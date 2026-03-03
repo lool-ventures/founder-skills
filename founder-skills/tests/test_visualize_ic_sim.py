@@ -462,8 +462,10 @@ def test_html_structural_sanity() -> None:
     close_count = stdout.count("</svg>")
     assert open_count == close_count, f"Unbalanced SVG tags: {open_count} opens vs {close_count} closes"
 
-    # No script tags
-    assert "<script" not in stdout.lower()
+    # Inline JS is allowed; verify script tags are balanced
+    script_count = stdout.lower().count("<script")
+    script_close = stdout.lower().count("</script>")
+    assert script_count == script_close, "Unbalanced script tags"
 
 
 def test_dealbreaker_verdict() -> None:
@@ -809,8 +811,8 @@ def test_summary_bar_present() -> None:
     assert "Analyst: More Diligence" in stdout, "Summary bar should show Analyst verdict"
 
 
-def test_radar_data_point_labels() -> None:
-    """Radar data points should have small percentage labels near them (font-size 8)."""
+def test_radar_outer_labels_show_scores() -> None:
+    """Outer category labels should include percentage scores beneath category names."""
     arts = _all_required_artifacts()
     score = dict(_VALID_SCORE)
     summary = dict(score["summary"])
@@ -859,5 +861,5 @@ def test_radar_data_point_labels() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, stderr = _run_visualize(d)
     assert rc == 0, f"exit {rc}, stderr={stderr}"
-    assert 'font-size="8"' in stdout, "Data-point percentage labels (font-size 8) should appear"
-    assert "38%" in stdout, "Team's 37.5% rounded to 38% should appear as data-point label"
+    assert "38%" in stdout, "Team's 37.5% rounded to 38% should appear as outer label"
+    assert "Team" in stdout, "Category name should appear as outer label"

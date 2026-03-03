@@ -1,15 +1,16 @@
 ---
 name: ic-sim
 disable-model-invocation: true
-description: >
-  This skill should be used when the user asks to "simulate an IC",
-  "how would VCs discuss this", "IC meeting simulation", "investment
-  committee practice", "prepare for IC", "VC partner discussion",
-  "what will investors debate", "how would a fund evaluate this",
-  "IC prep", or provides startup materials for investment committee
-  simulation. Simulates a realistic VC Investment Committee discussion
-  with three partner archetypes debating the startup's merits,
-  concerns, and deal terms -- scored across 28 dimensions.
+description: "Simulates a realistic VC Investment Committee discussion with three partner archetypes debating a startup's merits, concerns, and deal terms, scored across 28 dimensions. Use when user asks to \"simulate an IC\", \"how would VCs discuss this\", \"IC meeting simulation\", \"investment committee practice\", \"prepare for IC\", \"VC partner discussion\", \"what will investors debate\", \"how would a fund evaluate this\", \"IC prep\", or provides startup materials for investment committee simulation. Do NOT use for pitch deck feedback (use deck-review), market sizing, or financial model analysis."
+compatibility: Requires Python 3.10+ and uv for script execution.
+metadata:
+  author: lool-ventures
+  version: "0.2.0"
+imports:
+  - "market-sizing:sizing.json (recommended — fund alignment and market validation)"
+  - "deck-review:checklist.json (recommended — deck quality assessment)"
+exports:
+  - "report.json -> fundraise-readiness, dd-readiness"
 ---
 
 # IC Simulation Skill
@@ -270,6 +271,48 @@ Imported artifacts are recorded with dates. Imports older than 7 days are flagge
 ## Model Considerations
 
 This skill works best with Opus-class models due to the complexity of maintaining 3 distinct partner personas, grounding positions in evidence, and making nuanced judgment calls. Sonnet will produce adequate results but with less distinct partner voices and shallower evidence grounding.
+
+## Troubleshooting
+
+### Script not found
+If the path resolution block cannot locate scripts:
+1. Verify `${CLAUDE_PLUGIN_ROOT}` is set (SessionStart hook should set it)
+2. Fall back to Glob: `**/founder-skills/skills/ic-sim/scripts/<script>.py`
+3. If running in Cowork, check that the plugin cache has been populated
+
+### Invalid JSON from script
+If a script exits non-zero or outputs invalid JSON:
+1. Check stderr for the specific error message
+2. Ensure the JSON piped via heredoc is valid (use `python3 -m json.tool` to verify)
+3. Verify required fields are present in the input payload
+
+### Empty or missing artifacts
+If compose_report.py reports missing artifacts:
+1. Verify the artifact directory exists: `ls "$SIM_DIR/"`
+2. Check that earlier pipeline steps completed without error
+3. Re-run the failed step individually to isolate the issue
+
+## Performance Notes
+- Take your time to do this thoroughly
+- Quality is more important than speed
+- Do not skip validation steps or checklist items
+
+## Progress Updates
+
+Keep the founder informed with brief, plain-language updates at each step. Never mention file names, scripts, or JSON — describe what you're doing in terms they care about.
+
+| Step | Say to the founder |
+|------|--------------------|
+| 1–2 | "Building your startup profile and importing any prior analysis..." |
+| 3 | "Setting up the investment committee with fund profile and thesis..." |
+| 4 | "Checking for portfolio conflicts..." |
+| 5a–c | "Three IC partners are independently evaluating your company..." |
+| 5d | "The partners are now discussing and debating their views..." |
+| 6 | "Scoring the final assessment across 28 dimensions..." |
+| 7 | "Assembling the full report and cross-checking for consistency..." |
+| 8 | "Generating a visual summary with charts..." |
+
+After each analytical step (4–6) completes, share a one-sentence finding before moving on (e.g., "No portfolio conflicts found — moving to partner assessments."). Don't wait until the end to surface findings.
 
 ## Additional Resources
 

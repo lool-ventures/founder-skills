@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-03-03
+
+### Highlights
+
+New Financial Model Review agent — reviews startup financial models for investor readiness,
+validating structure, unit economics, runway, and metrics against stage-appropriate standards.
+Supports Excel, CSV, pitch decks, and conversational input with automatic profile-based gating
+by stage, geography, and sector.
+
+### Added
+
+- Financial Model Review Agent with 6 scripts: `extract_model.py` (Excel/CSV parser), `checklist.py` (46-criteria scoring across 7 categories with profile-based auto-gating), `unit_economics.py` (11 benchmarked metrics), `runway.py` (multi-scenario stress-test with decision points and default-alive analysis), `compose_report.py` (report assembly with cross-artifact validation), and `visualize.py` (self-contained HTML with SVG charts).
+- SKILL.md for financial model review (`/founder-skills:financial-model-review` slash command).
+- Agent definition with skill preloading (`skills:` frontmatter).
+- Profile-based auto-gating: checklist items gate by stage (`seed+`), geography (Israel, multi-currency, multi-entity), sector (AI-native, marketplace, usage-based, hardware, consumer, annual-contracts), and model format (spreadsheet vs. deck/conversational).
+- `ai-powered` trait for AI-hybrid products: triggers AI cost scrutiny (SECTOR_40) regardless of revenue model type.
+- Data sufficiency gate with qualitative fallback path for deck/conversational inputs.
+- `data_confidence` qualifier (`exact`/`estimated`/`mixed`) propagated through unit economics and runway outputs.
+- Cross-agent integration: financial model review exports `report.json`, `unit_economics.json`, and `runway.json` for downstream IC simulation and fundraise-readiness skills.
+- 457 regression tests across all four skills.
+
 ## [0.1.0] - 2026-02-22
 
 ### Highlights

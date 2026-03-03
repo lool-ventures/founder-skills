@@ -108,7 +108,8 @@ def _num(value: Any, default: float = 0.0) -> float:
 # Color scheme
 # ---------------------------------------------------------------------------
 
-_COLOR_PRIMARY = "#21a2e3"
+_COLOR_PRIMARY = "#0d549d"
+_CLR_ACCENT = "#21a2e3"
 _COLOR_PASS = "#10b981"
 _COLOR_WARN = "#f59e0b"
 _COLOR_FAIL = "#ef4444"
@@ -181,69 +182,249 @@ def _placeholder(message: str) -> str:
 
 def _css() -> str:
     """Return the inline CSS for the report."""
-    return """
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
+    return f"""
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0f0f14;
-            color: #e4e4e7;
+            background: #f9fafb;
+            color: #1f2937;
             line-height: 1.6;
             padding: 2rem;
             max-width: 960px;
             margin: 0 auto;
-        }
-        header {
+        }}
+        header {{
             text-align: center;
             margin-bottom: 2rem;
             padding-bottom: 1.5rem;
-            border-bottom: 1px solid #27272a;
-        }
-        header h1 {
+            border-bottom: 3px solid {_COLOR_PRIMARY};
+        }}
+        header h1 {{
             font-size: 1.75rem;
-            color: #21a2e3;
+            color: {_COLOR_PRIMARY};
             margin-bottom: 0.25rem;
-        }
-        header .subtitle {
+        }}
+        header .subtitle {{
             font-size: 0.9rem;
-            color: #71717a;
-        }
-        main { display: flex; flex-direction: column; gap: 2rem; }
-        .chart-section {
-            background: #18181b;
-            border: 1px solid #27272a;
+            color: #6b7280;
+        }}
+        main {{ display: flex; flex-direction: column; gap: 2rem; }}
+        .chart-section {{
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
             border-radius: 12px;
             padding: 1.5rem;
-        }
-        .chart-section h2 {
+        }}
+        .chart-section h2 {{
             font-size: 1.1rem;
-            color: #a1a1aa;
+            color: {_COLOR_PRIMARY};
             margin-bottom: 1rem;
             text-transform: uppercase;
             letter-spacing: 0.05em;
-        }
-        .chart-container {
+        }}
+        .chart-container {{
             display: flex;
             justify-content: center;
             align-items: center;
-        }
-        .placeholder {
+        }}
+        .placeholder {{
             text-align: center;
-            color: #71717a;
+            color: #9ca3af;
             padding: 2rem;
             font-style: italic;
-        }
-        footer {
+            background: #f3f4f6;
+            border-radius: 0.25rem;
+        }}
+        footer {{
             text-align: center;
             margin-top: 2rem;
             padding-top: 1rem;
-            border-top: 1px solid #27272a;
-            color: #52525b;
+            border-top: 1px solid #e5e7eb;
+            color: #9ca3af;
             font-size: 0.8rem;
-        }
-        footer a, header a { color: #21a2e3; text-decoration: none; }
-        footer a:hover, header a:hover { text-decoration: underline; }
-        svg text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        }}
+        footer a, header a {{ color: {_CLR_ACCENT}; text-decoration: none; }}
+        footer a:hover, header a:hover {{ text-decoration: underline; }}
+        svg text {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }}
+        .collapsible-toggle {{
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0;
+        }}
+        .collapsible-toggle:hover {{ background: #f3f4f6; border-radius: 0.25rem; }}
+        .chevron {{
+            display: inline-block;
+            transition: transform 0.2s;
+            font-size: 0.75rem;
+            color: #9ca3af;
+        }}
+        .collapsible-content {{ padding-left: 1.5rem; }}
+        .finding-item {{
+            padding: 0.75rem;
+            border-left: 3px solid #e5e7eb;
+            margin-bottom: 0.5rem;
+            border-radius: 0 0.25rem 0.25rem 0;
+        }}
+        .finding-strong {{ border-left-color: {_COLOR_PASS}; }}
+        .finding-attention {{ border-left-color: {_COLOR_FAIL}; }}
+        .finding-action {{ border-left-color: {_CLR_ACCENT}; }}
+        .findings-subsection {{ margin-bottom: 1rem; }}
+        .findings-subsection h3 {{
+            font-size: 0.9rem;
+            color: #374151;
+            margin-bottom: 0.5rem;
+        }}
+        @media print {{
+            body {{ background: #fff; padding: 0; }}
+            .chart-section {{ break-inside: avoid; border: 1px solid #ccc; }}
+            header {{ border-bottom-color: #000; }}
+            header h1 {{ color: #000; }}
+            .collapsible-content {{ display: block !important; }}
+            .collapsible-toggle .chevron {{ display: none; }}
+            [data-tooltip] {{ cursor: default; }}
+        }}
     """
+
+
+# ---------------------------------------------------------------------------
+# Inline JS
+# ---------------------------------------------------------------------------
+
+
+def _tooltip_js() -> str:
+    """Return inline JS for hover tooltips on elements with data-tooltip attribute."""
+    return (
+        "<script>\n"
+        "document.addEventListener('DOMContentLoaded', function() {\n"
+        "    var tip = document.createElement('div');\n"
+        "    tip.style.cssText = 'position:fixed;padding:8px 12px;background:#1f2937;color:#fff;'\n"
+        "        + 'border-radius:6px;font-size:12px;max-width:300px;pointer-events:none;'\n"
+        "        + 'z-index:1000;display:none;line-height:1.4;white-space:pre-line;'\n"
+        "        + 'box-shadow:0 2px 8px rgba(0,0,0,0.15)';\n"
+        "    document.body.appendChild(tip);\n"
+        "    document.addEventListener('mouseover', function(e) {\n"
+        "        var el = e.target.closest('[data-tooltip]');\n"
+        "        if (el) {\n"
+        "            tip.textContent = el.getAttribute('data-tooltip');\n"
+        "            tip.style.display = 'block';\n"
+        "        }\n"
+        "    });\n"
+        "    document.addEventListener('mousemove', function(e) {\n"
+        "        if (tip.style.display === 'block') {\n"
+        "            tip.style.left = Math.min(e.clientX + 12, window.innerWidth - 320) + 'px';\n"
+        "            tip.style.top = (e.clientY + 16) + 'px';\n"
+        "        }\n"
+        "    });\n"
+        "    document.addEventListener('mouseout', function(e) {\n"
+        "        if (e.target.closest('[data-tooltip]')) tip.style.display = 'none';\n"
+        "    });\n"
+        "});\n"
+        "</script>"
+    )
+
+
+def _collapsible_js() -> str:
+    """Return inline JS for collapsible sections."""
+    return (
+        "<script>\n"
+        "document.addEventListener('DOMContentLoaded', function() {\n"
+        "    document.querySelectorAll('.collapsible-toggle').forEach(function(btn) {\n"
+        "        btn.addEventListener('click', function() {\n"
+        "            var content = this.nextElementSibling;\n"
+        "            var chevron = this.querySelector('.chevron');\n"
+        "            if (content.style.display === 'none') {\n"
+        "                content.style.display = 'block';\n"
+        "                if (chevron) chevron.style.transform = 'rotate(90deg)';\n"
+        "            } else {\n"
+        "                content.style.display = 'none';\n"
+        "                if (chevron) chevron.style.transform = 'rotate(0deg)';\n"
+        "            }\n"
+        "        });\n"
+        "    });\n"
+        "});\n"
+        "</script>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Key Findings
+# ---------------------------------------------------------------------------
+
+
+def _key_findings(
+    checklist: dict[str, Any] | None,
+    reviews: dict[str, Any] | None,
+) -> str:
+    """Build actionable Key Findings section from checklist and slide reviews."""
+    strong: list[str] = []
+    attention: list[str] = []
+    actions: list[str] = []
+
+    if _usable(checklist):
+        summary = _as_dict(checklist.get("summary"))
+        by_category = _as_dict(summary.get("by_category"))
+        items = _as_list(checklist.get("items"))
+
+        # Strong categories (>= 80% pass rate)
+        for cat in _ordered_categories(by_category):
+            counts = _as_dict(by_category.get(cat))
+            p = _num(counts.get("pass", 0))
+            f = _num(counts.get("fail", 0))
+            w = _num(counts.get("warn", 0))
+            total = p + f + w
+            if total > 0 and p / total >= 0.8:
+                strong.append(f"{cat}: {int(p)}/{int(total)} criteria pass")
+
+        # Failed items
+        for item in items:
+            if isinstance(item, dict) and item.get("status") == "fail":
+                label = str(item.get("label", item.get("id", "")))
+                evidence = str(item.get("evidence") or item.get("notes") or "")
+                text = f"{label}: {evidence}" if evidence else label
+                attention.append(text)
+                actions.append(f"Address: {label}")
+
+    # Slide review findings
+    if _usable(reviews):
+        missing = _as_list(reviews.get("missing_slides"))
+        for ms in missing[:3]:
+            if isinstance(ms, dict):
+                expected = str(ms.get("expected_type", ""))
+                label = _humanize_framework(expected) if expected else "Unknown"
+                importance = str(ms.get("importance", ""))
+                text = f"Missing: {label}"
+                if importance:
+                    text += f" ({importance})"
+                attention.append(text)
+                actions.append(f"Add a {label} slide")
+
+    if not strong and not attention and not actions:
+        return ""
+
+    def _render_items(items: list[str], css_class: str, max_items: int = 3) -> str:
+        return "".join(f'<div class="finding-item {css_class}">{_esc(item)}</div>' for item in items[:max_items])
+
+    parts: list[str] = []
+    if strong:
+        parts.append(
+            f'<div class="findings-subsection"><h3>What\'s strong</h3>{_render_items(strong, "finding-strong")}</div>'
+        )
+    if attention:
+        parts.append(
+            '<div class="findings-subsection">'
+            "<h3>What needs attention</h3>"
+            f"{_render_items(attention, 'finding-attention')}"
+            "</div>"
+        )
+    if actions:
+        parts.append(
+            f'<div class="findings-subsection"><h3>Top actions</h3>{_render_items(actions, "finding-action")}</div>'
+        )
+
+    return "".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -339,10 +520,10 @@ def _chart_score_gauge(checklist: dict[str, Any] | None) -> str:
     score_text = (
         f'<text x="{cx:.2f}" y="{_num(cy - 30):.2f}" '
         f'text-anchor="middle" font-size="28" font-weight="700" '
-        f'fill="#e4e4e7">{_esc(f"{score_pct:.0f}")}%</text>'
+        f'fill="#1f2937">{_esc(f"{score_pct:.0f}")}%</text>'
         f'<text x="{cx:.2f}" y="{_num(cy - 8):.2f}" '
         f'text-anchor="middle" font-size="13" '
-        f'fill="#a1a1aa">{overall_status}</text>'
+        f'fill="#6b7280">{overall_status}</text>'
     )
 
     # Threshold labels
@@ -353,7 +534,7 @@ def _chart_score_gauge(checklist: dict[str, Any] | None) -> str:
         lx = _num(cx + label_r * math.cos(a))
         ly = _num(cy - label_r * math.sin(a))
         labels += (
-            f'<text x="{lx:.2f}" y="{ly:.2f}" text-anchor="middle" font-size="9" fill="#71717a">{_esc(label)}</text>'
+            f'<text x="{lx:.2f}" y="{ly:.2f}" text-anchor="middle" font-size="9" fill="#9ca3af">{_esc(label)}</text>'
         )
 
     clipped = f'{clip}<g clip-path="url(#gc)">{"".join(arcs)}</g>'
@@ -425,7 +606,7 @@ def _chart_radar(checklist: dict[str, Any] | None) -> str:
             px = _num(cx + ring_r * math.cos(angle))
             py = _num(cy + ring_r * math.sin(angle))
             points_str += f"{px:.2f},{py:.2f} "
-        grid_lines += f'<polygon points="{_esc(points_str.strip())}" fill="none" stroke="#27272a" stroke-width="1"/>'
+        grid_lines += f'<polygon points="{_esc(points_str.strip())}" fill="none" stroke="#e5e7eb" stroke-width="1"/>'
 
     # Axis lines
     axis_lines = ""
@@ -434,7 +615,7 @@ def _chart_radar(checklist: dict[str, Any] | None) -> str:
         ax = _num(cx + max_r * math.cos(angle))
         ay = _num(cy + max_r * math.sin(angle))
         axis_lines += (
-            f'<line x1="{cx:.2f}" y1="{cy:.2f}" x2="{ax:.2f}" y2="{ay:.2f}" stroke="#27272a" stroke-width="1"/>'
+            f'<line x1="{cx:.2f}" y1="{cy:.2f}" x2="{ax:.2f}" y2="{ay:.2f}" stroke="#e5e7eb" stroke-width="1"/>'
         )
 
     # Data polygon
@@ -474,10 +655,10 @@ def _chart_radar(checklist: dict[str, Any] | None) -> str:
         rate_str = f"{pass_rates[i]:.0f}%"
         labels += (
             f'<text x="{lx:.2f}" y="{ly:.2f}" text-anchor="{_esc(anchor)}" '
-            f'font-size="10" fill="#a1a1aa">'
+            f'font-size="10" fill="#6b7280">'
             f"{_esc(categories[i])}</text>"
             f'<text x="{lx:.2f}" y="{_num(ly + 13):.2f}" text-anchor="{_esc(anchor)}" '
-            f'font-size="9" fill="#71717a">{_esc(rate_str)}</text>'
+            f'font-size="9" fill="#9ca3af">{_esc(rate_str)}</text>'
         )
 
     svg = (
@@ -542,7 +723,7 @@ def _chart_category_breakdown(checklist: dict[str, Any] | None) -> str:
         # Label
         bars_svg += (
             f'<text x="{_num(label_width - 8):.2f}" y="{_num(y + bar_height / 2 + 4):.2f}" '
-            f'text-anchor="end" font-size="11" fill="#a1a1aa">{_esc(cat)}</text>'
+            f'text-anchor="end" font-size="11" fill="#6b7280">{_esc(cat)}</text>'
         )
 
         if total <= 0:
@@ -550,7 +731,7 @@ def _chart_category_breakdown(checklist: dict[str, Any] | None) -> str:
             bars_svg += (
                 f'<rect x="{_num(label_width):.2f}" y="{y:.2f}" '
                 f'width="{_num(bar_width):.2f}" height="{_num(bar_height):.2f}" '
-                f'rx="4" fill="#27272a"/>'
+                f'rx="4" fill="#f3f4f6"/>'
             )
             continue
 
@@ -558,7 +739,7 @@ def _chart_category_breakdown(checklist: dict[str, Any] | None) -> str:
         bars_svg += (
             f'<rect x="{_num(label_width):.2f}" y="{y:.2f}" '
             f'width="{_num(bar_width):.2f}" height="{_num(bar_height):.2f}" '
-            f'rx="4" fill="#27272a"/>'
+            f'rx="4" fill="#f3f4f6"/>'
         )
 
         # Stacked segments: pass, warn, fail, NA
@@ -595,7 +776,7 @@ def _chart_category_breakdown(checklist: dict[str, Any] | None) -> str:
             f'<rect x="{lx:.2f}" y="{legend_y:.2f}" width="12" height="12" rx="2" '
             f'fill="{_esc(color)}"/>'
             f'<text x="{_num(lx + 16):.2f}" y="{_num(legend_y + 10):.2f}" '
-            f'font-size="10" fill="#a1a1aa">{_esc(label)}</text>'
+            f'font-size="10" fill="#6b7280">{_esc(label)}</text>'
         )
         lx = _num(lx + 60)
 
@@ -748,7 +929,7 @@ def _chart_slide_map(
     svg_parts.append(
         f'<line x1="{center_x:.1f}" y1="{padding_top}" '
         f'x2="{center_x:.1f}" y2="{_num(total_h - padding_bottom):.1f}" '
-        f'stroke="#3f3f46" stroke-width="1"/>'
+        f'stroke="#d1d5db" stroke-width="1"/>'
     )
 
     for idx, row in enumerate(rows):
@@ -759,7 +940,7 @@ def _chart_slide_map(
         # Zebra striping
         if idx % 2 == 1:
             svg_parts.append(
-                f'<rect x="0" y="{y:.1f}" width="{total_w}" height="{row_h}" fill="#27272a" fill-opacity="0.5" rx="4"/>'
+                f'<rect x="0" y="{y:.1f}" width="{total_w}" height="{row_h}" fill="#f3f4f6" fill-opacity="0.5" rx="4"/>'
             )
 
         if row["type"] == "present":
@@ -775,7 +956,7 @@ def _chart_slide_map(
                 label_text += f" \u00b7 {label}"
             svg_parts.append(
                 f'<text x="{_num(label_w - 8):.1f}" y="{text_y:.1f}" '
-                f'text-anchor="end" font-size="11" fill="#a1a1aa">'
+                f'text-anchor="end" font-size="11" fill="#6b7280">'
                 f"{_esc(label_text)}</text>"
             )
 
@@ -827,7 +1008,7 @@ def _chart_slide_map(
                 rec_x = _num(label_w + bar_area_w + 14)
                 svg_parts.append(
                     f'<text x="{rec_x:.1f}" y="{text_y:.1f}" '
-                    f'font-size="10" fill="#71717a">'
+                    f'font-size="10" fill="#9ca3af">'
                     f"{r_count} rec{'s' if r_count != 1 else ''}</text>"
                 )
 
@@ -838,14 +1019,14 @@ def _chart_slide_map(
 
             svg_parts.append(
                 f'<text x="{_num(label_w - 8):.1f}" y="{text_y:.1f}" '
-                f'text-anchor="end" font-size="11" fill="#52525b">'
+                f'text-anchor="end" font-size="11" fill="#6b7280">'
                 f"\u2014 \u00b7 {_esc(label)}</text>"
             )
 
             svg_parts.append(
                 f'<line x1="{label_w}" y1="{mid_y:.1f}" '
                 f'x2="{_num(label_w + bar_area_w):.1f}" y2="{mid_y:.1f}" '
-                f'stroke="#52525b" stroke-width="1" stroke-dasharray="6,4"/>'
+                f'stroke="#9ca3af" stroke-width="1" stroke-dasharray="6,4"/>'
             )
 
             if importance:
@@ -853,7 +1034,7 @@ def _chart_slide_map(
                 rec_x = _num(label_w + bar_area_w + 14)
                 svg_parts.append(
                     f'<text x="{rec_x:.1f}" y="{text_y:.1f}" '
-                    f'font-size="9" fill="#52525b" font-style="italic">'
+                    f'font-size="9" fill="#6b7280" font-style="italic">'
                     f"{_esc(badge_label)}</text>"
                 )
 
@@ -878,7 +1059,7 @@ def _chart_slide_map(
                 f'stroke="{_esc(color)}" stroke-width="2" stroke-dasharray="4,3"/>'
             )
         legend_svg += (
-            f'<text x="{_num(lx + 16):.1f}" y="{legend_y:.1f}" font-size="10" fill="#a1a1aa">{_esc(label)}</text>'
+            f'<text x="{_num(lx + 16):.1f}" y="{legend_y:.1f}" font-size="10" fill="#6b7280">{_esc(label)}</text>'
         )
         lx = _num(lx + len(label) * 7 + 32)
 
@@ -937,6 +1118,12 @@ def compose_html(dir_path: str) -> str:
     # Build chart sections
     gauge_section = f'<div class="chart-section"><h2>Overall Score</h2>{_chart_score_gauge(checklist)}</div>'
 
+    # Key Findings section
+    findings_html = _key_findings(checklist, reviews)
+    findings_section = ""
+    if findings_html:
+        findings_section = f'<div class="chart-section"><h2>Key Findings</h2>{findings_html}</div>'
+
     radar_section = f'<div class="chart-section"><h2>Category Radar</h2>{_chart_radar(checklist)}</div>'
 
     breakdown_section = (
@@ -947,7 +1134,9 @@ def compose_html(dir_path: str) -> str:
     slide_map_chart = _chart_slide_map(reviews, inventory, stage_profile)
     slide_map_section = f'<div class="chart-section"><h2>Slide Map</h2>{slide_map_chart}</div>'
 
-    main_content = f"<main>{gauge_section}{radar_section}{breakdown_section}{slide_map_section}</main>"
+    main_content = (
+        f"<main>{gauge_section}{findings_section}{radar_section}{breakdown_section}{slide_map_section}</main>"
+    )
 
     footer = (
         "<footer>Generated by "
@@ -969,6 +1158,8 @@ def compose_html(dir_path: str) -> str:
         f"{header}\n"
         f"{main_content}\n"
         f"{footer}\n"
+        f"    {_tooltip_js()}\n"
+        f"    {_collapsible_js()}\n"
         "</body>\n"
         "</html>\n"
     )

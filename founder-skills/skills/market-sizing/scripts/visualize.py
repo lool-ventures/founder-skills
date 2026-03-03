@@ -223,6 +223,7 @@ _DASH_CLAMPED_CIRCLE = "3,2"  # floor-clamped circles ("not to scale")
 _SAM_LABEL_FONT = 10  # px, SAM label font size in funnel chart
 
 _CLR_PRIMARY = "#0d549d"
+_CLR_ACCENT = "#21a2e3"
 _CLR_PASS = "#10b981"
 _CLR_WARN = "#f59e0b"
 _CLR_FAIL = "#ef4444"
@@ -328,15 +329,119 @@ def _css() -> str:
             padding-top: 1rem;
             border-top: 1px solid #e5e7eb;
         }}
-        footer a, header a {{ color: #0d549d; text-decoration: none; }}
+        footer a, header a {{ color: {_CLR_ACCENT}; text-decoration: none; }}
         footer a:hover, header a:hover {{ text-decoration: underline; }}
+        .collapsible-toggle {{
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0;
+        }}
+        .collapsible-toggle:hover {{ background: #f3f4f6; border-radius: 0.25rem; }}
+        .chevron {{
+            display: inline-block;
+            transition: transform 0.2s;
+            font-size: 0.75rem;
+            color: #9ca3af;
+        }}
+        .collapsible-content {{ padding-left: 1.5rem; }}
+        .finding-item {{
+            padding: 0.75rem;
+            border-left: 3px solid #e5e7eb;
+            margin-bottom: 0.5rem;
+            border-radius: 0 0.25rem 0.25rem 0;
+        }}
+        .finding-strong {{ border-left-color: {_CLR_PASS}; }}
+        .finding-attention {{ border-left-color: {_CLR_FAIL}; }}
+        .finding-action {{ border-left-color: {_CLR_ACCENT}; }}
+        .findings-subsection {{ margin-bottom: 1rem; }}
+        .findings-subsection h3 {{
+            font-size: 0.9rem;
+            color: #374151;
+            margin-bottom: 0.5rem;
+        }}
+        .confidence-badge {{
+            display: inline-block;
+            padding: 0.1rem 0.4rem;
+            border-radius: 0.25rem;
+            font-size: 0.65rem;
+            font-weight: 600;
+            color: #fff;
+            margin-left: 0.25rem;
+            vertical-align: middle;
+        }}
         @media print {{
             body {{ background: #fff; padding: 0; }}
             main section {{ break-inside: avoid; border: 1px solid #ccc; }}
             header {{ border-bottom-color: #000; }}
             header h1 {{ color: #000; }}
+            .collapsible-content {{ display: block !important; }}
+            .collapsible-toggle .chevron {{ display: none; }}
+            [data-tooltip] {{ cursor: default; }}
         }}
     """
+
+
+# ---------------------------------------------------------------------------
+# Inline JS
+# ---------------------------------------------------------------------------
+
+
+def _tooltip_js() -> str:
+    """Return inline JS for hover tooltips on elements with data-tooltip attribute."""
+    return (
+        "<script>\n"
+        "document.addEventListener('DOMContentLoaded', function() {\n"
+        "    var tip = document.createElement('div');\n"
+        "    tip.style.cssText = 'position:fixed;padding:8px 12px;background:#1f2937;color:#fff;'\n"
+        "        + 'border-radius:6px;font-size:12px;max-width:300px;pointer-events:none;'\n"
+        "        + 'z-index:1000;display:none;line-height:1.4;white-space:pre-line;'\n"
+        "        + 'box-shadow:0 2px 8px rgba(0,0,0,0.15)';\n"
+        "    document.body.appendChild(tip);\n"
+        "    document.addEventListener('mouseover', function(e) {\n"
+        "        var el = e.target.closest('[data-tooltip]');\n"
+        "        if (el) {\n"
+        "            tip.textContent = el.getAttribute('data-tooltip');\n"
+        "            tip.style.display = 'block';\n"
+        "        }\n"
+        "    });\n"
+        "    document.addEventListener('mousemove', function(e) {\n"
+        "        if (tip.style.display === 'block') {\n"
+        "            tip.style.left = Math.min(e.clientX + 12, window.innerWidth - 320) + 'px';\n"
+        "            tip.style.top = (e.clientY + 16) + 'px';\n"
+        "        }\n"
+        "    });\n"
+        "    document.addEventListener('mouseout', function(e) {\n"
+        "        if (e.target.closest('[data-tooltip]')) tip.style.display = 'none';\n"
+        "    });\n"
+        "});\n"
+        "</script>"
+    )
+
+
+def _collapsible_js() -> str:
+    """Return inline JS for collapsible sections."""
+    return (
+        "<script>\n"
+        "document.addEventListener('DOMContentLoaded', function() {\n"
+        "    document.querySelectorAll('.collapsible-toggle').forEach(function(btn) {\n"
+        "        btn.addEventListener('click', function() {\n"
+        "            var content = this.nextElementSibling;\n"
+        "            var chevron = this.querySelector('.chevron');\n"
+        "            if (content.style.display === 'none') {\n"
+        "                content.style.display = 'block';\n"
+        "                if (chevron) chevron.style.transform = 'rotate(90deg)';\n"
+        "            } else {\n"
+        "                content.style.display = 'none';\n"
+        "                if (chevron) chevron.style.transform = 'rotate(0deg)';\n"
+        "            }\n"
+        "        });\n"
+        "    });\n"
+        "});\n"
+        "</script>"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -682,10 +787,17 @@ def _render_tornado_svg(
         bar_x = min(x_low, x_high)
         bar_w = max(abs(x_high - x_low), 1.0)
 
+        tooltip_text = (
+            f"{param.replace('_', ' ').title()}\n"
+            f"Low: {_fmt_usd(low_som)}\n"
+            f"Base: {_fmt_usd(_b_som)}\n"
+            f"High: {_fmt_usd(high_som)}"
+        )
         parts.append(
             f'<rect x="{_num(bar_x):.2f}" y="{y:.2f}" '
             f'width="{_num(bar_w):.2f}" height="{_num(bar_height):.2f}" '
-            f'fill="{_CLR_PRIMARY}" opacity="0.6" rx="3" />'
+            f'fill="{_CLR_PRIMARY}" opacity="0.6" rx="3" '
+            f'data-tooltip="{_esc(tooltip_text)}" />'
         )
 
         # Low/high value labels — enforce minimum gap to prevent overlap.
@@ -1154,43 +1266,50 @@ def _chart_key_findings(
     validation: dict[str, Any] | None,
     provenance: dict[str, dict[str, Any]] | None,
 ) -> str:
-    """Render Key Findings section from raw artifacts. Returns empty string if no findings."""
-    findings: list[str] = []
+    """Render Key Findings section with strong/attention/actions subsections."""
+    strong: list[str] = []
+    attention: list[str] = []
+    actions: list[str] = []
 
-    # 1. Checklist failures
+    # --- Checklist findings ---
     if _usable(checklist):
-        for i, item in enumerate(_as_list(checklist.get("items"))):
+        items = _as_list(checklist.get("items"))
+        pass_count = sum(1 for i in items if isinstance(i, dict) and i.get("status") == "pass")
+        total = sum(1 for i in items if isinstance(i, dict) and i.get("status") != "not_applicable")
+        if total > 0 and pass_count / total >= 0.7:
+            strong.append(f"Checklist: {pass_count} of {total} criteria pass")
+        for item in items:
             if not isinstance(item, dict):
                 continue
             if item.get("status") == "fail":
-                label = _esc(item.get("label", item.get("id", "Unknown")))
-                notes = item.get("notes", "")
-                notes_html = f" — {_esc(notes)}" if notes else ""
-                findings.append(
-                    f'<div style="color:#ef4444;padding:0.3rem 0;" '
-                    f'data-source="checklist.items[{i}]">'
-                    f"<strong>[FAIL]</strong> {label}{notes_html}</div>"
-                )
+                label = str(item.get("label", item.get("id", "Unknown")))
+                notes = str(item.get("notes", ""))
+                text = f"{label}: {notes}" if notes else label
+                attention.append(text)
+                actions.append(f"Address: {label}")
 
-    # 2. Refuted/unsupported figure validations
+    # --- Validation findings ---
     if _usable(validation):
-        for i, fig in enumerate(_as_list(validation.get("figure_validations"))):
+        confirmed = 0
+        total_figs = 0
+        for fig in _as_list(validation.get("figure_validations")):
             if not isinstance(fig, dict):
                 continue
+            total_figs += 1
             status = fig.get("status", "")
-            if status in ("refuted", "unsupported"):
-                figure_name = _esc(fig.get("figure", "Unknown"))
-                notes = fig.get("notes", "")
-                notes_html = f" — {_esc(notes)}" if notes else ""
-                prefix = "[REFUTED]" if status == "refuted" else "[UNSUPPORTED]"
-                color = "#ef4444" if status == "refuted" else "#f59e0b"
-                findings.append(
-                    f'<div style="color:{color};padding:0.3rem 0;" '
-                    f'data-source="validation.figure_validations[{i}]">'
-                    f"<strong>{_esc(prefix)}</strong> {figure_name}{notes_html}</div>"
-                )
+            if status == "confirmed":
+                confirmed += 1
+            elif status in ("refuted", "unsupported"):
+                figure_name = str(fig.get("figure", "Unknown"))
+                notes = str(fig.get("notes", ""))
+                prefix = "Refuted" if status == "refuted" else "Unsupported"
+                text = f"{prefix}: {figure_name}" + (f" — {notes}" if notes else "")
+                attention.append(text)
+                actions.append(f"Find independent source for {figure_name}")
+        if total_figs > 0 and confirmed / total_figs >= 0.7:
+            strong.append(f"{confirmed} of {total_figs} figures independently validated")
 
-    # 3. Large deck-claim deltas (> +/-50%)
+    # --- Provenance / delta findings ---
     if provenance:
         for approach_key in ("top_down", "bottom_up"):
             if approach_key not in provenance:
@@ -1199,21 +1318,39 @@ def _chart_key_findings(
             for metric in ("tam", "sam", "som"):
                 prov = _as_dict(provenance[approach_key].get(metric))
                 delta = prov.get("delta_vs_deck_pct")
-                if delta is not None and abs(delta) > 50:
-                    findings.append(
-                        f'<div style="color:#f59e0b;padding:0.3rem 0;" '
-                        f'data-source="provenance.{approach_key}.{metric}">'
-                        f"<strong>[DELTA]</strong> {_esc(metric.upper())} ({_esc(method)}): "
-                        f"{_esc(f'{delta:+.1f}%')} vs deck claim</div>"
-                    )
+                if delta is not None:
+                    if abs(delta) <= 20:
+                        strong.append(f"{metric.upper()} ({method}) within 20% of deck claim")
+                    elif abs(delta) > 50:
+                        attention.append(f"{metric.upper()} ({method}): {delta:+.1f}% vs deck claim")
 
-    if not findings:
+    if not strong and not attention and not actions:
         return ""
+
+    def _render_items(items: list[str], css_class: str, max_items: int = 3) -> str:
+        return "".join(f'<div class="finding-item {css_class}">{_esc(item)}</div>' for item in items[:max_items])
+
+    parts: list[str] = []
+    if strong:
+        parts.append(
+            f'<div class="findings-subsection"><h3>What\'s strong</h3>{_render_items(strong, "finding-strong")}</div>'
+        )
+    if attention:
+        parts.append(
+            '<div class="findings-subsection">'
+            "<h3>What needs attention</h3>"
+            f"{_render_items(attention, 'finding-attention')}"
+            "</div>"
+        )
+    if actions:
+        parts.append(
+            f'<div class="findings-subsection"><h3>Top actions</h3>{_render_items(actions, "finding-action")}</div>'
+        )
 
     return (
         '<section><h2 style="color:#0d549d;font-size:1.25rem;margin-bottom:1rem;'
         'border-bottom:1px solid #e5e7eb;padding-bottom:0.5rem;">Key Findings</h2>'
-        '<div style="font-size:0.9rem;">' + "\n".join(findings) + "</div></section>"
+        '<div style="font-size:0.9rem;">' + "".join(parts) + "</div></section>"
     )
 
 
@@ -1309,6 +1446,8 @@ def compose_html(dir_path: str) -> str:
         Generated by <a href="https://github.com/lool-ventures/founder-skills">founder skills</a>
         by <a href="https://lool.vc">lool ventures</a> — Market Sizing Agent
     </footer>
+    {_tooltip_js()}
+    {_collapsible_js()}
 </body>
 </html>
 """

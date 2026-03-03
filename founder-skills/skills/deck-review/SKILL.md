@@ -1,14 +1,13 @@
 ---
 name: deck-review
 disable-model-invocation: true
-description: >
-  This skill should be used when the user asks to "review my deck", "pitch deck
-  feedback", "check my slides", "is my deck ready", "review this pitch deck",
-  "deck critique", "improve my pitch deck", "what's wrong with my deck",
-  "pitch deck review", "fundraising deck feedback", or provides a pitch deck
-  (PDF, PPTX, markdown, or text description) for evaluation. Covers pre-seed,
-  seed, and Series A decks against 2026 investor best practices from Sequoia,
-  DocSend, YC, a16z, and Carta data.
+description: "Scores and strengthens startup pitch decks against 35 investor-grade criteria before founders send them to VCs. Use when user asks to \"review my deck\", \"pitch deck feedback\", \"check my slides\", \"is my deck ready\", \"review this pitch deck\", \"deck critique\", \"improve my pitch deck\", \"what's wrong with my deck\", \"pitch deck review\", \"fundraising deck feedback\", or provides a pitch deck (PDF, PPTX, markdown, or text) for evaluation. Covers pre-seed, seed, and Series A against 2026 best practices from Sequoia, DocSend, YC, a16z, and Carta data. Do NOT use for financial model review, market sizing, or general document editing."
+compatibility: Requires Python 3.10+ and uv for script execution.
+metadata:
+  author: lool-ventures
+  version: "0.2.0"
+exports:
+  - "checklist.json -> financial-model-review, ic-sim, fundraise-readiness"
 ---
 
 # Deck Review Skill
@@ -156,6 +155,46 @@ Copy the final deliverables to the workspace root for easy access:
 - Each of 35 items: pass / fail / warn / not_applicable
 - `score_pct` = pass / (total - not_applicable) x 100
 - Overall: "strong" (>=85%), "solid" (>=70%), "needs_work" (>=50%), "major_revision" (<50%)
+
+## Troubleshooting
+
+### Script not found
+If the path resolution block cannot locate scripts:
+1. Verify `${CLAUDE_PLUGIN_ROOT}` is set (SessionStart hook should set it)
+2. Fall back to Glob: `**/founder-skills/skills/deck-review/scripts/<script>.py`
+3. If running in Cowork, check that the plugin cache has been populated
+
+### Invalid JSON from script
+If a script exits non-zero or outputs invalid JSON:
+1. Check stderr for the specific error message
+2. Ensure the JSON piped via heredoc is valid (use `python3 -m json.tool` to verify)
+3. Verify required fields are present in the input payload
+
+### Empty or missing artifacts
+If compose_report.py reports missing artifacts:
+1. Verify the artifact directory exists: `ls "$REVIEW_DIR/"`
+2. Check that earlier pipeline steps completed without error
+3. Re-run the failed step individually to isolate the issue
+
+## Performance Notes
+- Take your time to do this thoroughly
+- Quality is more important than speed
+- Do not skip validation steps or checklist items
+
+## Progress Updates
+
+Keep the founder informed with brief, plain-language updates at each step. Never mention file names, scripts, or JSON — describe what you're doing in terms they care about.
+
+| Step | Say to the founder |
+|------|--------------------|
+| 1 | "Reading through your deck and cataloging each slide..." |
+| 2 | "Detecting your company stage to calibrate expectations..." |
+| 3 | "Reviewing each slide in detail..." |
+| 4 | "Scoring your deck against 35 investor-readiness criteria..." |
+| 5 | "Assembling the full review and cross-checking for consistency..." |
+| 6 | "Generating a visual summary with charts..." |
+
+After each analytical step (3–4) completes, share a one-sentence finding before moving on (e.g., "Your problem and solution slides are strong — the competitive landscape slide needs more specificity."). Don't wait until the end to surface findings.
 
 ## Additional Resources
 

@@ -1,14 +1,15 @@
 ---
 name: market-sizing
 disable-model-invocation: true
-description: >
-  This skill should be used when the user asks to "size this market",
-  "what's the TAM", "analyze this market", "validate these market numbers",
-  "review the market sizing slide", "is this market big enough",
-  "market sizing", "TAM/SAM/SOM", "stress-test market assumptions",
-  or provides a pitch deck, financial model, or market data for analysis.
-  Builds credible TAM/SAM/SOM analysis with external validation and
-  sensitivity testing — the kind that earns investor trust.
+description: "Builds credible TAM/SAM/SOM analysis with external validation and sensitivity testing for startup fundraising. Use when user asks to \"size this market\", \"what's the TAM\", \"analyze this market\", \"validate these market numbers\", \"review the market sizing slide\", \"is this market big enough\", \"market sizing\", \"TAM/SAM/SOM\", \"stress-test market assumptions\", or provides a pitch deck, financial model, or market data for analysis. Supports top-down, bottom-up, or dual-methodology approaches. Do NOT use for general market research without sizing, competitive landscape analysis, or financial model review (use financial-model-review)."
+compatibility: Requires Python 3.10+ and uv for script execution.
+metadata:
+  author: lool-ventures
+  version: "0.2.0"
+exports:
+  - "sizing.json -> financial-model-review, ic-sim, fundraise-readiness"
+  - "sensitivity.json -> financial-model-review"
+  - "checklist.json -> ic-sim"
 ---
 
 # Market Sizing Skill
@@ -198,6 +199,49 @@ Copy the final deliverables to the workspace root for easy access:
 - Each of 22 items: pass / fail / not_applicable
 - `score_pct` = pass / (total - not_applicable) x 100
 - compose_report.py validates cross-artifact consistency (assumption coverage, source quality, sensitivity ranges)
+
+## Troubleshooting
+
+### Script not found
+If the path resolution block cannot locate scripts:
+1. Verify `${CLAUDE_PLUGIN_ROOT}` is set (SessionStart hook should set it)
+2. Fall back to Glob: `**/founder-skills/skills/market-sizing/scripts/<script>.py`
+3. If running in Cowork, check that the plugin cache has been populated
+
+### Invalid JSON from script
+If a script exits non-zero or outputs invalid JSON:
+1. Check stderr for the specific error message
+2. Ensure the JSON piped via heredoc is valid (use `python3 -m json.tool` to verify)
+3. Verify required fields are present in the input payload
+
+### Empty or missing artifacts
+If compose_report.py reports missing artifacts:
+1. Verify the artifact directory exists: `ls "$ANALYSIS_DIR/"`
+2. Check that earlier pipeline steps completed without error
+3. Re-run the failed step individually to isolate the issue
+
+## Performance Notes
+- Take your time to do this thoroughly
+- Quality is more important than speed
+- Do not skip validation steps or checklist items
+
+## Progress Updates
+
+Keep the founder informed with brief, plain-language updates at each step. Never mention file names, scripts, or JSON — describe what you're doing in terms they care about.
+
+| Step | Say to the founder |
+|------|--------------------|
+| 1 | "Gathering your market inputs and assumptions..." |
+| 2 | "Reading up on sizing methodology for your market..." |
+| 3 | "Validating your numbers against external sources..." |
+| 4 | "Calculating your TAM, SAM, and SOM..." |
+| 4.5 | "Sanity-checking the results..." |
+| 5 | "Stress-testing your assumptions with sensitivity analysis..." |
+| 6 | "Running the self-check against 22 common sizing pitfalls..." |
+| 7 | "Assembling the full report and cross-checking for consistency..." |
+| 8 | "Generating a visual summary with charts..." |
+
+After each analytical step (4–6) completes, share a one-sentence finding before moving on (e.g., "Your bottom-up SOM looks well-grounded — the top-down TAM may need a tighter scope."). Don't wait until the end to surface findings.
 
 ## Additional Resources
 

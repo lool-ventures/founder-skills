@@ -434,8 +434,10 @@ def test_html_structural_sanity() -> None:
     close_svg = stdout.count("</svg>")
     assert open_svg == close_svg, f"Unbalanced SVG tags: {open_svg} open, {close_svg} close"
     assert open_svg > 0, "Expected at least one SVG element"
-    # No raw <script tags
-    assert "<script" not in stdout.lower()
+    # Inline JS is allowed; verify script tags are balanced
+    script_count = stdout.lower().count("<script")
+    script_close = stdout.lower().count("</script>")
+    assert script_count == script_close, "Unbalanced script tags"
 
 
 def test_slide_map_diverging_bars() -> None:

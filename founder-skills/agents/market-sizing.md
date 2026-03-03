@@ -71,6 +71,7 @@ Run with: `python ${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/scripts/<script>.py
 ```bash
 SCRIPTS="$CLAUDE_PLUGIN_ROOT/skills/market-sizing/scripts"
 REFS="$CLAUDE_PLUGIN_ROOT/skills/market-sizing/references"
+SHARED_SCRIPTS="$CLAUDE_PLUGIN_ROOT/scripts"
 ARTIFACTS_ROOT="$(pwd)/artifacts"
 echo "$SCRIPTS"
 ```
@@ -93,6 +94,7 @@ Every analysis deposits structured JSON artifacts into a working directory. The 
 
 | Step | Artifact | Producer |
 |------|----------|----------|
+| 0 | founder context | `founder_context.py` read/init |
 | 1 | `inputs.json` | Agent (heredoc) |
 | 2 | `methodology.json` | Agent (heredoc) |
 | 3 | `validation.json` | Sub-agent (Task) validates externally; agent (heredoc) if fallback |
@@ -127,6 +129,69 @@ Create the analysis directory and verify it exists before any artifact writes:
 mkdir -p "$ANALYSIS_DIR" && test -d "$ANALYSIS_DIR" && echo "Directory ready: $ANALYSIS_DIR"
 ```
 Every script called with `-o` will exit 1 if the parent directory does not exist.
+
+### Step 0: Read or Create Founder Context
+
+Check for an existing founder context file:
+
+```bash
+ARTIFACTS_ROOT="$(pwd)/artifacts"
+python "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --pretty
+```
+
+Three cases based on exit code:
+
+**Exit 0 (found, single context):** Use the company slug and pre-filled fields. Proceed to Step 1.
+
+**Exit 1 (not found):** Ask the founder conversationally for company name, sector, and geography. Then use AskUserQuestion for stage:
+
+```
+AskUserQuestion:
+  question: "What stage is {company_name} at?"
+  header: "Stage"
+  multiSelect: false
+  options:
+    - label: "Pre-seed"
+      description: "No revenue yet. LOIs, waitlist, or prototype. Raising <$2.5M."
+    - label: "Seed"
+      description: "Early ARR ($100K-$1M range). Paying customers. Raising $2M-$6M."
+    - label: "Series A"
+      description: "$1M+ ARR, cohort data, repeatable GTM. Raising $10M+."
+    - label: "Series B / Later"
+      description: "$5M+ ARR, proven unit economics. Raising $15M+."
+```
+
+Map the selection to `founder_context.py` stage values: "Pre-seed" → `pre-seed`, "Seed" → `seed`, "Series A" → `series-a`, "Series B / Later" → `later`. If the user selects "Other" and types a stage, map it to the closest valid value.
+
+Then create it:
+
+```bash
+python "$SHARED_SCRIPTS/founder_context.py" init \
+  --company-name "Acme Corp" --stage seed --sector "B2B SaaS" \
+  --geography "US" --artifacts-root "$ARTIFACTS_ROOT"
+```
+
+**Exit 2 (multiple context files):** Use AskUserQuestion to let the founder pick their company. Build options dynamically from the context files returned by the read command:
+
+```
+AskUserQuestion:
+  question: "Multiple companies found. Which one is this session for?"
+  header: "Company"
+  multiSelect: false
+  options:
+    # Build dynamically from discovered context files (up to 4)
+    - label: "{company_name}"
+      description: "{stage} · {sector} · {geography}"
+    # ... one option per context file
+```
+
+If more than 4 context files exist, show the 4 most recently modified. The user can select "Other" and type the company name.
+
+Then re-read with the chosen slug:
+
+```bash
+python "$SHARED_SCRIPTS/founder_context.py" read --slug "<chosen-slug>" --artifacts-root "$ARTIFACTS_ROOT" --pretty
+```
 
 ### Step 1: Gather Inputs and Deposit `inputs.json`
 

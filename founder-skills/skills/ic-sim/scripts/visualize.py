@@ -155,6 +155,9 @@ _SEVERITY_COLORS: dict[str, str] = {
     "blocking": "#ef4444",
 }
 
+_CLR_PRIMARY = "#0d549d"
+_CLR_ACCENT = "#21a2e3"
+
 
 # ---------------------------------------------------------------------------
 # CSS
@@ -169,49 +172,73 @@ def _css() -> str:
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
                          "Helvetica Neue", Arial, sans-serif;
-            background: #0f172a; color: #e2e8f0; line-height: 1.6;
+            background: #f9fafb; color: #1f2937; line-height: 1.6;
             padding: 2rem; max-width: 1100px; margin: 0 auto;
         }
-        h1 { color: #21a2e3; font-size: 1.8rem; margin-bottom: 0.25rem; }
+        h1 { color: #0d549d; font-size: 1.8rem; margin-bottom: 0.25rem; }
         h2 {
-            color: #94a3b8; font-size: 1.2rem; margin: 2rem 0 1rem;
-            border-bottom: 1px solid #1e293b; padding-bottom: 0.5rem;
+            color: #0d549d; font-size: 1.2rem; margin: 2rem 0 1rem;
+            border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem;
         }
-        .subtitle { color: #64748b; font-size: 0.9rem; margin-bottom: 2rem; }
+        .subtitle { color: #6b7280; font-size: 0.9rem; margin-bottom: 2rem; }
         .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
         .chart-box {
-            background: #1e293b; border-radius: 12px; padding: 1.5rem;
-            border: 1px solid #334155;
+            background: #ffffff; border-radius: 12px; padding: 1.5rem;
+            border: 1px solid #e5e7eb;
         }
         .chart-box.full { grid-column: 1 / -1; }
         .partner-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
         .partner-card {
             border-radius: 10px; padding: 1rem; border-left: 4px solid;
-            background: #1e293b;
+            background: #ffffff;
         }
         .partner-card h3 { font-size: 1rem; margin-bottom: 0.25rem; }
         .partner-card .verdict { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem; }
-        .partner-card .rationale { font-size: 0.8rem; color: #94a3b8; }
+        .partner-card .rationale { font-size: 0.8rem; color: #6b7280; }
         .badge {
             display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px;
             font-size: 0.8rem; font-weight: 600; color: #fff;
         }
         .conflict-table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.85rem; }
-        .conflict-table th { text-align: left; color: #94a3b8; padding: 0.5rem; border-bottom: 1px solid #334155; }
-        .conflict-table td { padding: 0.5rem; border-bottom: 1px solid #1e293b; }
-        .placeholder { color: #64748b; font-style: italic; padding: 2rem; text-align: center; }
+        .conflict-table th { text-align: left; color: #6b7280; padding: 0.5rem; border-bottom: 1px solid #e5e7eb; }
+        .conflict-table td { padding: 0.5rem; border-bottom: 1px solid #f3f4f6; }
+        .placeholder { color: #6b7280; font-style: italic; padding: 2rem; text-align: center; }
         .footer {
             margin-top: 3rem; padding-top: 1rem;
-            border-top: 1px solid #1e293b; color: #475569;
+            border-top: 1px solid #e5e7eb; color: #9ca3af;
             font-size: 0.75rem; text-align: center;
         }
         .footer a { color: #21a2e3; text-decoration: none; }
         .chart-box h2 { border-bottom-color: #334155; margin-top: 0; }
         svg { max-width: 100%; height: auto; }
+        .collapsible-toggle {
+            cursor: pointer; user-select: none; display: flex;
+            align-items: center; gap: 0.5rem;
+        }
+        .collapsible-toggle::before { content: "\\25b6"; font-size: 0.6rem; transition: transform 0.2s; }
+        .collapsible-toggle.open::before { transform: rotate(90deg); }
+        .collapsible-body { display: none; }
+        .collapsible-body.open { display: block; }
+        .finding-strong { color: #10b981; }
+        .finding-attention { color: #ef4444; }
+        [data-tooltip] { position: relative; cursor: help; }
+        #tooltip-box {
+            display: none; position: fixed; background: #1f2937; color: #f9fafb;
+            padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 0.8rem;
+            max-width: 300px; z-index: 9999; pointer-events: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
         @media (max-width: 768px) {
             body { padding: 1rem; }
             .chart-grid { grid-template-columns: 1fr; }
             .partner-grid { grid-template-columns: 1fr; }
+        }
+        @media print {
+            body { background: #fff; padding: 0; }
+            .chart-box { break-inside: avoid; border: 1px solid #d1d5db; }
+            .collapsible-body { display: block !important; }
+            .collapsible-toggle::before { content: ""; }
+            #tooltip-box { display: none !important; }
         }
     </style>
 """
@@ -243,6 +270,154 @@ def _artifact_placeholder(
 
 
 # ---------------------------------------------------------------------------
+# JavaScript helpers
+# ---------------------------------------------------------------------------
+
+
+def _tooltip_js() -> str:
+    """Return tooltip hover JS + container div."""
+    return (
+        '<div id="tooltip-box"></div><script>\n'
+        "(function(){\n"
+        "  var box=document.getElementById('tooltip-box');\n"
+        "  document.addEventListener('mouseover',function(e){\n"
+        "    var t=e.target.closest('[data-tooltip]');\n"
+        "    if(!t)return;\n"
+        "    box.textContent=t.getAttribute('data-tooltip');\n"
+        "    box.style.display='block';\n"
+        "  });\n"
+        "  document.addEventListener('mousemove',function(e){\n"
+        "    if(box.style.display==='block'){\n"
+        "      box.style.left=Math.min(e.clientX+12,window.innerWidth-320)+'px';\n"
+        "      box.style.top=(e.clientY+12)+'px';\n"
+        "    }\n"
+        "  });\n"
+        "  document.addEventListener('mouseout',function(e){\n"
+        "    if(e.target.closest('[data-tooltip]'))box.style.display='none';\n"
+        "  });\n"
+        "})();\n"
+        "</script>"
+    )
+
+
+def _collapsible_js() -> str:
+    """Return collapsible toggle JS."""
+    return (
+        "<script>\n"
+        "document.querySelectorAll('.collapsible-toggle').forEach(function(el){\n"
+        "  el.addEventListener('click',function(){\n"
+        "    this.classList.toggle('open');\n"
+        "    var body=this.nextElementSibling;\n"
+        "    if(body)body.classList.toggle('open');\n"
+        "  });\n"
+        "});\n"
+        "</script>"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Key Findings
+# ---------------------------------------------------------------------------
+
+
+def _key_findings(
+    score_dims: dict[str, Any] | None,
+    discussion: dict[str, Any] | None,
+    conflict: dict[str, Any] | None,
+) -> str:
+    """Render key findings section with strong/attention/actions."""
+    strong: list[str] = []
+    attention: list[str] = []
+    actions: list[str] = []
+
+    if _usable(score_dims):
+        summary = _as_dict(score_dims.get("summary"))
+        by_cat = _as_dict(summary.get("by_category"))
+
+        # Strong categories (all strong conviction, no concerns/dealbreakers)
+        for cat in _CANONICAL_CATEGORIES:
+            counts = _as_dict(by_cat.get(cat))
+            s = int(_num(counts.get("strong_conviction"), 0))
+            c = int(_num(counts.get("concern"), 0))
+            d = int(_num(counts.get("dealbreaker"), 0))
+            if s > 0 and c == 0 and d == 0:
+                strong.append(f"{cat} scores all strong conviction")
+
+        # Dealbreakers
+        for db in _as_list(summary.get("dealbreakers")):
+            if isinstance(db, dict):
+                label = str(db.get("label", db.get("id", "?")))
+                cat = str(db.get("category", ""))
+                attention.append(f"Dealbreaker in {cat}: {label}")
+
+        # Top concerns
+        for tc in _as_list(summary.get("top_concerns")):
+            if isinstance(tc, dict):
+                label = str(tc.get("label", tc.get("id", "?")))
+                cat = str(tc.get("category", ""))
+                attention.append(f"Concern in {cat}: {label}")
+
+    if _usable(conflict):
+        conf_summary = _as_dict(conflict.get("summary"))
+        severity = str(conf_summary.get("overall_severity", "")).lower()
+        if severity == "clear":
+            strong.append("No portfolio conflicts found")
+        elif severity in ("manageable", "blocking"):
+            count = int(_num(conf_summary.get("conflict_count"), 0))
+            attention.append(f"{count} portfolio conflict(s) — severity: {severity}")
+
+    if _usable(discussion):
+        for req in _as_list(discussion.get("diligence_requirements")):
+            if isinstance(req, str) and req.strip():
+                actions.append(req.strip())
+        if not actions:
+            for kc in _as_list(discussion.get("key_concerns")):
+                if isinstance(kc, str) and kc.strip():
+                    actions.append(kc.strip())
+
+    if not strong and not attention and not actions:
+        return ""
+
+    parts: list[str] = ['<div class="chart-box full"><h2>Key Findings</h2>']
+
+    if strong:
+        parts.append(
+            '<div style="margin-bottom:1rem;">'
+            '<strong class="finding-strong">What\'s strong</strong>'
+            '<ul style="margin:0.25rem 0 0 1.25rem;color:#6b7280;'
+            'font-size:0.9rem;">'
+        )
+        for item in strong:
+            parts.append(f"<li>{_esc(item)}</li>")
+        parts.append("</ul></div>")
+
+    if attention:
+        parts.append(
+            '<div style="margin-bottom:1rem;">'
+            '<strong class="finding-attention">What needs attention</strong>'
+            '<ul style="margin:0.25rem 0 0 1.25rem;color:#6b7280;'
+            'font-size:0.9rem;">'
+        )
+        for item in attention:
+            parts.append(f"<li>{_esc(item)}</li>")
+        parts.append("</ul></div>")
+
+    if actions:
+        parts.append(
+            '<div style="margin-bottom:1rem;">'
+            "<strong>Top actions</strong>"
+            '<ul style="margin:0.25rem 0 0 1.25rem;color:#6b7280;'
+            'font-size:0.9rem;">'
+        )
+        for item in actions:
+            parts.append(f"<li>{_esc(item)}</li>")
+        parts.append("</ul></div>")
+
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # Chart 1: Conviction Gauge (semi-circle)
 # ---------------------------------------------------------------------------
 
@@ -262,77 +437,77 @@ def _chart_conviction_gauge(score_dims: dict[str, Any] | None) -> str:
 
     # SVG parameters
     cx, cy, r = 150.0, 130.0, 100.0
-    # Semi-circle: 180 degrees from left to right (pi to 0)
-    # Score angle
     score_frac = conviction / 100.0
+    # Semi-circle: angle sweeps from pi (left, 0%) to 0 (right, 100%)
     score_angle = math.pi * (1.0 - score_frac)
 
-    # Arc endpoint for the score
-    end_x = cx + r * math.cos(score_angle)
-    end_y = cy - r * math.sin(score_angle)
-
-    # Zone boundaries: 50% and 75%
-    z50_angle = math.pi * (1.0 - 0.5)
-    z75_angle = math.pi * (1.0 - 0.75)
+    # Zone boundaries
+    z50_angle = math.pi * 0.5
+    z75_angle = math.pi * 0.25
 
     z50_x = cx + r * math.cos(z50_angle)
     z50_y = cy - r * math.sin(z50_angle)
     z75_x = cx + r * math.cos(z75_angle)
     z75_y = cy - r * math.sin(z75_angle)
 
-    # Start of arc (left)
     start_x = cx - r
     start_y = cy
-
-    # End of arc (right)
     arc_end_x = cx + r
     arc_end_y = cy
 
     verdict_color = _VERDICT_COLORS.get(verdict, "#9ca3af")
     verdict_label = _esc(verdict.replace("_", " ").title())
 
-    # Large arc flag for score fill
-    large_arc = 1 if score_frac > 0.5 else 0
+    # Needle tip on the arc
+    needle_len = r - 10.0
+    needle_x = cx + needle_len * math.cos(score_angle)
+    needle_y = cy - needle_len * math.sin(score_angle)
 
     svg_parts = [
         '<svg viewBox="0 0 300 170" xmlns="http://www.w3.org/2000/svg">',
-        # Background arc zones: red (0-50%), yellow (50-75%), green (75-100%)
-        # Red zone: full semi-circle background
-        f'<path d="M {start_x:.2f} {start_y:.2f} A {r:.2f} {r:.2f} 0 1 1 {arc_end_x:.2f} {arc_end_y:.2f}"',
-        '  fill="none" stroke="#ef4444" stroke-width="18" stroke-opacity="0.25"/>',
-        # Yellow zone: from 50% to 75%
-        f'<path d="M {z50_x:.2f} {z50_y:.2f} A {r:.2f} {r:.2f} 0 0 1 {z75_x:.2f} {z75_y:.2f}"',
-        '  fill="none" stroke="#f59e0b" stroke-width="18" stroke-opacity="0.25"/>',
-        # Green zone: from 75% to 100%
-        f'<path d="M {z75_x:.2f} {z75_y:.2f} A {r:.2f} {r:.2f} 0 0 1 {arc_end_x:.2f} {arc_end_y:.2f}"',
-        '  fill="none" stroke="#10b981" stroke-width="18" stroke-opacity="0.25"/>',
+        # Background arc zones (no overlay arc — just zones + needle)
+        # Red zone: full semi-circle
+        f'<path d="M {start_x:.2f} {start_y:.2f}'
+        f" A {r:.2f} {r:.2f} 0 1 1"
+        f' {arc_end_x:.2f} {arc_end_y:.2f}"'
+        ' fill="none" stroke="#ef4444" stroke-width="18"'
+        ' stroke-opacity="0.25"/>',
+        # Yellow zone: 50%–75%
+        f'<path d="M {z50_x:.2f} {z50_y:.2f}'
+        f" A {r:.2f} {r:.2f} 0 0 1"
+        f' {z75_x:.2f} {z75_y:.2f}"'
+        ' fill="none" stroke="#f59e0b" stroke-width="18"'
+        ' stroke-opacity="0.25"/>',
+        # Green zone: 75%–100%
+        f'<path d="M {z75_x:.2f} {z75_y:.2f}'
+        f" A {r:.2f} {r:.2f} 0 0 1"
+        f' {arc_end_x:.2f} {arc_end_y:.2f}"'
+        ' fill="none" stroke="#10b981" stroke-width="18"'
+        ' stroke-opacity="0.25"/>',
+        # Needle line
+        f'<line x1="{cx:.2f}" y1="{cy:.2f}"'
+        f' x2="{needle_x:.2f}" y2="{needle_y:.2f}"'
+        f' stroke="{_esc(verdict_color)}" stroke-width="3"'
+        ' stroke-linecap="round"/>',
+        # Needle hub circle
+        f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="5" fill="{_esc(verdict_color)}"/>',
     ]
-
-    # Score fill arc
-    if conviction > 0.5:  # avoid degenerate arc
-        svg_parts.append(
-            f'<path d="M {start_x:.2f} {start_y:.2f} A {r:.2f} {r:.2f} 0'
-            f' {large_arc} 1 {end_x:.2f} {end_y:.2f}"'
-            f' fill="none" stroke="{_esc(verdict_color)}" stroke-width="18"'
-            f' stroke-linecap="round"/>'
-        )
 
     # Score text
     svg_parts.append(
-        f'<text x="{cx:.2f}" y="{cy - 15:.2f}" text-anchor="middle"'
+        f'<text x="{cx:.2f}" y="{cy - 18:.2f}" text-anchor="middle"'
         f' font-size="36" font-weight="bold" fill="{_esc(verdict_color)}">'
         f"{conviction:.1f}</text>"
     )
     # Verdict label
     svg_parts.append(
-        f'<text x="{cx:.2f}" y="{cy + 10:.2f}" text-anchor="middle"'
-        f' font-size="14" fill="#94a3b8">{verdict_label}</text>'
+        f'<text x="{cx:.2f}" y="{cy + 8:.2f}" text-anchor="middle" font-size="14" fill="#6b7280">{verdict_label}</text>'
     )
     svg_parts.append("</svg>")
 
     svg = "\n".join(svg_parts)
     ai_note = (
-        '<div style="color:#64748b;font-size:0.75rem;text-align:center;'
+        '<div style="color:#6b7280;font-size:0.75rem;text-align:center;'
         'margin-top:0.5rem;font-style:italic;">AI-generated assessment</div>'
     )
     return f'<div class="chart-box"><h2>Conviction Gauge</h2>{svg}{ai_note}</div>'
@@ -400,7 +575,7 @@ def _chart_category_radar(score_dims: dict[str, Any] | None) -> str:
             px = cx + ring_r * math.cos(a)
             py = cy + ring_r * math.sin(a)
             points.append(f"{px:.2f},{py:.2f}")
-        svg_lines.append(f'<polygon points="{" ".join(points)}" fill="none" stroke="#334155" stroke-width="0.5"/>')
+        svg_lines.append(f'<polygon points="{" ".join(points)}" fill="none" stroke="#d1d5db" stroke-width="0.5"/>')
 
     # Draw axis lines
     for i in range(n):
@@ -408,7 +583,7 @@ def _chart_category_radar(score_dims: dict[str, Any] | None) -> str:
         ex = cx + max_r * math.cos(a)
         ey = cy + max_r * math.sin(a)
         svg_lines.append(
-            f'<line x1="{cx:.2f}" y1="{cy:.2f}" x2="{ex:.2f}" y2="{ey:.2f}" stroke="#334155" stroke-width="0.5"/>'
+            f'<line x1="{cx:.2f}" y1="{cy:.2f}" x2="{ex:.2f}" y2="{ey:.2f}" stroke="#d1d5db" stroke-width="0.5"/>'
         )
 
     # Data polygon
@@ -428,25 +603,10 @@ def _chart_category_radar(score_dims: dict[str, Any] | None) -> str:
         f' fill="#21a2e3" fill-opacity="0.2" stroke="#21a2e3" stroke-width="2"/>'
     )
 
-    # Data points (dots) and per-point score labels
+    # Data points (dots)
     for i in range(n):
-        px, py, score_val = point_coords[i]
+        px, py, _score_val = point_coords[i]
         svg_lines.append(f'<circle cx="{px:.2f}" cy="{py:.2f}" r="3" fill="#21a2e3"/>')
-        # Score label near each data point (offset outward slightly)
-        a = _angle(i)
-        label_offset = 12.0
-        lx = px + label_offset * math.cos(a)
-        ly = py + label_offset * math.sin(a)
-        anchor = "middle"
-        if math.cos(a) > 0.3:
-            anchor = "start"
-        elif math.cos(a) < -0.3:
-            anchor = "end"
-        svg_lines.append(
-            f'<text x="{lx:.2f}" y="{ly:.2f}" text-anchor="{anchor}"'
-            f' font-size="8" fill="#21a2e3" font-weight="600">'
-            f"{score_val:.0f}%</text>"
-        )
 
     # Labels
     for i in range(n):
@@ -462,18 +622,18 @@ def _chart_category_radar(score_dims: dict[str, Any] | None) -> str:
         score_str = f"{scores[i]:.0f}%"
         svg_lines.append(
             f'<text x="{lx:.2f}" y="{ly:.2f}" text-anchor="{anchor}"'
-            f' font-size="10" fill="#94a3b8">'
+            f' font-size="10" fill="#6b7280">'
             f"{_esc(categories[i])}</text>"
         )
         svg_lines.append(
             f'<text x="{lx:.2f}" y="{ly + 12:.2f}" text-anchor="{anchor}"'
-            f' font-size="9" fill="#64748b">{_esc(score_str)}</text>'
+            f' font-size="9" fill="#9ca3af">{_esc(score_str)}</text>'
         )
 
     svg_lines.append("</svg>")
     svg = "\n".join(svg_lines)
     note = (
-        '<div style="color:#64748b;font-size:0.7rem;margin-top:0.25rem;">'
+        '<div style="color:#6b7280;font-size:0.7rem;margin-top:0.25rem;">'
         "Values below 5% rendered at 5% for readability.</div>"
     )
     return f'<div class="chart-box"><h2>Category Radar</h2>{svg}{note}</div>'
@@ -530,7 +690,7 @@ def _chart_category_bars(score_dims: dict[str, Any] | None) -> str:
         # Category label
         svg_lines.append(
             f'<text x="{label_width - 8:.2f}" y="{y + bar_height / 2 + 4:.2f}"'
-            f' text-anchor="end" font-size="11" fill="#e2e8f0">'
+            f' text-anchor="end" font-size="11" fill="#1f2937">'
             f"{_esc(cat)}</text>"
         )
 
@@ -546,13 +706,15 @@ def _chart_category_bars(score_dims: dict[str, Any] | None) -> str:
                     f' width="{seg_w:.2f}" height="{bar_height:.2f}"'
                     f' fill="{_esc(color)}" rx="2"/>'
                 )
-                # Count label inside bar if segment is wide enough
+                # Label inside bar: "N Label" if wide enough, else just "N"
+                slabel = status_labels.get(status, "")
+                bar_text = f"{int(count)} {slabel}" if seg_w > 60 else str(int(count))
                 if seg_w > 20:
                     svg_lines.append(
                         f'<text x="{x_offset + seg_w / 2:.2f}"'
                         f' y="{y + bar_height / 2 + 4:.2f}"'
                         f' text-anchor="middle" font-size="10"'
-                        f' fill="#fff">{int(count)}</text>'
+                        f' fill="#fff">{_esc(bar_text)}</text>'
                     )
                 x_offset += seg_w
 
@@ -564,7 +726,7 @@ def _chart_category_bars(score_dims: dict[str, Any] | None) -> str:
         label = status_labels.get(status, status)
         svg_lines.append(f'<rect x="{lx:.2f}" y="{legend_y:.2f}" width="10" height="10" fill="{_esc(color)}" rx="2"/>')
         svg_lines.append(
-            f'<text x="{lx + 14:.2f}" y="{legend_y + 9:.2f}" font-size="9" fill="#94a3b8">{_esc(label)}</text>'
+            f'<text x="{lx + 14:.2f}" y="{legend_y + 9:.2f}" font-size="9" fill="#6b7280">{_esc(label)}</text>'
         )
         lx += len(label) * 6.5 + 24
 
@@ -604,9 +766,9 @@ def _chart_partner_verdicts(discussion: dict[str, Any] | None) -> str:
         pv = by_partner.get(partner)
         if pv is None:
             cards.append(
-                '<div class="partner-card" style="border-color: #334155;">'
+                '<div class="partner-card" style="border-color: #e5e7eb;">'
                 f"<h3>{_esc(partner.title())}</h3>"
-                '<div class="verdict" style="color: #64748b;">No verdict</div>'
+                '<div class="verdict" style="color: #6b7280;">No verdict</div>'
                 "</div>"
             )
             continue
@@ -628,7 +790,7 @@ def _chart_partner_verdicts(discussion: dict[str, Any] | None) -> str:
         )
 
     subtitle = (
-        '<div style="color:#64748b;font-size:0.8rem;margin-bottom:0.75rem;'
+        '<div style="color:#6b7280;font-size:0.8rem;margin-bottom:0.75rem;'
         'font-style:italic;">AI-simulated partner perspectives '
         "— not actual investor views</div>"
     )
@@ -698,9 +860,9 @@ def _section_summary_bar(
         one_liner = str(startup.get("one_liner", ""))
         sector = str(startup.get("sector", ""))
         if one_liner:
-            parts.append(f'<div style="color:#e2e8f0;font-size:0.95rem;">{_esc(one_liner)}</div>')
+            parts.append(f'<div style="color:#1f2937;font-size:0.95rem;">{_esc(one_liner)}</div>')
         if sector:
-            parts.append(f'<div style="color:#64748b;font-size:0.85rem;">Sector: {_esc(sector)}</div>')
+            parts.append(f'<div style="color:#6b7280;font-size:0.85rem;">Sector: {_esc(sector)}</div>')
 
     if _usable(discussion):
         verdict_spans: list[str] = []
@@ -736,8 +898,8 @@ def _section_summary_bar(
 
     inner = "\n".join(parts)
     return (
-        '<div style="background:#1e293b;border-radius:10px;padding:1rem 1.5rem;'
-        'margin-bottom:1.5rem;border:1px solid #334155;">'
+        '<div style="background:#ffffff;border-radius:10px;padding:1rem 1.5rem;'
+        'margin-bottom:1.5rem;border:1px solid #e5e7eb;">'
         f"{inner}</div>"
     )
 
@@ -786,6 +948,7 @@ def compose_html(dir_path: str) -> str:
     bars = _chart_category_bars(score_dims)
     partners = _chart_partner_verdicts(discussion)
     conflicts = _chart_conflict_summary(conflict)
+    findings = _key_findings(score_dims, discussion, conflict)
 
     if _usable(startup):
         page_title = f"IC Simulation: {_esc(str(startup.get('company_name', 'Report')))}"
@@ -801,6 +964,7 @@ def compose_html(dir_path: str) -> str:
 {gauge}
 {radar}
 </div>
+{findings}
 {bars}
 {partners}
 {conflicts}
@@ -808,6 +972,8 @@ def compose_html(dir_path: str) -> str:
   Generated by <a href="https://github.com/lool-ventures/founder-skills">founder skills</a>
   by <a href="https://lool.vc">lool ventures</a> — IC Simulation Agent
 </div>
+{_tooltip_js()}
+{_collapsible_js()}
 """
 
     return f"""<!DOCTYPE html>

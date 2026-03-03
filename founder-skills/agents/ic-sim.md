@@ -68,6 +68,7 @@ Run with: `python ${CLAUDE_PLUGIN_ROOT}/skills/ic-sim/scripts/<script>.py --pret
 ```bash
 SCRIPTS="$CLAUDE_PLUGIN_ROOT/skills/ic-sim/scripts"
 REFS="$CLAUDE_PLUGIN_ROOT/skills/ic-sim/references"
+SHARED_SCRIPTS="$CLAUDE_PLUGIN_ROOT/scripts"
 ARTIFACTS_ROOT="$(pwd)/artifacts"
 echo "$SCRIPTS"
 ```
@@ -91,6 +92,7 @@ Every simulation deposits structured JSON artifacts into a working directory. Th
 
 | Step | Artifact | Producer |
 |------|----------|----------|
+| 0 | founder context | `founder_context.py` read/init |
 | 1 | `startup_profile.json` | Sub-agent (Task) extracts from files; agent (heredoc) if text-only or fallback |
 | 2 | `prior_artifacts.json` | Sub-agent (Task) imports; agent (heredoc) if text-only or fallback |
 | 3 | `fund_profile.json` | Agent (heredoc) then `fund_profile.py -o` validates |
@@ -126,12 +128,90 @@ Create the simulation directory and verify it exists:
 mkdir -p "$SIM_DIR" && test -d "$SIM_DIR" && echo "Directory ready: $SIM_DIR"
 ```
 
+### Step 0: Read or Create Founder Context
+
+Check for an existing founder context file:
+
+```bash
+ARTIFACTS_ROOT="$(pwd)/artifacts"
+python "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --pretty
+```
+
+Three cases based on exit code:
+
+**Exit 0 (found, single context):** Use the company slug and pre-filled fields. Proceed to Mode Selection.
+
+**Exit 1 (not found):** Ask the founder conversationally for company name, sector, and geography. Then use AskUserQuestion for stage:
+
+```
+AskUserQuestion:
+  question: "What stage is {company_name} at?"
+  header: "Stage"
+  multiSelect: false
+  options:
+    - label: "Pre-seed"
+      description: "No revenue yet. LOIs, waitlist, or prototype. Raising <$2.5M."
+    - label: "Seed"
+      description: "Early ARR ($100K-$1M range). Paying customers. Raising $2M-$6M."
+    - label: "Series A"
+      description: "$1M+ ARR, cohort data, repeatable GTM. Raising $10M+."
+    - label: "Series B / Later"
+      description: "$5M+ ARR, proven unit economics. Raising $15M+."
+```
+
+Map the selection to `founder_context.py` stage values: "Pre-seed" → `pre-seed`, "Seed" → `seed`, "Series A" → `series-a`, "Series B / Later" → `later`. If the user selects "Other" and types a stage, map it to the closest valid value.
+
+Then create it:
+
+```bash
+python "$SHARED_SCRIPTS/founder_context.py" init \
+  --company-name "Acme Corp" --stage seed --sector "B2B SaaS" \
+  --geography "US" --artifacts-root "$ARTIFACTS_ROOT"
+```
+
+**Exit 2 (multiple context files):** Use AskUserQuestion to let the founder pick their company. Build options dynamically from the context files returned by the read command:
+
+```
+AskUserQuestion:
+  question: "Multiple companies found. Which one is this session for?"
+  header: "Company"
+  multiSelect: false
+  options:
+    # Build dynamically from discovered context files (up to 4)
+    - label: "{company_name}"
+      description: "{stage} · {sector} · {geography}"
+    # ... one option per context file
+```
+
+If more than 4 context files exist, show the 4 most recently modified. The user can select "Other" and type the company name.
+
+Then re-read with the chosen slug:
+
+```bash
+python "$SHARED_SCRIPTS/founder_context.py" read --slug "<chosen-slug>" --artifacts-root "$ARTIFACTS_ROOT" --pretty
+```
+
 ### Mode Selection
 
-Ask the user (or infer from context):
-1. **Interactive** — Pause between partner positions for founder input
-2. **Auto-pilot** — Run all sections without pausing
-3. **Fund-specific** — Research a specific fund first (combines with either mode)
+Use AskUserQuestion to let the founder choose simulation mode:
+
+```
+AskUserQuestion:
+  question: "How would you like to run the IC simulation?"
+  header: "IC mode"
+  multiSelect: false
+  options:
+    - label: "Interactive"
+      description: "Pause after each partner's position so you can respond and shape the discussion."
+    - label: "Auto-pilot"
+      description: "Run the full IC discussion straight through. Best when you want to observe, not participate."
+    - label: "Fund-specific"
+      description: "Research a real fund's thesis and partners first, then simulate their IC."
+```
+
+If the user selects **Fund-specific**, ask conversationally which fund to research and whether to run interactive or auto-pilot within that simulation. Do not use a second AskUserQuestion call for this follow-up.
+
+If context clearly implies a mode (e.g., user said "simulate Sequoia's IC"), skip the prompt and use the implied mode.
 
 ### Steps 1-2: Extract Startup Profile and Import Prior Artifacts
 
@@ -141,6 +221,9 @@ Spawn a `general-purpose` Task sub-agent with `model: "sonnet"` to handle extrac
 - The file paths to read
 - `$SIM_DIR` for artifact output
 - `$REFS` directory path for the JSON schemas
+- `$SCRIPTS` directory path for find_artifact.py access
+- The company slug from Step 0's founder context
+- `$ARTIFACTS_ROOT` for artifact discovery
 - Today's date for `simulation_date`
 
 The sub-agent reads the raw materials in its own context (keeping them out of yours), extracts the startup profile, checks for prior market-sizing/deck-review artifacts, deposits both `startup_profile.json` and `prior_artifacts.json` to `$SIM_DIR`, and returns a brief summary.
@@ -156,7 +239,20 @@ Extract all schema fields. Write to: {sim_dir}/startup_profile.json
 
 ## Task 2: Import Prior Artifacts
 Read `{refs_path}/artifact-schemas.md` for the prior_artifacts.json schema.
-Glob for `{artifacts_root}/market-sizing-*/` and `{artifacts_root}/deck-review-*/`.
+
+Use find_artifact.py to locate prior skill artifacts:
+```bash
+SLUG="{company_slug}"
+
+SIZING_PATH=$(python "$SHARED_SCRIPTS/find_artifact.py" \
+  --skill market-sizing --artifact sizing.json \
+  --slug "$SLUG" --artifacts-root "$ARTIFACTS_ROOT") || true
+
+DECK_PATH=$(python "$SHARED_SCRIPTS/find_artifact.py" \
+  --skill deck-review --artifact checklist.json \
+  --slug "$SLUG" --artifacts-root "$ARTIFACTS_ROOT") || true
+```
+
 If found, read key JSON files, extract summary data (TAM/SAM/SOM, scores, failed criteria).
 Record import dates. Write to: {sim_dir}/prior_artifacts.json
 If nothing found, write: {"imported": []}

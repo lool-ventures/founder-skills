@@ -7,10 +7,11 @@
 [![CI](https://github.com/lool-ventures/founder-skills/actions/workflows/ci.yml/badge.svg)](https://github.com/lool-ventures/founder-skills/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/lool-ventures/founder-skills)
 
 Skills for startup founders by [lool ventures](https://lool.vc).
 
-A [Claude Cowork](https://claude.com/blog/cowork-plugins) plugin that gives founders three AI-powered coaching agents: market sizing, pitch deck review, and IC simulation. Each agent follows a structured, script-backed workflow to produce analysis that holds up under investor scrutiny.
+A [Claude Cowork](https://claude.com/blog/cowork-plugins) plugin that gives founders four AI-powered coaching agents: market sizing, pitch deck review, financial model review, and IC simulation. Each agent follows a structured, script-backed workflow to produce analysis that holds up under investor scrutiny.
 
 ## Skills
 
@@ -87,6 +88,30 @@ Simulates a realistic VC Investment Committee discussion with three partner arch
 
 > Full workflow details: [`founder-skills/skills/ic-sim/SKILL.md`](founder-skills/skills/ic-sim/SKILL.md)
 
+![Financial Model Review Agent](assets/financial_model_review.png)
+
+### Financial Model Review Agent
+
+Reviews startup financial models for investor readiness — validating structure, unit economics, runway, and metrics against stage-appropriate standards.
+
+**What it does:**
+- Scores 46 criteria across 7 categories with profile-based auto-gating by stage, geography, and sector
+- Computes and benchmarks 11 unit economics metrics against stage-appropriate targets
+- Stress-tests runway under base, slow-growth, and crisis scenarios with decision-point analysis
+- Supports Excel (.xlsx), CSV, Google Sheets exports, pitch decks, and conversational input
+- Assembles a final report with cross-artifact consistency validation
+
+**What to provide:** A financial model in any format — Excel spreadsheet, CSV, Google Sheets export, financial slides from a deck, or just describe the numbers in conversation. The agent adapts its analysis depth to the format provided.
+
+**What you get back:** A scored checklist (46 criteria across 7 categories), benchmarked unit economics with ratings, multi-scenario runway projections with cash-out dates and decision points, an overall readiness rating (strong/solid/needs work/major revision), and coaching on the highest-leverage improvements.
+
+**Example prompts:**
+- "Review my financial model" (with an Excel file attached)
+- "Here are our projections from the deck -- can you validate the unit economics?"
+- "We're burning $80K/mo with $1.2M in the bank, growing 15% MoM. How does our runway look?"
+
+> Full workflow details: [`founder-skills/skills/financial-model-review/SKILL.md`](founder-skills/skills/financial-model-review/SKILL.md)
+
 ## Getting Started
 
 ### Claude Cowork
@@ -107,7 +132,7 @@ claude plugin marketplace add lool-ventures/founder-skills
 claude plugin install founder-skills@lool-founder-skills
 ```
 
-Once installed, the agents activate automatically when you ask about market sizing, deck review, or IC simulation. No additional configuration required.
+Once installed, the agents activate automatically when you ask about market sizing, deck review, financial model review, or IC simulation. No additional configuration required.
 
 ### Manus
 

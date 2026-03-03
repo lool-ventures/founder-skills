@@ -65,6 +65,7 @@ Run with: `python ${CLAUDE_PLUGIN_ROOT}/skills/deck-review/scripts/<script>.py -
 ```bash
 SCRIPTS="$CLAUDE_PLUGIN_ROOT/skills/deck-review/scripts"
 REFS="$CLAUDE_PLUGIN_ROOT/skills/deck-review/references"
+SHARED_SCRIPTS="$CLAUDE_PLUGIN_ROOT/scripts"
 ARTIFACTS_ROOT="$(pwd)/artifacts"
 echo "$SCRIPTS"
 ```
@@ -87,6 +88,7 @@ Every review deposits structured JSON artifacts into a working directory. The fi
 
 | Step | Artifact | Producer |
 |------|----------|----------|
+| 0 | founder context | `founder_context.py` read/init |
 | 1 | `deck_inventory.json` | Sub-agent (Task) extracts from files; agent (heredoc) if text-only or fallback |
 | 2 | `stage_profile.json` | Agent (heredoc) |
 | 3 | `slide_reviews.json` | Agent (heredoc) |
@@ -115,6 +117,69 @@ Follow these steps in order for every review. Set `REVIEW_DIR="$ARTIFACTS_ROOT/d
 Create the review directory and verify it exists:
 ```bash
 mkdir -p "$REVIEW_DIR" && test -d "$REVIEW_DIR" && echo "Directory ready: $REVIEW_DIR"
+```
+
+### Step 0: Read or Create Founder Context
+
+Check for an existing founder context file:
+
+```bash
+ARTIFACTS_ROOT="$(pwd)/artifacts"
+python "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --pretty
+```
+
+Three cases based on exit code:
+
+**Exit 0 (found, single context):** Use the company slug and pre-filled fields. Proceed to Step 1.
+
+**Exit 1 (not found):** Ask the founder conversationally for company name, sector, and geography. Then use AskUserQuestion for stage:
+
+```
+AskUserQuestion:
+  question: "What stage is {company_name} at?"
+  header: "Stage"
+  multiSelect: false
+  options:
+    - label: "Pre-seed"
+      description: "No revenue yet. LOIs, waitlist, or prototype. Raising <$2.5M."
+    - label: "Seed"
+      description: "Early ARR ($100K-$1M range). Paying customers. Raising $2M-$6M."
+    - label: "Series A"
+      description: "$1M+ ARR, cohort data, repeatable GTM. Raising $10M+."
+    - label: "Series B / Later"
+      description: "$5M+ ARR, proven unit economics. Raising $15M+."
+```
+
+Map the selection to `founder_context.py` stage values: "Pre-seed" → `pre-seed`, "Seed" → `seed`, "Series A" → `series-a`, "Series B / Later" → `later`. If the user selects "Other" and types a stage, map it to the closest valid value.
+
+Then create it:
+
+```bash
+python "$SHARED_SCRIPTS/founder_context.py" init \
+  --company-name "Acme Corp" --stage seed --sector "B2B SaaS" \
+  --geography "US" --artifacts-root "$ARTIFACTS_ROOT"
+```
+
+**Exit 2 (multiple context files):** Use AskUserQuestion to let the founder pick their company. Build options dynamically from the context files returned by the read command:
+
+```
+AskUserQuestion:
+  question: "Multiple companies found. Which one is this session for?"
+  header: "Company"
+  multiSelect: false
+  options:
+    # Build dynamically from discovered context files (up to 4)
+    - label: "{company_name}"
+      description: "{stage} · {sector} · {geography}"
+    # ... one option per context file
+```
+
+If more than 4 context files exist, show the 4 most recently modified. The user can select "Other" and type the company name.
+
+Then re-read with the chosen slug:
+
+```bash
+python "$SHARED_SCRIPTS/founder_context.py" read --slug "<chosen-slug>" --artifacts-root "$ARTIFACTS_ROOT" --pretty
 ```
 
 ### Step 1: Ingest Deck and Deposit `deck_inventory.json`
@@ -183,7 +248,25 @@ Read `${CLAUDE_PLUGIN_ROOT}/skills/deck-review/references/deck-best-practices.md
 - **Series A:** $1M+ ARR, cohort data present, repeatable GTM motion, raise $10M+
 - **Later stage:** $5M+ ARR, proven unit economics, expanding product suite, raise $15M+. Set detected_stage to `"series_b"` or `"growth"` — the report will note this is outside calibrated scope.
 
-If signals are ambiguous, ask the user.
+If signals are ambiguous (confidence would be `"low"` or `"medium"`), use AskUserQuestion with evidence from the deck:
+
+```
+AskUserQuestion:
+  question: "Your deck shows mixed stage signals. Which best describes where {company_name} is today?"
+  header: "Stage"
+  multiSelect: false
+  options:
+    - label: "Pre-seed"
+      description: "Signals found: {cite specific evidence from deck}. No paying customers yet."
+    - label: "Seed"
+      description: "Signals found: {cite specific evidence from deck}. Early paying customers."
+    - label: "Series A"
+      description: "Signals found: {cite specific evidence from deck}. Repeatable growth."
+    - label: "Later stage"
+      description: "Beyond Series A. Note: calibrated advice covers pre-seed through Series A."
+```
+
+Populate each option's description with the actual signals found in the deck (e.g., "Signals found: '$200K ARR on slide 5, but no cohort data'"). If stage is clear (high confidence), skip this prompt entirely.
 
 Also determine: is this an AI-first company? (Triggers 4 additional AI-specific criteria.)
 
