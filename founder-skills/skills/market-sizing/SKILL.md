@@ -14,67 +14,35 @@ exports:
 
 # Market Sizing Skill
 
-Help startup founders build credible, defensible TAM/SAM/SOM analysis — the kind that earns investor trust rather than raising eyebrows. Produce a structured, validated market sizing with external sources, sensitivity testing, and a self-check against common pitfalls.
-
-The tone is founder-first: a rigorous but supportive coaching session. Confirm what's solid, flag what's not, and always explain *why* a number matters to investors and *how* to make it defensible.
-
-## Why This Matters
-
-Market sizing is the slide investors scrutinize most — and the one founders most often get wrong. Inflated TAMs get picked apart in diligence. Missing bottom-up validation signals laziness. Founders deserve to know exactly which numbers will hold up under investor scrutiny, so they can present with confidence.
+Help startup founders build credible, defensible TAM/SAM/SOM analysis — the kind that earns investor trust rather than raising eyebrows. Produce a structured, validated market sizing with external sources, sensitivity testing, and a self-check against common pitfalls. The tone is founder-first: a rigorous but supportive coaching session.
 
 ## Input Formats
 
-Accept any format the user provides: pitch deck (PDF, PPTX, markdown), financial model, market data, text descriptions, or just a verbal description of the business. Adapt extraction approach to what's available.
+Accept any format: pitch deck (PDF, PPTX, markdown), financial model, market data, text descriptions, or verbal description of the business.
 
 ## Available Scripts
 
 All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/scripts/`:
 
-- **`market_sizing.py`** — TAM/SAM/SOM calculator (top-down, bottom-up, or both approaches)
+- **`market_sizing.py`** — TAM/SAM/SOM calculator (top-down, bottom-up, or both)
 - **`sensitivity.py`** — Stress-test assumptions with low/base/high ranges and confidence-based auto-widening
 - **`checklist.py`** — Validates 22-item self-check with pass/fail per item
-- **`compose_report.py`** — Assembles report from artifacts, validates cross-artifact consistency; supports `--strict` to exit 1 on high/medium warnings (after writing output)
-- **`visualize.py`** — Generates a self-contained HTML file with SVG charts (funnel, tornado, donut). Outputs HTML (not JSON). `--pretty` accepted as no-op for compatibility
+- **`compose_report.py`** — Assembles report with cross-artifact validation; `--strict` exits 1 on high/medium warnings
+- **`visualize.py`** — Generates self-contained HTML with SVG charts (not JSON)
 
 Run with: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/scripts/<script>.py --pretty [args]`
 
-**Path resolution:** `${CLAUDE_PLUGIN_ROOT}` is persisted by the SessionStart hook. At the start of an analysis, resolve it once:
-
-```bash
-SCRIPTS="$CLAUDE_PLUGIN_ROOT/skills/market-sizing/scripts"
-REFS="$CLAUDE_PLUGIN_ROOT/skills/market-sizing/references"
-# ARTIFACTS_ROOT must be in the user's persistent workspace, NOT the session root.
-# In Cowork, $(pwd) is the ephemeral session scratch dir. Detect the mounted workspace:
-if ls "$(pwd)"/mnt/*/ >/dev/null 2>&1; then
-  ARTIFACTS_ROOT="$(ls -d "$(pwd)"/mnt/*/ | head -1)artifacts"
-else
-  ARTIFACTS_ROOT="$(pwd)/artifacts"
-fi
-echo "ARTIFACTS_ROOT=$ARTIFACTS_ROOT"
-echo "$SCRIPTS"
-```
-
-If empty, fall back: run `Glob` with pattern `**/founder-skills/skills/market-sizing/scripts/market_sizing.py`, strip to get `SCRIPTS`. Replace `/scripts` with `/references` to get `REFS`.
-
 ## Available References
 
-Read as needed during the analysis from `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/`:
+Read as needed from `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/`:
 
 - **`tam-sam-som-methodology.md`** — Definitions, calculation methods, industry examples, best practices
 - **`pitfalls-checklist.md`** — Self-review checklist for common mistakes
-- **`artifact-schemas.md`** — JSON schemas for all analysis artifacts (inputs, validation, sizing, sensitivity, checklist)
+- **`artifact-schemas.md`** — JSON schemas for all analysis artifacts
 
 ## Artifact Pipeline
 
 Every analysis deposits structured JSON artifacts into a working directory. The final step assembles all artifacts into a report and validates consistency. This is not optional.
-
-**Working directory:** Set `ANALYSIS_DIR` at the start. Artifacts persist in the workspace `artifacts/` directory across sessions.
-
-```bash
-ANALYSIS_DIR="$ARTIFACTS_ROOT/market-sizing-{company-slug}"
-mkdir -p "$ANALYSIS_DIR"
-test -d "$ANALYSIS_DIR" && echo "Directory ready: $ANALYSIS_DIR"
-```
 
 | Step | Artifact | Producer |
 |------|----------|----------|
@@ -91,13 +59,34 @@ test -d "$ANALYSIS_DIR" && echo "Directory ready: $ANALYSIS_DIR"
 - For agent-written artifacts (Steps 1-3), consult `references/artifact-schemas.md` for the JSON schema
 - If a step is not applicable, deposit a stub: `{"skipped": true, "reason": "..."}`
 
+Keep the founder informed with brief, plain-language updates at each step. Never mention file names, scripts, or JSON. After each analytical step (4–6), share a one-sentence finding before moving on.
+
 ## Workflow
+
+### Path Setup
+
+```bash
+SCRIPTS="$CLAUDE_PLUGIN_ROOT/skills/market-sizing/scripts"
+REFS="$CLAUDE_PLUGIN_ROOT/skills/market-sizing/references"
+if ls "$(pwd)"/mnt/*/ >/dev/null 2>&1; then
+  ARTIFACTS_ROOT="$(ls -d "$(pwd)"/mnt/*/ | head -1)artifacts"
+else
+  ARTIFACTS_ROOT="$(pwd)/artifacts"
+fi
+```
+
+If `CLAUDE_PLUGIN_ROOT` is empty, fall back: `Glob` for `**/founder-skills/skills/market-sizing/scripts/market_sizing.py`, strip to get `SCRIPTS`, derive `REFS`.
+
+```bash
+ANALYSIS_DIR="$ARTIFACTS_ROOT/market-sizing-{company-slug}"
+mkdir -p "$ANALYSIS_DIR"
+```
 
 ### Step 1: Gather Inputs -> `inputs.json`
 
 Read any materials the user provided. Extract: company name, existing market claims, product/service description, geography and segments, pricing model, customer counts, revenue, growth rates. If no materials provided, ask for the basics.
 
-If the deck or materials include explicit TAM/SAM/SOM claims, record them in `inputs.json` under `existing_claims` (e.g., `{"tam": 50000000000, "sam": 8000000000}`). These are used by compose_report.py and visualize.py to compare deck claims against calculated figures and track provenance.
+If the deck includes explicit TAM/SAM/SOM claims, record them in `inputs.json` under `existing_claims`. These are used by compose_report.py and visualize.py to compare deck claims against calculated figures.
 
 ### Step 2: Read Methodology -> `methodology.json`
 
@@ -105,13 +94,11 @@ Read `references/tam-sam-som-methodology.md`. Choose the approach: top-down (ind
 
 ### Step 3: External Validation -> `validation.json`
 
-Use WebSearch to find industry reports, government statistics, competitor data, and analyst figures. Triangulate key numbers with 2+ independent sources. Track every source with quality tier and segment match. Every assumption must appear in the `assumptions` array with a `name` matching the parameter used in the scripts and a `category` of `sourced`, `derived`, or `agent_estimate`. The category drives provenance classification in reports (see `artifact-schemas.md`).
+Use WebSearch to find industry reports, government statistics, competitor data, and analyst figures. Triangulate key numbers with 2+ independent sources. Track every source with quality tier and segment match. Every assumption must appear in the `assumptions` array with a `name` matching script parameter names and a `category` of `sourced`, `derived`, or `agent_estimate`.
 
 **Source quality hierarchy:** Government/regulatory > Established analysts > Industry associations > Academic > Business press > Company blogs (product facts only).
 
 ### Step 4: Calculate TAM/SAM/SOM -> `sizing.json`
-
-Run `market_sizing.py` with chosen approach. Pipe the input JSON via stdin (the script does not accept file path arguments):
 
 ```bash
 cat <<'SIZING_EOF' | python3 "$SCRIPTS/market_sizing.py" --pretty -o "$ANALYSIS_DIR/sizing.json"
@@ -121,33 +108,29 @@ SIZING_EOF
 
 For "both" mode, check the comparison section — a >30% TAM discrepancy means investigating which assumptions are flawed. TAM must match the product's actual target universe (not inflated industry totals).
 
-**Multi-vertical / platform companies:** If the company sells into multiple distinct industries or has applications at different maturity stages (e.g., commercial pilots in electrolyzers, R&D in batteries, future in quantum), the calculated TAM must reflect the full near-term opportunity — not just the beachhead:
+**Multi-vertical / platform companies:** If `inputs.json` lists applications in 2+ distinct industries:
 
-1. **Identify all verticals** where the product has a credible value proposition. Classify each as: `commercial` (revenue or active pilots), `r_and_d` (demonstrated technical feasibility with a credible path to commercial pilots within 2-3 years), or `future` (conceptual, early research, or no clear commercialization timeline).
-2. **Include `commercial` and `r_and_d` verticals in the calculated TAM.** If the top-down industry total only covers one vertical, use the bottom-up approach as the primary TAM and note the single-vertical industry figure for context only. When verticals have different economics, compute a weighted blended ARPU: `(customers_A x arpu_A + customers_B x arpu_B + ...) / total_customers` and document the per-vertical breakdown in `methodology.json` `rationale`. `Future` verticals should not be included in the calculated TAM — mention them in the coaching commentary as upside optionality.
-3. **Narrow SAM and SOM appropriately:** SAM = the segments where the company has commercial traction or active R&D. SOM = beachhead only (where pilots or revenue exist today).
-4. **Document your TAM scope decision** in `methodology.json` `rationale`. State which verticals are included in the TAM and why. If you intentionally scope TAM to a single vertical, explain why the other verticals were excluded.
+1. **Identify verticals** — classify as `commercial` (revenue/pilots), `r_and_d` (demonstrated feasibility, 2-3yr commercialization path), or `future` (conceptual/early).
+2. **Include `commercial` and `r_and_d` in TAM.** If top-down only covers one vertical, use bottom-up as primary. When verticals have different ARPUs, compute weighted blended ARPU. `Future` verticals go in coaching commentary as upside, not in the calculated TAM.
+3. **Narrow SAM and SOM** — SAM = traction + active R&D segments. SOM = beachhead only.
+4. **Document scope** in `methodology.json` `rationale`.
 
-**Decision rule:** If `inputs.json` mentions applications, customers, or use cases in 2+ distinct industries, treat it as multi-vertical and default to full-scope TAM (commercial + R&D verticals). The user can explicitly request beachhead-only scoping — if they do, document that decision in `methodology.json` `rationale`. Never narrow TAM on your own initiative.
-
-**Single-market companies:** If the product targets one industry/segment, proceed with the standard single-set calculation as shown above.
+Default to full-scope TAM. Only narrow to beachhead if the user explicitly requests it.
 
 ### Step 4.5: Reality Check
 
-Before proceeding to sensitivity analysis, pause and answer these questions. If any answer is "no" or raises a flag, go back and fix the sizing before continuing.
+Before proceeding, answer:
 
-1. **Laugh test:** If you told an experienced VC this TAM number over coffee, would they nod or raise an eyebrow? For a seed-stage company with <5 pilots, a TAM over $1B needs strong justification.
-2. **Scope match:** Does the TAM reflect ALL the `commercial` and `r_and_d` verticals listed in `inputs.json`? If `inputs.json` mentions multiple industries but `sizing.json` only sizes one, either re-do the sizing as multi-vertical (see Step 4) or explicitly document in `methodology.json` rationale why single-vertical is the right framing.
-3. **Customer count sanity:** Is the customer count grounded in identifiable entities? You should be able to name a representative sample — e.g., if you claim 60 OEMs, can you name at least a third of them? If the total market has fewer than 20 buyers, can you name most of them? A count you can't substantiate with real company names is likely inflated.
-4. **Convergence integrity:** If using both approaches, were the top-down and bottom-up parameters set independently? If you adjusted any parameter after seeing the other approach's result, that is convergence gaming — revert to your original estimate and accept the delta. A 40% discrepancy you can explain is more honest than a 5% delta you engineered.
+1. **Laugh test:** Would an experienced VC nod or raise an eyebrow? Seed + <5 pilots + >$1B TAM = explain yourself.
+2. **Scope match:** Does TAM cover all `commercial` and `r_and_d` verticals from `inputs.json`?
+3. **Customer count sanity:** Can you name a representative sample of the customers in your count?
+4. **Convergence integrity:** Were top-down and bottom-up parameters set independently? If you adjusted one after seeing the other, revert and accept the delta.
 
-This step produces no artifact. It is a gate — if it reveals problems, fix them in Steps 1-4 before proceeding.
+This step produces no artifact. If it reveals problems, fix them before proceeding.
 
 ### Step 5: Sensitivity Analysis -> `sensitivity.json`
 
-Tag each parameter with confidence from validation: `sourced` (range stands), `derived` (min +/-30%), `agent_estimate` (min +/-50%). Include **every `agent_estimate` parameter** in the sensitivity ranges — compose_report.py flags any missing ones as `UNSOURCED_ASSUMPTIONS`. Add additional `sourced`/`derived` params as needed (3–5 total is typical).
-
-Pipe the input JSON via stdin (the script does not accept `-i` or file path arguments):
+Tag each parameter with confidence from validation: `sourced` (range stands), `derived` (min +/-30%), `agent_estimate` (min +/-50%). Include **every `agent_estimate` parameter** — compose_report.py flags missing ones as `UNSOURCED_ASSUMPTIONS`.
 
 ```bash
 cat <<'SENS_EOF' | python3 "$SCRIPTS/sensitivity.py" --pretty -o "$ANALYSIS_DIR/sensitivity.json"
@@ -157,9 +140,7 @@ SENS_EOF
 
 ### Step 6: Self-Check -> `checklist.json`
 
-**REQUIRED — read `$REFS/artifact-schemas.md` "Canonical 22 checklist IDs" section now.** It lists all 22 item IDs by category. Do not build the checklist JSON without reading this section.
-
-Evaluate all 22 items from the pitfalls checklist. Pipe the input JSON via stdin:
+Evaluate all 22 items from the pitfalls checklist. **Read `$REFS/artifact-schemas.md` "Canonical 22 checklist IDs" section first.**
 
 ```bash
 cat <<'CHECK_EOF' | python3 "$SCRIPTS/checklist.py" --pretty -o "$ANALYSIS_DIR/checklist.json"
@@ -172,82 +153,26 @@ CHECK_EOF
 
 ### Step 7: Compose and Validate Report
 
-Run `compose_report.py`. Fix high-severity warnings and re-run. Use `--strict` to enforce a clean report (writes output first, then exits 1 on high/medium warnings).
+```bash
+python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --pretty -o "$ANALYSIS_DIR/report.json"
+```
 
-**Primary deliverable:** Read `report_markdown` from the output JSON and display it to the user in full. This is the main output of the analysis — the user must see the complete written report before anything else. Then add coaching commentary: what to feel confident about, the highest-leverage fix, whether the market story holds together, and which 1-2 sensitivity parameters the founder should prioritize sourcing — explain what happens to the market story if those assumptions move against them.
+Fix high-severity warnings and re-run. Use `--strict` to enforce a clean report.
+
+**Primary deliverable:** Read `report_markdown` from the output JSON and display it to the user in full. Then add coaching commentary: what to feel confident about, the highest-leverage fix, whether the market story holds together, and which 1-2 sensitivity parameters to prioritize sourcing.
 
 ### Step 8 (Optional): Generate Visual Report
-
-Supplement (not replace) the written report with a self-contained HTML report with charts:
 
 ```bash
 python3 "$SCRIPTS/visualize.py" --dir "$ANALYSIS_DIR" -o "$ANALYSIS_DIR/report.html"
 ```
 
-Opens in any browser. Contains SVG charts for TAM/SAM/SOM funnel, sensitivity tornado, cross-validation comparison, assumption confidence, and checklist status. No external dependencies or JavaScript.
-
 ### Step 9: Deliver Artifacts
 
-Copy the final deliverables to the workspace root for easy access:
-
-- Extract `report_markdown` from `report.json` and save as `{Company}_Market_Sizing.md`
-- `{Company}_Market_Sizing.html` — visual HTML report (if generated)
-- `{Company}_Market_Sizing.json` — full structured output with validation metadata (optional, for programmatic use)
+Copy final deliverables to workspace root: `{Company}_Market_Sizing.md`, `.html` (if generated), `.json` (optional).
 
 ## Scoring
 
 - Each of 22 items: pass / fail / not_applicable
 - `score_pct` = pass / (total - not_applicable) x 100
 - compose_report.py validates cross-artifact consistency (assumption coverage, source quality, sensitivity ranges)
-
-## Troubleshooting
-
-### Script not found
-If the path resolution block cannot locate scripts:
-1. Verify `${CLAUDE_PLUGIN_ROOT}` is set (SessionStart hook should set it)
-2. Fall back to Glob: `**/founder-skills/skills/market-sizing/scripts/<script>.py`
-3. If running in Cowork, check that the plugin cache has been populated
-
-### Invalid JSON from script
-If a script exits non-zero or outputs invalid JSON:
-1. Check stderr for the specific error message
-2. Ensure the JSON piped via heredoc is valid (use `python3 -m json.tool` to verify)
-3. Verify required fields are present in the input payload
-
-### Empty or missing artifacts
-If compose_report.py reports missing artifacts:
-1. Verify the artifact directory exists: `ls "$ANALYSIS_DIR/"`
-2. Check that earlier pipeline steps completed without error
-3. Re-run the failed step individually to isolate the issue
-
-## Performance Notes
-- Take your time to do this thoroughly
-- Quality is more important than speed
-- Do not skip validation steps or checklist items
-
-## Progress Updates
-
-Keep the founder informed with brief, plain-language updates at each step. Never mention file names, scripts, or JSON — describe what you're doing in terms they care about.
-
-| Step | Say to the founder |
-|------|--------------------|
-| 1 | "Gathering your market inputs and assumptions..." |
-| 2 | "Reading up on sizing methodology for your market..." |
-| 3 | "Validating your numbers against external sources..." |
-| 4 | "Calculating your TAM, SAM, and SOM..." |
-| 4.5 | "Sanity-checking the results..." |
-| 5 | "Stress-testing your assumptions with sensitivity analysis..." |
-| 6 | "Running the self-check against 22 common sizing pitfalls..." |
-| 7 | "Assembling the full report and cross-checking for consistency..." |
-| 8 | "Generating a visual summary with charts..." |
-
-After each analytical step (4–6) completes, share a one-sentence finding before moving on (e.g., "Your bottom-up SOM looks well-grounded — the top-down TAM may need a tighter scope."). Don't wait until the end to surface findings.
-
-## Additional Resources
-
-### Reference Files
-
-For detailed methodology and criteria definitions, consult:
-- **`references/tam-sam-som-methodology.md`** — Complete TAM/SAM/SOM methodology
-- **`references/pitfalls-checklist.md`** — All 22 pitfall items
-- **`references/artifact-schemas.md`** — JSON schemas for artifacts
