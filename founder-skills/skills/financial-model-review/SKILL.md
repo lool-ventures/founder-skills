@@ -1,7 +1,7 @@
 ---
 name: financial-model-review
 disable-model-invocation: true
-description: "Reviews startup financial models for investor readiness — validating unit economics, stress-testing runway scenarios, and benchmarking metrics against stage-appropriate targets. Use when user asks to \"review my financial model\", \"check my projections\", \"validate my unit economics\", \"stress-test my runway\", \"analyze my burn rate\", \"review my spreadsheet model\", or provides an Excel spreadsheet, CSV, or financial projections for evaluation. Supports Excel (.xlsx), CSV, Google Sheets exports, documents, and conversational input. Do NOT use for market sizing (use market-sizing), pitch deck feedback (use deck-review), or general spreadsheet editing, accounting, or tax preparation."
+description: "Reviews startup financial models for investor readiness — validating unit economics, stress-testing runway scenarios, and benchmarking metrics against stage-appropriate targets. Use when user asks to 'review my financial model', 'check my projections', 'validate my unit economics', 'stress-test my runway', 'analyze my burn rate', 'review my spreadsheet model', or provides an Excel spreadsheet, CSV, or financial projections for evaluation. Supports Excel (.xlsx), CSV, Google Sheets exports, documents, and conversational input. Do NOT use for market sizing (use market-sizing), pitch deck feedback (use deck-review), or general spreadsheet editing, accounting, or tax preparation."
 compatibility: Requires Python 3.10+ and uv for script execution. openpyxl required for Excel parsing.
 metadata:
   author: lool-ventures
