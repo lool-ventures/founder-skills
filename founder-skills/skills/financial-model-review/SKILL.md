@@ -21,7 +21,7 @@ Help startup founders understand how investors will evaluate their financial mod
 
 ## Input Formats
 
-Accept any format: Excel (.xlsx), CSV, Google Sheets exports, financial documents, or conversational input. For Excel files, use `extract_model.py` to parse. For other formats, extract data manually into the `inputs.json` schema.
+Accept any format: Excel (.xlsx), CSV, Google Sheets exports, financial documents, or conversational input. For Excel files, use `extract_model.py` to parse. For other formats, extract data manually into the `inputs.json` schema. If multiple copies of the same file exist (e.g., `Financials.xlsx` and `Financials (1).xlsx`), use the most recently modified version and note the duplication to the founder.
 
 ## Available Scripts
 
@@ -111,13 +111,15 @@ Three cases based on exit code:
 
 **Exit 0 (found, single context):** Use the company slug and pre-filled fields.
 
-**Exit 1 (not found):** Ask the founder for company name, stage, sector, geography. Then create:
+**Exit 1 (not found):** Ask the founder for company name, stage, sector, geography. Valid `--stage` values: `pre-seed`, `seed`, `series-a`, `series-b`, `later` (hyphenated, not underscored). Then create:
 
 ```bash
 python3 "$SHARED_SCRIPTS/founder_context.py" init \
   --company-name "Acme Corp" --stage seed --sector "B2B SaaS" \
   --geography "US" --artifacts-root "$ARTIFACTS_ROOT"
 ```
+
+If the script prints a `sector_type` warning but exits 0, that's non-fatal — proceed without retrying.
 
 **Exit 2 (multiple context files):** Present the list to the founder, ask which company, then re-read with `--slug`.
 
@@ -131,7 +133,7 @@ The sub-agent:
 3. Reads `$REFS/data-sufficiency.md` to assess data sufficiency
 4. Constructs `inputs.json` from extracted data, writing it to `$REVIEW_DIR/inputs.json`
 
-Instruct the sub-agent to return ONLY: (1) file paths written, (2) company name/stage/sector, (3) `model_format`, (4) data sufficiency verdict (sufficient/insufficient + count of missing critical fields), and (5) any `company.traits` detected — do not echo the full JSON back.
+Instruct the sub-agent: **Do not run any scripts other than `extract_model.py`. Do not create any files other than `model_data.json` and `inputs.json`.** Return ONLY: (1) file paths written, (2) company name/stage/sector, (3) `model_format`, (4) data sufficiency verdict (sufficient/insufficient + count of missing critical fields), and (5) any `company.traits` detected — do not echo the full JSON back.
 
 After the sub-agent returns, use the summary to decide the qualitative vs. quantitative path and share a brief update with the founder.
 
@@ -163,7 +165,7 @@ INPUTS_EOF
 
 ### Steps 4-6: Parallel Analysis (Checklist + Metrics & Runway)
 
-Spawn 2 `general-purpose` Task sub-agents **in a single message** (parallel, no `isolation: "worktree"`). Each receives the expanded `SCRIPTS`, `REFS`, `SHARED_SCRIPTS`, `SHARED_REFS`, and `REVIEW_DIR` paths.
+**IMPORTANT:** Spawn 2 `general-purpose` Task sub-agents **in a single message** — both Agent tool calls must appear in the same response. Do not run one and wait for it before spawning the other. No `isolation: "worktree"`. Each receives the expanded `SCRIPTS`, `REFS`, `SHARED_SCRIPTS`, `SHARED_REFS`, and `REVIEW_DIR` paths.
 
 **Sub-agent A — Checklist Scorer:**
 
@@ -201,7 +203,9 @@ Cross-skill: Use `find_artifact.py` to locate prior market-sizing and deck-revie
 
 If the main agent indicates the **qualitative path** (data insufficient for quantitative analysis), Sub-agent B deposits stubs instead of running unit_economics/runway scripts: `{"skipped": true, "reason": "qualitative path — insufficient quantitative data"}`
 
-Instruct Sub-agent B to return ONLY: (1) file paths written, (2) key metrics (burn rate, runway months, LTV/CAC), and (3) cross-skill findings — do not echo the full JSON back.
+Instruct Sub-agent B: **Do not run any scripts other than `unit_economics.py`, `runway.py`, and `find_artifact.py`. Do not create any files other than `unit_economics.json` and `runway.json`.** After running `unit_economics.py`, sanity-check the burn multiple — if it exceeds 20x for a company with meaningful ARR (>$500K), re-examine the `growth_rate_monthly` and `monthly_net_burn` inputs for unit inconsistency (e.g., monthly vs. annual mixing). Return ONLY: (1) file paths written, (2) key metrics (burn rate, runway months, LTV/CAC, burn multiple), and (3) cross-skill findings — do not echo the full JSON back.
+
+If `runway.py` produces minimal output (< 500 bytes) due to missing `cash_balance_current`, note this gap explicitly — the coaching commentary should address it.
 
 **Graceful degradation:** If Task tool is unavailable, run Steps 4-6 sequentially in the main agent.
 
@@ -213,9 +217,9 @@ After both sub-agents return, share a brief coaching update with the founder bef
 python3 "$SCRIPTS/compose_report.py" --dir "$REVIEW_DIR" --pretty -o "$REVIEW_DIR/report.json" --strict
 ```
 
-Check `validation.warnings`: fix high-severity, include medium in presentation, note low/info. This is a refinement loop — fix, re-deposit, re-compose until high-severity warnings are resolved.
+Check `validation.warnings`: fix high-severity, include medium in presentation, note low/info. This is a refinement loop — fix, re-deposit, re-compose until high-severity warnings are resolved. If a warning flags a computed value that looks implausible (e.g., burn multiple > 20x), investigate the source artifact's inputs before re-composing — the fix may be in `inputs.json` or `unit_economics.json`, not in the compose step.
 
-**Primary deliverable:** Read `report_markdown` from the output JSON, append `\n\n---\n[View visual report](report.html)\n` to it, write the result to `$REVIEW_DIR/report.md`, and display it to the user in full. Then add coaching commentary.
+**Primary deliverable:** Read `report_markdown` from the output JSON, write it to `$REVIEW_DIR/report.md`, and display it to the user in full. Then add coaching commentary covering: (1) what metrics look strong and why investors will notice, (2) the single highest-leverage fix to improve investor readiness, (3) any data gaps that weaken the story (e.g., missing runway, incomplete unit economics), and (4) what to prioritize before the next fundraise conversation.
 
 ### Step 8: Visualize (Optional)
 
