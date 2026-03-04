@@ -358,7 +358,8 @@ def test_output_flag() -> None:
     try:
         rc, stdout, stderr = _run_visualize(d, extra_args=["-o", tmp])
         assert rc == 0, f"exit {rc}, stderr={stderr}"
-        assert stdout == "", f"stdout should be empty, got: {stdout!r}"
+        receipt = json.loads(stdout)
+        assert receipt["ok"] is True
         with open(tmp, encoding="utf-8") as fh:
             content = fh.read()
         assert "<!DOCTYPE html>" in content

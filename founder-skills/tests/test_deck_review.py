@@ -265,7 +265,8 @@ def test_checklist_output_flag() -> None:
     try:
         rc, stdout, stderr = run_script_raw("checklist.py", ["--pretty", "-o", tmp], stdin_data=payload)
         assert rc == 0, f"rc={rc}, stderr={stderr}"
-        assert stdout == "", f"stdout={stdout!r}"
+        receipt = json.loads(stdout)
+        assert receipt["ok"] is True
         with open(tmp) as fh:
             data = json.load(fh)
         assert "summary" in data

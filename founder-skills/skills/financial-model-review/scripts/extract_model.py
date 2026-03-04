@@ -24,7 +24,7 @@ import sys
 from typing import Any
 
 
-def _write_output(data: str, output_path: str | None) -> None:
+def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
     if output_path:
         abs_path = os.path.abspath(output_path)
         parent = os.path.dirname(abs_path)
@@ -34,6 +34,10 @@ def _write_output(data: str, output_path: str | None) -> None:
         os.makedirs(parent, exist_ok=True)
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(data)
+        receipt: dict[str, Any] = {"ok": True, "path": abs_path, "bytes": len(data.encode("utf-8"))}
+        if summary:
+            receipt.update(summary)
+        sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     else:
         sys.stdout.write(data)
 
@@ -197,7 +201,11 @@ def main() -> None:
 
     indent = 2 if args.pretty else None
     out = json.dumps(data, indent=indent) + "\n"
-    _write_output(out, args.output)
+    _write_output(
+        out,
+        args.output,
+        summary={"sheets": len(data.get("sheets", []))},
+    )
 
 
 if __name__ == "__main__":

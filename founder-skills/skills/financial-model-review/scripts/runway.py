@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import Any
 
 
-def _write_output(data: str, output_path: str | None) -> None:
+def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
     """Write JSON string to file or stdout."""
     if output_path:
         abs_path = os.path.abspath(output_path)
@@ -33,6 +33,10 @@ def _write_output(data: str, output_path: str | None) -> None:
         os.makedirs(parent, exist_ok=True)
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(data)
+        receipt: dict[str, Any] = {"ok": True, "path": abs_path, "bytes": len(data.encode("utf-8"))}
+        if summary:
+            receipt.update(summary)
+        sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     else:
         sys.stdout.write(data)
 
@@ -659,7 +663,16 @@ def main() -> None:
 
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"
-    _write_output(out, args.output)
+    scenarios = result.get("scenarios", [])
+    base_s = next((s for s in scenarios if s["name"] == "base"), None)
+    _write_output(
+        out,
+        args.output,
+        summary={
+            "scenarios": len(scenarios),
+            "base_runway_months": base_s["runway_months"] if base_s else None,
+        },
+    )
 
 
 if __name__ == "__main__":

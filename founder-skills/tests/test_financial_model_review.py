@@ -113,7 +113,7 @@ def test_extract_model_output_flag() -> None:
     rc, data, stderr = run_script("extract_model.py", ["--file", csv_path, "-o", out_path])
     os.unlink(csv_path)
     assert rc == 0
-    assert data is None  # stdout should be empty
+    assert data is not None and data["ok"] is True
     with open(out_path) as fh:
         written = json.load(fh)
     os.unlink(out_path)
@@ -761,7 +761,7 @@ def test_unit_economics_output_flag() -> None:
     payload = json.dumps(_VALID_INPUTS)
     rc, data, stderr = run_script("unit_economics.py", ["-o", out_path], stdin_data=payload)
     assert rc == 0
-    assert data is None  # stdout empty
+    assert data is not None and data["ok"] is True
     with open(out_path) as f:
         written = json.load(f)
     os.unlink(out_path)
