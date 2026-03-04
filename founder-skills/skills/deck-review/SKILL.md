@@ -117,7 +117,7 @@ python3 "$SCRIPTS/compose_report.py" --dir "$REVIEW_DIR" --pretty -o "$REVIEW_DI
 
 Fix high-severity warnings and re-run. Use `--strict` to enforce a clean report.
 
-**Primary deliverable:** Read `report_markdown` from the output JSON and display it to the user in full. Then add coaching commentary.
+**Primary deliverable:** Read `report_markdown` from the output JSON, append `\n\n---\n[View visual report](report.html)\n` to it, write the result to `$REVIEW_DIR/report.md`, and display it to the user in full. Then add coaching commentary.
 
 ### Step 6 (Optional): Generate Visual Report
 

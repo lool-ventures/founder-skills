@@ -33,7 +33,7 @@ import json
 import os
 import re
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 # --- Constants ---
@@ -176,7 +176,7 @@ def _context_path(artifacts_root: str, slug: str) -> str:
 
 def _now_iso() -> str:
     """Return current UTC timestamp in ISO 8601 format."""
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _find_context_files(artifacts_root: str) -> list[str]:
