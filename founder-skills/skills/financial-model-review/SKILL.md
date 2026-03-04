@@ -54,11 +54,11 @@ Every review deposits structured JSON artifacts into a working directory. The fi
 | Step | Artifact | Producer |
 |------|----------|----------|
 | 1 | founder context | `founder_context.py` read/init |
-| 2 | `model_data.json` | `extract_model.py` (Excel/CSV only) |
-| 3 | `inputs.json` | Agent (heredoc) |
-| 4 | `checklist.json` | `checklist.py` |
-| 5 | `unit_economics.json` | `unit_economics.py` |
-| 6 | `runway.json` | `runway.py` |
+| 2 | `model_data.json` | Sub-agent (Task) + `extract_model.py` (Excel/CSV) |
+| 3 | `inputs.json` | Sub-agent (Task, single-pass or two-pass) or agent (heredoc) |
+| 4 | `checklist.json` | Sub-agent (Task) + `checklist.py` |
+| 5 | `unit_economics.json` | Sub-agent (Task) + `unit_economics.py` |
+| 6 | `runway.json` | Sub-agent (Task) + `runway.py` |
 | 7 | Report | `compose_report.py` reads all |
 | 8 | HTML | `visualize.py` |
 
@@ -66,6 +66,7 @@ Every review deposits structured JSON artifacts into a working directory. The fi
 - Deposit each artifact before proceeding to the next step
 - For agent-written artifacts (Step 3), consult `references/schema-inputs.md` for the JSON schema
 - If a step is not applicable, deposit a stub: `{"skipped": true, "reason": "..."}`
+- **Do NOT use `isolation: "worktree"`** for sub-agents — files written in a worktree won't appear in the main `$REVIEW_DIR`
 
 Keep the founder informed with brief, plain-language updates at each step. Never mention file names, scripts, or JSON. After each analytical step (4–6), share a one-sentence finding before moving on.
 
@@ -120,21 +121,31 @@ python3 "$SHARED_SCRIPTS/founder_context.py" init \
 
 **Exit 2 (multiple context files):** Present the list to the founder, ask which company, then re-read with `--slug`.
 
-### Step 2: Model Intake
+### Steps 2-3: Extract Model Data and Build `inputs.json`
 
-**For Excel (.xlsx) or CSV files:**
+**When Excel (.xlsx) or CSV files are provided,** spawn a `general-purpose` Task sub-agent to handle extraction and input construction. The sub-agent receives: file path, `SCRIPTS`, `REFS`, `SHARED_REFS`, and `REVIEW_DIR` paths. **Do NOT use `isolation: "worktree"`** — files written in a worktree won't appear in the main `$REVIEW_DIR`.
 
-```bash
-python3 "$SCRIPTS/extract_model.py" --file "$MODEL_FILE" --pretty -o "$REVIEW_DIR/model_data.json"
-```
+The sub-agent:
+1. Runs `extract_model.py` on the file → `model_data.json`
+2. Reads `$REFS/schema-inputs.md` for the JSON schema
+3. Reads `$REFS/data-sufficiency.md` to assess data sufficiency
+4. Constructs `inputs.json` from extracted data, writing it to `$REVIEW_DIR/inputs.json`
 
-**For documents, Google Sheets exports, or conversational input:** Extract data manually into the `inputs.json` schema (Step 3). If no materials provided, ask the founder for: revenue figures, cost structure, headcount, funding history, growth rates, key assumptions.
+Instruct the sub-agent to return ONLY: (1) file paths written, (2) company name/stage/sector, (3) `model_format`, (4) data sufficiency verdict (sufficient/insufficient + count of missing critical fields), and (5) any `company.traits` detected — do not echo the full JSON back.
 
-**Data sufficiency:** After extracting data, consult `references/data-sufficiency.md` to determine if enough quantitative data is available. If 3+ critical fields are missing, follow the data sufficiency gate procedure.
+After the sub-agent returns, use the summary to decide the qualitative vs. quantitative path and share a brief update with the founder.
 
-### Step 3: Build `inputs.json`
+**When documents (PDFs, data room dumps, Google Sheets exports) are provided,** use a two-pass sub-agent flow:
 
-Construct from extracted data. Consult `references/schema-inputs.md` for the full schema.
+1. **Probe pass:** Spawn a `general-purpose` Task sub-agent with the file path(s), `SCRIPTS`, `REFS`, `SHARED_REFS`, and `REVIEW_DIR` paths. The sub-agent reads the document(s), reads `$REFS/schema-inputs.md` for the schema, extracts what it can, and returns ONLY: (1) partial data extracted (company name, stage, sector, any metrics found), (2) `model_format`, (3) a numbered list of specific questions for missing critical fields (e.g., "1. What is your monthly burn rate? 2. How many paying customers?"), and (4) any `company.traits` detected. Save the sub-agent's ID for resumption.
+
+2. **Ask the founder:** Present the sub-agent's questions in plain language. Collect answers.
+
+3. **Build pass:** Resume the same sub-agent (using `resume` with the saved agent ID — preserves full document context). Pass the founder's answers. The sub-agent reads `$REFS/data-sufficiency.md`, constructs `inputs.json`, and writes it to `$REVIEW_DIR/inputs.json`. Returns ONLY: (1) file paths written, (2) data sufficiency verdict (sufficient/insufficient + count of missing critical fields), and (3) final `model_format`.
+
+After the sub-agent returns, use the summary to decide the qualitative vs. quantitative path and share a brief update with the founder.
+
+**When conversational input is provided (no files):** Handle directly in the main agent — the data is already in the conversation. Ask the founder for any missing fields: revenue figures, cost structure, headcount, funding history, growth rates, key assumptions. Consult `references/schema-inputs.md` for the full schema.
 
 ```bash
 cat <<'INPUTS_EOF' > "$REVIEW_DIR/inputs.json"
@@ -142,13 +153,21 @@ cat <<'INPUTS_EOF' > "$REVIEW_DIR/inputs.json"
 INPUTS_EOF
 ```
 
+**Data sufficiency:** After extracting data (whether via sub-agent or directly), consult `references/data-sufficiency.md` to determine if enough quantitative data is available. If 3+ critical fields are missing, follow the data sufficiency gate procedure.
+
 **Setting `model_format`:** `spreadsheet` (Excel/CSV/Google Sheets), `deck` (pitch deck), `conversational` (gathered through conversation), `partial` (incomplete spreadsheet). When `model_format` is `deck` or `conversational`, structural items auto-gate to `not_applicable`.
 
 **AI-powered products:** If the product uses AI/ML inference as a core feature, include `"ai-powered"` in `company.traits` regardless of `revenue_model_type`.
 
-### Step 4: Run Checklist -> `checklist.json`
+**Graceful degradation:** If Task tool is unavailable, extract directly in the main agent.
 
-**REQUIRED — read `$REFS/checklist-criteria.md` now.** It defines all 46 item IDs by category.
+### Steps 4-6: Parallel Analysis (Checklist + Metrics & Runway)
+
+Spawn 2 `general-purpose` Task sub-agents **in a single message** (parallel, no `isolation: "worktree"`). Each receives the expanded `SCRIPTS`, `REFS`, `SHARED_SCRIPTS`, `SHARED_REFS`, and `REVIEW_DIR` paths.
+
+**Sub-agent A — Checklist Scorer:**
+
+Reads `$REFS/checklist-criteria.md`, reads `$REVIEW_DIR/inputs.json`, assesses all 46 items with evidence, and runs `checklist.py`.
 
 | Format | Assess | Auto-gated by script |
 |--------|--------|---------------------|
@@ -167,21 +186,26 @@ CHECK_EOF
 
 **Evidence required:** Always provide `evidence` for `fail` or `warn` items.
 
-### Step 5: Unit Economics -> `unit_economics.json`
+Instruct Sub-agent A to return ONLY: (1) file path written, (2) `score_pct`, (3) overall rating, and (4) top 3 fail/warn items — do not echo the full assessment back.
+
+**Sub-agent B — Metrics & Runway:**
+
+Runs `unit_economics.py`, `runway.py`, and cross-skill lookups.
 
 ```bash
 cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/unit_economics.py" --pretty -o "$REVIEW_DIR/unit_economics.json"
-```
-
-### Step 5b: Cross-Skill Validation
-
-Use `find_artifact.py` to locate prior market-sizing and deck-review artifacts. If market-sizing found, compare projected Year 3 ARR against SOM. If deck-review found, cross-reference financial claims. Record findings for coaching commentary. If neither found, note and proceed.
-
-### Step 6: Runway Stress-Test -> `runway.json`
-
-```bash
 cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/runway.py" --pretty -o "$REVIEW_DIR/runway.json"
 ```
+
+Cross-skill: Use `find_artifact.py` to locate prior market-sizing and deck-review artifacts. If market-sizing found, compare projected Year 3 ARR against SOM. If deck-review found, cross-reference financial claims. Record findings for coaching commentary. If neither found, note and proceed.
+
+If the main agent indicates the **qualitative path** (data insufficient for quantitative analysis), Sub-agent B deposits stubs instead of running unit_economics/runway scripts: `{"skipped": true, "reason": "qualitative path — insufficient quantitative data"}`
+
+Instruct Sub-agent B to return ONLY: (1) file paths written, (2) key metrics (burn rate, runway months, LTV/CAC), and (3) cross-skill findings — do not echo the full JSON back.
+
+**Graceful degradation:** If Task tool is unavailable, run Steps 4-6 sequentially in the main agent.
+
+After both sub-agents return, share a brief coaching update with the founder before proceeding to Step 7.
 
 ### Step 7: Compose and Validate Report
 
