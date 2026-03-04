@@ -74,12 +74,16 @@ SCRIPTS="$CLAUDE_PLUGIN_ROOT/skills/ic-sim/scripts"
 REFS="$CLAUDE_PLUGIN_ROOT/skills/ic-sim/references"
 if ls "$(pwd)"/mnt/*/ >/dev/null 2>&1; then
   ARTIFACTS_ROOT="$(ls -d "$(pwd)"/mnt/*/ | head -1)artifacts"
+elif ls "$(pwd)"/sessions/*/mnt/*/ >/dev/null 2>&1; then
+  ARTIFACTS_ROOT="$(ls -d "$(pwd)"/sessions/*/mnt/*/ | head -1)artifacts"
 else
   ARTIFACTS_ROOT="$(pwd)/artifacts"
 fi
 ```
 
 If `CLAUDE_PLUGIN_ROOT` is empty, fall back: `Glob` for `**/founder-skills/skills/ic-sim/scripts/score_dimensions.py`, strip to get `SCRIPTS`, derive `REFS`.
+
+**If `ARTIFACTS_ROOT` resolves to `$(pwd)/artifacts` but no `artifacts/` directory exists at `$(pwd)`:** The workspace may not be mounted yet. Use `Glob` with pattern `**/artifacts/founder_context.json` to locate existing artifacts, and derive `ARTIFACTS_ROOT` from the result. If nothing is found, `mkdir -p "$ARTIFACTS_ROOT"` and proceed.
 
 ```bash
 SIM_DIR="$ARTIFACTS_ROOT/ic-sim-{company-slug}"

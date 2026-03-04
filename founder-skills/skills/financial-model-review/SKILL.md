@@ -83,12 +83,16 @@ SHARED_SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
 SHARED_REFS="${CLAUDE_PLUGIN_ROOT}/references"
 if ls "$(pwd)"/mnt/*/ >/dev/null 2>&1; then
   ARTIFACTS_ROOT="$(ls -d "$(pwd)"/mnt/*/ | head -1)artifacts"
+elif ls "$(pwd)"/sessions/*/mnt/*/ >/dev/null 2>&1; then
+  ARTIFACTS_ROOT="$(ls -d "$(pwd)"/sessions/*/mnt/*/ | head -1)artifacts"
 else
   ARTIFACTS_ROOT="./artifacts"
 fi
 ```
 
 If `CLAUDE_PLUGIN_ROOT` is empty, fall back: run `Glob` with pattern `**/founder-skills/skills/financial-model-review/scripts/checklist.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`.
+
+**If `ARTIFACTS_ROOT` resolves to `./artifacts` but no `artifacts/` directory exists at `$(pwd)`:** The workspace may not be mounted yet. Use `Glob` with pattern `**/artifacts/founder_context.json` to locate existing artifacts, and derive `ARTIFACTS_ROOT` from the result. If nothing is found, `mkdir -p ./artifacts` and proceed.
 
 After Step 1 (when the slug is known):
 
