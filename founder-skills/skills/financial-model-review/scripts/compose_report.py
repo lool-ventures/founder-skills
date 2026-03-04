@@ -32,7 +32,8 @@ WARNING_SEVERITY: dict[str, str] = {
     # High severity -- agent must fix before presenting report
     "CORRUPT_ARTIFACT": "high",
     "MISSING_ARTIFACT": "high",
-    "CHECKLIST_FAILURES": "high",
+    # Checklist failures are review findings, not data errors — present, don't block
+    "CHECKLIST_FAILURES": "medium",
     # Low severity -- informational
     "MISSING_OPTIONAL_ARTIFACT": "low",
     # Medium severity -- include in Warnings section of report
@@ -511,6 +512,19 @@ def _section_runway(runway: dict[str, Any] | None) -> str:
             lines.append(f"**Monthly Revenue:** {_fmt_usd(rev)}  ")
         lines.append("")
 
+    # Burn sensitivity table (partial analysis when cash balance unknown)
+    burn_sensitivity = _as_list(runway.get("burn_sensitivity"))
+    if burn_sensitivity:
+        lines.append("### Burn-Based Sensitivity (Cash Balance Unknown)\n")
+        lines.append("| Starting Cash | Estimated Runway |")
+        lines.append("|---------------|-----------------|")
+        for row in burn_sensitivity:
+            cash_val = row.get("starting_cash", 0)
+            rw = row.get("runway_months")
+            rw_str = f"{rw:.1f} months" if rw is not None else "Infinite"
+            lines.append(f"| {_fmt_usd(cash_val)} | {rw_str} |")
+        lines.append("")
+
     # Scenarios table
     scenarios = _as_list(runway.get("scenarios"))
     if scenarios:
@@ -722,10 +736,9 @@ def main() -> None:
         sys.exit(1)
 
     if args.strict:
-        blocking = [w for w in result["validation"]["warnings"] if w["severity"] in ("high", "medium")]
-        model_format = result["validation"].get("model_format", "spreadsheet")
-        if model_format in ("deck", "conversational"):
-            blocking = [w for w in blocking if w["code"] != "CHECKLIST_FAILURES"]
+        # Strict blocks on high-severity data/structural warnings only.
+        # CHECKLIST_FAILURES (medium) are review findings, not data errors.
+        blocking = [w for w in result["validation"]["warnings"] if w["severity"] == "high"]
         if blocking:
             print("STRICT MODE: Exiting with code 1 due to warnings", file=sys.stderr)
             sys.exit(1)

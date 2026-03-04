@@ -1670,23 +1670,25 @@ def test_compose_strict_mode_deck_format_checklist_failures_not_blocking() -> No
     assert checklist_warnings[0]["severity"] == "medium", "Severity should remain medium"
 
 
-def test_compose_strict_mode_deck_format_other_medium_still_blocks() -> None:
-    """--strict should still exit 1 for non-CHECKLIST_FAILURES medium warnings in deck format."""
-    inputs_deck = json.loads(json.dumps(_VALID_INPUTS))
-    inputs_deck["company"]["model_format"] = "deck"
-    # Create runway with inconsistent cash to trigger RUNWAY_INCONSISTENCY
+def test_compose_strict_mode_medium_warnings_do_not_block() -> None:
+    """--strict should NOT exit 1 for medium-severity warnings (findings, not data errors)."""
+    # Create runway with inconsistent cash to trigger RUNWAY_INCONSISTENCY (medium)
     runway_inconsistent = json.loads(json.dumps(_VALID_RUNWAY))
     runway_inconsistent["baseline"]["net_cash"] = 500000  # differs >10% from inputs cash 2M
     d = _make_fmr_artifact_dir(
         {
-            "inputs.json": inputs_deck,
+            "inputs.json": _VALID_INPUTS,
             "checklist.json": _VALID_CHECKLIST,
             "unit_economics.json": _VALID_UNIT_ECONOMICS,
             "runway.json": runway_inconsistent,
         }
     )
     rc, data, stderr = _run_compose(d, extra_args=["--strict"])
-    assert rc == 1, "--strict should still block on RUNWAY_INCONSISTENCY for deck format"
+    assert rc == 0, "--strict should not block on medium-severity warnings like RUNWAY_INCONSISTENCY"
+    # But the warning should still be present in the output
+    warnings = data["validation"]["warnings"]
+    codes = [w["code"] for w in warnings]
+    assert "RUNWAY_INCONSISTENCY" in codes
 
 
 def test_compose_validation_includes_model_format() -> None:

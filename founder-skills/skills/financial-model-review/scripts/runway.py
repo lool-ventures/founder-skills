@@ -453,13 +453,9 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
     current_balance = cash_data.get("current_balance")
     monthly_net_burn = cash_data.get("monthly_net_burn")
 
-    if current_balance is None or monthly_net_burn is None:
-        # Insufficient data
-        warnings.append("Cash balance and/or monthly burn data missing; cannot compute runway.")
-        if current_balance is None:
-            warnings.append("Missing: cash.current_balance")
-        if monthly_net_burn is None:
-            warnings.append("Missing: cash.monthly_net_burn")
+    if current_balance is None and monthly_net_burn is None:
+        # Both missing — no analysis possible
+        warnings.append("Cash balance and monthly burn data both missing; cannot compute runway.")
         return {
             "company": {
                 "name": company.get("company_name", "Unknown"),
@@ -470,6 +466,66 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
             "scenarios": [],
             "post_raise": None,
             "risk_assessment": "Insufficient data for runway analysis.",
+            "insufficient_data": True,
+            "limitations": limitations,
+            "warnings": warnings,
+        }
+
+    if current_balance is None and monthly_net_burn is not None:
+        # Burn known but no cash balance — produce sensitivity table
+        burn = abs(monthly_net_burn)
+        warnings.append(
+            "Missing: cash.current_balance — producing burn-based sensitivity "
+            "table instead of full projection. Ask the founder for current cash balance."
+        )
+        cash_scenarios = [500_000, 1_000_000, 2_000_000, 3_000_000, 5_000_000]
+        sensitivity: list[dict[str, Any]] = []
+        for starting_cash in cash_scenarios:
+            months = round(starting_cash / burn, 1) if burn > 0 else None
+            sensitivity.append(
+                {
+                    "starting_cash": starting_cash,
+                    "runway_months": months,
+                }
+            )
+        return {
+            "company": {
+                "name": company.get("company_name", "Unknown"),
+                "slug": company.get("slug", ""),
+                "stage": company.get("stage", ""),
+            },
+            "baseline": {
+                "net_cash": None,
+                "monthly_burn": burn,
+                "monthly_revenue": None,
+            },
+            "scenarios": [],
+            "post_raise": None,
+            "risk_assessment": f"Monthly burn is ${burn:,.0f}. Cash balance unknown — ask founder.",
+            "insufficient_data": True,
+            "partial_analysis": True,
+            "burn_sensitivity": sensitivity,
+            "limitations": limitations,
+            "warnings": warnings,
+        }
+
+    if monthly_net_burn is None:
+        # Cash balance known but burn unknown
+        warnings.append("Missing: cash.monthly_net_burn — cannot project runway without burn rate.")
+        return {
+            "company": {
+                "name": company.get("company_name", "Unknown"),
+                "slug": company.get("slug", ""),
+                "stage": company.get("stage", ""),
+            },
+            "baseline": {
+                "net_cash": current_balance,
+                "monthly_burn": None,
+                "monthly_revenue": None,
+            },
+            "scenarios": [],
+            "post_raise": None,
+            "risk_assessment": f"Cash balance is ${current_balance:,.0f} but burn rate unknown.",
             "insufficient_data": True,
             "limitations": limitations,
             "warnings": warnings,

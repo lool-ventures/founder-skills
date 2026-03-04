@@ -61,8 +61,7 @@ Canonical structured input for all downstream scripts. The `company` block is re
 | `partial` | All 46 items evaluated | Full computation | "Model Quality" |
 
 Additional effects for `deck` / `conversational`:
-- `compose_report.py`: CHECKLIST_FAILURES warning downgraded from "high" to "medium" severity
-- `compose_report.py --strict`: CHECKLIST_FAILURES excluded from blocking warnings
+- `compose_report.py --strict`: Only high-severity warnings (corrupt/missing artifacts) block; checklist failures are review findings, not data errors
 
 | `data_confidence` | string | no | One of: `"exact"`, `"estimated"`, `"mixed"`. Indicates reliability of input values. |
 | `traits` | string[] | no | Boolean trait flags: `"multi-currency"`, `"multi-entity"`, `"multi-market"`, `"annual-contracts"`, `"ai-powered"` — product uses AI/ML inference as a core feature (triggers AI cost scrutiny regardless of revenue model) |
@@ -140,7 +139,7 @@ Additional effects for `deck` / `conversational`:
 | `current_balance` | number | yes | Current cash balance |
 | `debt` | number | no | Outstanding debt (default 0); used for net cash calculation |
 | `balance_date` | string | yes | `"YYYY-MM"` balance date |
-| `monthly_net_burn` | number | yes | Net monthly burn rate |
+| `monthly_net_burn` | number | yes | Net monthly burn rate. **Sign convention: positive = cash outgoing** (e.g., if the company burns $500K/month, write `500000`, not `-500000`). The script will defensively abs() negative values, but correct sign avoids warnings. |
 | `fundraising` | object | no | Fundraising parameters |
 | `grants` | object | no | Government grant data |
 

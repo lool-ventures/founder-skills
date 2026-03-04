@@ -31,8 +31,12 @@ All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/scripts/
 - **`checklist.py`** — Scores 46 criteria across 7 categories with profile-based auto-gating
 - **`unit_economics.py`** — Computes and benchmarks 11 unit economics metrics
 - **`runway.py`** — Multi-scenario runway stress-test with decision points
-- **`compose_report.py`** — Assembles report with cross-artifact validation; `--strict` exits 1 on high/medium warnings
+- **`compose_report.py`** — Assembles report with cross-artifact validation; `--strict` exits 1 on high-severity warnings (corrupt/missing artifacts)
 - **`visualize.py`** — Generates self-contained HTML with SVG charts (not JSON)
+
+Also available from `${CLAUDE_PLUGIN_ROOT}/scripts/` (shared):
+
+- **`find_artifact.py`** — Resolves artifact paths by skill name and filename (used by Sub-agent B for cross-skill lookups)
 
 Run with: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/scripts/<script>.py --pretty [args]`
 
@@ -123,7 +127,7 @@ python3 "$SHARED_SCRIPTS/founder_context.py" init \
   --geography "US" --artifacts-root "$ARTIFACTS_ROOT"
 ```
 
-If the script prints a `sector_type` warning but exits 0, that's non-fatal — proceed without retrying.
+If the script prints a `sector_type` warning but exits 0, that's non-fatal — proceed without retrying. However, a null `sector_type` may suppress sector-specific checklist gating downstream. If you know the correct type, re-run with `--sector-type` (valid values: `saas`, `ai-native`, `marketplace`, `hardware`, `hardware-subscription`, `consumer-subscription`, `usage-based`).
 
 **Exit 2 (multiple context files):** Present the list to the founder, ask which company, then re-read with `--slug`.
 
@@ -163,9 +167,19 @@ INPUTS_EOF
 
 **Setting `model_format`:** `spreadsheet` (Excel/CSV/Google Sheets), `deck` (pitch deck), `conversational` (gathered through conversation), `partial` (incomplete spreadsheet). When `model_format` is `deck` or `conversational`, structural items auto-gate to `not_applicable`.
 
-**AI-powered products:** If the product uses AI/ML inference as a core feature, include `"ai-powered"` in `company.traits` regardless of `revenue_model_type`.
+**AI-powered products:** Include `"ai-powered"` in `company.traits` ONLY if there is explicit evidence in the source files that AI/ML inference is a core product feature — e.g., COGS showing GPU/inference costs, product descriptions mentioning ML models, or inference-related line items. Do NOT infer `ai-powered` from the sector name alone (e.g., "Fintech" does not imply AI).
 
 **Graceful degradation:** If Task tool is unavailable, extract directly in the main agent.
+
+### Step 3.5: Validate `inputs.json` Before Proceeding
+
+Before dispatching Steps 4–6, verify `inputs.json` quality:
+
+1. **Sign conventions:** `cash.monthly_net_burn` must be **positive** (cash outgoing). If negative, fix it: `abs(value)`.
+2. **Null critical fields:** Check that `cash.current_balance`, `cash.monthly_net_burn`, `revenue.mrr.value`, and `revenue.growth_rate_monthly` are not null when the source data contains these values. Null fields cascade into bad outputs.
+3. **Cash balance missing?** If `cash.current_balance` is null but burn rate is known, **ask the founder** for their current cash balance before proceeding. Runway analysis is central to Series A conversations — a sensitivity table is a poor substitute for the real number.
+
+Fix any issues in `inputs.json` before dispatching the parallel sub-agents. Fixing between sub-agent dispatches (e.g., after checklist but before metrics) breaks the parallel rule.
 
 ### Steps 4-6: Parallel Analysis (Checklist + Metrics & Runway)
 
@@ -192,7 +206,7 @@ CHECK_EOF
 
 **Evidence required:** Always provide `evidence` for `fail` or `warn` items.
 
-Instruct Sub-agent A to return ONLY: (1) file path written, (2) `score_pct`, (3) overall rating, and (4) top 3 fail/warn items — do not echo the full assessment back.
+Instruct Sub-agent A: **Return ONLY a short JSON object** with keys: `path`, `score_pct`, `overall_rating`, `top_issues` (array of max 3 strings). Do not return tables, recommendations, category breakdowns, or any other text. Keep total output under 500 characters.
 
 **Sub-agent B — Metrics & Runway:**
 
@@ -207,7 +221,7 @@ Cross-skill: Use `find_artifact.py` to locate prior market-sizing and deck-revie
 
 If the main agent indicates the **qualitative path** (data insufficient for quantitative analysis), Sub-agent B deposits stubs instead of running unit_economics/runway scripts: `{"skipped": true, "reason": "qualitative path — insufficient quantitative data"}`
 
-Instruct Sub-agent B: **Do not run any scripts other than `unit_economics.py`, `runway.py`, and `find_artifact.py`. Do not create any files other than `unit_economics.json` and `runway.json`.** After running `unit_economics.py`, sanity-check the burn multiple — if it exceeds 20x for a company with meaningful ARR (>$500K), re-examine the `growth_rate_monthly` and `monthly_net_burn` inputs for unit inconsistency (e.g., monthly vs. annual mixing). Return ONLY: (1) file paths written, (2) key metrics (burn rate, runway months, LTV/CAC, burn multiple), and (3) cross-skill findings — do not echo the full JSON back.
+Instruct Sub-agent B: **Do not run any scripts other than `unit_economics.py`, `runway.py`, and `find_artifact.py`. Do not create any files other than `unit_economics.json` and `runway.json`.** After running `unit_economics.py`, sanity-check the burn multiple — if it exceeds 20x for a company with meaningful ARR (>$500K), re-examine the `growth_rate_monthly` and `monthly_net_burn` inputs for unit inconsistency (e.g., monthly vs. annual mixing). **Return ONLY a short JSON object** with keys: `paths` (array), `burn_rate`, `runway_months`, `ltv_cac`, `burn_multiple`, `cross_skill` (string or null). Do not return tables, recommendations, or any other text. Keep total output under 500 characters.
 
 If `runway.py` produces minimal output (< 500 bytes) due to missing `cash_balance_current`, note this gap explicitly — the coaching commentary should address it.
 
@@ -221,7 +235,7 @@ After both sub-agents return, share a brief coaching update with the founder bef
 python3 "$SCRIPTS/compose_report.py" --dir "$REVIEW_DIR" --pretty -o "$REVIEW_DIR/report.json" --strict
 ```
 
-Check `validation.warnings`: fix high-severity, include medium in presentation, note low/info. This is a refinement loop — fix, re-deposit, re-compose until high-severity warnings are resolved. If a warning flags a computed value that looks implausible (e.g., burn multiple > 20x), investigate the source artifact's inputs before re-composing — the fix may be in `inputs.json` or `unit_economics.json`, not in the compose step. If a `RUNWAY_INCONSISTENCY` warning mentions cash direction (cash increasing despite positive burn), check `inputs.json` for null or zero fields that should have values — null fields are the most common cause of phantom 'infinite runway' results.
+Check `validation.warnings`: fix high-severity (corrupt/missing artifacts), present medium-severity (checklist failures, runway inconsistencies, metrics gaps) in the report, note low/info. `--strict` only blocks on high-severity warnings — medium-severity warnings like `CHECKLIST_FAILURES` are review findings to present, not data errors to fix. This is a refinement loop — fix high-severity warnings, re-deposit, re-compose. If a warning flags a computed value that looks implausible (e.g., burn multiple > 20x), investigate the source artifact's inputs before re-composing — the fix may be in `inputs.json` or `unit_economics.json`, not in the compose step. If a `RUNWAY_INCONSISTENCY` warning mentions cash direction (cash increasing despite positive burn), check `inputs.json` for null or zero fields that should have values — null fields are the most common cause of phantom 'infinite runway' results.
 
 **Primary deliverable:** Read `report_markdown` from the output JSON, write it to `$REVIEW_DIR/report.md`, and display it to the user in full. **Present the file path** so the user can access it directly. Then add coaching commentary covering: (1) what metrics look strong and why investors will notice, (2) the single highest-leverage fix to improve investor readiness, (3) any data gaps that weaken the story (e.g., missing runway, incomplete unit economics), and (4) what to prioritize before the next fundraise conversation.
 

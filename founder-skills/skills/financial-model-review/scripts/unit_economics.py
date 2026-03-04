@@ -329,6 +329,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
             qualifier = _CONFIDENCE_QUALIFIERS.get(data_confidence, "")
             final_evidence = evidence + qualifier
         entry: dict[str, Any] = {
+            "id": name,
             "name": name,
             "value": value,
             "rating": rating,
@@ -425,7 +426,17 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
         metrics.append(_metric("cac_payback", None, "not_rated", "Payback data not provided"))
 
     # 5. Burn multiple
-    monthly_burn = _deep_get(inputs, "cash", "monthly_net_burn")
+    monthly_burn_raw = _deep_get(inputs, "cash", "monthly_net_burn")
+    # Defensive: take absolute value — schema says positive = cash outgoing,
+    # but extraction may produce negative values (accounting convention).
+    monthly_burn = abs(monthly_burn_raw) if monthly_burn_raw is not None else None
+    if monthly_burn_raw is not None and monthly_burn_raw < 0:
+        print(
+            f"Warning: monthly_net_burn is negative ({monthly_burn_raw:,.0f}); "
+            f"using absolute value ({monthly_burn:,.0f}). "
+            f"Schema convention: positive = cash outgoing.",
+            file=sys.stderr,
+        )
     mrr = _deep_get(revenue, "mrr", "value")
     growth_rate = _deep_get(revenue, "growth_rate_monthly")
     _compute_inputs_present = monthly_burn is not None and mrr is not None and growth_rate is not None
@@ -646,8 +657,20 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
             # Annualize monthly growth rate
             growth_annualized = ((1 + growth_rate) ** 12 - 1) * 100
             r40 = round(growth_annualized + gm * 100, 1)
-            bench = benchmarks.get("rule_of_40")
-            if bench:
+            # Flag inflated scores from hyper-early growth (>200% YoY)
+            if growth_annualized > 200:
+                metrics.append(
+                    _metric(
+                        "rule_of_40",
+                        r40,
+                        "contextual",
+                        f"Rule of 40 score: {r40:.0f} "
+                        f"(growth {growth_annualized:.0f}% + margin {gm:.0%}); "
+                        f"score is inflated by hyper-early growth and not comparable "
+                        f"to the >= 40 benchmark used for scaled companies",
+                    )
+                )
+            elif bench := benchmarks.get("rule_of_40"):
                 rating = _rate_higher_is_better(r40, bench)
                 evidence = (
                     f"Rule of 40 score: {r40:.0f} "
