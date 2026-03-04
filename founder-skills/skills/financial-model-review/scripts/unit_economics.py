@@ -447,20 +447,41 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
         net_new_arr = mrr * growth_rate * 12
         if net_new_arr > 0:
             burn_mult = round(monthly_burn / (net_new_arr / 12), 2)
-            bench = benchmarks.get("burn_multiple")
-            if bench:
-                rating = _rate_lower_is_better(burn_mult, bench)
-                evidence = f"Burn multiple of {burn_mult:.1f}x; stage benchmark strong <= {bench['strong']}x"
-                metrics.append(_metric("burn_multiple", burn_mult, rating, evidence, bench["source"], bench["as_of"]))
-            else:
+            if burn_mult < 0:
                 metrics.append(
                     _metric(
                         "burn_multiple",
                         burn_mult,
                         "not_rated",
-                        f"Burn multiple of {burn_mult:.1f}x; no benchmark for stage '{stage}'",
+                        f"Burn multiple is negative ({burn_mult:.1f}x) — likely a sign/input error",
                     )
                 )
+            elif burn_mult > 50:
+                metrics.append(
+                    _metric(
+                        "burn_multiple",
+                        burn_mult,
+                        "not_rated",
+                        f"Burn multiple of {burn_mult:.1f}x is implausibly high — check input consistency",
+                    )
+                )
+            else:
+                bench = benchmarks.get("burn_multiple")
+                if bench:
+                    rating = _rate_lower_is_better(burn_mult, bench)
+                    evidence = f"Burn multiple of {burn_mult:.1f}x; stage benchmark strong <= {bench['strong']}x"
+                    metrics.append(
+                        _metric("burn_multiple", burn_mult, rating, evidence, bench["source"], bench["as_of"])
+                    )
+                else:
+                    metrics.append(
+                        _metric(
+                            "burn_multiple",
+                            burn_mult,
+                            "not_rated",
+                            f"Burn multiple of {burn_mult:.1f}x; no benchmark for stage '{stage}'",
+                        )
+                    )
         else:
             # Inputs present but economics undefined (net new ARR <= 0) — no fallback
             metrics.append(_metric("burn_multiple", None, "not_rated", "Net new ARR is zero or negative"))

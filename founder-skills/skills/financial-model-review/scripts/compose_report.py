@@ -247,7 +247,38 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                     )
                 )
 
-    # 6. METRICS_GAPS -- unit economics has few computed metrics
+    # 6. CHECKLIST_RUNWAY_CONTRADICTION -- CASH_* failures + default_alive: true
+    if _usable(checklist) and _usable(runway):
+        items = _as_list(checklist.get("items"))
+        cash_fails = [
+            i for i in items
+            if isinstance(i, dict)
+            and str(i.get("id", "")).startswith("CASH_")
+            and i.get("status") == "fail"
+        ]
+        scenarios = _as_list(runway.get("scenarios"))
+        base_scenario = next((s for s in scenarios if s.get("name") == "base"), None)
+        if cash_fails and base_scenario and base_scenario.get("default_alive") is True:
+            fail_ids = [str(f.get("id", "?")) for f in cash_fails]
+            warnings.append(
+                _warn(
+                    "RUNWAY_INCONSISTENCY",
+                    f"Checklist items {fail_ids} failed (cash/burn issues) but runway "
+                    f"base scenario shows default_alive: true — review inputs for consistency",
+                )
+            )
+        # Also flag cash direction warnings from runway scenarios
+        for s in scenarios:
+            cdw = s.get("cash_direction_warning")
+            if cdw:
+                warnings.append(
+                    _warn(
+                        "RUNWAY_INCONSISTENCY",
+                        f"Scenario '{s.get('name', '?')}': {cdw}",
+                    )
+                )
+
+    # 7. METRICS_GAPS -- unit economics has few computed metrics
     if _usable(unit_economics):
         ue_summary = _as_dict(unit_economics.get("summary"))
         computed = ue_summary.get("computed", 0)

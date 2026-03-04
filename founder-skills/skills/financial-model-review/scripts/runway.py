@@ -213,6 +213,18 @@ def _project_scenario(
     if cash_out_month is None:
         default_alive = True
 
+    # Sanity check: if initial net_burn was positive (company burning cash) but
+    # final cash > starting cash, inputs are inconsistent — flag it.
+    initial_net_burn = opex0 * (1 + burn_change) - revenue0
+    cash_direction_warning: str | None = None
+    if initial_net_burn > 0 and len(projections) > 0:
+        final_cash = projections[-1]["cash_balance"]
+        if final_cash > cash0 * 1.01:  # allow 1% rounding tolerance
+            cash_direction_warning = (
+                f"Cash increased from {cash0:,.0f} to {final_cash:,.0f} despite "
+                f"initial net burn of {initial_net_burn:,.0f}/mo — inputs may be inconsistent"
+            )
+
     # Compute dates
     runway_months = cash_out_month
     cash_out_date: str | None = None
@@ -227,7 +239,7 @@ def _project_scenario(
         # Never runs out within projection window
         decision_point = None
 
-    return {
+    result: dict[str, Any] = {
         "name": name,
         "growth_rate": growth_rate,
         "burn_change": burn_change,
@@ -238,6 +250,9 @@ def _project_scenario(
         "default_alive": default_alive,
         "monthly_projections": projections,
     }
+    if cash_direction_warning:
+        result["cash_direction_warning"] = cash_direction_warning
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -536,6 +551,11 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
             ils_expense_fraction=ils_fraction,
         )
         scenario_results.append(scenario_out)
+        # Surface per-scenario cash direction warnings
+        if scenario_out.get("cash_direction_warning"):
+            warnings.append(
+                f"Scenario '{scenario_out['name']}': {scenario_out['cash_direction_warning']}"
+            )
 
     # --- Compute minimum viable growth threshold ---
     if growth_rate >= 0:

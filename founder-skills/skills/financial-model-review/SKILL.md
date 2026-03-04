@@ -115,7 +115,7 @@ Three cases based on exit code:
 
 **Exit 0 (found, single context):** Use the company slug and pre-filled fields.
 
-**Exit 1 (not found):** Ask the founder for company name, stage, sector, geography. Valid `--stage` values: `pre-seed`, `seed`, `series-a`, `series-b`, `later` (hyphenated, not underscored). Then create:
+**Exit 1 (not found):** Ask the founder for company name, stage, sector, geography. When using `AskUserQuestion`, always provide at least 2 options (the tool requires a minimum of 2). Valid `--stage` values: `pre-seed`, `seed`, `series-a`, `series-b`, `later` (hyphenated, not underscored). Then create:
 
 ```bash
 python3 "$SHARED_SCRIPTS/founder_context.py" init \
@@ -137,7 +137,7 @@ The sub-agent:
 3. Reads `$REFS/data-sufficiency.md` to assess data sufficiency
 4. Constructs `inputs.json` from extracted data, writing it to `$REVIEW_DIR/inputs.json`
 
-Instruct the sub-agent: **Do not run any scripts other than `extract_model.py`. Do not create any files other than `model_data.json` and `inputs.json`.** Return ONLY: (1) file paths written, (2) company name/stage/sector, (3) `model_format`, (4) data sufficiency verdict (sufficient/insufficient + count of missing critical fields), and (5) any `company.traits` detected — do not echo the full JSON back.
+Instruct the sub-agent: **Do not run any scripts other than `extract_model.py`. Do not create any files other than `model_data.json` and `inputs.json`.** Before writing `inputs.json`, verify that no numeric field is null when the source data contains a value — null fields cascade into bad downstream outputs (unit economics scores wrong metrics, runway reports infinite runway). Return ONLY: (1) file paths written, (2) company name/stage/sector, (3) `model_format`, (4) data sufficiency verdict (sufficient/insufficient + count of missing critical fields), and (5) any `company.traits` detected — do not echo the full JSON back.
 
 After the sub-agent returns, use the summary to decide the qualitative vs. quantitative path and share a brief update with the founder.
 
@@ -169,11 +169,11 @@ INPUTS_EOF
 
 ### Steps 4-6: Parallel Analysis (Checklist + Metrics & Runway)
 
-**IMPORTANT:** Spawn 2 `general-purpose` Task sub-agents **in a single message** — both Agent tool calls must appear in the same response. Do not run one and wait for it before spawning the other. No `isolation: "worktree"`. Each receives the expanded `SCRIPTS`, `REFS`, `SHARED_SCRIPTS`, `SHARED_REFS`, and `REVIEW_DIR` paths.
+**IMPORTANT — PARALLEL DISPATCH IS MANDATORY:** Spawn 2 `general-purpose` Task sub-agents **in a single message** — both Agent tool calls MUST appear in the same assistant response. This is not a suggestion. If you spawn Sub-agent A first and wait for its result before spawning Sub-agent B, you are violating this rule. No `isolation: "worktree"`. Each receives the expanded `SCRIPTS`, `REFS`, `SHARED_SCRIPTS`, `SHARED_REFS`, and `REVIEW_DIR` paths.
 
 **Sub-agent A — Checklist Scorer:**
 
-Reads `$REFS/checklist-criteria.md`, reads `$REVIEW_DIR/inputs.json`, assesses all 46 items with evidence, and runs `checklist.py`.
+Reads `$REFS/checklist-criteria.md`, reads `$REVIEW_DIR/inputs.json`, assesses all 46 items with evidence, and runs `checklist.py`. **Do not run any other scripts** — only `checklist.py`. Do not create any files other than `checklist.json`.
 
 | Format | Assess | Auto-gated by script |
 |--------|--------|---------------------|
@@ -221,7 +221,7 @@ After both sub-agents return, share a brief coaching update with the founder bef
 python3 "$SCRIPTS/compose_report.py" --dir "$REVIEW_DIR" --pretty -o "$REVIEW_DIR/report.json" --strict
 ```
 
-Check `validation.warnings`: fix high-severity, include medium in presentation, note low/info. This is a refinement loop — fix, re-deposit, re-compose until high-severity warnings are resolved. If a warning flags a computed value that looks implausible (e.g., burn multiple > 20x), investigate the source artifact's inputs before re-composing — the fix may be in `inputs.json` or `unit_economics.json`, not in the compose step.
+Check `validation.warnings`: fix high-severity, include medium in presentation, note low/info. This is a refinement loop — fix, re-deposit, re-compose until high-severity warnings are resolved. If a warning flags a computed value that looks implausible (e.g., burn multiple > 20x), investigate the source artifact's inputs before re-composing — the fix may be in `inputs.json` or `unit_economics.json`, not in the compose step. If a `RUNWAY_INCONSISTENCY` warning mentions cash direction (cash increasing despite positive burn), check `inputs.json` for null or zero fields that should have values — null fields are the most common cause of phantom 'infinite runway' results.
 
 **Primary deliverable:** Read `report_markdown` from the output JSON, write it to `$REVIEW_DIR/report.md`, and display it to the user in full. **Present the file path** so the user can access it directly. Then add coaching commentary covering: (1) what metrics look strong and why investors will notice, (2) the single highest-leverage fix to improve investor readiness, (3) any data gaps that weaken the story (e.g., missing runway, incomplete unit economics), and (4) what to prioritize before the next fundraise conversation.
 
