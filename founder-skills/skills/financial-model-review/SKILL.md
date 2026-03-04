@@ -223,13 +223,15 @@ python3 "$SCRIPTS/compose_report.py" --dir "$REVIEW_DIR" --pretty -o "$REVIEW_DI
 
 Check `validation.warnings`: fix high-severity, include medium in presentation, note low/info. This is a refinement loop — fix, re-deposit, re-compose until high-severity warnings are resolved. If a warning flags a computed value that looks implausible (e.g., burn multiple > 20x), investigate the source artifact's inputs before re-composing — the fix may be in `inputs.json` or `unit_economics.json`, not in the compose step.
 
-**Primary deliverable:** Read `report_markdown` from the output JSON, write it to `$REVIEW_DIR/report.md`, and display it to the user in full. Then add coaching commentary covering: (1) what metrics look strong and why investors will notice, (2) the single highest-leverage fix to improve investor readiness, (3) any data gaps that weaken the story (e.g., missing runway, incomplete unit economics), and (4) what to prioritize before the next fundraise conversation.
+**Primary deliverable:** Read `report_markdown` from the output JSON, write it to `$REVIEW_DIR/report.md`, and display it to the user in full. **Present the file path** so the user can access it directly. Then add coaching commentary covering: (1) what metrics look strong and why investors will notice, (2) the single highest-leverage fix to improve investor readiness, (3) any data gaps that weaken the story (e.g., missing runway, incomplete unit economics), and (4) what to prioritize before the next fundraise conversation.
 
 ### Step 8: Visualize (Optional)
 
 ```bash
 python3 "$SCRIPTS/visualize.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.html"
 ```
+
+**Present the HTML file path** to the user so they can open the visual report.
 
 ## Scoring
 
