@@ -553,9 +553,7 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
         scenario_results.append(scenario_out)
         # Surface per-scenario cash direction warnings
         if scenario_out.get("cash_direction_warning"):
-            warnings.append(
-                f"Scenario '{scenario_out['name']}': {scenario_out['cash_direction_warning']}"
-            )
+            warnings.append(f"Scenario '{scenario_out['name']}': {scenario_out['cash_direction_warning']}")
 
     # --- Compute minimum viable growth threshold ---
     if growth_rate >= 0:

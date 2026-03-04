@@ -251,10 +251,9 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     if _usable(checklist) and _usable(runway):
         items = _as_list(checklist.get("items"))
         cash_fails = [
-            i for i in items
-            if isinstance(i, dict)
-            and str(i.get("id", "")).startswith("CASH_")
-            and i.get("status") == "fail"
+            i
+            for i in items
+            if isinstance(i, dict) and str(i.get("id", "")).startswith("CASH_") and i.get("status") == "fail"
         ]
         scenarios = _as_list(runway.get("scenarios"))
         base_scenario = next((s for s in scenarios if s.get("name") == "base"), None)
