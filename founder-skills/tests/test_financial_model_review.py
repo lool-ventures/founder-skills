@@ -1783,6 +1783,7 @@ def test_compose_strict_mode_medium_warnings_do_not_block() -> None:
     )
     rc, data, stderr = _run_compose(d, extra_args=["--strict"])
     assert rc == 0, "--strict should not block on medium-severity warnings like RUNWAY_INCONSISTENCY"
+    assert data is not None
     # But the warning should still be present in the output
     warnings = data["validation"]["warnings"]
     codes = [w["code"] for w in warnings]
