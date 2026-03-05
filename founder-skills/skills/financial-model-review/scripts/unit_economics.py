@@ -287,6 +287,72 @@ def _deep_get(data: dict[str, Any], *keys: str, default: Any = None) -> Any:
 
 
 # ---------------------------------------------------------------------------
+# Time-series net new ARR helpers
+# ---------------------------------------------------------------------------
+
+
+def _net_new_arr_from_monthly(entries: list[dict[str, Any]]) -> float | None:
+    """Compute net new ARR from monthly time-series (≥13 entries for full TTM).
+
+    Uses ``arr`` field if present, otherwise approximates as ``total * 12``.
+    With exactly 12 entries, computes over 11-month span (best available).
+    Returns None if fewer than 12 entries.
+    """
+    if len(entries) < 12:
+        return None
+    sorted_entries = sorted(entries, key=lambda e: e.get("month", ""))
+
+    def _arr_value(entry: dict[str, Any]) -> float | None:
+        arr = entry.get("arr")
+        if isinstance(arr, (int, float)):
+            return float(arr)
+        total = entry.get("total")
+        if isinstance(total, (int, float)):
+            return float(total) * 12
+        return None
+
+    latest_arr = _arr_value(sorted_entries[-1])
+    # Look back 12 months (13th entry from end) for true TTM; fall back to
+    # oldest available if fewer than 13 entries.
+    lookback_idx = -13 if len(sorted_entries) >= 13 else 0
+    earliest_arr = _arr_value(sorted_entries[lookback_idx])
+    if latest_arr is None or earliest_arr is None:
+        return None
+    net_new = latest_arr - earliest_arr
+    return net_new if net_new > 0 else None
+
+
+def _net_new_arr_from_quarterly(entries: list[dict[str, Any]]) -> float | None:
+    """Compute net new ARR from quarterly time-series (≥5 entries for full YoY).
+
+    Uses ``arr`` field (annualized run-rate). With exactly 4 entries, computes
+    over 3-quarter span (best available). Returns None if fewer than 4 entries.
+    """
+    if len(entries) < 4:
+        return None
+    sorted_entries = sorted(entries, key=lambda e: e.get("quarter", ""))
+
+    def _arr_value(entry: dict[str, Any]) -> float | None:
+        arr = entry.get("arr")
+        if isinstance(arr, (int, float)):
+            return float(arr)
+        total = entry.get("total")
+        if isinstance(total, (int, float)):
+            return float(total) * 4  # quarterly revenue → annualized
+        return None
+
+    latest_arr = _arr_value(sorted_entries[-1])
+    # Look back 4 quarters (5th entry from end) for true YoY; fall back to
+    # oldest available if fewer than 5 entries.
+    lookback_idx = -5 if len(sorted_entries) >= 5 else 0
+    earliest_arr = _arr_value(sorted_entries[lookback_idx])
+    if latest_arr is None or earliest_arr is None:
+        return None
+    net_new = latest_arr - earliest_arr
+    return net_new if net_new > 0 else None
+
+
+# ---------------------------------------------------------------------------
 # Metric computation
 # ---------------------------------------------------------------------------
 
@@ -307,6 +373,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
 
     benchmarks = _get_stage_benchmarks(stage)
     metrics: list[dict[str, Any]] = []
+    ue_warnings: list[dict[str, str]] = []
     bench: dict[str, Any] | None  # reused across metric sections
 
     _CONFIDENCE_QUALIFIERS: dict[str, str] = {
@@ -373,18 +440,34 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
     if ltv_value is not None:
         # Cap LTV at 60-month horizon when churn is 0%
         ltv_churn = _deep_get(unit_econ, "ltv", "inputs", "churn_monthly")
+        ltv_unreliable = False
         if ltv_churn is not None and ltv_churn == 0:
             arpu = _deep_get(unit_econ, "ltv", "inputs", "arpu_monthly")
             gm_input = _deep_get(unit_econ, "ltv", "inputs", "gross_margin")
+            obs_note = "observed" if ltv_observed == "observed" else "assumed"
             if arpu is not None and gm_input is not None:
                 ltv_value = round(arpu * gm_input * 60, 2)
-            obs_note = "observed" if ltv_observed == "observed" else "assumed"
-            evidence = f"LTV of ${ltv_value:,.0f} ({obs_note}; capped at 5-year horizon, 0% churn assumed)"
+                evidence = f"LTV of ${ltv_value:,.0f} ({obs_note}; capped at 5-year horizon, 0% churn assumed)"
+            else:
+                ltv_unreliable = True
+                evidence = (
+                    f"LTV of ${ltv_value:,.0f} ({obs_note}; 0% churn — "
+                    "could not apply 5-year cap, missing arpu or gross_margin inputs; value may be unreliable)"
+                )
+                ue_warnings.append(
+                    {
+                        "code": "LTV_CAP_MISSING_INPUTS",
+                        "message": "Cannot compute 60-month LTV cap: missing arpu_monthly or gross_margin",
+                        "field": "unit_economics.ltv",
+                    }
+                )
         else:
             obs_note = "observed" if ltv_observed == "observed" else "assumed"
             evidence = f"LTV of ${ltv_value:,.0f} ({obs_note})"
         # LTV doesn't have standalone stage benchmarks; report as not_rated
-        if not saas and model_type in ("hardware", "hardware-subscription", "marketplace"):
+        if ltv_unreliable:
+            rating = "not_rated"
+        elif not saas and model_type in ("hardware", "hardware-subscription", "marketplace"):
             rating = "contextual"
             evidence += f"; LTV benchmarks vary significantly for {model_type} models"
         else:
@@ -455,6 +538,20 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
     arr_val_for_bm = _deep_get(revenue, "arr", "value")
     _arr_below_floor = arr_val_for_bm is not None and arr_val_for_bm < 500_000
 
+    # Try time-series-based net new ARR (more accurate for enterprise/lumpy growth)
+    monthly_entries = revenue.get("monthly", [])
+    quarterly_entries = revenue.get("quarterly", [])
+    _ts_net_new_arr: float | None = None
+    _ts_method: str = ""
+    if isinstance(monthly_entries, list):
+        _ts_net_new_arr = _net_new_arr_from_monthly(monthly_entries)
+        if _ts_net_new_arr is not None:
+            _ts_method = "TTM"
+    if _ts_net_new_arr is None and isinstance(quarterly_entries, list):
+        _ts_net_new_arr = _net_new_arr_from_quarterly(quarterly_entries)
+        if _ts_net_new_arr is not None:
+            _ts_method = "YoY (quarterly)"
+
     if _arr_below_floor:
         metrics.append(
             _metric(
@@ -464,7 +561,77 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                 f"Burn multiple not meaningful below $500K ARR (current: ${arr_val_for_bm:,.0f})",
             )
         )
+    elif monthly_burn is not None and _ts_net_new_arr is not None and _ts_net_new_arr > 0:
+        # Time-series path (preferred): TTM or YoY quarterly
+        burn_mult = round((monthly_burn * 12) / _ts_net_new_arr, 2)
+        _bm_method_label = f"{_ts_method} actual"
+        if burn_mult < 0:
+            metrics.append(
+                _metric(
+                    "burn_multiple",
+                    burn_mult,
+                    "not_rated",
+                    f"Burn multiple is negative ({burn_mult:.1f}x, {_bm_method_label}) — likely a sign/input error",
+                )
+            )
+        elif burn_mult > 50:
+            metrics.append(
+                _metric(
+                    "burn_multiple",
+                    burn_mult,
+                    "not_rated",
+                    f"Burn multiple of {burn_mult:.1f}x ({_bm_method_label}) is implausibly high "
+                    f"— check input consistency",
+                )
+            )
+        else:
+            bench = benchmarks.get("burn_multiple")
+            if bench:
+                rating = _rate_lower_is_better(burn_mult, bench)
+                evidence = (
+                    f"Burn multiple of {burn_mult:.1f}x ({_bm_method_label}); "
+                    f"stage benchmark strong <= {bench['strong']}x"
+                )
+                metrics.append(
+                    _metric(
+                        "burn_multiple",
+                        burn_mult,
+                        rating,
+                        evidence,
+                        bench["source"],
+                        bench["as_of"],
+                        bench=bench,
+                    )
+                )
+            else:
+                metrics.append(
+                    _metric(
+                        "burn_multiple",
+                        burn_mult,
+                        "not_rated",
+                        f"Burn multiple of {burn_mult:.1f}x ({_bm_method_label}); no benchmark for stage '{stage}'",
+                    )
+                )
+        # Divergence check: if growth-rate method is also available, compare
+        if _compute_inputs_present and growth_rate > 0:
+            _gr_net_new_arr = mrr * growth_rate * 12
+            if _gr_net_new_arr > 0:
+                _gr_burn_mult = round((monthly_burn * 12) / _gr_net_new_arr, 2)
+                ratio = max(burn_mult, _gr_burn_mult) / max(min(burn_mult, _gr_burn_mult), 0.01)
+                if ratio > 2.0:
+                    ue_warnings.append(
+                        {
+                            "code": "BURN_MULTIPLE_DIVERGENCE",
+                            "message": (
+                                f"{_bm_method_label} burn multiple ({burn_mult:.1f}x) diverges >2x "
+                                f"from growth-rate estimate ({_gr_burn_mult:.1f}x) — "
+                                f"review for lumpy deal timing or data issues"
+                            ),
+                            "field": "burn_multiple",
+                        }
+                    )
     elif _compute_inputs_present and growth_rate > 0:
+        # Growth-rate fallback (less accurate for enterprise/lumpy growth)
         net_new_arr = mrr * growth_rate * 12
         if net_new_arr > 0:
             burn_mult = round(monthly_burn / (net_new_arr / 12), 2)
@@ -863,7 +1030,10 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
 
     summary = {"computed": computed, **rating_counts}
 
-    return {"metrics": metrics, "summary": summary}
+    result: dict[str, Any] = {"metrics": metrics, "summary": summary}
+    if ue_warnings:
+        result["warnings"] = ue_warnings
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -909,6 +1079,10 @@ def main() -> None:
         return
 
     result = _compute_metrics(data)
+    # Propagate run_id from inputs metadata into output for stale-artifact detection
+    _input_metadata = data.get("metadata")
+    if isinstance(_input_metadata, dict) and isinstance(_input_metadata.get("run_id"), str):
+        result.setdefault("metadata", {})["run_id"] = _input_metadata["run_id"]
     out = json.dumps(result, indent=indent) + "\n"
     s = result["summary"]
     _write_output(

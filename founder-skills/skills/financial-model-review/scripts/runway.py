@@ -745,6 +745,10 @@ def main() -> None:
         return
 
     result = _compute_runway(data)
+    # Propagate run_id from inputs metadata into output for stale-artifact detection
+    _input_metadata = data.get("metadata")
+    if isinstance(_input_metadata, dict) and isinstance(_input_metadata.get("run_id"), str):
+        result.setdefault("metadata", {})["run_id"] = _input_metadata["run_id"]
     out = json.dumps(result, indent=indent) + "\n"
     scenarios = result.get("scenarios", [])
     base_s = next((s for s in scenarios if s["name"] == "base"), None)

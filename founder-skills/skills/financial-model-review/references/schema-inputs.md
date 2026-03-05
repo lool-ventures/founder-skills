@@ -30,6 +30,7 @@ Canonical structured input for all downstream scripts. The `company` block is re
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `company` | object | yes | Company profile |
+| `metadata` | object | no | Extraction metadata (periodicity, conversion, overrides) |
 | `revenue` | object | no | Revenue and growth data |
 | `expenses` | object | no | Headcount, OpEx, COGS |
 | `cash` | object | no | Cash position and fundraising |
@@ -38,6 +39,24 @@ Canonical structured input for all downstream scripts. The `company` block is re
 | `structure` | object | no | Model structural quality signals |
 | `israel_specific` | object | no | Israel-specific cost and compliance data |
 | `bridge` | object | no | Fundraising bridge and milestones |
+
+### metadata
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `source_periodicity` | string | no | Periodicity detected from the source model. One of: `"monthly"`, `"quarterly"`, `"annual"`, `"mixed"`, `"unknown"`. |
+| `conversion_applied` | string | no | Conversion applied to flow metrics. One of: `"none"`, `"divided_by_3"`, `"divided_by_12"`. |
+| `run_id` | string | no | Unique identifier for this review run (ISO timestamp or UUID). Used by `compose_report.py` to detect stale artifacts. |
+| `warning_overrides` | object[] | no | Critical warnings the agent investigated and chose to proceed past. |
+
+#### warning_overrides[] entry
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `code` | string | yes | Warning code from `validate_inputs.py` (e.g., `"BURN_MULTIPLE_SUSPECT"`) |
+| `reason` | string | yes | Why the warning was overridden |
+| `reviewed_by` | string | yes | One of: `"agent"`, `"founder"` |
+| `timestamp` | string | yes | ISO 8601 timestamp |
 
 ### company
 
@@ -71,6 +90,7 @@ Additional effects for `deck` / `conversational`:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `monthly` | object[] | no | Monthly revenue time series |
+| `quarterly` | object[] | no | Quarterly revenue time series (use instead of `monthly` when source data is quarterly) |
 | `arr` | object | no | Annual recurring revenue snapshot |
 | `mrr` | object | no | Monthly recurring revenue snapshot |
 | `monthly_total` | number | no | Fallback when `mrr` is absent for non-SaaS models |
@@ -87,6 +107,17 @@ Additional effects for `deck` / `conversational`:
 | `month` | string | yes | `"YYYY-MM"` format |
 | `actual` | boolean | yes | `true` for actuals, `false` for projections |
 | `total` | number | yes | Total revenue for the month |
+| `arr` | number | no | Annualized run-rate at this point in time. When present, used for TTM burn multiple. When absent, `total * 12` is used as approximation. |
+| `drivers` | object | no | Breakdown (e.g., `customers`, `arpu`) |
+
+#### quarterly[] entry
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `quarter` | string | yes | `"YYYY-QN"` format (e.g., `"2024-Q1"`) |
+| `actual` | boolean | yes | `true` for actuals, `false` for projections |
+| `total` | number | yes | Total revenue for the quarter |
+| `arr` | number | no | Annualized run-rate at quarter end. Used for YoY burn multiple computation. |
 | `drivers` | object | no | Breakdown (e.g., `customers`, `arpu`) |
 
 #### arr / mrr
@@ -354,4 +385,4 @@ Additional effects for `deck` / `conversational`:
 
 ### LTV Cap Behavior
 
-When `unit_economics.ltv.inputs.churn_monthly` is 0%, LTV is mathematically infinite. The script caps the value at a 60-month (5-year) horizon: `arpu_monthly * gross_margin * 60`. The evidence field labels this as "capped at 5-year horizon, 0% churn assumed".
+When `unit_economics.ltv.inputs.churn_monthly` is 0%, LTV is mathematically infinite. The script caps the value at a 60-month (5-year) horizon: `arpu_monthly * gross_margin * 60`. The evidence field labels this as "capped at 5-year horizon, 0% churn assumed". If `arpu_monthly` or `gross_margin` is missing, the cap cannot be computed — the original LTV value passes through but is marked `not_rated` with evidence noting the cap could not be applied.

@@ -976,6 +976,66 @@ def test_unit_economics_ltv_zero_churn_capped() -> None:
     assert "capped" in ltv["evidence"].lower() or "5-year" in ltv["evidence"].lower()
 
 
+def test_unit_economics_ltv_zero_churn_missing_arpu() -> None:
+    """LTV with 0% churn but missing arpu should be not_rated with warning evidence."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["unit_economics"]["ltv"] = {
+        "value": 1840000,
+        "method": "formula",
+        "inputs": {"churn_monthly": 0.0, "gross_margin": 0.75},
+        "observed_vs_assumed": "assumed",
+    }
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    ltv = metrics_by_name["ltv"]
+    assert ltv["rating"] == "not_rated"
+    assert "could not apply 5-year cap" in ltv["evidence"].lower()
+    assert "missing arpu" in ltv["evidence"].lower()
+    # Structured warning
+    warnings = data.get("warnings", [])
+    codes = [w["code"] for w in warnings]
+    assert "LTV_CAP_MISSING_INPUTS" in codes
+
+
+def test_unit_economics_ltv_zero_churn_missing_gm() -> None:
+    """LTV with 0% churn but missing gross_margin should be not_rated with warning evidence."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["unit_economics"]["ltv"] = {
+        "value": 1840000,
+        "method": "formula",
+        "inputs": {"arpu_monthly": 500, "churn_monthly": 0.0},
+        "observed_vs_assumed": "assumed",
+    }
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    ltv = metrics_by_name["ltv"]
+    assert ltv["rating"] == "not_rated"
+    assert "could not apply 5-year cap" in ltv["evidence"].lower()
+    # Structured warning
+    warnings = data.get("warnings", [])
+    codes = [w["code"] for w in warnings]
+    assert "LTV_CAP_MISSING_INPUTS" in codes
+
+
+def test_unit_economics_ltv_zero_churn_with_inputs_no_warning() -> None:
+    """LTV with 0% churn and both arpu+gm present should NOT emit LTV_CAP_MISSING_INPUTS."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["unit_economics"]["ltv"]["inputs"]["churn_monthly"] = 0.0
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    warnings = data.get("warnings", [])
+    codes = [w["code"] for w in warnings]
+    assert "LTV_CAP_MISSING_INPUTS" not in codes
+
+
 def test_unit_economics_ltv_cac_contextual_when_assumed() -> None:
     """LTV/CAC from assumed inputs should be rated 'contextual', not hard pass/fail."""
     payload = json.dumps(_VALID_INPUTS)
@@ -1814,6 +1874,110 @@ def test_compose_report_unit_economics_estimated_header() -> None:
     assert "estimated" in md.lower()
 
 
+def test_compose_report_stale_artifact_mismatched_run_ids() -> None:
+    """Mismatched run_id across artifacts triggers STALE_ARTIFACT warning."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["metadata"] = {"run_id": "run-001"}
+    checklist = json.loads(json.dumps(_VALID_CHECKLIST))
+    checklist["metadata"] = {"run_id": "run-001"}
+    ue = json.loads(json.dumps(_VALID_UNIT_ECONOMICS))
+    ue["metadata"] = {"run_id": "run-002"}  # stale!
+    runway = json.loads(json.dumps(_VALID_RUNWAY))
+    runway["metadata"] = {"run_id": "run-001"}
+    d = _make_fmr_artifact_dir(
+        {"inputs.json": inputs, "checklist.json": checklist, "unit_economics.json": ue, "runway.json": runway}
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "STALE_ARTIFACT" in codes
+
+
+def test_compose_report_matching_run_ids_no_stale_warning() -> None:
+    """Matching run_id across all artifacts produces no STALE_ARTIFACT warning."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["metadata"] = {"run_id": "run-001"}
+    checklist = json.loads(json.dumps(_VALID_CHECKLIST))
+    checklist["metadata"] = {"run_id": "run-001"}
+    ue = json.loads(json.dumps(_VALID_UNIT_ECONOMICS))
+    ue["metadata"] = {"run_id": "run-001"}
+    runway = json.loads(json.dumps(_VALID_RUNWAY))
+    runway["metadata"] = {"run_id": "run-001"}
+    d = _make_fmr_artifact_dir(
+        {"inputs.json": inputs, "checklist.json": checklist, "unit_economics.json": ue, "runway.json": runway}
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "STALE_ARTIFACT" not in codes
+
+
+def test_compose_report_no_run_ids_graceful() -> None:
+    """No run_id in any artifact → graceful degradation, no STALE_ARTIFACT."""
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "STALE_ARTIFACT" not in codes
+
+
+def test_compose_report_surfaces_warning_overrides() -> None:
+    """Warning overrides from inputs.json metadata appear in the report."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["metadata"] = {
+        "warning_overrides": [
+            {
+                "code": "BURN_MULTIPLE_SUSPECT",
+                "reason": "Enterprise SaaS with lumpy deal flow; TTM burn multiple is 5.7x",
+                "reviewed_by": "agent",
+                "timestamp": "2026-03-05T17:30:00Z",
+            }
+        ]
+    }
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": inputs,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    assert "Acknowledged Warnings" in md
+    assert "BURN_MULTIPLE_SUSPECT" in md
+    assert "Enterprise SaaS with lumpy deal flow" in md
+    assert "reviewed by agent" in md
+
+
+def test_compose_report_no_overrides_no_section() -> None:
+    """No warning overrides → no Acknowledged Warnings section."""
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    assert "Acknowledged Warnings" not in data["report_markdown"]
+
+
 # --- B1: sector_type derivation from revenue_model_type ---
 
 
@@ -2112,6 +2276,180 @@ def test_unit_economics_burn_multiple_seed_vs_series_a_thresholds() -> None:
         )
 
 
+def test_unit_economics_burn_multiple_ttm_monthly_arr() -> None:
+    """12+ monthly entries with arr field → TTM path used."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    # Build 12 monthly entries with ARR growing from 400K to 1M
+    inputs["revenue"]["monthly"] = [
+        {"month": f"2025-{m:02d}", "total": 33333 + i * 5000, "arr": 400000 + i * 50000}
+        for i, m in enumerate(range(1, 13))
+    ]
+    # net_new_arr = 950000 - 400000 = 550000
+    # burn = 80000/mo → annual burn = 960000
+    # burn_mult = 960000 / 550000 = 1.75
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["value"] == 1.75, f"Expected TTM burn multiple 1.75, got {bm['value']}"
+    assert "TTM actual" in bm["evidence"]
+
+
+def test_unit_economics_burn_multiple_ttm_monthly_total_only() -> None:
+    """12+ monthly entries with only total (no arr) → total*12 approximation."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    # Build 12 monthly entries with total growing from 30K to 80K (no arr field)
+    inputs["revenue"]["monthly"] = [
+        {"month": f"2025-{m:02d}", "total": 30000 + i * (50000 / 11)} for i, m in enumerate(range(1, 13))
+    ]
+    # latest total ≈ 80000 → arr approx = 960000
+    # earliest total = 30000 → arr approx = 360000
+    # net_new_arr = 960000 - 360000 = 600000
+    # burn = 80000/mo → annual burn = 960000
+    # burn_mult = 960000 / 600000 = 1.6
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["value"] is not None
+    assert "TTM actual" in bm["evidence"]
+
+
+def test_unit_economics_burn_multiple_quarterly_yoy() -> None:
+    """4+ quarterly entries → YoY quarterly path used."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    # No monthly entries — force quarterly path
+    inputs["revenue"].pop("monthly", None)
+    inputs["revenue"]["quarterly"] = [
+        {"quarter": "2025-Q1", "total": 100000, "arr": 400000},
+        {"quarter": "2025-Q2", "total": 125000, "arr": 500000},
+        {"quarter": "2025-Q3", "total": 150000, "arr": 600000},
+        {"quarter": "2025-Q4", "total": 200000, "arr": 800000},
+    ]
+    # net_new_arr = 800000 - 400000 = 400000
+    # burn = 80000/mo → annual burn = 960000
+    # burn_mult = 960000 / 400000 = 2.4
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["value"] == 2.4, f"Expected quarterly burn multiple 2.4, got {bm['value']}"
+    assert "YoY (quarterly) actual" in bm["evidence"]
+
+
+def test_unit_economics_burn_multiple_growth_rate_fallback() -> None:
+    """<12 monthly + <4 quarterly → growth-rate fallback."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    # Only 3 monthly entries — not enough for TTM
+    inputs["revenue"]["monthly"] = [{"month": f"2025-{m:02d}", "total": 50000} for m in range(10, 13)]
+    # Only 2 quarterly entries — not enough for YoY
+    inputs["revenue"]["quarterly"] = [
+        {"quarter": "2025-Q3", "total": 150000, "arr": 600000},
+        {"quarter": "2025-Q4", "total": 200000, "arr": 800000},
+    ]
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["value"] is not None
+    # Growth-rate fallback doesn't say "TTM" or "YoY"
+    assert "TTM" not in bm["evidence"]
+    assert "YoY" not in bm["evidence"]
+
+
+def test_unit_economics_burn_multiple_ttm_13_months_full_window() -> None:
+    """13 monthly entries → true 12-month lookback (index -13)."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    # 13 entries: month 0 (arr=400K) through month 12 (arr=1M)
+    # With 13 entries, lookback is -13 → index 0 → arr=400K
+    # net_new_arr = 1000000 - 400000 = 600000
+    # burn = 80K/mo → annual = 960K → burn_mult = 960K / 600K = 1.6
+    inputs["revenue"]["monthly"] = [
+        {"month": f"2025-{m:02d}" if m <= 12 else f"2026-{m - 12:02d}", "arr": 400000 + i * 50000}
+        for i, m in enumerate(range(0, 13))
+    ]
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["value"] == 1.6, f"Expected 1.6, got {bm['value']}"
+    assert "TTM actual" in bm["evidence"]
+
+
+def test_unit_economics_burn_multiple_quarterly_5_entries_full_yoy() -> None:
+    """5 quarterly entries → true 4-quarter YoY lookback (index -5)."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"].pop("monthly", None)
+    # 5 entries: Q1 (arr=300K) through Q5 (arr=900K)
+    # With 5 entries, lookback is -5 → index 0 → arr=300K
+    # net_new_arr = 900000 - 300000 = 600000
+    # burn = 80K/mo → annual = 960K → burn_mult = 960K / 600K = 1.6
+    inputs["revenue"]["quarterly"] = [
+        {"quarter": f"2024-Q{q}", "arr": 300000 + i * 150000} for i, q in enumerate([1, 2, 3, 4])
+    ] + [{"quarter": "2025-Q1", "arr": 900000}]
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["value"] == 1.6, f"Expected 1.6, got {bm['value']}"
+    assert "YoY (quarterly) actual" in bm["evidence"]
+
+
+def test_unit_economics_burn_multiple_divergence_warning() -> None:
+    """When TTM and growth-rate burn multiples diverge >2x, emit BURN_MULTIPLE_DIVERGENCE warning."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    # Monthly time-series with flat ARR (net new ARR = 0 from growth, but big jump in ARR)
+    # TTM: arr grows from 200K to 800K → net_new_arr = 600K, burn_mult = (80K*12)/600K = 1.6x
+    # Growth-rate: MRR=50K, growth=0.02 → net_new_arr = 50K*0.02*12 = 12K, burn_mult = 80K/1K = 80x
+    inputs["revenue"]["growth_rate_monthly"] = 0.02  # low stated growth
+    inputs["revenue"]["monthly"] = [
+        {"month": f"2025-{m:02d}", "arr": 200000 + i * (600000 / 11)} for i, m in enumerate(range(1, 13))
+    ]
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    # Should use TTM path
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert "TTM actual" in bm["evidence"]
+    # Should have divergence warning
+    warnings = data.get("warnings", [])
+    codes = [w["code"] for w in warnings]
+    assert "BURN_MULTIPLE_DIVERGENCE" in codes, f"Expected divergence warning, got: {warnings}"
+
+
+def test_unit_economics_burn_multiple_no_divergence_warning() -> None:
+    """When TTM and growth-rate burn multiples are close, no BURN_MULTIPLE_DIVERGENCE."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    # Linear ARR growth of ~4K/mo over 12 months → net_new_arr ≈ 44K
+    # growth_rate=0.08, MRR=50K → growth-rate net_new_arr = 50K*0.08*12 = 48K
+    # TTM BM ≈ 21.8x, GR BM ≈ 20.0x → ratio ~1.09 (< 2x threshold)
+    inputs["revenue"]["monthly"] = [
+        {"month": f"2025-{m:02d}", "total": 50000 + i * 333, "arr": 600000 + i * 4000}
+        for i, m in enumerate(range(1, 13))
+    ]
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    warnings = data.get("warnings", [])
+    codes = [w["code"] for w in warnings]
+    assert "BURN_MULTIPLE_DIVERGENCE" not in codes
+
+
 def test_unit_economics_ai_gross_margin_seed_vs_series_a() -> None:
     """AI gross margin adjustment: -5pt for seed, -10pt for series-a."""
     for stage, expected_adj in [("seed", 0.05), ("series-a", 0.10)]:
@@ -2289,6 +2627,25 @@ def test_validate_burn_multiple_suspect() -> None:
     assert data["has_critical_warnings"] is True
 
 
+def test_validate_burn_multiple_suspect_ttm_overrides_growth_rate() -> None:
+    """Time-series burn multiple should prevent false positive from growth-rate shortcut."""
+    # Growth-rate shortcut: burn=150K, MRR=50K, growth=2% → net_new_arr = 50K*0.02*12 = 12K
+    # burn_multiple = (150K*12)/12K = 150x → would trigger BURN_MULTIPLE_SUSPECT
+    # But TTM time-series: ARR grew from 400K to 1.4M → net_new_arr = 1M
+    # burn_multiple = (150K*12)/1M = 1.8x → should NOT trigger
+    inputs = _make_inputs(stage="series-a", mrr=50_000, burn=150_000, growth=0.02)
+    inputs["revenue"]["monthly"] = [
+        {"month": f"2025-{m:02d}", "arr": 400000 + i * (1000000 / 11)} for i, m in enumerate(range(1, 13))
+    ]
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_MULTIPLE_SUSPECT" not in codes, (
+        "TTM time-series should prevent false positive from growth-rate shortcut"
+    )
+
+
 def test_validate_burn_multiple_no_growth_no_trigger() -> None:
     """Missing growth data does not trigger burn multiple check."""
     inputs = _make_inputs(stage="series-a", mrr=170_000, burn=1_440_000, growth=None)
@@ -2308,6 +2665,112 @@ def test_validate_has_critical_warnings_false_when_clean() -> None:
     assert rc == 0
     assert data is not None
     assert data["has_critical_warnings"] is False
+
+
+def test_validate_warning_overrides_valid() -> None:
+    """Valid warning_overrides pass structural validation."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["metadata"] = {
+        "warning_overrides": [
+            {
+                "code": "BURN_MULTIPLE_SUSPECT",
+                "reason": "Enterprise SaaS with lumpy deal flow",
+                "reviewed_by": "agent",
+                "timestamp": "2026-03-05T17:30:00Z",
+            }
+        ]
+    }
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    errors = data.get("errors", [])
+    override_errors = [e for e in errors if e["code"].startswith("OVERRIDE_")]
+    assert override_errors == [], f"Valid overrides should not produce errors: {override_errors}"
+
+
+def test_validate_warning_overrides_missing_keys() -> None:
+    """warning_overrides entry missing required keys produces OVERRIDE_MISSING_KEYS."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["metadata"] = {
+        "warning_overrides": [{"code": "BURN_MULTIPLE_SUSPECT"}]  # missing reason, reviewed_by, timestamp
+    }
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    errors = data.get("errors", [])
+    codes = [e["code"] for e in errors]
+    assert "OVERRIDE_MISSING_KEYS" in codes
+
+
+def test_validate_warning_overrides_invalid_reviewer() -> None:
+    """warning_overrides entry with bad reviewed_by produces OVERRIDE_INVALID_REVIEWER."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["metadata"] = {
+        "warning_overrides": [
+            {
+                "code": "BURN_MULTIPLE_SUSPECT",
+                "reason": "test",
+                "reviewed_by": "nobody",
+                "timestamp": "2026-03-05T17:30:00Z",
+            }
+        ]
+    }
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    errors = data.get("errors", [])
+    codes = [e["code"] for e in errors]
+    assert "OVERRIDE_INVALID_REVIEWER" in codes
+
+
+def test_unit_economics_propagates_run_id() -> None:
+    """unit_economics.py propagates metadata.run_id from input to output."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["metadata"] = {"run_id": "test-run-001"}
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data.get("metadata", {}).get("run_id") == "test-run-001"
+
+
+def test_unit_economics_no_run_id_no_metadata() -> None:
+    """unit_economics.py without run_id in input produces no metadata in output."""
+    payload = json.dumps(_VALID_INPUTS)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert "metadata" not in data
+
+
+def test_runway_propagates_run_id() -> None:
+    """runway.py propagates metadata.run_id from input to output."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["metadata"] = {"run_id": "test-run-002"}
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data.get("metadata", {}).get("run_id") == "test-run-002"
+
+
+def test_checklist_propagates_run_id() -> None:
+    """checklist.py propagates metadata.run_id from input to output."""
+    items = _make_checklist_items()
+    payload = json.dumps(
+        {
+            "items": items,
+            "company": {"stage": "seed", "geography": "us", "sector": "B2B SaaS"},
+            "metadata": {"run_id": "test-run-003"},
+        }
+    )
+    rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data.get("metadata", {}).get("run_id") == "test-run-003"
 
 
 def test_validate_inputs_referenced_by_agent() -> None:

@@ -104,11 +104,16 @@ After Step 1 (when the slug is known):
 ```bash
 REVIEW_DIR="$ARTIFACTS_ROOT/financial-model-review-${SLUG}"
 mkdir -p "$REVIEW_DIR"
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 ```
+
+Pass `RUN_ID` to all sub-agents. Every artifact written to `$REVIEW_DIR` must include `"metadata": {"run_id": "$RUN_ID"}` at the top level. `compose_report.py` checks that all artifact run IDs match — a mismatch triggers a `STALE_ARTIFACT` high-severity warning, blocking under `--strict`.
 
 If `REVIEW_DIR` already contains artifacts from a previous run, remove them before starting:
 
     rm -f "$REVIEW_DIR"/{inputs,checklist,unit_economics,runway,report,model_data}.json "$REVIEW_DIR/report.html"
+
+In Cowork, file deletion may require explicit permission. If cleanup fails with "Operation not permitted", request delete permission and retry before proceeding.
 
 ### Step 1: Read or Create Founder Context
 
@@ -149,9 +154,10 @@ If the script prints a `sector_type` warning but exits 0, that's non-fatal — p
 
 The sub-agent:
 1. Runs `extract_model.py --file <path> --pretty -o "$REVIEW_DIR/model_data.json"` (note: `--file`, not positional)
-2. Reads `$REFS/schema-inputs.md` for the JSON schema
-3. Reads `$REFS/data-sufficiency.md` to assess data sufficiency
-4. Constructs `inputs.json` from extracted data, writing it to `$REVIEW_DIR/inputs.json`
+2. **Checks the `periodicity_summary` and per-sheet `periodicity` fields** in the extraction output. If periodicity is `quarterly` or `annual`, all **flow metrics** (burn, revenue, expenses — anything measured per period) must be divided by 3 or 12 respectively before writing to `inputs.json`. **Do NOT convert stock metrics** (cash balance, headcount, customer count, ARR — point-in-time snapshots). For time-series data, use `revenue.quarterly[]` instead of forcing quarterly observations into `revenue.monthly[]`. If periodicity is `unknown`, flag it for the main agent to ask the founder — do not guess. Record the conversion in `metadata.source_periodicity` and `metadata.conversion_applied`.
+3. Reads `$REFS/schema-inputs.md` for the JSON schema
+4. Reads `$REFS/data-sufficiency.md` to assess data sufficiency
+5. Constructs `inputs.json` from extracted data, writing it to `$REVIEW_DIR/inputs.json`
 
 Instruct the sub-agent: **Do not run any scripts other than `extract_model.py`. Do not create any files other than `model_data.json` and `inputs.json`.** Before writing `inputs.json`, verify that no numeric field is null when the source data contains a value — null fields cascade into bad downstream outputs (unit economics scores wrong metrics, runway reports infinite runway). **ARPU sanity check:** If `drivers.arpu` or `unit_economics.ltv.inputs.arpu` exceeds total MRR, it's probably the aggregate revenue, not per-customer ARPU. Divide by customer count to get the correct value. This is the most common extraction error. Return ONLY: (1) file paths written, (2) company name/stage/sector, (3) `model_format`, (4) data sufficiency verdict (sufficient/insufficient + count of missing critical fields), and (5) any `company.traits` detected — do not echo the full JSON back.
 
@@ -197,7 +203,7 @@ python3 "$SCRIPTS/validate_inputs.py" --fix < "$REVIEW_DIR/inputs.json" > "$REVI
 
 Then re-validate. If errors persist after `--fix`, correct `inputs.json` manually (e.g., fill nulls from founder-provided data in Step 1).
 
-**Do NOT proceed to Step 4 until `valid == true` and `has_critical_warnings == false`.** If `has_critical_warnings` is true, investigate the flagged warnings (these signal likely data errors such as wrong periodicity or implausible magnitudes) and correct `inputs.json` before dispatching sub-agents. Non-critical warnings are informational and do not block.
+**Do NOT proceed to Step 4 until `valid == true` and `has_critical_warnings == false`.** If `has_critical_warnings` is true, investigate the flagged warnings (these signal likely data errors such as wrong periodicity or implausible magnitudes) and correct `inputs.json` before dispatching sub-agents. If investigation confirms the data is correct (e.g., enterprise SaaS with lumpy deal flow), record the override in `metadata.warning_overrides` (see `schema-inputs.md`) and proceed. Non-critical warnings are informational and do not block.
 
 Additional manual checks:
 - **Cash balance missing?** If `cash.current_balance` is null but burn rate is known, use the value collected in Step 1. If the founder didn't provide it in Step 1, proceed without it — the runway analysis will flag the gap, and coaching commentary should note that cash balance is needed for a complete picture.
@@ -223,7 +229,7 @@ cat <<'CHECK_EOF' | python3 "$SCRIPTS/checklist.py" --pretty -o "$REVIEW_DIR/che
 {"items": [
   {"id": "...", "status": "pass", "evidence": "...", "notes": null},
   ...all 46 items...
-], "company": {...from inputs.json...}}
+], "company": {...from inputs.json...}, "metadata": {...from inputs.json if present...}}
 CHECK_EOF
 ```
 
@@ -251,6 +257,8 @@ If `runway.py` produces minimal output (< 500 bytes) due to missing `cash_balanc
 **Graceful degradation:** If Task tool is unavailable, run Steps 4-6 sequentially in the main agent.
 
 After both sub-agents return, share a brief coaching update with the founder before proceeding to Step 7.
+
+After both sub-agents return, verify that `$REVIEW_DIR` contains fresh `checklist.json`, `unit_economics.json`, and `runway.json`. If any are missing, the corresponding sub-agent failed — re-run it before proceeding.
 
 **Post-dispatch corrections:** If `inputs.json` is corrected after sub-agents have completed (e.g., due to data errors discovered during report composition), re-run only the sub-agents whose outputs reference the corrected values. Single re-runs are permitted — the parallel dispatch mandate applies to the initial launch, not to error recovery.
 

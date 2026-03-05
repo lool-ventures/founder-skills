@@ -32,6 +32,7 @@ WARNING_SEVERITY: dict[str, str] = {
     # High severity -- agent must fix before presenting report
     "CORRUPT_ARTIFACT": "high",
     "MISSING_ARTIFACT": "high",
+    "STALE_ARTIFACT": "high",
     # Checklist failures are review findings, not data errors — present, don't block
     "CHECKLIST_FAILURES": "medium",
     # Low severity -- informational
@@ -49,6 +50,7 @@ OPTIONAL_ARTIFACTS = ["model_data.json"]
 WARNING_LABELS: dict[str, str] = {
     "CORRUPT_ARTIFACT": "Corrupt Artifact",
     "MISSING_ARTIFACT": "Missing Artifact",
+    "STALE_ARTIFACT": "Stale Artifact",
     "CHECKLIST_FAILURES": "Checklist Failures",
     "MISSING_OPTIONAL_ARTIFACT": "Missing Optional Artifact",
     "CHECKLIST_INCOMPLETE": "Checklist Incomplete",
@@ -192,6 +194,26 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             warnings.append(_warn("CORRUPT_ARTIFACT", f"Artifact has invalid JSON: {name}"))
         elif data is None:
             warnings.append(_warn("MISSING_ARTIFACT", f"Required artifact missing: {name}"))
+
+    # 1b. STALE_ARTIFACT -- run_id mismatch across artifacts
+    run_ids: dict[str, str] = {}
+    for name in REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS:
+        data = artifacts.get(name)
+        if _usable(data):
+            assert data is not None  # for type narrowing
+            rid = _as_dict(data.get("metadata")).get("run_id")
+            if isinstance(rid, str) and rid:
+                run_ids[name] = rid
+    if len(run_ids) >= 2:
+        unique_ids = set(run_ids.values())
+        if len(unique_ids) > 1:
+            mismatched = [f"{n} ({rid})" for n, rid in run_ids.items()]
+            warnings.append(
+                _warn(
+                    "STALE_ARTIFACT",
+                    f"Run ID mismatch across artifacts — possible stale data: {', '.join(mismatched)}",
+                )
+            )
 
     # 2. CORRUPT_ARTIFACT / MISSING_OPTIONAL_ARTIFACT -- optional artifacts
     for name in OPTIONAL_ARTIFACTS:
@@ -612,6 +634,26 @@ def _section_model_completeness(
     return "\n".join(lines) + "\n"
 
 
+def _section_overrides(inputs: dict[str, Any] | None) -> str:
+    """Warning overrides section for audit transparency."""
+    if inputs is None:
+        return ""
+    overrides = _as_list(_as_dict(inputs.get("metadata")).get("warning_overrides"))
+    if not overrides:
+        return ""
+
+    lines = ["## Acknowledged Warnings\n"]
+    lines.append("The following validation warnings were reviewed and acknowledged:\n")
+    for o in overrides:
+        if not isinstance(o, dict):
+            continue
+        code = o.get("code", "?")
+        reason = o.get("reason", "No reason provided")
+        reviewer = o.get("reviewed_by", "unknown")
+        lines.append(f"- **{_humanize_warning(code)}** (`{code}`): {_md_safe(reason)} *(reviewed by {reviewer})*")
+    return "\n".join(lines) + "\n"
+
+
 def _section_warnings(warnings: list[dict[str, str]]) -> str:
     """Validation warnings section."""
     if not warnings:
@@ -663,6 +705,7 @@ def compose(dir_path: str) -> dict[str, Any]:
         _section_model_completeness(inputs, checklist),
         _section_unit_economics(unit_economics),
         _section_runway(runway),
+        _section_overrides(inputs),
         _section_warnings(warnings),
     ]
 

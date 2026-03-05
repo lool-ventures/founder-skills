@@ -146,6 +146,48 @@ def _validate_structural(
                 }
             )
 
+    # --- warning_overrides structural validation ---
+    metadata = inputs.get("metadata")
+    if isinstance(metadata, dict):
+        overrides = metadata.get("warning_overrides")
+        if isinstance(overrides, list):
+            _REQUIRED_OVERRIDE_KEYS = {"code", "reason", "reviewed_by", "timestamp"}
+            _VALID_REVIEWERS = {"agent", "founder"}
+            for i, entry in enumerate(overrides):
+                if not isinstance(entry, dict):
+                    errors.append(
+                        {
+                            "code": "OVERRIDE_MALFORMED",
+                            "message": f"metadata.warning_overrides[{i}] must be an object",
+                            "field": f"metadata.warning_overrides[{i}]",
+                            "layer": 1,
+                        }
+                    )
+                    continue
+                missing = _REQUIRED_OVERRIDE_KEYS - set(entry.keys())
+                if missing:
+                    errors.append(
+                        {
+                            "code": "OVERRIDE_MISSING_KEYS",
+                            "message": f"metadata.warning_overrides[{i}] missing required keys: {sorted(missing)}",
+                            "field": f"metadata.warning_overrides[{i}]",
+                            "layer": 1,
+                        }
+                    )
+                reviewer = entry.get("reviewed_by")
+                if isinstance(reviewer, str) and reviewer not in _VALID_REVIEWERS:
+                    errors.append(
+                        {
+                            "code": "OVERRIDE_INVALID_REVIEWER",
+                            "message": (
+                                f"metadata.warning_overrides[{i}].reviewed_by must be "
+                                f"'agent' or 'founder', got '{reviewer}'"
+                            ),
+                            "field": f"metadata.warning_overrides[{i}].reviewed_by",
+                            "layer": 1,
+                        }
+                    )
+
     return errors, warnings, fixes
 
 
@@ -279,22 +321,67 @@ def _validate_sanity(inputs: dict[str, Any]) -> list[dict[str, Any]]:
             )
 
     # Burn multiple sanity (data-error detector — checklist scores the metric)
-    if (
-        isinstance(burn, (int, float))
-        and isinstance(mrr, (int, float))
-        and isinstance(growth, (int, float))
-        and growth > 0
-        and mrr > 0
-    ):
-        net_new_arr = mrr * growth * 12
-        if net_new_arr > 0:
+    # Prefer time-series net new ARR over growth-rate shortcut to avoid
+    # false positives for enterprise SaaS with lumpy deal flow.
+    _ts_net_new_arr: float | None = None
+    _bm_method = ""
+    revenue = inputs.get("revenue")
+    if isinstance(revenue, dict):
+        monthly = revenue.get("monthly")
+        if isinstance(monthly, list) and len(monthly) >= 12:
+            sorted_m = sorted(monthly, key=lambda e: e.get("month", ""))
+            lookback = -13 if len(sorted_m) >= 13 else 0
+
+            def _arr_val(entry: dict[str, Any]) -> float | None:
+                a = entry.get("arr")
+                if isinstance(a, (int, float)):
+                    return float(a)
+                t = entry.get("total")
+                if isinstance(t, (int, float)):
+                    return float(t) * 12
+                return None
+
+            latest = _arr_val(sorted_m[-1])
+            earliest = _arr_val(sorted_m[lookback])
+            if latest is not None and earliest is not None and latest > earliest:
+                _ts_net_new_arr = latest - earliest
+                _bm_method = "TTM"
+        if _ts_net_new_arr is None:
+            quarterly = revenue.get("quarterly")
+            if isinstance(quarterly, list) and len(quarterly) >= 4:
+                sorted_q = sorted(quarterly, key=lambda e: e.get("quarter", ""))
+                q_lookback = -5 if len(sorted_q) >= 5 else 0
+
+                def _arr_val_q(entry: dict[str, Any]) -> float | None:
+                    a = entry.get("arr")
+                    if isinstance(a, (int, float)):
+                        return float(a)
+                    t = entry.get("total")
+                    if isinstance(t, (int, float)):
+                        return float(t) * 4
+                    return None
+
+                q_latest = _arr_val_q(sorted_q[-1])
+                q_earliest = _arr_val_q(sorted_q[q_lookback])
+                if q_latest is not None and q_earliest is not None and q_latest > q_earliest:
+                    _ts_net_new_arr = q_latest - q_earliest
+                    _bm_method = "YoY quarterly"
+
+    if isinstance(burn, (int, float)) and burn > 0:
+        net_new_arr: float | None = None
+        if _ts_net_new_arr is not None and _ts_net_new_arr > 0:
+            net_new_arr = _ts_net_new_arr
+        elif isinstance(mrr, (int, float)) and isinstance(growth, (int, float)) and growth > 0 and mrr > 0:
+            net_new_arr = mrr * growth * 12
+            _bm_method = "growth-rate estimate"
+        if net_new_arr is not None and net_new_arr > 0:
             burn_multiple = (burn * 12) / net_new_arr
             if burn_multiple > 10:
                 warnings.append(
                     {
                         "code": "BURN_MULTIPLE_SUSPECT",
                         "message": (
-                            f"Burn multiple ({burn_multiple:.0f}x) exceeds 10x "
+                            f"Burn multiple ({burn_multiple:.0f}x, {_bm_method}) exceeds 10x "
                             "— likely data error rather than poor unit economics."
                         ),
                         "field": "cash.monthly_net_burn",

@@ -854,6 +854,11 @@ def main() -> None:
     else:
         result["validation"] = {"status": "valid", "errors": []}
 
+    # Propagate run_id from input metadata into output for stale-artifact detection
+    _input_metadata = data.get("metadata") or (data.get("inputs") or {}).get("metadata")
+    if isinstance(_input_metadata, dict) and isinstance(_input_metadata.get("run_id"), str):
+        result.setdefault("metadata", {})["run_id"] = _input_metadata["run_id"]
+
     out = json.dumps(result, indent=indent) + "\n"
     s = result["summary"]
     summary = {"score_pct": s["score_pct"], "pass": s["pass"], "fail": s["fail"]} if s else {}
