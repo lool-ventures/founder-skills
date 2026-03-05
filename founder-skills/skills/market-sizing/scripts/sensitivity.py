@@ -88,29 +88,136 @@ def fmt(v: float) -> float:
     return round(v, 2)
 
 
+def _validate_config(data: dict[str, Any]) -> tuple[str, dict[str, float], dict[str, dict[str, float]], list[str]]:
+    """Validate sensitivity config. Returns (approach, base_params, ranges, errors).
+
+    Consolidates all validation from main() and run_sensitivity() into one pass.
+    """
+    errors: list[str] = []
+
+    # Validate 'base' key
+    if "base" not in data:
+        errors.append("Missing required key: 'base'")
+        return "", {}, {}, errors
+
+    if not isinstance(data["base"], dict):
+        errors.append(f"'base' must be an object (got {type(data['base']).__name__})")
+        return "", {}, {}, errors
+
+    if "ranges" in data and not isinstance(data["ranges"], dict):
+        errors.append(f"'ranges' must be an object (got {type(data['ranges']).__name__})")
+        return "", {}, {}, errors
+
+    # Normalize approach
+    approach = data.get("approach", "bottom_up").replace("-", "_")
+    if approach not in VALID_APPROACHES:
+        errors.append(f"approach must be one of {sorted(VALID_APPROACHES)} (got '{approach}')")
+        return approach, {}, {}, errors
+
+    base_params = data["base"]
+    ranges = data.get("ranges", {})
+
+    if not ranges:
+        errors.append("'ranges' is required with at least one parameter to vary")
+
+    # Validate required fields per approach
+    if approach == "both":
+        required = REQUIRED_FIELDS["bottom_up"] | REQUIRED_FIELDS["top_down"]
+    else:
+        required = REQUIRED_FIELDS.get(approach, set())
+    missing = required - set(base_params.keys())
+    if missing:
+        errors.append(f"approach '{approach}' requires these fields in 'base': {sorted(missing)}")
+
+    # Coerce all base_params values to float
+    coerce_ok = True
+    for key in list(base_params.keys()):
+        val = base_params[key]
+        try:
+            base_params[key] = float(val)
+        except (TypeError, ValueError):
+            errors.append(f"base.{key} must be numeric (got {val!r})")
+            coerce_ok = False
+
+    if coerce_ok:
+        # customer_count must be a whole number
+        if "customer_count" in base_params:
+            cc = base_params["customer_count"]
+            if cc != int(cc):
+                errors.append(f"base.customer_count must be a whole number (got {cc})")
+
+        # Validate base percentage params are in [0, 100]
+        for key in PCT_PARAMS & set(base_params.keys()):
+            val = base_params[key]
+            if val < 0 or val > 100:
+                errors.append(f"base.{key} must be between 0 and 100 (got {val})")
+
+        # Validate base non-negative params
+        for key in set(base_params.keys()) - PCT_PARAMS:
+            if base_params[key] < 0:
+                errors.append(f"base.{key} cannot be negative (got {base_params[key]})")
+
+    # Determine relevant params for single-approach mode
+    if approach == "both":
+        relevant_params = TD_PARAMS | BU_PARAMS
+    elif approach in REQUIRED_FIELDS:
+        relevant_params = TD_PARAMS if approach == "top_down" else BU_PARAMS
+    else:
+        relevant_params = set()
+
+    # Validate and coerce range specs (only for relevant params)
+    relevant_range_count = 0
+    for param_name, range_spec in ranges.items():
+        if param_name not in relevant_params:
+            # Irrelevant params will be filtered with warnings in run_sensitivity()
+            continue
+        relevant_range_count += 1
+
+        if not isinstance(range_spec, dict):
+            errors.append(f"range for '{param_name}' must be an object (got {type(range_spec).__name__})")
+            continue
+
+        # Check required keys
+        for required_key in ("low_pct", "high_pct"):
+            if required_key not in range_spec:
+                errors.append(f"range for '{param_name}' missing '{required_key}'")
+
+        # Coerce pct values to float
+        for pct_key in ("low_pct", "high_pct"):
+            if pct_key in range_spec:
+                val = range_spec[pct_key]
+                try:
+                    range_spec[pct_key] = float(val)
+                except (TypeError, ValueError):
+                    errors.append(f"ranges.{param_name}.{pct_key} must be numeric (got {val!r})")
+
+        # Validate range key exists in base params
+        if param_name not in base_params:
+            errors.append(f"range key '{param_name}' not found in base params (available: {list(base_params.keys())})")
+
+        # Validate confidence level
+        raw_confidence = range_spec.get("confidence")
+        if raw_confidence is not None:
+            confidence = str(raw_confidence)
+            if confidence not in CONFIDENCE_MIN_RANGE:
+                errors.append(f"confidence must be one of {list(CONFIDENCE_MIN_RANGE)} (got '{confidence}')")
+
+    # Check relevance for single-approach mode
+    if not errors and approach != "both" and ranges and relevant_range_count == 0:
+        errors.append(f"no relevant parameters for {approach} approach")
+
+    return approach, base_params, ranges, errors
+
+
 def run_sensitivity(
     approach: str,
     base_params: dict[str, float],
     ranges: dict[str, dict[str, float]],
 ) -> dict[str, Any]:
-    """Run sensitivity analysis by varying each parameter independently."""
-    if approach not in VALID_APPROACHES:
-        print(
-            f"Error: approach must be one of {VALID_APPROACHES} (got '{approach}')",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    """Run sensitivity analysis by varying each parameter independently.
 
-    if approach == "both":
-        all_required = BU_PARAMS | TD_PARAMS
-        missing = all_required - set(base_params.keys())
-        if missing:
-            print(
-                f"Error: approach 'both' requires all 7 params in 'base': {sorted(missing)}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
+    Assumes inputs are pre-validated by _validate_config().
+    """
     if approach == "both":
         td_base = {k: base_params[k] for k in TD_PARAMS}
         bu_base = {k: base_params[k] for k in BU_PARAMS}
@@ -128,27 +235,11 @@ def run_sensitivity(
         for key in sorted(filtered_keys):
             print(f"Warning: ignoring '{key}' — not relevant for {approach} approach", file=sys.stderr)
         ranges = {k: v for k, v in ranges.items() if k in relevant_params}
-        if not ranges:
-            print(f"Error: no relevant parameters for {approach} approach", file=sys.stderr)
-            sys.exit(1)
 
     scenarios: list[dict[str, Any]] = []
     sensitivity_ranking: list[dict[str, Any]] = []
 
     for param_name, range_spec in ranges.items():
-        if not isinstance(range_spec, dict):
-            print(
-                f"Error: range for '{param_name}' must be an object (got {type(range_spec).__name__})",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        if param_name not in base_params:
-            print(
-                f"Error: range key '{param_name}' not found in base params (available: {list(base_params.keys())})",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
         # For "both" approach, determine which sub-approach this param belongs to
         if approach == "both":
             if param_name in TD_PARAMS:
@@ -156,12 +247,7 @@ def run_sensitivity(
             elif param_name in BU_PARAMS:
                 param_approach = "bottom_up"
             else:
-                print(
-                    f"Error: Range parameter '{param_name}' does not belong to either approach. "
-                    f"Top-down params: {TD_PARAMS}. Bottom-up params: {BU_PARAMS}.",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
+                continue
             calc = calc_top_down if param_approach == "top_down" else calc_bottom_up
             calc_base_params = td_base if param_approach == "top_down" else bu_base
             calc_base_result: dict[str, Any] = base_result_td if param_approach == "top_down" else base_result_bu
@@ -169,13 +255,6 @@ def run_sensitivity(
             param_approach = approach
             calc_base_params = base_params
             calc_base_result = base_result
-        for required_key in ("low_pct", "high_pct"):
-            if required_key not in range_spec:
-                print(
-                    f"Error: range for '{param_name}' missing '{required_key}'",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
 
         low_pct = range_spec["low_pct"]
         high_pct = range_spec["high_pct"]
@@ -187,12 +266,6 @@ def run_sensitivity(
             confidence = "sourced"
         else:
             confidence = str(raw_confidence)
-        if confidence not in CONFIDENCE_MIN_RANGE:
-            print(
-                f"Error: confidence must be one of {list(CONFIDENCE_MIN_RANGE)} (got '{confidence}')",
-                file=sys.stderr,
-            )
-            sys.exit(1)
         min_range = CONFIDENCE_MIN_RANGE[confidence]
         original_low_pct = low_pct
         original_high_pct = high_pct
@@ -317,7 +390,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    indent = 2 if args.pretty else None
 
+    # --- Infrastructure checks (sys.exit(1)) ---
     if sys.stdin.isatty():
         print("Error: pipe JSON input via stdin", file=sys.stderr)
         print("Example: echo '{...}' | python sensitivity.py --pretty", file=sys.stderr)
@@ -329,95 +404,19 @@ def main() -> None:
         print(f"Error: invalid JSON input: {e}", file=sys.stderr)
         sys.exit(1)
 
-    if not isinstance(data, dict) or "base" not in data:
-        print("Error: JSON must be an object with a 'base' key", file=sys.stderr)
+    if not isinstance(data, dict):
+        print("Error: JSON must be an object", file=sys.stderr)
         sys.exit(1)
 
-    if not isinstance(data["base"], dict):
-        print("Error: 'base' must be an object (got {})".format(type(data["base"]).__name__), file=sys.stderr)
-        sys.exit(1)
+    # --- Validation (JSON error dict, exit 0) ---
+    approach, base_params, ranges, errors = _validate_config(data)
 
-    if "ranges" in data and not isinstance(data["ranges"], dict):
-        print("Error: 'ranges' must be an object (got {})".format(type(data["ranges"]).__name__), file=sys.stderr)
-        sys.exit(1)
-
-    # Normalize approach: accept both hyphens and underscores
-    approach = data.get("approach", "bottom_up").replace("-", "_")
-    base_params = data["base"]
-    ranges = data.get("ranges", {})
-
-    if not ranges:
-        print("Error: 'ranges' is required with at least one parameter to vary", file=sys.stderr)
-        sys.exit(1)
-
-    # Validate required fields per approach
-    if approach == "both":
-        required = REQUIRED_FIELDS["bottom_up"] | REQUIRED_FIELDS["top_down"]
+    if errors:
+        result: dict[str, Any] = {"validation": {"status": "invalid", "errors": errors}}
     else:
-        required = REQUIRED_FIELDS.get(approach, set())
-    missing = required - set(base_params.keys())
-    if missing:
-        print(
-            f"Error: approach '{approach}' requires these fields in 'base': {sorted(missing)}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        result = run_sensitivity(approach, base_params, ranges)
+        result["validation"] = {"status": "valid", "errors": []}
 
-    # Coerce all base_params values to float (JSON may have strings)
-    for key in list(base_params.keys()):
-        val = base_params[key]
-        try:
-            base_params[key] = float(val)
-        except (TypeError, ValueError):
-            print(f"Error: base.{key} must be numeric (got {val!r})", file=sys.stderr)
-            sys.exit(1)
-
-    # customer_count must be a whole number
-    if "customer_count" in base_params:
-        cc = base_params["customer_count"]
-        if cc != int(cc):
-            print(f"Error: base.customer_count must be a whole number (got {cc})", file=sys.stderr)
-            sys.exit(1)
-
-    # Validate base percentage params are in [0, 100]
-    for key in PCT_PARAMS & set(base_params.keys()):
-        val = base_params[key]
-        if val < 0 or val > 100:
-            print(
-                f"Error: base.{key} must be between 0 and 100 (got {val})",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
-    # Validate base non-negative params
-    for key in set(base_params.keys()) - PCT_PARAMS:
-        if base_params[key] < 0:
-            print(f"Error: base.{key} cannot be negative (got {base_params[key]})", file=sys.stderr)
-            sys.exit(1)
-
-    # Coerce range percentages to float
-    for param_name, range_spec in ranges.items():
-        if not isinstance(range_spec, dict):
-            print(
-                f"Error: range for '{param_name}' must be an object (got {type(range_spec).__name__})",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        for pct_key in ("low_pct", "high_pct"):
-            if pct_key in range_spec:
-                val = range_spec[pct_key]
-                try:
-                    range_spec[pct_key] = float(val)
-                except (TypeError, ValueError):
-                    print(
-                        f"Error: ranges.{param_name}.{pct_key} must be numeric (got {val!r})",
-                        file=sys.stderr,
-                    )
-                    sys.exit(1)
-
-    result = run_sensitivity(approach, base_params, ranges)
-
-    indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"
     _write_output(
         out,

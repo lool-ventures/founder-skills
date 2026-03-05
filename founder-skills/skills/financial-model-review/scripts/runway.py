@@ -729,13 +729,14 @@ def main() -> None:
         print("Error: JSON input must be an object", file=sys.stderr)
         sys.exit(1)
 
+    indent = 2 if args.pretty else None
+
     if "company" not in data:
-        print("Error: 'company' key is required", file=sys.stderr)
-        sys.exit(1)
+        result: dict[str, Any] = {"validation": {"status": "invalid", "errors": ["Missing required key: 'company'"]}}
+        _write_output(json.dumps(result, indent=indent) + "\n", args.output)
+        return
 
     result = _compute_runway(data)
-
-    indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"
     scenarios = result.get("scenarios", [])
     base_s = next((s for s in scenarios if s["name"] == "base"), None)

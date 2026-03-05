@@ -211,50 +211,59 @@ def test_checklist_by_category() -> None:
     assert nf.get("warn") == 1
 
 
+def _assert_validation_errors(data: dict | None, *fragments: str) -> None:
+    """Assert data has validation.status == 'invalid' and errors contain all fragments."""
+    assert data is not None, "expected JSON output with validation errors"
+    assert data["validation"]["status"] == "invalid"
+    joined = " ".join(data["validation"]["errors"]).lower()
+    for frag in fragments:
+        assert frag.lower() in joined, f"expected '{frag}' in validation errors: {data['validation']['errors']}"
+
+
 def test_checklist_missing_items() -> None:
-    """Only 32 items -- should exit 1."""
+    """Only 32 items -- should produce validation error."""
     items = _make_checklist_items(exclude=["data_room_ready", "contact_info_present", "numbers_consistent"])
     payload = json.dumps({"items": items})
-    rc, _, stderr = run_script("checklist.py", [], stdin_data=payload)
-    assert rc == 1
-    assert "missing" in stderr.lower()
+    rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "missing")
 
 
 def test_checklist_duplicate_id() -> None:
-    """36 items with a duplicate -- should exit 1."""
+    """36 items with a duplicate -- should produce validation error."""
     items = _make_checklist_items()
     items.append({"id": "purpose_clear", "status": "pass", "evidence": "dup", "notes": None})
     payload = json.dumps({"items": items})
-    rc, _, stderr = run_script("checklist.py", [], stdin_data=payload)
-    assert rc == 1
-    assert "duplicate" in stderr.lower()
+    rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "duplicate")
 
 
 def test_checklist_unknown_id() -> None:
-    """Unknown ID -- should exit 1."""
+    """Unknown ID -- should produce validation error."""
     items = _make_checklist_items()
     items[0] = {"id": "bogus_criterion", "status": "pass", "evidence": "test", "notes": None}
     payload = json.dumps({"items": items})
-    rc, _, stderr = run_script("checklist.py", [], stdin_data=payload)
-    assert rc == 1
-    assert "unknown" in stderr.lower()
+    rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "unknown")
 
 
 def test_checklist_invalid_status() -> None:
-    """Status 'maybe' -- should exit 1."""
+    """Status 'maybe' -- should produce validation error."""
     overrides = {"purpose_clear": {"status": "maybe", "evidence": "test", "notes": None}}
     payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
-    rc, _, stderr = run_script("checklist.py", [], stdin_data=payload)
-    assert rc == 1
-    assert "invalid" in stderr.lower() or "must be one of" in stderr.lower()
+    rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "invalid")
 
 
 def test_checklist_non_dict_item() -> None:
-    """Non-dict item in checklist items array -> exit 1."""
+    """Non-dict item in checklist items array -> validation error."""
     payload = json.dumps({"items": ["not_a_dict"]})
-    rc, _, stderr = run_script("checklist.py", [], stdin_data=payload)
-    assert rc == 1
-    assert "must be an object" in stderr
+    rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "must be an object")
 
 
 def test_checklist_output_flag() -> None:

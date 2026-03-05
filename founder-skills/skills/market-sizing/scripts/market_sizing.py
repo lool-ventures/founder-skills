@@ -60,49 +60,42 @@ def fmt(value: float) -> float:
     return round(value, 2)
 
 
-def validate_pct(name: str, value: float) -> None:
-    """Validate percentage inputs (must be 0-100 for subset percentages)."""
+def validate_pct(name: str, value: float) -> str | None:
+    """Validate percentage inputs (must be 0-100). Returns error message or None."""
     if value < 0:
-        print(f"Error: {name} cannot be negative (got {value})", file=sys.stderr)
-        sys.exit(1)
+        return f"{name} cannot be negative (got {value})"
     if value > 100:
-        print(f"Error: {name} cannot exceed 100% (got {value}%)", file=sys.stderr)
-        sys.exit(1)
+        return f"{name} cannot exceed 100% (got {value}%)"
+    return None
 
 
-def validate_positive(name: str, value: float) -> None:
-    """Validate positive numeric inputs."""
+def validate_positive(name: str, value: float) -> str | None:
+    """Validate positive numeric inputs. Returns error message or None."""
     if value <= 0:
-        print(f"Error: {name} must be positive (> 0) (got {value})", file=sys.stderr)
-        sys.exit(1)
+        return f"{name} must be positive (> 0) (got {value})"
+    return None
 
 
-def coerce_float(name: str, value: Any) -> float:
-    """Coerce a JSON value to float, with a clear error if it can't be converted."""
+def coerce_float(name: str, value: Any) -> tuple[float, str | None]:
+    """Coerce a JSON value to float. Returns (value, error_or_None)."""
     try:
-        return float(value)
+        return float(value), None
     except (TypeError, ValueError):
-        print(f"Error: {name} must be numeric (got {value!r})", file=sys.stderr)
-        sys.exit(1)
+        return 0.0, f"{name} must be numeric (got {value!r})"
 
 
-def coerce_int(name: str, value: Any) -> int:
-    """Coerce a JSON value to int, with a clear error if it can't be converted.
+def coerce_int(name: str, value: Any) -> tuple[int, str | None]:
+    """Coerce a JSON value to int. Returns (value, error_or_None).
 
     Rejects non-integer floats like 3.9 to avoid silent truncation.
     """
     try:
         f = float(value)
     except (TypeError, ValueError):
-        print(f"Error: {name} must be numeric (got {value!r})", file=sys.stderr)
-        sys.exit(1)
+        return 0, f"{name} must be numeric (got {value!r})"
     if f != int(f):
-        print(
-            f"Error: {name} must be a whole number (got {value!r})",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    return int(f)
+        return 0, f"{name} must be a whole number (got {value!r})"
+    return int(f), None
 
 
 def top_down(
@@ -113,20 +106,12 @@ def top_down(
     years: int = 0,
 ) -> dict[str, Any]:
     """Top-down market sizing: start from industry total, narrow down."""
-    validate_positive("industry_total", industry_total)
-    validate_pct("segment_pct", segment_pct)
-    validate_pct("share_pct", share_pct)
     seg = segment_pct / 100
     shr = share_pct / 100
 
     tam = industry_total
     sam = tam * seg
     som = sam * shr
-
-    # Validate growth rate floor
-    if growth_rate is not None and growth_rate < -100:
-        print(f"Error: growth_rate cannot be below -100% (got {growth_rate}%)", file=sys.stderr)
-        sys.exit(1)
 
     # Apply growth if specified
     if years < 0:
@@ -189,10 +174,6 @@ def bottom_up(
     years: int = 0,
 ) -> dict[str, Any]:
     """Bottom-up market sizing: start from customers and pricing."""
-    validate_positive("customer_count", customer_count)
-    validate_positive("arpu", arpu)
-    validate_pct("serviceable_pct", serviceable_pct)
-    validate_pct("target_pct", target_pct)
     svc = serviceable_pct / 100
     tgt = target_pct / 100
 
@@ -230,10 +211,6 @@ def bottom_up(
             },
         },
     }
-
-    if growth_rate is not None and growth_rate < -100:
-        print(f"Error: growth_rate cannot be below -100% (got {growth_rate}%)", file=sys.stderr)
-        sys.exit(1)
 
     if years < 0:
         print(f"Warning: years is negative ({years}), ignoring growth projection", file=sys.stderr)
@@ -284,6 +261,152 @@ def compare(td: dict[str, Any], bu: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _validate_inputs(
+    data: dict[str, Any] | None,
+    args: argparse.Namespace,
+    approach: str,
+) -> tuple[dict[str, Any], list[str]]:
+    """Validate and parse all inputs. Returns (parsed, errors).
+
+    Handles coercion (stdin strings → numeric) and range validation.
+    """
+    errors: list[str] = []
+    parsed: dict[str, Any] = {}
+
+    if not isinstance(args.currency, str) or not args.currency.strip():
+        errors.append("currency must be a non-empty string")
+
+    if approach in ("top-down", "both"):
+        if data is not None:
+            it = data.get("industry_total")
+            sp = data.get("segment_pct")
+            shp = data.get("share_pct")
+            gr = data.get("growth_rate")
+            yr = data.get("years", 0)
+        else:
+            it, sp, shp = args.industry_total, args.segment_pct, args.share_pct
+            gr, yr = args.growth_rate, args.years
+
+        if it is None or sp is None or shp is None:
+            missing = [k for k, v in [("industry_total", it), ("segment_pct", sp), ("share_pct", shp)] if v is None]
+            if data is not None:
+                errors.append(f"top-down requires JSON keys: {', '.join(missing)}")
+            else:
+                errors.append("top-down requires --industry-total, --segment-pct, --share-pct")
+        else:
+            # Coerce JSON string values to numeric types
+            td_ok = True
+            if data is not None:
+                it, err = coerce_float("industry_total", it)
+                if err:
+                    errors.append(err)
+                    td_ok = False
+                sp, err = coerce_float("segment_pct", sp)
+                if err:
+                    errors.append(err)
+                    td_ok = False
+                shp, err = coerce_float("share_pct", shp)
+                if err:
+                    errors.append(err)
+                    td_ok = False
+                if gr is not None:
+                    gr, err = coerce_float("growth_rate", gr)
+                    if err:
+                        errors.append(err)
+                        td_ok = False
+                yr, err = coerce_int("years", yr)
+                if err:
+                    errors.append(err)
+                    td_ok = False
+
+            # Validate ranges only if coercion succeeded
+            if td_ok:
+                err = validate_positive("industry_total", it)
+                if err:
+                    errors.append(err)
+                err = validate_pct("segment_pct", sp)
+                if err:
+                    errors.append(err)
+                err = validate_pct("share_pct", shp)
+                if err:
+                    errors.append(err)
+                if gr is not None and gr < -100:
+                    errors.append(f"growth_rate cannot be below -100% (got {gr}%)")
+
+            parsed["td"] = (it, sp, shp, gr, yr)
+
+    if approach in ("bottom-up", "both"):
+        if data is not None:
+            cc = data.get("customer_count")
+            arpu = data.get("arpu")
+            svcp = data.get("serviceable_pct")
+            tgtp = data.get("target_pct")
+            gr = data.get("growth_rate")
+            yr = data.get("years", 0)
+        else:
+            cc, arpu = args.customer_count, args.arpu
+            svcp, tgtp = args.serviceable_pct, args.target_pct
+            gr, yr = args.growth_rate, args.years
+
+        if cc is None or arpu is None or svcp is None or tgtp is None:
+            pairs = [("customer_count", cc), ("arpu", arpu), ("serviceable_pct", svcp), ("target_pct", tgtp)]
+            missing = [k for k, v in pairs if v is None]
+            if data is not None:
+                errors.append(f"bottom-up requires JSON keys: {', '.join(missing)}")
+            else:
+                errors.append("bottom-up requires --customer-count, --arpu, --serviceable-pct, --target-pct")
+        else:
+            # Coerce JSON string values to numeric types
+            bu_ok = True
+            if data is not None:
+                cc, err = coerce_int("customer_count", cc)
+                if err:
+                    errors.append(err)
+                    bu_ok = False
+                arpu, err = coerce_float("arpu", arpu)
+                if err:
+                    errors.append(err)
+                    bu_ok = False
+                svcp, err = coerce_float("serviceable_pct", svcp)
+                if err:
+                    errors.append(err)
+                    bu_ok = False
+                tgtp, err = coerce_float("target_pct", tgtp)
+                if err:
+                    errors.append(err)
+                    bu_ok = False
+                if gr is not None:
+                    gr, err = coerce_float("growth_rate", gr)
+                    if err:
+                        errors.append(err)
+                        bu_ok = False
+                yr, err = coerce_int("years", yr)
+                if err:
+                    errors.append(err)
+                    bu_ok = False
+
+            # Validate ranges only if coercion succeeded
+            if bu_ok:
+                err = validate_positive("customer_count", cc)
+                if err:
+                    errors.append(err)
+                err = validate_positive("arpu", arpu)
+                if err:
+                    errors.append(err)
+                err = validate_pct("serviceable_pct", svcp)
+                if err:
+                    errors.append(err)
+                err = validate_pct("target_pct", tgtp)
+                if err:
+                    errors.append(err)
+                if gr is not None and gr < -100:
+                    errors.append(f"growth_rate cannot be below -100% (got {gr}%)")
+
+            parsed["bu"] = (cc, arpu, svcp, tgtp, gr, yr)
+
+    return parsed, errors
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="TAM/SAM/SOM market sizing calculator")
     p.add_argument(
@@ -319,8 +442,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    indent = 2 if args.pretty else None
 
     if args.stdin:
+        # --- Infrastructure checks (sys.exit(1)) ---
         try:
             data = json.load(sys.stdin)
         except json.JSONDecodeError as e:
@@ -329,10 +454,18 @@ def main() -> None:
         if not isinstance(data, dict):
             print("Error: JSON input must be an object", file=sys.stderr)
             sys.exit(1)
+
+        # --- Validation starts here (JSON error dict, exit 0) ---
         raw_approach = data.get("approach", "both")
         if not isinstance(raw_approach, str):
-            print(f"Error: approach must be a string (got {type(raw_approach).__name__})", file=sys.stderr)
-            sys.exit(1)
+            result: dict[str, Any] = {
+                "validation": {
+                    "status": "invalid",
+                    "errors": [f"approach must be a string (got {type(raw_approach).__name__})"],
+                }
+            }
+            _write_output(json.dumps(result, indent=indent) + "\n", args.output)
+            return
         approach = raw_approach.replace("_", "-")
     else:
         data = None
@@ -340,87 +473,35 @@ def main() -> None:
 
     valid_approaches = {"top-down", "bottom-up", "both"}
     if approach not in valid_approaches:
-        print(
-            f"Error: approach must be one of {sorted(valid_approaches)} (got '{approach}')",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        result = {
+            "validation": {
+                "status": "invalid",
+                "errors": [f"approach must be one of {sorted(valid_approaches)} (got '{approach}')"],
+            }
+        }
+        _write_output(json.dumps(result, indent=indent) + "\n", args.output)
+        return
 
-    result: dict[str, Any] = {"approach": approach, "currency": args.currency}
+    parsed, errors = _validate_inputs(data, args, approach)
 
-    if not isinstance(args.currency, str) or not args.currency.strip():
-        print("Error: currency must be a non-empty string", file=sys.stderr)
-        sys.exit(1)
+    if errors:
+        result = {"validation": {"status": "invalid", "errors": errors}}
+    else:
+        result = {"approach": approach, "currency": args.currency}
 
-    if approach in ("top-down", "both"):
-        if data is not None:
-            it = data.get("industry_total")
-            sp = data.get("segment_pct")
-            shp = data.get("share_pct")
-            gr = data.get("growth_rate")
-            yr = data.get("years", 0)
-        else:
-            it, sp, shp = args.industry_total, args.segment_pct, args.share_pct
-            gr, yr = args.growth_rate, args.years
+        if approach in ("top-down", "both"):
+            it, sp, shp, gr, yr = parsed["td"]
+            result["top_down"] = top_down(it, sp, shp, gr, yr)
 
-        if it is None or sp is None or shp is None:
-            missing = [k for k, v in [("industry_total", it), ("segment_pct", sp), ("share_pct", shp)] if v is None]
-            if data is not None:
-                print(f"Error: top-down requires JSON keys: {', '.join(missing)}", file=sys.stderr)
-            else:
-                print("Error: top-down requires --industry-total, --segment-pct, --share-pct", file=sys.stderr)
-            sys.exit(1)
+        if approach in ("bottom-up", "both"):
+            cc, arpu_val, svcp, tgtp, gr, yr = parsed["bu"]
+            result["bottom_up"] = bottom_up(cc, arpu_val, svcp, tgtp, gr, yr)
 
-        # Coerce JSON string values to numeric types
-        if data is not None:
-            it = coerce_float("industry_total", it)
-            sp = coerce_float("segment_pct", sp)
-            shp = coerce_float("share_pct", shp)
-            if gr is not None:
-                gr = coerce_float("growth_rate", gr)
-            yr = coerce_int("years", yr)
+        if approach == "both" and "top_down" in result and "bottom_up" in result:
+            result["comparison"] = compare(result["top_down"], result["bottom_up"])
 
-        result["top_down"] = top_down(it, sp, shp, gr, yr)
+        result["validation"] = {"status": "valid", "errors": []}
 
-    if approach in ("bottom-up", "both"):
-        if data is not None:
-            cc = data.get("customer_count")
-            arpu = data.get("arpu")
-            svcp = data.get("serviceable_pct")
-            tgtp = data.get("target_pct")
-            gr = data.get("growth_rate")
-            yr = data.get("years", 0)
-        else:
-            cc, arpu = args.customer_count, args.arpu
-            svcp, tgtp = args.serviceable_pct, args.target_pct
-            gr, yr = args.growth_rate, args.years
-
-        if cc is None or arpu is None or svcp is None or tgtp is None:
-            pairs = [("customer_count", cc), ("arpu", arpu), ("serviceable_pct", svcp), ("target_pct", tgtp)]
-            missing = [k for k, v in pairs if v is None]
-            if data is not None:
-                msg = f"Error: bottom-up requires JSON keys: {', '.join(missing)}"
-            else:
-                msg = "Error: bottom-up requires --customer-count, --arpu, --serviceable-pct, --target-pct"
-            print(msg, file=sys.stderr)
-            sys.exit(1)
-
-        # Coerce JSON string values to numeric types
-        if data is not None:
-            cc = coerce_int("customer_count", cc)
-            arpu = coerce_float("arpu", arpu)
-            svcp = coerce_float("serviceable_pct", svcp)
-            tgtp = coerce_float("target_pct", tgtp)
-            if gr is not None:
-                gr = coerce_float("growth_rate", gr)
-            yr = coerce_int("years", yr)
-
-        result["bottom_up"] = bottom_up(cc, arpu, svcp, tgtp, gr, yr)
-
-    if approach == "both" and "top_down" in result and "bottom_up" in result:
-        result["comparison"] = compare(result["top_down"], result["bottom_up"])
-
-    indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"
     _write_output(out, args.output, summary={"approach": approach})
 

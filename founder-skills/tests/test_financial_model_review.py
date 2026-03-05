@@ -412,19 +412,29 @@ def test_checklist_ai_powered_trait_triggers_sector_40() -> None:
     assert s40["status"] == "fail", "SECTOR_40 should not be auto-gated when ai-powered trait present"
 
 
+def _assert_validation_errors(data: dict | None, *fragments: str) -> None:
+    """Assert data has validation.status == 'invalid' and errors contain all fragments."""
+    assert data is not None, "expected JSON output with validation errors"
+    assert data["validation"]["status"] == "invalid"
+    joined = " ".join(data["validation"]["errors"]).lower()
+    for frag in fragments:
+        assert frag.lower() in joined, f"expected '{frag}' in validation errors: {data['validation']['errors']}"
+
+
 def test_checklist_missing_items() -> None:
     items = _make_checklist_items(exclude={"STRUCT_01", "UNIT_10"})
     payload = json.dumps({"items": items})
-    rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
-    assert rc == 1
-    assert "STRUCT_01" in stderr
+    rc, data, _ = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "STRUCT_01")
 
 
 def test_checklist_invalid_status() -> None:
     items = _make_checklist_items(overrides={"STRUCT_01": {"status": "maybe"}})
     payload = json.dumps({"items": items})
-    rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
-    assert rc == 1
+    rc, data, _ = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "invalid")
 
 
 def test_checklist_by_category() -> None:
