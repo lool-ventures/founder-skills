@@ -117,9 +117,20 @@ python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_R
 
 Three cases based on exit code:
 
-**Exit 0 (found, single context):** Use the company slug and pre-filled fields.
+**Exit 0 (found, single context):** Use the company slug and pre-filled fields. Before proceeding to extraction, ask the founder for current cash balance and date if not already stated in the conversation — this is the #1 cause of incomplete runway analysis. If files are attached, also ask about monthly burn rate unless the conversation already contains it. Batch these into a single message or `AskUserQuestion` call.
 
-**Exit 1 (not found):** Ask the founder for company name, stage, sector, geography. When using `AskUserQuestion`, always provide at least 2 options (the tool requires a minimum of 2). Valid `--stage` values: `pre-seed`, `seed`, `series-a`, `series-b`, `later` (hyphenated, not underscored). Then create:
+**Exit 1 (not found):** Ask the founder for company details AND key financial context in a **single `AskUserQuestion` call** (one interaction = one chance for the UI to render correctly). Gather:
+- Company name, stage, sector, geography (required for context creation)
+- Current cash balance and date (critical for runway — the #1 cause of incomplete reports)
+- Monthly burn rate if not obvious from the provided files
+
+When using `AskUserQuestion`, always provide at least 2 options (the tool requires a minimum of 2). Valid `--stage` values: `pre-seed`, `seed`, `series-a`, `series-b`, `later` (hyphenated, not underscored).
+
+**Why everything upfront:** Extraction sub-agents run in parallel and cannot pause to ask questions. Asking early prevents pipeline stalls.
+
+If the founder provides files (Excel/CSV), still ask about cash balance — extraction may miss or misinterpret values, and having the founder's stated number lets the agent cross-check later.
+
+Then create:
 
 ```bash
 python3 "$SHARED_SCRIPTS/founder_context.py" init \
@@ -136,26 +147,24 @@ If the script prints a `sector_type` warning but exits 0, that's non-fatal — p
 **When Excel (.xlsx) or CSV files are provided,** spawn a `general-purpose` Task sub-agent to handle extraction and input construction. The sub-agent receives: file path, `SCRIPTS`, `REFS`, `SHARED_REFS`, and `REVIEW_DIR` paths. **Do NOT use `isolation: "worktree"`** — files written in a worktree won't appear in the main `$REVIEW_DIR`.
 
 The sub-agent:
-1. Runs `extract_model.py` on the file → `model_data.json`
+1. Runs `extract_model.py --file <path> --pretty -o "$REVIEW_DIR/model_data.json"` (note: `--file`, not positional)
 2. Reads `$REFS/schema-inputs.md` for the JSON schema
 3. Reads `$REFS/data-sufficiency.md` to assess data sufficiency
 4. Constructs `inputs.json` from extracted data, writing it to `$REVIEW_DIR/inputs.json`
 
-Instruct the sub-agent: **Do not run any scripts other than `extract_model.py`. Do not create any files other than `model_data.json` and `inputs.json`.** Before writing `inputs.json`, verify that no numeric field is null when the source data contains a value — null fields cascade into bad downstream outputs (unit economics scores wrong metrics, runway reports infinite runway). Return ONLY: (1) file paths written, (2) company name/stage/sector, (3) `model_format`, (4) data sufficiency verdict (sufficient/insufficient + count of missing critical fields), and (5) any `company.traits` detected — do not echo the full JSON back.
+Instruct the sub-agent: **Do not run any scripts other than `extract_model.py`. Do not create any files other than `model_data.json` and `inputs.json`.** Before writing `inputs.json`, verify that no numeric field is null when the source data contains a value — null fields cascade into bad downstream outputs (unit economics scores wrong metrics, runway reports infinite runway). **ARPU sanity check:** If `drivers.arpu` or `unit_economics.ltv.inputs.arpu` exceeds total MRR, it's probably the aggregate revenue, not per-customer ARPU. Divide by customer count to get the correct value. This is the most common extraction error. Return ONLY: (1) file paths written, (2) company name/stage/sector, (3) `model_format`, (4) data sufficiency verdict (sufficient/insufficient + count of missing critical fields), and (5) any `company.traits` detected — do not echo the full JSON back.
 
 After the sub-agent returns, use the summary to decide the qualitative vs. quantitative path and share a brief update with the founder.
 
 **When documents (PDFs, data room dumps, Google Sheets exports) are provided,** use a two-pass sub-agent flow:
 
-1. **Probe pass:** Spawn a `general-purpose` Task sub-agent with the file path(s), `SCRIPTS`, `REFS`, `SHARED_REFS`, and `REVIEW_DIR` paths. The sub-agent reads the document(s), reads `$REFS/schema-inputs.md` for the schema, extracts what it can, and returns ONLY: (1) partial data extracted (company name, stage, sector, any metrics found), (2) `model_format`, (3) a numbered list of specific questions for missing critical fields (e.g., "1. What is your monthly burn rate? 2. How many paying customers?"), and (4) any `company.traits` detected. Save the sub-agent's ID for resumption.
+1. **Probe pass:** Spawn a `general-purpose` Task sub-agent with the file path(s), `SCRIPTS`, `REFS`, `SHARED_REFS`, and `REVIEW_DIR` paths. The sub-agent reads the document(s), reads `$REFS/schema-inputs.md` for the schema, extracts what it can, and returns ONLY: (1) partial data extracted (company name, stage, sector, any metrics found), (2) `model_format`, (3) a list of fields that could not be extracted, and (4) any `company.traits` detected. Save the sub-agent's ID for resumption.
 
-2. **Ask the founder:** Present the sub-agent's questions in plain language. Collect answers.
-
-3. **Build pass:** Resume the same sub-agent (using `resume` with the saved agent ID — preserves full document context). Pass the founder's answers. The sub-agent reads `$REFS/data-sufficiency.md`, constructs `inputs.json`, and writes it to `$REVIEW_DIR/inputs.json`. Returns ONLY: (1) file paths written, (2) data sufficiency verdict (sufficient/insufficient + count of missing critical fields), and (3) final `model_format`.
+2. **Build pass:** Resume the same sub-agent (using `resume` with the saved agent ID — preserves full document context). Pass the founder's answers from Step 1 to fill any gaps. The sub-agent reads `$REFS/data-sufficiency.md`, constructs `inputs.json`, and writes it to `$REVIEW_DIR/inputs.json`. Returns ONLY: (1) file paths written, (2) data sufficiency verdict (sufficient/insufficient + count of missing critical fields), and (3) final `model_format`.
 
 After the sub-agent returns, use the summary to decide the qualitative vs. quantitative path and share a brief update with the founder.
 
-**When conversational input is provided (no files):** Handle directly in the main agent — the data is already in the conversation. Ask the founder for any missing fields: revenue figures, cost structure, headcount, funding history, growth rates, key assumptions. Consult `references/schema-inputs.md` for the full schema.
+**When conversational input is provided (no files):** Handle directly in the main agent — the data is already in the conversation. Gather all needed fields within Step 1 through normal conversation (not via `AskUserQuestion` after extraction starts). Ask for: revenue figures, cost structure, headcount, funding history, growth rates, key assumptions. Consult `references/schema-inputs.md` for the full schema. Since there are no files to extract, there is no extraction pipeline to block — but all data gathering must complete before dispatching sub-agents in Steps 4-6.
 
 ```bash
 cat <<'INPUTS_EOF' > "$REVIEW_DIR/inputs.json"
@@ -177,7 +186,7 @@ Before dispatching Steps 4–6, verify `inputs.json` quality:
 
 1. **Sign conventions:** `cash.monthly_net_burn` must be **positive** (cash outgoing). If negative, fix it: `abs(value)`.
 2. **Null critical fields:** Check that `cash.current_balance`, `cash.monthly_net_burn`, `revenue.mrr.value`, and `revenue.growth_rate_monthly` are not null when the source data contains these values. Null fields cascade into bad outputs.
-3. **Cash balance missing?** If `cash.current_balance` is null but burn rate is known, **ask the founder** for their current cash balance before proceeding. Runway analysis is central to Series A conversations — a sensitivity table is a poor substitute for the real number.
+3. **Cash balance missing?** If `cash.current_balance` is null but burn rate is known, use the value collected in Step 1. If the founder didn't provide it in Step 1, proceed without it — the runway analysis will flag the gap, and coaching commentary should note that cash balance is needed for a complete picture.
 
 Fix any issues in `inputs.json` before dispatching the parallel sub-agents. Fixing between sub-agent dispatches (e.g., after checklist but before metrics) breaks the parallel rule.
 
