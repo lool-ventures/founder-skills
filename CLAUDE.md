@@ -70,6 +70,7 @@
 ## Financial Model Review Scripts
 
 - **`extract_model.py`** — Extracts structured data from Excel (.xlsx) and CSV files into model_data.json
+- **`validate_inputs.py`** — Four-layer validation of inputs.json (structural, consistency, sanity, completeness); `--fix` auto-corrects sign errors
 - **`checklist.py`** — Scores 46 criteria across 7 categories with profile-based auto-gating by stage/geography/sector
 - **`unit_economics.py`** — Computes and benchmarks 11 unit economics metrics against stage-appropriate targets
 - **`runway.py`** — Multi-scenario runway stress-test with decision points and default-alive analysis

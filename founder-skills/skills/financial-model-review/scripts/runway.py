@@ -537,9 +537,17 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
 
     # Revenue
     mrr_value = _deep_get(revenue_data, "mrr", "value")
+    arr_value = _deep_get(revenue_data, "arr", "value")
     monthly_total = revenue_data.get("monthly_total")
     if mrr_value is not None:
         revenue0 = mrr_value
+    elif arr_value is not None:
+        revenue0 = arr_value / 12
+        print(
+            f"Warning: using ARR/12 (${revenue0:,.0f}) as MRR proxy — revenue.mrr.value not provided",
+            file=sys.stderr,
+        )
+        warnings.append(f"Using ARR/12 (${revenue0:,.0f}) as MRR proxy (no MRR provided).")
     elif monthly_total is not None:
         revenue0 = monthly_total
         warnings.append("Using revenue.monthly_total (no MRR provided).")

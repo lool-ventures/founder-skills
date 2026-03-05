@@ -721,9 +721,10 @@ def test_unit_economics_rule_of_40_below_1m_arr() -> None:
 
 
 def test_unit_economics_rule_of_40_above_1m_arr() -> None:
-    """Rule of 40 should use operating margin (burn-derived) when ARR >= $1M."""
+    """Rule of 40 should use operating margin (burn-derived) when ARR >= $5M."""
     inputs = json.loads(json.dumps(_VALID_INPUTS))
-    inputs["revenue"]["arr"]["value"] = 1200000
+    # ARR intentionally inflated above MRR*12 to test R40 $5M+ benchmark path
+    inputs["revenue"]["arr"]["value"] = 6000000
     inputs["cash"]["monthly_net_burn"] = 30000  # op_margin = -30K/50K = -60%
     payload = json.dumps(inputs)
     rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
@@ -742,7 +743,8 @@ def test_unit_economics_rule_of_40_above_1m_arr() -> None:
 def test_unit_economics_rule_of_40_negative() -> None:
     """R40 can be negative when burn far exceeds revenue."""
     inputs = json.loads(json.dumps(_VALID_INPUTS))
-    inputs["revenue"]["arr"]["value"] = 1200000
+    # ARR intentionally inflated above MRR*12 to test R40 $5M+ benchmark path
+    inputs["revenue"]["arr"]["value"] = 6000000
     inputs["cash"]["monthly_net_burn"] = 80000  # op_margin = -80K/50K = -160%
     payload = json.dumps(inputs)
     rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
@@ -775,7 +777,8 @@ def test_unit_economics_rule_of_40_gross_margin_fallback() -> None:
 def test_unit_economics_rule_of_40_operating_margin_preferred() -> None:
     """When both burn+MRR and gross margin are available, operating margin wins."""
     inputs = json.loads(json.dumps(_VALID_INPUTS))
-    inputs["revenue"]["arr"]["value"] = 1200000
+    # ARR intentionally inflated above MRR*12 to test R40 $5M+ benchmark path
+    inputs["revenue"]["arr"]["value"] = 6000000
     inputs["cash"]["monthly_net_burn"] = 30000
     inputs["unit_economics"]["gross_margin"] = 0.75  # should be ignored for R40
     payload = json.dumps(inputs)
@@ -1873,6 +1876,177 @@ def test_unit_economics_burn_multiple_fallback_below_500k_arr() -> None:
     bm = metrics_by_name["burn_multiple"]
     assert bm["rating"] == "not_applicable", "ARR floor should gate even the fallback path"
     assert "$500K" in bm["evidence"] or "not meaningful" in bm["evidence"].lower()
+
+
+# --- New tests: FMR postmortem fixes ---
+
+
+def test_unit_economics_annual_contracts_saas() -> None:
+    """annual-contracts model type should be treated as SaaS."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["company"]["revenue_model_type"] = "annual-contracts"
+    inputs["revenue"]["arr"]["value"] = 1200000  # above R40 $1M floor
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    # SaaS-only metrics should be computed, not not_applicable
+    assert metrics_by_name["magic_number"]["rating"] != "not_applicable"
+    assert metrics_by_name["rule_of_40"]["rating"] != "not_applicable"
+
+
+def test_unit_economics_rule_of_40_contextual_band_1m_5m() -> None:
+    """R40 should be contextual between $1M and $5M ARR with operating margin."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["arr"]["value"] = 3000000
+    inputs["cash"]["monthly_net_burn"] = 30000
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert r40["rating"] == "contextual"
+    assert "not benchmark-compared below $5M ARR" in r40["evidence"]
+
+
+def test_unit_economics_rule_of_40_above_5m_benchmarked() -> None:
+    """R40 above $5M ARR with operating margin should be benchmark-rated."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["arr"]["value"] = 6000000
+    inputs["cash"]["monthly_net_burn"] = 30000
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert r40["rating"] not in ("contextual", "not_applicable", "not_rated")
+    assert "benchmark" in r40["evidence"].lower() or "strong" in r40["evidence"].lower()
+
+
+def test_unit_economics_rule_of_40_hyper_growth_above_5m() -> None:
+    """R40 hyper-growth should still be contextual even above $5M ARR."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["arr"]["value"] = 6000000
+    inputs["revenue"]["growth_rate_monthly"] = 0.15  # annualized ~435%
+    inputs["cash"]["monthly_net_burn"] = 30000
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert r40["rating"] == "contextual"
+    assert "hyper" in r40["evidence"].lower()
+
+
+def test_unit_economics_burn_multiple_hyper_growth_contextual() -> None:
+    """Burn multiple should be contextual when annualized growth > 200%."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["growth_rate_monthly"] = 0.15  # annualized ~435%
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["rating"] == "contextual"
+    assert "hyper-growth" in bm["evidence"].lower()
+
+
+def test_unit_economics_burn_multiple_seed_vs_series_a_thresholds() -> None:
+    """Seed burn_multiple thresholds (2.0/2.5/3.0) differ from series-a (1.5/2.0/2.5)."""
+    # A burn_mult of 1.8 should be strong for seed but acceptable for series-a
+    for stage, expected_rating in [("seed", "strong"), ("series-a", "acceptable")]:
+        inputs = json.loads(json.dumps(_VALID_INPUTS))
+        inputs["company"]["stage"] = stage
+        # Engineer BM to ~1.8x: burn=80K, net_new_arr = MRR*growth*12 = 50K*0.08*12 = 48K
+        # burn / (net_new_arr/12) = 80K / 4K = 20.0 — too high
+        # Set growth higher: 0.20 → net_new_arr/12 = 50K*0.20 = 10K, burn_mult = 80K/10K = 8
+        # Set burn = 15000, growth = 0.08 → net_new_arr/12 = 4K, burn_mult = 3.75 — hmm
+        # Use: burn=8000, growth=0.08 → 8000/4000 = 2.0
+        inputs["cash"]["monthly_net_burn"] = 8000
+        inputs["revenue"]["growth_rate_monthly"] = 0.08
+        payload = json.dumps(inputs)
+        rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+        assert rc == 0
+        assert data is not None
+        metrics_by_name = {m["name"]: m for m in data["metrics"]}
+        bm = metrics_by_name["burn_multiple"]
+        assert bm["value"] == 2.0
+        assert bm["rating"] == expected_rating, (
+            f"Stage {stage}: burn_mult 2.0 expected {expected_rating}, got {bm['rating']}"
+        )
+
+
+def test_unit_economics_ai_gross_margin_seed_vs_series_a() -> None:
+    """AI gross margin adjustment: -5pt for seed, -10pt for series-a."""
+    for stage, expected_adj in [("seed", 0.05), ("series-a", 0.10)]:
+        inputs = json.loads(json.dumps(_VALID_INPUTS))
+        inputs["company"]["stage"] = stage
+        inputs["company"]["sector"] = "ai-native"
+        inputs["unit_economics"]["gross_margin"] = 0.70
+        payload = json.dumps(inputs)
+        rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+        assert rc == 0
+        assert data is not None
+        metrics_by_name = {m["name"]: m for m in data["metrics"]}
+        gm = metrics_by_name["gross_margin"]
+        assert f"{expected_adj:.0%} discount" in gm["evidence"]
+
+
+def test_unit_economics_benchmark_nested_object() -> None:
+    """Benchmark-rated metrics should include a nested benchmark object."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    # Gross margin should have benchmark
+    gm = metrics_by_name["gross_margin"]
+    assert "benchmark" in gm, f"gross_margin should have benchmark nested object: {gm}"
+    assert gm["benchmark"]["target"] is not None
+    assert gm["benchmark"]["source"] != ""
+
+
+def test_runway_arr_12_fallback() -> None:
+    """When MRR is missing but ARR present, runway should use ARR/12."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    del inputs["revenue"]["mrr"]
+    inputs["revenue"]["arr"]["value"] = 600000  # ARR/12 = 50K
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data["baseline"]["monthly_revenue"] == 50000.0
+    assert "ARR/12" in stderr or "ARR/12" in str(data.get("warnings", []))
+
+
+def test_sector_alias_fintech_to_saas() -> None:
+    """fintech should resolve to saas sector type."""
+    shared_scripts = os.path.join(os.path.dirname(SCRIPT_DIR), "scripts")
+    sys.path.insert(0, shared_scripts)
+    try:
+        from founder_context import _derive_sector_type  # type: ignore[import-not-found]
+
+        assert _derive_sector_type("fintech") == "saas"
+        assert _derive_sector_type("B2B fintech") == "saas"
+        assert _derive_sector_type("cybersecurity") == "saas"
+        assert _derive_sector_type("edtech") == "saas"
+        assert _derive_sector_type("transactional fintech") == "transactional-fintech"
+        assert _derive_sector_type("payment processing") == "transactional-fintech"
+        assert _derive_sector_type("payments infrastructure") == "transactional-fintech"
+    finally:
+        sys.path.remove(shared_scripts)
+
+
+def test_validate_inputs_referenced_by_agent() -> None:
+    """validate_inputs.py should exist on disk."""
+    scripts_dir = os.path.join(SCRIPT_DIR, "..", "skills", "financial-model-review", "scripts")
+    assert os.path.isfile(os.path.join(scripts_dir, "validate_inputs.py"))
 
 
 # --- Agent structural smoke test ---

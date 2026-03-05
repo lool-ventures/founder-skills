@@ -62,9 +62,9 @@ _STAGE_BENCHMARKS: dict[str, dict[str, dict[str, Any]]] = {
     },
     "seed": {
         "burn_multiple": {
-            "strong": 1.5,
-            "acceptable": 2.0,
-            "warning": 2.5,
+            "strong": 2.0,
+            "acceptable": 2.5,
+            "warning": 3.0,
             "source": "CFO Advisors 2025 / best-practices resolution",
             "as_of": "2025-Q1",
         },
@@ -193,7 +193,7 @@ _CAC_PAYBACK_BY_ACV: dict[str, dict[str, Any]] = {
 }
 
 # SaaS model types
-_SAAS_MODEL_TYPES = {"saas-plg", "saas-sales-led"}
+_SAAS_MODEL_TYPES = {"saas-plg", "saas-sales-led", "annual-contracts"}
 
 # Metrics only applicable to SaaS
 _SAAS_ONLY_METRICS = {"nrr", "grr", "magic_number", "rule_of_40", "arr_per_fte"}
@@ -322,6 +322,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
         evidence: str,
         benchmark_source: Any = "",
         benchmark_as_of: Any = "",
+        bench: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         # Append confidence qualifier to rated metrics
         final_evidence = evidence
@@ -339,6 +340,12 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
         }
         if data_confidence != "exact" and rating not in ("not_rated", "not_applicable"):
             entry["confidence"] = data_confidence
+        if bench is not None:
+            entry["benchmark"] = {
+                "target": bench.get("strong"),
+                "source": bench.get("source", ""),
+                "as_of": bench.get("as_of", ""),
+            }
         return entry
 
     # 1. CAC
@@ -400,6 +407,8 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
             bench = {"strong": 3.0, "acceptable": 2.0, "warning": 1.0}
             rating = _rate_higher_is_better(ltv_cac, bench)
             evidence = f"LTV/CAC of {ltv_cac:.1f}x (observed data); benchmark strong >= 3x"
+        # bench may be set (observed path) or unset (assumed path)
+        ltv_cac_bench = bench if ltv_observed != "assumed" else None
         metrics.append(
             _metric(
                 "ltv_cac_ratio",
@@ -408,6 +417,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                 evidence,
                 "Mosaic 2023 / KeyBanc 2024",
                 "2024-Q4",
+                bench=ltv_cac_bench,
             )
         )
     else:
@@ -421,7 +431,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
         bench = _CAC_PAYBACK_BY_ACV.get(acv_tier, _CAC_PAYBACK_BY_ACV["default"])
         rating = _rate_lower_is_better(payback, bench)
         evidence = f"CAC payback of {payback} months; {acv_tier} tier benchmark strong <= {bench['strong']} months"
-        metrics.append(_metric("cac_payback", payback, rating, evidence, bench["source"], bench["as_of"]))
+        metrics.append(_metric("cac_payback", payback, rating, evidence, bench["source"], bench["as_of"], bench=bench))
     else:
         metrics.append(_metric("cac_payback", None, "not_rated", "Payback data not provided"))
 
@@ -476,13 +486,33 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                         f"Burn multiple of {burn_mult:.1f}x is implausibly high — check input consistency",
                     )
                 )
+            elif ((1 + growth_rate) ** 12) - 1 > 2.0:
+                growth_annualized_bm = (((1 + growth_rate) ** 12) - 1) * 100
+                metrics.append(
+                    _metric(
+                        "burn_multiple",
+                        burn_mult,
+                        "contextual",
+                        f"Burn multiple of {burn_mult:.1f}x; "
+                        f"growth is {growth_annualized_bm:.0f}% annualized (hyper-growth) — "
+                        f"not benchmark-compared",
+                    )
+                )
             else:
                 bench = benchmarks.get("burn_multiple")
                 if bench:
                     rating = _rate_lower_is_better(burn_mult, bench)
                     evidence = f"Burn multiple of {burn_mult:.1f}x; stage benchmark strong <= {bench['strong']}x"
                     metrics.append(
-                        _metric("burn_multiple", burn_mult, rating, evidence, bench["source"], bench["as_of"])
+                        _metric(
+                            "burn_multiple",
+                            burn_mult,
+                            rating,
+                            evidence,
+                            bench["source"],
+                            bench["as_of"],
+                            bench=bench,
+                        )
                     )
                 else:
                     metrics.append(
@@ -538,7 +568,17 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
             if bench:
                 rating = _rate_higher_is_better(magic, bench)
                 evidence = f"Magic number of {magic:.2f}; stage benchmark strong >= {bench['strong']}"
-                metrics.append(_metric("magic_number", magic, rating, evidence, bench["source"], bench["as_of"]))
+                metrics.append(
+                    _metric(
+                        "magic_number",
+                        magic,
+                        rating,
+                        evidence,
+                        bench["source"],
+                        bench["as_of"],
+                        bench=bench,
+                    )
+                )
             else:
                 metrics.append(
                     _metric(
@@ -560,15 +600,19 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
         if bench:
             # AI companies get -5pt threshold adjustment
             if ai_sector:
+                ai_adj = 0.10 if stage in ("series-a", "series-b", "later") else 0.05
                 adjusted_bench = {
-                    "strong": bench["strong"] - 0.05,
-                    "acceptable": bench["acceptable"] - 0.05,
-                    "warning": bench["warning"] - 0.05,
+                    "strong": bench["strong"] - ai_adj,
+                    "acceptable": bench["acceptable"] - ai_adj,
+                    "warning": bench["warning"] - ai_adj,
                     "source": bench["source"],
                     "as_of": bench["as_of"],
                 }
                 rating = _rate_higher_is_better(gm, adjusted_bench)
-                evidence = f"Gross margin of {gm:.0%}; AI-adjusted benchmark strong >= {adjusted_bench['strong']:.0%}"
+                evidence = (
+                    f"Gross margin of {gm:.0%}; AI-adjusted ({ai_adj:.0%} discount) "
+                    f"benchmark strong >= {adjusted_bench['strong']:.0%}"
+                )
                 metrics.append(
                     _metric(
                         "gross_margin",
@@ -577,12 +621,23 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                         evidence,
                         adjusted_bench["source"],
                         adjusted_bench["as_of"],
+                        bench=adjusted_bench,
                     )
                 )
             else:
                 rating = _rate_higher_is_better(gm, bench)
                 evidence = f"Gross margin of {gm:.0%}; stage benchmark strong >= {bench['strong']:.0%}"
-                metrics.append(_metric("gross_margin", gm, rating, evidence, bench["source"], bench["as_of"]))
+                metrics.append(
+                    _metric(
+                        "gross_margin",
+                        gm,
+                        rating,
+                        evidence,
+                        bench["source"],
+                        bench["as_of"],
+                        bench=bench,
+                    )
+                )
         else:
             metrics.append(
                 _metric(
@@ -603,7 +658,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
             if bench:
                 rating = _rate_higher_is_better(nrr, bench)
                 evidence = f"NRR of {nrr:.0%}; stage benchmark strong >= {bench['strong']:.0%}"
-                metrics.append(_metric("nrr", nrr, rating, evidence, bench["source"], bench["as_of"]))
+                metrics.append(_metric("nrr", nrr, rating, evidence, bench["source"], bench["as_of"], bench=bench))
             else:
                 metrics.append(
                     _metric(
@@ -626,7 +681,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
             if bench:
                 rating = _rate_higher_is_better(grr, bench)
                 evidence = f"GRR of {grr:.0%}; stage benchmark strong >= {bench['strong']:.0%}"
-                metrics.append(_metric("grr", grr, rating, evidence, bench["source"], bench["as_of"]))
+                metrics.append(_metric("grr", grr, rating, evidence, bench["source"], bench["as_of"], bench=bench))
             else:
                 metrics.append(
                     _metric(
@@ -721,6 +776,18 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                             f"using gross margin as proxy — overstates R40 vs. FCF-based standard",
                         )
                     )
+                elif arr_val_for_r40 is not None and arr_val_for_r40 < 5_000_000:
+                    metrics.append(
+                        _metric(
+                            "rule_of_40",
+                            r40,
+                            "contextual",
+                            f"Rule of 40: components — growth {growth_annualized:.0f}%, "
+                            f"{margin_label} margin {margin_value:.0%} "
+                            f"(composite {r40:.0f}); "
+                            f"not benchmark-compared below $5M ARR",
+                        )
+                    )
                 elif bench := benchmarks.get("rule_of_40"):
                     rating = _rate_higher_is_better(r40, bench)
                     evidence = (
@@ -728,7 +795,17 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                         f"(growth {growth_annualized:.0f}% + operating margin (burn-derived) {margin_value:.0%}); "
                         f"benchmark strong >= {bench['strong']}"
                     )
-                    metrics.append(_metric("rule_of_40", r40, rating, evidence, bench["source"], bench["as_of"]))
+                    metrics.append(
+                        _metric(
+                            "rule_of_40",
+                            r40,
+                            rating,
+                            evidence,
+                            bench["source"],
+                            bench["as_of"],
+                            bench=bench,
+                        )
+                    )
                 else:
                     metrics.append(
                         _metric(
@@ -739,6 +816,15 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                             f"(using operating margin (burn-derived)); no benchmark for stage '{stage}'",
                         )
                     )
+        elif arr_val_for_r40 is not None and arr_val_for_r40 < 1_000_000:
+            metrics.append(
+                _metric(
+                    "rule_of_40",
+                    None,
+                    "not_applicable",
+                    f"Rule of 40 not meaningful below $1M ARR (current: ${arr_val_for_r40:,.0f})",
+                )
+            )
         else:
             metrics.append(_metric("rule_of_40", None, "not_rated", "Insufficient data for Rule of 40"))
     else:

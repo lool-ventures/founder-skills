@@ -68,6 +68,7 @@ CANONICAL_SECTOR_TYPES = frozenset(
         "hardware-subscription",
         "consumer-subscription",
         "usage-based",
+        "transactional-fintech",
     }
 )
 
@@ -84,6 +85,17 @@ _SECTOR_ALIASES: dict[str, str] = {
     "consumer subscription": "consumer-subscription",
     "usage based": "usage-based",
     "consumption": "usage-based",
+    "fintech": "saas",
+    "proptech": "saas",
+    "insurtech": "saas",
+    "edtech": "saas",
+    "healthtech": "saas",
+    "legaltech": "saas",
+    "regtech": "saas",
+    "cyber": "saas",
+    "cybersecurity": "saas",
+    "transactional fintech": "transactional-fintech",
+    "payment processing": "transactional-fintech",
 }
 
 # Precedence for substring extraction; most specific first.
@@ -103,6 +115,9 @@ _SECTOR_SUBSTRING_PRECEDENCE: list[tuple[str, str]] = [
     ("usage-based", "usage-based"),
     ("marketplace", "marketplace"),
     ("hardware", "hardware"),
+    ("payment processing", "transactional-fintech"),
+    ("payments", "transactional-fintech"),
+    ("fintech", "saas"),
     ("ai", "ai-native"),
     ("saas", "saas"),
 ]

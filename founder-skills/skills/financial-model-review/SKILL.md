@@ -28,6 +28,7 @@ Accept any format: Excel (.xlsx), CSV, Google Sheets exports, financial document
 All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/scripts/`:
 
 - **`extract_model.py`** — Extracts structured data from Excel (.xlsx) and CSV files
+- **`validate_inputs.py`** — Four-layer validation of `inputs.json` (structural, consistency, sanity, completeness); supports `--fix` to auto-correct sign errors
 - **`checklist.py`** — Scores 46 criteria across 7 categories with profile-based auto-gating
 - **`unit_economics.py`** — Computes and benchmarks 11 unit economics metrics
 - **`runway.py`** — Multi-scenario runway stress-test with decision points
@@ -180,13 +181,26 @@ INPUTS_EOF
 
 **Graceful degradation:** If Task tool is unavailable, extract directly in the main agent.
 
-### Step 3.5: Validate `inputs.json` Before Proceeding
+### Step 3.5: Validate `inputs.json` Before Proceeding — STOP GATE
 
-Before dispatching Steps 4–6, verify `inputs.json` quality:
+Run the validation script:
 
-1. **Sign conventions:** `cash.monthly_net_burn` must be **positive** (cash outgoing). If negative, fix it: `abs(value)`.
-2. **Null critical fields:** Check that `cash.current_balance`, `cash.monthly_net_burn`, `revenue.mrr.value`, and `revenue.growth_rate_monthly` are not null when the source data contains these values. Null fields cascade into bad outputs.
-3. **Cash balance missing?** If `cash.current_balance` is null but burn rate is known, use the value collected in Step 1. If the founder didn't provide it in Step 1, proceed without it — the runway analysis will flag the gap, and coaching commentary should note that cash balance is needed for a complete picture.
+```bash
+cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/validate_inputs.py" --pretty
+```
+
+If `valid == false` (errors present), run with `--fix` to auto-correct fixable issues:
+
+```bash
+python3 "$SCRIPTS/validate_inputs.py" --fix < "$REVIEW_DIR/inputs.json" > "$REVIEW_DIR/inputs_fixed.json" && mv "$REVIEW_DIR/inputs_fixed.json" "$REVIEW_DIR/inputs.json"
+```
+
+Then re-validate. If errors persist after `--fix`, correct `inputs.json` manually (e.g., fill nulls from founder-provided data in Step 1).
+
+**Do NOT proceed to Step 4 until `valid == true`.** Warnings are informational and do not block.
+
+Additional manual checks:
+- **Cash balance missing?** If `cash.current_balance` is null but burn rate is known, use the value collected in Step 1. If the founder didn't provide it in Step 1, proceed without it — the runway analysis will flag the gap, and coaching commentary should note that cash balance is needed for a complete picture.
 
 Fix any issues in `inputs.json` before dispatching the parallel sub-agents. Fixing between sub-agent dispatches (e.g., after checklist but before metrics) breaks the parallel rule.
 
