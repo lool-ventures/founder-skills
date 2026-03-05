@@ -653,40 +653,92 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                     f"Rule of 40 not meaningful below $1M ARR (current: ${arr_val_for_r40:,.0f})",
                 )
             )
-        elif growth_rate is not None and gm is not None:
+        elif growth_rate is not None and (
+            gm is not None or (monthly_burn_raw is not None and mrr is not None and mrr > 0)
+        ):
             # Annualize monthly growth rate
             growth_annualized = ((1 + growth_rate) ** 12 - 1) * 100
-            r40 = round(growth_annualized + gm * 100, 1)
-            # Flag inflated scores from hyper-early growth (>200% YoY)
-            if growth_annualized > 200:
-                metrics.append(
-                    _metric(
-                        "rule_of_40",
-                        r40,
-                        "contextual",
-                        f"Rule of 40 score: {r40:.0f} "
-                        f"(growth {growth_annualized:.0f}% + margin {gm:.0%}); "
-                        f"score is inflated by hyper-early growth and not comparable "
-                        f"to the >= 40 benchmark used for scaled companies",
+
+            # Prefer operating margin (burn-derived, closer to FCF margin)
+            if monthly_burn_raw is not None and mrr is not None and mrr > 0:
+                op_margin = -monthly_burn_raw / mrr
+                if op_margin > 1.0:
+                    # > 100% operating margin is implausible — likely sign error
+                    print(
+                        f"Warning: computed operating margin {op_margin:.0%} exceeds 100%, "
+                        f"likely sign error in monthly_net_burn ({monthly_burn_raw:,.0f}); "
+                        f"falling back to gross margin for R40",
+                        file=sys.stderr,
                     )
-                )
-            elif bench := benchmarks.get("rule_of_40"):
-                rating = _rate_higher_is_better(r40, bench)
-                evidence = (
-                    f"Rule of 40 score: {r40:.0f} "
-                    f"(growth {growth_annualized:.0f}% + margin {gm:.0%}); "
-                    f"benchmark strong >= {bench['strong']}"
-                )
-                metrics.append(_metric("rule_of_40", r40, rating, evidence, bench["source"], bench["as_of"]))
+                    if gm is None:
+                        metrics.append(
+                            _metric(
+                                "rule_of_40",
+                                None,
+                                "not_rated",
+                                "Insufficient data for Rule of 40 "
+                                "(operating margin implausible, no gross margin available)",
+                            )
+                        )
+                        margin_value = None
+                        margin_label = "skipped"
+                    else:
+                        margin_value = gm
+                        margin_label = "gross"
+                else:
+                    margin_value = op_margin
+                    margin_label = "operating"
             else:
-                metrics.append(
-                    _metric(
-                        "rule_of_40",
-                        r40,
-                        "not_rated",
-                        f"Rule of 40 score: {r40:.0f}; no benchmark for stage '{stage}'",
+                margin_value = gm
+                margin_label = "gross"
+
+            if margin_label == "skipped":
+                pass  # already appended not_rated metric above
+            else:
+                r40 = round(growth_annualized + margin_value * 100, 1)  # type: ignore[operator]
+
+                # Priority: hyper-growth → margin type → benchmark availability
+                if growth_annualized > 200:
+                    metrics.append(
+                        _metric(
+                            "rule_of_40",
+                            r40,
+                            "contextual",
+                            f"Rule of 40 score: {r40:.0f} "
+                            f"(growth {growth_annualized:.0f}% + {margin_label} margin {margin_value:.0%}); "
+                            f"score is inflated by hyper-early growth and not comparable "
+                            f"to the >= 40 benchmark used for scaled companies",
+                        )
                     )
-                )
+                elif margin_label == "gross":
+                    metrics.append(
+                        _metric(
+                            "rule_of_40",
+                            r40,
+                            "contextual",
+                            f"Rule of 40 score: {r40:.0f} "
+                            f"(growth {growth_annualized:.0f}% + gross margin {margin_value:.0%}); "
+                            f"using gross margin as proxy — overstates R40 vs. FCF-based standard",
+                        )
+                    )
+                elif bench := benchmarks.get("rule_of_40"):
+                    rating = _rate_higher_is_better(r40, bench)
+                    evidence = (
+                        f"Rule of 40 score: {r40:.0f} "
+                        f"(growth {growth_annualized:.0f}% + operating margin (burn-derived) {margin_value:.0%}); "
+                        f"benchmark strong >= {bench['strong']}"
+                    )
+                    metrics.append(_metric("rule_of_40", r40, rating, evidence, bench["source"], bench["as_of"]))
+                else:
+                    metrics.append(
+                        _metric(
+                            "rule_of_40",
+                            r40,
+                            "not_rated",
+                            f"Rule of 40 score: {r40:.0f} "
+                            f"(using operating margin (burn-derived)); no benchmark for stage '{stage}'",
+                        )
+                    )
         else:
             metrics.append(_metric("rule_of_40", None, "not_rated", "Insufficient data for Rule of 40"))
     else:

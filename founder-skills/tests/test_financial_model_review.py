@@ -721,9 +721,10 @@ def test_unit_economics_rule_of_40_below_1m_arr() -> None:
 
 
 def test_unit_economics_rule_of_40_above_1m_arr() -> None:
-    """Rule of 40 should be rated normally when ARR >= $1M."""
+    """Rule of 40 should use operating margin (burn-derived) when ARR >= $1M."""
     inputs = json.loads(json.dumps(_VALID_INPUTS))
     inputs["revenue"]["arr"]["value"] = 1200000
+    inputs["cash"]["monthly_net_burn"] = 30000  # op_margin = -30K/50K = -60%
     payload = json.dumps(inputs)
     rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
     assert rc == 0
@@ -731,7 +732,94 @@ def test_unit_economics_rule_of_40_above_1m_arr() -> None:
     metrics_by_name = {m["name"]: m for m in data["metrics"]}
     r40 = metrics_by_name["rule_of_40"]
     assert r40["rating"] != "not_applicable"
+    assert r40["rating"] != "contextual"  # operating margin → benchmark-rated
     assert r40["value"] is not None
+    # growth ≈ 151.8%, op_margin = -60%, R40 ≈ 91.8
+    assert 85 < r40["value"] < 100
+    assert "operating margin" in r40["evidence"].lower()
+
+
+def test_unit_economics_rule_of_40_negative() -> None:
+    """R40 can be negative when burn far exceeds revenue."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["arr"]["value"] = 1200000
+    inputs["cash"]["monthly_net_burn"] = 80000  # op_margin = -80K/50K = -160%
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert r40["value"] is not None
+    assert r40["value"] < 0  # growth ≈ 151.8% + (-160%) ≈ -8.2
+    assert "operating margin" in r40["evidence"].lower()
+
+
+def test_unit_economics_rule_of_40_gross_margin_fallback() -> None:
+    """R40 should fall back to gross margin (contextual) when burn data missing."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["arr"]["value"] = 1200000
+    del inputs["cash"]["monthly_net_burn"]
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert r40["value"] is not None
+    assert r40["rating"] == "contextual"
+    assert "gross margin" in r40["evidence"].lower()
+    assert "overstates" in r40["evidence"].lower()
+
+
+def test_unit_economics_rule_of_40_operating_margin_preferred() -> None:
+    """When both burn+MRR and gross margin are available, operating margin wins."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["arr"]["value"] = 1200000
+    inputs["cash"]["monthly_net_burn"] = 30000
+    inputs["unit_economics"]["gross_margin"] = 0.75  # should be ignored for R40
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert "operating margin" in r40["evidence"].lower()
+    assert "gross margin" not in r40["evidence"].lower()
+
+
+def test_unit_economics_rule_of_40_sign_error_fallback() -> None:
+    """Negative monthly_net_burn (wrong sign) should trigger gross margin fallback."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["arr"]["value"] = 1200000
+    inputs["cash"]["monthly_net_burn"] = -80000  # wrong sign → op_margin > 100%
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert r40["rating"] == "contextual"
+    assert "gross margin" in r40["evidence"].lower()
+    assert "sign error" in stderr.lower() or "exceeds 100%" in stderr.lower()
+
+
+def test_unit_economics_rule_of_40_sign_error_no_gm() -> None:
+    """Sign error + no gross margin → not_rated (can't compute R40 at all)."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["arr"]["value"] = 1200000
+    inputs["cash"]["monthly_net_burn"] = -80000
+    del inputs["unit_economics"]["gross_margin"]
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert r40["value"] is None
+    assert r40["rating"] == "not_rated"
+    assert "implausible" in r40["evidence"].lower()
+    assert "exceeds 100%" in stderr.lower()
 
 
 def test_unit_economics_ltv_zero_churn_capped() -> None:
