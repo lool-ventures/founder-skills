@@ -20,6 +20,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import sys
 from typing import Any
 
@@ -72,6 +73,95 @@ def _safe_value(val: Any) -> Any:
     return str(val)
 
 
+# ---------------------------------------------------------------------------
+# Periodicity detection
+# ---------------------------------------------------------------------------
+
+# Month-range patterns MUST be checked before single-month to avoid
+# misclassifying "Jan-Mar" as monthly.
+_MONTH_NAMES = (
+    r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?"
+    r"|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+)
+
+_QUARTERLY_PATTERNS: list[re.Pattern[str]] = [
+    # Q1 2024, Q1-24, Q1 - 24, Q1'24
+    re.compile(r"\bQ[1-4]\b", re.IGNORECASE),
+    # 1Q24, 1Q2024
+    re.compile(r"\b[1-4]Q\d{2,4}\b", re.IGNORECASE),
+    # Jan-Mar 2024, January-March, Jan-Mar
+    re.compile(
+        rf"\b({_MONTH_NAMES})\s*[-–]\s*({_MONTH_NAMES})\b",
+        re.IGNORECASE,
+    ),
+]
+
+_ANNUAL_PATTERNS: list[re.Pattern[str]] = [
+    # FY2024, FY24, FY 2024
+    re.compile(r"\bFY\s*\d{2,4}\b", re.IGNORECASE),
+    # H1 2024, H2, 1H24, 2H24
+    re.compile(r"\b[12]H\d{2,4}\b|\bH[12]\b", re.IGNORECASE),
+]
+
+_MONTHLY_PATTERNS: list[re.Pattern[str]] = [
+    # Jan 2024, January 24, Jan-24, Jan '24
+    re.compile(
+        rf"\b({_MONTH_NAMES})\s*[-–'/]?\s*\d{{2,4}}\b",
+        re.IGNORECASE,
+    ),
+    # 2024-01, 2024-01-01
+    re.compile(r"\b20\d{2}-(?:0[1-9]|1[0-2])\b"),
+]
+
+
+def _classify_header(header: str) -> str | None:
+    """Classify a single column header as monthly/quarterly/annual or None."""
+    # Check quarterly first (month-range before single-month)
+    for pat in _QUARTERLY_PATTERNS:
+        if pat.search(header):
+            return "quarterly"
+    for pat in _ANNUAL_PATTERNS:
+        if pat.search(header):
+            return "annual"
+    for pat in _MONTHLY_PATTERNS:
+        if pat.search(header):
+            return "monthly"
+    return None
+
+
+def detect_periodicity(headers: list[str]) -> str:
+    """Detect periodicity from column headers via majority vote.
+
+    Skips the first column (typically row labels). Returns one of:
+    monthly, quarterly, annual, unknown.
+    """
+    classifications: list[str] = []
+    for h in headers[1:]:  # skip first column (row labels)
+        c = _classify_header(h)
+        if c is not None:
+            classifications.append(c)
+
+    if not classifications:
+        return "unknown"
+
+    # Majority vote
+    from collections import Counter
+
+    counts = Counter(classifications)
+    winner, _ = counts.most_common(1)[0]
+    return winner
+
+
+def _periodicity_summary(sheets: list[dict[str, Any]]) -> str:
+    """Compute top-level periodicity summary from per-sheet values."""
+    values: set[str] = {s["periodicity"] for s in sheets if s.get("periodicity") != "unknown"}
+    if not values:
+        return "unknown"
+    if len(values) == 1:
+        return next(iter(values))
+    return "mixed"
+
+
 def extract_xlsx(file_path: str) -> dict[str, Any]:
     """Extract data from an Excel file."""
     try:
@@ -100,12 +190,18 @@ def extract_xlsx(file_path: str) -> dict[str, Any]:
                 "headers": headers,
                 "rows": rows_data,
                 "detected_type": _detect_tab_type(ws.title),
+                "periodicity": detect_periodicity(headers),
                 "row_count": len(rows_data),
                 "col_count": len(headers),
             }
         )
     wb.close()
-    return {"sheets": sheets, "source_format": "xlsx", "source_file": os.path.basename(file_path)}
+    return {
+        "sheets": sheets,
+        "source_format": "xlsx",
+        "source_file": os.path.basename(file_path),
+        "periodicity_summary": _periodicity_summary(sheets),
+    }
 
 
 def extract_csv(file_path: str) -> dict[str, Any]:
@@ -115,19 +211,22 @@ def extract_csv(file_path: str) -> dict[str, Any]:
         rows_raw = list(reader)
 
     if not rows_raw:
+        empty_sheets: list[dict[str, Any]] = [
+            {
+                "name": "Sheet1",
+                "headers": [],
+                "rows": [],
+                "detected_type": None,
+                "periodicity": "unknown",
+                "row_count": 0,
+                "col_count": 0,
+            }
+        ]
         return {
-            "sheets": [
-                {
-                    "name": "Sheet1",
-                    "headers": [],
-                    "rows": [],
-                    "detected_type": None,
-                    "row_count": 0,
-                    "col_count": 0,
-                }
-            ],
+            "sheets": empty_sheets,
             "source_format": "csv",
             "source_file": os.path.basename(file_path),
+            "periodicity_summary": "unknown",
         }
 
     headers = rows_raw[0]
@@ -146,19 +245,22 @@ def extract_csv(file_path: str) -> dict[str, Any]:
         rows_data.append(row_vals)
 
     name = os.path.splitext(os.path.basename(file_path))[0]
+    csv_sheets = [
+        {
+            "name": name,
+            "headers": headers,
+            "rows": rows_data,
+            "detected_type": _detect_tab_type(name),
+            "periodicity": detect_periodicity(headers),
+            "row_count": len(rows_data),
+            "col_count": len(headers),
+        }
+    ]
     return {
-        "sheets": [
-            {
-                "name": name,
-                "headers": headers,
-                "rows": rows_data,
-                "detected_type": _detect_tab_type(name),
-                "row_count": len(rows_data),
-                "col_count": len(headers),
-            }
-        ],
+        "sheets": csv_sheets,
         "source_format": "csv",
         "source_file": os.path.basename(file_path),
+        "periodicity_summary": _periodicity_summary(csv_sheets),
     }
 
 

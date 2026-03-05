@@ -120,6 +120,137 @@ def test_extract_model_output_flag() -> None:
     assert "sheets" in written
 
 
+# --- periodicity detection tests ---
+
+
+def test_extract_periodicity_quarterly_csv() -> None:
+    """CSV with Q1/Q2/Q3/Q4 headers detects quarterly periodicity."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Line Item,Q1 2024,Q2 2024,Q3 2024,Q4 2024\nRevenue,100,200,300,400\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert data["sheets"][0]["periodicity"] == "quarterly"
+    assert data["periodicity_summary"] == "quarterly"
+
+
+def test_extract_periodicity_monthly_csv() -> None:
+    """CSV with month name headers detects monthly periodicity."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Line Item,Jan 2024,Feb 2024,Mar 2024\nRevenue,100,200,300\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert data["sheets"][0]["periodicity"] == "monthly"
+    assert data["periodicity_summary"] == "monthly"
+
+
+def test_extract_periodicity_iso_monthly_csv() -> None:
+    """CSV with YYYY-MM headers detects monthly periodicity."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Line Item,2024-01,2024-02,2024-03\nRevenue,100,200,300\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert data["sheets"][0]["periodicity"] == "monthly"
+
+
+def test_extract_periodicity_variant_1q24() -> None:
+    """CSV with 1Q24-style headers detects quarterly."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Line Item,1Q24,2Q24,3Q24,4Q24\nRevenue,100,200,300,400\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert data["sheets"][0]["periodicity"] == "quarterly"
+
+
+def test_extract_periodicity_month_range_quarterly() -> None:
+    """CSV with Jan-Mar style headers detects quarterly, not monthly."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Line Item,Jan-Mar 2024,Apr-Jun 2024,Jul-Sep 2024,Oct-Dec 2024\nRevenue,100,200,300,400\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert data["sheets"][0]["periodicity"] == "quarterly"
+
+
+def test_extract_periodicity_annual_csv() -> None:
+    """CSV with FY headers detects annual periodicity."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Line Item,FY2024,FY2025,FY2026\nRevenue,1000,2000,3000\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert data["sheets"][0]["periodicity"] == "annual"
+
+
+def test_extract_periodicity_unknown_csv() -> None:
+    """CSV with non-time-series headers returns unknown."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Category,Amount,Notes\nSalaries,50000,Monthly\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert data["sheets"][0]["periodicity"] == "unknown"
+    assert data["periodicity_summary"] == "unknown"
+
+
+def test_extract_periodicity_stdin_no_periodicity() -> None:
+    """Stdin passthrough does not add periodicity (caller's responsibility)."""
+    input_data = json.dumps({"sheets": [{"name": "Manual", "headers": ["A"], "rows": [[1]]}]})
+    rc, data, stderr = run_script("extract_model.py", ["--stdin"], stdin_data=input_data)
+    assert rc == 0
+    assert data is not None
+    # Stdin passes through as-is — no periodicity added
+    assert "periodicity_summary" not in data
+
+
+def test_extract_periodicity_mixed_xlsx() -> None:
+    """XLSX with quarterly and monthly sheets returns mixed summary."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    # Sheet 1: quarterly headers
+    ws1 = wb.active
+    assert ws1 is not None
+    ws1.title = "P&L"
+    ws1.append(["Line Item", "Q1 2024", "Q2 2024", "Q3 2024", "Q4 2024"])
+    ws1.append(["Revenue", 100000, 120000, 140000, 160000])
+    # Sheet 2: monthly headers
+    ws2 = wb.create_sheet("Revenue")
+    ws2.append(["Metric", "Jan 2024", "Feb 2024", "Mar 2024"])
+    ws2.append(["MRR", 30000, 32000, 34000])
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+        wb.save(f.name)
+        tmp_path = f.name
+    try:
+        rc, data, stderr = run_script("extract_model.py", ["--file", tmp_path, "--pretty"])
+        assert rc == 0
+        assert data is not None
+        periodicities = {s["name"]: s["periodicity"] for s in data["sheets"]}
+        assert periodicities["P&L"] == "quarterly"
+        assert periodicities["Revenue"] == "monthly"
+        assert data["periodicity_summary"] == "mixed"
+    finally:
+        os.unlink(tmp_path)
+
+
 # --- Checklist IDs and helpers ---
 
 _CHECKLIST_IDS: list[str] = [
@@ -2041,6 +2172,142 @@ def test_sector_alias_fintech_to_saas() -> None:
         assert _derive_sector_type("payments infrastructure") == "transactional-fintech"
     finally:
         sys.path.remove(shared_scripts)
+
+
+# --- validate_inputs.py sanity check tests ---
+
+
+def _make_inputs(
+    stage: str = "series-a",
+    mrr: float = 100_000,
+    burn: float = 200_000,
+    growth: float | None = 0.10,
+) -> dict[str, Any]:
+    """Build a minimal inputs.json for validate_inputs tests."""
+    inputs: dict[str, Any] = {
+        "company": {
+            "company_name": "TestCo",
+            "slug": "testco",
+            "stage": stage,
+            "sector": "SaaS",
+            "geography": "US",
+            "revenue_model_type": "saas-plg",
+        },
+        "revenue": {
+            "mrr": {"value": mrr, "as_of": "2025-01"},
+        },
+        "cash": {
+            "current_balance": 2_000_000,
+            "balance_date": "2025-01",
+            "monthly_net_burn": burn,
+        },
+    }
+    if growth is not None:
+        inputs["revenue"]["growth_rate_monthly"] = growth
+    return inputs
+
+
+def test_validate_burn_revenue_suspect_series_a() -> None:
+    """Series A burn > 5x MRR triggers BURN_REVENUE_SUSPECT with critical flag."""
+    inputs = _make_inputs(stage="series-a", mrr=100_000, burn=600_000)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    assert data["valid"] is True
+    assert data["has_critical_warnings"] is True
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_REVENUE_SUSPECT" in codes
+    w = next(w for w in data["warnings"] if w["code"] == "BURN_REVENUE_SUSPECT")
+    assert w["critical"] is True
+
+
+def test_validate_burn_revenue_normal_no_warning() -> None:
+    """Series A burn < 5x MRR does not trigger warning."""
+    # burn=80K < 5*100K=500K → no BURN_REVENUE_SUSPECT
+    # burn_multiple = (80K*12)/(100K*0.1*12) = 8x → no BURN_MULTIPLE_SUSPECT
+    inputs = _make_inputs(stage="series-a", mrr=100_000, burn=80_000)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_REVENUE_SUSPECT" not in codes
+    assert data["has_critical_warnings"] is False
+
+
+def test_validate_burn_revenue_seed_higher_threshold() -> None:
+    """Seed stage uses 10x threshold — 8x burn should not trigger."""
+    # burn=40K < 10*50K=500K → no BURN_REVENUE_SUSPECT
+    # burn_multiple = (40K*12)/(50K*0.1*12) = 8x → no BURN_MULTIPLE_SUSPECT
+    inputs = _make_inputs(stage="seed", mrr=50_000, burn=40_000)  # 0.8x
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_REVENUE_SUSPECT" not in codes
+
+
+def test_validate_burn_revenue_seed_above_threshold() -> None:
+    """Seed stage burn > 10x MRR triggers warning."""
+    inputs = _make_inputs(stage="seed", mrr=50_000, burn=600_000)  # 12x
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_REVENUE_SUSPECT" in codes
+
+
+def test_validate_burn_revenue_pre_seed_skipped() -> None:
+    """Pre-seed stage skips burn-to-revenue check entirely."""
+    inputs = _make_inputs(stage="pre-seed", mrr=1_000, burn=200_000)  # 200x
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_REVENUE_SUSPECT" not in codes
+
+
+def test_validate_burn_revenue_zero_mrr_no_trigger() -> None:
+    """Zero MRR does not trigger burn-to-revenue check (pre-revenue guard)."""
+    inputs = _make_inputs(stage="series-a", mrr=0, burn=500_000)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_REVENUE_SUSPECT" not in codes
+
+
+def test_validate_burn_multiple_suspect() -> None:
+    """Extreme burn multiple (> 10x) triggers BURN_MULTIPLE_SUSPECT."""
+    # burn=1.44M, MRR=170K, growth=10% → net_new_ARR = 170K * 0.10 * 12 = 204K
+    # burn_multiple = (1.44M * 12) / 204K ≈ 84x
+    inputs = _make_inputs(stage="series-a", mrr=170_000, burn=1_440_000, growth=0.10)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_MULTIPLE_SUSPECT" in codes
+    assert data["has_critical_warnings"] is True
+
+
+def test_validate_burn_multiple_no_growth_no_trigger() -> None:
+    """Missing growth data does not trigger burn multiple check."""
+    inputs = _make_inputs(stage="series-a", mrr=170_000, burn=1_440_000, growth=None)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_MULTIPLE_SUSPECT" not in codes
+
+
+def test_validate_has_critical_warnings_false_when_clean() -> None:
+    """Clean inputs produce has_critical_warnings: false."""
+    # burn=80K < 5*100K → no BURN_REVENUE_SUSPECT
+    # burn_multiple = (80K*12)/(100K*0.1*12) = 8x → no BURN_MULTIPLE_SUSPECT
+    inputs = _make_inputs(stage="series-a", mrr=100_000, burn=80_000, growth=0.10)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    assert data["has_critical_warnings"] is False
 
 
 def test_validate_inputs_referenced_by_agent() -> None:

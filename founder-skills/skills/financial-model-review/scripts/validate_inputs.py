@@ -251,6 +251,58 @@ def _validate_sanity(inputs: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
 
+    # Burn-to-revenue sanity (data-error detector, not metric scorer)
+    burn = _deep_get(inputs, "cash", "monthly_net_burn")
+    stage = _deep_get(inputs, "company", "stage")
+    if isinstance(burn, (int, float)) and isinstance(mrr, (int, float)) and mrr > 0:
+        # Stage-aware thresholds
+        if _stage_in(stage, _SERIES_A_PLUS):
+            threshold = 5
+        elif _stage_in(stage, _SEED_PLUS):
+            threshold = 10
+        else:
+            threshold = 0  # pre-seed: skip
+
+        if threshold > 0 and burn > threshold * mrr:
+            warnings.append(
+                {
+                    "code": "BURN_REVENUE_SUSPECT",
+                    "message": (
+                        f"Monthly burn ({burn:,.0f}) is {burn / mrr:.0f}x MRR ({mrr:,.0f}) "
+                        f"— exceeds {threshold}x threshold for {stage}. "
+                        "Likely data error (e.g., quarterly figures treated as monthly)."
+                    ),
+                    "field": "cash.monthly_net_burn",
+                    "layer": 3,
+                    "critical": True,
+                }
+            )
+
+    # Burn multiple sanity (data-error detector — checklist scores the metric)
+    if (
+        isinstance(burn, (int, float))
+        and isinstance(mrr, (int, float))
+        and isinstance(growth, (int, float))
+        and growth > 0
+        and mrr > 0
+    ):
+        net_new_arr = mrr * growth * 12
+        if net_new_arr > 0:
+            burn_multiple = (burn * 12) / net_new_arr
+            if burn_multiple > 10:
+                warnings.append(
+                    {
+                        "code": "BURN_MULTIPLE_SUSPECT",
+                        "message": (
+                            f"Burn multiple ({burn_multiple:.0f}x) exceeds 10x "
+                            "— likely data error rather than poor unit economics."
+                        ),
+                        "field": "cash.monthly_net_burn",
+                        "layer": 3,
+                        "critical": True,
+                    }
+                )
+
     return warnings
 
 
@@ -357,6 +409,7 @@ def validate(inputs: dict[str, Any], *, fix: bool = False) -> dict[str, Any]:
 
     return {
         "valid": len(all_errors) == 0,
+        "has_critical_warnings": any(w.get("critical") for w in all_warnings),
         "errors": all_errors,
         "warnings": all_warnings,
         "auto_fixes": all_fixes,

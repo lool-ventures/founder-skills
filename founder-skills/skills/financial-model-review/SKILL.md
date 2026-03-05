@@ -21,7 +21,7 @@ Help startup founders understand how investors will evaluate their financial mod
 
 ## Input Formats
 
-Accept any format: Excel (.xlsx), CSV, Google Sheets exports, financial documents, or conversational input. For Excel files, use `extract_model.py` to parse. For other formats, extract data manually into the `inputs.json` schema. If multiple copies of the same file exist (e.g., `Financials.xlsx` and `Financials (1).xlsx`), use the most recently modified version and note the duplication to the founder.
+Accept any format: Excel (.xlsx), CSV, Google Sheets exports, financial documents, or conversational input. For Excel files, use `extract_model.py` to parse. For other formats, extract data manually into the `inputs.json` schema. If multiple copies of the same file exist (e.g., `Financials.xlsx` and `Financials (1).xlsx`), use the most recently modified version and note the duplication to the founder. If timestamps are identical, ask the founder which file to use. If the founder cannot be queried, prefer the file without parenthetical suffixes (e.g., `(1)`, `(2)`) — these typically indicate browser re-download duplicates.
 
 ## Available Scripts
 
@@ -79,7 +79,7 @@ Keep the founder informed with brief, plain-language updates at each step. Never
 
 ### Step 0: Path Setup
 
-Define these variables at the start of every Bash invocation:
+**Every Bash tool call runs in a fresh shell — variables do not persist.** Prefix every Bash call that uses these paths with the variable block below, or substitute absolute paths directly:
 
 ```bash
 SCRIPTS="${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/scripts"
@@ -197,7 +197,7 @@ python3 "$SCRIPTS/validate_inputs.py" --fix < "$REVIEW_DIR/inputs.json" > "$REVI
 
 Then re-validate. If errors persist after `--fix`, correct `inputs.json` manually (e.g., fill nulls from founder-provided data in Step 1).
 
-**Do NOT proceed to Step 4 until `valid == true`.** Warnings are informational and do not block.
+**Do NOT proceed to Step 4 until `valid == true` and `has_critical_warnings == false`.** If `has_critical_warnings` is true, investigate the flagged warnings (these signal likely data errors such as wrong periodicity or implausible magnitudes) and correct `inputs.json` before dispatching sub-agents. Non-critical warnings are informational and do not block.
 
 Additional manual checks:
 - **Cash balance missing?** If `cash.current_balance` is null but burn rate is known, use the value collected in Step 1. If the founder didn't provide it in Step 1, proceed without it — the runway analysis will flag the gap, and coaching commentary should note that cash balance is needed for a complete picture.
@@ -251,6 +251,8 @@ If `runway.py` produces minimal output (< 500 bytes) due to missing `cash_balanc
 **Graceful degradation:** If Task tool is unavailable, run Steps 4-6 sequentially in the main agent.
 
 After both sub-agents return, share a brief coaching update with the founder before proceeding to Step 7.
+
+**Post-dispatch corrections:** If `inputs.json` is corrected after sub-agents have completed (e.g., due to data errors discovered during report composition), re-run only the sub-agents whose outputs reference the corrected values. Single re-runs are permitted — the parallel dispatch mandate applies to the initial launch, not to error recovery.
 
 ### Step 7: Compose and Validate Report
 

@@ -339,6 +339,8 @@ def cmd_read(args: argparse.Namespace) -> None:
     artifacts_root: str = args.artifacts_root
     rc, slug = _resolve_slug(artifacts_root, args.slug)
     if rc != 0:
+        if slug:
+            print(slug, file=sys.stderr)
         sys.exit(rc)
 
     path = _context_path(artifacts_root, slug)
@@ -358,6 +360,8 @@ def cmd_merge(args: argparse.Namespace) -> None:
     artifacts_root: str = args.artifacts_root
     rc, slug = _resolve_slug(artifacts_root, args.slug)
     if rc != 0:
+        if slug:
+            print(slug, file=sys.stderr)
         sys.exit(rc)
 
     path = _context_path(artifacts_root, slug)
@@ -417,6 +421,8 @@ def cmd_validate(args: argparse.Namespace) -> None:
     artifacts_root: str = args.artifacts_root
     rc, slug = _resolve_slug(artifacts_root, args.slug)
     if rc != 0:
+        if slug:
+            print(slug, file=sys.stderr)
         sys.exit(rc)
 
     path = _context_path(artifacts_root, slug)
@@ -467,6 +473,8 @@ def cmd_update_identity(args: argparse.Namespace) -> None:
     artifacts_root: str = args.artifacts_root
     rc, slug = _resolve_slug(artifacts_root, args.slug)
     if rc != 0:
+        if slug:
+            print(slug, file=sys.stderr)
         sys.exit(rc)
 
     path = _context_path(artifacts_root, slug)

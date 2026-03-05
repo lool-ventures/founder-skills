@@ -15,6 +15,7 @@ Structured extraction of the spreadsheet contents for downstream analysis.
 | `sheets` | object[] | yes | Per-sheet extraction |
 | `source_format` | string | yes | One of: `"xlsx"`, `"csv"` |
 | `source_file` | string | yes | Original filename |
+| `periodicity_summary` | string | yes | One of: `"monthly"`, `"quarterly"`, `"annual"`, `"mixed"`, `"unknown"`. `"mixed"` when sheets have different periodicities. |
 
 ### sheets[] entry
 
@@ -24,6 +25,7 @@ Structured extraction of the spreadsheet contents for downstream analysis.
 | `headers` | string[] | yes | Column headers detected |
 | `rows` | any[][] | yes | Row data (mixed types) |
 | `detected_type` | string \| null | yes | One of: `"assumptions"`, `"revenue"`, `"expenses"`, `"cash"`, `"pnl"`, `"summary"`, `"scenarios"`, or `null` if unclassified |
+| `periodicity` | string | yes | One of: `"monthly"`, `"quarterly"`, `"annual"`, `"unknown"`. Detected from column headers via regex and majority vote. |
 | `row_count` | integer | yes | Number of data rows |
 | `col_count` | integer | yes | Number of columns |
 
@@ -36,12 +38,14 @@ Structured extraction of the spreadsheet contents for downstream analysis.
       "headers": ["Parameter", "Value", "Source", "Notes"],
       "rows": [["Monthly churn", 0.03, "Industry avg", "Conservative"]],
       "detected_type": "assumptions",
+      "periodicity": "monthly",
       "row_count": 45,
       "col_count": 4
     }
   ],
   "source_format": "xlsx",
-  "source_file": "acme-financial-model.xlsx"
+  "source_file": "acme-financial-model.xlsx",
+  "periodicity_summary": "monthly"
 }
 ```
 
