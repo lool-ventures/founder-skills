@@ -43,7 +43,7 @@ def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any]
 # Stage benchmarks
 # ---------------------------------------------------------------------------
 
-_STAGE_BENCHMARKS: dict[str, dict[str, dict[str, Any]]] = {
+STAGE_BENCHMARKS: dict[str, dict[str, dict[str, Any]]] = {
     "pre-seed": {
         "burn_multiple": {
             "strong": 3.0,
@@ -154,7 +154,7 @@ _STAGE_BENCHMARKS: dict[str, dict[str, dict[str, Any]]] = {
 # CAC payback benchmarks by ACV tier
 # ---------------------------------------------------------------------------
 
-_CAC_PAYBACK_BY_ACV: dict[str, dict[str, Any]] = {
+CAC_PAYBACK_BY_ACV: dict[str, dict[str, Any]] = {
     "smb": {
         "strong": 6,
         "acceptable": 9,
@@ -251,14 +251,14 @@ def _rate_metric(
 
 def _get_stage_benchmarks(stage: str) -> dict[str, dict[str, Any]]:
     """Get benchmarks for a stage, falling back to series-a for later stages."""
-    if stage in _STAGE_BENCHMARKS:
-        return _STAGE_BENCHMARKS[stage]
+    if stage in STAGE_BENCHMARKS:
+        return STAGE_BENCHMARKS[stage]
     # Fall back to series-a for unknown / later stages
     print(
         f"Warning: no benchmarks for stage '{stage}'; falling back to series-a",
         file=sys.stderr,
     )
-    return _STAGE_BENCHMARKS["series-a"]
+    return STAGE_BENCHMARKS["series-a"]
 
 
 def _is_saas(model_type: str) -> bool:
@@ -511,7 +511,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
     payback = _deep_get(unit_econ, "payback_months")
     if payback is not None:
         acv_tier = _deep_get(company, "acv_tier", default="default")
-        bench = _CAC_PAYBACK_BY_ACV.get(acv_tier, _CAC_PAYBACK_BY_ACV["default"])
+        bench = CAC_PAYBACK_BY_ACV.get(acv_tier, CAC_PAYBACK_BY_ACV["default"])
         rating = _rate_lower_is_better(payback, bench)
         evidence = f"CAC payback of {payback} months; {acv_tier} tier benchmark strong <= {bench['strong']} months"
         metrics.append(_metric("cac_payback", payback, rating, evidence, bench["source"], bench["as_of"], bench=bench))
