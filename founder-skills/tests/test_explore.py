@@ -476,13 +476,8 @@ def test_burn_multiple_method_field() -> None:
     rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
     assert rc == 0
     data = _extract_data_payload(stdout)
-    bm_metrics = [m for m in data["benchmarks"].get("metrics", []) if m["name"] == "burn_multiple"]
-    if bm_metrics:
-        assert bm_metrics[0]["method"] in ("ttm", "quarterly", "growth_rate")
-    else:
-        # burn_multiple may be a top-level key in benchmarks
-        bm = data["benchmarks"]["burn_multiple"]
-        assert bm.get("method") in ("ttm", "quarterly", "growth_rate")
+    bm = next(m for m in data["metrics"] if m["id"] == "burn_multiple")
+    assert bm["method"] in ("ttm", "quarterly", "growth_rate")
 
 
 def test_chartjs_cdn_link() -> None:
