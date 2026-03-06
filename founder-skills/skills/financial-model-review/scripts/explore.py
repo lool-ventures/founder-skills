@@ -642,7 +642,130 @@ function findMinViableGrowth(params) {{
 }}
 
 // ---------------------------------------------------------------------------
-// UI controls (stubs — Tasks 5-7 will implement)
+// Number formatting
+// ---------------------------------------------------------------------------
+
+function fmtCurrency(v) {{
+  if (v === null || v === undefined || isNaN(v)) return 'N/A';
+  var neg = v < 0 ? '-' : '';
+  var abs = Math.abs(v);
+  if (abs >= 1e6) return neg + '$' + (abs / 1e6).toFixed(1) + 'M';
+  if (abs >= 1e3) return neg + '$' + (abs / 1e3).toFixed(0) + 'K';
+  return neg + '$' + Math.round(abs);
+}}
+
+function fmtPct(v, decimals) {{
+  if (v === null || v === undefined || isNaN(v)) return 'N/A';
+  return (v * 100).toFixed(decimals !== undefined ? decimals : 1) + '%';
+}}
+
+function fmtRatio(v) {{
+  if (v === null || v === undefined || isNaN(v) || !isFinite(v)) return 'N/A';
+  return v.toFixed(1) + 'x';
+}}
+
+function fmtMonths(v) {{
+  if (v === null || v === undefined) return 'N/A';
+  return Math.round(v) + ' months';
+}}
+
+// ---------------------------------------------------------------------------
+// Unit economics formulas (Lens 3)
+// ---------------------------------------------------------------------------
+
+function calcBurnMultiple(inputs) {{
+  var mrr = inputs.mrr, growth_rate = inputs.growth_rate;
+  var monthly_burn = inputs.monthly_burn;
+  if (!growth_rate || !mrr || monthly_burn <= 0) return null;
+  var burn = Math.max(0, monthly_burn);
+  return burn / (mrr * growth_rate);
+}}
+
+function calcLTV(inputs) {{
+  var arpu = inputs.arpu, gross_margin = inputs.gross_margin;
+  var churn = inputs.churn;
+  if (!arpu || gross_margin === null || gross_margin === undefined) return null;
+  if (churn > 0) return (arpu * gross_margin) / churn;
+  return arpu * gross_margin * 60;
+}}
+
+function calcLTVCAC(inputs) {{
+  var ltv = calcLTV(inputs);
+  if (ltv === null || !inputs.cac || inputs.cac === 0) return null;
+  return ltv / inputs.cac;
+}}
+
+function calcCACPayback(inputs) {{
+  var arpu = inputs.arpu, gross_margin = inputs.gross_margin;
+  var cac = inputs.cac;
+  if (!arpu || !gross_margin || gross_margin === 0 || !cac) return null;
+  return cac / (arpu * gross_margin);
+}}
+
+function calcR40(inputs) {{
+  var mrr = inputs.mrr, growth_rate = inputs.growth_rate;
+  var monthly_burn = inputs.monthly_burn, gross_margin = inputs.gross_margin;
+  if (!growth_rate) return null;
+  var annualGrowth = (Math.pow(1 + growth_rate, 12) - 1) * 100;
+  var margin = null;
+  if (mrr && mrr > 0 && monthly_burn !== null && monthly_burn !== undefined) {{
+    var opMargin = -monthly_burn / mrr;
+    if (opMargin <= 1.0) {{
+      margin = opMargin;
+    }} else if (gross_margin !== null && gross_margin !== undefined) {{
+      margin = gross_margin;
+    }}
+  }} else if (gross_margin !== null && gross_margin !== undefined) {{
+    margin = gross_margin;
+  }}
+  if (margin === null) return null;
+  return annualGrowth + margin * 100;
+}}
+
+function safeMetric(val, benchTarget) {{
+  if (val === null || val === undefined || !isFinite(val) || isNaN(val)) return null;
+  if (benchTarget && Math.abs(val) > Math.abs(benchTarget) * 1000) return null;
+  return val;
+}}
+
+var METRIC_FORMULAS = {{
+  burn_multiple: calcBurnMultiple,
+  ltv: calcLTV,
+  ltv_cac_ratio: calcLTVCAC,
+  cac_payback: calcCACPayback,
+  rule_of_40: calcR40
+}};
+
+// ---------------------------------------------------------------------------
+// Rating logic
+// ---------------------------------------------------------------------------
+
+function rateMetric(id, value, benchmarks) {{
+  if (value === null) return 'not_rated';
+  var b = benchmarks[id];
+  if (!b) return 'not_rated';
+  var lowerBetter = ['burn_multiple', 'cac_payback', 'cac'];
+  if (lowerBetter.indexOf(id) >= 0) {{
+    if (value <= b.strong) return 'strong';
+    if (value <= b.acceptable) return 'acceptable';
+    if (value <= b.warning) return 'warning';
+    return 'fail';
+  }}
+  if (value >= b.strong) return 'strong';
+  if (value >= b.acceptable) return 'acceptable';
+  if (value >= b.warning) return 'warning';
+  return 'fail';
+}}
+
+function ratingIcon(r) {{
+  if (r === 'strong') return '\u2713';
+  if (r === 'warning' || r === 'acceptable') return '\u26a0';
+  if (r === 'fail') return '\u2717';
+  return '';
+}}
+
+// ---------------------------------------------------------------------------
+// UI controls (stubs — Tasks 6-7 will implement)
 // ---------------------------------------------------------------------------
 
 function switchLens(name) {{
