@@ -553,15 +553,92 @@ def _build_html_string(
 const DATA = {data_json};
 
 // ---------------------------------------------------------------------------
-// Projection engine (stubs — Task 4 will implement)
+// Projection Engine (port of runway.py _project_scenario)
 // ---------------------------------------------------------------------------
 
 function projectScenario(params) {{
-  return {{runway_months: null, default_alive: false, projections: []}};
+  var defaults = {{
+    burnChange: 0, fxAdjustment: 0, grantMonthly: 0,
+    grantStart: 1, grantEnd: 0, ilsFraction: 0,
+    maxMonths: DATA.engine.max_months,
+    growthDecay: DATA.engine.growth_decay
+  }};
+  var p = Object.assign({{}}, defaults, params);
+  var cash0 = p.cash0, revenue0 = p.revenue0, opex0 = p.opex0;
+  var growthRate = p.growthRate, burnChange = p.burnChange;
+  var fxAdjustment = p.fxAdjustment, grantMonthly = p.grantMonthly;
+  var grantStart = p.grantStart, grantEnd = p.grantEnd;
+  var ilsFraction = p.ilsFraction;
+  var maxMonths = p.maxMonths, growthDecay = p.growthDecay;
+
+  var projections = [];
+  var cash = cash0;
+  var revenue = revenue0;
+  var opex = opex0 * (1 + burnChange);
+  var cashOutMonth = null;
+  var defaultAlive = false;
+
+  for (var t = 1; t <= maxMonths; t++) {{
+    var effGrowth = growthRate * Math.pow(growthDecay, t - 1);
+    revenue = revenue * (1 + effGrowth);
+
+    var effOpex = opex;
+    if (ilsFraction > 0 && fxAdjustment !== 0) {{
+      effOpex = opex * (1 - ilsFraction) + opex * ilsFraction * (1 + fxAdjustment);
+    }}
+
+    var netBurn = effOpex - revenue;
+    var grant = 0;
+    if (grantMonthly > 0 && t >= grantStart && t <= grantEnd) {{
+      grant = grantMonthly;
+    }}
+
+    cash = cash - netBurn + grant;
+    projections.push({{
+      month: t, cash_balance: cash, revenue: revenue,
+      expenses: effOpex, net_burn: netBurn
+    }});
+
+    if (netBurn <= 0 && !defaultAlive) defaultAlive = true;
+    if (cash <= 0 && cashOutMonth === null) {{
+      cashOutMonth = t;
+      break;
+    }}
+  }}
+  if (cashOutMonth === null) defaultAlive = true;
+
+  return {{
+    runway_months: cashOutMonth,
+    default_alive: defaultAlive,
+    projections: projections,
+    cash_out_month: cashOutMonth
+  }};
 }}
 
 function findMinViableGrowth(params) {{
-  return 0;
+  var base = Object.assign({{}}, params);
+  var lo = 0;
+  var hi = Math.max(base.growthRate || 0, 0.01);
+  var maxHi = 0.50;
+  var precision = 0.001;
+
+  while (hi < maxHi) {{
+    var r = projectScenario(
+      Object.assign({{}}, base, {{growthRate: hi, burnChange: 0}})
+    );
+    if (r.default_alive || (r.runway_months !== null && r.runway_months >= 18)) break;
+    hi = Math.min(hi * 2, maxHi);
+  }}
+
+  for (var i = 0; i < 50; i++) {{
+    var mid = (lo + hi) / 2;
+    var r2 = projectScenario(
+      Object.assign({{}}, base, {{growthRate: mid, burnChange: 0}})
+    );
+    if (r2.default_alive) {{ hi = mid; }} else {{ lo = mid; }}
+    if (hi - lo < precision) break;
+  }}
+  return Math.round(hi * 1000) / 1000;
 }}
 
 // ---------------------------------------------------------------------------
