@@ -286,6 +286,7 @@ def _validate_sanity(inputs: dict[str, Any]) -> list[dict[str, Any]]:
                 ),
                 "field": "unit_economics.ltv.inputs.arpu_monthly",
                 "layer": 3,
+                "critical": True,
             }
         )
 
@@ -469,6 +470,19 @@ def _validate_completeness(inputs: dict[str, Any]) -> list[dict[str, Any]]:
                 "code": "MISSING_GROSS_MARGIN",
                 "message": "gross_margin should be populated at seed+",
                 "field": "unit_economics.gross_margin",
+                "layer": 4,
+            }
+        )
+
+    # Customer count needed for ARPU validation when LTV inputs present
+    ltv_inputs = _deep_get(inputs, "unit_economics", "ltv", "inputs")
+    customers = _deep_get(inputs, "revenue", "customers")
+    if isinstance(ltv_inputs, dict) and ltv_inputs and customers is None and _stage_in(stage, _SEED_PLUS):
+        warnings.append(
+            {
+                "code": "CUSTOMERS_MISSING",
+                "message": "LTV inputs present but revenue.customers missing — ARPU sanity check cannot run",
+                "field": "revenue.customers",
                 "layer": 4,
             }
         )

@@ -2855,3 +2855,73 @@ class TestValidateInputsArpuFallback:
         assert rc == 0
         codes = [w["code"] for w in data["warnings"]]
         assert "ARPU_SUSPECT" not in codes  # 5000 < 50000 MRR, so no suspect
+
+
+class TestValidateInputsArpuCritical:
+    """ARPU_SUSPECT should be critical; CUSTOMERS_MISSING when LTV present but no customers."""
+
+    def test_arpu_suspect_is_critical(self):
+        """ARPU_SUSPECT should block at the stop-gate."""
+        inp = {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}, "customers": 10},
+            "cash": {"monthly_net_burn": 80000},
+            "unit_economics": {
+                "ltv": {"value": 6000, "inputs": {"arpu_monthly": 60000, "churn_monthly": 0.03, "gross_margin": 0.75}},
+                "gross_margin": 0.75,
+            },
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        suspect = [w for w in data["warnings"] if w["code"] == "ARPU_SUSPECT"]
+        assert len(suspect) == 1
+        assert suspect[0].get("critical") is True
+        assert data["has_critical_warnings"] is True
+
+    def test_customers_missing_with_ltv_at_seed(self):
+        """CUSTOMERS_MISSING fires when LTV inputs present but revenue.customers absent."""
+        inp = {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}},
+            "cash": {"monthly_net_burn": 80000},
+            "unit_economics": {
+                "ltv": {"value": 6000, "inputs": {"arpu_monthly": 5000, "churn_monthly": 0.03, "gross_margin": 0.75}},
+                "gross_margin": 0.75,
+            },
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "CUSTOMERS_MISSING" in codes
+
+    def test_customers_missing_not_at_preseed(self):
+        """CUSTOMERS_MISSING should NOT fire at pre-seed."""
+        inp = {
+            "company": {"stage": "pre-seed"},
+            "revenue": {"mrr": {"value": 5000}},
+            "cash": {"monthly_net_burn": 20000},
+            "unit_economics": {
+                "ltv": {"value": 6000, "inputs": {"arpu_monthly": 5000}},
+                "gross_margin": 0.75,
+            },
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "CUSTOMERS_MISSING" not in codes
+
+    def test_customers_present_no_warning(self):
+        """No CUSTOMERS_MISSING when revenue.customers is populated."""
+        inp = {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}, "customers": 10},
+            "cash": {"monthly_net_burn": 80000},
+            "unit_economics": {
+                "ltv": {"value": 6000, "inputs": {"arpu_monthly": 5000, "churn_monthly": 0.03, "gross_margin": 0.75}},
+                "gross_margin": 0.75,
+            },
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "CUSTOMERS_MISSING" not in codes
