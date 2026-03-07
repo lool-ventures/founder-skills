@@ -217,8 +217,8 @@ def _build_metrics(inputs: dict[str, Any], ue_data: dict[str, Any]) -> list[dict
         if name == "burn_multiple":
             metric["method"] = _detect_burn_method(m.get("evidence"))
             metric["inputs"] = {
-                "burn": _deep_get(cash, "monthly_net_burn", default=0),
-                "revenue": _deep_get(revenue, "mrr", "value", default=0),
+                "monthly_burn": _deep_get(cash, "monthly_net_burn", default=0),
+                "mrr": _deep_get(revenue, "mrr", "value", default=0),
                 "growth_rate": _deep_get(revenue, "growth_rate_monthly", default=0),
             }
         elif name in ("cac", "ltv", "ltv_cac_ratio", "cac_payback"):
@@ -236,8 +236,8 @@ def _build_metrics(inputs: dict[str, Any], ue_data: dict[str, Any]) -> list[dict
         elif name == "rule_of_40":
             metric["inputs"] = {
                 "growth_rate": _deep_get(revenue, "growth_rate_monthly", default=0),
-                "burn": _deep_get(cash, "monthly_net_burn", default=0),
-                "revenue": _deep_get(revenue, "mrr", "value", default=0),
+                "monthly_burn": _deep_get(cash, "monthly_net_burn", default=0),
+                "mrr": _deep_get(revenue, "mrr", "value", default=0),
             }
         else:
             metric["inputs"] = {}
@@ -1208,7 +1208,7 @@ function renderUnitEconomics() {{
       }}
     }}
 
-    markup += '<tr class="clickable" onclick="selectMetric(\'' + m.id + '\')" style="cursor:pointer">' +
+    markup += '<tr class="clickable" onclick="selectMetric(\\x27' + m.id + '\\x27)" style="cursor:pointer">' +
       '<td>' + label + '</td>' +
       '<td>' + fmt(val) + '</td>' +
       '<td><span class="badge ' + rating + '">' + icon + ' ' + rating + '</span></td>' +
