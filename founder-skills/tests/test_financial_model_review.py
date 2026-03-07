@@ -799,17 +799,18 @@ def test_unit_economics_ratings() -> None:
 
 
 def test_unit_economics_burn_multiple_computed_wins() -> None:
-    """When compute inputs are present, computed burn_multiple is used, not reported."""
+    """When compute inputs are present and values are close, computed burn_multiple is used."""
     inputs = json.loads(json.dumps(_VALID_INPUTS))
-    inputs["unit_economics"]["burn_multiple"] = 0.66
+    # Computed: 80000 / (50000 * 0.08) = 20.0x; provided 18.0 is within 2x ratio → computed wins
+    inputs["unit_economics"]["burn_multiple"] = 18.0
     payload = json.dumps(inputs)
     rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
     assert rc == 0
     assert data is not None
     metrics_by_name = {m["name"]: m for m in data["metrics"]}
     assert "burn_multiple" in metrics_by_name
-    # Computed value should be used, not the reported 0.66
-    assert metrics_by_name["burn_multiple"]["value"] != 0.66
+    # Computed value (20.0) should be used, not the reported 18.0
+    assert metrics_by_name["burn_multiple"]["value"] != 18.0
     # burn_multiple_lifetime should NOT exist
     assert "burn_multiple_lifetime" not in metrics_by_name
 
@@ -3094,3 +3095,72 @@ class TestValidateInputsDerivedMetric:
         assert rc == 0
         codes = [w["code"] for w in data["warnings"]]
         assert "DERIVED_METRIC_REDUNDANT" not in codes
+
+
+class TestBurnMultipleProvidedPreference:
+    """When growth-rate burn multiple diverges >2x from provided, prefer provided."""
+
+    def _make_inputs(self, growth_rate: float, provided_bm: float | None = None) -> dict:
+        inp = {
+            "company": {"stage": "series-a", "sector": "B2B SaaS", "revenue_model_type": "saas-sales-led"},
+            "revenue": {"mrr": {"value": 153603}, "arr": {"value": 1843235}, "growth_rate_monthly": growth_rate},
+            "cash": {"current_balance": 1500000, "monthly_net_burn": 561000},
+            "unit_economics": {"gross_margin": 0.784},
+        }
+        if provided_bm is not None:
+            inp["unit_economics"]["burn_multiple"] = provided_bm
+        return inp
+
+    def test_divergent_prefers_provided(self) -> None:
+        """31x growth-rate vs 3.05x provided → use 3.05x, warn about divergence."""
+        inp = self._make_inputs(0.118, provided_bm=3.05)
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        bm = next(m for m in data["metrics"] if m["name"] == "burn_multiple")
+        assert bm["value"] == 3.05
+        # Value goes through normal rating branches (sanity + benchmark)
+        # Divergence detail is in the warning
+        codes = [w["code"] for w in data.get("warnings", [])]
+        assert "BURN_MULTIPLE_REPORTED_DIVERGENCE" in codes
+
+    def test_close_values_uses_computed(self) -> None:
+        """When growth-rate and provided are close, use computed."""
+        inp = {
+            "company": {"stage": "series-a", "sector": "B2B SaaS", "revenue_model_type": "saas-sales-led"},
+            "revenue": {"mrr": {"value": 100000}, "arr": {"value": 1200000}, "growth_rate_monthly": 0.05},
+            "cash": {"current_balance": 5000000, "monthly_net_burn": 50000},
+            "unit_economics": {"gross_margin": 0.75, "burn_multiple": 9.5},
+        }
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        bm = next(m for m in data["metrics"] if m["name"] == "burn_multiple")
+        # Computed: 50000 / (100000*0.05) = 10x; provided 9.5; ratio 1.05 < 2 → use computed
+        assert bm["value"] == 10.0
+
+    def test_no_provided_uses_computed(self) -> None:
+        """Without provided burn_multiple, always use computed (existing behavior)."""
+        inp = self._make_inputs(0.118, provided_bm=None)
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        bm = next(m for m in data["metrics"] if m["name"] == "burn_multiple")
+        # 561000 / (153603 * 0.118) = 30.95
+        assert bm["value"] == 30.95
+
+    def test_time_series_path_unaffected_by_divergence_check(self) -> None:
+        """Time-series burn multiple path should not be affected by the growth-rate divergence check."""
+        inp = self._make_inputs(0.118, provided_bm=3.05)
+        # Add TTM revenue data to trigger time-series path
+        inp["revenue"]["quarterly"] = [
+            {"quarter": "Q1-2025", "arr": 400000},
+            {"quarter": "Q2-2025", "arr": 420000},
+            {"quarter": "Q3-2025", "arr": 450000},
+            {"quarter": "Q4-2025", "arr": 480000},
+        ]
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        bm = next(m for m in data["metrics"] if m["name"] == "burn_multiple")
+        # Time-series path should be used, not the provided value
+        assert bm["value"] != 3.05
+        # Should NOT produce BURN_MULTIPLE_REPORTED_DIVERGENCE (that's growth-rate path only)
+        codes = [w["code"] for w in data.get("warnings", [])]
+        assert "BURN_MULTIPLE_REPORTED_DIVERGENCE" not in codes

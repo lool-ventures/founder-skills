@@ -639,6 +639,25 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
         net_new_arr = mrr * growth_rate * 12
         if net_new_arr > 0:
             burn_mult = round(monthly_burn / (net_new_arr / 12), 2)
+            # --- divergence check: prefer provided when growth-rate estimate is unreliable ---
+            # Only compare positive values; negative burn_mult flows to existing sign-error handler
+            provided_bm = _deep_get(unit_econ, "burn_multiple")
+            if burn_mult > 0 and provided_bm is not None and isinstance(provided_bm, (int, float)) and provided_bm > 0:
+                ratio = max(burn_mult, provided_bm) / min(burn_mult, provided_bm)
+                if ratio > 2.0:
+                    burn_mult_original = burn_mult
+                    ue_warnings.append(
+                        {
+                            "code": "BURN_MULTIPLE_REPORTED_DIVERGENCE",
+                            "message": (
+                                f"Growth-rate burn multiple ({burn_mult_original:.1f}x) diverges >2x "
+                                f"from reported value ({provided_bm:.1f}x) — "
+                                f"using reported value (growth-rate method unreliable without time-series)"
+                            ),
+                            "field": "burn_multiple",
+                        }
+                    )
+                    burn_mult = provided_bm
             if burn_mult < 0:
                 metrics.append(
                     _metric(
