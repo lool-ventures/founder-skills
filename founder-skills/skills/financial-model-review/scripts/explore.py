@@ -1208,10 +1208,13 @@ function renderUnitEconomics() {{
       }}
     }}
 
+    var ratingCell = rating === 'not_rated'
+      ? '<td style="color:#86868b">\u2014</td>'
+      : '<td><span class="badge ' + rating + '">' + icon + ' ' + rating + '</span></td>';
     markup += '<tr class="clickable" onclick="selectMetric(\\x27' + m.id + '\\x27)" style="cursor:pointer">' +
       '<td>' + label + '</td>' +
       '<td>' + fmt(val) + '</td>' +
-      '<td><span class="badge ' + rating + '">' + icon + ' ' + rating + '</span></td>' +
+      ratingCell +
       '<td>' + benchStr + '</td></tr>';
   }});
   markup += '</table>';
@@ -1276,10 +1279,12 @@ function selectMetric(metricId) {{
     }}[m.id] || String;
     var icon = ratingIcon(rating);
     var valStr = newVal !== null ? fmt(newVal) : 'N/A';
+    var badgeHtml = rating === 'not_rated'
+      ? '<span style="color:#86868b;font-size:0.85rem;margin-left:8px">no benchmark</span>'
+      : ' <span class="badge ' + rating + '">' + icon + ' ' + rating + '</span>';
     var ueEl = document.getElementById('ue-result');
     if (ueEl) setContent(ueEl,
-      '<div style="font-size:1.5rem;margin:0.5rem 0">' + valStr +
-      ' <span class="badge ' + rating + '">' + icon + ' ' + rating + '</span></div>');
+      '<div style="font-size:1.5rem;margin:0.5rem 0">' + valStr + badgeHtml + '</div>');
   }}
 
   // Add sliders based on metric type
