@@ -440,9 +440,13 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
     if ltv_value is not None:
         # Cap LTV at 60-month horizon when churn is 0%
         ltv_churn = _deep_get(unit_econ, "ltv", "inputs", "churn_monthly")
+        if ltv_churn is None:
+            ltv_churn = _deep_get(unit_econ, "ltv", "inputs", "churn")
         ltv_unreliable = False
         if ltv_churn is not None and ltv_churn == 0:
             arpu = _deep_get(unit_econ, "ltv", "inputs", "arpu_monthly")
+            if arpu is None:
+                arpu = _deep_get(unit_econ, "ltv", "inputs", "arpu")
             gm_input = _deep_get(unit_econ, "ltv", "inputs", "gross_margin")
             obs_note = "observed" if ltv_observed == "observed" else "assumed"
             if arpu is not None and gm_input is not None:

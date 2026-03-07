@@ -224,7 +224,8 @@ def _build_metrics(inputs: dict[str, Any], ue_data: dict[str, Any]) -> list[dict
         elif name in ("cac", "ltv", "ltv_cac_ratio", "cac_payback"):
             metric["inputs"] = {
                 "cac": _deep_get(ue_input, "cac", "total", default=0),
-                "arpu": _deep_get(ue_input, "ltv", "inputs", "arpu_monthly", default=0),
+                "arpu": _deep_get(ue_input, "ltv", "inputs", "arpu_monthly")
+                or _deep_get(ue_input, "ltv", "inputs", "arpu", default=0),
                 "churn": _deep_get(revenue, "churn_monthly", default=0),
                 "gross_margin": _deep_get(ue_input, "gross_margin", default=0),
             }
@@ -498,6 +499,21 @@ def _build_html_string(
         "  cursor: pointer; font-size: 0.875rem;",
         "}",
         ".reset-btn:hover { background: #e8e8ed; }",
+        ".metrics-strip {",
+        "  display: flex; align-items: center; gap: 0.5rem;",
+        "  flex-wrap: wrap; margin: 0.75rem 0;",
+        "}",
+        ".metrics-table th, .metrics-table td {",
+        "  text-align: left; padding: 0.5rem 0.75rem;",
+        "  border-bottom: 1px solid #e8e8ed;",
+        "}",
+        ".metrics-table th { font-weight: 600; color: #86868b; }",
+        ".scenario-table th, .scenario-table td {",
+        "  text-align: left; padding: 0.5rem 0.75rem;",
+        "  border-bottom: 1px solid #e8e8ed;",
+        "}",
+        ".scenario-table th { font-weight: 600; color: #86868b; }",
+        ".clickable:hover { background: #f5f5f7; }",
     ]
     css = "\n".join(css_lines)
 
@@ -765,7 +781,27 @@ function ratingIcon(r) {{
 }}
 
 // ---------------------------------------------------------------------------
-// UI controls (stubs — Tasks 6-7 will implement)
+// UI State
+// ---------------------------------------------------------------------------
+
+var state = {{
+  growthRate: DATA.engine.growth_rate,
+  opex0: DATA.engine.opex0,
+  cash0: DATA.engine.cash0,
+  fxAdjustment: DATA.engine.fx_adjustment,
+  grantMonthly: DATA.engine.grant_monthly,
+  grantStart: DATA.engine.grant_start || 1,
+  grantEnd: DATA.engine.grant_end || 0,
+  ilsFraction: DATA.engine.ils_expense_fraction,
+  targetRunway: (DATA.bridge && DATA.bridge.runway_target) || 24,
+  burnChange: 0
+}};
+
+var charts = {{}};
+var currentLens = null;
+
+// ---------------------------------------------------------------------------
+// Tab switching
 // ---------------------------------------------------------------------------
 
 function switchLens(name) {{
@@ -780,16 +816,712 @@ function switchLens(name) {{
   document.querySelectorAll('.tab[data-lens="' + name + '"]').forEach(function(el) {{
     el.classList.add('active');
   }});
+  currentLens = name;
+  if (name === 'runway') renderRunway();
+  else if (name === 'raise_planner') renderRaisePlanner();
+  else if (name === 'unit_economics') renderUnitEconomics();
+  else if (name === 'stress_test') renderStressTest();
 }}
 
 function resetAll() {{
-  // Reset all sliders and UI state to defaults
+  state.growthRate = DATA.engine.growth_rate;
+  state.opex0 = DATA.engine.opex0;
+  state.cash0 = DATA.engine.cash0;
+  state.fxAdjustment = DATA.engine.fx_adjustment;
+  state.grantMonthly = DATA.engine.grant_monthly;
+  state.grantStart = DATA.engine.grant_start || 1;
+  state.grantEnd = DATA.engine.grant_end || 0;
+  state.burnChange = 0;
+  state.targetRunway = (DATA.bridge && DATA.bridge.runway_target) || 24;
+  if (currentLens) switchLens(currentLens);
 }}
 
-// Auto-activate first enabled lens
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function getProjectionParams() {{
+  return {{
+    cash0: state.cash0,
+    revenue0: DATA.engine.revenue0,
+    opex0: state.opex0,
+    growthRate: state.growthRate,
+    burnChange: state.burnChange,
+    fxAdjustment: state.fxAdjustment,
+    grantMonthly: state.grantMonthly,
+    grantStart: state.grantStart,
+    grantEnd: state.grantEnd,
+    ilsFraction: state.ilsFraction
+  }};
+}}
+
+function makeSlider(opts) {{
+  var id = opts.id, label = opts.label, min = opts.min, max = opts.max;
+  var step = opts.step, value = opts.value, fmt = opts.fmt || String;
+  var onChange = opts.onChange;
+  var div = document.createElement('div');
+  div.className = 'slider-group';
+  var lbl = document.createElement('label');
+  lbl.setAttribute('for', id);
+  lbl.textContent = label + ': ';
+  var valSpan = document.createElement('span');
+  valSpan.className = 'slider-value';
+  valSpan.id = 'val-' + id;
+  valSpan.textContent = fmt(value);
+  lbl.appendChild(valSpan);
+  div.appendChild(lbl);
+  var input = document.createElement('input');
+  input.type = 'range';
+  input.id = id;
+  input.min = String(min);
+  input.max = String(max);
+  input.step = String(step);
+  input.value = String(value);
+  input.setAttribute('aria-label', label);
+  div.appendChild(input);
+  input.addEventListener('input', function() {{
+    var v = parseFloat(this.value);
+    valSpan.textContent = fmt(v);
+    if (onChange) onChange(v);
+  }});
+  return div;
+}}
+
+function commentaryBox(lensKey) {{
+  if (!DATA.commentary || !DATA.commentary.lenses) return '';
+  var c = DATA.commentary.lenses[lensKey];
+  if (!c) return '';
+  var parts = [];
+  if (c.callout) parts.push('<div class="commentary-box">' + c.callout + '</div>');
+  if (c.highlight) parts.push('<div class="commentary-box"'
+    + ' style="border-color:#86868b;background:#f9f9fb">' + c.highlight + '</div>');
+  if (c.watch_out) parts.push('<div class="commentary-box"'
+    + ' style="border-color:#f59e0b;background:#fffbeb">' + c.watch_out + '</div>');
+  return parts.join('');
+}}
+
+// ---------------------------------------------------------------------------
+// Safe DOM helpers — build content via DOM API, not innerHTML
+// ---------------------------------------------------------------------------
+
+function setContent(el, htmlStr) {{
+  // Uses createContextualFragment for safe insertion of
+  // internally-constructed markup (no external/user input).
+  while (el.firstChild) el.removeChild(el.firstChild);
+  var range = document.createRange();
+  range.selectNode(document.body);
+  el.appendChild(range.createContextualFragment(htmlStr));
+}}
+
+// ---------------------------------------------------------------------------
+// Lens 1: Runway & Default-Alive
+// ---------------------------------------------------------------------------
+
+function renderRunway() {{
+  var panel = document.getElementById('lens-runway');
+  if (!panel) return;
+
+  var p = getProjectionParams();
+  var result = projectScenario(p);
+  var mvg = findMinViableGrowth(p);
+
+  var alive = result.default_alive;
+  var months = result.runway_months || DATA.engine.max_months + '+';
+  var badge = alive
+    ? '<span class="badge strong">SELF-SUSTAINING</span>'
+    : '<span class="badge fail">NEEDS FUNDING</span>';
+
+  var burn = state.opex0 - DATA.engine.revenue0;
+  var burnLabel = burn >= 0 ? 'Monthly burn' : 'Monthly expenses';
+  var burnAbs = Math.abs(burn);
+  var burnMax = Math.max(DATA.engine.opex0, DATA.engine.revenue0) * 3;
+  var burnStep = Math.max(1000, Math.round(burnAbs / 20 / 1000) * 1000) || 5000;
+
+  var markup = '<h2>Runway &amp; Default-Alive</h2>';
+  markup += '<div class="metrics-strip">' + badge +
+    ' <span style="margin-left:12px">Runway: <strong>' + months + ' months</strong></span>' +
+    ' <span style="margin-left:12px">Min viable growth: <strong>' + fmtPct(mvg, 1) + ' MoM</strong></span>' +
+    '</div>';
+  markup += commentaryBox('runway');
+  markup += '<div class="chart-container"><canvas id="chart-runway"></canvas></div>';
+  markup += '<div id="sliders-runway"></div>';
+  setContent(panel, markup);
+
+  // Sliders
+  var sliderDiv = document.getElementById('sliders-runway');
+  sliderDiv.appendChild(makeSlider({{
+    id: 'growth', label: 'Growth rate', min: 0, max: 0.30, step: 0.005,
+    value: state.growthRate, fmt: function(v) {{ return fmtPct(v, 1); }},
+    onChange: function(v) {{ state.growthRate = v; renderRunway(); }}
+  }}));
+  sliderDiv.appendChild(makeSlider({{
+    id: 'opex', label: burnLabel, min: 0, max: burnMax, step: burnStep,
+    value: state.opex0, fmt: fmtCurrency,
+    onChange: function(v) {{ state.opex0 = v; renderRunway(); }}
+  }}));
+
+  // Advanced toggle
+  var advBtn = document.createElement('button');
+  advBtn.className = 'tab';
+  advBtn.style.cssText = 'font-size:0.8rem;padding:4px 8px;margin-top:8px';
+  advBtn.textContent = 'Advanced...';
+  var advPanel = document.createElement('div');
+  advPanel.style.display = 'none';
+  advBtn.onclick = function() {{
+    advPanel.style.display = advPanel.style.display === 'none' ? 'block' : 'none';
+  }};
+  sliderDiv.appendChild(advBtn);
+
+  advPanel.appendChild(makeSlider({{
+    id: 'cash0', label: 'Starting cash', min: 0,
+    max: DATA.engine.cash0 * 3 || 1000000, step: Math.max(10000, Math.round(DATA.engine.cash0 / 20)),
+    value: state.cash0, fmt: fmtCurrency,
+    onChange: function(v) {{ state.cash0 = v; renderRunway(); }}
+  }}));
+
+  if (state.ilsFraction > 0) {{
+    advPanel.appendChild(makeSlider({{
+      id: 'fx', label: 'FX adjustment', min: -0.15, max: 0.15, step: 0.01,
+      value: state.fxAdjustment, fmt: function(v) {{ return fmtPct(v, 0); }},
+      onChange: function(v) {{ state.fxAdjustment = v; renderRunway(); }}
+    }}));
+  }}
+
+  if (DATA.engine.grant_monthly > 0) {{
+    advPanel.appendChild(makeSlider({{
+      id: 'grant', label: 'IIA grant/month', min: 0,
+      max: DATA.engine.grant_monthly * 2, step: Math.max(10000, Math.round(DATA.engine.grant_monthly / 10)),
+      value: state.grantMonthly, fmt: fmtCurrency,
+      onChange: function(v) {{ state.grantMonthly = v; renderRunway(); }}
+    }}));
+  }}
+
+  sliderDiv.appendChild(advPanel);
+
+  // Chart
+  renderRunwayChart(result);
+}}
+
+function renderRunwayChart(result) {{
+  var ctx = document.getElementById('chart-runway');
+  if (!ctx) return;
+  if (charts.runway) charts.runway.destroy();
+
+  var labels = result.projections.map(function(p) {{ return 'M' + p.month; }});
+  var cashData = result.projections.map(function(p) {{ return Math.round(p.cash_balance); }});
+  var revData = result.projections.map(function(p) {{ return Math.round(p.revenue); }});
+
+  charts.runway = new Chart(ctx, {{
+    type: 'line',
+    data: {{
+      labels: labels,
+      datasets: [
+        {{
+          label: 'Cash Balance',
+          data: cashData,
+          borderColor: '#0071e3',
+          backgroundColor: 'rgba(0,113,227,0.1)',
+          fill: true,
+          tension: 0.2
+        }},
+        {{
+          label: 'Revenue',
+          data: revData,
+          borderColor: '#34c759',
+          borderDash: [5, 5],
+          fill: false,
+          tension: 0.2
+        }}
+      ]
+    }},
+    options: {{
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {{
+        legend: {{ position: 'top' }},
+        tooltip: {{
+          callbacks: {{
+            label: function(ctx) {{ return ctx.dataset.label + ': ' + fmtCurrency(ctx.raw); }}
+          }}
+        }}
+      }},
+      scales: {{
+        y: {{
+          ticks: {{
+            callback: function(v) {{ return fmtCurrency(v); }}
+          }}
+        }}
+      }}
+    }}
+  }});
+}}
+
+// ---------------------------------------------------------------------------
+// Lens 2: Raise Planner
+// ---------------------------------------------------------------------------
+
+function renderRaisePlanner() {{
+  var panel = document.getElementById('lens-raise_planner');
+  if (!panel) return;
+
+  var targetRaise = (DATA.bridge && DATA.bridge.raise_amount) || 3000000;
+  var amounts = [];
+  var raiseStep = targetRaise > 5000000 ? 1000000 : 500000;
+  for (var a = raiseStep; a <= targetRaise * 3; a += raiseStep) {{
+    amounts.push(a);
+  }}
+  if (amounts.length < 3) amounts = [500000, 1000000, 1500000, 2000000, 3000000, 5000000];
+
+  var results = amounts.map(function(amt) {{
+    var p = getProjectionParams();
+    p.cash0 = state.cash0 + amt;
+    p.burnChange = state.burnChange;
+    var r = projectScenario(p);
+    return {{
+      amount: amt,
+      runway: r.runway_months || DATA.engine.max_months,
+      alive: r.default_alive
+    }};
+  }});
+
+  var target = state.targetRunway;
+  var markup = '<h2>Raise Planner</h2>';
+  markup += commentaryBox('raise_planner');
+  markup += '<div class="chart-container"><canvas id="chart-raise"></canvas></div>';
+  markup += '<div id="sliders-raise"></div>';
+  setContent(panel, markup);
+
+  var sliderDiv = document.getElementById('sliders-raise');
+  sliderDiv.appendChild(makeSlider({{
+    id: 'target-runway', label: 'Target runway', min: 12, max: 36, step: 1,
+    value: target, fmt: function(v) {{ return v + ' months'; }},
+    onChange: function(v) {{ state.targetRunway = v; renderRaisePlanner(); }}
+  }}));
+  sliderDiv.appendChild(makeSlider({{
+    id: 'growth-rp', label: 'Growth rate', min: 0, max: 0.30, step: 0.005,
+    value: state.growthRate, fmt: function(v) {{ return fmtPct(v, 1); }},
+    onChange: function(v) {{ state.growthRate = v; renderRaisePlanner(); }}
+  }}));
+
+  // Advanced
+  var advBtn = document.createElement('button');
+  advBtn.className = 'tab';
+  advBtn.style.cssText = 'font-size:0.8rem;padding:4px 8px;margin-top:8px';
+  advBtn.textContent = 'Advanced...';
+  var advPanel = document.createElement('div');
+  advPanel.style.display = 'none';
+  advBtn.onclick = function() {{
+    advPanel.style.display = advPanel.style.display === 'none' ? 'block' : 'none';
+  }};
+  sliderDiv.appendChild(advBtn);
+  advPanel.appendChild(makeSlider({{
+    id: 'burn-change', label: 'Burn increase after raise', min: 0, max: 0.50, step: 0.05,
+    value: state.burnChange, fmt: function(v) {{ return '+' + fmtPct(v, 0); }},
+    onChange: function(v) {{ state.burnChange = v; renderRaisePlanner(); }}
+  }}));
+  sliderDiv.appendChild(advPanel);
+
+  // Chart
+  var ctx = document.getElementById('chart-raise');
+  if (charts.raise) charts.raise.destroy();
+  charts.raise = new Chart(ctx, {{
+    type: 'bar',
+    data: {{
+      labels: results.map(function(r) {{ return fmtCurrency(r.amount); }}),
+      datasets: [{{
+        label: 'Runway (months)',
+        data: results.map(function(r) {{ return r.runway; }}),
+        backgroundColor: results.map(function(r) {{
+          return r.runway >= target ? '#34c759' : r.runway >= target * 0.8 ? '#ff9f0a' : '#ff3b30';
+        }})
+      }}]
+    }},
+    options: {{
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {{
+        legend: {{ display: false }},
+        annotation: undefined
+      }},
+      scales: {{
+        y: {{
+          beginAtZero: true,
+          title: {{ display: true, text: 'Months' }}
+        }}
+      }}
+    }}
+  }});
+}}
+
+// ---------------------------------------------------------------------------
+// Lens 3: Unit Economics
+// ---------------------------------------------------------------------------
+
+var ueState = {{}};
+
+function renderUnitEconomics() {{
+  var panel = document.getElementById('lens-unit_economics');
+  if (!panel) return;
+
+  var markup = '<h2>Unit Economics</h2>';
+  markup += commentaryBox('unit_economics');
+
+  // Metrics table
+  markup += '<table class="metrics-table" style="width:100%;border-collapse:collapse;font-size:0.875rem">';
+  markup += '<tr><th>Metric</th><th>Value</th><th>Rating</th><th>Benchmark</th></tr>';
+
+  var metricLabels = {{
+    cac: 'CAC', ltv: 'LTV', ltv_cac_ratio: 'LTV/CAC',
+    cac_payback: 'CAC Payback', gross_margin: 'Gross Margin',
+    burn_multiple: 'Burn Multiple', rule_of_40: 'Rule of 40'
+  }};
+
+  var metricFmt = {{
+    cac: fmtCurrency, ltv: fmtCurrency, ltv_cac_ratio: fmtRatio,
+    cac_payback: fmtMonths, gross_margin: function(v) {{ return fmtPct(v, 0); }},
+    burn_multiple: fmtRatio, rule_of_40: function(v) {{ return v !== null ? v.toFixed(0) : 'N/A'; }}
+  }};
+
+  var worstGap = null, worstMetric = null;
+
+  DATA.metrics.forEach(function(m) {{
+    var label = metricLabels[m.id] || m.id;
+    var fmt = metricFmt[m.id] || String;
+    var val = m.value;
+    var rating = m.rating || 'not_rated';
+    var icon = ratingIcon(rating);
+    var bench = DATA.benchmarks[m.id];
+    var benchStr = bench ? fmt(bench.strong) : '-';
+
+    // Track worst gap for default selection
+    if (bench && val !== null && val !== undefined) {{
+      var gap;
+      var lowerBetter = ['burn_multiple', 'cac_payback', 'cac'];
+      if (lowerBetter.indexOf(m.id) >= 0) {{
+        gap = val - bench.strong;
+      }} else {{
+        gap = bench.strong - val;
+      }}
+      if (gap > 0 && (worstGap === null || gap > worstGap)) {{
+        worstGap = gap;
+        worstMetric = m.id;
+      }}
+    }}
+
+    markup += '<tr class="clickable" onclick="selectMetric(\'' + m.id + '\')" style="cursor:pointer">' +
+      '<td>' + label + '</td>' +
+      '<td>' + fmt(val) + '</td>' +
+      '<td><span class="badge ' + rating + '">' + icon + ' ' + rating + '</span></td>' +
+      '<td>' + benchStr + '</td></tr>';
+  }});
+  markup += '</table>';
+
+  markup += '<div id="fix-metric" style="margin-top:1.5rem"></div>';
+  setContent(panel, markup);
+
+  // Auto-select worst metric
+  if (worstMetric) selectMetric(worstMetric);
+  else if (DATA.metrics.length > 0) selectMetric(DATA.metrics[0].id);
+}}
+
+function selectMetric(metricId) {{
+  var m = null;
+  DATA.metrics.forEach(function(metric) {{
+    if (metric.id === metricId) m = metric;
+  }});
+  if (!m) return;
+
+  var div = document.getElementById('fix-metric');
+  if (!div) return;
+
+  var label = {{
+    cac: 'CAC', ltv: 'LTV', ltv_cac_ratio: 'LTV/CAC',
+    cac_payback: 'CAC Payback', gross_margin: 'Gross Margin',
+    burn_multiple: 'Burn Multiple', rule_of_40: 'Rule of 40'
+  }}[m.id] || m.id;
+
+  // TTM burn multiple: read-only
+  if (m.id === 'burn_multiple' && m.method && m.method !== 'growth_rate') {{
+    setContent(div, '<h3>Fix: ' + label + '</h3>' +
+      '<p><em>Actual (trailing 12 months)</em> — this reflects historical data and cannot be adjusted.</p>' +
+      '<p>Current value: <strong>' + fmtRatio(m.value) + '</strong></p>');
+    return;
+  }}
+
+  // Build sliders for this metric's formula inputs
+  var fixMarkup = '<h3>Fix: ' + label + '</h3>';
+  var inputs = Object.assign({{}}, m.inputs || {{}});
+  ueState = Object.assign({{}}, inputs);
+
+  var formula = METRIC_FORMULAS[m.id];
+  if (!formula) {{
+    setContent(div, fixMarkup + '<p>No interactive formula available for this metric.</p>');
+    return;
+  }}
+
+  fixMarkup += '<div id="ue-result"></div>';
+  fixMarkup += '<div id="ue-sliders"></div>';
+  setContent(div, fixMarkup);
+
+  var slidersDiv = document.getElementById('ue-sliders');
+
+  function updateUE() {{
+    var newVal = formula(ueState);
+    newVal = safeMetric(newVal, DATA.benchmarks[m.id] ? DATA.benchmarks[m.id].strong : null);
+    var rating = rateMetric(m.id, newVal, DATA.benchmarks);
+    var fmt = {{
+      cac: fmtCurrency, ltv: fmtCurrency, ltv_cac_ratio: fmtRatio,
+      cac_payback: fmtMonths, gross_margin: function(v) {{ return fmtPct(v, 0); }},
+      burn_multiple: fmtRatio, rule_of_40: function(v) {{ return v !== null ? v.toFixed(0) : 'N/A'; }}
+    }}[m.id] || String;
+    var icon = ratingIcon(rating);
+    var valStr = newVal !== null ? fmt(newVal) : 'N/A';
+    var ueEl = document.getElementById('ue-result');
+    if (ueEl) setContent(ueEl,
+      '<div style="font-size:1.5rem;margin:0.5rem 0">' + valStr +
+      ' <span class="badge ' + rating + '">' + icon + ' ' + rating + '</span></div>');
+  }}
+
+  // Add sliders based on metric type
+  if (m.id === 'burn_multiple') {{
+    slidersDiv.appendChild(makeSlider({{
+      id: 'ue-growth', label: 'Growth rate', min: 0.001, max: 0.30, step: 0.005,
+      value: ueState.growth_rate || 0.05,
+      fmt: function(v) {{ return fmtPct(v, 1); }},
+      onChange: function(v) {{ ueState.growth_rate = v; updateUE(); }}
+    }}));
+    slidersDiv.appendChild(makeSlider({{
+      id: 'ue-burn', label: 'Monthly burn', min: 0, max: (ueState.monthly_burn || 50000) * 3,
+      step: Math.max(1000, Math.round((ueState.monthly_burn || 50000) / 20)),
+      value: ueState.monthly_burn || 0, fmt: fmtCurrency,
+      onChange: function(v) {{ ueState.monthly_burn = v; updateUE(); }}
+    }}));
+  }} else if (m.id === 'rule_of_40') {{
+    slidersDiv.appendChild(makeSlider({{
+      id: 'ue-growth', label: 'Growth rate', min: 0, max: 0.30, step: 0.005,
+      value: ueState.growth_rate || 0.05,
+      fmt: function(v) {{ return fmtPct(v, 1); }},
+      onChange: function(v) {{ ueState.growth_rate = v; updateUE(); }}
+    }}));
+  }} else if (['cac', 'ltv', 'ltv_cac_ratio', 'cac_payback'].indexOf(m.id) >= 0) {{
+    if (ueState.arpu !== undefined) {{
+      slidersDiv.appendChild(makeSlider({{
+        id: 'ue-arpu', label: 'ARPU/month', min: Math.max(1, (ueState.arpu || 100) * 0.5),
+        max: (ueState.arpu || 100) * 3, step: Math.max(1, Math.round((ueState.arpu || 100) / 20)),
+        value: ueState.arpu || 100, fmt: fmtCurrency,
+        onChange: function(v) {{ ueState.arpu = v; updateUE(); }}
+      }}));
+    }}
+    if (ueState.churn !== undefined) {{
+      slidersDiv.appendChild(makeSlider({{
+        id: 'ue-churn', label: 'Monthly churn', min: 0, max: 0.15, step: 0.005,
+        value: ueState.churn || 0.03,
+        fmt: function(v) {{ return fmtPct(v, 1); }},
+        onChange: function(v) {{ ueState.churn = v; updateUE(); }}
+      }}));
+    }}
+    if (ueState.cac !== undefined) {{
+      slidersDiv.appendChild(makeSlider({{
+        id: 'ue-cac', label: 'CAC', min: Math.max(1, (ueState.cac || 500) * 0.5),
+        max: (ueState.cac || 500) * 3, step: Math.max(1, Math.round((ueState.cac || 500) / 20)),
+        value: ueState.cac || 500, fmt: fmtCurrency,
+        onChange: function(v) {{ ueState.cac = v; updateUE(); }}
+      }}));
+    }}
+    if (ueState.gross_margin !== undefined) {{
+      slidersDiv.appendChild(makeSlider({{
+        id: 'ue-gm', label: 'Gross margin', min: 0, max: 0.95, step: 0.01,
+        value: ueState.gross_margin || 0.7,
+        fmt: function(v) {{ return fmtPct(v, 0); }},
+        onChange: function(v) {{ ueState.gross_margin = v; updateUE(); }}
+      }}));
+    }}
+  }} else if (m.id === 'gross_margin') {{
+    slidersDiv.appendChild(makeSlider({{
+      id: 'ue-gm', label: 'Gross margin', min: 0, max: 0.95, step: 0.01,
+      value: ueState.gross_margin || 0.7,
+      fmt: function(v) {{ return fmtPct(v, 0); }},
+      onChange: function(v) {{ ueState.gross_margin = v; updateUE(); }}
+    }}));
+  }}
+
+  updateUE();
+}}
+
+// ---------------------------------------------------------------------------
+// Lens 4: Stress Test
+// ---------------------------------------------------------------------------
+
+function renderStressTest() {{
+  var panel = document.getElementById('lens-stress_test');
+  if (!panel) return;
+
+  var markup = '<h2>Stress Test</h2>';
+  markup += commentaryBox('stress_test');
+
+  // Sensitivity tornado
+  markup += '<h3 style="margin-top:1rem">Sensitivity (at your current settings)</h3>';
+  markup += '<div id="tornado"></div>';
+
+  // Scenario overlay
+  markup += '<h3 style="margin-top:1.5rem">Scenarios (at review values)</h3>';
+  markup += '<div class="chart-container"><canvas id="chart-stress"></canvas></div>';
+  markup += '<table class="scenario-table"'
+    + ' style="width:100%;border-collapse:collapse;font-size:0.875rem;margin-top:0.5rem">';
+  markup += '<tr><th>Scenario</th><th>Growth</th><th>Runway</th><th>Status</th></tr>';
+
+  DATA.scenarios.forEach(function(s) {{
+    var status = s.default_alive
+      ? '<span class="badge strong">Self-sustaining</span>'
+      : '<span class="badge fail">' + (s.runway_months || '?') + ' months</span>';
+    markup += '<tr><td>' + s.name + '</td><td>' + fmtPct(s.growth_rate, 1) +
+      '</td><td>' + (s.runway_months || 'N/A') + '</td><td>' + status + '</td></tr>';
+  }});
+  markup += '</table>';
+
+  setContent(panel, markup);
+
+  // Build tornado
+  buildTornado();
+
+  // Scenario chart
+  renderScenarioChart();
+}}
+
+function buildTornado() {{
+  var container = document.getElementById('tornado');
+  if (!container) return;
+
+  var baseParams = getProjectionParams();
+  var baseResult = projectScenario(baseParams);
+  var baseMonths = baseResult.runway_months || DATA.engine.max_months;
+
+  var params = [
+    {{ key: 'growthRate', label: 'Growth rate', floor: 0.03 }},
+    {{ key: 'opex0', label: 'Burn rate', floor: 5000 }},
+    {{ key: 'cash0', label: 'Starting cash', floor: 50000 }}
+  ];
+  if (state.ilsFraction > 0) {{
+    params.push({{ key: 'fxAdjustment', label: 'FX exposure', floor: 0.05 }});
+  }}
+
+  var bars = [];
+  params.forEach(function(param) {{
+    var val = state[param.key];
+    var delta = Math.abs(val) * 0.2;
+    if (delta === 0) delta = param.floor;
+
+    var hiParams = Object.assign({{}}, baseParams);
+    var loParams = Object.assign({{}}, baseParams);
+    hiParams[param.key] = val + delta;
+    loParams[param.key] = Math.max(0, val - delta);
+
+    var hiResult = projectScenario(hiParams);
+    var loResult = projectScenario(loParams);
+    var hiMonths = hiResult.runway_months || DATA.engine.max_months;
+    var loMonths = loResult.runway_months || DATA.engine.max_months;
+
+    bars.push({{
+      label: param.label,
+      hi: hiMonths - baseMonths,
+      lo: loMonths - baseMonths,
+      impact: Math.abs(hiMonths - baseMonths) + Math.abs(loMonths - baseMonths)
+    }});
+  }});
+
+  bars.sort(function(a, b) {{ return b.impact - a.impact; }});
+
+  var maxImpact = Math.max.apply(null, bars.map(function(b) {{
+    return Math.max(Math.abs(b.hi), Math.abs(b.lo));
+  }})) || 1;
+
+  var tornadoMarkup = '';
+  bars.forEach(function(bar) {{
+    var hiWidth = Math.round(Math.abs(bar.hi) / maxImpact * 45);
+    var loWidth = Math.round(Math.abs(bar.lo) / maxImpact * 45);
+    var hiColor = bar.hi >= 0 ? '#34c759' : '#ff3b30';
+    var loColor = bar.lo >= 0 ? '#34c759' : '#ff3b30';
+    var hiSign = bar.hi >= 0 ? '+' : '';
+    var loSign = bar.lo >= 0 ? '+' : '';
+
+    tornadoMarkup += '<div style="display:flex;align-items:center;margin:6px 0;font-size:0.85rem">' +
+      '<div style="width:120px;text-align:right;padding-right:8px">' + bar.label + '</div>' +
+      '<div style="width:45%;display:flex;justify-content:flex-end">' +
+        '<div style="width:' + loWidth + '%;background:' + loColor + ';height:22px;border-radius:3px;' +
+        'display:flex;align-items:center;justify-content:center;color:#fff;font-size:0.75rem;min-width:' +
+        (bar.lo !== 0 ? '30px' : '0') + '">' + (bar.lo !== 0 ? loSign + bar.lo + 'mo' : '') + '</div></div>' +
+      '<div style="width:2px;background:#666;margin:0 2px"></div>' +
+      '<div style="width:45%">' +
+        '<div style="width:' + hiWidth + '%;background:' + hiColor + ';height:22px;border-radius:3px;' +
+        'display:flex;align-items:center;justify-content:center;color:#fff;font-size:0.75rem;min-width:' +
+        (bar.hi !== 0 ? '30px' : '0') + '">' + (bar.hi !== 0 ? hiSign + bar.hi + 'mo' : '') + '</div></div>' +
+      '</div>';
+  }});
+
+  tornadoMarkup += '<div style="font-size:0.75rem;color:#86868b;margin-top:4px">'
+    + 'Base: ' + baseMonths + ' months runway</div>';
+  setContent(container, tornadoMarkup);
+}}
+
+function renderScenarioChart() {{
+  var ctx = document.getElementById('chart-stress');
+  if (!ctx || DATA.scenarios.length === 0) return;
+  if (charts.stress) charts.stress.destroy();
+
+  var colors = ['#0071e3', '#ff9f0a', '#ff3b30', '#5856d6', '#af52de'];
+  var datasets = [];
+
+  DATA.scenarios.forEach(function(s, i) {{
+    if (!s.monthly_projections || s.monthly_projections.length === 0) return;
+    datasets.push({{
+      label: s.name,
+      data: s.monthly_projections.map(function(p) {{ return p.cash_balance; }}),
+      borderColor: colors[i % colors.length],
+      fill: false,
+      tension: 0.2
+    }});
+  }});
+
+  var maxLen = 0;
+  DATA.scenarios.forEach(function(s) {{
+    if (s.monthly_projections && s.monthly_projections.length > maxLen) {{
+      maxLen = s.monthly_projections.length;
+    }}
+  }});
+  var labels = [];
+  for (var i = 1; i <= maxLen; i++) labels.push('M' + i);
+
+  charts.stress = new Chart(ctx, {{
+    type: 'line',
+    data: {{ labels: labels, datasets: datasets }},
+    options: {{
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {{
+        legend: {{ position: 'top' }},
+        tooltip: {{
+          callbacks: {{
+            label: function(ctx) {{ return ctx.dataset.label + ': ' + fmtCurrency(ctx.raw); }}
+          }}
+        }}
+      }},
+      scales: {{
+        y: {{
+          ticks: {{
+            callback: function(v) {{ return fmtCurrency(v); }}
+          }}
+        }}
+      }}
+    }}
+  }});
+}}
+
+// ---------------------------------------------------------------------------
+// Initialize
+// ---------------------------------------------------------------------------
+
 (function() {{
   var lenses = {json.dumps(_LENSES)};
-  var status = {json.dumps({})};
   for (var i = 0; i < lenses.length; i++) {{
     var tab = document.querySelector('.tab[data-lens="' + lenses[i] + '"]:not(.disabled)');
     if (tab) {{

@@ -2925,3 +2925,43 @@ class TestValidateInputsArpuCritical:
         assert rc == 0
         codes = [w["code"] for w in data["warnings"]]
         assert "CUSTOMERS_MISSING" not in codes
+
+
+# --- ARPU/churn field-name fallback in unit_economics.py ---
+
+
+class TestUnitEconomicsArpuFallback:
+    """unit_economics.py LTV cap must work with both arpu and arpu_monthly."""
+
+    def _make_inputs_zero_churn(self, arpu_field: str, arpu_val: float) -> dict:
+        return {
+            "company": {"stage": "seed", "sector": "B2B SaaS", "revenue_model_type": "saas-sales-led"},
+            "revenue": {"mrr": {"value": 50000}, "arr": {"value": 600000}, "growth_rate_monthly": 0.08},
+            "cash": {"current_balance": 2000000, "monthly_net_burn": 80000},
+            "unit_economics": {
+                "cac": {"total": 1500},
+                "ltv": {
+                    "value": 999999,
+                    "inputs": {arpu_field: arpu_val, "churn_monthly": 0, "gross_margin": 0.75},
+                },
+                "gross_margin": 0.75,
+            },
+        }
+
+    def test_zero_churn_cap_with_arpu_monthly(self) -> None:
+        """60-month cap applies with canonical arpu_monthly."""
+        inp = self._make_inputs_zero_churn("arpu_monthly", 500)
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        assert data is not None
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        assert ltv["value"] == 500 * 0.75 * 60  # 22500
+
+    def test_zero_churn_cap_with_arpu_old_name(self) -> None:
+        """60-month cap applies with old schema field name arpu."""
+        inp = self._make_inputs_zero_churn("arpu", 500)
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        assert data is not None
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        assert ltv["value"] == 500 * 0.75 * 60  # 22500
