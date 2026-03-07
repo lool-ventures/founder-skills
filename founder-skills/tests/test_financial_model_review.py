@@ -3032,3 +3032,65 @@ class TestUnitEconomicsArpuFallback:
         assert data is not None
         ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
         assert ltv["value"] == 500 * 0.75 * 60  # 22500
+
+
+# --- DERIVED_METRIC_REDUNDANT informational warning ---
+
+
+class TestValidateInputsDerivedMetric:
+    """validate_inputs.py warns when burn_multiple is provided alongside compute inputs."""
+
+    def test_redundant_with_growth_inputs(self) -> None:
+        """Warning fires when burn, mrr, and growth are all present."""
+        inp = {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}, "growth_rate_monthly": 0.08},
+            "cash": {"monthly_net_burn": 80000},
+            "unit_economics": {"burn_multiple": 3.4, "gross_margin": 0.75},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "DERIVED_METRIC_REDUNDANT" in codes
+        redundant = [w for w in data["warnings"] if w["code"] == "DERIVED_METRIC_REDUNDANT"]
+        assert redundant[0].get("critical") is not True  # informational only
+
+    def test_redundant_with_time_series(self) -> None:
+        """Warning fires when monthly time-series has >= 12 entries."""
+        monthly = [{"month": f"2024-{m:02d}", "actual": True, "total": 10000 + m * 1000} for m in range(1, 13)]
+        inp = {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}, "monthly": monthly},
+            "cash": {"monthly_net_burn": 80000},
+            "unit_economics": {"burn_multiple": 3.4, "gross_margin": 0.75},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "DERIVED_METRIC_REDUNDANT" in codes
+
+    def test_no_warning_when_fallback_needed(self) -> None:
+        """No warning when compute inputs are missing (fallback is legitimate)."""
+        inp = {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}},  # no growth, no monthly
+            "cash": {},  # no burn
+            "unit_economics": {"burn_multiple": 3.4, "gross_margin": 0.75},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "DERIVED_METRIC_REDUNDANT" not in codes
+
+    def test_no_warning_when_no_provided_bm(self) -> None:
+        """No warning when burn_multiple is not provided."""
+        inp = {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}, "growth_rate_monthly": 0.08},
+            "cash": {"monthly_net_burn": 80000},
+            "unit_economics": {"gross_margin": 0.75},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "DERIVED_METRIC_REDUNDANT" not in codes

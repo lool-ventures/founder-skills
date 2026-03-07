@@ -415,6 +415,28 @@ def _validate_sanity(inputs: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
 
+    # Warn when burn_multiple is provided but script can compute independently
+    provided_bm = _deep_get(inputs, "unit_economics", "burn_multiple")
+    if provided_bm is not None and isinstance(burn, (int, float)):
+        monthly_entries = inputs.get("revenue", {}).get("monthly", [])
+        quarterly_entries = inputs.get("revenue", {}).get("quarterly", [])
+        has_ts = (isinstance(monthly_entries, list) and len(monthly_entries) >= 12) or (
+            isinstance(quarterly_entries, list) and len(quarterly_entries) >= 4
+        )
+        has_growth = isinstance(mrr, (int, float)) and isinstance(growth, (int, float))
+        if has_ts or has_growth:
+            warnings.append(
+                {
+                    "code": "DERIVED_METRIC_REDUNDANT",
+                    "message": (
+                        f"burn_multiple ({provided_bm}) provided but compute inputs are present — "
+                        "script will likely compute independently (provided value used only as fallback)"
+                    ),
+                    "field": "unit_economics.burn_multiple",
+                    "layer": 3,
+                }
+            )
+
     return warnings
 
 
