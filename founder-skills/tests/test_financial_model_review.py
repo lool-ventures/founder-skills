@@ -2800,3 +2800,58 @@ def test_agent_definition_references_valid_scripts() -> None:
     # Verify SKILL.md exists
     skill_md = os.path.join(SCRIPT_DIR, "..", "skills", "financial-model-review", "SKILL.md")
     assert os.path.isfile(skill_md), "SKILL.md not found"
+
+
+# --- ARPU field-name fallback tests ---
+
+
+class TestValidateInputsArpuFallback:
+    """validate_inputs.py must detect ARPU issues regardless of field name."""
+
+    def _make_inputs_with_arpu(self, field_name: str, arpu_val: float) -> dict:
+        """Build minimal inputs with ARPU under the given field name."""
+        return {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}, "customers": 10},
+            "cash": {"monthly_net_burn": 80000},
+            "unit_economics": {
+                "ltv": {
+                    "value": 6000,
+                    "inputs": {field_name: arpu_val, "churn_monthly": 0.03, "gross_margin": 0.75},
+                },
+                "gross_margin": 0.75,
+            },
+        }
+
+    def test_arpu_monthly_triggers_suspect(self):
+        """ARPU_SUSPECT fires with canonical field name arpu_monthly."""
+        inp = self._make_inputs_with_arpu("arpu_monthly", 60000)  # >= MRR
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "ARPU_SUSPECT" in codes
+
+    def test_arpu_old_name_triggers_suspect(self):
+        """ARPU_SUSPECT fires with old schema field name arpu."""
+        inp = self._make_inputs_with_arpu("arpu", 60000)  # >= MRR
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "ARPU_SUSPECT" in codes
+
+    def test_arpu_old_name_consistency_check(self):
+        """ARPU_INCONSISTENT fires with old field name when ARPU*customers != MRR."""
+        inp = self._make_inputs_with_arpu("arpu", 3000)  # 3000*10=30000 vs MRR 50000 → >20% gap
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "ARPU_INCONSISTENT" in codes
+
+    def test_arpu_monthly_preferred_over_arpu(self):
+        """When both arpu_monthly and arpu exist, arpu_monthly wins."""
+        inp = self._make_inputs_with_arpu("arpu_monthly", 5000)
+        inp["unit_economics"]["ltv"]["inputs"]["arpu"] = 60000  # old name, wrong value
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "ARPU_SUSPECT" not in codes  # 5000 < 50000 MRR, so no suspect

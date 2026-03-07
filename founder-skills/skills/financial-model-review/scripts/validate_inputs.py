@@ -78,6 +78,14 @@ def _stage_in(stage: str | None, group: set[str]) -> bool:
     return stage.lower().strip() in group
 
 
+def _arpu_monthly(inputs: dict[str, Any]) -> Any:
+    """Read ARPU with fallback from old schema name."""
+    val = _deep_get(inputs, "unit_economics", "ltv", "inputs", "arpu_monthly")
+    if val is None:
+        val = _deep_get(inputs, "unit_economics", "ltv", "inputs", "arpu")
+    return val
+
+
 # ---------------------------------------------------------------------------
 # Layer 1 — Structural
 # ---------------------------------------------------------------------------
@@ -207,7 +215,7 @@ def _validate_consistency(inputs: dict[str, Any]) -> list[dict[str, Any]]:
     """Layer 2: cross-field consistency checks."""
     warnings: list[dict[str, Any]] = []
 
-    arpu = _deep_get(inputs, "unit_economics", "ltv", "inputs", "arpu_monthly")
+    arpu = _arpu_monthly(inputs)
     customers = _deep_get(inputs, "revenue", "customers")
     mrr = _deep_get(inputs, "revenue", "mrr", "value")
     arr = _deep_get(inputs, "revenue", "arr", "value")
@@ -257,7 +265,7 @@ def _validate_sanity(inputs: dict[str, Any]) -> list[dict[str, Any]]:
     """Layer 3: reasonableness checks on individual values."""
     warnings: list[dict[str, Any]] = []
 
-    arpu = _deep_get(inputs, "unit_economics", "ltv", "inputs", "arpu_monthly")
+    arpu = _arpu_monthly(inputs)
     mrr = _deep_get(inputs, "revenue", "mrr", "value")
     customers = _deep_get(inputs, "revenue", "customers")
 
