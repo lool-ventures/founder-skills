@@ -34,6 +34,7 @@ All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/scripts/
 - **`runway.py`** — Multi-scenario runway stress-test with decision points
 - **`compose_report.py`** — Assembles report with cross-artifact validation; `--strict` exits 1 on high-severity warnings (corrupt/missing artifacts)
 - **`visualize.py`** — Generates self-contained HTML with SVG charts (not JSON)
+- **`explore.py`** — Generates self-contained interactive HTML explorer from review artifacts; outputs HTML (not JSON)
 
 Also available from `${CLAUDE_PLUGIN_ROOT}/scripts/` (shared):
 
@@ -65,7 +66,9 @@ Every review deposits structured JSON artifacts into a working directory. The fi
 | 5 | `unit_economics.json` | Sub-agent (Task) + `unit_economics.py` |
 | 6 | `runway.json` | Sub-agent (Task) + `runway.py` |
 | 7 | Report | `compose_report.py` reads all |
-| 8 | HTML | `visualize.py` |
+| 8a | HTML report | `visualize.py` |
+| 8b | Commentary | agent-written `commentary.json` |
+| 8c | Explorer | `explore.py` |
 
 **Rules:**
 - Deposit each artifact before proceeding to the next step
@@ -280,13 +283,31 @@ Check `validation.warnings`: fix high-severity (corrupt/missing artifacts), pres
 
 **Primary deliverable:** Read `report_markdown` from the output JSON, write it to `$REVIEW_DIR/report.md`, and display it to the user in full. **Present the file path** so the user can access it directly. Then add coaching commentary covering: (1) what metrics look strong and why investors will notice, (2) the single highest-leverage fix to improve investor readiness, (3) any data gaps that weaken the story (e.g., missing runway, incomplete unit economics), and (4) what to prioritize before the next fundraise conversation.
 
-### Step 8: Visualize (Optional)
+### Step 8a: Visualize (Optional)
 
 ```bash
 python3 "$SCRIPTS/visualize.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.html"
 ```
 
 **Present the HTML file path** to the user so they can open the visual report.
+
+### Step 8b: Write Commentary (Quantitative Path Only)
+
+Write `commentary.json` to `$REVIEW_DIR`. Use the review findings to write specific, actionable narrative for each lens. Reference actual numbers from the review (runway months, metric values, scenario outcomes). Do not use generic advice.
+
+Only write commentary for lenses whose required artifacts exist. Omit keys for disabled lenses (e.g., if runway.json is missing, omit "runway" and "raise_planner" keys from lenses). Do not reference grant details (iia_pending, royalty_rate, iia_royalties_modeled) that the explorer cannot model.
+
+The investor_talking_points should be sentences the founder can literally say out loud during a fundraise conversation. Frame strengths confidently, frame gaps as "here's our plan to address X."
+
+Every sentence must contain at least one number from this company's review.
+
+### Step 8c: Generate Interactive Explorer (Quantitative Path Only)
+
+```bash
+python3 "$SCRIPTS/explore.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/explore.html"
+```
+
+Present to the founder: *"I've also generated an interactive explorer where you can adjust growth rate, burn, and raise amount to see how your runway and metrics change in real time. Open it in your browser (internet connection recommended for interactive charts)."*
 
 ## Scoring
 

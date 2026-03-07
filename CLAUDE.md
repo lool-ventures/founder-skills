@@ -76,6 +76,7 @@
 - **`runway.py`** — Multi-scenario runway stress-test with decision points and default-alive analysis
 - **`compose_report.py`** — Assembles financial model review artifacts into final report with cross-artifact validation
 - **`visualize.py`** — Generates self-contained HTML with SVG charts; outputs HTML (not JSON)
+- **`explore.py`** — Generates self-contained interactive HTML explorer from review artifacts; outputs HTML (not JSON)
 
 ## Dev Setup
 
@@ -162,17 +163,29 @@ Cowork caches plugin files per-session. To hot-patch files for testing without r
 
 4. **Start a new Cowork session** — already-running sessions have already loaded skill bodies into context.
 
-## Removing a Marketplace from Claude Code / Cowork
+## Removing / Refreshing a Plugin in Claude Code / Cowork
 
-There is no UI to remove a marketplace. Edit these config files directly:
+There is no UI to remove a marketplace. Edit config files directly.
 
-1. **Claude Code (local):**
-   - `~/.claude/plugins/known_marketplaces.json` — delete the marketplace entry
-   - `~/.claude/plugins/installed_plugins.json` — delete any `pluginname@marketplace` entries
-   - `~/.claude/plugins/cache/<marketplace>/` — delete to reclaim disk space
+### Claude Code (CLI)
 
-2. **Cowork (per-session):**
-   - `~/Library/Application Support/Claude/local-agent-mode-sessions/<org-id>/<session-id>/cowork_plugins/known_marketplaces.json` — delete the marketplace entry
-   - Same session dir `cowork_plugins/installed_plugins.json` — delete any related plugin entries if present
+- `~/.claude/plugins/known_marketplaces.json` — delete the marketplace entry
+- `~/.claude/plugins/installed_plugins.json` — delete any `pluginname@marketplace` entries
+- `~/.claude/plugins/cache/<marketplace>/` — delete to reclaim disk space
+
+### Cowork (Desktop App) — stale version troubleshooting
+
+When Cowork won't pick up a new version, nuke all three locations:
+
+```bash
+BASE="$HOME/Library/Application Support/Claude/local-agent-mode-sessions/<org-id>/<user-id>/cowork_plugins"
+rm -rf "$BASE/cache/<marketplace>"
+rm -rf "$BASE/marketplaces/<marketplace>"
+rm -f "$BASE/.install-manifests/<plugin>@<marketplace>.json"
+```
+
+Then remove the entries from `known_marketplaces.json` and `installed_plugins.json`, restart Cowork, and re-add the marketplace.
+
+**Tip:** `installed_plugins.json` pins a `gitCommitSha` — compare against `git rev-parse HEAD` to check freshness.
 
 **Pitfall:** When deleting an entry from these JSON files, ensure the preceding entry's trailing comma is removed if it becomes the last entry. A trailing comma produces invalid JSON that `JSON.parse()` rejects, causing "Failed to add marketplace" errors in Cowork.
