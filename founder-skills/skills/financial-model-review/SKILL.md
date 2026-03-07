@@ -159,7 +159,15 @@ The sub-agent:
 4. Reads `$REFS/data-sufficiency.md` to assess data sufficiency
 5. Constructs `inputs.json` from extracted data, writing it to `$REVIEW_DIR/inputs.json`
 
-Instruct the sub-agent: **Do not run any scripts other than `extract_model.py`. Do not create any files other than `model_data.json` and `inputs.json`.** Before writing `inputs.json`, verify that no numeric field is null when the source data contains a value — null fields cascade into bad downstream outputs (unit economics scores wrong metrics, runway reports infinite runway). **ARPU sanity check:** If `drivers.arpu` or `unit_economics.ltv.inputs.arpu` exceeds total MRR, it's probably the aggregate revenue, not per-customer ARPU. Divide by customer count to get the correct value. This is the most common extraction error. Return ONLY: (1) file paths written, (2) company name/stage/sector, (3) `model_format`, (4) data sufficiency verdict (sufficient/insufficient + count of missing critical fields), and (5) any `company.traits` detected — do not echo the full JSON back.
+Instruct the sub-agent: **Do not run any scripts other than `extract_model.py`. Do not create any files other than `model_data.json` and `inputs.json`.** Before writing `inputs.json`, verify that no numeric field is null when the source data contains a value — null fields cascade into bad downstream outputs (unit economics scores wrong metrics, runway reports infinite runway). **ARPU sanity check:** If `drivers.arpu_monthly` or `unit_economics.ltv.inputs.arpu_monthly` exceeds total MRR, it's probably the aggregate revenue, not per-customer ARPU. Divide by customer count to get the correct value. This is the most common extraction error. Return ONLY: (1) file paths written, (2) company name/stage/sector, (3) `model_format`, (4) data sufficiency verdict (sufficient/insufficient + count of missing critical fields), and (5) any `company.traits` detected — do not echo the full JSON back.
+
+**Extraction constraints:**
+- Use `arpu_monthly` and `churn_monthly` as field names in `ltv.inputs` (not `arpu`/`churn`).
+- Populate `revenue.customers` with the current customer count.
+- ARPU is **per-customer** average revenue: `ARPU = MRR / customer_count`. Never use total revenue as ARPU.
+- Place `arr` at the top level of each `monthly[]` entry (per schema), not inside `drivers`.
+- Do NOT compute derived metrics (burn multiple, LTV/CAC, Rule of 40, etc.). Only scripts produce metric values.
+- Create ONLY `model_data.json` and `inputs.json`. No summaries, notes, or extra artifacts.
 
 After the sub-agent returns, use the summary to decide the qualitative vs. quantitative path and share a brief update with the founder.
 
@@ -235,7 +243,7 @@ CHECK_EOF
 
 **Evidence required:** Always provide `evidence` for `fail` or `warn` items.
 
-Instruct Sub-agent A: **Return ONLY a short JSON object** with keys: `path`, `score_pct`, `overall_rating`, `top_issues` (array of max 3 strings). Do not return tables, recommendations, category breakdowns, or any other text. Keep total output under 500 characters.
+Instruct Sub-agent A: **Return ONLY a short JSON object** with keys: `path`, `score_pct`, `overall_status`, `top_issues` (array of max 3 strings). Do not return tables, recommendations, category breakdowns, or any other text. Keep total output under 500 characters.
 
 **Sub-agent B — Metrics & Runway:**
 

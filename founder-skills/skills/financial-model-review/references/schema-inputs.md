@@ -89,6 +89,7 @@ Additional effects for `deck` / `conversational`:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `customers` | number | no | Current customer count. Required at seed+ when LTV inputs are provided. |
 | `monthly` | object[] | no | Monthly revenue time series |
 | `quarterly` | object[] | no | Quarterly revenue time series (use instead of `monthly` when source data is quarterly) |
 | `arr` | object | no | Annual recurring revenue snapshot |
@@ -108,7 +109,7 @@ Additional effects for `deck` / `conversational`:
 | `actual` | boolean | yes | `true` for actuals, `false` for projections |
 | `total` | number | yes | Total revenue for the month |
 | `arr` | number | no | Annualized run-rate at this point in time. When present, used for TTM burn multiple. When absent, `total * 12` is used as approximation. |
-| `drivers` | object | no | Breakdown (e.g., `customers`, `arpu`) |
+| `drivers` | object | no | Breakdown (e.g., `customers`, `arpu_monthly`) |
 
 #### quarterly[] entry
 
@@ -118,7 +119,7 @@ Additional effects for `deck` / `conversational`:
 | `actual` | boolean | yes | `true` for actuals, `false` for projections |
 | `total` | number | yes | Total revenue for the quarter |
 | `arr` | number | no | Annualized run-rate at quarter end. Used for YoY burn multiple computation. |
-| `drivers` | object | no | Breakdown (e.g., `customers`, `arpu`) |
+| `drivers` | object | no | Breakdown (e.g., `customers`, `arpu_monthly`) |
 
 #### arr / mrr
 
@@ -291,9 +292,10 @@ Additional effects for `deck` / `conversational`:
     "traits": ["multi-currency", "multi-entity"]
   },
   "revenue": {
+    "customers": 50,
     "monthly": [
-      {"month": "2025-01", "actual": true, "total": 25000, "drivers": {"customers": 50, "arpu": 500}},
-      {"month": "2025-06", "actual": false, "total": 80000, "drivers": {"customers": 120, "arpu": 667}}
+      {"month": "2025-01", "actual": true, "total": 25000, "arr": 300000, "drivers": {"customers": 50, "arpu_monthly": 500}},
+      {"month": "2025-06", "actual": false, "total": 80000, "arr": 960000, "drivers": {"customers": 120, "arpu_monthly": 667}}
     ],
     "arr": {"value": 300000, "as_of": "2025-01"},
     "mrr": {"value": 25000, "as_of": "2025-01"},
@@ -321,7 +323,7 @@ Additional effects for `deck` / `conversational`:
   },
   "unit_economics": {
     "cac": {"total": 8000, "components": {"ad_spend": 3000, "sales_salary": 4000, "tools": 1000}, "fully_loaded": true},
-    "ltv": {"value": 20000, "method": "formula", "inputs": {"arpu": 500, "churn": 0.03, "gross_margin": 0.80}, "observed_vs_assumed": "assumed"},
+    "ltv": {"value": 20000, "method": "formula", "inputs": {"arpu_monthly": 500, "churn_monthly": 0.03, "gross_margin": 0.80}, "observed_vs_assumed": "assumed"},
     "payback_months": 16,
     "gross_margin": 0.80,
     "burn_multiple": 2.5
