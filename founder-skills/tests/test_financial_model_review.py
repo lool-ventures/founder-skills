@@ -2927,6 +2927,73 @@ class TestValidateInputsArpuCritical:
         assert "CUSTOMERS_MISSING" not in codes
 
 
+class TestValidateInputsCashZero:
+    """validate_inputs.py must flag $0 cash balance at seed+ as suspicious."""
+
+    def test_zero_cash_at_series_a(self):
+        """CASH_ZERO_SUSPECT fires as critical at series-a."""
+        inp = {
+            "company": {"stage": "series-a"},
+            "revenue": {"mrr": {"value": 150000}},
+            "cash": {"current_balance": 0, "monthly_net_burn": 500000},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        suspect = [w for w in data["warnings"] if w["code"] == "CASH_ZERO_SUSPECT"]
+        assert len(suspect) == 1
+        assert suspect[0].get("critical") is True
+        assert data["has_critical_warnings"] is True
+
+    def test_zero_cash_at_seed(self):
+        """CASH_ZERO_SUSPECT fires at seed."""
+        inp = {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}},
+            "cash": {"current_balance": 0, "monthly_net_burn": 80000},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "CASH_ZERO_SUSPECT" in codes
+
+    def test_zero_cash_at_preseed_no_warning(self):
+        """CASH_ZERO_SUSPECT does NOT fire at pre-seed."""
+        inp = {
+            "company": {"stage": "pre-seed"},
+            "revenue": {"mrr": {"value": 5000}},
+            "cash": {"current_balance": 0, "monthly_net_burn": 20000},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "CASH_ZERO_SUSPECT" not in codes
+
+    def test_nonzero_cash_no_warning(self):
+        """Normal cash balance produces no CASH_ZERO_SUSPECT."""
+        inp = {
+            "company": {"stage": "series-a"},
+            "revenue": {"mrr": {"value": 150000}},
+            "cash": {"current_balance": 5000000, "monthly_net_burn": 500000},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "CASH_ZERO_SUSPECT" not in codes
+
+    def test_null_cash_no_zero_warning(self):
+        """Null cash triggers MISSING_CASH_BALANCE, not CASH_ZERO_SUSPECT."""
+        inp = {
+            "company": {"stage": "series-a"},
+            "revenue": {"mrr": {"value": 150000}},
+            "cash": {"monthly_net_burn": 500000},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "CASH_ZERO_SUSPECT" not in codes
+        assert "MISSING_CASH_BALANCE" in codes
+
+
 # --- ARPU/churn field-name fallback in unit_economics.py ---
 
 

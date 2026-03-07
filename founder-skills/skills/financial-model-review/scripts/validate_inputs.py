@@ -399,6 +399,22 @@ def _validate_sanity(inputs: dict[str, Any]) -> list[dict[str, Any]]:
                     }
                 )
 
+    # Cash balance of exactly $0 at seed+ is almost always extraction failure
+    current_balance = _deep_get(inputs, "cash", "current_balance")
+    if current_balance == 0 and _stage_in(stage, _SEED_PLUS):
+        warnings.append(
+            {
+                "code": "CASH_ZERO_SUSPECT",
+                "message": (
+                    "Cash balance is exactly $0 — likely missing from extraction. "
+                    "Confirm with founder or set to null if unknown."
+                ),
+                "field": "cash.current_balance",
+                "layer": 3,
+                "critical": True,
+            }
+        )
+
     return warnings
 
 
