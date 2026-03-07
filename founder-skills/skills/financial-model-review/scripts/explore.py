@@ -749,7 +749,8 @@ var METRIC_FORMULAS = {{
   ltv: calcLTV,
   ltv_cac_ratio: calcLTVCAC,
   cac_payback: calcCACPayback,
-  rule_of_40: calcR40
+  rule_of_40: calcR40,
+  gross_margin: function(s) {{ return s.gross_margin; }}
 }};
 
 // ---------------------------------------------------------------------------
@@ -833,6 +834,8 @@ function resetAll() {{
   state.grantEnd = DATA.engine.grant_end || 0;
   state.burnChange = 0;
   state.targetRunway = (DATA.bridge && DATA.bridge.runway_target) || 24;
+  state.advRunwayOpen = false;
+  state.advRaiseOpen = false;
   if (currentLens) switchLens(currentLens);
 }}
 
@@ -966,9 +969,10 @@ function renderRunway() {{
   advBtn.style.cssText = 'font-size:0.8rem;padding:4px 8px;margin-top:8px';
   advBtn.textContent = 'Advanced...';
   var advPanel = document.createElement('div');
-  advPanel.style.display = 'none';
+  advPanel.style.display = state.advRunwayOpen ? 'block' : 'none';
   advBtn.onclick = function() {{
-    advPanel.style.display = advPanel.style.display === 'none' ? 'block' : 'none';
+    state.advRunwayOpen = !state.advRunwayOpen;
+    advPanel.style.display = state.advRunwayOpen ? 'block' : 'none';
   }};
   sliderDiv.appendChild(advBtn);
 
@@ -990,7 +994,7 @@ function renderRunway() {{
   if (DATA.engine.grant_monthly > 0) {{
     advPanel.appendChild(makeSlider({{
       id: 'grant', label: 'IIA grant/month', min: 0,
-      max: DATA.engine.grant_monthly * 2, step: Math.max(10000, Math.round(DATA.engine.grant_monthly / 10)),
+      max: DATA.engine.grant_monthly * 5, step: Math.max(10000, Math.round(DATA.engine.grant_monthly / 10)),
       value: state.grantMonthly, fmt: fmtCurrency,
       onChange: function(v) {{ state.grantMonthly = v; renderRunway(); }}
     }}));
@@ -1067,7 +1071,7 @@ function renderRaisePlanner() {{
   var targetRaise = (DATA.bridge && DATA.bridge.raise_amount) || 3000000;
   var amounts = [];
   var raiseStep = targetRaise > 5000000 ? 1000000 : 500000;
-  for (var a = raiseStep; a <= targetRaise * 3; a += raiseStep) {{
+  for (var a = raiseStep; a <= targetRaise * 2; a += raiseStep) {{
     amounts.push(a);
   }}
   if (amounts.length < 3) amounts = [500000, 1000000, 1500000, 2000000, 3000000, 5000000];
@@ -1109,9 +1113,10 @@ function renderRaisePlanner() {{
   advBtn.style.cssText = 'font-size:0.8rem;padding:4px 8px;margin-top:8px';
   advBtn.textContent = 'Advanced...';
   var advPanel = document.createElement('div');
-  advPanel.style.display = 'none';
+  advPanel.style.display = state.advRaiseOpen ? 'block' : 'none';
   advBtn.onclick = function() {{
-    advPanel.style.display = advPanel.style.display === 'none' ? 'block' : 'none';
+    state.advRaiseOpen = !state.advRaiseOpen;
+    advPanel.style.display = state.advRaiseOpen ? 'block' : 'none';
   }};
   sliderDiv.appendChild(advBtn);
   advPanel.appendChild(makeSlider({{
@@ -1140,12 +1145,12 @@ function renderRaisePlanner() {{
       responsive: true,
       maintainAspectRatio: false,
       plugins: {{
-        legend: {{ display: false }},
-        annotation: undefined
+        legend: {{ display: false }}
       }},
       scales: {{
         y: {{
           beginAtZero: true,
+          suggestedMax: Math.max(target + 6, Math.max.apply(null, results.map(function(r) {{ return r.runway; }}))),
           title: {{ display: true, text: 'Months' }}
         }}
       }}
@@ -1169,7 +1174,7 @@ function renderUnitEconomics() {{
   // Metrics table
   var explorable = {{}};
   DATA.metrics.forEach(function(m) {{
-    explorable[m.id] = !!METRIC_FORMULAS[m.id] || m.id === 'gross_margin';
+    explorable[m.id] = !!METRIC_FORMULAS[m.id];
   }});
 
   markup += '<p style="font-size:0.8rem;color:#86868b;margin-bottom:0.5rem">'
@@ -1276,7 +1281,7 @@ function selectMetric(metricId) {{
 
   var formula = METRIC_FORMULAS[m.id];
   if (!formula) {{
-    setContent(div, fixMarkup + '<p>No interactive formula available for this metric.</p>');
+    setContent(div, fixMarkup + '<p>This metric is calculated from your model data.</p>');
     return;
   }}
 
