@@ -1167,8 +1167,15 @@ function renderUnitEconomics() {{
   markup += commentaryBox('unit_economics');
 
   // Metrics table
+  var explorable = {{}};
+  DATA.metrics.forEach(function(m) {{
+    explorable[m.id] = !!METRIC_FORMULAS[m.id] || m.id === 'gross_margin';
+  }});
+
+  markup += '<p style="font-size:0.8rem;color:#86868b;margin-bottom:0.5rem">'
+    + 'Click a metric with \u25b6 to explore what-if scenarios</p>';
   markup += '<table class="metrics-table" style="width:100%;border-collapse:collapse;font-size:0.875rem">';
-  markup += '<tr><th>Metric</th><th>Value</th><th>Rating</th><th>Benchmark</th></tr>';
+  markup += '<tr><th></th><th>Metric</th><th>Value</th><th>Rating</th><th>Benchmark</th></tr>';
 
   var metricLabels = {{
     cac: 'CAC', ltv: 'LTV', ltv_cac_ratio: 'LTV/CAC',
@@ -1192,9 +1199,10 @@ function renderUnitEconomics() {{
     var icon = ratingIcon(rating);
     var bench = DATA.benchmarks[m.id];
     var benchStr = bench ? fmt(bench.strong) : '-';
+    var canExplore = explorable[m.id];
 
-    // Track worst gap for default selection
-    if (bench && val !== null && val !== undefined) {{
+    // Track worst gap for default selection (only explorable metrics)
+    if (canExplore && bench && val !== null && val !== undefined) {{
       var gap;
       var lowerBetter = ['burn_multiple', 'cac_payback', 'cac'];
       if (lowerBetter.indexOf(m.id) >= 0) {{
@@ -1211,7 +1219,12 @@ function renderUnitEconomics() {{
     var ratingCell = rating === 'not_rated'
       ? '<td style="color:#86868b">\u2014</td>'
       : '<td><span class="badge ' + rating + '">' + icon + ' ' + rating + '</span></td>';
-    markup += '<tr class="clickable" onclick="selectMetric(\\x27' + m.id + '\\x27)" style="cursor:pointer">' +
+    var arrow = canExplore ? '<td style="color:#0071e3;font-size:0.7rem">\u25b6</td>' : '<td></td>';
+    var trAttr = canExplore
+      ? ' class="clickable" onclick="selectMetric(\\x27' + m.id + '\\x27)" style="cursor:pointer"'
+      : '';
+    markup += '<tr' + trAttr + '>' +
+      arrow +
       '<td>' + label + '</td>' +
       '<td>' + fmt(val) + '</td>' +
       ratingCell +
@@ -1222,9 +1235,14 @@ function renderUnitEconomics() {{
   markup += '<div id="fix-metric" style="margin-top:1.5rem"></div>';
   setContent(panel, markup);
 
-  // Auto-select worst metric
-  if (worstMetric) selectMetric(worstMetric);
-  else if (DATA.metrics.length > 0) selectMetric(DATA.metrics[0].id);
+  // Auto-select worst explorable metric
+  if (worstMetric) {{
+    selectMetric(worstMetric);
+  }} else {{
+    var first = null;
+    DATA.metrics.forEach(function(m) {{ if (!first && explorable[m.id]) first = m.id; }});
+    if (first) selectMetric(first);
+  }}
 }}
 
 function selectMetric(metricId) {{

@@ -13,3 +13,4 @@ docs/internal/
 uv.lock
 .worktrees/
 artifacts/
+docs/plans/
