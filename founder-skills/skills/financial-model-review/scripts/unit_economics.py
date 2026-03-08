@@ -434,7 +434,57 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
     else:
         metrics.append(_metric("cac", None, "not_rated", "CAC data not provided"))
 
-    # 2. LTV
+    # 2. LTV — synthesize inputs from revenue-level fields if ltv.inputs is missing
+    ltv_inputs = _deep_get(unit_econ, "ltv", "inputs")
+    _ltv_value_synthesized = False  # True when we computed ltv.value from revenue fields
+    _ltv_inputs_synthesized = False  # True when we filled ltv.inputs from revenue fields
+    if not isinstance(ltv_inputs, dict) or not ltv_inputs:
+        # Try to build ltv.inputs from revenue-level data
+        _synth_churn = _deep_get(revenue, "churn_monthly")
+        if _synth_churn is None:
+            _synth_churn = _deep_get(revenue, "churn")
+        _synth_customers = _deep_get(revenue, "customers")
+        _synth_gm = _deep_get(unit_econ, "gross_margin")
+        _synth_mrr = _deep_get(revenue, "mrr", "value")
+        if (
+            _synth_mrr is not None
+            and isinstance(_synth_mrr, (int, float))
+            and _synth_customers is not None
+            and isinstance(_synth_customers, (int, float))
+            and _synth_customers > 0
+            and _synth_churn is not None
+            and isinstance(_synth_churn, (int, float))
+            and _synth_churn >= 0
+            and _synth_gm is not None
+            and isinstance(_synth_gm, (int, float))
+            and 0 <= _synth_gm <= 1
+        ):
+            _synth_arpu = _synth_mrr / _synth_customers
+            # Compute LTV: arpu * gross_margin / churn (or 60-month cap if churn=0)
+            if _synth_churn == 0:
+                _synth_ltv = round(_synth_arpu * _synth_gm * 60, 2)
+            else:
+                _synth_ltv = round(_synth_arpu * _synth_gm / _synth_churn, 2)
+            # Inject into unit_econ so downstream code (LTV/CAC, etc.) works
+            ltv_node = _deep_get(unit_econ, "ltv")
+            if not isinstance(ltv_node, dict):
+                unit_econ["ltv"] = {}
+            # Only set ltv.value if not already provided by extraction
+            existing_ltv = _deep_get(unit_econ, "ltv", "value")
+            if existing_ltv is None:
+                unit_econ["ltv"]["value"] = _synth_ltv
+                _ltv_value_synthesized = True
+            # Always fill inputs (that's what was missing)
+            unit_econ["ltv"]["inputs"] = {
+                "arpu_monthly": round(_synth_arpu, 2),
+                "churn_monthly": _synth_churn,
+                "gross_margin": _synth_gm,
+            }
+            _ltv_inputs_synthesized = True
+            # Only set observed_vs_assumed if not already present
+            if "observed_vs_assumed" not in unit_econ["ltv"]:
+                unit_econ["ltv"]["observed_vs_assumed"] = "assumed"
+
     ltv_value = _deep_get(unit_econ, "ltv", "value")
     ltv_observed = _deep_get(unit_econ, "ltv", "observed_vs_assumed", default="assumed")
     if ltv_value is not None:
@@ -449,6 +499,10 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                 arpu = _deep_get(unit_econ, "ltv", "inputs", "arpu")
             gm_input = _deep_get(unit_econ, "ltv", "inputs", "gross_margin")
             obs_note = "observed" if ltv_observed == "observed" else "assumed"
+            if _ltv_value_synthesized:
+                obs_note = "synthesized from revenue.customers and revenue.churn_monthly"
+            elif _ltv_inputs_synthesized:
+                obs_note += "; inputs synthesized from revenue fields"
             if arpu is not None and gm_input is not None:
                 ltv_value = round(arpu * gm_input * 60, 2)
                 evidence = f"LTV of ${ltv_value:,.0f} ({obs_note}; capped at 5-year horizon, 0% churn assumed)"
@@ -467,6 +521,10 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                 )
         else:
             obs_note = "observed" if ltv_observed == "observed" else "assumed"
+            if _ltv_value_synthesized:
+                obs_note = "synthesized from revenue.customers and revenue.churn_monthly"
+            elif _ltv_inputs_synthesized:
+                obs_note += "; inputs synthesized from revenue fields"
             evidence = f"LTV of ${ltv_value:,.0f} ({obs_note})"
         # LTV doesn't have standalone stage benchmarks; report as not_rated
         if ltv_unreliable:

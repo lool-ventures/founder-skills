@@ -3164,3 +3164,93 @@ class TestBurnMultipleProvidedPreference:
         # Should NOT produce BURN_MULTIPLE_REPORTED_DIVERGENCE (that's growth-rate path only)
         codes = [w["code"] for w in data.get("warnings", [])]
         assert "BURN_MULTIPLE_REPORTED_DIVERGENCE" not in codes
+
+
+class TestUnitEconomicsLtvSynthesis:
+    """unit_economics.py synthesizes LTV when ltv.inputs missing but revenue has the data."""
+
+    def _base_inputs(self) -> dict:
+        return {
+            "company": {"stage": "series-a", "sector": "B2B SaaS", "revenue_model_type": "saas-sales-led"},
+            "revenue": {
+                "mrr": {"value": 153603},
+                "arr": {"value": 1843235},
+                "growth_rate_monthly": 0.118,
+                "customers": 45,
+                "churn_monthly": 0.0067,
+            },
+            "cash": {"current_balance": 1500000, "monthly_net_burn": 561000},
+            "unit_economics": {"gross_margin": 0.784},
+        }
+
+    def test_synthesizes_ltv_from_revenue(self) -> None:
+        """LTV computed from revenue.customers + revenue.churn_monthly + gross_margin."""
+        inp = self._base_inputs()
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        # arpu = 153603/45 = 3413.40, ltv = 3413.40 * 0.784 / 0.0067 ≈ 399,277.01
+        expected_ltv = round(153603 / 45 * 0.784 / 0.0067, 2)
+        assert ltv["value"] == expected_ltv
+        assert "synthesized" in ltv["evidence"].lower() or "computed" in ltv["evidence"].lower()
+
+    def test_no_synthesis_when_ltv_inputs_present(self) -> None:
+        """Don't synthesize when ltv.inputs already has data."""
+        inp = self._base_inputs()
+        inp["unit_economics"]["ltv"] = {
+            "value": 50000,
+            "inputs": {"arpu_monthly": 3413, "churn_monthly": 0.0067, "gross_margin": 0.784},
+        }
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        assert ltv["value"] == 50000  # uses provided, not synthesized
+
+    def test_preserves_existing_ltv_value_when_inputs_missing(self) -> None:
+        """When ltv.value is provided but ltv.inputs is missing, synthesis fills inputs but keeps the value."""
+        inp = self._base_inputs()
+        inp["unit_economics"]["ltv"] = {"value": 75000}  # value present, inputs absent
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        assert ltv["value"] == 75000  # must NOT be overwritten by synthesis
+        # Evidence should NOT claim value was synthesized — only inputs were filled
+        assert "synthesized from revenue.customers" not in ltv["evidence"].lower()
+
+    def test_no_synthesis_without_customers(self) -> None:
+        """Can't compute ARPU without customer count."""
+        inp = self._base_inputs()
+        del inp["revenue"]["customers"]
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        assert ltv["value"] is None  # no data
+
+    def test_no_synthesis_without_churn(self) -> None:
+        """Can't compute LTV without churn."""
+        inp = self._base_inputs()
+        del inp["revenue"]["churn_monthly"]
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        assert ltv["value"] is None
+
+    def test_no_synthesis_with_zero_customers(self) -> None:
+        """Zero customers → can't compute ARPU, no synthesis."""
+        inp = self._base_inputs()
+        inp["revenue"]["customers"] = 0
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        assert ltv["value"] is None
+
+    def test_zero_churn_applies_60mo_cap(self) -> None:
+        """Zero churn → 60-month LTV cap even with synthesized inputs."""
+        inp = self._base_inputs()
+        inp["revenue"]["churn_monthly"] = 0
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        # arpu = 153603/45 = 3413.40, capped ltv = 3413.40 * 0.784 * 60 = 160,564
+        expected = round(153603 / 45 * 0.784 * 60, 2)
+        assert ltv["value"] == expected
