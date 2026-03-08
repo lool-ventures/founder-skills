@@ -607,3 +607,52 @@ def test_cash_flow_positive() -> None:
     data = _extract_data_payload(stdout)
     assert data["engine"]["opex0"] == 30000  # revenue (50K) + burn (-20K) = 30K
     assert data["engine"]["opex0"] < data["engine"]["revenue0"]
+
+
+def test_find_min_viable_growth_uses_target_runway_param() -> None:
+    """JS findMinViableGrowth must accept targetRunway param and use it in both loops."""
+    d = _make_artifact_dir()
+    rc, html, stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+
+    # Extract the findMinViableGrowth function signature and body
+    fn_start = html.find("function findMinViableGrowth")
+    assert fn_start != -1, "findMinViableGrowth function not found in HTML output"
+    fn_body = html[fn_start : fn_start + 3000]
+
+    # Function should accept targetRunway parameter
+    assert re.search(r"function findMinViableGrowth\(params,\s*targetRunway\)", fn_body), (
+        "findMinViableGrowth should accept targetRunway as second parameter"
+    )
+
+    # Binary search for-loop must have runway check using targetRunway param
+    for_start = fn_body.find("for (var i = 0;")
+    assert for_start != -1, "Binary search for-loop not found in findMinViableGrowth"
+    for_block = fn_body[for_start : for_start + 500]
+
+    # Assert the convergence condition includes runway_months >= targetRunway
+    assert re.search(
+        r"if\s*\(\s*r2\.default_alive\s*\|\|\s*\(.*?r2\.runway_months\s*>=\s*targetRunway",
+        for_block,
+        re.DOTALL,
+    ), (
+        "findMinViableGrowth binary search for-loop must check "
+        "r2.runway_months >= targetRunway (not hardcoded or missing)"
+    )
+
+    # Expansion while-loop should also use targetRunway (not hardcoded 18)
+    while_start = fn_body.find("while (hi < maxHi)")
+    assert while_start != -1, "Expansion while-loop not found in findMinViableGrowth"
+    while_block = fn_body[while_start : while_start + 300]
+    assert "targetRunway" in while_block, (
+        "findMinViableGrowth expansion while-loop should use targetRunway param, not hardcoded 18"
+    )
+
+    # Call site in renderRunway must pass state.targetRunway
+    render_start = html.find("function renderRunway()")
+    assert render_start != -1, "renderRunway function not found in HTML output"
+    render_body = html[render_start : render_start + 2000]
+    assert re.search(
+        r"findMinViableGrowth\(\s*p\s*,\s*state\.targetRunway\s*\)",
+        render_body,
+    ), "renderRunway must pass state.targetRunway to findMinViableGrowth"

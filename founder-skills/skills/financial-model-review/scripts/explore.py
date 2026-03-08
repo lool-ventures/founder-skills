@@ -631,7 +631,8 @@ function projectScenario(params) {{
   }};
 }}
 
-function findMinViableGrowth(params) {{
+function findMinViableGrowth(params, targetRunway) {{
+  targetRunway = targetRunway || 18;
   var base = Object.assign({{}}, params);
   var lo = 0;
   var hi = Math.max(base.growthRate || 0, 0.01);
@@ -642,7 +643,7 @@ function findMinViableGrowth(params) {{
     var r = projectScenario(
       Object.assign({{}}, base, {{growthRate: hi, burnChange: 0}})
     );
-    if (r.default_alive || (r.runway_months !== null && r.runway_months >= 18)) break;
+    if (r.default_alive || (r.runway_months !== null && r.runway_months >= targetRunway)) break;
     hi = Math.min(hi * 2, maxHi);
   }}
 
@@ -651,7 +652,9 @@ function findMinViableGrowth(params) {{
     var r2 = projectScenario(
       Object.assign({{}}, base, {{growthRate: mid, burnChange: 0}})
     );
-    if (r2.default_alive) {{ hi = mid; }} else {{ lo = mid; }}
+    if (r2.default_alive || (r2.runway_months !== null && r2.runway_months >= targetRunway)) {{  // noqa: E501
+      hi = mid;
+    }} else {{ lo = mid; }}
     if (hi - lo < precision) break;
   }}
   return Math.round(hi * 1000) / 1000;
@@ -926,7 +929,7 @@ function renderRunway() {{
 
   var p = getProjectionParams();
   var result = projectScenario(p);
-  var mvg = findMinViableGrowth(p);
+  var mvg = findMinViableGrowth(p, state.targetRunway);
 
   var alive = result.default_alive;
   var months = result.runway_months || DATA.engine.max_months + '+';
