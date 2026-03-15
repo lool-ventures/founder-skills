@@ -10,6 +10,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
+from typing import Any
 
 _SCRIPTS = os.path.join(
     os.path.dirname(__file__),
@@ -129,7 +130,7 @@ _MINIMAL_INPUTS = {
 }
 
 
-def _generate_static(inputs):
+def _generate_static(inputs: dict[str, Any]) -> tuple[int, str, str]:
     """Write inputs to temp file, run script with --static, return (exit_code, html, stderr)."""
     with tempfile.TemporaryDirectory() as tmpdir:
         inputs_path = os.path.join(tmpdir, "inputs.json")
@@ -154,53 +155,53 @@ def _generate_static(inputs):
 
 
 class TestStaticHTML:
-    def test_outputs_valid_html(self):
+    def test_outputs_valid_html(self) -> None:
         """Script outputs valid HTML document."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         assert rc == 0
         assert "<!DOCTYPE html>" in html
         assert "</html>" in html
 
-    def test_company_name_embedded(self):
+    def test_company_name_embedded(self) -> None:
         """Company name appears in HTML output."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         assert "TestCo" in html
 
-    def test_all_tabs_present(self):
+    def test_all_tabs_present(self) -> None:
         """All 6 tab identifiers present in output."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         for tab in ["company", "revenue", "cash", "team", "unit-economics", "more"]:
             assert tab in html, f"Tab '{tab}' missing from HTML output"
 
-    def test_mrr_value_embedded(self):
+    def test_mrr_value_embedded(self) -> None:
         """MRR value appears in embedded data."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         assert "50000" in html
 
-    def test_sanity_metrics_present(self):
+    def test_sanity_metrics_present(self) -> None:
         """Sanity metric elements present in HTML."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         assert "runway" in html.lower()
         assert "burn" in html.lower()
 
-    def test_submit_button_present(self):
+    def test_submit_button_present(self) -> None:
         """Submit/Download button exists."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         assert "submit" in html.lower() or "download" in html.lower()
 
-    def test_corrections_tracking(self):
+    def test_corrections_tracking(self) -> None:
         """HTML tracks corrections (diff between original and edited state)."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         assert "corrections" in html.lower() or "ORIGINAL" in html
 
-    def test_minimal_inputs(self):
+    def test_minimal_inputs(self) -> None:
         """Works with minimal inputs (no expenses, UE, scenarios, etc.)."""
         rc, html, stderr = _generate_static(_MINIMAL_INPUTS)
         assert rc == 0
         assert "MinCo" in html
         assert "</html>" in html
 
-    def test_empty_arrays_handled(self):
+    def test_empty_arrays_handled(self) -> None:
         """Empty headcount/opex arrays don't break generation."""
         inputs = {
             **_FULL_INPUTS,
@@ -209,7 +210,7 @@ class TestStaticHTML:
         rc, html, stderr = _generate_static(inputs)
         assert rc == 0
 
-    def test_null_fields_handled(self):
+    def test_null_fields_handled(self) -> None:
         """Null optional fields don't break generation."""
         inputs = json.loads(json.dumps(_FULL_INPUTS))
         inputs["revenue"]["growth_rate_monthly"] = None
@@ -217,63 +218,63 @@ class TestStaticHTML:
         rc, html, stderr = _generate_static(inputs)
         assert rc == 0
 
-    def test_ils_currency_support(self):
+    def test_ils_currency_support(self) -> None:
         """ILS currency toggle support present when fx_rate exists."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         assert "ILS" in html or "ils" in html
 
-    def test_no_ils_when_no_fx_rate(self):
+    def test_no_ils_when_no_fx_rate(self) -> None:
         """No crash when no fx_rate in data."""
         rc, html, stderr = _generate_static(_MINIMAL_INPUTS)
         assert rc == 0
 
-    def test_time_series_data(self):
+    def test_time_series_data(self) -> None:
         """Monthly time-series data present in output."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         assert "2025-11" in html
         assert "41000" in html
 
-    def test_headcount_data(self):
+    def test_headcount_data(self) -> None:
         """Headcount data present in output."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         assert "Engineer" in html
         assert "120000" in html
 
-    def test_feedback_payload_shape(self):
+    def test_feedback_payload_shape(self) -> None:
         """Download/submit logic references correct payload keys."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         assert "warning_overrides" in html or "warningOverrides" in html
         assert "ils_fields" in html or "ilsFields" in html
 
-    def test_light_theme_colors(self):
+    def test_light_theme_colors(self) -> None:
         """Uses light theme palette."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         assert any(c in html for c in ["#0d549d", "#0071e3", "#f9fafb", "#1f2937"])
 
-    def test_stage_badge(self):
+    def test_stage_badge(self) -> None:
         """Stage badge rendered."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         assert "seed" in html.lower()
 
-    def test_scenarios_rendered(self):
+    def test_scenarios_rendered(self) -> None:
         """Scenario fields present."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         assert "base" in html
         assert "slow" in html
         assert "crisis" in html
 
-    def test_grants_fields(self):
+    def test_grants_fields(self) -> None:
         """IIA grant fields present."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         assert "iia_approved" in html or "IIA" in html or "200000" in html
 
-    def test_fetch_fallback_pattern(self):
+    def test_fetch_fallback_pattern(self) -> None:
         """HTML contains the fetch-then-catch pattern for dual-mode."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         assert "/api/feedback" in html
         assert "download" in html.lower()
 
-    def test_stdout_reports_mode(self):
+    def test_stdout_reports_mode(self) -> None:
         """Stdout contains JSON with mode info."""
         with tempfile.TemporaryDirectory() as tmpdir:
             inputs_path = os.path.join(tmpdir, "inputs.json")
@@ -294,7 +295,9 @@ class TestStaticHTML:
 # ---------------------------------------------------------------------------
 
 
-def _start_server(inputs, extra_args=None):
+def _start_server(
+    inputs: dict[str, Any], extra_args: list[str] | None = None
+) -> tuple[int, str, subprocess.Popen[str]]:
     """Start server in background, return (port, workspace_dir, process)."""
     tmpdir = tempfile.mkdtemp()
     inputs_path = os.path.join(tmpdir, "inputs.json")
@@ -307,6 +310,7 @@ def _start_server(inputs, extra_args=None):
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     # Read stdout to get port
+    assert proc.stdout is not None
     line = proc.stdout.readline()
     info = json.loads(line)
     return info["port"], tmpdir, proc
@@ -318,7 +322,7 @@ def _start_server(inputs, extra_args=None):
 
 
 class TestServerMode:
-    def test_server_starts_and_serves_html(self):
+    def test_server_starts_and_serves_html(self) -> None:
         """Server starts on requested port and returns HTML on GET /."""
         port, tmpdir, proc = _start_server(_FULL_INPUTS)
         try:
@@ -330,7 +334,7 @@ class TestServerMode:
             proc.terminate()
             proc.wait(timeout=5)
 
-    def test_post_feedback_writes_file(self):
+    def test_post_feedback_writes_file(self) -> None:
         """POST /api/feedback writes corrections.json to workspace."""
         port, tmpdir, proc = _start_server(_FULL_INPUTS)
         try:
@@ -361,7 +365,7 @@ class TestServerMode:
             proc.terminate()
             proc.wait(timeout=5)
 
-    def test_get_feedback_restores_state(self):
+    def test_get_feedback_restores_state(self) -> None:
         """GET /api/feedback returns previously saved feedback."""
         port, tmpdir, proc = _start_server(_FULL_INPUTS)
         try:
@@ -382,7 +386,7 @@ class TestServerMode:
             proc.terminate()
             proc.wait(timeout=5)
 
-    def test_post_check_returns_validation(self):
+    def test_post_check_returns_validation(self) -> None:
         """POST /api/check returns validation results with sanity metrics."""
         port, tmpdir, proc = _start_server(_FULL_INPUTS)
         try:
@@ -408,7 +412,7 @@ class TestServerMode:
             proc.terminate()
             proc.wait(timeout=5)
 
-    def test_stdout_reports_server_mode(self):
+    def test_stdout_reports_server_mode(self) -> None:
         """Stdout JSON reports server mode with URL and port."""
         port, tmpdir, proc = _start_server(_FULL_INPUTS)
         try:
@@ -426,7 +430,7 @@ class TestServerMode:
 
 
 class TestIntegration:
-    def test_round_trip_static_then_apply(self):
+    def test_round_trip_static_then_apply(self) -> None:
         """Generate static HTML, simulate corrections payload, apply."""
         # Step 1: Generate static HTML (verify it works)
         rc, html, stderr = _generate_static(_FULL_INPUTS)
@@ -474,7 +478,7 @@ class TestIntegration:
             # Verify metadata preserved
             assert corrected["metadata"]["run_id"] == "20260309T120000Z"
 
-    def test_round_trip_server_then_apply(self):
+    def test_round_trip_server_then_apply(self) -> None:
         """Start server, POST feedback, kill server, apply corrections."""
         port, tmpdir, proc = _start_server(_FULL_INPUTS)
         try:
