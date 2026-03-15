@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from typing import Any
 
 _SCRIPTS = os.path.join(
     os.path.dirname(__file__),
@@ -23,7 +24,7 @@ _SCRIPT = os.path.join(_SCRIPTS, "apply_corrections.py")
 # Fixtures
 # ---------------------------------------------------------------------------
 
-_ORIGINAL = {
+_ORIGINAL: dict[str, Any] = {
     "company": {
         "company_name": "TestCo",
         "slug": "testco",
@@ -54,7 +55,11 @@ _ORIGINAL = {
 }
 
 
-def _run(corrections_data, original_data, extra_args=None):
+def _run(
+    corrections_data: dict[str, Any],
+    original_data: dict[str, Any],
+    extra_args: list[str] | None = None,
+) -> tuple[int, dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
     """Write temp files, run apply_corrections.py, return (exit_code, stdout, files)."""
     with tempfile.TemporaryDirectory() as tmpdir:
         corr_path = os.path.join(tmpdir, "corrections.json")
@@ -94,7 +99,7 @@ def _run(corrections_data, original_data, extra_args=None):
 
 
 class TestApplyCorrections:
-    def test_basic_round_trip(self):
+    def test_basic_round_trip(self) -> None:
         """Corrections applied, both files written, stdout reports success."""
         payload = {
             "corrections": [{"path": "revenue.mrr.value", "was": 50000, "now": 75000, "label": "MRR"}],
@@ -114,7 +119,7 @@ class TestApplyCorrections:
         assert audit is not None
         assert audit["correction_count"] == 1
 
-    def test_coercion_string_to_number(self):
+    def test_coercion_string_to_number(self) -> None:
         """String numeric values coerced to int/float."""
         payload = {
             "corrections": [],
@@ -127,10 +132,11 @@ class TestApplyCorrections:
         }
         rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
         assert rc == 0
+        assert corrected is not None
         assert corrected["cash"]["current_balance"] == 1500000
         assert corrected["cash"]["monthly_net_burn"] == 90000.50
 
-    def test_coercion_error_exits_nonzero(self):
+    def test_coercion_error_exits_nonzero(self) -> None:
         """Non-numeric string in numeric field → exit 1, no files written."""
         payload = {
             "corrections": [],
@@ -143,7 +149,7 @@ class TestApplyCorrections:
         assert corrected is None  # file not written
         assert "errors" in stdout
 
-    def test_ils_normalization(self):
+    def test_ils_normalization(self) -> None:
         """ILS-tagged fields divided by fx_rate."""
         payload = {
             "corrections": [],
@@ -153,9 +159,10 @@ class TestApplyCorrections:
         }
         rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
         assert rc == 0
+        assert corrected is not None
         assert corrected["cash"]["current_balance"] == 1000000  # 3600000 / 3.6
 
-    def test_time_series_canonicalization(self):
+    def test_time_series_canonicalization(self) -> None:
         """Monthly entries sorted by month."""
         payload = {
             "corrections": [],
@@ -175,10 +182,11 @@ class TestApplyCorrections:
         }
         rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
         assert rc == 0
+        assert corrected is not None
         months = [e["month"] for e in corrected["revenue"]["monthly"]]
         assert months == ["2026-01", "2026-02", "2026-03"]
 
-    def test_invalid_time_series_date_exits_nonzero(self):
+    def test_invalid_time_series_date_exits_nonzero(self) -> None:
         """Malformed YYYY-MM in time series → exit 1."""
         payload = {
             "corrections": [],
@@ -193,7 +201,7 @@ class TestApplyCorrections:
         assert rc == 1
         assert corrected is None
 
-    def test_override_merge_preserves_agent(self):
+    def test_override_merge_preserves_agent(self) -> None:
         """Founder override does not replace existing agent override."""
         payload = {
             "corrections": [],
@@ -211,12 +219,13 @@ class TestApplyCorrections:
         }
         rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
         assert rc == 0
+        assert corrected is not None
         overrides = corrected["metadata"]["warning_overrides"]
         bm = [o for o in overrides if o["code"] == "BURN_MULTIPLE_SUSPECT"]
         assert len(bm) == 1
         assert bm[0]["reviewed_by"] == "agent"  # not downgraded
 
-    def test_override_merge_adds_new(self):
+    def test_override_merge_adds_new(self) -> None:
         """New founder override added alongside existing agent override."""
         payload = {
             "corrections": [],
@@ -234,26 +243,28 @@ class TestApplyCorrections:
         }
         rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
         assert rc == 0
+        assert corrected is not None
         overrides = corrected["metadata"]["warning_overrides"]
         codes = [o["code"] for o in overrides]
         assert "BURN_MULTIPLE_SUSPECT" in codes  # preserved
         assert "ARPU_SUSPECT" in codes  # added
 
-    def test_run_id_preserved(self):
+    def test_run_id_preserved(self) -> None:
         """Original metadata.run_id preserved in output."""
-        payload = {
+        # Remove run_id from corrected to test preservation
+        corrected_input: dict[str, Any] = {**_ORIGINAL, "metadata": {}}
+        payload: dict[str, Any] = {
             "corrections": [],
-            "corrected": {**_ORIGINAL},
+            "corrected": corrected_input,
             "warning_overrides": [],
             "ils_fields": {},
         }
-        # Remove run_id from corrected to test preservation
-        payload["corrected"]["metadata"] = {}
         rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
         assert rc == 0
+        assert corrected is not None
         assert corrected["metadata"]["run_id"] == "20260309T120000Z"
 
-    def test_row_ids_stripped(self):
+    def test_row_ids_stripped(self) -> None:
         """_row_id keys removed from array entries before saving."""
         payload = {
             "corrections": [],
@@ -269,9 +280,10 @@ class TestApplyCorrections:
         }
         rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
         assert rc == 0
+        assert corrected is not None
         assert "_row_id" not in corrected["revenue"]["monthly"][0]
 
-    def test_boolean_coercion_in_time_series(self):
+    def test_boolean_coercion_in_time_series(self) -> None:
         """String 'true'/'false' in actual field coerced to boolean."""
         payload = {
             "corrections": [],
@@ -287,9 +299,10 @@ class TestApplyCorrections:
         }
         rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
         assert rc == 0
+        assert corrected is not None
         assert corrected["revenue"]["monthly"][0]["actual"] is True
 
-    def test_audit_trail_structure(self):
+    def test_audit_trail_structure(self) -> None:
         """extraction_corrections.json has expected structure."""
         payload = {
             "corrections": [{"path": "revenue.mrr.value", "was": 50000, "now": 75000, "label": "MRR"}],
@@ -310,13 +323,14 @@ class TestApplyCorrections:
         }
         rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
         assert rc == 0
+        assert audit is not None
         assert "timestamp" in audit
         assert audit["source_file"] == "inputs.json"
         assert audit["correction_count"] == 1
         assert len(audit["corrections"]) == 1
         assert audit["override_count"] == 1
 
-    def test_zero_corrections_still_writes(self):
+    def test_zero_corrections_still_writes(self) -> None:
         """Even with 0 corrections, files are written (may have overrides)."""
         payload = {
             "corrections": [],
@@ -332,7 +346,7 @@ class TestApplyCorrections:
 
 
 class TestIntegration:
-    def test_round_trip_generate_then_apply(self):
+    def test_round_trip_generate_then_apply(self) -> None:
         """Generate static HTML from inputs, simulate corrections payload, apply."""
         # Step 1: Generate static HTML (verify it works)
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -373,6 +387,8 @@ class TestIntegration:
         # Step 3: Apply corrections
         rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
         assert rc == 0
+        assert corrected is not None
+        assert audit is not None
         assert corrected["revenue"]["mrr"]["value"] == 75000
         assert corrected["revenue"]["customers"] == 150
         assert audit["correction_count"] == 2
