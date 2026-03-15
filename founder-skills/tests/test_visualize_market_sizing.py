@@ -343,7 +343,8 @@ def test_output_flag() -> None:
     try:
         rc, stdout, _stderr = _run_visualize(d, extra_args=["-o", tmp])
         assert rc == 0
-        assert stdout == ""
+        receipt = json.loads(stdout)
+        assert receipt["ok"] is True
         assert os.path.exists(tmp)
         with open(tmp) as fh:
             content = fh.read()

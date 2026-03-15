@@ -33,7 +33,7 @@ import json
 import os
 import re
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 # --- Constants ---
@@ -68,6 +68,7 @@ CANONICAL_SECTOR_TYPES = frozenset(
         "hardware-subscription",
         "consumer-subscription",
         "usage-based",
+        "transactional-fintech",
     }
 )
 
@@ -84,6 +85,17 @@ _SECTOR_ALIASES: dict[str, str] = {
     "consumer subscription": "consumer-subscription",
     "usage based": "usage-based",
     "consumption": "usage-based",
+    "fintech": "saas",
+    "proptech": "saas",
+    "insurtech": "saas",
+    "edtech": "saas",
+    "healthtech": "saas",
+    "legaltech": "saas",
+    "regtech": "saas",
+    "cyber": "saas",
+    "cybersecurity": "saas",
+    "transactional fintech": "transactional-fintech",
+    "payment processing": "transactional-fintech",
 }
 
 # Precedence for substring extraction; most specific first.
@@ -103,6 +115,9 @@ _SECTOR_SUBSTRING_PRECEDENCE: list[tuple[str, str]] = [
     ("usage-based", "usage-based"),
     ("marketplace", "marketplace"),
     ("hardware", "hardware"),
+    ("payment processing", "transactional-fintech"),
+    ("payments", "transactional-fintech"),
+    ("fintech", "saas"),
     ("ai", "ai-native"),
     ("saas", "saas"),
 ]
@@ -176,7 +191,7 @@ def _context_path(artifacts_root: str, slug: str) -> str:
 
 def _now_iso() -> str:
     """Return current UTC timestamp in ISO 8601 format."""
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _find_context_files(artifacts_root: str) -> list[str]:
@@ -324,6 +339,8 @@ def cmd_read(args: argparse.Namespace) -> None:
     artifacts_root: str = args.artifacts_root
     rc, slug = _resolve_slug(artifacts_root, args.slug)
     if rc != 0:
+        if slug:
+            print(slug, file=sys.stderr)
         sys.exit(rc)
 
     path = _context_path(artifacts_root, slug)
@@ -343,6 +360,8 @@ def cmd_merge(args: argparse.Namespace) -> None:
     artifacts_root: str = args.artifacts_root
     rc, slug = _resolve_slug(artifacts_root, args.slug)
     if rc != 0:
+        if slug:
+            print(slug, file=sys.stderr)
         sys.exit(rc)
 
     path = _context_path(artifacts_root, slug)
@@ -402,6 +421,8 @@ def cmd_validate(args: argparse.Namespace) -> None:
     artifacts_root: str = args.artifacts_root
     rc, slug = _resolve_slug(artifacts_root, args.slug)
     if rc != 0:
+        if slug:
+            print(slug, file=sys.stderr)
         sys.exit(rc)
 
     path = _context_path(artifacts_root, slug)
@@ -452,6 +473,8 @@ def cmd_update_identity(args: argparse.Namespace) -> None:
     artifacts_root: str = args.artifacts_root
     rc, slug = _resolve_slug(artifacts_root, args.slug)
     if rc != 0:
+        if slug:
+            print(slug, file=sys.stderr)
         sys.exit(rc)
 
     path = _context_path(artifacts_root, slug)

@@ -87,13 +87,25 @@ Advice is calibrated to fundraising stage where the skill warrants it. A pre-see
 - **Deck review** detects stage from signals (revenue, team size, raise amount) and applies stage-specific criteria and benchmarks
 - **IC simulation** uses stage context from the startup profile to guide partner assessments; stage-calibrated thresholds are documented in the evaluation criteria reference file and applied by agents during assessment
 
-## Independent Perspectives (IC Simulation)
+## Sub-Agent Architecture
 
-The IC simulation runs three partner assessments as parallel sub-agents, not sequential prompts.
+Skills offload context-heavy and parallelizable work to Task sub-agents. This serves two purposes:
 
-**Why:** Sequential generation creates convergence bias — the second partner unconsciously echoes the first. Parallel sub-agents produce genuinely independent assessments that create real debate.
+**Context offloading:** Extraction sub-agents read source files (pitch decks, spreadsheets, market data), load reference files, and return only a structured summary — keeping raw document content and search results out of the main agent's context. A pitch deck can be 15-20 slides of raw content; a web research phase can produce 15-30 KB of search results. The main agent needs only the distilled output to direct subsequent steps.
 
-The three archetypes (Visionary, Operator, Analyst) each have distinct focus areas, debate styles, and red flags. The main agent then orchestrates a discussion that surfaces disagreements rather than manufacturing consensus.
+- Market sizing: extraction sub-agent reads materials and writes `inputs.json` + `methodology.json`, returns a company brief and data availability summary
+- Market sizing: research sub-agents run WebSearch and return structured assumptions arrays, not raw search results
+- Financial model review: extraction sub-agent parses Excel/CSV via `extract_model.py` and constructs `inputs.json`, returns data sufficiency verdict
+
+**Parallel independent work:** When steps have no data dependency, sub-agents run them concurrently in a single message. This both saves time and — for assessment tasks — prevents convergence bias where sequential generation causes later outputs to echo earlier ones.
+
+- Market sizing: sensitivity + checklist run in parallel after the reality check passes
+- Financial model review: checklist scoring + metrics/runway run in parallel
+- IC simulation: three partner assessments (Visionary, Operator, Analyst) run as parallel sub-agents, producing genuinely independent perspectives that create real debate
+
+**Return contracts:** Every sub-agent invocation specifies exactly what to return (file paths, key metrics, summary stats) with an explicit "do not echo the full artifact/document back" constraint. This is what makes context offloading effective — without the constraint, sub-agents would dump everything back into the main context.
+
+**No worktree isolation:** Sub-agents must write artifacts to the main `$ANALYSIS_DIR`. Using `isolation: "worktree"` would write files into a temporary copy that the main agent can't see.
 
 ## Graceful Degradation
 

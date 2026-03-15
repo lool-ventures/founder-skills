@@ -32,7 +32,9 @@ WARNING_SEVERITY: dict[str, str] = {
     # High severity -- agent must fix before presenting report
     "CORRUPT_ARTIFACT": "high",
     "MISSING_ARTIFACT": "high",
-    "CHECKLIST_FAILURES": "high",
+    "STALE_ARTIFACT": "high",
+    # Checklist failures are review findings, not data errors — present, don't block
+    "CHECKLIST_FAILURES": "medium",
     # Low severity -- informational
     "MISSING_OPTIONAL_ARTIFACT": "low",
     # Medium severity -- include in Warnings section of report
@@ -48,6 +50,7 @@ OPTIONAL_ARTIFACTS = ["model_data.json"]
 WARNING_LABELS: dict[str, str] = {
     "CORRUPT_ARTIFACT": "Corrupt Artifact",
     "MISSING_ARTIFACT": "Missing Artifact",
+    "STALE_ARTIFACT": "Stale Artifact",
     "CHECKLIST_FAILURES": "Checklist Failures",
     "MISSING_OPTIONAL_ARTIFACT": "Missing Optional Artifact",
     "CHECKLIST_INCOMPLETE": "Checklist Incomplete",
@@ -108,7 +111,7 @@ def _md_safe(text: str | None) -> str:
     return text.replace("|", "\\|").replace("\n", " ")
 
 
-def _write_output(data: str, output_path: str | None) -> None:
+def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
     """Write JSON string to file or stdout."""
     if output_path:
         abs_path = os.path.abspath(output_path)
@@ -119,6 +122,10 @@ def _write_output(data: str, output_path: str | None) -> None:
         os.makedirs(parent, exist_ok=True)
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(data)
+        receipt: dict[str, Any] = {"ok": True, "path": abs_path, "bytes": len(data.encode("utf-8"))}
+        if summary:
+            receipt.update(summary)
+        sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     else:
         sys.stdout.write(data)
 
@@ -188,6 +195,26 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
         elif data is None:
             warnings.append(_warn("MISSING_ARTIFACT", f"Required artifact missing: {name}"))
 
+    # 1b. STALE_ARTIFACT -- run_id mismatch across artifacts
+    run_ids: dict[str, str] = {}
+    for name in REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS:
+        data = artifacts.get(name)
+        if _usable(data):
+            assert data is not None  # for type narrowing
+            rid = _as_dict(data.get("metadata")).get("run_id")
+            if isinstance(rid, str) and rid:
+                run_ids[name] = rid
+    if len(run_ids) >= 2:
+        unique_ids = set(run_ids.values())
+        if len(unique_ids) > 1:
+            mismatched = [f"{n} ({rid})" for n, rid in run_ids.items()]
+            warnings.append(
+                _warn(
+                    "STALE_ARTIFACT",
+                    f"Run ID mismatch across artifacts — possible stale data: {', '.join(mismatched)}",
+                )
+            )
+
     # 2. CORRUPT_ARTIFACT / MISSING_OPTIONAL_ARTIFACT -- optional artifacts
     for name in OPTIONAL_ARTIFACTS:
         data = artifacts.get(name)
@@ -243,7 +270,37 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                     )
                 )
 
-    # 6. METRICS_GAPS -- unit economics has few computed metrics
+    # 6. CHECKLIST_RUNWAY_CONTRADICTION -- CASH_* failures + default_alive: true
+    if _usable(checklist) and _usable(runway):
+        items = _as_list(checklist.get("items"))
+        cash_fails = [
+            i
+            for i in items
+            if isinstance(i, dict) and str(i.get("id", "")).startswith("CASH_") and i.get("status") == "fail"
+        ]
+        scenarios = _as_list(runway.get("scenarios"))
+        base_scenario = next((s for s in scenarios if s.get("name") == "base"), None)
+        if cash_fails and base_scenario and base_scenario.get("default_alive") is True:
+            fail_ids = [str(f.get("id", "?")) for f in cash_fails]
+            warnings.append(
+                _warn(
+                    "RUNWAY_INCONSISTENCY",
+                    f"Checklist items {fail_ids} failed (cash/burn issues) but runway "
+                    f"base scenario shows default_alive: true — review inputs for consistency",
+                )
+            )
+        # Also flag cash direction warnings from runway scenarios
+        for s in scenarios:
+            cdw = s.get("cash_direction_warning")
+            if cdw:
+                warnings.append(
+                    _warn(
+                        "RUNWAY_INCONSISTENCY",
+                        f"Scenario '{s.get('name', '?')}': {cdw}",
+                    )
+                )
+
+    # 7. METRICS_GAPS -- unit economics has few computed metrics
     if _usable(unit_economics):
         ue_summary = _as_dict(unit_economics.get("summary"))
         computed = ue_summary.get("computed", 0)
@@ -477,6 +534,19 @@ def _section_runway(runway: dict[str, Any] | None) -> str:
             lines.append(f"**Monthly Revenue:** {_fmt_usd(rev)}  ")
         lines.append("")
 
+    # Burn sensitivity table (partial analysis when cash balance unknown)
+    burn_sensitivity = _as_list(runway.get("burn_sensitivity"))
+    if burn_sensitivity:
+        lines.append("### Burn-Based Sensitivity (Cash Balance Unknown)\n")
+        lines.append("| Starting Cash | Estimated Runway |")
+        lines.append("|---------------|-----------------|")
+        for row in burn_sensitivity:
+            cash_val = row.get("starting_cash", 0)
+            rw = row.get("runway_months")
+            rw_str = f"{rw:.1f} months" if rw is not None else "Infinite"
+            lines.append(f"| {_fmt_usd(cash_val)} | {rw_str} |")
+        lines.append("")
+
     # Scenarios table
     scenarios = _as_list(runway.get("scenarios"))
     if scenarios:
@@ -564,6 +634,47 @@ def _section_model_completeness(
     return "\n".join(lines) + "\n"
 
 
+def _section_overrides(inputs: dict[str, Any] | None) -> str:
+    """Warning overrides section for audit transparency."""
+    if inputs is None:
+        return ""
+    overrides = _as_list(_as_dict(inputs.get("metadata")).get("warning_overrides"))
+    if not overrides:
+        return ""
+
+    # Separate agent vs founder overrides.
+    # Dedupe by code alone (legacy overrides lack 'field'), so a code-only
+    # legacy/agent override and a code+field founder override for the same
+    # warning are not shown in both sections.
+    agent_overrides = [o for o in overrides if isinstance(o, dict) and o.get("reviewed_by") == "agent"]
+    legacy = [o for o in overrides if isinstance(o, dict) and not o.get("reviewed_by")]
+    acknowledged_codes = {o.get("code") for o in agent_overrides + legacy if o.get("code")}
+    founder_only = [
+        o
+        for o in overrides
+        if isinstance(o, dict) and o.get("reviewed_by") == "founder" and o.get("code") not in acknowledged_codes
+    ]
+
+    lines: list[str] = []
+    if agent_overrides or legacy:
+        lines.append("## Acknowledged Warnings\n")
+        lines.append("The following validation warnings were reviewed and acknowledged:\n")
+        for o in agent_overrides + legacy:
+            code = o.get("code", "?")
+            reason = o.get("reason", "No reason provided")
+            lines.append(f"- **{_humanize_warning(code)}** (`{code}`): {_md_safe(reason)}")
+
+    if founder_only:
+        lines.append("\n## Founder-Reported Context\n")
+        lines.append("The following were noted by the founder during extraction review (not agent-verified):\n")
+        for o in founder_only:
+            code = o.get("code", "?")
+            reason = o.get("reason", "No reason provided")
+            lines.append(f"- **{_humanize_warning(code)}** (`{code}`): {_md_safe(reason)} *(founder-reported)*")
+
+    return "\n".join(lines) + "\n" if lines else ""
+
+
 def _section_warnings(warnings: list[dict[str, str]]) -> str:
     """Validation warnings section."""
     if not warnings:
@@ -615,12 +726,14 @@ def compose(dir_path: str) -> dict[str, Any]:
         _section_model_completeness(inputs, checklist),
         _section_unit_economics(unit_economics),
         _section_runway(runway),
+        _section_overrides(inputs),
         _section_warnings(warnings),
     ]
 
     report_markdown = "\n".join(sections)
     report_markdown += (
-        "\n\n---\n*Generated by [founder skills](https://github.com/lool-ventures/founder-skills)"
+        "\n\n---\n"
+        "*Generated by [founder skills](https://github.com/lool-ventures/founder-skills)"
         " by [lool ventures](https://lool.vc)"
         " — Financial Model Review Agent*\n"
     )
@@ -673,7 +786,12 @@ def main() -> None:
 
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"
-    _write_output(out, args.output)
+    v = result["validation"]
+    _write_output(
+        out,
+        args.output,
+        summary={"validation": v["status"], "warnings": len(v["warnings"])},
+    )
 
     # Exit 1 if any required artifacts are missing (regardless of strict mode)
     missing_required = [w for w in result["validation"]["warnings"] if w["code"] == "MISSING_ARTIFACT"]
@@ -682,10 +800,9 @@ def main() -> None:
         sys.exit(1)
 
     if args.strict:
-        blocking = [w for w in result["validation"]["warnings"] if w["severity"] in ("high", "medium")]
-        model_format = result["validation"].get("model_format", "spreadsheet")
-        if model_format in ("deck", "conversational"):
-            blocking = [w for w in blocking if w["code"] != "CHECKLIST_FAILURES"]
+        # Strict blocks on high-severity data/structural warnings only.
+        # CHECKLIST_FAILURES (medium) are review findings, not data errors.
+        blocking = [w for w in result["validation"]["warnings"] if w["severity"] == "high"]
         if blocking:
             print("STRICT MODE: Exiting with code 1 due to warnings", file=sys.stderr)
             sys.exit(1)

@@ -13,3 +13,7 @@ docs/internal/
 uv.lock
 .worktrees/
 artifacts/
+docs/plans/
+test-feedback-plugin/
+scripts/sync-test-repo.sh
+.superpowers/

@@ -832,3 +832,44 @@ def test_merge_force_overrides_protection() -> None:
         assert data["key_metrics"]["burn_monthly"]["value"] == 75000
         # Should have a warning on stderr
         assert "warning" in stderr.lower() or "force" in stderr.lower()
+
+
+# --- stderr on resolve_slug failure ---
+
+
+def test_read_no_context_files_stderr() -> None:
+    """read with no context files should exit 1 and print message to stderr."""
+    with tempfile.TemporaryDirectory() as td:
+        rc, data, stderr = run_context(["read"], artifacts_root=td)
+        assert rc == 1
+        assert "no founder context files found" in stderr.lower()
+
+
+def test_merge_no_context_files_stderr() -> None:
+    """merge with no context files should exit 1 and print message to stderr."""
+    with tempfile.TemporaryDirectory() as td:
+        rc, data, stderr = run_context(
+            ["merge", "--data", '{"company_name": "Test"}', "--source", "user"],
+            artifacts_root=td,
+        )
+        assert rc == 1
+        assert "no founder context files found" in stderr.lower()
+
+
+def test_validate_no_context_files_stderr() -> None:
+    """validate with no context files should exit 1 and print message to stderr."""
+    with tempfile.TemporaryDirectory() as td:
+        rc, data, stderr = run_context(["validate"], artifacts_root=td)
+        assert rc == 1
+        assert "no founder context files found" in stderr.lower()
+
+
+def test_update_identity_no_context_files_stderr() -> None:
+    """update-identity with no context files should exit 1 and print message to stderr."""
+    with tempfile.TemporaryDirectory() as td:
+        rc, data, stderr = run_context(
+            ["update-identity", "--sector", "Fintech"],
+            artifacts_root=td,
+        )
+        assert rc == 1
+        assert "no founder context files found" in stderr.lower()

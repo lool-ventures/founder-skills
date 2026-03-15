@@ -128,6 +128,35 @@ Add to the standard tab structure:
 
 ---
 
+## Modeling pattern: Hardware + subscription Israeli startups
+
+Israeli startups combining hardware deployment with recurring subscription revenue (IoT, robotics, agtech, medtech devices) hit nearly every "hard" modeling pattern in this guide simultaneously. These companies are common in the Israeli ecosystem and require special attention.
+
+**Key modeling challenges:**
+
+| Challenge | What the model must handle |
+| --- | --- |
+| **Hardware + subscription hybrid** | Separate hardware COGS (BOM, logistics, deployment) from recurring service margin. Track blended gross margin trajectory as the subscription base grows relative to new deployments. |
+| **Manufacturing working capital** | Units must be manufactured before deployment — inventory accumulation drains cash before revenue recognition. Each hardware iteration changes the BOM. |
+| **Israel R&D + global operations** | R&D and manufacturing in Israel; customers primarily abroad. Classic dual-entity structure with all the FX and entity-cash implications above. |
+| **Grant dependencies** | IIA and/or EU grants fund early R&D. Must model grant inflows, royalty repayment (3–5% of revenue), and IP transfer constraints. |
+| **Multi-currency manufacturing** | Production costs in ILS; revenue in USD. FX sensitivity directly impacts per-unit production cost and blended margin. |
+| **Unit economics complexity** | LTV must account for hardware deployment cost, ongoing service costs (field maintenance, connectivity), and subscription retention by deployment vintage. |
+| **Milestone-based scaling** | Each hardware generation improves economics. Model must tie manufacturing iterations to margin improvement and deployment rate to production capacity. |
+| **Seasonality** | Many hardware verticals (agtech, construction, energy) have seasonal deployment windows that affect revenue timing and cash flow. |
+
+**Key model questions investors will ask:**
+1. What is the per-unit gross margin on hardware deployment vs. the recurring subscription margin?
+2. How does manufacturing scale change BOM cost? (Show the iteration improvement curve.)
+3. What is the subscription retention rate by deployment vintage?
+4. How do grant royalties affect long-term gross margin as revenue scales?
+5. What is the FX sensitivity on per-unit production cost (ILS manufacturing → USD revenue)?
+6. What happens to cash if multiple production cycles of inventory must be pre-funded before a seasonal deployment window?
+
+SaaS benchmarks (NRR, magic number, burn multiple) don't map cleanly onto hardware + subscription models. For these companies, the model must center on **unit economics per deployed device**, **blended margin trajectory**, **manufacturing cash cycle**, and **seasonal deployment capacity** — alongside the standard Israel-specific requirements (FX, entity cash, grant royalties).
+
+---
+
 ## Key Sources
 
 | Source | Date |

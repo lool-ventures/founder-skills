@@ -29,17 +29,17 @@ def run_script(
     args: list[str] | None = None,
     stdin_data: str | None = None,
     script_dir: str | None = None,
-) -> tuple[int, dict | None, str]:
-    """Run a script and return (exit_code, parsed_json_or_None, stderr)."""
+) -> tuple[int, dict[str, Any], str]:
+    """Run a script and return (exit_code, parsed_json, stderr)."""
     base = script_dir or FMR_SCRIPTS_DIR
     cmd = [sys.executable, os.path.join(base, name)]
     if args:
         cmd.extend(args)
     result = subprocess.run(cmd, input=stdin_data, capture_output=True, text=True)
     try:
-        data = json.loads(result.stdout) if result.stdout.strip() else None
+        data = json.loads(result.stdout) if result.stdout.strip() else {}
     except json.JSONDecodeError:
-        data = None
+        data = {}
     return result.returncode, data, result.stderr
 
 
@@ -113,11 +113,142 @@ def test_extract_model_output_flag() -> None:
     rc, data, stderr = run_script("extract_model.py", ["--file", csv_path, "-o", out_path])
     os.unlink(csv_path)
     assert rc == 0
-    assert data is None  # stdout should be empty
+    assert data is not None and data["ok"] is True
     with open(out_path) as fh:
         written = json.load(fh)
     os.unlink(out_path)
     assert "sheets" in written
+
+
+# --- periodicity detection tests ---
+
+
+def test_extract_periodicity_quarterly_csv() -> None:
+    """CSV with Q1/Q2/Q3/Q4 headers detects quarterly periodicity."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Line Item,Q1 2024,Q2 2024,Q3 2024,Q4 2024\nRevenue,100,200,300,400\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert data["sheets"][0]["periodicity"] == "quarterly"
+    assert data["periodicity_summary"] == "quarterly"
+
+
+def test_extract_periodicity_monthly_csv() -> None:
+    """CSV with month name headers detects monthly periodicity."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Line Item,Jan 2024,Feb 2024,Mar 2024\nRevenue,100,200,300\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert data["sheets"][0]["periodicity"] == "monthly"
+    assert data["periodicity_summary"] == "monthly"
+
+
+def test_extract_periodicity_iso_monthly_csv() -> None:
+    """CSV with YYYY-MM headers detects monthly periodicity."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Line Item,2024-01,2024-02,2024-03\nRevenue,100,200,300\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert data["sheets"][0]["periodicity"] == "monthly"
+
+
+def test_extract_periodicity_variant_1q24() -> None:
+    """CSV with 1Q24-style headers detects quarterly."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Line Item,1Q24,2Q24,3Q24,4Q24\nRevenue,100,200,300,400\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert data["sheets"][0]["periodicity"] == "quarterly"
+
+
+def test_extract_periodicity_month_range_quarterly() -> None:
+    """CSV with Jan-Mar style headers detects quarterly, not monthly."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Line Item,Jan-Mar 2024,Apr-Jun 2024,Jul-Sep 2024,Oct-Dec 2024\nRevenue,100,200,300,400\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert data["sheets"][0]["periodicity"] == "quarterly"
+
+
+def test_extract_periodicity_annual_csv() -> None:
+    """CSV with FY headers detects annual periodicity."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Line Item,FY2024,FY2025,FY2026\nRevenue,1000,2000,3000\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert data["sheets"][0]["periodicity"] == "annual"
+
+
+def test_extract_periodicity_unknown_csv() -> None:
+    """CSV with non-time-series headers returns unknown."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Category,Amount,Notes\nSalaries,50000,Monthly\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data is not None
+    assert data["sheets"][0]["periodicity"] == "unknown"
+    assert data["periodicity_summary"] == "unknown"
+
+
+def test_extract_periodicity_stdin_no_periodicity() -> None:
+    """Stdin passthrough does not add periodicity (caller's responsibility)."""
+    input_data = json.dumps({"sheets": [{"name": "Manual", "headers": ["A"], "rows": [[1]]}]})
+    rc, data, stderr = run_script("extract_model.py", ["--stdin"], stdin_data=input_data)
+    assert rc == 0
+    assert data is not None
+    # Stdin passes through as-is — no periodicity added
+    assert "periodicity_summary" not in data
+
+
+def test_extract_periodicity_mixed_xlsx() -> None:
+    """XLSX with quarterly and monthly sheets returns mixed summary."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    # Sheet 1: quarterly headers
+    ws1 = wb.active
+    assert ws1 is not None
+    ws1.title = "P&L"
+    ws1.append(["Line Item", "Q1 2024", "Q2 2024", "Q3 2024", "Q4 2024"])
+    ws1.append(["Revenue", 100000, 120000, 140000, 160000])
+    # Sheet 2: monthly headers
+    ws2 = wb.create_sheet("Revenue")
+    ws2.append(["Metric", "Jan 2024", "Feb 2024", "Mar 2024"])
+    ws2.append(["MRR", 30000, 32000, 34000])
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+        wb.save(f.name)
+        tmp_path = f.name
+    try:
+        rc, data, stderr = run_script("extract_model.py", ["--file", tmp_path, "--pretty"])
+        assert rc == 0
+        assert data is not None
+        periodicities = {s["name"]: s["periodicity"] for s in data["sheets"]}
+        assert periodicities["P&L"] == "quarterly"
+        assert periodicities["Revenue"] == "monthly"
+        assert data["periodicity_summary"] == "mixed"
+    finally:
+        os.unlink(tmp_path)
 
 
 # --- Checklist IDs and helpers ---
@@ -412,19 +543,29 @@ def test_checklist_ai_powered_trait_triggers_sector_40() -> None:
     assert s40["status"] == "fail", "SECTOR_40 should not be auto-gated when ai-powered trait present"
 
 
+def _assert_validation_errors(data: dict | None, *fragments: str) -> None:
+    """Assert data has validation.status == 'invalid' and errors contain all fragments."""
+    assert data is not None, "expected JSON output with validation errors"
+    assert data["validation"]["status"] == "invalid"
+    joined = " ".join(data["validation"]["errors"]).lower()
+    for frag in fragments:
+        assert frag.lower() in joined, f"expected '{frag}' in validation errors: {data['validation']['errors']}"
+
+
 def test_checklist_missing_items() -> None:
     items = _make_checklist_items(exclude={"STRUCT_01", "UNIT_10"})
     payload = json.dumps({"items": items})
-    rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
-    assert rc == 1
-    assert "STRUCT_01" in stderr
+    rc, data, _ = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "STRUCT_01")
 
 
 def test_checklist_invalid_status() -> None:
     items = _make_checklist_items(overrides={"STRUCT_01": {"status": "maybe"}})
     payload = json.dumps({"items": items})
-    rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
-    assert rc == 1
+    rc, data, _ = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "invalid")
 
 
 def test_checklist_by_category() -> None:
@@ -658,17 +799,18 @@ def test_unit_economics_ratings() -> None:
 
 
 def test_unit_economics_burn_multiple_computed_wins() -> None:
-    """When compute inputs are present, computed burn_multiple is used, not reported."""
+    """When compute inputs are present and values are close, computed burn_multiple is used."""
     inputs = json.loads(json.dumps(_VALID_INPUTS))
-    inputs["unit_economics"]["burn_multiple"] = 0.66
+    # Computed: 80000 / (50000 * 0.08) = 20.0x; provided 18.0 is within 2x ratio → computed wins
+    inputs["unit_economics"]["burn_multiple"] = 18.0
     payload = json.dumps(inputs)
     rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
     assert rc == 0
     assert data is not None
     metrics_by_name = {m["name"]: m for m in data["metrics"]}
     assert "burn_multiple" in metrics_by_name
-    # Computed value should be used, not the reported 0.66
-    assert metrics_by_name["burn_multiple"]["value"] != 0.66
+    # Computed value (20.0) should be used, not the reported 18.0
+    assert metrics_by_name["burn_multiple"]["value"] != 18.0
     # burn_multiple_lifetime should NOT exist
     assert "burn_multiple_lifetime" not in metrics_by_name
 
@@ -711,9 +853,11 @@ def test_unit_economics_rule_of_40_below_1m_arr() -> None:
 
 
 def test_unit_economics_rule_of_40_above_1m_arr() -> None:
-    """Rule of 40 should be rated normally when ARR >= $1M."""
+    """Rule of 40 should use operating margin (burn-derived) when ARR >= $5M."""
     inputs = json.loads(json.dumps(_VALID_INPUTS))
-    inputs["revenue"]["arr"]["value"] = 1200000
+    # ARR intentionally inflated above MRR*12 to test R40 $5M+ benchmark path
+    inputs["revenue"]["arr"]["value"] = 6000000
+    inputs["cash"]["monthly_net_burn"] = 30000  # op_margin = -30K/50K = -60%
     payload = json.dumps(inputs)
     rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
     assert rc == 0
@@ -721,7 +865,96 @@ def test_unit_economics_rule_of_40_above_1m_arr() -> None:
     metrics_by_name = {m["name"]: m for m in data["metrics"]}
     r40 = metrics_by_name["rule_of_40"]
     assert r40["rating"] != "not_applicable"
+    assert r40["rating"] != "contextual"  # operating margin → benchmark-rated
     assert r40["value"] is not None
+    # growth ≈ 151.8%, op_margin = -60%, R40 ≈ 91.8
+    assert 85 < r40["value"] < 100
+    assert "operating margin" in r40["evidence"].lower()
+
+
+def test_unit_economics_rule_of_40_negative() -> None:
+    """R40 can be negative when burn far exceeds revenue."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    # ARR intentionally inflated above MRR*12 to test R40 $5M+ benchmark path
+    inputs["revenue"]["arr"]["value"] = 6000000
+    inputs["cash"]["monthly_net_burn"] = 80000  # op_margin = -80K/50K = -160%
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert r40["value"] is not None
+    assert r40["value"] < 0  # growth ≈ 151.8% + (-160%) ≈ -8.2
+    assert "operating margin" in r40["evidence"].lower()
+
+
+def test_unit_economics_rule_of_40_gross_margin_fallback() -> None:
+    """R40 should fall back to gross margin (contextual) when burn data missing."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["arr"]["value"] = 1200000
+    del inputs["cash"]["monthly_net_burn"]
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert r40["value"] is not None
+    assert r40["rating"] == "contextual"
+    assert "gross margin" in r40["evidence"].lower()
+    assert "overstates" in r40["evidence"].lower()
+
+
+def test_unit_economics_rule_of_40_operating_margin_preferred() -> None:
+    """When both burn+MRR and gross margin are available, operating margin wins."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    # ARR intentionally inflated above MRR*12 to test R40 $5M+ benchmark path
+    inputs["revenue"]["arr"]["value"] = 6000000
+    inputs["cash"]["monthly_net_burn"] = 30000
+    inputs["unit_economics"]["gross_margin"] = 0.75  # should be ignored for R40
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert "operating margin" in r40["evidence"].lower()
+    assert "gross margin" not in r40["evidence"].lower()
+
+
+def test_unit_economics_rule_of_40_sign_error_fallback() -> None:
+    """Negative monthly_net_burn (wrong sign) should trigger gross margin fallback."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["arr"]["value"] = 1200000
+    inputs["cash"]["monthly_net_burn"] = -80000  # wrong sign → op_margin > 100%
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert r40["rating"] == "contextual"
+    assert "gross margin" in r40["evidence"].lower()
+    assert "sign error" in stderr.lower() or "exceeds 100%" in stderr.lower()
+
+
+def test_unit_economics_rule_of_40_sign_error_no_gm() -> None:
+    """Sign error + no gross margin → not_rated (can't compute R40 at all)."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["arr"]["value"] = 1200000
+    inputs["cash"]["monthly_net_burn"] = -80000
+    del inputs["unit_economics"]["gross_margin"]
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert r40["value"] is None
+    assert r40["rating"] == "not_rated"
+    assert "implausible" in r40["evidence"].lower()
+    assert "exceeds 100%" in stderr.lower()
 
 
 def test_unit_economics_ltv_zero_churn_capped() -> None:
@@ -744,6 +977,66 @@ def test_unit_economics_ltv_zero_churn_capped() -> None:
     assert "capped" in ltv["evidence"].lower() or "5-year" in ltv["evidence"].lower()
 
 
+def test_unit_economics_ltv_zero_churn_missing_arpu() -> None:
+    """LTV with 0% churn but missing arpu should be not_rated with warning evidence."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["unit_economics"]["ltv"] = {
+        "value": 1840000,
+        "method": "formula",
+        "inputs": {"churn_monthly": 0.0, "gross_margin": 0.75},
+        "observed_vs_assumed": "assumed",
+    }
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    ltv = metrics_by_name["ltv"]
+    assert ltv["rating"] == "not_rated"
+    assert "could not apply 5-year cap" in ltv["evidence"].lower()
+    assert "missing arpu" in ltv["evidence"].lower()
+    # Structured warning
+    warnings = data.get("warnings", [])
+    codes = [w["code"] for w in warnings]
+    assert "LTV_CAP_MISSING_INPUTS" in codes
+
+
+def test_unit_economics_ltv_zero_churn_missing_gm() -> None:
+    """LTV with 0% churn but missing gross_margin should be not_rated with warning evidence."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["unit_economics"]["ltv"] = {
+        "value": 1840000,
+        "method": "formula",
+        "inputs": {"arpu_monthly": 500, "churn_monthly": 0.0},
+        "observed_vs_assumed": "assumed",
+    }
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    ltv = metrics_by_name["ltv"]
+    assert ltv["rating"] == "not_rated"
+    assert "could not apply 5-year cap" in ltv["evidence"].lower()
+    # Structured warning
+    warnings = data.get("warnings", [])
+    codes = [w["code"] for w in warnings]
+    assert "LTV_CAP_MISSING_INPUTS" in codes
+
+
+def test_unit_economics_ltv_zero_churn_with_inputs_no_warning() -> None:
+    """LTV with 0% churn and both arpu+gm present should NOT emit LTV_CAP_MISSING_INPUTS."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["unit_economics"]["ltv"]["inputs"]["churn_monthly"] = 0.0
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    warnings = data.get("warnings", [])
+    codes = [w["code"] for w in warnings]
+    assert "LTV_CAP_MISSING_INPUTS" not in codes
+
+
 def test_unit_economics_ltv_cac_contextual_when_assumed() -> None:
     """LTV/CAC from assumed inputs should be rated 'contextual', not hard pass/fail."""
     payload = json.dumps(_VALID_INPUTS)
@@ -761,7 +1054,7 @@ def test_unit_economics_output_flag() -> None:
     payload = json.dumps(_VALID_INPUTS)
     rc, data, stderr = run_script("unit_economics.py", ["-o", out_path], stdin_data=payload)
     assert rc == 0
-    assert data is None  # stdout empty
+    assert data is not None and data["ok"] is True
     with open(out_path) as f:
         written = json.load(f)
     os.unlink(out_path)
@@ -1582,6 +1875,111 @@ def test_compose_report_unit_economics_estimated_header() -> None:
     assert "estimated" in md.lower()
 
 
+def test_compose_report_stale_artifact_mismatched_run_ids() -> None:
+    """Mismatched run_id across artifacts triggers STALE_ARTIFACT warning."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["metadata"] = {"run_id": "run-001"}
+    checklist = json.loads(json.dumps(_VALID_CHECKLIST))
+    checklist["metadata"] = {"run_id": "run-001"}
+    ue = json.loads(json.dumps(_VALID_UNIT_ECONOMICS))
+    ue["metadata"] = {"run_id": "run-002"}  # stale!
+    runway = json.loads(json.dumps(_VALID_RUNWAY))
+    runway["metadata"] = {"run_id": "run-001"}
+    d = _make_fmr_artifact_dir(
+        {"inputs.json": inputs, "checklist.json": checklist, "unit_economics.json": ue, "runway.json": runway}
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "STALE_ARTIFACT" in codes
+
+
+def test_compose_report_matching_run_ids_no_stale_warning() -> None:
+    """Matching run_id across all artifacts produces no STALE_ARTIFACT warning."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["metadata"] = {"run_id": "run-001"}
+    checklist = json.loads(json.dumps(_VALID_CHECKLIST))
+    checklist["metadata"] = {"run_id": "run-001"}
+    ue = json.loads(json.dumps(_VALID_UNIT_ECONOMICS))
+    ue["metadata"] = {"run_id": "run-001"}
+    runway = json.loads(json.dumps(_VALID_RUNWAY))
+    runway["metadata"] = {"run_id": "run-001"}
+    d = _make_fmr_artifact_dir(
+        {"inputs.json": inputs, "checklist.json": checklist, "unit_economics.json": ue, "runway.json": runway}
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "STALE_ARTIFACT" not in codes
+
+
+def test_compose_report_no_run_ids_graceful() -> None:
+    """No run_id in any artifact → graceful degradation, no STALE_ARTIFACT."""
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "STALE_ARTIFACT" not in codes
+
+
+def test_compose_report_surfaces_warning_overrides() -> None:
+    """Warning overrides from inputs.json metadata appear in the report."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["metadata"] = {
+        "warning_overrides": [
+            {
+                "code": "BURN_MULTIPLE_SUSPECT",
+                "reason": "Enterprise SaaS with lumpy deal flow; TTM burn multiple is 5.7x",
+                "reviewed_by": "agent",
+                "timestamp": "2026-03-05T17:30:00Z",
+            }
+        ]
+    }
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": inputs,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    assert "Acknowledged Warnings" in md
+    assert "BURN_MULTIPLE_SUSPECT" in md
+    assert "Enterprise SaaS with lumpy deal flow" in md
+    # Agent overrides appear in "Acknowledged Warnings" without reviewer suffix
+    assert "Burn Multiple Suspect" in md
+
+
+def test_compose_report_no_overrides_no_section() -> None:
+    """No warning overrides → no Acknowledged Warnings section."""
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    assert "Acknowledged Warnings" not in data["report_markdown"]
+
+
 # --- B1: sector_type derivation from revenue_model_type ---
 
 
@@ -1670,23 +2068,26 @@ def test_compose_strict_mode_deck_format_checklist_failures_not_blocking() -> No
     assert checklist_warnings[0]["severity"] == "medium", "Severity should remain medium"
 
 
-def test_compose_strict_mode_deck_format_other_medium_still_blocks() -> None:
-    """--strict should still exit 1 for non-CHECKLIST_FAILURES medium warnings in deck format."""
-    inputs_deck = json.loads(json.dumps(_VALID_INPUTS))
-    inputs_deck["company"]["model_format"] = "deck"
-    # Create runway with inconsistent cash to trigger RUNWAY_INCONSISTENCY
+def test_compose_strict_mode_medium_warnings_do_not_block() -> None:
+    """--strict should NOT exit 1 for medium-severity warnings (findings, not data errors)."""
+    # Create runway with inconsistent cash to trigger RUNWAY_INCONSISTENCY (medium)
     runway_inconsistent = json.loads(json.dumps(_VALID_RUNWAY))
     runway_inconsistent["baseline"]["net_cash"] = 500000  # differs >10% from inputs cash 2M
     d = _make_fmr_artifact_dir(
         {
-            "inputs.json": inputs_deck,
+            "inputs.json": _VALID_INPUTS,
             "checklist.json": _VALID_CHECKLIST,
             "unit_economics.json": _VALID_UNIT_ECONOMICS,
             "runway.json": runway_inconsistent,
         }
     )
     rc, data, stderr = _run_compose(d, extra_args=["--strict"])
-    assert rc == 1, "--strict should still block on RUNWAY_INCONSISTENCY for deck format"
+    assert rc == 0, "--strict should not block on medium-severity warnings like RUNWAY_INCONSISTENCY"
+    assert data is not None
+    # But the warning should still be present in the output
+    warnings = data["validation"]["warnings"]
+    codes = [w["code"] for w in warnings]
+    assert "RUNWAY_INCONSISTENCY" in codes
 
 
 def test_compose_validation_includes_model_format() -> None:
@@ -1774,6 +2175,774 @@ def test_unit_economics_burn_multiple_fallback_below_500k_arr() -> None:
     assert "$500K" in bm["evidence"] or "not meaningful" in bm["evidence"].lower()
 
 
+# --- New tests: FMR postmortem fixes ---
+
+
+def test_unit_economics_annual_contracts_saas() -> None:
+    """annual-contracts model type should be treated as SaaS."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["company"]["revenue_model_type"] = "annual-contracts"
+    inputs["revenue"]["arr"]["value"] = 1200000  # above R40 $1M floor
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    # SaaS-only metrics should be computed, not not_applicable
+    assert metrics_by_name["magic_number"]["rating"] != "not_applicable"
+    assert metrics_by_name["rule_of_40"]["rating"] != "not_applicable"
+
+
+def test_unit_economics_rule_of_40_contextual_band_1m_5m() -> None:
+    """R40 should be contextual between $1M and $5M ARR with operating margin."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["arr"]["value"] = 3000000
+    inputs["cash"]["monthly_net_burn"] = 30000
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert r40["rating"] == "contextual"
+    assert "not benchmark-compared below $5M ARR" in r40["evidence"]
+
+
+def test_unit_economics_rule_of_40_above_5m_benchmarked() -> None:
+    """R40 above $5M ARR with operating margin should be benchmark-rated."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["arr"]["value"] = 6000000
+    inputs["cash"]["monthly_net_burn"] = 30000
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert r40["rating"] not in ("contextual", "not_applicable", "not_rated")
+    assert "benchmark" in r40["evidence"].lower() or "strong" in r40["evidence"].lower()
+
+
+def test_unit_economics_rule_of_40_hyper_growth_above_5m() -> None:
+    """R40 hyper-growth should still be contextual even above $5M ARR."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["arr"]["value"] = 6000000
+    inputs["revenue"]["growth_rate_monthly"] = 0.15  # annualized ~435%
+    inputs["cash"]["monthly_net_burn"] = 30000
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert r40["rating"] == "contextual"
+    assert "hyper" in r40["evidence"].lower()
+
+
+def test_unit_economics_burn_multiple_hyper_growth_contextual() -> None:
+    """Burn multiple should be contextual when annualized growth > 200%."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["growth_rate_monthly"] = 0.15  # annualized ~435%
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["rating"] == "contextual"
+    assert "hyper-growth" in bm["evidence"].lower()
+
+
+def test_unit_economics_burn_multiple_seed_vs_series_a_thresholds() -> None:
+    """Seed burn_multiple thresholds (2.0/2.5/3.0) differ from series-a (1.5/2.0/2.5)."""
+    # A burn_mult of 1.8 should be strong for seed but acceptable for series-a
+    for stage, expected_rating in [("seed", "strong"), ("series-a", "acceptable")]:
+        inputs = json.loads(json.dumps(_VALID_INPUTS))
+        inputs["company"]["stage"] = stage
+        # Engineer BM to ~1.8x: burn=80K, net_new_arr = MRR*growth*12 = 50K*0.08*12 = 48K
+        # burn / (net_new_arr/12) = 80K / 4K = 20.0 — too high
+        # Set growth higher: 0.20 → net_new_arr/12 = 50K*0.20 = 10K, burn_mult = 80K/10K = 8
+        # Set burn = 15000, growth = 0.08 → net_new_arr/12 = 4K, burn_mult = 3.75 — hmm
+        # Use: burn=8000, growth=0.08 → 8000/4000 = 2.0
+        inputs["cash"]["monthly_net_burn"] = 8000
+        inputs["revenue"]["growth_rate_monthly"] = 0.08
+        payload = json.dumps(inputs)
+        rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+        assert rc == 0
+        assert data is not None
+        metrics_by_name = {m["name"]: m for m in data["metrics"]}
+        bm = metrics_by_name["burn_multiple"]
+        assert bm["value"] == 2.0
+        assert bm["rating"] == expected_rating, (
+            f"Stage {stage}: burn_mult 2.0 expected {expected_rating}, got {bm['rating']}"
+        )
+
+
+def test_unit_economics_burn_multiple_ttm_monthly_arr() -> None:
+    """12+ monthly entries with arr field → TTM path used."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    # Build 12 monthly entries with ARR growing from 400K to 1M
+    inputs["revenue"]["monthly"] = [
+        {"month": f"2025-{m:02d}", "total": 33333 + i * 5000, "arr": 400000 + i * 50000}
+        for i, m in enumerate(range(1, 13))
+    ]
+    # net_new_arr = 950000 - 400000 = 550000
+    # burn = 80000/mo → annual burn = 960000
+    # burn_mult = 960000 / 550000 = 1.75
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["value"] == 1.75, f"Expected TTM burn multiple 1.75, got {bm['value']}"
+    assert "TTM actual" in bm["evidence"]
+
+
+def test_unit_economics_burn_multiple_ttm_monthly_total_only() -> None:
+    """12+ monthly entries with only total (no arr) → total*12 approximation."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    # Build 12 monthly entries with total growing from 30K to 80K (no arr field)
+    inputs["revenue"]["monthly"] = [
+        {"month": f"2025-{m:02d}", "total": 30000 + i * (50000 / 11)} for i, m in enumerate(range(1, 13))
+    ]
+    # latest total ≈ 80000 → arr approx = 960000
+    # earliest total = 30000 → arr approx = 360000
+    # net_new_arr = 960000 - 360000 = 600000
+    # burn = 80000/mo → annual burn = 960000
+    # burn_mult = 960000 / 600000 = 1.6
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["value"] is not None
+    assert "TTM actual" in bm["evidence"]
+
+
+def test_unit_economics_burn_multiple_quarterly_yoy() -> None:
+    """4+ quarterly entries → YoY quarterly path used."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    # No monthly entries — force quarterly path
+    inputs["revenue"].pop("monthly", None)
+    inputs["revenue"]["quarterly"] = [
+        {"quarter": "2025-Q1", "total": 100000, "arr": 400000},
+        {"quarter": "2025-Q2", "total": 125000, "arr": 500000},
+        {"quarter": "2025-Q3", "total": 150000, "arr": 600000},
+        {"quarter": "2025-Q4", "total": 200000, "arr": 800000},
+    ]
+    # net_new_arr = 800000 - 400000 = 400000
+    # burn = 80000/mo → annual burn = 960000
+    # burn_mult = 960000 / 400000 = 2.4
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["value"] == 2.4, f"Expected quarterly burn multiple 2.4, got {bm['value']}"
+    assert "YoY (quarterly) actual" in bm["evidence"]
+
+
+def test_unit_economics_burn_multiple_growth_rate_fallback() -> None:
+    """<12 monthly + <4 quarterly → growth-rate fallback."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    # Only 3 monthly entries — not enough for TTM
+    inputs["revenue"]["monthly"] = [{"month": f"2025-{m:02d}", "total": 50000} for m in range(10, 13)]
+    # Only 2 quarterly entries — not enough for YoY
+    inputs["revenue"]["quarterly"] = [
+        {"quarter": "2025-Q3", "total": 150000, "arr": 600000},
+        {"quarter": "2025-Q4", "total": 200000, "arr": 800000},
+    ]
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["value"] is not None
+    # Growth-rate fallback doesn't say "TTM" or "YoY"
+    assert "TTM" not in bm["evidence"]
+    assert "YoY" not in bm["evidence"]
+
+
+def test_unit_economics_burn_multiple_ttm_13_months_full_window() -> None:
+    """13 monthly entries → true 12-month lookback (index -13)."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    # 13 entries: month 0 (arr=400K) through month 12 (arr=1M)
+    # With 13 entries, lookback is -13 → index 0 → arr=400K
+    # net_new_arr = 1000000 - 400000 = 600000
+    # burn = 80K/mo → annual = 960K → burn_mult = 960K / 600K = 1.6
+    inputs["revenue"]["monthly"] = [
+        {"month": f"2025-{m:02d}" if m <= 12 else f"2026-{m - 12:02d}", "arr": 400000 + i * 50000}
+        for i, m in enumerate(range(0, 13))
+    ]
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["value"] == 1.6, f"Expected 1.6, got {bm['value']}"
+    assert "TTM actual" in bm["evidence"]
+
+
+def test_unit_economics_burn_multiple_quarterly_5_entries_full_yoy() -> None:
+    """5 quarterly entries → true 4-quarter YoY lookback (index -5)."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"].pop("monthly", None)
+    # 5 entries: Q1 (arr=300K) through Q5 (arr=900K)
+    # With 5 entries, lookback is -5 → index 0 → arr=300K
+    # net_new_arr = 900000 - 300000 = 600000
+    # burn = 80K/mo → annual = 960K → burn_mult = 960K / 600K = 1.6
+    inputs["revenue"]["quarterly"] = [
+        {"quarter": f"2024-Q{q}", "arr": 300000 + i * 150000} for i, q in enumerate([1, 2, 3, 4])
+    ] + [{"quarter": "2025-Q1", "arr": 900000}]
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["value"] == 1.6, f"Expected 1.6, got {bm['value']}"
+    assert "YoY (quarterly) actual" in bm["evidence"]
+
+
+def test_unit_economics_burn_multiple_divergence_warning() -> None:
+    """When TTM and growth-rate burn multiples diverge >2x, emit BURN_MULTIPLE_DIVERGENCE warning."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    # Monthly time-series with flat ARR (net new ARR = 0 from growth, but big jump in ARR)
+    # TTM: arr grows from 200K to 800K → net_new_arr = 600K, burn_mult = (80K*12)/600K = 1.6x
+    # Growth-rate: MRR=50K, growth=0.02 → net_new_arr = 50K*0.02*12 = 12K, burn_mult = 80K/1K = 80x
+    inputs["revenue"]["growth_rate_monthly"] = 0.02  # low stated growth
+    inputs["revenue"]["monthly"] = [
+        {"month": f"2025-{m:02d}", "arr": 200000 + i * (600000 / 11)} for i, m in enumerate(range(1, 13))
+    ]
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    # Should use TTM path
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert "TTM actual" in bm["evidence"]
+    # Should have divergence warning
+    warnings = data.get("warnings", [])
+    codes = [w["code"] for w in warnings]
+    assert "BURN_MULTIPLE_DIVERGENCE" in codes, f"Expected divergence warning, got: {warnings}"
+
+
+def test_unit_economics_burn_multiple_no_divergence_warning() -> None:
+    """When TTM and growth-rate burn multiples are close, no BURN_MULTIPLE_DIVERGENCE."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    # Linear ARR growth of ~4K/mo over 12 months → net_new_arr ≈ 44K
+    # growth_rate=0.08, MRR=50K → growth-rate net_new_arr = 50K*0.08*12 = 48K
+    # TTM BM ≈ 21.8x, GR BM ≈ 20.0x → ratio ~1.09 (< 2x threshold)
+    inputs["revenue"]["monthly"] = [
+        {"month": f"2025-{m:02d}", "total": 50000 + i * 333, "arr": 600000 + i * 4000}
+        for i, m in enumerate(range(1, 13))
+    ]
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    warnings = data.get("warnings", [])
+    codes = [w["code"] for w in warnings]
+    assert "BURN_MULTIPLE_DIVERGENCE" not in codes
+
+
+def test_unit_economics_ai_gross_margin_seed_vs_series_a() -> None:
+    """AI gross margin adjustment: -5pt for seed, -10pt for series-a."""
+    for stage, expected_adj in [("seed", 0.05), ("series-a", 0.10)]:
+        inputs = json.loads(json.dumps(_VALID_INPUTS))
+        inputs["company"]["stage"] = stage
+        inputs["company"]["sector"] = "ai-native"
+        inputs["unit_economics"]["gross_margin"] = 0.70
+        payload = json.dumps(inputs)
+        rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+        assert rc == 0
+        assert data is not None
+        metrics_by_name = {m["name"]: m for m in data["metrics"]}
+        gm = metrics_by_name["gross_margin"]
+        assert f"{expected_adj:.0%} discount" in gm["evidence"]
+
+
+def test_unit_economics_benchmark_nested_object() -> None:
+    """Benchmark-rated metrics should include a nested benchmark object."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    # Gross margin should have benchmark
+    gm = metrics_by_name["gross_margin"]
+    assert "benchmark" in gm, f"gross_margin should have benchmark nested object: {gm}"
+    assert gm["benchmark"]["target"] is not None
+    assert gm["benchmark"]["source"] != ""
+
+
+def test_runway_arr_12_fallback() -> None:
+    """When MRR is missing but ARR present, runway should use ARR/12."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    del inputs["revenue"]["mrr"]
+    inputs["revenue"]["arr"]["value"] = 600000  # ARR/12 = 50K
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data["baseline"]["monthly_revenue"] == 50000.0
+    assert "ARR/12" in stderr or "ARR/12" in str(data.get("warnings", []))
+
+
+def test_sector_alias_fintech_to_saas() -> None:
+    """fintech should resolve to saas sector type."""
+    shared_scripts = os.path.join(os.path.dirname(SCRIPT_DIR), "scripts")
+    sys.path.insert(0, shared_scripts)
+    try:
+        from founder_context import _derive_sector_type  # type: ignore[import-not-found]
+
+        assert _derive_sector_type("fintech") == "saas"
+        assert _derive_sector_type("B2B fintech") == "saas"
+        assert _derive_sector_type("cybersecurity") == "saas"
+        assert _derive_sector_type("edtech") == "saas"
+        assert _derive_sector_type("transactional fintech") == "transactional-fintech"
+        assert _derive_sector_type("payment processing") == "transactional-fintech"
+        assert _derive_sector_type("payments infrastructure") == "transactional-fintech"
+    finally:
+        sys.path.remove(shared_scripts)
+
+
+# --- validate_inputs.py sanity check tests ---
+
+
+def _make_inputs(
+    stage: str = "series-a",
+    mrr: float = 100_000,
+    burn: float = 200_000,
+    growth: float | None = 0.10,
+) -> dict[str, Any]:
+    """Build a minimal inputs.json for validate_inputs tests."""
+    inputs: dict[str, Any] = {
+        "company": {
+            "company_name": "TestCo",
+            "slug": "testco",
+            "stage": stage,
+            "sector": "SaaS",
+            "geography": "US",
+            "revenue_model_type": "saas-plg",
+        },
+        "revenue": {
+            "mrr": {"value": mrr, "as_of": "2025-01"},
+        },
+        "cash": {
+            "current_balance": 2_000_000,
+            "balance_date": "2025-01",
+            "monthly_net_burn": burn,
+        },
+    }
+    if growth is not None:
+        inputs["revenue"]["growth_rate_monthly"] = growth
+    return inputs
+
+
+def test_validate_burn_revenue_suspect_series_a() -> None:
+    """Series A burn > 5x MRR triggers BURN_REVENUE_SUSPECT with critical flag."""
+    inputs = _make_inputs(stage="series-a", mrr=100_000, burn=600_000)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    assert data["valid"] is True
+    assert data["has_critical_warnings"] is True
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_REVENUE_SUSPECT" in codes
+    w = next(w for w in data["warnings"] if w["code"] == "BURN_REVENUE_SUSPECT")
+    assert w["critical"] is True
+
+
+def test_validate_burn_revenue_normal_no_warning() -> None:
+    """Series A burn < 5x MRR does not trigger warning."""
+    # burn=80K < 5*100K=500K → no BURN_REVENUE_SUSPECT
+    # burn_multiple = (80K*12)/(100K*0.1*12) = 8x → no BURN_MULTIPLE_SUSPECT
+    inputs = _make_inputs(stage="series-a", mrr=100_000, burn=80_000)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_REVENUE_SUSPECT" not in codes
+    assert data["has_critical_warnings"] is False
+
+
+def test_validate_burn_revenue_seed_higher_threshold() -> None:
+    """Seed stage uses 10x threshold — 8x burn should not trigger."""
+    # burn=40K < 10*50K=500K → no BURN_REVENUE_SUSPECT
+    # burn_multiple = (40K*12)/(50K*0.1*12) = 8x → no BURN_MULTIPLE_SUSPECT
+    inputs = _make_inputs(stage="seed", mrr=50_000, burn=40_000)  # 0.8x
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_REVENUE_SUSPECT" not in codes
+
+
+def test_validate_burn_revenue_seed_above_threshold() -> None:
+    """Seed stage burn > 10x MRR triggers warning."""
+    inputs = _make_inputs(stage="seed", mrr=50_000, burn=600_000)  # 12x
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_REVENUE_SUSPECT" in codes
+
+
+def test_validate_burn_revenue_pre_seed_skipped() -> None:
+    """Pre-seed stage skips burn-to-revenue check entirely."""
+    inputs = _make_inputs(stage="pre-seed", mrr=1_000, burn=200_000)  # 200x
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_REVENUE_SUSPECT" not in codes
+
+
+def test_validate_burn_revenue_zero_mrr_no_trigger() -> None:
+    """Zero MRR does not trigger burn-to-revenue check (pre-revenue guard)."""
+    inputs = _make_inputs(stage="series-a", mrr=0, burn=500_000)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_REVENUE_SUSPECT" not in codes
+
+
+def test_validate_burn_multiple_suspect() -> None:
+    """Extreme burn multiple (> 10x) triggers BURN_MULTIPLE_SUSPECT."""
+    # burn=1.44M, MRR=170K, growth=10% → net_new_ARR = 170K * 0.10 * 12 = 204K
+    # burn_multiple = (1.44M * 12) / 204K ≈ 84x
+    inputs = _make_inputs(stage="series-a", mrr=170_000, burn=1_440_000, growth=0.10)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_MULTIPLE_SUSPECT" in codes
+    assert data["has_critical_warnings"] is True
+
+
+def test_validate_burn_multiple_suspect_ttm_overrides_growth_rate() -> None:
+    """Time-series burn multiple should prevent false positive from growth-rate shortcut."""
+    # Growth-rate shortcut: burn=150K, MRR=50K, growth=2% → net_new_arr = 50K*0.02*12 = 12K
+    # burn_multiple = (150K*12)/12K = 150x → would trigger BURN_MULTIPLE_SUSPECT
+    # But TTM time-series: ARR grew from 400K to 1.4M → net_new_arr = 1M
+    # burn_multiple = (150K*12)/1M = 1.8x → should NOT trigger
+    inputs = _make_inputs(stage="series-a", mrr=50_000, burn=150_000, growth=0.02)
+    inputs["revenue"]["monthly"] = [
+        {"month": f"2025-{m:02d}", "arr": 400000 + i * (1000000 / 11)} for i, m in enumerate(range(1, 13))
+    ]
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_MULTIPLE_SUSPECT" not in codes, (
+        "TTM time-series should prevent false positive from growth-rate shortcut"
+    )
+
+
+def test_validate_burn_multiple_no_growth_no_trigger() -> None:
+    """Missing growth data does not trigger burn multiple check."""
+    inputs = _make_inputs(stage="series-a", mrr=170_000, burn=1_440_000, growth=None)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "BURN_MULTIPLE_SUSPECT" not in codes
+
+
+def test_validate_has_critical_warnings_false_when_clean() -> None:
+    """Clean inputs produce has_critical_warnings: false."""
+    # burn=80K < 5*100K → no BURN_REVENUE_SUSPECT
+    # burn_multiple = (80K*12)/(100K*0.1*12) = 8x → no BURN_MULTIPLE_SUSPECT
+    inputs = _make_inputs(stage="series-a", mrr=100_000, burn=80_000, growth=0.10)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    assert data["has_critical_warnings"] is False
+
+
+def test_validate_warning_overrides_valid() -> None:
+    """Valid warning_overrides pass structural validation."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["metadata"] = {
+        "warning_overrides": [
+            {
+                "code": "BURN_MULTIPLE_SUSPECT",
+                "reason": "Enterprise SaaS with lumpy deal flow",
+                "reviewed_by": "agent",
+                "timestamp": "2026-03-05T17:30:00Z",
+            }
+        ]
+    }
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    errors = data.get("errors", [])
+    override_errors = [e for e in errors if e["code"].startswith("OVERRIDE_")]
+    assert override_errors == [], f"Valid overrides should not produce errors: {override_errors}"
+
+
+def test_validate_warning_overrides_missing_keys() -> None:
+    """warning_overrides entry missing required keys produces OVERRIDE_MISSING_KEYS."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["metadata"] = {
+        "warning_overrides": [{"code": "BURN_MULTIPLE_SUSPECT"}]  # missing reason, reviewed_by, timestamp
+    }
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    errors = data.get("errors", [])
+    codes = [e["code"] for e in errors]
+    assert "OVERRIDE_MISSING_KEYS" in codes
+
+
+def test_validate_warning_overrides_invalid_reviewer() -> None:
+    """warning_overrides entry with bad reviewed_by produces OVERRIDE_INVALID_REVIEWER."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["metadata"] = {
+        "warning_overrides": [
+            {
+                "code": "BURN_MULTIPLE_SUSPECT",
+                "reason": "test",
+                "reviewed_by": "nobody",
+                "timestamp": "2026-03-05T17:30:00Z",
+            }
+        ]
+    }
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    errors = data.get("errors", [])
+    codes = [e["code"] for e in errors]
+    assert "OVERRIDE_INVALID_REVIEWER" in codes
+
+
+# --- validate_inputs.py override filtering tests (direct import) ---
+
+
+def _import_validate() -> Any:
+    """Import validate() directly from validate_inputs.py."""
+    sys.path.insert(0, FMR_SCRIPTS_DIR)
+    try:
+        import validate_inputs  # type: ignore[import-not-found]
+
+        return validate_inputs.validate
+    finally:
+        sys.path.remove(FMR_SCRIPTS_DIR)
+
+
+def test_validate_founder_override_does_not_clear_critical() -> None:
+    """Founder override is informational — does NOT clear has_critical_warnings."""
+    validate = _import_validate()
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["growth_rate_monthly"] = 0.0
+    inputs["revenue"]["mrr"] = {"value": 50000, "as_of": "2026-01"}
+    inputs["revenue"]["customers"] = 100
+
+    result = validate(inputs)
+    assert result["has_critical_warnings"] is True
+
+    # Founder override: still has_critical_warnings
+    warning_field = next(w["field"] for w in result["warnings"] if w["code"] == "GROWTH_RATE_ZERO_SUSPECT")
+    inputs.setdefault("metadata", {})["warning_overrides"] = [
+        {
+            "code": "GROWTH_RATE_ZERO_SUSPECT",
+            "field": warning_field,
+            "reason": "pivot phase",
+            "reviewed_by": "founder",
+            "timestamp": "2026-03-09T14:00:00Z",
+        }
+    ]
+    result2 = validate(inputs)
+    assert result2["has_critical_warnings"] is True  # founder override does NOT clear
+
+
+def test_validate_agent_override_clears_critical() -> None:
+    """Agent override clears has_critical_warnings."""
+    validate = _import_validate()
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["growth_rate_monthly"] = 0.0
+    inputs["revenue"]["mrr"] = {"value": 50000, "as_of": "2026-01"}
+    inputs["revenue"]["customers"] = 100
+
+    result = validate(inputs)
+    assert result["has_critical_warnings"] is True
+
+    warning_field = next(w["field"] for w in result["warnings"] if w["code"] == "GROWTH_RATE_ZERO_SUSPECT")
+    inputs.setdefault("metadata", {})["warning_overrides"] = [
+        {
+            "code": "GROWTH_RATE_ZERO_SUSPECT",
+            "field": warning_field,
+            "reason": "pivot phase — confirmed by founder",
+            "reviewed_by": "agent",
+            "timestamp": "2026-03-09T14:00:00Z",
+        }
+    ]
+    result2 = validate(inputs)
+    assert result2["has_critical_warnings"] is False
+    # Warning still in list, just not blocking
+    assert any(w["code"] == "GROWTH_RATE_ZERO_SUSPECT" for w in result2["warnings"])
+
+
+def test_validate_honors_legacy_overrides_without_field() -> None:
+    """Override without field (legacy agent format) suppresses by code only."""
+    validate = _import_validate()
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["growth_rate_monthly"] = 0.0
+    inputs["revenue"]["mrr"] = {"value": 50000, "as_of": "2026-01"}
+    inputs["revenue"]["customers"] = 100
+
+    result = validate(inputs)
+    assert result["has_critical_warnings"] is True
+
+    # Legacy override: code only, no field
+    inputs.setdefault("metadata", {})["warning_overrides"] = [
+        {
+            "code": "GROWTH_RATE_ZERO_SUSPECT",
+            "reason": "pivot phase",
+            "reviewed_by": "agent",
+            "timestamp": "2026-03-09T14:00:00Z",
+        }
+    ]
+    result2 = validate(inputs)
+    assert result2["has_critical_warnings"] is False
+
+
+def test_unit_economics_propagates_run_id() -> None:
+    """unit_economics.py propagates metadata.run_id from input to output."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["metadata"] = {"run_id": "test-run-001"}
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data.get("metadata", {}).get("run_id") == "test-run-001"
+
+
+def test_unit_economics_no_run_id_no_metadata() -> None:
+    """unit_economics.py without run_id in input produces no metadata in output."""
+    payload = json.dumps(_VALID_INPUTS)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert "metadata" not in data
+
+
+def test_runway_propagates_run_id() -> None:
+    """runway.py propagates metadata.run_id from input to output."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["metadata"] = {"run_id": "test-run-002"}
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data.get("metadata", {}).get("run_id") == "test-run-002"
+
+
+def test_checklist_propagates_run_id() -> None:
+    """checklist.py propagates metadata.run_id from input to output."""
+    items = _make_checklist_items()
+    payload = json.dumps(
+        {
+            "items": items,
+            "company": {"stage": "seed", "geography": "us", "sector": "B2B SaaS"},
+            "metadata": {"run_id": "test-run-003"},
+        }
+    )
+    rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data.get("metadata", {}).get("run_id") == "test-run-003"
+
+
+_CO = {
+    "company_name": "TestCo",
+    "slug": "testco",
+    "stage": "seed",
+    "sector": "SaaS",
+    "geography": "US",
+    "revenue_model_type": "saas-plg",
+}
+
+
+def test_validate_date_format_errors() -> None:
+    """validate_inputs.py catches malformed YYYY-MM dates."""
+    payload = json.dumps(
+        {
+            "company": _CO,
+            "cash": {
+                "current_balance": 100000,
+                "monthly_net_burn": 10000,
+                "balance_date": "not-a-month",
+            },
+            "revenue": {
+                "mrr": {"value": 5000, "as_of": "2026-2"},
+            },
+        }
+    )
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data["valid"] is False
+    error_fields = {e["field"] for e in data.get("errors", [])}
+    assert "cash.balance_date" in error_fields
+    assert "revenue.mrr.as_of" in error_fields
+
+
+def test_validate_enum_errors() -> None:
+    """validate_inputs.py catches invalid enum values."""
+    payload = json.dumps(
+        {
+            "company": {**_CO, "stage": "unicorn"},
+            "structure": {"formatting_quality": "fair"},
+        }
+    )
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data["valid"] is False
+    error_fields = {e["field"] for e in data.get("errors", [])}
+    assert "company.stage" in error_fields
+    assert "structure.formatting_quality" in error_fields
+
+
+def test_validate_time_series_date_format() -> None:
+    """validate_inputs.py catches malformed dates in time series arrays."""
+    payload = json.dumps(
+        {
+            "company": _CO,
+            "revenue": {
+                "monthly": [
+                    {"month": "2025-01", "actual": True, "total": 1000},
+                    {"month": "Jan-2025", "actual": False, "total": 2000},
+                ],
+            },
+        }
+    )
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data["valid"] is False
+    assert any("Jan-2025" in e.get("message", "") for e in data.get("errors", []))
+
+
+def test_validate_inputs_referenced_by_agent() -> None:
+    """validate_inputs.py should exist on disk."""
+    scripts_dir = os.path.join(SCRIPT_DIR, "..", "skills", "financial-model-review", "scripts")
+    assert os.path.isfile(os.path.join(scripts_dir, "validate_inputs.py"))
+
+
 # --- Agent structural smoke test ---
 
 
@@ -1795,3 +2964,569 @@ def test_agent_definition_references_valid_scripts() -> None:
     # Verify SKILL.md exists
     skill_md = os.path.join(SCRIPT_DIR, "..", "skills", "financial-model-review", "SKILL.md")
     assert os.path.isfile(skill_md), "SKILL.md not found"
+
+
+# --- ARPU field-name fallback tests ---
+
+
+class TestValidateInputsArpuFallback:
+    """validate_inputs.py must detect ARPU issues regardless of field name."""
+
+    def _make_inputs_with_arpu(self, field_name: str, arpu_val: float) -> dict:
+        """Build minimal inputs with ARPU under the given field name."""
+        return {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}, "customers": 10},
+            "cash": {"monthly_net_burn": 80000},
+            "unit_economics": {
+                "ltv": {
+                    "value": 6000,
+                    "inputs": {field_name: arpu_val, "churn_monthly": 0.03, "gross_margin": 0.75},
+                },
+                "gross_margin": 0.75,
+            },
+        }
+
+    def test_arpu_monthly_triggers_suspect(self) -> None:
+        """ARPU_SUSPECT fires with canonical field name arpu_monthly."""
+        inp = self._make_inputs_with_arpu("arpu_monthly", 60000)  # >= MRR
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "ARPU_SUSPECT" in codes
+
+    def test_arpu_old_name_triggers_suspect(self) -> None:
+        """ARPU_SUSPECT fires with old schema field name arpu."""
+        inp = self._make_inputs_with_arpu("arpu", 60000)  # >= MRR
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "ARPU_SUSPECT" in codes
+
+    def test_arpu_old_name_consistency_check(self) -> None:
+        """ARPU_INCONSISTENT fires with old field name when ARPU*customers != MRR."""
+        inp = self._make_inputs_with_arpu("arpu", 3000)  # 3000*10=30000 vs MRR 50000 → >20% gap
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "ARPU_INCONSISTENT" in codes
+
+    def test_arpu_monthly_preferred_over_arpu(self) -> None:
+        """When both arpu_monthly and arpu exist, arpu_monthly wins."""
+        inp = self._make_inputs_with_arpu("arpu_monthly", 5000)
+        inp["unit_economics"]["ltv"]["inputs"]["arpu"] = 60000  # old name, wrong value
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "ARPU_SUSPECT" not in codes  # 5000 < 50000 MRR, so no suspect
+
+
+class TestValidateInputsArpuCritical:
+    """ARPU_SUSPECT should be critical; CUSTOMERS_MISSING when LTV present but no customers."""
+
+    def test_arpu_suspect_is_critical(self) -> None:
+        """ARPU_SUSPECT should block at the stop-gate."""
+        inp = {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}, "customers": 10},
+            "cash": {"monthly_net_burn": 80000},
+            "unit_economics": {
+                "ltv": {"value": 6000, "inputs": {"arpu_monthly": 60000, "churn_monthly": 0.03, "gross_margin": 0.75}},
+                "gross_margin": 0.75,
+            },
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        suspect = [w for w in data["warnings"] if w["code"] == "ARPU_SUSPECT"]
+        assert len(suspect) == 1
+        assert suspect[0].get("critical") is True
+        assert data["has_critical_warnings"] is True
+
+    def test_customers_missing_with_ltv_at_seed(self) -> None:
+        """CUSTOMERS_MISSING fires when LTV inputs present but revenue.customers absent."""
+        inp = {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}},
+            "cash": {"monthly_net_burn": 80000},
+            "unit_economics": {
+                "ltv": {"value": 6000, "inputs": {"arpu_monthly": 5000, "churn_monthly": 0.03, "gross_margin": 0.75}},
+                "gross_margin": 0.75,
+            },
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "CUSTOMERS_MISSING" in codes
+
+    def test_customers_missing_not_at_preseed(self) -> None:
+        """CUSTOMERS_MISSING should NOT fire at pre-seed."""
+        inp = {
+            "company": {"stage": "pre-seed"},
+            "revenue": {"mrr": {"value": 5000}},
+            "cash": {"monthly_net_burn": 20000},
+            "unit_economics": {
+                "ltv": {"value": 6000, "inputs": {"arpu_monthly": 5000}},
+                "gross_margin": 0.75,
+            },
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "CUSTOMERS_MISSING" not in codes
+
+    def test_customers_present_no_warning(self) -> None:
+        """No CUSTOMERS_MISSING when revenue.customers is populated."""
+        inp = {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}, "customers": 10},
+            "cash": {"monthly_net_burn": 80000},
+            "unit_economics": {
+                "ltv": {"value": 6000, "inputs": {"arpu_monthly": 5000, "churn_monthly": 0.03, "gross_margin": 0.75}},
+                "gross_margin": 0.75,
+            },
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "CUSTOMERS_MISSING" not in codes
+
+
+class TestValidateInputsCashZero:
+    """validate_inputs.py must flag $0 cash balance at seed+ as suspicious."""
+
+    def test_zero_cash_at_series_a(self) -> None:
+        """CASH_ZERO_SUSPECT fires as critical at series-a."""
+        inp = {
+            "company": {"stage": "series-a"},
+            "revenue": {"mrr": {"value": 150000}},
+            "cash": {"current_balance": 0, "monthly_net_burn": 500000},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        suspect = [w for w in data["warnings"] if w["code"] == "CASH_ZERO_SUSPECT"]
+        assert len(suspect) == 1
+        assert suspect[0].get("critical") is True
+        assert data["has_critical_warnings"] is True
+
+    def test_zero_cash_at_seed(self) -> None:
+        """CASH_ZERO_SUSPECT fires at seed."""
+        inp = {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}},
+            "cash": {"current_balance": 0, "monthly_net_burn": 80000},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "CASH_ZERO_SUSPECT" in codes
+
+    def test_zero_cash_at_preseed_no_warning(self) -> None:
+        """CASH_ZERO_SUSPECT does NOT fire at pre-seed."""
+        inp = {
+            "company": {"stage": "pre-seed"},
+            "revenue": {"mrr": {"value": 5000}},
+            "cash": {"current_balance": 0, "monthly_net_burn": 20000},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "CASH_ZERO_SUSPECT" not in codes
+
+    def test_nonzero_cash_no_warning(self) -> None:
+        """Normal cash balance produces no CASH_ZERO_SUSPECT."""
+        inp = {
+            "company": {"stage": "series-a"},
+            "revenue": {"mrr": {"value": 150000}},
+            "cash": {"current_balance": 5000000, "monthly_net_burn": 500000},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "CASH_ZERO_SUSPECT" not in codes
+
+    def test_null_cash_no_zero_warning(self) -> None:
+        """Null cash triggers MISSING_CASH_BALANCE, not CASH_ZERO_SUSPECT."""
+        inp = {
+            "company": {"stage": "series-a"},
+            "revenue": {"mrr": {"value": 150000}},
+            "cash": {"monthly_net_burn": 500000},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "CASH_ZERO_SUSPECT" not in codes
+        assert "MISSING_CASH_BALANCE" in codes
+
+
+# --- ARPU/churn field-name fallback in unit_economics.py ---
+
+
+class TestUnitEconomicsArpuFallback:
+    """unit_economics.py LTV cap must work with both arpu and arpu_monthly."""
+
+    def _make_inputs_zero_churn(self, arpu_field: str, arpu_val: float) -> dict:
+        return {
+            "company": {"stage": "seed", "sector": "B2B SaaS", "revenue_model_type": "saas-sales-led"},
+            "revenue": {"mrr": {"value": 50000}, "arr": {"value": 600000}, "growth_rate_monthly": 0.08},
+            "cash": {"current_balance": 2000000, "monthly_net_burn": 80000},
+            "unit_economics": {
+                "cac": {"total": 1500},
+                "ltv": {
+                    "value": 999999,
+                    "inputs": {arpu_field: arpu_val, "churn_monthly": 0, "gross_margin": 0.75},
+                },
+                "gross_margin": 0.75,
+            },
+        }
+
+    def test_zero_churn_cap_with_arpu_monthly(self) -> None:
+        """60-month cap applies with canonical arpu_monthly."""
+        inp = self._make_inputs_zero_churn("arpu_monthly", 500)
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        assert data is not None
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        assert ltv["value"] == 500 * 0.75 * 60  # 22500
+
+    def test_zero_churn_cap_with_arpu_old_name(self) -> None:
+        """60-month cap applies with old schema field name arpu."""
+        inp = self._make_inputs_zero_churn("arpu", 500)
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        assert data is not None
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        assert ltv["value"] == 500 * 0.75 * 60  # 22500
+
+
+# --- DERIVED_METRIC_REDUNDANT informational warning ---
+
+
+class TestValidateInputsDerivedMetric:
+    """validate_inputs.py warns when burn_multiple is provided alongside compute inputs."""
+
+    def test_redundant_with_growth_inputs(self) -> None:
+        """Warning fires when burn, mrr, and growth are all present."""
+        inp = {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}, "growth_rate_monthly": 0.08},
+            "cash": {"monthly_net_burn": 80000},
+            "unit_economics": {"burn_multiple": 3.4, "gross_margin": 0.75},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "DERIVED_METRIC_REDUNDANT" in codes
+        redundant = [w for w in data["warnings"] if w["code"] == "DERIVED_METRIC_REDUNDANT"]
+        assert redundant[0].get("critical") is not True  # informational only
+
+    def test_redundant_with_time_series(self) -> None:
+        """Warning fires when monthly time-series has >= 12 entries."""
+        monthly = [{"month": f"2024-{m:02d}", "actual": True, "total": 10000 + m * 1000} for m in range(1, 13)]
+        inp = {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}, "monthly": monthly},
+            "cash": {"monthly_net_burn": 80000},
+            "unit_economics": {"burn_multiple": 3.4, "gross_margin": 0.75},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "DERIVED_METRIC_REDUNDANT" in codes
+
+    def test_no_warning_when_fallback_needed(self) -> None:
+        """No warning when compute inputs are missing (fallback is legitimate)."""
+        inp = {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}},  # no growth, no monthly
+            "cash": {},  # no burn
+            "unit_economics": {"burn_multiple": 3.4, "gross_margin": 0.75},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "DERIVED_METRIC_REDUNDANT" not in codes
+
+    def test_no_warning_when_no_provided_bm(self) -> None:
+        """No warning when burn_multiple is not provided."""
+        inp = {
+            "company": {"stage": "seed"},
+            "revenue": {"mrr": {"value": 50000}, "growth_rate_monthly": 0.08},
+            "cash": {"monthly_net_burn": 80000},
+            "unit_economics": {"gross_margin": 0.75},
+        }
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        codes = [w["code"] for w in data["warnings"]]
+        assert "DERIVED_METRIC_REDUNDANT" not in codes
+
+
+class TestBurnMultipleProvidedPreference:
+    """When growth-rate burn multiple diverges >2x from provided, prefer provided."""
+
+    def _make_inputs(self, growth_rate: float, provided_bm: float | None = None) -> dict[str, Any]:
+        inp: dict[str, Any] = {
+            "company": {"stage": "series-a", "sector": "B2B SaaS", "revenue_model_type": "saas-sales-led"},
+            "revenue": {"mrr": {"value": 153603}, "arr": {"value": 1843235}, "growth_rate_monthly": growth_rate},
+            "cash": {"current_balance": 1500000, "monthly_net_burn": 561000},
+            "unit_economics": {"gross_margin": 0.784},
+        }
+        if provided_bm is not None:
+            inp["unit_economics"]["burn_multiple"] = provided_bm
+        return inp
+
+    def test_divergent_prefers_provided(self) -> None:
+        """31x growth-rate vs 3.05x provided → use 3.05x, warn about divergence."""
+        inp = self._make_inputs(0.118, provided_bm=3.05)
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        bm = next(m for m in data["metrics"] if m["name"] == "burn_multiple")
+        assert bm["value"] == 3.05
+        # Value goes through normal rating branches (sanity + benchmark)
+        # Divergence detail is in the warning
+        codes = [w["code"] for w in data.get("warnings", [])]
+        assert "BURN_MULTIPLE_REPORTED_DIVERGENCE" in codes
+
+    def test_close_values_uses_computed(self) -> None:
+        """When growth-rate and provided are close, use computed."""
+        inp = {
+            "company": {"stage": "series-a", "sector": "B2B SaaS", "revenue_model_type": "saas-sales-led"},
+            "revenue": {"mrr": {"value": 100000}, "arr": {"value": 1200000}, "growth_rate_monthly": 0.05},
+            "cash": {"current_balance": 5000000, "monthly_net_burn": 50000},
+            "unit_economics": {"gross_margin": 0.75, "burn_multiple": 9.5},
+        }
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        bm = next(m for m in data["metrics"] if m["name"] == "burn_multiple")
+        # Computed: 50000 / (100000*0.05) = 10x; provided 9.5; ratio 1.05 < 2 → use computed
+        assert bm["value"] == 10.0
+
+    def test_no_provided_uses_computed(self) -> None:
+        """Without provided burn_multiple, always use computed (existing behavior)."""
+        inp = self._make_inputs(0.118, provided_bm=None)
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        bm = next(m for m in data["metrics"] if m["name"] == "burn_multiple")
+        # 561000 / (153603 * 0.118) = 30.95
+        assert bm["value"] == 30.95
+
+    def test_time_series_path_unaffected_by_divergence_check(self) -> None:
+        """Time-series burn multiple path should not be affected by the growth-rate divergence check."""
+        inp = self._make_inputs(0.118, provided_bm=3.05)
+        # Add TTM revenue data to trigger time-series path
+        inp["revenue"]["quarterly"] = [
+            {"quarter": "Q1-2025", "arr": 400000},
+            {"quarter": "Q2-2025", "arr": 420000},
+            {"quarter": "Q3-2025", "arr": 450000},
+            {"quarter": "Q4-2025", "arr": 480000},
+        ]
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        bm = next(m for m in data["metrics"] if m["name"] == "burn_multiple")
+        # Time-series path should be used, not the provided value
+        assert bm["value"] != 3.05
+        # Should NOT produce BURN_MULTIPLE_REPORTED_DIVERGENCE (that's growth-rate path only)
+        codes = [w["code"] for w in data.get("warnings", [])]
+        assert "BURN_MULTIPLE_REPORTED_DIVERGENCE" not in codes
+
+
+class TestUnitEconomicsLtvSynthesis:
+    """unit_economics.py synthesizes LTV when ltv.inputs missing but revenue has the data."""
+
+    def _base_inputs(self) -> dict:
+        return {
+            "company": {"stage": "series-a", "sector": "B2B SaaS", "revenue_model_type": "saas-sales-led"},
+            "revenue": {
+                "mrr": {"value": 153603},
+                "arr": {"value": 1843235},
+                "growth_rate_monthly": 0.118,
+                "customers": 45,
+                "churn_monthly": 0.0067,
+            },
+            "cash": {"current_balance": 1500000, "monthly_net_burn": 561000},
+            "unit_economics": {"gross_margin": 0.784},
+        }
+
+    def test_synthesizes_ltv_from_revenue(self) -> None:
+        """LTV computed from revenue.customers + revenue.churn_monthly + gross_margin."""
+        inp = self._base_inputs()
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        # arpu = 153603/45 = 3413.40, ltv = 3413.40 * 0.784 / 0.0067 ≈ 399,277.01
+        expected_ltv = round(153603 / 45 * 0.784 / 0.0067, 2)
+        assert ltv["value"] == expected_ltv
+        assert "synthesized" in ltv["evidence"].lower() or "computed" in ltv["evidence"].lower()
+
+    def test_no_synthesis_when_ltv_inputs_present(self) -> None:
+        """Don't synthesize when ltv.inputs already has data."""
+        inp = self._base_inputs()
+        inp["unit_economics"]["ltv"] = {
+            "value": 50000,
+            "inputs": {"arpu_monthly": 3413, "churn_monthly": 0.0067, "gross_margin": 0.784},
+        }
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        assert ltv["value"] == 50000  # uses provided, not synthesized
+
+    def test_preserves_existing_ltv_value_when_inputs_missing(self) -> None:
+        """When ltv.value is provided but ltv.inputs is missing, synthesis fills inputs but keeps the value."""
+        inp = self._base_inputs()
+        inp["unit_economics"]["ltv"] = {"value": 75000}  # value present, inputs absent
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        assert ltv["value"] == 75000  # must NOT be overwritten by synthesis
+        # Evidence should NOT claim value was synthesized — only inputs were filled
+        assert "synthesized from revenue.customers" not in ltv["evidence"].lower()
+
+    def test_no_synthesis_without_customers(self) -> None:
+        """Can't compute ARPU without customer count."""
+        inp = self._base_inputs()
+        del inp["revenue"]["customers"]
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        assert ltv["value"] is None  # no data
+
+    def test_no_synthesis_without_churn(self) -> None:
+        """Can't compute LTV without churn."""
+        inp = self._base_inputs()
+        del inp["revenue"]["churn_monthly"]
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        assert ltv["value"] is None
+
+    def test_no_synthesis_with_zero_customers(self) -> None:
+        """Zero customers → can't compute ARPU, no synthesis."""
+        inp = self._base_inputs()
+        inp["revenue"]["customers"] = 0
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        assert ltv["value"] is None
+
+    def test_zero_churn_applies_60mo_cap(self) -> None:
+        """Zero churn → 60-month LTV cap even with synthesized inputs."""
+        inp = self._base_inputs()
+        inp["revenue"]["churn_monthly"] = 0
+        rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
+        assert rc == 0
+        ltv = next(m for m in data["metrics"] if m["name"] == "ltv")
+        # arpu = 153603/45 = 3413.40, capped ltv = 3413.40 * 0.784 * 60 = 160,564
+        expected = round(153603 / 45 * 0.784 * 60, 2)
+        assert ltv["value"] == expected
+
+
+# ---------------------------------------------------------------------------
+# ARPU-vs-MRR derived divergence regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_validate_arpu_derived_divergence() -> None:
+    """When stated ARPU diverges >20% from MRR/customers, warn."""
+    inputs = _make_inputs(stage="series-a", mrr=100_000, burn=80_000, growth=0.10)
+    inputs["revenue"]["customers"] = 50
+    inputs["unit_economics"] = {
+        "ltv": {
+            "inputs": {"arpu_monthly": 3400}  # 100K/50 = 2000, 3400 is 70% higher
+        }
+    }
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "ARPU_INCONSISTENT" in codes
+
+
+def test_validate_arpu_derived_close_no_warning() -> None:
+    """When stated ARPU is within 20% of MRR/customers, no warning."""
+    inputs = _make_inputs(stage="series-a", mrr=100_000, burn=80_000, growth=0.10)
+    inputs["revenue"]["customers"] = 50
+    inputs["unit_economics"] = {
+        "ltv": {
+            "inputs": {"arpu_monthly": 2100}  # 100K/50 = 2000, 2100 is 5% higher
+        }
+    }
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "ARPU_INCONSISTENT" not in codes
+
+
+# ---------------------------------------------------------------------------
+# Runway: cash direction warning + profitability regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_runway_no_cash_direction_warning_when_profitable() -> None:
+    """Growth-driven profitability should not trigger cash direction warning."""
+    # High growth (20% MoM) with moderate burn → revenue overtakes expenses
+    inputs = {
+        "company": {
+            "company_name": "GrowthCo",
+            "slug": "growthco",
+            "stage": "seed",
+            "sector": "SaaS",
+            "geography": "US",
+        },
+        "revenue": {
+            "mrr": {"value": 50_000, "as_of": "2025-01"},
+            "growth_rate_monthly": 0.20,
+        },
+        "cash": {
+            "current_balance": 500_000,
+            "balance_date": "2025-01",
+            "monthly_net_burn": 100_000,
+        },
+    }
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    base = next(s for s in data["scenarios"] if s["name"] == "base")
+    # With 20% MoM growth, revenue overtakes expenses → became profitable
+    assert base["default_alive"] is True
+    # Cash direction warning should NOT fire — growth explains cash increase
+    assert base.get("cash_direction_warning") is None
+
+
+def test_runway_cash_direction_warning_with_grant_no_profitability() -> None:
+    """Grant-funded cash increase without profitability should still warn.
+
+    IIA grants add cash monthly, making the company never run out of cash
+    (default_alive = True), but the company never becomes cash-flow positive
+    (revenue < expenses throughout). Cash increases due to grants, not
+    operational profitability — the warning should fire.
+    """
+    inputs = {
+        "company": {"company_name": "GrantCo", "slug": "grantco", "stage": "seed", "sector": "SaaS", "geography": "IL"},
+        "revenue": {
+            "mrr": {"value": 10_000, "as_of": "2025-01"},
+            "growth_rate_monthly": 0.0,  # zero growth → never profitable
+        },
+        "cash": {
+            "current_balance": 500_000,
+            "balance_date": "2025-01",
+            "monthly_net_burn": 20_000,
+            "grants": {
+                "iia_approved": 3_000_000,  # 50K/mo for 60 months
+                "iia_disbursement_months": 60,
+                "iia_start_month": 1,
+            },
+        },
+    }
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    base = next(s for s in data["scenarios"] if s["name"] == "base")
+    # Revenue (10K) < opex (30K) throughout, never becomes profitable
+    # But default_alive is True (never runs out of cash due to grants)
+    # Cash increases due to grant inflows — warning SHOULD fire
+    assert base["default_alive"] is True
+    final_cash = base["monthly_projections"][-1]["cash_balance"]
+    assert final_cash > 500_000  # cash increased
+    assert base.get("cash_direction_warning") is not None
+    # Risk narrative should NOT say "reaches profitability"
+    assert "reaches profitability" not in data.get("risk_assessment", "")

@@ -162,9 +162,18 @@ def test_market_sizing_stdin_string_coercion() -> None:
     assert data["bottom_up"]["tam"]["value"] == 67_500_000_000.0
 
 
+def _assert_validation_errors(data: dict | None, *fragments: str) -> None:
+    """Assert data has validation.status == 'invalid' and errors contain all fragments."""
+    assert data is not None, "expected JSON output with validation errors"
+    assert data["validation"]["status"] == "invalid"
+    joined = " ".join(data["validation"]["errors"]).lower()
+    for frag in fragments:
+        assert frag.lower() in joined, f"expected '{frag}' in validation errors: {data['validation']['errors']}"
+
+
 def test_market_sizing_negative_pct_error() -> None:
-    """Negative percentage should error."""
-    rc, _, stderr = run_script(
+    """Negative percentage should produce validation error."""
+    rc, data, _ = run_script(
         "market_sizing.py",
         [
             "--approach",
@@ -177,12 +186,12 @@ def test_market_sizing_negative_pct_error() -> None:
             "10",
         ],
     )
-    assert rc == 1
-    assert "negative" in stderr.lower() or "cannot" in stderr.lower()
+    assert rc == 0
+    _assert_validation_errors(data, "negative")
 
 
 def test_market_sizing_non_integer_customer_count() -> None:
-    """Non-integer customer_count via stdin should error."""
+    """Non-integer customer_count via stdin should produce validation error."""
     payload = json.dumps(
         {
             "approach": "bottom_up",
@@ -192,9 +201,9 @@ def test_market_sizing_non_integer_customer_count() -> None:
             "target_pct": "0.5",
         }
     )
-    rc, _, stderr = run_script("market_sizing.py", ["--stdin"], stdin_data=payload)
-    assert rc == 1
-    assert "whole number" in stderr.lower()
+    rc, data, _ = run_script("market_sizing.py", ["--stdin"], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "whole number")
 
 
 def test_sensitivity_basic() -> None:
@@ -321,42 +330,42 @@ def test_checklist_some_fail() -> None:
 
 
 def test_checklist_missing_items() -> None:
-    """Only 19 items -- should exit 1."""
+    """Only 19 items -- should produce validation error."""
     items = _make_checklist_items(exclude=["data_current", "sources_reputable", "figures_triangulated"])
     payload = json.dumps({"items": items})
-    rc, _, stderr = run_script("checklist.py", [], stdin_data=payload)
-    assert rc == 1
-    assert "missing" in stderr.lower()
+    rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "missing")
 
 
 def test_checklist_duplicate_id() -> None:
-    """23 items with a duplicate -- should exit 1."""
+    """23 items with a duplicate -- should produce validation error."""
     items = _make_checklist_items()
     items.append({"id": "data_current", "status": "pass", "notes": None})
     payload = json.dumps({"items": items})
-    rc, _, stderr = run_script("checklist.py", [], stdin_data=payload)
-    assert rc == 1
-    assert "duplicate" in stderr.lower()
+    rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "duplicate")
 
 
 def test_checklist_unknown_id() -> None:
-    """Unknown ID 'bogus' -- should exit 1."""
+    """Unknown ID 'bogus' -- should produce validation error."""
     items = _make_checklist_items()
     # Replace one valid item with bogus
     items[0] = {"id": "bogus", "status": "pass", "notes": None}
     payload = json.dumps({"items": items})
-    rc, _, stderr = run_script("checklist.py", [], stdin_data=payload)
-    assert rc == 1
-    assert "unknown" in stderr.lower()
+    rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "unknown")
 
 
 def test_checklist_invalid_status() -> None:
-    """Status 'maybe' -- should exit 1."""
+    """Status 'maybe' -- should produce validation error."""
     overrides = {"data_current": {"status": "maybe", "notes": None}}
     payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
-    rc, _, stderr = run_script("checklist.py", [], stdin_data=payload)
-    assert rc == 1
-    assert "invalid" in stderr.lower() or "must be one of" in stderr.lower()
+    rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "invalid")
 
 
 def test_checklist_not_applicable() -> None:
@@ -861,7 +870,7 @@ def test_sensitivity_confidence_default() -> None:
 
 
 def test_sensitivity_confidence_invalid() -> None:
-    """'guessed' -> exit 1."""
+    """'guessed' -> validation error."""
     payload = json.dumps(
         {
             "approach": "bottom_up",
@@ -869,9 +878,9 @@ def test_sensitivity_confidence_invalid() -> None:
             "ranges": {"arpu": {"low_pct": -10, "high_pct": 10, "confidence": "guessed"}},
         }
     )
-    rc, _, stderr = run_script("sensitivity.py", [], stdin_data=payload)
-    assert rc == 1
-    assert "confidence" in stderr.lower()
+    rc, data, _ = run_script("sensitivity.py", [], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "confidence")
 
 
 def test_sensitivity_confidence_no_narrowing() -> None:
@@ -1032,9 +1041,9 @@ def test_sensitivity_both_missing_params() -> None:
             "ranges": {"customer_count": {"low_pct": -30, "high_pct": 20}},
         }
     )
-    rc, _, stderr = run_script("sensitivity.py", [], stdin_data=payload)
-    assert rc == 1
-    assert "industry_total" in stderr
+    rc, data, _ = run_script("sensitivity.py", [], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "industry_total")
 
 
 def test_sensitivity_both_base_result_nested() -> None:
@@ -1493,7 +1502,8 @@ def test_market_sizing_output_flag() -> None:
             ],
         )
         assert rc == 0, f"rc={rc}, stderr={stderr}"
-        assert stdout == "", f"stdout={stdout!r}"
+        receipt = json.loads(stdout)
+        assert receipt["ok"] is True
         assert os.path.exists(tmp)
         with open(tmp) as fh:
             data = json.load(fh)
@@ -1525,7 +1535,8 @@ def test_sensitivity_output_flag() -> None:
             stdin_data=payload,
         )
         assert rc == 0, f"rc={rc}, stderr={stderr}"
-        assert stdout == "", f"stdout={stdout!r}"
+        receipt = json.loads(stdout)
+        assert receipt["ok"] is True
         with open(tmp) as fh:
             data = json.load(fh)
         assert "scenarios" in data
@@ -1550,7 +1561,8 @@ def test_checklist_output_flag() -> None:
             stdin_data=payload,
         )
         assert rc == 0, f"rc={rc}, stderr={stderr}"
-        assert stdout == "", f"stdout={stdout!r}"
+        receipt = json.loads(stdout)
+        assert receipt["ok"] is True
         with open(tmp) as fh:
             data = json.load(fh)
         assert "summary" in data
@@ -1615,7 +1627,7 @@ def test_output_flag_pretty_format() -> None:
 
 
 def test_sensitivity_non_dict_range_entry() -> None:
-    """Range entry that is not a dict (e.g. integer) -> exit 1."""
+    """Range entry that is not a dict (e.g. integer) -> validation error."""
     payload = json.dumps(
         {
             "approach": "bottom_up",
@@ -1623,17 +1635,17 @@ def test_sensitivity_non_dict_range_entry() -> None:
             "ranges": {"arpu": 42},
         }
     )
-    rc, _, stderr = run_script("sensitivity.py", [], stdin_data=payload)
-    assert rc == 1
-    assert "must be an object" in stderr
+    rc, data, _ = run_script("sensitivity.py", [], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "must be an object")
 
 
 def test_checklist_non_dict_item() -> None:
-    """Non-dict item in checklist items array -> exit 1."""
+    """Non-dict item in checklist items array -> validation error."""
     payload = json.dumps({"items": ["not_a_dict"]})
-    rc, _, stderr = run_script("checklist.py", [], stdin_data=payload)
-    assert rc == 1
-    assert "must be an object" in stderr
+    rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "must be an object")
 
 
 def test_compose_corrupt_artifact() -> None:
@@ -1726,16 +1738,16 @@ def test_output_flag_root_path_blocked() -> None:
 
 
 def test_market_sizing_stdin_non_string_approach() -> None:
-    """Non-string approach in stdin JSON should error."""
+    """Non-string approach in stdin JSON should produce validation error."""
     payload = json.dumps({"approach": 123})
-    rc, _, stderr = run_script("market_sizing.py", ["--stdin"], stdin_data=payload)
-    assert rc == 1
-    assert "string" in stderr.lower()
+    rc, data, _ = run_script("market_sizing.py", ["--stdin"], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "string")
 
 
 def test_market_sizing_growth_rate_below_minus_100() -> None:
-    """Growth rate below -100% should error."""
-    rc, _, stderr = run_script(
+    """Growth rate below -100% should produce validation error."""
+    rc, data, _ = run_script(
         "market_sizing.py",
         [
             "--approach",
@@ -1752,18 +1764,18 @@ def test_market_sizing_growth_rate_below_minus_100() -> None:
             "5",
         ],
     )
-    assert rc == 1
-    assert "-100" in stderr or "growth_rate" in stderr
+    assert rc == 0
+    _assert_validation_errors(data, "-100")
 
 
 def test_market_sizing_zero_industry_total() -> None:
-    """Zero industry_total should error (validate_positive rejects <= 0)."""
-    rc, _, stderr = run_script(
+    """Zero industry_total should produce validation error (validate_positive rejects <= 0)."""
+    rc, data, _ = run_script(
         "market_sizing.py",
         ["--approach", "top-down", "--industry-total", "0", "--segment-pct", "10", "--share-pct", "5"],
     )
-    assert rc == 1
-    assert "positive" in stderr.lower()
+    assert rc == 0
+    _assert_validation_errors(data, "positive")
 
 
 def test_compose_strict_mode_writes_output_file() -> None:
@@ -1814,7 +1826,7 @@ def test_compose_malformed_field_types() -> None:
 
 
 def test_sensitivity_customer_count_fractional() -> None:
-    """Fractional customer_count in sensitivity base should error."""
+    """Fractional customer_count in sensitivity base should produce validation error."""
     payload = json.dumps(
         {
             "approach": "bottom_up",
@@ -1822,9 +1834,9 @@ def test_sensitivity_customer_count_fractional() -> None:
             "ranges": {"arpu": {"low_pct": -10, "high_pct": 10}},
         }
     )
-    rc, _, stderr = run_script("sensitivity.py", [], stdin_data=payload)
-    assert rc == 1
-    assert "whole number" in stderr.lower() or "integer" in stderr.lower()
+    rc, data, _ = run_script("sensitivity.py", [], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "whole number")
 
 
 def test_sensitivity_irrelevant_param_warned() -> None:
@@ -1849,7 +1861,7 @@ def test_sensitivity_irrelevant_param_warned() -> None:
 
 
 def test_sensitivity_all_irrelevant_error() -> None:
-    """Single-approach mode with ONLY irrelevant params -> error."""
+    """Single-approach mode with ONLY irrelevant params -> validation error."""
     payload = json.dumps(
         {
             "approach": "bottom_up",
@@ -1857,9 +1869,9 @@ def test_sensitivity_all_irrelevant_error() -> None:
             "ranges": {"industry_total": {"low_pct": -10, "high_pct": 10}},
         }
     )
-    rc, _, stderr = run_script("sensitivity.py", [], stdin_data=payload)
-    assert rc == 1
-    assert "no relevant" in stderr.lower()
+    rc, data, _ = run_script("sensitivity.py", [], stdin_data=payload)
+    assert rc == 0
+    _assert_validation_errors(data, "no relevant")
 
 
 def test_sensitivity_pct_clamping_warned() -> None:
@@ -2044,25 +2056,24 @@ def test_checklist_notes_coerced() -> None:
 
 def test_market_sizing_stdin_empty_object() -> None:
     """Empty JSON object via stdin should read keys as None and error clearly, not fall to CLI."""
-    rc, data, stderr = run_script(
+    rc, data, _ = run_script(
         "market_sizing.py",
         ["--stdin", "--pretty"],
         stdin_data="{}",
     )
-    assert rc == 1
-    # Should error about missing required params from the JSON, not CLI args
-    assert "top-down requires" in stderr or "bottom-up requires" in stderr
+    assert rc == 0
+    _assert_validation_errors(data, "requires")
 
 
 def test_market_sizing_stdin_empty_object_bottom_up() -> None:
     """Empty JSON object with bottom_up approach should read fields from JSON (all None)."""
-    rc, data, stderr = run_script(
+    rc, data, _ = run_script(
         "market_sizing.py",
         ["--stdin", "--pretty"],
         stdin_data='{"approach": "bottom_up"}',
     )
-    assert rc == 1
-    assert "bottom-up requires" in stderr
+    assert rc == 0
+    _assert_validation_errors(data, "bottom-up requires")
 
 
 # ---------------------------------------------------------------------------

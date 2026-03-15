@@ -296,7 +296,8 @@ def test_score_output_flag() -> None:
     try:
         rc, stdout, stderr = run_script_raw("score_dimensions.py", ["--pretty", "-o", tmp], stdin_data=payload)
         assert rc == 0, f"rc={rc}, stderr={stderr}"
-        assert stdout == "", f"stdout={stdout!r}"
+        receipt = json.loads(stdout)
+        assert receipt["ok"] is True
         with open(tmp) as fh:
             data = json.load(fh)
         assert "summary" in data
@@ -439,7 +440,8 @@ def test_fund_profile_output_flag() -> None:
     try:
         rc, stdout, stderr = run_script_raw("fund_profile.py", ["--pretty", "-o", tmp], stdin_data=payload)
         assert rc == 0, f"rc={rc}, stderr={stderr}"
-        assert stdout == "", f"stdout={stdout!r}"
+        receipt = json.loads(stdout)
+        assert receipt["ok"] is True
         with open(tmp) as fh:
             data = json.load(fh)
         assert data["validation"]["status"] == "valid"
@@ -578,7 +580,8 @@ def test_conflicts_output_flag() -> None:
     try:
         rc, stdout, stderr = run_script_raw("detect_conflicts.py", ["--pretty", "-o", tmp], stdin_data=payload)
         assert rc == 0, f"rc={rc}, stderr={stderr}"
-        assert stdout == "", f"stdout={stdout!r}"
+        receipt = json.loads(stdout)
+        assert receipt["ok"] is True
         with open(tmp) as fh:
             data = json.load(fh)
         assert data["summary"]["overall_severity"] == "clear"
@@ -1508,7 +1511,8 @@ def test_compose_output_flag() -> None:
     try:
         rc, stdout, stderr = run_script_raw("compose_report.py", ["--dir", d, "--pretty", "-o", tmp])
         assert rc == 0, f"rc={rc}, stderr={stderr}"
-        assert stdout == "", f"stdout should be empty, got: {stdout!r}"
+        receipt = json.loads(stdout)
+        assert receipt["ok"] is True
         with open(tmp) as fh:
             data = json.load(fh)
         assert "report_markdown" in data

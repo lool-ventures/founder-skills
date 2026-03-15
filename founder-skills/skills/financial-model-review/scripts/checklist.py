@@ -27,7 +27,7 @@ import sys
 from typing import Any
 
 
-def _write_output(data: str, output_path: str | None) -> None:
+def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
     """Write JSON string to file or stdout."""
     if output_path:
         abs_path = os.path.abspath(output_path)
@@ -38,6 +38,10 @@ def _write_output(data: str, output_path: str | None) -> None:
         os.makedirs(parent, exist_ok=True)
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(data)
+        receipt: dict[str, Any] = {"ok": True, "path": abs_path, "bytes": len(data.encode("utf-8"))}
+        if summary:
+            receipt.update(summary)
+        sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     else:
         sys.stdout.write(data)
 
@@ -605,37 +609,33 @@ def validate_checklist(
     items: list[dict[str, Any]],
     company: dict[str, Any] | None = None,
     inputs: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Validate checklist input and produce scored summary."""
+) -> tuple[dict[str, Any], list[str]]:
+    """Validate checklist input and produce scored summary. Returns (result, errors)."""
+    errors: list[str] = []
     seen_ids: set[str] = set()
-    for item in items:
+    for i, item in enumerate(items):
         if not isinstance(item, dict):
-            print(f"Error: each item must be an object (got {type(item).__name__})", file=sys.stderr)
-            sys.exit(1)
+            errors.append(f"Item {i} must be an object (got {type(item).__name__})")
+            continue
         item_id = item.get("id", "")
         if item_id not in VALID_IDS:
-            print(
-                f"Error: unknown checklist ID '{item_id}'. Valid IDs: {sorted(VALID_IDS)}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+            errors.append(f"Unknown checklist ID '{item_id}'")
+            continue
         if item_id in seen_ids:
-            print(f"Error: duplicate checklist ID '{item_id}'", file=sys.stderr)
-            sys.exit(1)
+            errors.append(f"Duplicate checklist ID '{item_id}'")
+            continue
         seen_ids.add(item_id)
 
         status = item.get("status", "")
         if status not in VALID_STATUSES:
-            print(
-                f"Error: invalid status '{status}' for item '{item_id}'. Must be one of: {sorted(VALID_STATUSES)}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+            errors.append(f"Invalid status '{status}' for item '{item_id}'. Must be one of: {sorted(VALID_STATUSES)}")
 
     missing = VALID_IDS - seen_ids
     if missing:
-        print(f"Error: missing checklist items: {sorted(missing)}", file=sys.stderr)
-        sys.exit(1)
+        errors.append(f"Missing checklist items: {sorted(missing)}")
+
+    if errors:
+        return {"items": [], "summary": None}, errors
 
     # Normalize company profile if provided
     norm_company = _normalize_profile(company) if company else None
@@ -800,7 +800,7 @@ def validate_checklist(
             "failed_items": failed_items,
             "warned_items": warned_items,
         },
-    }
+    }, []
 
 
 def parse_args() -> argparse.Namespace:
@@ -827,21 +827,42 @@ def main() -> None:
         print(f"Error: invalid JSON input: {e}", file=sys.stderr)
         sys.exit(1)
 
-    if not isinstance(data, dict) or "items" not in data:
-        print("Error: JSON must be an object with an 'items' key", file=sys.stderr)
+    if not isinstance(data, dict):
+        print("Error: JSON must be an object", file=sys.stderr)
         sys.exit(1)
 
-    if not isinstance(data["items"], list):
-        print("Error: 'items' must be an array", file=sys.stderr)
-        sys.exit(1)
+    indent = 2 if args.pretty else None
+
+    # --- Validation (JSON error dict, exit 0) ---
+    errors: list[str] = []
+    if "items" not in data:
+        errors.append("Missing required key: 'items'")
+    elif not isinstance(data["items"], list):
+        errors.append("'items' must be an array")
+
+    if errors:
+        result: dict[str, Any] = {"validation": {"status": "invalid", "errors": errors}, "items": [], "summary": None}
+        _write_output(json.dumps(result, indent=indent) + "\n", args.output)
+        return
 
     company = data.get("company")
     inputs_data = data.get("inputs")
-    result = validate_checklist(data["items"], company, inputs=inputs_data)
+    result, errors = validate_checklist(data["items"], company, inputs=inputs_data)
 
-    indent = 2 if args.pretty else None
+    if errors:
+        result["validation"] = {"status": "invalid", "errors": errors}
+    else:
+        result["validation"] = {"status": "valid", "errors": []}
+
+    # Propagate run_id from input metadata into output for stale-artifact detection
+    _input_metadata = data.get("metadata") or (data.get("inputs") or {}).get("metadata")
+    if isinstance(_input_metadata, dict) and isinstance(_input_metadata.get("run_id"), str):
+        result.setdefault("metadata", {})["run_id"] = _input_metadata["run_id"]
+
     out = json.dumps(result, indent=indent) + "\n"
-    _write_output(out, args.output)
+    s = result["summary"]
+    summary = {"score_pct": s["score_pct"], "pass": s["pass"], "fail": s["fail"]} if s else {}
+    _write_output(out, args.output, summary=summary)
 
 
 if __name__ == "__main__":

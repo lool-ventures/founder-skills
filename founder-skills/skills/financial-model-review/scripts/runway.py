@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import Any
 
 
-def _write_output(data: str, output_path: str | None) -> None:
+def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
     """Write JSON string to file or stdout."""
     if output_path:
         abs_path = os.path.abspath(output_path)
@@ -33,6 +33,10 @@ def _write_output(data: str, output_path: str | None) -> None:
         os.makedirs(parent, exist_ok=True)
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(data)
+        receipt: dict[str, Any] = {"ok": True, "path": abs_path, "bytes": len(data.encode("utf-8"))}
+        if summary:
+            receipt.update(summary)
+        sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     else:
         sys.stdout.write(data)
 
@@ -167,6 +171,7 @@ def _project_scenario(
     opex = opex0 * (1 + burn_change)  # one-time step-up at scenario start
     cash_out_month: int | None = None
     default_alive = False
+    became_profitable = False
 
     for t in range(1, _MAX_MONTHS + 1):
         effective_growth = growth_rate * (_GROWTH_DECAY ** (t - 1))
@@ -198,6 +203,8 @@ def _project_scenario(
         )
 
         # Check if company becomes cash-flow positive (revenue >= expenses)
+        if net_burn <= 0 and not became_profitable:
+            became_profitable = True
         if net_burn <= 0 and not default_alive:
             default_alive = True
 
@@ -208,6 +215,23 @@ def _project_scenario(
     # If we never ran out of cash, the company is default alive
     if cash_out_month is None:
         default_alive = True
+
+    # Sanity check: if initial net_burn was positive (company burning cash) but
+    # final cash > starting cash AND the company never reached operational
+    # profitability (revenue >= expenses), inputs are inconsistent — flag it.
+    # Skip when became_profitable is True because growth-driven profitability
+    # legitimately causes cash accumulation.  Note: we intentionally do NOT
+    # use default_alive here — default_alive is also set when cash never runs
+    # out (e.g., due to grant inflows), which doesn't indicate profitability.
+    initial_net_burn = opex0 * (1 + burn_change) - revenue0
+    cash_direction_warning: str | None = None
+    if initial_net_burn > 0 and not became_profitable and len(projections) > 0:
+        final_cash = projections[-1]["cash_balance"]
+        if final_cash > cash0 * 1.01:  # allow 1% rounding tolerance
+            cash_direction_warning = (
+                f"Cash increased from {cash0:,.0f} to {final_cash:,.0f} despite "
+                f"initial net burn of {initial_net_burn:,.0f}/mo — inputs may be inconsistent"
+            )
 
     # Compute dates
     runway_months = cash_out_month
@@ -223,7 +247,7 @@ def _project_scenario(
         # Never runs out within projection window
         decision_point = None
 
-    return {
+    result: dict[str, Any] = {
         "name": name,
         "growth_rate": growth_rate,
         "burn_change": burn_change,
@@ -232,8 +256,12 @@ def _project_scenario(
         "cash_out_date": cash_out_date,
         "decision_point": decision_point,
         "default_alive": default_alive,
+        "became_profitable": became_profitable,
         "monthly_projections": projections,
     }
+    if cash_direction_warning:
+        result["cash_direction_warning"] = cash_direction_warning
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -392,7 +420,13 @@ def _assess_risk(scenario_results: list[dict[str, Any]]) -> str:
         threshold_suffix = f" You need at least {threshold['growth_rate']:.1%} MoM growth to stay default-alive."
 
     if base["default_alive"]:
-        base_text = "Low risk: company reaches profitability under base scenario before running out of cash."
+        if base.get("became_profitable"):
+            base_text = "Low risk: company reaches profitability under base scenario before running out of cash."
+        else:
+            base_text = (
+                "Low risk: company does not run out of cash under base scenario "
+                "within projection window, though operational profitability is not reached."
+            )
         return base_text + threshold_suffix
 
     runway = base.get("runway_months")
@@ -434,13 +468,9 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
     current_balance = cash_data.get("current_balance")
     monthly_net_burn = cash_data.get("monthly_net_burn")
 
-    if current_balance is None or monthly_net_burn is None:
-        # Insufficient data
-        warnings.append("Cash balance and/or monthly burn data missing; cannot compute runway.")
-        if current_balance is None:
-            warnings.append("Missing: cash.current_balance")
-        if monthly_net_burn is None:
-            warnings.append("Missing: cash.monthly_net_burn")
+    if current_balance is None and monthly_net_burn is None:
+        # Both missing — no analysis possible
+        warnings.append("Cash balance and monthly burn data both missing; cannot compute runway.")
         return {
             "company": {
                 "name": company.get("company_name", "Unknown"),
@@ -456,15 +486,83 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
             "warnings": warnings,
         }
 
+    if current_balance is None and monthly_net_burn is not None:
+        # Burn known but no cash balance — produce sensitivity table
+        burn = abs(monthly_net_burn)
+        warnings.append(
+            "Missing: cash.current_balance — producing burn-based sensitivity "
+            "table instead of full projection. Ask the founder for current cash balance."
+        )
+        cash_scenarios = [500_000, 1_000_000, 2_000_000, 3_000_000, 5_000_000]
+        sensitivity: list[dict[str, Any]] = []
+        for starting_cash in cash_scenarios:
+            months = round(starting_cash / burn, 1) if burn > 0 else None
+            sensitivity.append(
+                {
+                    "starting_cash": starting_cash,
+                    "runway_months": months,
+                }
+            )
+        return {
+            "company": {
+                "name": company.get("company_name", "Unknown"),
+                "slug": company.get("slug", ""),
+                "stage": company.get("stage", ""),
+            },
+            "baseline": {
+                "net_cash": None,
+                "monthly_burn": burn,
+                "monthly_revenue": None,
+            },
+            "scenarios": [],
+            "post_raise": None,
+            "risk_assessment": f"Monthly burn is ${burn:,.0f}. Cash balance unknown — ask founder.",
+            "insufficient_data": True,
+            "partial_analysis": True,
+            "burn_sensitivity": sensitivity,
+            "limitations": limitations,
+            "warnings": warnings,
+        }
+
+    if monthly_net_burn is None:
+        # Cash balance known but burn unknown
+        warnings.append("Missing: cash.monthly_net_burn — cannot project runway without burn rate.")
+        return {
+            "company": {
+                "name": company.get("company_name", "Unknown"),
+                "slug": company.get("slug", ""),
+                "stage": company.get("stage", ""),
+            },
+            "baseline": {
+                "net_cash": current_balance,
+                "monthly_burn": None,
+                "monthly_revenue": None,
+            },
+            "scenarios": [],
+            "post_raise": None,
+            "risk_assessment": f"Cash balance is ${current_balance:,.0f} but burn rate unknown.",
+            "insufficient_data": True,
+            "limitations": limitations,
+            "warnings": warnings,
+        }
+
     # --- Derive baselines ---
     debt = cash_data.get("debt", 0)
     cash0 = current_balance - debt
 
     # Revenue
     mrr_value = _deep_get(revenue_data, "mrr", "value")
+    arr_value = _deep_get(revenue_data, "arr", "value")
     monthly_total = revenue_data.get("monthly_total")
     if mrr_value is not None:
         revenue0 = mrr_value
+    elif arr_value is not None:
+        revenue0 = arr_value / 12
+        print(
+            f"Warning: using ARR/12 (${revenue0:,.0f}) as MRR proxy — revenue.mrr.value not provided",
+            file=sys.stderr,
+        )
+        warnings.append(f"Using ARR/12 (${revenue0:,.0f}) as MRR proxy (no MRR provided).")
     elif monthly_total is not None:
         revenue0 = monthly_total
         warnings.append("Using revenue.monthly_total (no MRR provided).")
@@ -532,6 +630,9 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
             ils_expense_fraction=ils_fraction,
         )
         scenario_results.append(scenario_out)
+        # Surface per-scenario cash direction warnings
+        if scenario_out.get("cash_direction_warning"):
+            warnings.append(f"Scenario '{scenario_out['name']}': {scenario_out['cash_direction_warning']}")
 
     # --- Compute minimum viable growth threshold ---
     if growth_rate >= 0:
@@ -651,15 +752,29 @@ def main() -> None:
         print("Error: JSON input must be an object", file=sys.stderr)
         sys.exit(1)
 
+    indent = 2 if args.pretty else None
+
     if "company" not in data:
-        print("Error: 'company' key is required", file=sys.stderr)
-        sys.exit(1)
+        result: dict[str, Any] = {"validation": {"status": "invalid", "errors": ["Missing required key: 'company'"]}}
+        _write_output(json.dumps(result, indent=indent) + "\n", args.output)
+        return
 
     result = _compute_runway(data)
-
-    indent = 2 if args.pretty else None
+    # Propagate run_id from inputs metadata into output for stale-artifact detection
+    _input_metadata = data.get("metadata")
+    if isinstance(_input_metadata, dict) and isinstance(_input_metadata.get("run_id"), str):
+        result.setdefault("metadata", {})["run_id"] = _input_metadata["run_id"]
     out = json.dumps(result, indent=indent) + "\n"
-    _write_output(out, args.output)
+    scenarios = result.get("scenarios", [])
+    base_s = next((s for s in scenarios if s["name"] == "base"), None)
+    _write_output(
+        out,
+        args.output,
+        summary={
+            "scenarios": len(scenarios),
+            "base_runway_months": base_s["runway_months"] if base_s else None,
+        },
+    )
 
 
 if __name__ == "__main__":
