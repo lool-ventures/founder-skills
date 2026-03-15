@@ -319,7 +319,7 @@ If the specified range is narrower than the minimum, it is widened. Wider ranges
 | `status` | string | yes | One of: `"pass"`, `"fail"`, `"not_applicable"` |
 | `notes` | string \| null | no | Agent's notes explaining the assessment |
 
-All 22 canonical IDs must be present, with no duplicates and no unknown IDs. The script validates this and exits 1 on violations.
+All 22 canonical IDs must be present, with no duplicates and no unknown IDs. The script validates this and reports violations in the `validation` field of the JSON output (`validation.status: "invalid"`).
 
 ### Output format
 

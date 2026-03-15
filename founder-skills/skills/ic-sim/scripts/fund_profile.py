@@ -123,6 +123,10 @@ def validate_fund_profile(profile: dict[str, Any]) -> dict[str, Any]:
                 roles_seen.add(role)
             if not arch.get("name"):
                 errors.append(f"Archetype {i}: missing 'name' field")
+            if not arch.get("background"):
+                errors.append(f"Archetype {i}: missing 'background'")
+            if not isinstance(arch.get("focus_areas"), list) or not arch.get("focus_areas"):
+                errors.append(f"Archetype {i}: 'focus_areas' must be a non-empty array")
 
     # Portfolio: must be array, each entry must have 'name'
     portfolio = profile.get("portfolio", [])

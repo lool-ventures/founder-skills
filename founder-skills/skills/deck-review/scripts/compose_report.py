@@ -525,7 +525,7 @@ def _section_priority_fixes(
 
     # Draw from missing slides
     if reviews is not None and not _is_stub(reviews):
-        for m in reviews.get("missing_slides", []):
+        for m in _as_list(reviews.get("missing_slides")):
             if m.get("importance") == "critical":
                 fixes.append(f"Add missing {m.get('expected_type', 'slide')}: {m.get('recommendation', '')}")
 

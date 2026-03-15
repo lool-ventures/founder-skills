@@ -288,23 +288,39 @@ class TestMissingArtifacts:
         rc, out, stderr = _run(arts, ["--gate", "1"])
         assert rc == 0
 
-    def test_missing_commentary_ok_for_conversational(self) -> None:
-        """Missing commentary.json is OK when model_format is conversational."""
+    def test_missing_commentary_ok_for_qualitative_conversational(self) -> None:
+        """Missing commentary.json is OK for qualitative (skipped) conversational reviews."""
         arts = _full_artifacts()
         arts["inputs.json"] = json.loads(json.dumps(_INPUTS))
         arts["inputs.json"]["company"]["model_format"] = "conversational"
         del arts["commentary.json"]
+        # Make it a qualitative review — skip unit_economics and runway
+        arts["unit_economics.json"] = {"skipped": True, "reason": "qualitative path"}
+        arts["runway.json"] = {"skipped": True, "reason": "qualitative path"}
         rc, out, stderr = _run(arts)
         assert rc == 0
 
-    def test_missing_commentary_ok_for_deck(self) -> None:
-        """Missing commentary.json is OK when model_format is deck."""
+    def test_missing_commentary_ok_for_qualitative_deck(self) -> None:
+        """Missing commentary.json is OK for qualitative (skipped) deck reviews."""
         arts = _full_artifacts()
         arts["inputs.json"] = json.loads(json.dumps(_INPUTS))
         arts["inputs.json"]["company"]["model_format"] = "deck"
         del arts["commentary.json"]
+        # Make it a qualitative review — skip unit_economics and runway
+        arts["unit_economics.json"] = {"skipped": True, "reason": "qualitative path"}
+        arts["runway.json"] = {"skipped": True, "reason": "qualitative path"}
         rc, out, stderr = _run(arts)
         assert rc == 0
+
+    def test_missing_commentary_fails_for_quantitative_deck(self) -> None:
+        """Missing commentary.json fails for quantitative deck reviews."""
+        arts = _full_artifacts()
+        arts["inputs.json"] = json.loads(json.dumps(_INPUTS))
+        arts["inputs.json"]["company"]["model_format"] = "deck"
+        del arts["commentary.json"]
+        # unit_economics.json and runway.json are NOT skipped -> quantitative path
+        rc, out, stderr = _run(arts)
+        assert rc == 1
 
 
 # ---------------------------------------------------------------------------

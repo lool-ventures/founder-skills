@@ -39,6 +39,7 @@ WARNING_SEVERITY: dict[str, str] = {
     "BLOCKING_CONFLICT": "high",
     "ORPHANED_CONFLICT": "high",
     "VERDICT_SCORE_MISMATCH": "high",
+    "INVALID_PARTNER_COUNT": "high",
     # Medium — quality concerns worth surfacing
     "PARTNER_UNANIMITY": "medium",
     "ZERO_APPLICABLE": "medium",
@@ -434,6 +435,9 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     if _usable(discussion):
         partner_verdicts = _as_list(discussion.get("partner_verdicts"))
         assessment_mode = discussion.get("assessment_mode", "sequential")
+
+        if len(partner_verdicts) != 3:
+            warnings.append(_warn("INVALID_PARTNER_COUNT", f"Expected 3 partner verdicts, got {len(partner_verdicts)}"))
 
         if len(partner_verdicts) == 3:
             verdicts_list = [pv.get("verdict") for pv in partner_verdicts]

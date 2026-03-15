@@ -101,8 +101,21 @@ def _check_existence(dir_path: str, gate: int, model_format: str | None) -> dict
     # Determine which artifacts to check
     required = list(_ALWAYS_REQUIRED)
 
-    # commentary.json is required at Gate 2 for spreadsheet/partial formats
-    if gate >= 2 and model_format in ("spreadsheet", "partial"):
+    # commentary.json is required at Gate 2 for all quantitative reviews.
+    # Detect quantitative path: unit_economics.json and runway.json exist and are not skipped.
+    _require_commentary = False
+    if gate >= 2:
+        for quant_name in ("unit_economics.json", "runway.json"):
+            quant_path = os.path.join(dir_path, quant_name)
+            if os.path.isfile(quant_path):
+                try:
+                    with open(quant_path, encoding="utf-8") as _f:
+                        _qdata = json.load(_f)
+                    if isinstance(_qdata, dict) and not _qdata.get("skipped"):
+                        _require_commentary = True
+                except (json.JSONDecodeError, OSError):
+                    pass
+    if _require_commentary:
         required.append("commentary.json")
 
     all_names = required + _OPTIONAL
@@ -165,11 +178,16 @@ def _check_inputs_quality(data: dict[str, Any]) -> list[dict[str, str]]:
     error_fields = [
         (("company", "company_name"), "company.company_name"),
         (("company", "stage"), "company.stage"),
-        (("revenue", "mrr", "value"), "revenue.mrr.value"),
     ]
     for keys, label in error_fields:
         if _deep_get(data, *keys) is None:
             issues.append(_issue("error", f"{label} is null"))
+
+    # At least one revenue metric required
+    mrr_value = _deep_get(data, "revenue", "mrr", "value")
+    monthly_total = _deep_get(data, "revenue", "monthly_total")
+    if mrr_value is None and monthly_total is None:
+        issues.append(_issue("error", "revenue.mrr.value or revenue.monthly_total is required"))
 
     # Warnings for null fields
     warning_fields = [
