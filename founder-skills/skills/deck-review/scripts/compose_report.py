@@ -40,9 +40,11 @@ WARNING_SEVERITY: dict[str, str] = {
     "SLIDE_COUNT_EXTREME": "medium",
     "UNCITED_CRITIQUE": "medium",
     "AI_CRITERIA_SKIPPED": "medium",
+    "AI_CRITERIA_ON_NON_AI": "medium",
     # Low — minor notes
     "STAGE_OUT_OF_SCOPE": "low",
     "UNSUPPORTED_CHECKLIST_CRITIQUE": "high",
+    "CHECKLIST_VALIDATION_FAILED": "high",
 }
 
 ACCEPTIBLE_SEVERITIES = {"medium"}
@@ -56,8 +58,10 @@ WARNING_LABELS: dict[str, str] = {
     "SLIDE_COUNT_EXTREME": "Slide Count",
     "UNCITED_CRITIQUE": "Uncited Critique",
     "AI_CRITERIA_SKIPPED": "AI Criteria Skipped",
+    "AI_CRITERIA_ON_NON_AI": "AI Criteria Applied to Non-AI Company",
     "STAGE_OUT_OF_SCOPE": "Stage Out of Scope",
     "UNSUPPORTED_CHECKLIST_CRITIQUE": "Unsupported Checklist Critique",
+    "CHECKLIST_VALIDATION_FAILED": "Checklist Validation Failed",
 }
 
 
@@ -248,6 +252,28 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                     )
                 )
 
+    # 8b. AI_CRITERIA_ON_NON_AI — non-AI company penalized on AI-specific criteria
+    if _usable(profile) and _usable(checklist):
+        is_ai = profile.get("is_ai_company", False)
+        if not is_ai:
+            ai_ids = {
+                "ai_retention_rebased",
+                "ai_cost_to_serve_shown",
+                "ai_defensibility_beyond_model",
+                "ai_responsible_controls",
+            }
+            items = _as_list(checklist.get("items"))
+            ai_items = [i for i in items if i.get("id") in ai_ids]
+            penalized = [i.get("id", "?") for i in ai_items if i.get("status") in ("fail", "warn")]
+            if penalized:
+                ids_str = ", ".join(penalized)
+                warnings.append(
+                    _warn(
+                        "AI_CRITERIA_ON_NON_AI",
+                        f"Non-AI company penalized on AI-specific criteria: {ids_str}",
+                    )
+                )
+
     # 9. UNSUPPORTED_CHECKLIST_CRITIQUE — fail/warn items without evidence
     if _usable(checklist):
         unsupported_ids: list[str] = []
@@ -262,6 +288,18 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 _warn(
                     "UNSUPPORTED_CHECKLIST_CRITIQUE",
                     f"Checklist items lack evidence for fail/warn status: {ids_str}",
+                )
+            )
+
+    # 10. CHECKLIST_VALIDATION_FAILED — checklist present but validation.status != "valid"
+    if _usable(checklist):
+        validation = _as_dict(checklist.get("validation"))
+        if validation and validation.get("status") != "valid":
+            val_status = validation.get("status", "unknown")
+            warnings.append(
+                _warn(
+                    "CHECKLIST_VALIDATION_FAILED",
+                    f"Checklist validation status is '{val_status}' — checklist data may be unreliable",
                 )
             )
 

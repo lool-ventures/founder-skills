@@ -52,6 +52,7 @@ WARNING_SEVERITY: dict[str, str] = {
     "UNANIMOUS_VERDICT_MISMATCH": "medium",
     "SHALLOW_ASSESSMENT": "medium",
     "HIGH_NA_COUNT": "medium",
+    "INCOMPLETE_PORTFOLIO_REVIEW": "medium",
     # Low — minor notes
     "SCHEMA_DRIFT": "low",
     "STAGE_OUT_OF_SCOPE": "low",
@@ -347,6 +348,20 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                         " — cross-artifact identity mismatch",
                     )
                 )
+
+    # 3b. INCOMPLETE_PORTFOLIO_REVIEW — conflict check didn't cover all portfolio companies
+    if _usable(conflict_check) and _usable(fund_profile):
+        portfolio = _as_list(fund_profile.get("portfolio"))
+        portfolio_size = conflict_check.get("portfolio_size", 0)
+        if isinstance(portfolio_size, int) and portfolio_size < len(portfolio):
+            not_assessed = len(portfolio) - portfolio_size
+            warnings.append(
+                _warn(
+                    "INCOMPLETE_PORTFOLIO_REVIEW",
+                    f"Conflict check covered {portfolio_size} companies but fund has"
+                    f" {len(portfolio)} — {not_assessed} not assessed",
+                )
+            )
 
     # 4. VERDICT_SCORE_MISMATCH
     if _usable(score_dims):

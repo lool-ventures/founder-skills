@@ -1301,7 +1301,7 @@ def _chart_key_findings(
                 continue
             total_figs += 1
             status = fig.get("status", "")
-            if status == "confirmed":
+            if status == "validated":
                 confirmed += 1
             elif status in ("refuted", "unsupported"):
                 figure_name = str(fig.get("figure", "Unknown"))

@@ -157,7 +157,7 @@ def _build_engine(inputs: dict[str, Any]) -> dict[str, Any]:
     if iia_approved > 0 and iia_disbursement_months > 0:
         grant_monthly = iia_approved / iia_disbursement_months
         grant_start = iia_start_month
-        grant_end = iia_start_month + iia_disbursement_months
+        grant_end = iia_start_month + iia_disbursement_months - 1
     else:
         grant_monthly = 0
         grant_start = None
@@ -166,7 +166,7 @@ def _build_engine(inputs: dict[str, Any]) -> dict[str, Any]:
     # ILS expense fraction: 0.5 when fx_rate is set, 0.0 otherwise
     israel = _deep_get(inputs, "israel_specific", default={})
     fx_rate = _deep_get(israel, "fx_rate_ils_usd", default=None)
-    ils_expense_fraction = 0.5 if fx_rate is not None else 0.0
+    ils_expense_fraction = _deep_get(israel, "ils_expense_fraction", default=0.5) if fx_rate is not None else 0.0
 
     return {
         "cash0": cash0,

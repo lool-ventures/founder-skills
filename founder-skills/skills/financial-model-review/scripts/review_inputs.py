@@ -1051,7 +1051,40 @@ function createEditableTable(arrayPath, columns) {
               updateTableCell(arrayPath, ri, ck, newVal, renderRows);
             };
           })(rowIdx, col.key, col.type));
-          td.appendChild(inp);
+
+          if (col.type === "currency") {
+            var fxRate = getByPath(state, "israel_specific.fx_rate_ils_usd");
+            if (fxRate) {
+              var cellPath = arrayPath + "[" + rowIdx + "]." + col.key;
+              var crow = document.createElement("div");
+              crow.className = "currency-row";
+              inp.style.flex = "1";
+              inp.style.width = "";
+              crow.appendChild(inp);
+              var ctog = document.createElement("div");
+              ctog.className = "currency-toggle";
+              var bUsd = document.createElement("button");
+              bUsd.textContent = "$";
+              bUsd.className = ilsFields[cellPath] ? "" : "active";
+              var bIls = document.createElement("button");
+              bIls.textContent = "\u20aa";
+              bIls.className = ilsFields[cellPath] ? "active" : "";
+              bUsd.addEventListener("click", (function(cp, bu, bi) {
+                return function() { delete ilsFields[cp]; bu.className = "active"; bi.className = ""; };
+              })(cellPath, bUsd, bIls));
+              bIls.addEventListener("click", (function(cp, bu, bi) {
+                return function() { ilsFields[cp] = true; bi.className = "active"; bu.className = ""; };
+              })(cellPath, bUsd, bIls));
+              ctog.appendChild(bUsd);
+              ctog.appendChild(bIls);
+              crow.appendChild(ctog);
+              td.appendChild(crow);
+            } else {
+              td.appendChild(inp);
+            }
+          } else {
+            td.appendChild(inp);
+          }
         }
         tr.appendChild(td);
       });

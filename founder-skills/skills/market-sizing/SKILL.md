@@ -233,4 +233,4 @@ Copy final deliverables to workspace root: `{Company}_Market_Sizing.md`, `.html`
 
 - Each of 22 items: pass / fail / not_applicable
 - `score_pct` = pass / (total - not_applicable) x 100
-- compose_report.py validates cross-artifact consistency (assumption coverage, source quality, sensitivity ranges)
+- compose_report.py validates cross-artifact consistency (assumption coverage, sensitivity ranges)

@@ -214,14 +214,17 @@ def _check_checklist_quality(data: dict[str, Any]) -> list[dict[str, str]]:
 def _check_ue_quality(data: dict[str, Any]) -> list[dict[str, str]]:
     """Validate unit_economics.json content quality."""
     issues: list[dict[str, str]] = []
-    metrics = data.get("metrics", [])
 
-    computed = 0
-    for m in metrics:
-        rating = m.get("rating")
-        value = m.get("value")
-        if rating not in ("not_rated", "not_applicable") and value is not None:
-            computed += 1
+    # Use summary.computed from unit_economics.py which counts all metrics
+    # with non-null values (regardless of rating).  This avoids undercounting
+    # valid-but-unbenchmarked metrics that carry not_rated or contextual ratings.
+    summary = data.get("summary")
+    if isinstance(summary, dict) and "computed" in summary:
+        computed = summary["computed"]
+    else:
+        # Fallback: count value-bearing metrics directly
+        metrics = data.get("metrics", [])
+        computed = sum(1 for m in metrics if m.get("value") is not None)
 
     if computed < 2:
         issues.append(_issue("error", f"Only {computed} computed metrics (need >= 2)"))
