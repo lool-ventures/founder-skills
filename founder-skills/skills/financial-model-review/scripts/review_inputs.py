@@ -536,7 +536,7 @@ function updateWarnings(warnings) {
     btn.textContent = "Dismiss";
     btn.addEventListener("click", (function(wRef, cardRef) {
       return function() {
-        warningOverrides.set(wRef.code, { code: wRef.code, reason: "founder_dismissed" });
+        warningOverrides.set(wRef.code, { code: wRef.code, reason: "founder_dismissed", reviewed_by: "founder", timestamp: new Date().toISOString() });
         cardRef.remove();
         var fields = wRef.contributing_fields || [];
         for (var j = 0; j < fields.length; j++) {

@@ -303,6 +303,7 @@ def _validate_structural(
                 "hardware-subscription",
                 "consumer-subscription",
                 "transactional-fintech",
+                "annual-contracts",
             ],
         ),
         "model_format": (

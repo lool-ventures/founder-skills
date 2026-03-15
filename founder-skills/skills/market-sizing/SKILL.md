@@ -143,7 +143,7 @@ Triangulate key numbers with 2+ independent sources. Track every source with qua
 ### Step 4: Calculate TAM/SAM/SOM -> `sizing.json`
 
 ```bash
-cat <<'SIZING_EOF' | python3 "$SCRIPTS/market_sizing.py" --pretty -o "$ANALYSIS_DIR/sizing.json"
+cat <<'SIZING_EOF' | python3 "$SCRIPTS/market_sizing.py" --stdin --pretty -o "$ANALYSIS_DIR/sizing.json"
 {...sizing input JSON — see artifact-schemas.md for format...}
 SIZING_EOF
 ```

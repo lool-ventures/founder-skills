@@ -45,6 +45,8 @@ WARNING_SEVERITY: dict[str, str] = {
     "STALE_IMPORT": "medium",
     "LOW_EVIDENCE": "medium",
     "FUND_VALIDATION_ERROR": "medium",
+    "CONFLICT_CHECK_VALIDATION_ERROR": "medium",
+    "SCORE_DIMENSIONS_VALIDATION_ERROR": "medium",
     "DEGRADED_ASSESSMENT": "medium",
     "CONSENSUS_SCORE_MISMATCH": "medium",
     "UNANIMOUS_VERDICT_MISMATCH": "medium",
@@ -499,6 +501,30 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 _warn(
                     "FUND_VALIDATION_ERROR",
                     f"Fund profile validation failed: {'; '.join(str(e) for e in errors[:3])}",
+                )
+            )
+
+    # 9b. CONFLICT_CHECK_VALIDATION_ERROR
+    if _usable(conflict_check) and "validation" in conflict_check:
+        validation = _as_dict(conflict_check.get("validation"))
+        if validation.get("status") != "valid":
+            errors = _as_list(validation.get("errors"))
+            warnings.append(
+                _warn(
+                    "CONFLICT_CHECK_VALIDATION_ERROR",
+                    f"Conflict check validation failed: {'; '.join(str(e) for e in errors[:3])}",
+                )
+            )
+
+    # 9c. SCORE_DIMENSIONS_VALIDATION_ERROR
+    if _usable(score_dims) and "validation" in score_dims:
+        validation = _as_dict(score_dims.get("validation"))
+        if validation.get("status") != "valid":
+            errors = _as_list(validation.get("errors"))
+            warnings.append(
+                _warn(
+                    "SCORE_DIMENSIONS_VALIDATION_ERROR",
+                    f"Score dimensions validation failed: {'; '.join(str(e) for e in errors[:3])}",
                 )
             )
 

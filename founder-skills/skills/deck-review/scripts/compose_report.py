@@ -42,6 +42,7 @@ WARNING_SEVERITY: dict[str, str] = {
     "AI_CRITERIA_SKIPPED": "medium",
     # Low — minor notes
     "STAGE_OUT_OF_SCOPE": "low",
+    "UNSUPPORTED_CHECKLIST_CRITIQUE": "high",
 }
 
 ACCEPTIBLE_SEVERITIES = {"medium"}
@@ -56,6 +57,7 @@ WARNING_LABELS: dict[str, str] = {
     "UNCITED_CRITIQUE": "Uncited Critique",
     "AI_CRITERIA_SKIPPED": "AI Criteria Skipped",
     "STAGE_OUT_OF_SCOPE": "Stage Out of Scope",
+    "UNSUPPORTED_CHECKLIST_CRITIQUE": "Unsupported Checklist Critique",
 }
 
 
@@ -245,6 +247,23 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                         "Company detected as AI-first but all AI criteria marked not_applicable",
                     )
                 )
+
+    # 9. UNSUPPORTED_CHECKLIST_CRITIQUE — fail/warn items without evidence
+    if _usable(checklist):
+        unsupported_ids: list[str] = []
+        for item in _as_list(checklist.get("items")):
+            if item.get("status") in ("fail", "warn"):
+                evidence = item.get("evidence", "")
+                if not evidence or not str(evidence).strip():
+                    unsupported_ids.append(item.get("id", "?"))
+        if unsupported_ids:
+            ids_str = ", ".join(unsupported_ids)
+            warnings.append(
+                _warn(
+                    "UNSUPPORTED_CHECKLIST_CRITIQUE",
+                    f"Checklist items lack evidence for fail/warn status: {ids_str}",
+                )
+            )
 
     return warnings
 
