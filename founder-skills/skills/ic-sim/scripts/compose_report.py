@@ -340,6 +340,8 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             if isinstance(entry, dict)
         }
         for conflict in _as_list(conflict_check.get("conflicts")):
+            if not isinstance(conflict, dict):
+                continue
             company = conflict.get("company", "")
             if _normalize_company(company) not in portfolio_names:
                 warnings.append(
@@ -416,16 +418,28 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             all_negative = all(v in _NEGATIVE_VERDICTS for v in partner_verdicts_list)
             consensus_positive = consensus in _POSITIVE_VERDICTS
             consensus_negative = consensus in _NEGATIVE_VERDICTS
-            if (all_positive and consensus_negative) or (all_negative and consensus_positive):
+            # Check opposite polarity (e.g., all positive vs negative consensus)
+            opposite_polarity = (all_positive and consensus_negative) or (all_negative and consensus_positive)
+            # Also check unanimous same-verdict mismatch (e.g., all "more_diligence" vs consensus "invest")
+            unanimous_exact = len(set(partner_verdicts_list)) == 1 and partner_verdicts_list[0] != consensus
+            if opposite_polarity or unanimous_exact:
+                if opposite_polarity:
+                    detail = (
+                        f"{'positive' if all_positive else 'negative'} "
+                        f"but consensus is '{discussion.get('consensus_verdict')}' "
+                        f"({'negative' if consensus_negative else 'positive'})"
+                    )
+                else:
+                    detail = (
+                        f"unanimously '{partner_verdicts_list[0]}' "
+                        f"but consensus is '{discussion.get('consensus_verdict')}'"
+                    )
                 warnings.append(
                     _warn(
                         "UNANIMOUS_VERDICT_MISMATCH",
                         (
-                            f"All {len(partner_verdicts_list)} partners are "
-                            f"{'positive' if all_positive else 'negative'} "
-                            f"but consensus is '{discussion.get('consensus_verdict')}' "
-                            f"({'negative' if consensus_negative else 'positive'}) "
-                            "— partner_verdicts or consensus_verdict likely not "
+                            f"All {len(partner_verdicts_list)} partners are {detail}"
+                            " — partner_verdicts or consensus_verdict likely not "
                             "updated after debate"
                         ),
                     )
@@ -483,6 +497,8 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # 7. STALE_IMPORT
     if _usable(prior):
         for imp in _as_list(prior.get("imported")):
+            if not isinstance(imp, dict):
+                continue
             import_date_str = imp.get("import_date", "")
             if import_date_str:
                 try:
@@ -501,6 +517,8 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # 8. LOW_EVIDENCE
     if _usable(score_dims):
         for item in _as_list(score_dims.get("items")):
+            if not isinstance(item, dict):
+                continue
             if item.get("status") != "not_applicable":
                 evidence = item.get("evidence")
                 if not evidence or (isinstance(evidence, str) and evidence.strip() == ""):
@@ -769,6 +787,8 @@ def _section_conflict_check(conflict: dict[str, Any] | None) -> str:
     if conflicts:
         lines.append("")
         for c in conflicts:
+            if not isinstance(c, dict):
+                continue
             sev = c.get("severity", "?").upper()
             lines.append(f"- **[{sev}]** {c.get('company', '?')} ({c.get('type', '?')}): {c.get('rationale', '?')}")
 
@@ -786,6 +806,8 @@ def _section_discussion(discussion: dict[str, Any] | None) -> str:
 
     # Partner positions
     for pv in _as_list(discussion.get("partner_verdicts")):
+        if not isinstance(pv, dict):
+            continue
         partner = (pv.get("partner") or "?").title()
         verdict = pv.get("verdict") or "?"
         rationale = pv.get("rationale") or ""
@@ -798,8 +820,12 @@ def _section_discussion(discussion: dict[str, Any] | None) -> str:
     if debate:
         lines.append("\n### Key Debates\n")
         for section in debate:
+            if not isinstance(section, dict):
+                continue
             lines.append(f"**{section.get('topic', '?')}**\n")
             for exchange in _as_list(section.get("exchanges")):
+                if not isinstance(exchange, dict):
+                    continue
                 partner = (exchange.get("partner") or "?").title()
                 position = exchange.get("position") or ""
                 lines.append(f"> **{partner}:** {position}\n")

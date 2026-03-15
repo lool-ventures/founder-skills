@@ -864,9 +864,17 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
         if not isinstance(s, dict):
             continue
         dp_list = _as_list(s.get("decision_points"))
-        dp_single = _as_dict(s.get("decision_point"))
-        if dp_single and dp_single.get("month"):
-            dp_list = [dp_single] + dp_list
+        dp_raw = s.get("decision_point")
+        # Backward compat: dict with month/action fields
+        if isinstance(dp_raw, dict) and dp_raw.get("month"):
+            dp_list = [dp_raw] + dp_list
+        # New format from runway.py: YYYY-MM string
+        elif isinstance(dp_raw, str) and dp_raw:
+            # Derive month index from runway_months (dp = max(runway-12, 0))
+            rw = s.get("runway_months")
+            if rw is not None:
+                dp_month_idx = max(int(_num(rw)) - 12, 0)
+                dp_list = [{"month": dp_month_idx, "action": "Start fundraising"}] + dp_list
         for dp in dp_list:
             if not isinstance(dp, dict):
                 continue
@@ -1222,11 +1230,11 @@ def compose_html(dir_path: str) -> str:
     checklist_html = _chart_checklist_heatmap(checklist)
     unit_econ_html = _chart_unit_economics(unit_economics)
     runway_html = _chart_runway(runway)
-    # Revenue section only if MRR time-series data exists
+    # Revenue section only if time-series data exists
     has_mrr_series = False
     if _usable(inputs):
         revenue = _as_dict(inputs.get("revenue"))
-        has_mrr_series = len(_as_list(revenue.get("mrr_history"))) > 1
+        has_mrr_series = len(_as_list(revenue.get("monthly"))) > 1 or len(_as_list(revenue.get("quarterly"))) > 1
     revenue_html = _chart_revenue_waterfall(inputs) if has_mrr_series else ""
 
     # Key Findings section (only if there are findings)

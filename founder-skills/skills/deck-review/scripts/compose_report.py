@@ -39,6 +39,7 @@ WARNING_SEVERITY: dict[str, str] = {
     "STAGE_MISMATCH": "medium",
     "SLIDE_COUNT_EXTREME": "medium",
     "UNCITED_CRITIQUE": "medium",
+    "AI_CRITERIA_MISSING": "high",
     "AI_CRITERIA_SKIPPED": "medium",
     "AI_CRITERIA_ON_NON_AI": "medium",
     # Low — minor notes
@@ -57,6 +58,7 @@ WARNING_LABELS: dict[str, str] = {
     "STAGE_MISMATCH": "Stage Mismatch",
     "SLIDE_COUNT_EXTREME": "Slide Count",
     "UNCITED_CRITIQUE": "Uncited Critique",
+    "AI_CRITERIA_MISSING": "AI Criteria Missing",
     "AI_CRITERIA_SKIPPED": "AI Criteria Skipped",
     "AI_CRITERIA_ON_NON_AI": "AI Criteria Applied to Non-AI Company",
     "STAGE_OUT_OF_SCOPE": "Stage Out of Scope",
@@ -244,6 +246,13 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             }
             items = _as_list(checklist.get("items"))
             ai_items = [i for i in items if i.get("id") in ai_ids]
+            if len(ai_items) < 4:
+                warnings.append(
+                    _warn(
+                        "AI_CRITERIA_MISSING",
+                        f"AI company checklist missing {4 - len(ai_items)} of 4 AI criteria items",
+                    )
+                )
             if ai_items and all(i.get("status") == "not_applicable" for i in ai_items):
                 warnings.append(
                     _warn(

@@ -348,18 +348,21 @@ def _check_cross_consistency(
     if inputs_data is None or artifacts.get("inputs.json", {}).get("_skipped"):
         return checks
 
-    # runway.baseline.net_cash vs inputs.cash.current_balance
+    # runway.baseline.net_cash vs inputs net cash (current_balance - debt)
     runway_entry = artifacts.get("runway.json", {})
     runway_data = runway_entry.get("_data")
     if runway_data and not runway_entry.get("_skipped"):
         runway_cash = _deep_get(runway_data, "baseline", "net_cash")
-        inputs_cash = _deep_get(inputs_data, "cash", "current_balance")
+        raw_balance = _deep_get(inputs_data, "cash", "current_balance")
+        raw_debt = _deep_get(inputs_data, "cash", "debt")
+        inputs_cash = (raw_balance if isinstance(raw_balance, (int, float)) else 0) - (
+            raw_debt if isinstance(raw_debt, (int, float)) else 0
+        )
         if not _approx_eq(runway_cash, inputs_cash):
             checks.append(
                 _issue(
                     "warning",
-                    f"runway baseline.net_cash ({runway_cash}) diverges >20% "
-                    f"from inputs cash.current_balance ({inputs_cash})",
+                    f"runway baseline.net_cash ({runway_cash}) diverges >20% from inputs net cash ({inputs_cash})",
                 )
             )
 
