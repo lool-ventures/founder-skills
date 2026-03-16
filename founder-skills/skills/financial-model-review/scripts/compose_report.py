@@ -252,21 +252,24 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
         baseline = _as_dict(runway.get("baseline"))
         cash_data = _as_dict(inputs.get("cash"))
         runway_cash = baseline.get("net_cash")
-        inputs_cash = cash_data.get("current_balance")
+        raw_balance = cash_data.get("current_balance")
+        raw_debt = cash_data.get("debt")
+        inputs_cash = (raw_balance if isinstance(raw_balance, (int, float)) else 0) - (
+            raw_debt if isinstance(raw_debt, (int, float)) else 0
+        )
         if (
             runway_cash is not None
-            and inputs_cash is not None
             and isinstance(runway_cash, (int, float))
-            and isinstance(inputs_cash, (int, float))
-            and inputs_cash > 0
+            and isinstance(raw_balance, (int, float))
+            and inputs_cash != 0
         ):
-            delta_pct = abs(runway_cash - inputs_cash) / inputs_cash * 100
+            delta_pct = abs(runway_cash - inputs_cash) / abs(inputs_cash) * 100
             if delta_pct > 10:
                 warnings.append(
                     _warn(
                         "RUNWAY_INCONSISTENCY",
                         f"Runway net_cash ({_fmt_usd(runway_cash)}) differs from inputs "
-                        f"current_balance ({_fmt_usd(inputs_cash)}) by {delta_pct:.0f}%",
+                        f"net cash ({_fmt_usd(inputs_cash)}) by {delta_pct:.0f}%",
                     )
                 )
 

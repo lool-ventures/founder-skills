@@ -39,17 +39,21 @@ WARNING_SEVERITY: dict[str, str] = {
     "BLOCKING_CONFLICT": "high",
     "ORPHANED_CONFLICT": "high",
     "VERDICT_SCORE_MISMATCH": "high",
+    "INVALID_PARTNER_COUNT": "high",
     # Medium — quality concerns worth surfacing
     "PARTNER_UNANIMITY": "medium",
     "ZERO_APPLICABLE": "medium",
     "STALE_IMPORT": "medium",
     "LOW_EVIDENCE": "medium",
     "FUND_VALIDATION_ERROR": "medium",
+    "CONFLICT_CHECK_VALIDATION_ERROR": "medium",
+    "SCORE_DIMENSIONS_VALIDATION_ERROR": "medium",
     "DEGRADED_ASSESSMENT": "medium",
     "CONSENSUS_SCORE_MISMATCH": "medium",
     "UNANIMOUS_VERDICT_MISMATCH": "medium",
     "SHALLOW_ASSESSMENT": "medium",
     "HIGH_NA_COUNT": "medium",
+    "INCOMPLETE_PORTFOLIO_REVIEW": "medium",
     # Low — minor notes
     "SCHEMA_DRIFT": "low",
     "STAGE_OUT_OF_SCOPE": "low",
@@ -336,6 +340,8 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             if isinstance(entry, dict)
         }
         for conflict in _as_list(conflict_check.get("conflicts")):
+            if not isinstance(conflict, dict):
+                continue
             company = conflict.get("company", "")
             if _normalize_company(company) not in portfolio_names:
                 warnings.append(
@@ -345,6 +351,20 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                         " — cross-artifact identity mismatch",
                     )
                 )
+
+    # 3b. INCOMPLETE_PORTFOLIO_REVIEW — conflict check didn't cover all portfolio companies
+    if _usable(conflict_check) and _usable(fund_profile):
+        portfolio = _as_list(fund_profile.get("portfolio"))
+        portfolio_size = conflict_check.get("portfolio_size", 0)
+        if isinstance(portfolio_size, int) and portfolio_size < len(portfolio):
+            not_assessed = len(portfolio) - portfolio_size
+            warnings.append(
+                _warn(
+                    "INCOMPLETE_PORTFOLIO_REVIEW",
+                    f"Conflict check covered {portfolio_size} companies but fund has"
+                    f" {len(portfolio)} — {not_assessed} not assessed",
+                )
+            )
 
     # 4. VERDICT_SCORE_MISMATCH
     if _usable(score_dims):
@@ -398,16 +418,28 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             all_negative = all(v in _NEGATIVE_VERDICTS for v in partner_verdicts_list)
             consensus_positive = consensus in _POSITIVE_VERDICTS
             consensus_negative = consensus in _NEGATIVE_VERDICTS
-            if (all_positive and consensus_negative) or (all_negative and consensus_positive):
+            # Check opposite polarity (e.g., all positive vs negative consensus)
+            opposite_polarity = (all_positive and consensus_negative) or (all_negative and consensus_positive)
+            # Also check unanimous same-verdict mismatch (e.g., all "more_diligence" vs consensus "invest")
+            unanimous_exact = len(set(partner_verdicts_list)) == 1 and partner_verdicts_list[0] != consensus
+            if opposite_polarity or unanimous_exact:
+                if opposite_polarity:
+                    detail = (
+                        f"{'positive' if all_positive else 'negative'} "
+                        f"but consensus is '{discussion.get('consensus_verdict')}' "
+                        f"({'negative' if consensus_negative else 'positive'})"
+                    )
+                else:
+                    detail = (
+                        f"unanimously '{partner_verdicts_list[0]}' "
+                        f"but consensus is '{discussion.get('consensus_verdict')}'"
+                    )
                 warnings.append(
                     _warn(
                         "UNANIMOUS_VERDICT_MISMATCH",
                         (
-                            f"All {len(partner_verdicts_list)} partners are "
-                            f"{'positive' if all_positive else 'negative'} "
-                            f"but consensus is '{discussion.get('consensus_verdict')}' "
-                            f"({'negative' if consensus_negative else 'positive'}) "
-                            "— partner_verdicts or consensus_verdict likely not "
+                            f"All {len(partner_verdicts_list)} partners are {detail}"
+                            " — partner_verdicts or consensus_verdict likely not "
                             "updated after debate"
                         ),
                     )
@@ -417,6 +449,9 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     if _usable(discussion):
         partner_verdicts = _as_list(discussion.get("partner_verdicts"))
         assessment_mode = discussion.get("assessment_mode", "sequential")
+
+        if len(partner_verdicts) != 3:
+            warnings.append(_warn("INVALID_PARTNER_COUNT", f"Expected 3 partner verdicts, got {len(partner_verdicts)}"))
 
         if len(partner_verdicts) == 3:
             verdicts_list = [pv.get("verdict") for pv in partner_verdicts]
@@ -462,6 +497,8 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # 7. STALE_IMPORT
     if _usable(prior):
         for imp in _as_list(prior.get("imported")):
+            if not isinstance(imp, dict):
+                continue
             import_date_str = imp.get("import_date", "")
             if import_date_str:
                 try:
@@ -480,6 +517,8 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # 8. LOW_EVIDENCE
     if _usable(score_dims):
         for item in _as_list(score_dims.get("items")):
+            if not isinstance(item, dict):
+                continue
             if item.get("status") != "not_applicable":
                 evidence = item.get("evidence")
                 if not evidence or (isinstance(evidence, str) and evidence.strip() == ""):
@@ -499,6 +538,30 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 _warn(
                     "FUND_VALIDATION_ERROR",
                     f"Fund profile validation failed: {'; '.join(str(e) for e in errors[:3])}",
+                )
+            )
+
+    # 9b. CONFLICT_CHECK_VALIDATION_ERROR
+    if _usable(conflict_check) and "validation" in conflict_check:
+        validation = _as_dict(conflict_check.get("validation"))
+        if validation.get("status") != "valid":
+            errors = _as_list(validation.get("errors"))
+            warnings.append(
+                _warn(
+                    "CONFLICT_CHECK_VALIDATION_ERROR",
+                    f"Conflict check validation failed: {'; '.join(str(e) for e in errors[:3])}",
+                )
+            )
+
+    # 9c. SCORE_DIMENSIONS_VALIDATION_ERROR
+    if _usable(score_dims) and "validation" in score_dims:
+        validation = _as_dict(score_dims.get("validation"))
+        if validation.get("status") != "valid":
+            errors = _as_list(validation.get("errors"))
+            warnings.append(
+                _warn(
+                    "SCORE_DIMENSIONS_VALIDATION_ERROR",
+                    f"Score dimensions validation failed: {'; '.join(str(e) for e in errors[:3])}",
                 )
             )
 
@@ -724,6 +787,8 @@ def _section_conflict_check(conflict: dict[str, Any] | None) -> str:
     if conflicts:
         lines.append("")
         for c in conflicts:
+            if not isinstance(c, dict):
+                continue
             sev = c.get("severity", "?").upper()
             lines.append(f"- **[{sev}]** {c.get('company', '?')} ({c.get('type', '?')}): {c.get('rationale', '?')}")
 
@@ -741,6 +806,8 @@ def _section_discussion(discussion: dict[str, Any] | None) -> str:
 
     # Partner positions
     for pv in _as_list(discussion.get("partner_verdicts")):
+        if not isinstance(pv, dict):
+            continue
         partner = (pv.get("partner") or "?").title()
         verdict = pv.get("verdict") or "?"
         rationale = pv.get("rationale") or ""
@@ -753,8 +820,12 @@ def _section_discussion(discussion: dict[str, Any] | None) -> str:
     if debate:
         lines.append("\n### Key Debates\n")
         for section in debate:
+            if not isinstance(section, dict):
+                continue
             lines.append(f"**{section.get('topic', '?')}**\n")
             for exchange in _as_list(section.get("exchanges")):
+                if not isinstance(exchange, dict):
+                    continue
                 partner = (exchange.get("partner") or "?").title()
                 position = exchange.get("position") or ""
                 lines.append(f"> **{partner}:** {position}\n")

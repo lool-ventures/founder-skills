@@ -143,7 +143,7 @@ Triangulate key numbers with 2+ independent sources. Track every source with qua
 ### Step 4: Calculate TAM/SAM/SOM -> `sizing.json`
 
 ```bash
-cat <<'SIZING_EOF' | python3 "$SCRIPTS/market_sizing.py" --pretty -o "$ANALYSIS_DIR/sizing.json"
+cat <<'SIZING_EOF' | python3 "$SCRIPTS/market_sizing.py" --stdin --pretty -o "$ANALYSIS_DIR/sizing.json"
 {...sizing input JSON — see artifact-schemas.md for format...}
 SIZING_EOF
 ```
@@ -233,4 +233,4 @@ Copy final deliverables to workspace root: `{Company}_Market_Sizing.md`, `.html`
 
 - Each of 22 items: pass / fail / not_applicable
 - `score_pct` = pass / (total - not_applicable) x 100
-- compose_report.py validates cross-artifact consistency (assumption coverage, source quality, sensitivity ranges)
+- compose_report.py validates cross-artifact consistency (assumption coverage, sensitivity ranges)

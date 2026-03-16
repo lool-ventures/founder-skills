@@ -245,15 +245,15 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
             na_count += 1
             categories[category]["not_applicable"] += 1
 
-    # Advisory warning: fail/warn without evidence
+    # Evidence is required for fail/warn items at checklist generation time.
+    evidence_errors: list[str] = []
     for item in enriched:
         if item["status"] in ("fail", "warn"):
-            evidence = item.get("evidence")
-            if not evidence or (isinstance(evidence, str) and not evidence.strip()):
-                print(
-                    f"Warning: {item['id']} has status '{item['status']}' but no evidence",
-                    file=sys.stderr,
-                )
+            ev = item.get("evidence")
+            if not ev or (isinstance(ev, str) and not ev.strip()):
+                msg = f"{item['id']} has status '{item['status']}' but no evidence"
+                print(f"Warning: {msg}", file=sys.stderr)
+                evidence_errors.append(msg)
 
     # Score: pass / (total - not_applicable) * 100
     # Why no weighting: keeps scoring simple and defensible — each applicable
@@ -286,7 +286,7 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
             "failed_items": failed_items,
             "warned_items": warned_items,
         },
-    }, []
+    }, evidence_errors
 
 
 def parse_args() -> argparse.Namespace:

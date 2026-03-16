@@ -109,7 +109,11 @@ def _validate_config(data: dict[str, Any]) -> tuple[str, dict[str, float], dict[
         return "", {}, {}, errors
 
     # Normalize approach
-    approach = data.get("approach", "bottom_up").replace("-", "_")
+    approach_raw = data.get("approach", "bottom_up")
+    if not isinstance(approach_raw, str):
+        errors.append(f"'approach' must be a string (got {type(approach_raw).__name__})")
+        return "", {}, {}, errors
+    approach = approach_raw.replace("-", "_")
     if approach not in VALID_APPROACHES:
         errors.append(f"approach must be one of {sorted(VALID_APPROACHES)} (got '{approach}')")
         return approach, {}, {}, errors

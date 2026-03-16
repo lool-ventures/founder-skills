@@ -37,7 +37,7 @@
 
 - Scripts use PEP 723 inline metadata; default to `python`, `uv run` optional
 - Scripts output JSON to stdout, warnings/errors to stderr
-- All scripts support `--pretty` for human-readable output and `-o <file>` to write to file instead of stdout
+- All scripts support `--pretty` for human-readable output and `-o <file>` to write to file (skill scripts emit a JSON receipt to stdout confirming the write)
 - Skill-local scripts live in `founder-skills/skills/<skill>/scripts/`
 
 ## Shared Scripts

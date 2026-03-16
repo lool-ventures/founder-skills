@@ -266,9 +266,16 @@ def _is_saas(model_type: str) -> bool:
     return model_type.lower() in _SAAS_MODEL_TYPES
 
 
-def _is_ai_sector(sector: str) -> bool:
-    """Check if the sector is AI-related (gets gross margin threshold adjustment)."""
-    return sector.lower() in _AI_SECTORS
+def _is_ai_company(sector: str, model_type: str, traits: list[str] | None = None) -> bool:
+    """Check if the company is AI-related (gets gross margin threshold adjustment).
+
+    Checks three signals: sector, revenue_model_type, and traits.
+    """
+    if sector.lower() in _AI_SECTORS:
+        return True
+    if model_type.lower() == "ai-native":
+        return True
+    return bool(traits and "ai-powered" in traits)
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +375,8 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
     sector = company.get("sector", "").lower()
     model_type = company.get("revenue_model_type", "").lower()
     saas = _is_saas(model_type)
-    ai_sector = _is_ai_sector(sector)
+    traits = company.get("traits", []) or []
+    ai_sector = _is_ai_company(sector, model_type, traits if isinstance(traits, list) else [])
     data_confidence = company.get("data_confidence", "exact")
 
     benchmarks = _get_stage_benchmarks(stage)

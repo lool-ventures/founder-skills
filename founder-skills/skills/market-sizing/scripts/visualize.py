@@ -1301,7 +1301,7 @@ def _chart_key_findings(
                 continue
             total_figs += 1
             status = fig.get("status", "")
-            if status == "confirmed":
+            if status == "validated":
                 confirmed += 1
             elif status in ("refuted", "unsupported"):
                 figure_name = str(fig.get("figure", "Unknown"))
@@ -1387,7 +1387,7 @@ def compose_html(dir_path: str) -> str:
 
     # Compute provenance
     provenance_data: dict[str, dict[str, Any]] | None = None
-    if _usable(sizing) and _usable(validation):
+    if _usable(sizing) and (_usable(validation) or _usable(inputs)):
         provenance_data = _compute_provenance(sizing, validation, inputs)
 
     # Build sections

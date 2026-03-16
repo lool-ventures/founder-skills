@@ -303,6 +303,7 @@ def _validate_structural(
                 "hardware-subscription",
                 "consumer-subscription",
                 "transactional-fintech",
+                "annual-contracts",
             ],
         ),
         "model_format": (
@@ -717,16 +718,17 @@ def _validate_completeness(inputs: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
 
-    # revenue.mrr.value when revenue key exists
+    # revenue.mrr.value when revenue key exists and no monthly_total fallback
     if (
         "revenue" in inputs
         and isinstance(inputs["revenue"], dict)
         and _deep_get(inputs, "revenue", "mrr", "value") is None
+        and _deep_get(inputs, "revenue", "monthly_total") is None
     ):
         warnings.append(
             {
                 "code": "MISSING_MRR",
-                "message": "revenue.mrr.value should be provided when revenue key exists",
+                "message": "revenue.mrr.value or revenue.monthly_total should be provided when revenue key exists",
                 "field": "revenue.mrr.value",
                 "layer": 4,
             }

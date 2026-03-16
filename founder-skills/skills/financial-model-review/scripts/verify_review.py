@@ -101,8 +101,21 @@ def _check_existence(dir_path: str, gate: int, model_format: str | None) -> dict
     # Determine which artifacts to check
     required = list(_ALWAYS_REQUIRED)
 
-    # commentary.json is required at Gate 2 for spreadsheet/partial formats
-    if gate >= 2 and model_format in ("spreadsheet", "partial"):
+    # commentary.json is required at Gate 2 for all quantitative reviews.
+    # Detect quantitative path: unit_economics.json and runway.json exist and are not skipped.
+    _require_commentary = False
+    if gate >= 2:
+        for quant_name in ("unit_economics.json", "runway.json"):
+            quant_path = os.path.join(dir_path, quant_name)
+            if os.path.isfile(quant_path):
+                try:
+                    with open(quant_path, encoding="utf-8") as _f:
+                        _qdata = json.load(_f)
+                    if isinstance(_qdata, dict) and not _qdata.get("skipped"):
+                        _require_commentary = True
+                except (json.JSONDecodeError, OSError):
+                    pass
+    if _require_commentary:
         required.append("commentary.json")
 
     all_names = required + _OPTIONAL
@@ -165,11 +178,16 @@ def _check_inputs_quality(data: dict[str, Any]) -> list[dict[str, str]]:
     error_fields = [
         (("company", "company_name"), "company.company_name"),
         (("company", "stage"), "company.stage"),
-        (("revenue", "mrr", "value"), "revenue.mrr.value"),
     ]
     for keys, label in error_fields:
         if _deep_get(data, *keys) is None:
             issues.append(_issue("error", f"{label} is null"))
+
+    # At least one revenue metric required
+    mrr_value = _deep_get(data, "revenue", "mrr", "value")
+    monthly_total = _deep_get(data, "revenue", "monthly_total")
+    if mrr_value is None and monthly_total is None:
+        issues.append(_issue("error", "revenue.mrr.value or revenue.monthly_total is required"))
 
     # Warnings for null fields
     warning_fields = [
@@ -214,14 +232,17 @@ def _check_checklist_quality(data: dict[str, Any]) -> list[dict[str, str]]:
 def _check_ue_quality(data: dict[str, Any]) -> list[dict[str, str]]:
     """Validate unit_economics.json content quality."""
     issues: list[dict[str, str]] = []
-    metrics = data.get("metrics", [])
 
-    computed = 0
-    for m in metrics:
-        rating = m.get("rating")
-        value = m.get("value")
-        if rating not in ("not_rated", "not_applicable") and value is not None:
-            computed += 1
+    # Use summary.computed from unit_economics.py which counts all metrics
+    # with non-null values (regardless of rating).  This avoids undercounting
+    # valid-but-unbenchmarked metrics that carry not_rated or contextual ratings.
+    summary = data.get("summary")
+    if isinstance(summary, dict) and "computed" in summary:
+        computed = summary["computed"]
+    else:
+        # Fallback: count value-bearing metrics directly
+        metrics = data.get("metrics", [])
+        computed = sum(1 for m in metrics if m.get("value") is not None)
 
     if computed < 2:
         issues.append(_issue("error", f"Only {computed} computed metrics (need >= 2)"))
@@ -327,18 +348,21 @@ def _check_cross_consistency(
     if inputs_data is None or artifacts.get("inputs.json", {}).get("_skipped"):
         return checks
 
-    # runway.baseline.net_cash vs inputs.cash.current_balance
+    # runway.baseline.net_cash vs inputs net cash (current_balance - debt)
     runway_entry = artifacts.get("runway.json", {})
     runway_data = runway_entry.get("_data")
     if runway_data and not runway_entry.get("_skipped"):
         runway_cash = _deep_get(runway_data, "baseline", "net_cash")
-        inputs_cash = _deep_get(inputs_data, "cash", "current_balance")
+        raw_balance = _deep_get(inputs_data, "cash", "current_balance")
+        raw_debt = _deep_get(inputs_data, "cash", "debt")
+        inputs_cash = (raw_balance if isinstance(raw_balance, (int, float)) else 0) - (
+            raw_debt if isinstance(raw_debt, (int, float)) else 0
+        )
         if not _approx_eq(runway_cash, inputs_cash):
             checks.append(
                 _issue(
                     "warning",
-                    f"runway baseline.net_cash ({runway_cash}) diverges >20% "
-                    f"from inputs cash.current_balance ({inputs_cash})",
+                    f"runway baseline.net_cash ({runway_cash}) diverges >20% from inputs net cash ({inputs_cash})",
                 )
             )
 

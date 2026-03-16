@@ -64,8 +64,15 @@ QUANTITATIVE_PARAMS = {
     "share_pct",
 }
 
-REQUIRED_ARTIFACTS = ["inputs.json", "methodology.json", "validation.json", "sizing.json", "checklist.json"]
-OPTIONAL_ARTIFACTS = ["sensitivity.json"]
+REQUIRED_ARTIFACTS = [
+    "inputs.json",
+    "methodology.json",
+    "validation.json",
+    "sizing.json",
+    "checklist.json",
+    "sensitivity.json",
+]
+OPTIONAL_ARTIFACTS: list[str] = []
 
 # Human-readable parameter names for report presentation
 PARAM_LABELS: dict[str, str] = {

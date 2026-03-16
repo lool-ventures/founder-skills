@@ -39,9 +39,13 @@ WARNING_SEVERITY: dict[str, str] = {
     "STAGE_MISMATCH": "medium",
     "SLIDE_COUNT_EXTREME": "medium",
     "UNCITED_CRITIQUE": "medium",
+    "AI_CRITERIA_MISSING": "high",
     "AI_CRITERIA_SKIPPED": "medium",
+    "AI_CRITERIA_ON_NON_AI": "medium",
     # Low — minor notes
     "STAGE_OUT_OF_SCOPE": "low",
+    "UNSUPPORTED_CHECKLIST_CRITIQUE": "high",
+    "CHECKLIST_VALIDATION_FAILED": "high",
 }
 
 ACCEPTIBLE_SEVERITIES = {"medium"}
@@ -54,8 +58,12 @@ WARNING_LABELS: dict[str, str] = {
     "STAGE_MISMATCH": "Stage Mismatch",
     "SLIDE_COUNT_EXTREME": "Slide Count",
     "UNCITED_CRITIQUE": "Uncited Critique",
+    "AI_CRITERIA_MISSING": "AI Criteria Missing",
     "AI_CRITERIA_SKIPPED": "AI Criteria Skipped",
+    "AI_CRITERIA_ON_NON_AI": "AI Criteria Applied to Non-AI Company",
     "STAGE_OUT_OF_SCOPE": "Stage Out of Scope",
+    "UNSUPPORTED_CHECKLIST_CRITIQUE": "Unsupported Checklist Critique",
+    "CHECKLIST_VALIDATION_FAILED": "Checklist Validation Failed",
 }
 
 
@@ -238,6 +246,13 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             }
             items = _as_list(checklist.get("items"))
             ai_items = [i for i in items if i.get("id") in ai_ids]
+            if len(ai_items) < 4:
+                warnings.append(
+                    _warn(
+                        "AI_CRITERIA_MISSING",
+                        f"AI company checklist missing {4 - len(ai_items)} of 4 AI criteria items",
+                    )
+                )
             if ai_items and all(i.get("status") == "not_applicable" for i in ai_items):
                 warnings.append(
                     _warn(
@@ -245,6 +260,57 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                         "Company detected as AI-first but all AI criteria marked not_applicable",
                     )
                 )
+
+    # 8b. AI_CRITERIA_ON_NON_AI — non-AI company penalized on AI-specific criteria
+    if _usable(profile) and _usable(checklist):
+        is_ai = profile.get("is_ai_company", False)
+        if not is_ai:
+            ai_ids = {
+                "ai_retention_rebased",
+                "ai_cost_to_serve_shown",
+                "ai_defensibility_beyond_model",
+                "ai_responsible_controls",
+            }
+            items = _as_list(checklist.get("items"))
+            ai_items = [i for i in items if i.get("id") in ai_ids]
+            penalized = [i.get("id", "?") for i in ai_items if i.get("status") in ("fail", "warn")]
+            if penalized:
+                ids_str = ", ".join(penalized)
+                warnings.append(
+                    _warn(
+                        "AI_CRITERIA_ON_NON_AI",
+                        f"Non-AI company penalized on AI-specific criteria: {ids_str}",
+                    )
+                )
+
+    # 9. UNSUPPORTED_CHECKLIST_CRITIQUE — fail/warn items without evidence
+    if _usable(checklist):
+        unsupported_ids: list[str] = []
+        for item in _as_list(checklist.get("items")):
+            if item.get("status") in ("fail", "warn"):
+                evidence = item.get("evidence", "")
+                if not evidence or not str(evidence).strip():
+                    unsupported_ids.append(item.get("id", "?"))
+        if unsupported_ids:
+            ids_str = ", ".join(unsupported_ids)
+            warnings.append(
+                _warn(
+                    "UNSUPPORTED_CHECKLIST_CRITIQUE",
+                    f"Checklist items lack evidence for fail/warn status: {ids_str}",
+                )
+            )
+
+    # 10. CHECKLIST_VALIDATION_FAILED — checklist present but validation.status != "valid"
+    if _usable(checklist):
+        validation = _as_dict(checklist.get("validation"))
+        if validation and validation.get("status") != "valid":
+            val_status = validation.get("status", "unknown")
+            warnings.append(
+                _warn(
+                    "CHECKLIST_VALIDATION_FAILED",
+                    f"Checklist validation status is '{val_status}' — checklist data may be unreliable",
+                )
+            )
 
     return warnings
 
@@ -370,6 +436,9 @@ def _section_slide_feedback(reviews: dict[str, Any] | None) -> str:
             lines.append("**What investors will question:**")
             for w in weaknesses:
                 lines.append(f"- {w}")
+            refs = _as_list(review.get("best_practice_refs"))
+            if refs:
+                lines.append(f"  *Principles: {', '.join(str(r) for r in refs)}*")
 
         recommendations = _as_list(review.get("recommendations"))
         if recommendations:
@@ -468,7 +537,7 @@ def _section_priority_fixes(
 
     # Draw from missing slides
     if reviews is not None and not _is_stub(reviews):
-        for m in reviews.get("missing_slides", []):
+        for m in _as_list(reviews.get("missing_slides")):
             if m.get("importance") == "critical":
                 fixes.append(f"Add missing {m.get('expected_type', 'slide')}: {m.get('recommendation', '')}")
 

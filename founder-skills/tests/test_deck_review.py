@@ -704,6 +704,10 @@ def test_compose_severity_map_complete() -> None:
         "UNCITED_CRITIQUE",
         "AI_CRITERIA_SKIPPED",
         "STAGE_OUT_OF_SCOPE",
+        "UNSUPPORTED_CHECKLIST_CRITIQUE",
+        "CHECKLIST_VALIDATION_FAILED",
+        "AI_CRITERIA_ON_NON_AI",
+        "AI_CRITERIA_MISSING",
     ]
     assert len(sev_map) == len(expected), f"expected {len(expected)} codes, got {len(sev_map)}"
     for code in expected:

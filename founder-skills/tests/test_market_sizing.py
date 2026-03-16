@@ -586,8 +586,8 @@ def test_compose_missing_required() -> None:
     assert "MISSING_ARTIFACT" in codes
 
 
-def test_compose_missing_optional_sensitivity() -> None:
-    """No sensitivity.json -> MISSING_OPTIONAL_ARTIFACT."""
+def test_compose_missing_sensitivity() -> None:
+    """No sensitivity.json -> MISSING_ARTIFACT (sensitivity is required)."""
     d = _make_artifact_dir(
         {
             "inputs.json": _VALID_INPUTS,
@@ -601,7 +601,9 @@ def test_compose_missing_optional_sensitivity() -> None:
     assert rc == 0
     assert data is not None
     codes = [w["code"] for w in data["validation"]["warnings"]]
-    assert "MISSING_OPTIONAL_ARTIFACT" in codes
+    assert "MISSING_ARTIFACT" in codes
+    missing_msgs = [w["message"] for w in data["validation"]["warnings"] if w["code"] == "MISSING_ARTIFACT"]
+    assert any("sensitivity.json" in m for m in missing_msgs)
 
 
 def test_compose_checklist_failures() -> None:
@@ -1195,12 +1197,12 @@ def test_compose_accepted_unknown_code() -> None:
 
 
 def test_compose_accepted_match_scoping() -> None:
-    """accepted_warnings for low-severity code -> not downgraded (only medium is acceptible)."""
+    """accepted_warnings for high-severity code -> not downgraded (only medium is acceptible)."""
     methodology = dict(_VALID_METHODOLOGY)
     methodology["accepted_warnings"] = [
-        {"code": "MISSING_OPTIONAL_ARTIFACT", "reason": "Sensitivity not needed", "match": "sensitivity.json"},
+        {"code": "MISSING_ARTIFACT", "reason": "Sensitivity not needed", "match": "sensitivity.json"},
     ]
-    # Missing optional artifact -> MISSING_OPTIONAL_ARTIFACT warning (low severity)
+    # Missing required artifact -> MISSING_ARTIFACT warning (high severity)
     d = _make_artifact_dir(
         {
             "inputs.json": _VALID_INPUTS,
@@ -1213,11 +1215,14 @@ def test_compose_accepted_match_scoping() -> None:
     rc, data, _ = _run_compose(d)
     assert rc == 0
     assert data is not None
-    opt_w = [w for w in data["validation"]["warnings"] if w["code"] == "MISSING_OPTIONAL_ARTIFACT"]
-    assert len(opt_w) == 1
-    # Low-severity warnings are not acceptible — stays at "low", not downgraded
-    assert opt_w[0]["severity"] == "low"
-    assert "sensitivity.json" in opt_w[0]["message"]
+    missing_w = [
+        w
+        for w in data["validation"]["warnings"]
+        if w["code"] == "MISSING_ARTIFACT" and "sensitivity.json" in w["message"]
+    ]
+    assert len(missing_w) == 1
+    # High-severity warnings are not acceptible — stays at "high", not downgraded
+    assert missing_w[0]["severity"] == "high"
 
 
 def test_compose_accepted_missing_match() -> None:
@@ -1694,8 +1699,8 @@ def test_compose_corrupt_required_artifact() -> None:
     assert not any("sizing.json" in m for m in missing_msgs)
 
 
-def test_compose_strict_mode_optional_only_missing() -> None:
-    """Strict mode succeeds when only optional artifacts are missing (low severity)."""
+def test_compose_strict_mode_all_required_present() -> None:
+    """Strict mode succeeds when all required artifacts are present."""
     d = _make_artifact_dir(
         {
             "inputs.json": _VALID_INPUTS,
@@ -1703,7 +1708,7 @@ def test_compose_strict_mode_optional_only_missing() -> None:
             "validation.json": _VALID_VALIDATION,
             "sizing.json": _VALID_SIZING,
             "checklist.json": _VALID_CHECKLIST,
-            # No sensitivity.json -> MISSING_OPTIONAL_ARTIFACT (now low severity)
+            "sensitivity.json": _VALID_SENSITIVITY,
         }
     )
     rc, data, _ = _run_compose(d, extra_args=["--strict"])

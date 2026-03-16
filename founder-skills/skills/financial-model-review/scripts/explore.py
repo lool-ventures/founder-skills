@@ -149,15 +149,24 @@ def _build_engine(inputs: dict[str, Any]) -> dict[str, Any]:
     growth_rate = _raw_growth or 0
     balance_date = _deep_get(cash, "balance_date", default=None)
 
-    # Grant fields
-    israel = _deep_get(inputs, "israel_specific", default={})
-    grant_monthly = _deep_get(israel, "grant_monthly", default=0) or 0
-    grant_start = _deep_get(israel, "grant_start", default=None)
-    grant_end = _deep_get(israel, "grant_end", default=None)
+    # Grant fields — read from cash.grants (IIA grant data)
+    grants = _deep_get(cash, "grants", default={})
+    iia_approved = _deep_get(grants, "iia_approved", default=0) or 0
+    iia_disbursement_months = _deep_get(grants, "iia_disbursement_months", default=0) or 0
+    iia_start_month = _deep_get(grants, "iia_start_month", default=1)
+    if iia_approved > 0 and iia_disbursement_months > 0:
+        grant_monthly = iia_approved / iia_disbursement_months
+        grant_start = iia_start_month
+        grant_end = iia_start_month + iia_disbursement_months - 1
+    else:
+        grant_monthly = 0
+        grant_start = None
+        grant_end = None
 
     # ILS expense fraction: 0.5 when fx_rate is set, 0.0 otherwise
-    fx_rate = _deep_get(israel, "fx_rate", default=None)
-    ils_expense_fraction = 0.5 if fx_rate is not None else 0.0
+    israel = _deep_get(inputs, "israel_specific", default={})
+    fx_rate = _deep_get(israel, "fx_rate_ils_usd", default=None)
+    ils_expense_fraction = _deep_get(israel, "ils_expense_fraction", default=0.5) if fx_rate is not None else 0.0
 
     return {
         "cash0": cash0,

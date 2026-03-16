@@ -1026,7 +1026,7 @@ def test_compose_sequential_fallback() -> None:
 
 
 def test_compose_severity_map_complete() -> None:
-    """WARNING_SEVERITY contains all 19 expected codes."""
+    """WARNING_SEVERITY contains all 23 expected codes."""
     snippet = (
         f"import sys, os; sys.path.insert(0, '{IC_SIM_DIR}'); "
         "from compose_report import WARNING_SEVERITY; "
@@ -1058,6 +1058,10 @@ def test_compose_severity_map_complete() -> None:
         "STAGE_OUT_OF_SCOPE",
         "PARTNER_CONVERGENCE",
         "SEQUENTIAL_FALLBACK",
+        "CONFLICT_CHECK_VALIDATION_ERROR",
+        "SCORE_DIMENSIONS_VALIDATION_ERROR",
+        "INCOMPLETE_PORTFOLIO_REVIEW",
+        "INVALID_PARTNER_COUNT",
     ]
     assert len(sev_map) == len(expected), (
         f"expected {len(expected)} codes, got {len(sev_map)}: {sorted(sev_map.keys())}"

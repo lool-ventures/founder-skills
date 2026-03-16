@@ -536,7 +536,7 @@ function updateWarnings(warnings) {
     btn.textContent = "Dismiss";
     btn.addEventListener("click", (function(wRef, cardRef) {
       return function() {
-        warningOverrides.set(wRef.code, { code: wRef.code, reason: "founder_dismissed" });
+        warningOverrides.set(wRef.code, { code: wRef.code, reason: "founder_dismissed", reviewed_by: "founder", timestamp: new Date().toISOString() });
         cardRef.remove();
         var fields = wRef.contributing_fields || [];
         for (var j = 0; j < fields.length; j++) {
@@ -1051,7 +1051,40 @@ function createEditableTable(arrayPath, columns) {
               updateTableCell(arrayPath, ri, ck, newVal, renderRows);
             };
           })(rowIdx, col.key, col.type));
-          td.appendChild(inp);
+
+          if (col.type === "currency") {
+            var fxRate = getByPath(state, "israel_specific.fx_rate_ils_usd");
+            if (fxRate) {
+              var cellPath = arrayPath + "[" + rowIdx + "]." + col.key;
+              var crow = document.createElement("div");
+              crow.className = "currency-row";
+              inp.style.flex = "1";
+              inp.style.width = "";
+              crow.appendChild(inp);
+              var ctog = document.createElement("div");
+              ctog.className = "currency-toggle";
+              var bUsd = document.createElement("button");
+              bUsd.textContent = "$";
+              bUsd.className = ilsFields[cellPath] ? "" : "active";
+              var bIls = document.createElement("button");
+              bIls.textContent = "\u20aa";
+              bIls.className = ilsFields[cellPath] ? "active" : "";
+              bUsd.addEventListener("click", (function(cp, bu, bi) {
+                return function() { delete ilsFields[cp]; bu.className = "active"; bi.className = ""; };
+              })(cellPath, bUsd, bIls));
+              bIls.addEventListener("click", (function(cp, bu, bi) {
+                return function() { ilsFields[cp] = true; bi.className = "active"; bu.className = ""; };
+              })(cellPath, bUsd, bIls));
+              ctog.appendChild(bUsd);
+              ctog.appendChild(bIls);
+              crow.appendChild(ctog);
+              td.appendChild(crow);
+            } else {
+              td.appendChild(inp);
+            }
+          } else {
+            td.appendChild(inp);
+          }
         }
         tr.appendChild(td);
       });
@@ -1444,6 +1477,7 @@ def _coerce_state(state: dict[str, Any]) -> list[dict[str, Any]]:
         "revenue.churn_monthly",
         "revenue.nrr",
         "revenue.grr",
+        "revenue.monthly_total",
         "unit_economics.cac.total",
         "unit_economics.ltv.value",
         "unit_economics.ltv.inputs.arpu_monthly",
@@ -1451,8 +1485,22 @@ def _coerce_state(state: dict[str, Any]) -> list[dict[str, Any]]:
         "unit_economics.ltv.inputs.gross_margin",
         "unit_economics.gross_margin",
         "unit_economics.payback_months",
+        "unit_economics.burn_multiple",
         "cash.fundraising.target_raise",
+        "cash.grants.iia_approved",
+        "cash.grants.iia_pending",
+        "cash.grants.iia_disbursement_months",
+        "cash.grants.iia_start_month",
+        "cash.grants.royalty_rate",
         "israel_specific.fx_rate_ils_usd",
+        "israel_specific.ils_expense_fraction",
+        "scenarios.base.growth_rate",
+        "scenarios.base.burn_change",
+        "scenarios.slow.growth_rate",
+        "scenarios.slow.burn_change",
+        "scenarios.crisis.growth_rate",
+        "scenarios.crisis.burn_change",
+        "bridge.runway_target_months",
     ]
 
     for path in _NUMERIC_PATHS:
