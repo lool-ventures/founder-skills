@@ -492,7 +492,15 @@ def _build_html_string(
         ".slider-group label {",
         "  display: block; font-weight: 600; margin-bottom: 0.25rem;",
         "}",
-        '.slider-group input[type="range"] { width: 100%; }',
+        ".slider-row { display: flex; gap: 8px; align-items: center; }",
+        '.slider-row input[type="range"] { flex: 1; }',
+        ".slider-edit {",
+        "  width: 80px; padding: 2px 6px; border: 1px solid #d1d5db; border-radius: 4px;",
+        "  font-family: inherit; font-size: 0.85rem; text-align: right;",
+        "  background: #f9fafb; color: #1d1d1f;",
+        "}",
+        ".slider-edit:focus { outline: none; border-color: #0071e3; background: #fff; }",
+        ".slider-unit { font-size: 0.8rem; color: #86868b; min-width: 24px; }",
         ".slider-value { font-size: 0.875rem; color: #86868b; }",
         ".badge {",
         "  display: inline-block; padding: 0.125rem 0.5rem;",
@@ -911,10 +919,22 @@ function makeSlider(opts) {{
   var id = opts.id, label = opts.label, min = opts.min, max = opts.max;
   var step = opts.step, value = opts.value, fmt = opts.fmt || String;
   var onChange = opts.onChange;
+  // Auto-detect unit/rawFmt/rawParse from fmt if not explicitly provided
+  var isPct = fmt === fmtPct || (fmt(0.1) || '').indexOf('%') >= 0;
+  var isCurrency = fmt === fmtCurrency || (fmt(1000) || '').indexOf('$') >= 0;
+  var unit = opts.unit || (isPct ? '%' : isCurrency ? '$' : '');
+  var rawFmt = opts.rawFmt || (isPct
+    ? function(v) {{ return String(Math.round(v * 1000) / 10); }}
+    : isCurrency
+      ? function(v) {{ return v >= 1000 ? String(Math.round(v)) : String(Math.round(v * 100) / 100); }}
+      : function(v) {{ return String(Math.round(v * 10000) / 10000); }});
+  var rawParse = opts.rawParse || (isPct
+    ? function(s) {{ return parseFloat(s.replace(/,/g, '')) / 100; }}
+    : function(s) {{ return parseFloat(s.replace(/,/g, '')); }});
+
   var div = document.createElement('div');
   div.className = 'slider-group';
   var lbl = document.createElement('label');
-  lbl.setAttribute('for', id);
   lbl.textContent = label + ': ';
   var valSpan = document.createElement('span');
   valSpan.className = 'slider-value';
@@ -922,20 +942,58 @@ function makeSlider(opts) {{
   valSpan.textContent = fmt(value);
   lbl.appendChild(valSpan);
   div.appendChild(lbl);
-  var input = document.createElement('input');
-  input.type = 'range';
-  input.id = id;
-  input.min = String(min);
-  input.max = String(max);
-  input.step = String(step);
-  input.value = String(value);
-  input.setAttribute('aria-label', label);
-  div.appendChild(input);
-  input.addEventListener('input', function() {{
+
+  var row = document.createElement('div');
+  row.className = 'slider-row';
+
+  var slider = document.createElement('input');
+  slider.type = 'range';
+  slider.id = id;
+  slider.min = String(min);
+  slider.max = String(max);
+  slider.step = String(step);
+  slider.value = String(value);
+  slider.setAttribute('aria-label', label);
+  row.appendChild(slider);
+
+  var editBox = document.createElement('input');
+  editBox.type = 'text';
+  editBox.className = 'slider-edit';
+  editBox.value = rawFmt(value);
+  editBox.setAttribute('aria-label', label + ' value');
+  row.appendChild(editBox);
+
+  if (unit) {{
+    var unitSpan = document.createElement('span');
+    unitSpan.className = 'slider-unit';
+    unitSpan.textContent = unit;
+    row.appendChild(unitSpan);
+  }}
+
+  div.appendChild(row);
+
+  // Slider drives edit box + display
+  slider.addEventListener('input', function() {{
     var v = parseFloat(this.value);
     valSpan.textContent = fmt(v);
+    editBox.value = rawFmt(v);
     if (onChange) onChange(v);
   }});
+
+  // Edit box drives slider + display
+  editBox.addEventListener('change', function() {{
+    var v = rawParse(this.value);
+    if (isNaN(v)) return;
+    v = Math.max(min, Math.min(max, v));
+    slider.value = String(v);
+    valSpan.textContent = fmt(v);
+    editBox.value = rawFmt(v);
+    if (onChange) onChange(v);
+  }});
+  editBox.addEventListener('keydown', function(e) {{
+    if (e.key === 'Enter') this.blur();
+  }});
+
   return div;
 }}
 

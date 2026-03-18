@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import subprocess
@@ -53,6 +54,11 @@ _ORIGINAL: dict[str, Any] = {
     },
     "israel_specific": {"fx_rate_ils_usd": 3.6},
 }
+
+
+def _compute_hash(data: dict[str, Any]) -> str:
+    canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def _run(
@@ -393,3 +399,266 @@ class TestIntegration:
         assert corrected["revenue"]["customers"] == 150
         assert audit["correction_count"] == 2
         assert corrected["metadata"]["run_id"] == "20260309T120000Z"
+
+    def test_round_trip_patch_based(self) -> None:
+        """Generate HTML, simulate patch-based corrections, apply."""
+        # Step 1: Generate static HTML (verify it works)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            inputs_path = os.path.join(tmpdir, "inputs.json")
+            output_path = os.path.join(tmpdir, "review.html")
+            with open(inputs_path, "w") as f:
+                json.dump(_ORIGINAL, f)
+            gen_result = subprocess.run(
+                [
+                    sys.executable,
+                    os.path.join(_SCRIPTS, "review_inputs.py"),
+                    inputs_path,
+                    "--static",
+                    output_path,
+                ],
+                capture_output=True,
+                text=True,
+            )
+            assert gen_result.returncode == 0
+            with open(output_path) as f:
+                html = f.read()
+            assert "<!DOCTYPE html>" in html
+
+        # Step 2: Simulate patch-based corrections payload
+        payload = {
+            "base_hash": _compute_hash(_ORIGINAL),
+            "changes": [
+                {"path": "revenue.mrr.value", "expected_old": 50000, "new": 75000},
+                {"path": "revenue.customers", "expected_old": 100, "new": 150},
+            ],
+            "warning_overrides": [],
+            "ils_fields": {},
+        }
+
+        # Step 3: Apply corrections
+        rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
+        assert rc == 0
+        assert corrected is not None
+        assert audit is not None
+        assert corrected["revenue"]["mrr"]["value"] == 75000
+        assert corrected["revenue"]["customers"] == 150
+        assert audit["correction_count"] == 2
+        assert corrected["metadata"]["run_id"] == "20260309T120000Z"
+
+
+class TestPatchBasedFlow:
+    def test_patch_applies_change(self) -> None:
+        """Changes applied via patches, not via corrected object."""
+        payload = {
+            "base_hash": _compute_hash(_ORIGINAL),
+            "changes": [
+                {
+                    "path": "revenue.mrr.value",
+                    "expected_old": 50000,
+                    "new": 75000,
+                }
+            ],
+            "warning_overrides": [],
+            "ils_fields": {},
+        }
+        rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
+        assert rc == 0
+        assert corrected is not None
+        assert corrected["revenue"]["mrr"]["value"] == 75000
+
+    def test_patch_stale_base_hash_rejected(self) -> None:
+        """Wrong base_hash -> exit 1."""
+        payload = {
+            "base_hash": "sha256:wrong",
+            "changes": [{"path": "revenue.mrr.value", "expected_old": 50000, "new": 75000}],
+            "warning_overrides": [],
+            "ils_fields": {},
+        }
+        rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
+        assert rc == 1
+        assert (
+            "stale" in stdout.get("errors", [{}])[0].get("message", "").lower()
+            or "hash" in stdout.get("errors", [{}])[0].get("message", "").lower()
+        )
+
+    def test_patch_expected_old_mismatch_rejected(self) -> None:
+        """expected_old doesn't match -> exit 1."""
+        payload = {
+            "base_hash": _compute_hash(_ORIGINAL),
+            "changes": [{"path": "revenue.mrr.value", "expected_old": 99999, "new": 75000}],
+            "warning_overrides": [],
+            "ils_fields": {},
+        }
+        rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
+        assert rc == 1
+
+    def test_patch_coerces_string_values(self) -> None:
+        """String 'new' values coerced to numbers."""
+        payload = {
+            "base_hash": _compute_hash(_ORIGINAL),
+            "changes": [{"path": "cash.current_balance", "expected_old": 1000000, "new": "1500000"}],
+            "warning_overrides": [],
+            "ils_fields": {},
+        }
+        rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
+        assert rc == 0
+        assert corrected is not None
+        assert corrected["cash"]["current_balance"] == 1500000
+
+    def test_patch_multiple_changes(self) -> None:
+        """Multiple changes applied in order."""
+        payload = {
+            "base_hash": _compute_hash(_ORIGINAL),
+            "changes": [
+                {"path": "revenue.mrr.value", "expected_old": 50000, "new": 75000},
+                {"path": "revenue.customers", "expected_old": 100, "new": 150},
+            ],
+            "warning_overrides": [],
+            "ils_fields": {},
+        }
+        rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
+        assert rc == 0
+        assert corrected is not None
+        assert corrected["revenue"]["mrr"]["value"] == 75000
+        assert corrected["revenue"]["customers"] == 150
+
+    def test_patch_missing_base_hash_rejected(self) -> None:
+        """Missing base_hash in changes[] payload -> exit 1."""
+        payload = {
+            "changes": [{"path": "revenue.mrr.value", "expected_old": 50000, "new": 75000}],
+            "warning_overrides": [],
+            "ils_fields": {},
+        }
+        rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
+        assert rc == 1
+        assert stdout.get("errors", [{}])[0].get("code") == "MISSING_BASE_HASH"
+
+    def test_legacy_corrected_payload_still_works(self) -> None:
+        """Old-style payload with 'corrected' key still works."""
+        payload = {
+            "corrections": [{"path": "revenue.mrr.value", "was": 50000, "now": 75000}],
+            "corrected": {
+                **_ORIGINAL,
+                "revenue": {**_ORIGINAL["revenue"], "mrr": {"value": 75000, "as_of": "2026-01"}},
+            },
+            "warning_overrides": [],
+            "ils_fields": {},
+        }
+        rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
+        assert rc == 0
+        assert corrected is not None
+        assert corrected["revenue"]["mrr"]["value"] == 75000
+
+    def test_patch_audit_trail(self) -> None:
+        """Audit trail records changes, not legacy corrections."""
+        payload = {
+            "base_hash": _compute_hash(_ORIGINAL),
+            "changes": [{"path": "revenue.mrr.value", "expected_old": 50000, "new": 75000}],
+            "warning_overrides": [],
+            "ils_fields": {},
+        }
+        rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
+        assert rc == 0
+        assert audit is not None
+        assert audit["correction_count"] == 1
+        assert audit["corrections"][0]["path"] == "revenue.mrr.value"
+
+    def test_patch_preserves_unmodified_fields(self) -> None:
+        """Fields not in changes[] are preserved from original."""
+        payload = {
+            "base_hash": _compute_hash(_ORIGINAL),
+            "changes": [{"path": "revenue.mrr.value", "expected_old": 50000, "new": 75000}],
+            "warning_overrides": [],
+            "ils_fields": {},
+        }
+        rc, stdout, corrected, audit = _run(payload, _ORIGINAL)
+        assert rc == 0
+        assert corrected is not None
+        # Unmodified fields preserved exactly
+        assert corrected["cash"]["current_balance"] == 1000000
+        assert corrected["company"]["company_name"] == "TestCo"
+
+    def test_replace_array_adds_row(self) -> None:
+        """replace_array change replaces entire array (e.g., headcount row added)."""
+        original_with_hc = {
+            **_ORIGINAL,
+            "expenses": {
+                "headcount": [{"role": "Engineer", "count": 3, "salary_annual": 120000}],
+            },
+        }
+        new_headcount = [
+            {"role": "Engineer", "count": 3, "salary_annual": 120000},
+            {"role": "Designer", "count": 1, "salary_annual": 100000},
+        ]
+        payload = {
+            "base_hash": _compute_hash(original_with_hc),
+            "changes": [
+                {
+                    "path": "expenses.headcount",
+                    "type": "replace_array",
+                    "expected_old": 1,  # old array length
+                    "new": new_headcount,
+                }
+            ],
+            "warning_overrides": [],
+            "ils_fields": {},
+        }
+        rc, stdout, corrected, audit = _run(payload, original_with_hc)
+        assert rc == 0
+        assert corrected is not None
+        assert len(corrected["expenses"]["headcount"]) == 2
+        assert corrected["expenses"]["headcount"][1]["role"] == "Designer"
+
+    def test_replace_array_removes_row(self) -> None:
+        """replace_array change with fewer rows removes entries."""
+        original_with_hc = {
+            **_ORIGINAL,
+            "expenses": {
+                "headcount": [
+                    {"role": "Engineer", "count": 3, "salary_annual": 120000},
+                    {"role": "Designer", "count": 1, "salary_annual": 100000},
+                ],
+            },
+        }
+        new_headcount = [{"role": "Engineer", "count": 3, "salary_annual": 120000}]
+        payload = {
+            "base_hash": _compute_hash(original_with_hc),
+            "changes": [
+                {
+                    "path": "expenses.headcount",
+                    "type": "replace_array",
+                    "expected_old": 2,
+                    "new": new_headcount,
+                }
+            ],
+            "warning_overrides": [],
+            "ils_fields": {},
+        }
+        rc, stdout, corrected, audit = _run(payload, original_with_hc)
+        assert rc == 0
+        assert corrected is not None
+        assert len(corrected["expenses"]["headcount"]) == 1
+
+    def test_replace_array_stale_length_rejected(self) -> None:
+        """replace_array with wrong expected_old length is rejected."""
+        original_with_hc = {
+            **_ORIGINAL,
+            "expenses": {
+                "headcount": [{"role": "Engineer", "count": 3, "salary_annual": 120000}],
+            },
+        }
+        payload = {
+            "base_hash": _compute_hash(original_with_hc),
+            "changes": [
+                {
+                    "path": "expenses.headcount",
+                    "type": "replace_array",
+                    "expected_old": 5,  # wrong length
+                    "new": [],
+                }
+            ],
+            "warning_overrides": [],
+            "ils_fields": {},
+        }
+        rc, stdout, corrected, audit = _run(payload, original_with_hc)
+        assert rc == 1

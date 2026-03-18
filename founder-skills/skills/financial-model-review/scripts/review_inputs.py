@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import copy
+import hashlib
 import json
 import os
 import signal
@@ -320,6 +321,7 @@ const corrections = new Map();
 const ilsFields = {};
 const warningOverrides = new Map();
 const accordionState = {};
+var structurallyModified = new Set();
 let activeTab = "company";
 
 /* ===== Path helpers ===== */
@@ -409,6 +411,15 @@ function markChanged(path) {
 }
 
 /* ===== Formatting helpers ===== */
+function fmtNumber(v) {
+  if (v == null || v === "") return "";
+  var n = Number(String(v).replace(/,/g, ""));
+  if (isNaN(n)) return String(v);
+  // Preserve decimals up to 2 places, drop trailing zeros
+  var frac = n % 1 !== 0 ? 2 : 0;
+  return n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: frac });
+}
+function stripCommas(s) { return String(s).replace(/,/g, ""); }
 function fmtCurrency(v) {
   if (v == null) return "\u2014";
   return "$" + Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 });
@@ -661,11 +672,81 @@ function submitFeedback() {
   btn.disabled = true;
   btn.textContent = "Submitting...";
 
+  /* Known editable array paths */
+  var ARRAY_PATHS = [
+    "expenses.headcount", "expenses.opex_monthly",
+    "revenue.monthly", "revenue.quarterly"
+  ];
+
+  var changes = [];
+  var structuralPrefixes = [];
+
+  // 1. Emit replace_array for each structurally modified array
+  var fxRate = getByPath(state, "israel_specific.fx_rate_ils_usd") || 0;
+  ARRAY_PATHS.forEach(function(ap) {
+    if (!structurallyModified.has(ap)) return;
+    var orig = getByPath(ORIGINAL, ap) || [];
+    var curr = getByPath(state, ap) || [];
+    // Skip if array was modified but returned to exactly original state
+    if (JSON.stringify(orig) === JSON.stringify(curr)) return;
+    // STRUCTURAL — emit replace_array with ILS pre-normalization
+    var normalized = JSON.parse(JSON.stringify(curr));
+    if (fxRate > 0) {
+      normalized.forEach(function(row, ri) {
+        if (!row || typeof row !== "object") return;
+        Object.keys(row).forEach(function(k) {
+          var cellPath = ap + "[" + ri + "]." + k;
+          if (ilsFields[cellPath] && typeof row[k] === "number") {
+            row[k] = Math.round((row[k] / fxRate) * 100) / 100;
+          }
+        });
+      });
+    }
+    changes.push({
+      path: ap,
+      type: "replace_array",
+      expected_old: orig.length,
+      "new": normalized
+    });
+    structuralPrefixes.push(ap + "[");
+  });
+
+  // Also suppress child PATCHES for structurally modified arrays that returned
+  // to original (skipped above) — their child corrections are still index-stale.
+  var allStructuralPrefixes = [];
+  structurallyModified.forEach(function(ap) {
+    allStructuralPrefixes.push(ap + "[");
+  });
+
+  // 2. Emit scalar changes, EXCLUDING children of ANY structurally modified array
+  corrections.forEach(function(c) {
+    for (var i = 0; i < allStructuralPrefixes.length; i++) {
+      if (c.path.indexOf(allStructuralPrefixes[i]) === 0) return;
+    }
+    changes.push({
+      path: c.path,
+      expected_old: c.was,
+      "new": c.now
+    });
+  });
+
+  // 3. Filter ils_fields: ONLY remove entries under arrays where replace_array
+  //    actually fired (structuralPrefixes). Arrays that returned to original
+  //    keep their ils_fields.
+  var cleanIlsFields = {};
+  Object.keys(ilsFields).forEach(function(path) {
+    var dominated = false;
+    for (var i = 0; i < structuralPrefixes.length; i++) {
+      if (path.indexOf(structuralPrefixes[i]) === 0) { dominated = true; break; }
+    }
+    if (!dominated) cleanIlsFields[path] = ilsFields[path];
+  });
+
   var payload = JSON.stringify({
-    corrections: Array.from(corrections.values()),
-    corrected: state,
+    base_hash: BASE_HASH,
+    changes: changes,
     warning_overrides: Array.from(warningOverrides.values()),
-    ils_fields: ilsFields
+    ils_fields: cleanIlsFields
   }, null, 2);
 
   /* file:// URLs cannot use fetch — go straight to download */
@@ -768,10 +849,12 @@ function createNumberInput(path, label, opts) {
   input.className = "input-field";
   input.dataset.path = path;
   var val = getByPath(state, path);
-  input.value = val != null ? String(val) : "";
+  input.value = fmtNumber(val);
+  input.addEventListener("focus", function() { this.value = stripCommas(this.value); });
+  input.addEventListener("blur", function() { this.value = fmtNumber(this.value); });
   input.addEventListener("input", function() {
     if (this.value === "") { updateField(path, null); return; }
-    var n = Number(this.value);
+    var n = Number(stripCommas(this.value));
     if (!isNaN(n)) updateField(path, n);
   });
   fg.wrapper.appendChild(input);
@@ -818,10 +901,12 @@ function createCurrencyInput(path, label, opts) {
   input.dataset.path = path;
   input.style.flex = "1";
   var val = getByPath(state, path);
-  input.value = val != null ? String(val) : "";
+  input.value = fmtNumber(val);
+  input.addEventListener("focus", function() { this.value = stripCommas(this.value); });
+  input.addEventListener("blur", function() { this.value = fmtNumber(this.value); });
   input.addEventListener("input", function() {
     if (this.value === "") { updateField(path, null); return; }
-    var n = Number(this.value.replace(/,/g, ""));
+    var n = Number(stripCommas(this.value));
     if (!isNaN(n)) updateField(path, n);
   });
   row.appendChild(input);
@@ -1033,14 +1118,20 @@ function createEditableTable(arrayPath, columns) {
           if (col.type === "month") inp.placeholder = "YYYY-MM";
           if (col.type === "pct" && val != null) {
             inp.value = String(Math.round(val * 10000) / 100);
+          } else if ((col.type === "number" || col.type === "currency") && val != null) {
+            inp.value = fmtNumber(val);
           } else {
             inp.value = val != null ? String(val) : "";
+          }
+          if (col.type === "number" || col.type === "currency") {
+            inp.addEventListener("focus", function() { this.value = stripCommas(this.value); });
+            inp.addEventListener("blur", function() { this.value = fmtNumber(this.value); });
           }
           inp.addEventListener("input", (function(ri, ck, ct) {
             return function() {
               var newVal;
               if (ct === "number" || ct === "currency") {
-                newVal = this.value === "" ? null : Number(this.value.replace(/,/g, ""));
+                newVal = this.value === "" ? null : Number(stripCommas(this.value));
                 if (this.value !== "" && isNaN(newVal)) return;
               } else if (ct === "pct") {
                 if (this.value === "") newVal = null;
@@ -1094,6 +1185,7 @@ function createEditableTable(arrayPath, columns) {
       rmBtn.textContent = "\u2715";
       rmBtn.addEventListener("click", (function(ri) {
         return function() {
+          structurallyModified.add(arrayPath);
           var nextArr = getByPath(state, arrayPath) || [];
           nextArr.splice(ri, 1);
           setByPath(state, arrayPath, nextArr);
@@ -1114,6 +1206,7 @@ function createEditableTable(arrayPath, columns) {
   addBtn.className = "add-row-btn";
   addBtn.textContent = "+ Add row";
   addBtn.addEventListener("click", function() {
+    structurallyModified.add(arrayPath);
     var arr = getByPath(state, arrayPath) || [];
     var newRow = {};
     columns.forEach(function(col) { newRow[col.key] = null; });
@@ -1411,15 +1504,65 @@ init();
 # ---------------------------------------------------------------------------
 
 
-def _build_html(inputs: dict[str, Any]) -> str:
+def _build_html(inputs: dict[str, Any], extraction_warnings: dict[str, Any] | None = None) -> str:
     """Inject embedded data into the HTML template."""
-    data_js = f"const DATA = {json.dumps(inputs)};"
-    return _HTML_TEMPLATE.replace("/*__EMBEDDED_DATA__*/", data_js)
+    canonical = json.dumps(inputs, sort_keys=True, separators=(",", ":"))
+    base_hash = "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
+    data_js = f"const DATA = {json.dumps(inputs)};\nconst BASE_HASH = {json.dumps(base_hash)};"
+    html = _HTML_TEMPLATE.replace("/*__EMBEDDED_DATA__*/", data_js)
+
+    # Inject extraction warnings banner above the warnings container
+    if extraction_warnings and extraction_warnings.get("status") == "warn":
+        banner = _extraction_warnings_html(extraction_warnings)
+        html = html.replace('<div id="warnings-container">', banner + '\n<div id="warnings-container">')
+
+    return html
 
 
-def _write_static(inputs: dict[str, Any], output_path: str) -> None:
+def _extraction_warnings_html(ew: dict[str, Any]) -> str:
+    """Build static HTML banner for extraction validation warnings."""
+    checks = ew.get("checks", [])
+    warns = [c for c in checks if c.get("status") == "warn"]
+    if not warns:
+        return ""
+
+    cards: list[str] = []
+    for w in warns:
+        msg = w.get("message", "")
+        detail = ""
+        if w.get("candidates"):
+            detail = (
+                f' <span style="color:#6b7280;font-size:0.8rem">(candidates: {", ".join(w["candidates"][:3])})</span>'
+            )
+        if w.get("untraceable"):
+            items = w["untraceable"]
+            if w["id"] == "SALARY_TRACEABILITY":
+                names = [u.get("role", "?") for u in items]
+                detail = f' <span style="color:#6b7280;font-size:0.8rem">({", ".join(names)})</span>'
+            elif w["id"] == "REVENUE_TRACEABILITY":
+                names = [u.get("field", "?") for u in items]
+                detail = f' <span style="color:#6b7280;font-size:0.8rem">({", ".join(names)})</span>'
+        cards.append(
+            f'<div class="extraction-warn-card" style="background:#fef2f2;border-left:4px solid #ef4444;'
+            f"padding:0.75rem 1rem;margin-bottom:0.5rem;border-radius:4px;"
+            f'display:flex;justify-content:space-between;align-items:center;">'
+            f'<span style="color:#991b1b;font-size:0.9rem">{msg}{detail}</span>'
+            f'<button onclick="this.parentElement.remove()" style="background:none;border:1px solid #dc2626;'
+            f"color:#dc2626;padding:0.25rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.8rem;"
+            f'flex-shrink:0;margin-left:12px;">Dismiss</button>'
+            f"</div>"
+        )
+
+    return (
+        '<div id="extraction-warnings" style="padding:0 32px;margin-bottom:8px;">'
+        '<div style="font-size:0.8rem;font-weight:600;color:#991b1b;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em;">'
+        "Extraction Warnings</div>" + "\n".join(cards) + "</div>"
+    )
+
+
+def _write_static(inputs: dict[str, Any], output_path: str, extraction_warnings: dict[str, Any] | None = None) -> None:
     """Write self-contained HTML to a file, print JSON status to stdout."""
-    html = _build_html(inputs)
+    html = _build_html(inputs, extraction_warnings=extraction_warnings)
     with open(output_path, "w") as f:
         f.write(html)
     abs_path = os.path.abspath(output_path)
@@ -1706,6 +1849,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     workspace: str = ""
     inputs_path: str = ""
+    extraction_warnings_path: str = ""
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         """Suppress request logging."""
@@ -1725,7 +1869,14 @@ class _Handler(BaseHTTPRequestHandler):
                     inputs = json.load(f)
             except Exception:
                 inputs = {}
-            html = _build_html(inputs)
+            ew: dict[str, Any] | None = None
+            if self.extraction_warnings_path:
+                try:
+                    with open(self.extraction_warnings_path) as ewf:
+                        ew = json.load(ewf)
+                except (OSError, json.JSONDecodeError):
+                    pass
+            html = _build_html(inputs, extraction_warnings=ew)
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
@@ -1895,13 +2046,14 @@ class _Handler(BaseHTTPRequestHandler):
         )
 
 
-def _serve(inputs_path: str, workspace: str, port: int = 3117) -> None:
+def _serve(inputs_path: str, workspace: str, port: int = 3117, extraction_warnings_path: str = "") -> None:
     """Start the HTTP server and open the browser."""
     if port != 0:
         _kill_port(port)
 
     _Handler.workspace = workspace
     _Handler.inputs_path = inputs_path
+    _Handler.extraction_warnings_path = extraction_warnings_path
 
     try:
         server = HTTPServer(("127.0.0.1", port), _Handler)
@@ -1957,6 +2109,11 @@ def main() -> None:
         metavar="FILE",
         help="Alias for --static (write HTML to FILE)",
     )
+    parser.add_argument(
+        "--extraction-warnings",
+        metavar="FILE",
+        help="Path to extraction_validation.json for extraction warning banner",
+    )
     args = parser.parse_args()
 
     # Read inputs
@@ -1967,12 +2124,22 @@ def main() -> None:
         print(f"Error reading {args.inputs}: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # Load extraction warnings if provided
+    ew: dict[str, Any] | None = None
+    ew_path = getattr(args, "extraction_warnings", None) or ""
+    if ew_path:
+        try:
+            with open(ew_path) as ewf:
+                ew = json.load(ewf)
+        except (OSError, json.JSONDecodeError):
+            pass
+
     output = args.static or args.o
     if output:
-        _write_static(inputs, output)
+        _write_static(inputs, output, extraction_warnings=ew)
     elif args.workspace:
         os.makedirs(args.workspace, exist_ok=True)
-        _serve(os.path.abspath(args.inputs), args.workspace, port=args.port)
+        _serve(os.path.abspath(args.inputs), args.workspace, port=args.port, extraction_warnings_path=ew_path)
     else:
         print(
             "Error: provide --static <file> for static mode or --workspace <dir> for server mode",

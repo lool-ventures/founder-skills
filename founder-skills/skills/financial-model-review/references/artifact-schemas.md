@@ -28,6 +28,8 @@ Structured extraction of the spreadsheet contents for downstream analysis.
 | `periodicity` | string | yes | One of: `"monthly"`, `"quarterly"`, `"annual"`, `"unknown"`. Detected from column headers via regex and majority vote. |
 | `row_count` | integer | yes | Number of data rows |
 | `col_count` | integer | yes | Number of columns |
+| `pre_header_rows` | any[][] | yes | Rows before the detected header row (xlsx: rows above header containing company name, logos, etc.; csv: always empty `[]`). `validate_extraction.py` treats a missing key as `[]` for backward compatibility with older model_data files. |
+| `cell_refs` | object[] | yes | List of row-level cell coordinate mappings. Each entry: `{"row_index": N, "label": "Revenue", "cols": {"Jan 2025": "B3"}}`. `row_index` is the position in `rows[]` (stable key — labels can duplicate). Only rows with numeric cells are included. xlsx: populated from openpyxl cell coordinates; csv: always `[]`. Used by `validate_extraction.py` for best-match provenance (value-based lookup, not authoritative for duplicate values). Missing key treated as `[]` for backward compatibility. |
 
 **Example:**
 ```json
@@ -282,3 +284,32 @@ Agent-written narrative commentary for the interactive explorer.
   - `highlight` — Secondary observation (grey box)
   - `watch_out` — Risk/concern (amber box)
   All three are optional per lens. Omit a lens key entirely if its required artifacts are missing.
+
+---
+
+## corrections.json (v2 -- patch-based)
+
+**Producer:** Review UI (`review_inputs.py`)
+**Consumer:** `apply_corrections.py`
+
+### Payload format (v2)
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `base_hash` | string | yes (v2) | `"sha256:<hex>"` of canonical JSON of original inputs.json. `apply_corrections` rejects patch payloads without it. |
+| `changes` | object[] | yes (v2) | Ordered list of field-level patches |
+| `warning_overrides` | object[] | no | Warning override entries |
+| `ils_fields` | object | no | Map of field paths to `true` for ILS-denominated values |
+
+### changes[] entry
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `path` | string | yes | Dotted path to field (e.g., `"revenue.mrr.value"`) |
+| `type` | string | no | `"scalar"` (default) for field-level edits, `"replace_array"` for array mutations (row add/remove). |
+| `expected_old` | any | no | For scalar: expected current value. For `replace_array`: expected array length (integer). If present and doesn't match, change is rejected as stale. |
+| `new` | any | yes | For scalar: new value. For `replace_array`: the entire replacement array. |
+
+### Legacy format (v1)
+
+Payloads with `"corrected"` key and no `"changes"` key are handled via the legacy path for backward compatibility. The `corrected` object is used directly. This path emits a stderr warning.

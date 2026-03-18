@@ -845,12 +845,14 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
                     )
                     break
 
-    # Label collision avoidance: offset labels that are within 15px vertically
-    end_labels.sort(key=lambda el: el[1])
+    # Label collision avoidance: offset labels that overlap in both X and Y
+    end_labels.sort(key=lambda el: (el[0], el[1]))  # sort by x, then y
     for i in range(1, len(end_labels)):
-        if abs(end_labels[i][1] - end_labels[i - 1][1]) < 15:
-            x, y, n, c = end_labels[i]
-            end_labels[i] = (x, end_labels[i - 1][1] + 15, n, c)
+        prev_x, prev_y = end_labels[i - 1][0], end_labels[i - 1][1]
+        cur_x, cur_y = end_labels[i][0], end_labels[i][1]
+        if abs(cur_x - prev_x) < 40 and abs(cur_y - prev_y) < 14:
+            x, _y, n, c = end_labels[i]
+            end_labels[i] = (x, prev_y + 14, n, c)
 
     for lx, ly, lname, lcolor in end_labels:
         parts.append(
@@ -859,18 +861,16 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
             f'fill="{_esc(lcolor)}" font-weight="bold">{_esc(lname)}</text>'
         )
 
-    # Decision point markers from scenario data
+    # Decision point markers from scenario data — deduplicate by month
+    dp_by_month: dict[int, str] = {}  # month -> action label
     for s in scenarios:
         if not isinstance(s, dict):
             continue
         dp_list = _as_list(s.get("decision_points"))
         dp_raw = s.get("decision_point")
-        # Backward compat: dict with month/action fields
         if isinstance(dp_raw, dict) and dp_raw.get("month"):
             dp_list = [dp_raw] + dp_list
-        # New format from runway.py: YYYY-MM string
         elif isinstance(dp_raw, str) and dp_raw:
-            # Derive month index from runway_months (dp = max(runway-12, 0))
             rw = s.get("runway_months")
             if rw is not None:
                 dp_month_idx = max(int(_num(rw)) - 12, 0)
@@ -881,18 +881,33 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
             dp_month = int(_num(dp.get("month", 0)))
             dp_action = str(dp.get("action", ""))
             if dp_month > 0 and min_month <= dp_month <= max_month:
-                dpx = x_pos(dp_month)
-                parts.append(
-                    f'<line x1="{dpx:.2f}" y1="{_num(margin_top):.2f}" '
-                    f'x2="{dpx:.2f}" y2="{_num(margin_top + chart_height):.2f}" '
-                    f'stroke="{_CLR_ACCENT}" stroke-width="1.5" stroke-dasharray="4,3" />'
-                )
-                if dp_action:
-                    parts.append(
-                        f'<text x="{dpx:.2f}" y="{_num(margin_top - 5):.2f}" '
-                        f'text-anchor="middle" font-size="8" fill="{_CLR_ACCENT}">'
-                        f"{_esc(dp_action[:30])}</text>"
-                    )
+                dp_by_month.setdefault(dp_month, dp_action)
+
+    # Render deduplicated decision points with collision-aware labels
+    dp_labels: list[tuple[float, float, str]] = []  # (x, y, text)
+    for dp_month, dp_action in sorted(dp_by_month.items()):
+        dpx = x_pos(dp_month)
+        parts.append(
+            f'<line x1="{dpx:.2f}" y1="{_num(margin_top):.2f}" '
+            f'x2="{dpx:.2f}" y2="{_num(margin_top + chart_height):.2f}" '
+            f'stroke="{_CLR_ACCENT}" stroke-width="1.5" stroke-dasharray="4,3" />'
+        )
+        if dp_action:
+            dp_labels.append((dpx, margin_top - 5, dp_action[:30]))
+
+    # Offset overlapping decision point labels
+    for i in range(1, len(dp_labels)):
+        prev_x, prev_y = dp_labels[i - 1][0], dp_labels[i - 1][1]
+        cur_x, cur_y = dp_labels[i][0], dp_labels[i][1]
+        if abs(cur_x - prev_x) < 80 and abs(cur_y - prev_y) < 12:
+            dp_labels[i] = (dp_labels[i][0], prev_y - 12, dp_labels[i][2])
+
+    for dpx, dpy, dp_text in dp_labels:
+        parts.append(
+            f'<text x="{dpx:.2f}" y="{_num(dpy):.2f}" '
+            f'text-anchor="middle" font-size="8" fill="{_CLR_ACCENT}">'
+            f"{_esc(dp_text)}</text>"
+        )
 
     parts.append("</svg>")
 

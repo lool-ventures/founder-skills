@@ -20,6 +20,8 @@ Output:
 from __future__ import annotations
 
 import argparse
+import copy
+import hashlib
 import json
 import os
 import re
@@ -361,6 +363,145 @@ def _strip_row_ids(state: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Patch-based flow
+# ---------------------------------------------------------------------------
+
+
+def _canonical_hash(data: dict[str, Any]) -> str:
+    canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _apply_patches(
+    original: dict[str, Any],
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Apply patch-based changes to a deep copy of original.
+
+    Returns (patched_state, corrections_for_audit, errors).
+    """
+    errors: list[dict[str, Any]] = []
+
+    # Verify base_hash — required for new-style payloads
+    base_hash = payload.get("base_hash")
+    if base_hash is None:
+        errors.append(
+            {
+                "code": "MISSING_BASE_HASH",
+                "message": "base_hash is required for patch-based corrections",
+                "field": "",
+                "layer": 0,
+            }
+        )
+        return {}, [], errors
+    actual_hash = _canonical_hash(original)
+    if base_hash != actual_hash:
+        errors.append(
+            {
+                "code": "STALE_BASE",
+                "message": f"Base hash mismatch — original has changed since review page was loaded. "
+                f"Expected {base_hash[:20]}..., got {actual_hash[:20]}...",
+                "field": "",
+                "layer": 0,
+            }
+        )
+        return {}, [], errors
+
+    state = copy.deepcopy(original)
+    changes = payload.get("changes", [])
+    corrections: list[dict[str, Any]] = []
+
+    for ch in changes:
+        path = ch.get("path", "")
+        expected_old = ch.get("expected_old")
+        new_val = ch.get("new")
+        change_type = ch.get("type", "scalar")
+
+        # --- Path validation (applies to ALL change types) ---
+        # Verify the path exists in original before writing.
+        # _set_by_path auto-creates missing dict segments, so a typo like
+        # "revenue.mrr.valeu" or "expenses.headcout" would silently add a
+        # new key. We check the leaf key exists in its parent object.
+        # This correctly handles null values (key exists, value is None).
+        parts = path.split(".")
+        leaf = parts[-1]
+        parent_path = ".".join(parts[:-1])
+        parent_obj = _deep_get(original, parent_path) if parent_path else original
+        if not isinstance(parent_obj, dict) or leaf not in parent_obj:
+            errors.append(
+                {
+                    "code": "PATH_ERROR",
+                    "message": f"Path '{path}' does not exist in original — possible typo",
+                    "field": path,
+                    "layer": 0,
+                }
+            )
+            continue
+
+        actual_old = _deep_get(state, path)
+
+        if change_type == "replace_array":
+            # For array replacements, expected_old is the array length
+            actual_len = len(actual_old) if isinstance(actual_old, list) else 0
+            if expected_old is not None and actual_len != expected_old:
+                errors.append(
+                    {
+                        "code": "STALE_EDIT",
+                        "message": f"Stale array edit at '{path}': expected length {expected_old}, found {actual_len}",
+                        "field": path,
+                        "layer": 0,
+                    }
+                )
+                continue
+            _set_by_path(state, path, new_val)
+            new_len = len(new_val) if isinstance(new_val, list) else 0
+            corrections.append(
+                {
+                    "path": path,
+                    "type": "replace_array",
+                    "was_length": actual_len,
+                    "now_length": new_len,
+                }
+            )
+            continue
+
+        # Scalar change — verify expected_old matches (skip check if None)
+        if expected_old is not None and actual_old != expected_old:
+            # Tolerance for float comparison
+            if isinstance(actual_old, (int, float)) and isinstance(expected_old, (int, float)):
+                if abs(float(actual_old) - float(expected_old)) <= 0.01:
+                    pass  # within tolerance, proceed
+                else:
+                    errors.append(
+                        {
+                            "code": "STALE_EDIT",
+                            "message": f"Stale edit at '{path}': expected {expected_old}, found {actual_old}",
+                            "field": path,
+                            "layer": 0,
+                        }
+                    )
+                    continue
+            else:
+                errors.append(
+                    {
+                        "code": "STALE_EDIT",
+                        "message": f"Stale edit at '{path}': expected {expected_old}, found {actual_old}",
+                        "field": path,
+                        "layer": 0,
+                    }
+                )
+                continue
+
+        _set_by_path(state, path, new_val)
+        corrections.append({"path": path, "was": actual_old, "now": new_val})
+
+    if errors:
+        return {}, [], errors
+
+    return state, corrections, []
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -378,8 +519,33 @@ def main() -> None:
     with open(args.original, encoding="utf-8") as f:
         original = json.load(f)
 
-    corrections = payload.get("corrections", [])
-    corrected = payload.get("corrected", original)
+    # Detect payload shape: new (changes[]) vs legacy (corrected{})
+    if "changes" in payload:
+        corrected, corrections, patch_errors = _apply_patches(original, payload)
+        if patch_errors:
+            json.dump({"status": "error", "errors": patch_errors}, sys.stdout, indent=2 if args.pretty else None)
+            sys.stdout.write("\n")
+            sys.exit(1)
+    elif "corrected" in payload:
+        print("Warning: legacy payload format — using 'corrected' object directly", file=sys.stderr)
+        corrections = payload.get("corrections", [])
+        corrected = payload["corrected"]
+    else:
+        err = {
+            "status": "error",
+            "errors": [
+                {
+                    "code": "INVALID_PAYLOAD",
+                    "message": "Payload must contain 'changes' or 'corrected'",
+                    "field": "",
+                    "layer": 0,
+                }
+            ],
+        }
+        json.dump(err, sys.stdout, indent=2 if args.pretty else None)
+        sys.stdout.write("\n")
+        sys.exit(1)
+
     overrides = payload.get("warning_overrides", [])
     ils_fields = payload.get("ils_fields", {})
 

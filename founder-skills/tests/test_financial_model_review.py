@@ -97,6 +97,18 @@ def test_extract_model_stdin_passthrough() -> None:
     assert data["sheets"][0]["name"] == "Manual"
 
 
+def test_extract_model_pre_header_rows_csv() -> None:
+    """CSV extraction includes pre_header_rows field (always empty for CSV)."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Month,Revenue\n2025-01,50000\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert "pre_header_rows" in data["sheets"][0]
+    assert data["sheets"][0]["pre_header_rows"] == []
+
+
 def test_extract_model_nonexistent_file() -> None:
     rc, data, stderr = run_script("extract_model.py", ["--file", "/tmp/nonexistent.xlsx"])
     assert rc == 1
@@ -249,6 +261,91 @@ def test_extract_periodicity_mixed_xlsx() -> None:
         assert data["periodicity_summary"] == "mixed"
     finally:
         os.unlink(tmp_path)
+
+
+# --- cell_refs tests ---
+
+
+def test_extract_model_cell_refs_csv() -> None:
+    """CSV extraction has empty cell_refs."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("Month,Revenue\n2025-01,50000\n")
+        f.flush()
+        rc, data, stderr = run_script("extract_model.py", ["--file", f.name, "--pretty"])
+    os.unlink(f.name)
+    assert rc == 0
+    assert data["sheets"][0]["cell_refs"] == []
+
+
+def test_extract_model_cell_refs_xlsx() -> None:
+    """XLSX extraction produces correct cell_refs with coordinates."""
+    from openpyxl import Workbook
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+        xlsx_path = f.name
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = "P&L"
+    # Row 1: headers
+    ws.append(["Line Item", "Jan 2025", "Feb 2025"])
+    # Row 2: Revenue
+    ws.append(["Revenue", 50000, 55000])
+    # Row 3: Expenses
+    ws.append(["Expenses", 80000, 82000])
+    wb.save(xlsx_path)
+    wb.close()
+
+    rc, data, stderr = run_script("extract_model.py", ["--file", xlsx_path, "--pretty"])
+    os.unlink(xlsx_path)
+    assert rc == 0
+    sheet = data["sheets"][0]
+    cell_refs = sheet["cell_refs"]
+    assert isinstance(cell_refs, list)
+    assert len(cell_refs) == 2  # Revenue + Expenses rows
+
+    # Verify Revenue row refs
+    rev_ref = next(r for r in cell_refs if r["label"] == "Revenue")
+    assert rev_ref["row_index"] == 0  # first data row after header
+    assert "Jan 2025" in rev_ref["cols"]
+    assert rev_ref["cols"]["Jan 2025"] == "B2"  # Excel row 2, col B
+    assert rev_ref["cols"]["Feb 2025"] == "C2"
+
+    # Verify Expenses row refs
+    exp_ref = next(r for r in cell_refs if r["label"] == "Expenses")
+    assert exp_ref["row_index"] == 1
+    assert exp_ref["cols"]["Jan 2025"] == "B3"
+
+
+def test_extract_model_cell_refs_duplicate_labels() -> None:
+    """XLSX with duplicate row labels produces separate cell_refs entries."""
+    from openpyxl import Workbook
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+        xlsx_path = f.name
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.append(["Line Item", "Jan 2025"])
+    ws.append(["Payroll", 50000])  # row 2 in Excel
+    ws.append(["Payroll", 80000])  # row 3 — same label, different row
+    ws.append(["Payroll", 30000])  # row 4 — third duplicate
+    wb.save(xlsx_path)
+    wb.close()
+
+    rc, data, stderr = run_script("extract_model.py", ["--file", xlsx_path, "--pretty"])
+    os.unlink(xlsx_path)
+    assert rc == 0
+    cell_refs = data["sheets"][0]["cell_refs"]
+    assert len(cell_refs) == 3  # all three rows present
+    # Each has a unique row_index
+    indices = [r["row_index"] for r in cell_refs]
+    assert len(set(indices)) == 3  # no duplicates
+    # All labeled "Payroll"
+    assert all(r["label"] == "Payroll" for r in cell_refs)
+    # Coordinates are distinct
+    coords = [r["cols"]["Jan 2025"] for r in cell_refs]
+    assert len(set(coords)) == 3  # B2, B3, B4
 
 
 # --- Checklist IDs and helpers ---

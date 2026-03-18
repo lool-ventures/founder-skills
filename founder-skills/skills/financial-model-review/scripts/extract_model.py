@@ -226,19 +226,45 @@ def extract_xlsx(file_path: str) -> dict[str, Any]:
     sheets = []
     for ws in wb.worksheets:
         all_rows: list[list[Any]] = []
-        for row in ws.iter_rows(values_only=True):
-            all_rows.append([_safe_value(c) for c in row])
+        all_coords: list[list[str]] = []  # parallel array of cell coordinates
+        for row in ws.iter_rows(values_only=False):
+            all_rows.append([_safe_value(c.value) for c in row])
+            all_coords.append([getattr(c, "coordinate", "") for c in row])
 
         header_idx = _find_header_row(all_rows)
         if header_idx >= 0:
             raw_header = all_rows[header_idx]
             headers = [str(v) if v is not None else f"col_{j}" for j, v in enumerate(raw_header)]
             rows_data = all_rows[header_idx + 1 :]
+            coords_data = all_coords[header_idx + 1 :]
         else:
             # No good header row found — use col_N fallback
             ncols = len(all_rows[0]) if all_rows else 0
             headers = [f"col_{j}" for j in range(ncols)]
             rows_data = all_rows
+            coords_data = all_coords
+
+        # Build cell_refs: list of {row_index, label, cols: {col_header: "B5"}}
+        # Only build when we have a valid header row
+        cell_refs: list[dict[str, Any]] = []
+        if header_idx >= 0:
+            for row_idx, (row_vals, row_coords) in enumerate(zip(rows_data, coords_data, strict=True)):
+                if not row_vals or row_vals[0] is None:
+                    continue
+                row_label = str(row_vals[0]).strip()
+                if not row_label:
+                    continue
+                cols: dict[str, str] = {}
+                for j in range(1, min(len(row_vals), len(headers))):
+                    if isinstance(row_vals[j], (int, float)) and not isinstance(row_vals[j], bool):
+                        cols[headers[j]] = row_coords[j] if j < len(row_coords) else ""
+                if cols:
+                    cell_refs.append({"row_index": row_idx, "label": row_label, "cols": cols})
+
+        # Rows before the detected header (company name, logos, etc.)
+        pre_header: list[list[Any]] = []
+        if header_idx > 0:
+            pre_header = all_rows[:header_idx]
 
         sheets.append(
             {
@@ -249,6 +275,8 @@ def extract_xlsx(file_path: str) -> dict[str, Any]:
                 "periodicity": detect_periodicity(headers),
                 "row_count": len(rows_data),
                 "col_count": len(headers),
+                "pre_header_rows": pre_header,
+                "cell_refs": cell_refs,
             }
         )
     wb.close()
@@ -276,6 +304,7 @@ def extract_csv(file_path: str) -> dict[str, Any]:
                 "periodicity": "unknown",
                 "row_count": 0,
                 "col_count": 0,
+                "cell_refs": [],
             }
         ]
         return {
@@ -310,6 +339,8 @@ def extract_csv(file_path: str) -> dict[str, Any]:
             "periodicity": detect_periodicity(headers),
             "row_count": len(rows_data),
             "col_count": len(headers),
+            "pre_header_rows": [],
+            "cell_refs": [],
         }
     ]
     return {

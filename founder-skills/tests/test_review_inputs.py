@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -130,6 +131,11 @@ _MINIMAL_INPUTS = {
 }
 
 
+def _compute_hash(data: dict[str, Any]) -> str:
+    canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
+
+
 def _generate_static(inputs: dict[str, Any]) -> tuple[int, str, str]:
     """Write inputs to temp file, run script with --static, return (exit_code, html, stderr)."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -245,6 +251,9 @@ class TestStaticHTML:
         rc, html, stderr = _generate_static(_FULL_INPUTS)
         assert "warning_overrides" in html or "warningOverrides" in html
         assert "ils_fields" in html or "ilsFields" in html
+        assert "BASE_HASH" in html
+        assert "base_hash" in html
+        assert "changes" in html
 
     def test_light_theme_colors(self) -> None:
         """Uses light theme palette."""
@@ -288,6 +297,129 @@ class TestStaticHTML:
             )
             stdout = json.loads(result.stdout)
             assert stdout["mode"] == "static"
+
+
+# ---------------------------------------------------------------------------
+# Extraction Warnings Fixtures
+# ---------------------------------------------------------------------------
+
+_EXTRACTION_WARNINGS_WARN: dict[str, Any] = {
+    "status": "warn",
+    "checks": [
+        {
+            "id": "COMPANY_NAME",
+            "status": "warn",
+            "message": "Company name 'BadCo' not found in model data",
+            "candidates": ["TestCo", "TestCorp"],
+        },
+        {
+            "id": "SALARY_TRACEABILITY",
+            "status": "pass",
+            "message": "All salary values traceable",
+        },
+    ],
+    "summary": {"total": 4, "pass": 3, "warn": 1, "skip": 0},
+    "correction_hints": ["Company name mismatch"],
+}
+
+_EXTRACTION_WARNINGS_PASS: dict[str, Any] = {
+    "status": "pass",
+    "checks": [],
+    "summary": {"total": 4, "pass": 4, "warn": 0, "skip": 0},
+    "correction_hints": [],
+}
+
+
+def _generate_static_with_ew(inputs: dict[str, Any], ew: dict[str, Any] | None) -> tuple[int, str, str]:
+    """Write inputs + extraction warnings, run script with --static, return (rc, html, stderr)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        inputs_path = os.path.join(tmpdir, "inputs.json")
+        output_path = os.path.join(tmpdir, "review.html")
+        with open(inputs_path, "w") as f:
+            json.dump(inputs, f)
+        cmd = [sys.executable, _SCRIPT, inputs_path, "--static", output_path]
+        if ew is not None:
+            ew_path = os.path.join(tmpdir, "extraction_validation.json")
+            with open(ew_path, "w") as f:
+                json.dump(ew, f)
+            cmd.extend(["--extraction-warnings", ew_path])
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        html = ""
+        if os.path.exists(output_path):
+            with open(output_path) as f:
+                html = f.read()
+        return result.returncode, html, result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Extraction Warning Tests — Static Mode
+# ---------------------------------------------------------------------------
+
+
+class TestExtractionWarningsStatic:
+    def test_warn_renders_extraction_warnings_div(self) -> None:
+        """Static mode with --extraction-warnings renders #extraction-warnings div."""
+        rc, html, _ = _generate_static_with_ew(_FULL_INPUTS, _EXTRACTION_WARNINGS_WARN)
+        assert rc == 0
+        assert 'id="extraction-warnings"' in html
+        assert "BadCo" in html
+        assert "TestCo" in html  # candidate
+
+    def test_pass_no_extraction_warnings_div(self) -> None:
+        """Static mode with passing extraction warnings does not render banner."""
+        rc, html, _ = _generate_static_with_ew(_FULL_INPUTS, _EXTRACTION_WARNINGS_PASS)
+        assert rc == 0
+        assert 'id="extraction-warnings"' not in html
+
+    def test_no_flag_no_extraction_warnings(self) -> None:
+        """Static mode without --extraction-warnings flag has no banner."""
+        rc, html, _ = _generate_static(_FULL_INPUTS)
+        assert rc == 0
+        assert 'id="extraction-warnings"' not in html
+
+    def test_extraction_warnings_separate_from_validation(self) -> None:
+        """Extraction warnings div is separate from #warnings-container."""
+        rc, html, _ = _generate_static_with_ew(_FULL_INPUTS, _EXTRACTION_WARNINGS_WARN)
+        assert rc == 0
+        # Both divs exist
+        assert 'id="extraction-warnings"' in html
+        assert 'id="warnings-container"' in html
+        # extraction-warnings appears before warnings-container
+        ew_pos = html.index('id="extraction-warnings"')
+        wc_pos = html.index('id="warnings-container"')
+        assert ew_pos < wc_pos
+
+    def test_dismiss_button_present(self) -> None:
+        """Each extraction warning has a dismiss button."""
+        rc, html, _ = _generate_static_with_ew(_FULL_INPUTS, _EXTRACTION_WARNINGS_WARN)
+        assert rc == 0
+        assert "Dismiss" in html
+
+
+# ---------------------------------------------------------------------------
+# Extraction Warning Tests — Server Mode
+# ---------------------------------------------------------------------------
+
+
+class TestExtractionWarningsServer:
+    def test_server_renders_extraction_warnings(self) -> None:
+        """Server mode GET / with extraction warnings renders #extraction-warnings div."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ew_path = os.path.join(tmpdir, "extraction_validation.json")
+            with open(ew_path, "w") as f:
+                json.dump(_EXTRACTION_WARNINGS_WARN, f)
+            port, workspace, proc = _start_server(
+                _FULL_INPUTS,
+                extra_args=["--extraction-warnings", ew_path],
+            )
+            try:
+                resp = urllib.request.urlopen(f"http://127.0.0.1:{port}/")
+                html = resp.read().decode()
+                assert 'id="extraction-warnings"' in html
+                assert "BadCo" in html
+            finally:
+                proc.terminate()
+                proc.wait(timeout=5)
 
 
 # ---------------------------------------------------------------------------
@@ -340,8 +472,8 @@ class TestServerMode:
         try:
             payload = json.dumps(
                 {
-                    "corrections": [{"path": "revenue.mrr.value", "was": 50000, "now": 75000}],
-                    "corrected": _FULL_INPUTS,
+                    "base_hash": _compute_hash(_FULL_INPUTS),
+                    "changes": [{"path": "revenue.mrr.value", "expected_old": 50000, "new": 75000}],
                     "warning_overrides": [],
                     "ils_fields": {},
                 }
@@ -360,7 +492,7 @@ class TestServerMode:
             assert os.path.exists(fb_path)
             with open(fb_path) as f:
                 saved = json.load(f)
-            assert saved["corrections"][0]["path"] == "revenue.mrr.value"
+            assert saved["changes"][0]["path"] == "revenue.mrr.value"
         finally:
             proc.terminate()
             proc.wait(timeout=5)
@@ -482,15 +614,13 @@ class TestIntegration:
         """Start server, POST feedback, kill server, apply corrections."""
         port, tmpdir, proc = _start_server(_FULL_INPUTS)
         try:
-            # Simulate founder submission via server
-            corrected_state = json.loads(json.dumps(_FULL_INPUTS))
-            corrected_state["cash"]["current_balance"] = 800000
+            # Simulate founder submission via server (new v2 payload shape)
             payload = json.dumps(
                 {
-                    "corrections": [
-                        {"path": "cash.current_balance", "was": 1000000, "now": 800000, "label": "Cash"},
+                    "base_hash": _compute_hash(_FULL_INPUTS),
+                    "changes": [
+                        {"path": "cash.current_balance", "expected_old": 1000000, "new": 800000},
                     ],
-                    "corrected": corrected_state,
                     "warning_overrides": [],
                     "ils_fields": {},
                 }
