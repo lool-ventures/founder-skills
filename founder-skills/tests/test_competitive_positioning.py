@@ -1016,3 +1016,708 @@ class TestChecklist:
                 assert "(based on estimated inputs)" in item["evidence"], (
                     f"Item {item['id']} missing confidence qualifier in evidence"
                 )
+
+
+# ===========================================================================
+# compose_report.py tests
+# ===========================================================================
+
+
+def _make_product_profile(
+    *,
+    company_name: str = "TestCo",
+    slug: str = "testco",
+    run_id: str = "20260319T143045Z",
+) -> dict[str, Any]:
+    """Build a product_profile.json artifact."""
+    return {
+        "company_name": company_name,
+        "slug": slug,
+        "product_description": "A test product for automated testing.",
+        "target_customers": ["SMBs", "Enterprise"],
+        "value_propositions": ["Fast deployment", "High accuracy"],
+        "differentiation_claims": ["Best-in-class latency"],
+        "stage": "seed",
+        "sector": "SaaS",
+        "business_model": "SaaS",
+        "input_mode": "conversation",
+        "source_materials": ["founder conversation"],
+        "metadata": {"run_id": run_id},
+    }
+
+
+def _make_landscape_artifact(
+    *,
+    run_id: str = "20260319T143045Z",
+    competitors: list[dict[str, Any]] | None = None,
+    warnings: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build a landscape.json artifact (output of validate_landscape)."""
+    if competitors is None:
+        competitors = [
+            _make_competitor("Alpha Corp", "alpha-corp", "direct"),
+            _make_competitor("Beta Inc", "beta-inc", "direct"),
+            _make_competitor("Gamma Ltd", "gamma-ltd", "adjacent"),
+            _make_competitor("Delta Co", "delta-co", "emerging"),
+            _make_competitor("Manual Process", "manual-process", "do_nothing"),
+        ]
+    return {
+        "competitors": competitors,
+        "input_mode": "conversation",
+        "warnings": warnings or [],
+        "metadata": {"run_id": run_id},
+    }
+
+
+def _make_positioning_artifact(
+    *,
+    run_id: str = "20260319T143045Z",
+    accepted_warnings: list[dict[str, Any]] | None = None,
+    assessment_mode: str | None = None,
+    views: list[dict[str, Any]] | None = None,
+    moat_assessments: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a positioning.json artifact."""
+    if views is None:
+        views = [
+            {
+                "id": "primary",
+                "x_axis": {
+                    "name": "Deployment Speed",
+                    "description": "How fast to deploy",
+                    "rationale": "Key differentiator for SMBs",
+                },
+                "y_axis": {
+                    "name": "Detection Accuracy",
+                    "description": "Threat detection accuracy",
+                    "rationale": "Table-stakes dimension",
+                },
+                "points": [
+                    _make_positioning_point("_startup", 90, 85),
+                    _make_positioning_point("alpha-corp", 60, 40),
+                    _make_positioning_point("beta-inc", 30, 70),
+                    _make_positioning_point("gamma-ltd", 50, 50),
+                    _make_positioning_point("delta-co", 20, 60),
+                    _make_positioning_point("manual-process", 95, 15),
+                ],
+            }
+        ]
+    if moat_assessments is None:
+        moat_assessments = {}
+        for slug in ["_startup", "alpha-corp", "beta-inc", "gamma-ltd", "delta-co", "manual-process"]:
+            moat_assessments[slug] = {
+                "moats": [
+                    _make_moat_entry("network_effects", status="moderate"),
+                    _make_moat_entry("data_advantages", status="moderate"),
+                    _make_moat_entry("switching_costs", status="moderate"),
+                    _make_moat_entry("regulatory_barriers", status="absent"),
+                    _make_moat_entry("cost_structure", status="weak"),
+                    _make_moat_entry("brand_reputation", status="weak"),
+                ]
+            }
+    result: dict[str, Any] = {
+        "views": views,
+        "moat_assessments": moat_assessments,
+        "differentiation_claims": [
+            {
+                "claim": "Best latency in market",
+                "verifiable": True,
+                "evidence": "Benchmark data shows <5ms",
+                "challenge": "No third-party validation",
+                "verdict": "holds",
+            }
+        ],
+        "metadata": {"run_id": run_id},
+    }
+    if accepted_warnings is not None:
+        result["accepted_warnings"] = accepted_warnings
+    if assessment_mode is not None:
+        result["assessment_mode"] = assessment_mode
+    return result
+
+
+def _make_moat_scores_artifact(
+    *,
+    run_id: str = "20260319T143045Z",
+    warnings: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build a moat_scores.json artifact."""
+    return {
+        "companies": {
+            "_startup": {
+                "moats": [
+                    _make_moat_entry("network_effects", status="moderate"),
+                    _make_moat_entry("data_advantages", status="strong"),
+                ],
+                "moat_count": 2,
+                "strongest_moat": "data_advantages",
+                "overall_defensibility": "moderate",
+            },
+            "alpha-corp": {
+                "moats": [
+                    _make_moat_entry("network_effects", status="strong"),
+                    _make_moat_entry("data_advantages", status="strong"),
+                ],
+                "moat_count": 2,
+                "strongest_moat": "network_effects",
+                "overall_defensibility": "high",
+            },
+        },
+        "comparison": {
+            "by_dimension": {
+                "network_effects": {"_startup": "moderate", "alpha-corp": "strong"},
+                "data_advantages": {"_startup": "strong", "alpha-corp": "strong"},
+            },
+            "startup_rank": {
+                "network_effects": {"rank": 2, "total": 2},
+                "data_advantages": {"rank": 1, "total": 2},
+            },
+        },
+        "warnings": warnings or [],
+        "metadata": {"run_id": run_id},
+    }
+
+
+def _make_positioning_scores_artifact(
+    *,
+    run_id: str = "20260319T143045Z",
+    views: list[dict[str, Any]] | None = None,
+    warnings: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build a positioning_scores.json artifact."""
+    if views is None:
+        views = [
+            {
+                "view_id": "primary",
+                "x_axis_name": "Deployment Speed",
+                "y_axis_name": "Detection Accuracy",
+                "x_axis_rationale": "Key differentiator for SMBs",
+                "y_axis_rationale": "Table-stakes dimension",
+                "x_axis_vanity_flag": False,
+                "y_axis_vanity_flag": False,
+                "differentiation_score": 75.0,
+                "startup_x_rank": 1,
+                "startup_y_rank": 3,
+                "competitor_count": 5,
+            }
+        ]
+    return {
+        "views": views,
+        "overall_differentiation": 75.0,
+        "differentiation_claims": [
+            {
+                "claim": "Best latency in market",
+                "verifiable": True,
+                "evidence": "Benchmark data",
+                "challenge": "No validation",
+                "verdict": "holds",
+            }
+        ],
+        "warnings": warnings or [],
+        "metadata": {"run_id": run_id},
+    }
+
+
+def _make_checklist_artifact(
+    *,
+    run_id: str = "20260319T143045Z",
+    score_pct: float = 82.6,
+) -> dict[str, Any]:
+    """Build a checklist.json artifact."""
+    items = []
+    for item_id in CHECKLIST_IDS:
+        items.append(
+            {
+                "id": item_id,
+                "category": item_id.split("_")[0],
+                "label": f"Label for {item_id}",
+                "status": "pass",
+                "evidence": f"Evidence for {item_id}",
+            }
+        )
+    return {
+        "items": items,
+        "score_pct": score_pct,
+        "pass_count": 22,
+        "warn_count": 1,
+        "fail_count": 1,
+        "na_count": 1,
+        "total": 25,
+        "input_mode": "conversation",
+        "metadata": {"run_id": run_id},
+    }
+
+
+def _make_artifact_dir(
+    tmp_path: str,
+    *,
+    run_id: str = "20260319T143045Z",
+    include_product_profile: bool = True,
+    include_landscape: bool = True,
+    include_positioning: bool = True,
+    include_moat_scores: bool = True,
+    include_positioning_scores: bool = True,
+    include_checklist: bool = True,
+    landscape_overrides: dict[str, Any] | None = None,
+    positioning_overrides: dict[str, Any] | None = None,
+    moat_scores_overrides: dict[str, Any] | None = None,
+    positioning_scores_overrides: dict[str, Any] | None = None,
+    checklist_overrides: dict[str, Any] | None = None,
+    product_profile_overrides: dict[str, Any] | None = None,
+) -> str:
+    """Write all required artifacts to a temp dir and return the path."""
+    os.makedirs(tmp_path, exist_ok=True)
+
+    if include_product_profile:
+        pp = _make_product_profile(run_id=run_id)
+        if product_profile_overrides:
+            pp.update(product_profile_overrides)
+        with open(os.path.join(tmp_path, "product_profile.json"), "w") as f:
+            json.dump(pp, f)
+
+    if include_landscape:
+        ls = _make_landscape_artifact(run_id=run_id)
+        if landscape_overrides:
+            ls.update(landscape_overrides)
+        with open(os.path.join(tmp_path, "landscape.json"), "w") as f:
+            json.dump(ls, f)
+
+    if include_positioning:
+        pos = _make_positioning_artifact(run_id=run_id)
+        if positioning_overrides:
+            pos.update(positioning_overrides)
+        with open(os.path.join(tmp_path, "positioning.json"), "w") as f:
+            json.dump(pos, f)
+
+    if include_moat_scores:
+        ms = _make_moat_scores_artifact(run_id=run_id)
+        if moat_scores_overrides:
+            ms.update(moat_scores_overrides)
+        with open(os.path.join(tmp_path, "moat_scores.json"), "w") as f:
+            json.dump(ms, f)
+
+    if include_positioning_scores:
+        ps = _make_positioning_scores_artifact(run_id=run_id)
+        if positioning_scores_overrides:
+            ps.update(positioning_scores_overrides)
+        with open(os.path.join(tmp_path, "positioning_scores.json"), "w") as f:
+            json.dump(ps, f)
+
+    if include_checklist:
+        cl = _make_checklist_artifact(run_id=run_id)
+        if checklist_overrides:
+            cl.update(checklist_overrides)
+        with open(os.path.join(tmp_path, "checklist.json"), "w") as f:
+            json.dump(cl, f)
+
+    return tmp_path
+
+
+class TestCompose:
+    """Tests for compose_report.py."""
+
+    # 1. All artifacts present — exits 0, has report_markdown
+    def test_compose_valid_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            assert "report_markdown" in data
+            assert "metadata" in data
+            assert "warnings" in data
+            assert "artifacts_loaded" in data
+            assert "scoring_summary" in data
+            assert data["metadata"]["company_name"] == "TestCo"
+            assert data["scoring_summary"]["checklist_score_pct"] == 82.6
+            assert data["scoring_summary"]["overall_differentiation"] == 75.0
+            assert data["scoring_summary"]["startup_defensibility"] == "moderate"
+
+    # 2. Missing landscape.json -> MISSING_LANDSCAPE (high)
+    def test_compose_missing_landscape_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp, include_landscape=False)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            codes = [w["code"] for w in data["warnings"]]
+            assert "MISSING_LANDSCAPE" in codes
+            warn = next(w for w in data["warnings"] if w["code"] == "MISSING_LANDSCAPE")
+            assert warn["severity"] == "high"
+
+    # 3. Missing positioning_scores.json -> high severity
+    def test_compose_missing_optional_artifact_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp, include_positioning_scores=False)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            codes = [w["code"] for w in data["warnings"]]
+            assert "MISSING_POSITIONING_SCORES" in codes
+            warn = next(w for w in data["warnings"] if w["code"] == "MISSING_POSITIONING_SCORES")
+            assert warn["severity"] == "high"
+
+    # 4. --strict exits 1 on high-severity warning
+    def test_compose_strict_mode_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp, include_landscape=False)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--strict"])
+            assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+
+    # 5. Scoring slug not in landscape -> orphan warning
+    def test_compose_orphan_competitor_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # Use only 3 competitors in landscape but positioning has slugs not in landscape
+            sparse_comps = [
+                _make_competitor("Alpha Corp", "alpha-corp", "direct"),
+                _make_competitor("Beta Inc", "beta-inc", "direct"),
+                _make_competitor("Gamma Ltd", "gamma-ltd", "adjacent"),
+                _make_competitor("Delta Co", "delta-co", "emerging"),
+                _make_competitor("Manual Process", "manual-process", "do_nothing"),
+            ]
+            _make_artifact_dir(tmp, landscape_overrides={"competitors": sparse_comps})
+            # Add an orphan slug in moat_scores
+            orphan_moat = _make_moat_scores_artifact()
+            orphan_moat["companies"]["orphan-slug"] = {
+                "moats": [_make_moat_entry("network_effects")],
+                "moat_count": 1,
+                "strongest_moat": "network_effects",
+                "overall_defensibility": "low",
+            }
+            with open(os.path.join(tmp, "moat_scores.json"), "w") as f:
+                json.dump(orphan_moat, f)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            # Should have an orphan warning for orphan-slug (not for _startup)
+            messages = " ".join(w["message"] for w in data["warnings"])
+            assert "orphan-slug" in messages
+
+    # 6. Mismatched run_id -> STALE_ARTIFACT
+    def test_compose_stale_artifact_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            # Overwrite checklist with a different run_id
+            cl = _make_checklist_artifact(run_id="20260101T000000Z")
+            with open(os.path.join(tmp, "checklist.json"), "w") as f:
+                json.dump(cl, f)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            codes = [w["code"] for w in data["warnings"]]
+            assert "STALE_ARTIFACT" in codes
+            warn = next(w for w in data["warnings"] if w["code"] == "STALE_ARTIFACT")
+            assert warn["severity"] == "high"
+
+    # 7. Competitor with sourced_fields_count < 3 -> SHALLOW_COMPETITOR_PROFILE
+    def test_compose_shallow_profile_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            shallow = _make_competitor(
+                "Shallow Co",
+                "shallow-co",
+                "direct",
+                research_depth="partial",
+                sourced_fields_count=1,
+            )
+            comps = [
+                shallow,
+                _make_competitor("Alpha Corp", "alpha-corp", "direct"),
+                _make_competitor("Beta Inc", "beta-inc", "adjacent"),
+                _make_competitor("Gamma Ltd", "gamma-ltd", "emerging"),
+                _make_competitor("Manual Process", "manual-process", "do_nothing"),
+            ]
+            _make_artifact_dir(tmp, landscape_overrides={"competitors": comps})
+            # Update positioning/moat artifacts to include shallow-co
+            pos = _make_positioning_artifact()
+            pos["views"][0]["points"].append(_make_positioning_point("shallow-co", 40, 40))
+            pos["moat_assessments"]["shallow-co"] = {"moats": [_make_moat_entry("network_effects")]}
+            with open(os.path.join(tmp, "positioning.json"), "w") as f:
+                json.dump(pos, f)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            codes = [w["code"] for w in data["warnings"]]
+            assert "SHALLOW_COMPETITOR_PROFILE" in codes
+            warn = next(w for w in data["warnings"] if w["code"] == "SHALLOW_COMPETITOR_PROFILE")
+            assert warn["severity"] == "medium"
+            assert "shallow-co" in warn["message"].lower() or "Shallow Co" in warn["message"]
+
+    # 8. Vanity-flagged view -> VANITY_AXIS_WARNING
+    def test_compose_vanity_axis_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vanity_views = [
+                {
+                    "view_id": "primary",
+                    "x_axis_name": "Speed",
+                    "y_axis_name": "Quality",
+                    "x_axis_rationale": "rationale",
+                    "y_axis_rationale": "rationale",
+                    "x_axis_vanity_flag": True,
+                    "y_axis_vanity_flag": False,
+                    "differentiation_score": 60.0,
+                    "startup_x_rank": 1,
+                    "startup_y_rank": 2,
+                    "competitor_count": 5,
+                }
+            ]
+            _make_artifact_dir(
+                tmp,
+                positioning_scores_overrides={"views": vanity_views},
+            )
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            codes = [w["code"] for w in data["warnings"]]
+            assert "VANITY_AXIS_WARNING" in codes
+            warn = next(w for w in data["warnings"] if w["code"] == "VANITY_AXIS_WARNING")
+            assert warn["severity"] == "medium"
+
+    # 9. MOAT_WITHOUT_EVIDENCE forwarded from moat_scores warnings
+    def test_compose_moat_without_evidence_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            moat_warns = [
+                {
+                    "code": "MOAT_WITHOUT_EVIDENCE",
+                    "severity": "medium",
+                    "message": "alpha-corp: network_effects rated 'strong' with insufficient evidence",
+                    "company": "alpha-corp",
+                    "moat_id": "network_effects",
+                }
+            ]
+            _make_artifact_dir(
+                tmp,
+                moat_scores_overrides={"warnings": moat_warns},
+            )
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            codes = [w["code"] for w in data["warnings"]]
+            assert "MOAT_WITHOUT_EVIDENCE" in codes
+
+    # 10. MISSING_DO_NOTHING forwarded from landscape warnings
+    def test_compose_missing_do_nothing_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            land_warns = [
+                {
+                    "code": "MISSING_DO_NOTHING",
+                    "severity": "medium",
+                    "message": "No do_nothing or adjacent competitor found",
+                }
+            ]
+            _make_artifact_dir(
+                tmp,
+                landscape_overrides={"warnings": land_warns},
+            )
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            codes = [w["code"] for w in data["warnings"]]
+            assert "MISSING_DO_NOTHING" in codes
+
+    # 11. RESEARCH_DEPTH_LOW: founder_provided + few sourced competitors
+    def test_compose_research_depth_low_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # All competitors with low sourced_fields_count
+            comps = [
+                _make_competitor("A", "a", "direct", research_depth="founder_provided", sourced_fields_count=1),
+                _make_competitor("B", "b", "direct", research_depth="founder_provided", sourced_fields_count=1),
+                _make_competitor("C", "c", "adjacent", research_depth="founder_provided", sourced_fields_count=2),
+                _make_competitor("D", "d", "emerging", research_depth="founder_provided", sourced_fields_count=0),
+                _make_competitor("E", "e", "do_nothing", research_depth="founder_provided", sourced_fields_count=0),
+            ]
+            # landscape enriched has research_depth; compose reads it from landscape metadata
+            # landscape.json doesn't have top-level research_depth, but the enriched one does
+            # Actually, looking at the schema: landscape_enriched.json has research_depth but
+            # landscape.json (output of validate_landscape) does not have a top-level research_depth.
+            # The compose should look at competitor-level research_depth.
+            # Per the task spec: "landscape research_depth == 'founder_provided' AND fewer than 4..."
+            # We need the metadata-level research_depth. Let me add it to the landscape.
+            _make_artifact_dir(
+                tmp,
+                landscape_overrides={
+                    "competitors": comps,
+                    "research_depth": "founder_provided",
+                },
+            )
+            # Update positioning to match slugs
+            pos = _make_positioning_artifact(
+                views=[
+                    {
+                        "id": "primary",
+                        "x_axis": {"name": "X", "description": "...", "rationale": "r"},
+                        "y_axis": {"name": "Y", "description": "...", "rationale": "r"},
+                        "points": [
+                            _make_positioning_point("_startup", 90, 85),
+                            _make_positioning_point("a", 60, 40),
+                            _make_positioning_point("b", 30, 70),
+                            _make_positioning_point("c", 50, 50),
+                            _make_positioning_point("d", 20, 60),
+                            _make_positioning_point("e", 95, 15),
+                        ],
+                    }
+                ],
+                moat_assessments={
+                    slug: {"moats": [_make_moat_entry("network_effects")]}
+                    for slug in ["_startup", "a", "b", "c", "d", "e"]
+                },
+            )
+            with open(os.path.join(tmp, "positioning.json"), "w") as f:
+                json.dump(pos, f)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            codes = [w["code"] for w in data["warnings"]]
+            assert "RESEARCH_DEPTH_LOW" in codes
+            warn = next(w for w in data["warnings"] if w["code"] == "RESEARCH_DEPTH_LOW")
+            assert warn["severity"] == "medium"
+
+    # 12. SEQUENTIAL_FALLBACK: assessment_mode == "sequential"
+    def test_compose_sequential_fallback_info(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp, positioning_overrides={"assessment_mode": "sequential"})
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            codes = [w["code"] for w in data["warnings"]]
+            assert "SEQUENTIAL_FALLBACK" in codes
+            warn = next(w for w in data["warnings"] if w["code"] == "SEQUENTIAL_FALLBACK")
+            assert warn["severity"] == "info"
+
+    # 13. Accepted warnings downgrades medium to acknowledged
+    def test_compose_accepted_warnings_downgrades(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # Create a scenario with MOAT_WITHOUT_EVIDENCE forwarded from moat_scores
+            moat_warns = [
+                {
+                    "code": "MOAT_WITHOUT_EVIDENCE",
+                    "severity": "medium",
+                    "message": "alpha-corp: network_effects rated 'strong' with insufficient evidence",
+                    "company": "alpha-corp",
+                    "moat_id": "network_effects",
+                }
+            ]
+            accepted = [
+                {
+                    "code": "MOAT_WITHOUT_EVIDENCE",
+                    "match": "alpha-corp",
+                    "reason": "Acceptable given source constraints",
+                }
+            ]
+            _make_artifact_dir(
+                tmp,
+                moat_scores_overrides={"warnings": moat_warns},
+                positioning_overrides={"accepted_warnings": accepted},
+            )
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            moat_w = next(w for w in data["warnings"] if w["code"] == "MOAT_WITHOUT_EVIDENCE")
+            assert moat_w["severity"] == "acknowledged"
+
+    # 14. High-severity code in accepted_warnings is ignored
+    def test_compose_high_severity_not_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            accepted = [
+                {
+                    "code": "MISSING_LANDSCAPE",
+                    "match": "landscape",
+                    "reason": "We know it's missing",
+                }
+            ]
+            _make_artifact_dir(
+                tmp,
+                include_landscape=False,
+                positioning_overrides={"accepted_warnings": accepted},
+            )
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            land_w = next(w for w in data["warnings"] if w["code"] == "MISSING_LANDSCAPE")
+            # Should NOT be acknowledged — high severity cannot be accepted
+            assert land_w["severity"] == "high"
+
+    # 15. FOUNDER_OVERRIDE_COUNT counts founder_override evidence sources
+    def test_compose_founder_override_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # Create positioning with some founder_override evidence_sources
+            views = [
+                {
+                    "id": "primary",
+                    "x_axis": {"name": "X", "description": "...", "rationale": "r"},
+                    "y_axis": {"name": "Y", "description": "...", "rationale": "r"},
+                    "points": [
+                        {
+                            "competitor": "_startup",
+                            "x": 90,
+                            "y": 85,
+                            "x_evidence": "e1",
+                            "y_evidence": "e2",
+                            "x_evidence_source": "founder_override",
+                            "y_evidence_source": "founder_override",
+                        },
+                        {
+                            "competitor": "alpha-corp",
+                            "x": 60,
+                            "y": 40,
+                            "x_evidence": "e1",
+                            "y_evidence": "e2",
+                            "x_evidence_source": "researched",
+                            "y_evidence_source": "founder_override",
+                        },
+                        _make_positioning_point("beta-inc", 30, 70),
+                        _make_positioning_point("gamma-ltd", 50, 50),
+                        _make_positioning_point("delta-co", 20, 60),
+                        _make_positioning_point("manual-process", 95, 15),
+                    ],
+                }
+            ]
+            # Also add founder_override in moat assessments
+            moat_assessments: dict[str, Any] = {}
+            for slug in ["_startup", "alpha-corp", "beta-inc", "gamma-ltd", "delta-co", "manual-process"]:
+                moat_assessments[slug] = {
+                    "moats": [
+                        _make_moat_entry(
+                            "network_effects",
+                            evidence_source="founder_override" if slug == "_startup" else "researched",
+                        ),
+                        _make_moat_entry("data_advantages"),
+                    ]
+                }
+            _make_artifact_dir(
+                tmp,
+                positioning_overrides={
+                    "views": views,
+                    "moat_assessments": moat_assessments,
+                },
+            )
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            # 3 founder_override in positioning points (2 for _startup + 1 for alpha-corp y)
+            # + 1 founder_override in moat assessments (_startup network_effects)
+            # = 4 total
+            assert data["metadata"]["founder_override_count"] == 4
+            codes = [w["code"] for w in data["warnings"]]
+            assert "FOUNDER_OVERRIDE_COUNT" in codes
+            warn = next(w for w in data["warnings"] if w["code"] == "FOUNDER_OVERRIDE_COUNT")
+            assert warn["severity"] == "low"
+
+    # 16. Report markdown has expected sections
+    def test_compose_report_markdown_structure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            md = data["report_markdown"]
+            assert "# Competitive Positioning Analysis" in md
+            assert "TestCo" in md
+            assert "## Executive Summary" in md
+            assert "## Competitor Landscape" in md
+            assert "## Positioning Analysis" in md
+            assert "## Moat Assessment" in md
+            assert "## Differentiation Stress-Test" in md
+            assert "## Key Findings" in md
+            assert "founder skills" in md
+            assert "lool ventures" in md
+            assert "Competitive Positioning Coach" in md
