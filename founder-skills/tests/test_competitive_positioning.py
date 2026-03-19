@@ -277,3 +277,213 @@ class TestValidateLandscape:
             assert len(file_data["competitors"]) == 5
         finally:
             os.unlink(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Factory: valid moat_assessments input for score_moats.py
+# ---------------------------------------------------------------------------
+
+CANONICAL_MOAT_IDS = [
+    "network_effects",
+    "data_advantages",
+    "switching_costs",
+    "regulatory_barriers",
+    "cost_structure",
+    "brand_reputation",
+]
+
+
+def _make_moat_entry(
+    moat_id: str,
+    *,
+    status: str = "moderate",
+    evidence: str = "Sufficient evidence for this moat dimension assessment.",
+    evidence_source: str = "researched",
+    trajectory: str = "stable",
+) -> dict[str, Any]:
+    """Build a single moat entry."""
+    return {
+        "id": moat_id,
+        "status": status,
+        "evidence": evidence,
+        "evidence_source": evidence_source,
+        "trajectory": trajectory,
+    }
+
+
+def _make_company_moats(
+    *,
+    statuses: dict[str, str] | None = None,
+    extra_moats: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build a moats object for one company."""
+    statuses = statuses or {}
+    moats = []
+    for mid in CANONICAL_MOAT_IDS:
+        moats.append(_make_moat_entry(mid, status=statuses.get(mid, "moderate")))
+    if extra_moats:
+        moats.extend(extra_moats)
+    return {"moats": moats}
+
+
+def _make_valid_moat_input(
+    *,
+    startup_statuses: dict[str, str] | None = None,
+    competitor_statuses: dict[str, str] | None = None,
+    extra_startup_moats: list[dict[str, Any]] | None = None,
+    data_confidence: str | None = None,
+    run_id: str = "20260319T143045Z",
+) -> dict[str, Any]:
+    """Build a valid score_moats.py input with _startup + 1 competitor."""
+    result: dict[str, Any] = {
+        "moat_assessments": {
+            "_startup": _make_company_moats(statuses=startup_statuses, extra_moats=extra_startup_moats),
+            "acme-corp": _make_company_moats(statuses=competitor_statuses),
+        },
+        "metadata": {"run_id": run_id},
+    }
+    if data_confidence is not None:
+        result["data_confidence"] = data_confidence
+    return result
+
+
+# ===========================================================================
+# score_moats.py tests
+# ===========================================================================
+
+
+class TestScoreMoats:
+    """Tests for score_moats.py."""
+
+    # 1. Well-formed input passes
+    def test_score_moats_valid_passes(self) -> None:
+        payload = _make_valid_moat_input()
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert "companies" in data
+        assert "_startup" in data["companies"]
+        assert "acme-corp" in data["companies"]
+        assert "comparison" in data
+        assert "warnings" in data
+        assert "metadata" in data
+        assert data["metadata"]["run_id"] == "20260319T143045Z"
+        # Each company should have moats + aggregates
+        for slug in ("_startup", "acme-corp"):
+            co = data["companies"][slug]
+            assert "moats" in co
+            assert "moat_count" in co
+            assert "strongest_moat" in co
+            assert "overall_defensibility" in co
+
+    # 2. Custom moat accepted
+    def test_score_moats_custom_moat_accepted(self) -> None:
+        custom = _make_moat_entry("custom_ip_patents", status="strong")
+        payload = _make_valid_moat_input(extra_startup_moats=[custom])
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        startup_ids = [m["id"] for m in data["companies"]["_startup"]["moats"]]
+        assert "custom_ip_patents" in startup_ids
+
+    # 3. Missing canonical moat produces warning
+    def test_score_moats_missing_canonical_warns(self) -> None:
+        payload = _make_valid_moat_input()
+        # Remove one canonical moat from _startup
+        payload["moat_assessments"]["_startup"]["moats"] = [
+            m for m in payload["moat_assessments"]["_startup"]["moats"] if m["id"] != "brand_reputation"
+        ]
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        codes = [w["code"] for w in data["warnings"]]
+        assert "MISSING_CANONICAL_MOAT" in codes
+        warn = next(w for w in data["warnings"] if w["code"] == "MISSING_CANONICAL_MOAT")
+        assert "_startup" in warn["message"]
+        assert "brand_reputation" in warn["message"]
+
+    # 4. Strong without evidence warns
+    def test_score_moats_strong_without_evidence_warns(self) -> None:
+        payload = _make_valid_moat_input(startup_statuses={"network_effects": "strong"})
+        # Shorten the evidence for the strong moat
+        for m in payload["moat_assessments"]["_startup"]["moats"]:
+            if m["id"] == "network_effects":
+                m["evidence"] = "Short."
+                break
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        codes = [w["code"] for w in data["warnings"]]
+        assert "MOAT_WITHOUT_EVIDENCE" in codes
+        warn = next(w for w in data["warnings"] if w["code"] == "MOAT_WITHOUT_EVIDENCE")
+        assert warn["severity"] == "medium"
+        assert "_startup" in warn.get("company", "")
+
+    # 5. Per-company aggregates
+    def test_score_moats_per_company_aggregates(self) -> None:
+        payload = _make_valid_moat_input(
+            startup_statuses={
+                "network_effects": "strong",
+                "data_advantages": "strong",
+                "switching_costs": "moderate",
+                "regulatory_barriers": "absent",
+                "cost_structure": "not_applicable",
+                "brand_reputation": "weak",
+            }
+        )
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        startup = data["companies"]["_startup"]
+        # moat_count: non-absent, non-na => strong(2) + moderate(1) + weak(1) = 4
+        assert startup["moat_count"] == 4
+        assert startup["strongest_moat"] == "network_effects"
+        assert startup["overall_defensibility"] == "high"  # 2+ strong
+
+    # 6. Comparison section present
+    def test_score_moats_comparison_section(self) -> None:
+        payload = _make_valid_moat_input()
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        comp = data["comparison"]
+        assert "by_dimension" in comp
+        assert "startup_rank" in comp
+        # Each canonical moat should be in by_dimension
+        for mid in CANONICAL_MOAT_IDS:
+            assert mid in comp["by_dimension"], f"Missing {mid} in by_dimension"
+            assert "_startup" in comp["by_dimension"][mid]
+            assert "acme-corp" in comp["by_dimension"][mid]
+        # startup_rank should have entries for canonical moats
+        for mid in CANONICAL_MOAT_IDS:
+            assert mid in comp["startup_rank"], f"Missing {mid} in startup_rank"
+            rank_info = comp["startup_rank"][mid]
+            assert "rank" in rank_info
+            assert "total" in rank_info
+
+    # 7. _startup key processed correctly
+    def test_score_moats_startup_included(self) -> None:
+        payload = _make_valid_moat_input()
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert "_startup" in data["companies"]
+        startup = data["companies"]["_startup"]
+        assert len(startup["moats"]) == 6
+
+    # 8. Data confidence qualifier
+    def test_score_moats_data_confidence_qualifier(self) -> None:
+        payload = _make_valid_moat_input(data_confidence="estimated")
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        # Evidence strings should be qualified
+        for m in data["companies"]["_startup"]["moats"]:
+            assert "(based on estimated inputs)" in m["evidence"]
+
+    # 9. Invalid trajectory fails
+    def test_score_moats_invalid_trajectory_fails(self) -> None:
+        payload = _make_valid_moat_input()
+        payload["moat_assessments"]["_startup"]["moats"][0]["trajectory"] = "declining"
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
