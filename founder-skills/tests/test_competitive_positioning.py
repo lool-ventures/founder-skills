@@ -823,3 +823,196 @@ class TestScorePositioning:
         assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
         assert data is not None
         assert data.get("data_confidence") == "estimated"
+
+
+# ---------------------------------------------------------------------------
+# Factory: valid checklist input for checklist.py
+# ---------------------------------------------------------------------------
+
+# Canonical 25 checklist item IDs — must match checklist-criteria.md exactly.
+CHECKLIST_IDS: list[str] = [
+    # Competitor Coverage (5)
+    "COVER_01",
+    "COVER_02",
+    "COVER_03",
+    "COVER_04",
+    "COVER_05",
+    # Positioning Quality (5)
+    "POS_01",
+    "POS_02",
+    "POS_03",
+    "POS_04",
+    "POS_05",
+    # Moat Assessment (4)
+    "MOAT_01",
+    "MOAT_02",
+    "MOAT_03",
+    "MOAT_04",
+    # Evidence Quality (4)
+    "EVID_01",
+    "EVID_02",
+    "EVID_03",
+    "EVID_04",
+    # Narrative Readiness (4)
+    "NARR_01",
+    "NARR_02",
+    "NARR_03",
+    "NARR_04",
+    # Common Mistakes (3)
+    "MISS_01",
+    "MISS_02",
+    "MISS_03",
+]
+
+
+def _make_checklist_item(
+    item_id: str,
+    *,
+    status: str = "pass",
+    evidence: str = "Sufficient evidence for this checklist item.",
+    notes: str | None = None,
+) -> dict[str, Any]:
+    """Build a single checklist item entry."""
+    result: dict[str, Any] = {
+        "id": item_id,
+        "status": status,
+        "evidence": evidence,
+    }
+    if notes is not None:
+        result["notes"] = notes
+    return result
+
+
+def _make_valid_checklist_input(
+    *,
+    input_mode: str = "conversation",
+    data_confidence: str = "exact",
+    run_id: str = "20260319T143045Z",
+    overrides: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Build a valid checklist.py input with all 25 items.
+
+    ``overrides`` maps item ID to status, e.g. {"COVER_01": "fail"}.
+    """
+    overrides = overrides or {}
+    items = []
+    for item_id in CHECKLIST_IDS:
+        status = overrides.get(item_id, "pass")
+        evidence = (
+            f"Evidence for {item_id} (status={status})" if status != "not_applicable" else f"Auto-gated: {item_id}"
+        )
+        items.append(_make_checklist_item(item_id, status=status, evidence=evidence))
+    return {
+        "items": items,
+        "input_mode": input_mode,
+        "data_confidence": data_confidence,
+        "metadata": {"run_id": run_id},
+    }
+
+
+# ===========================================================================
+# checklist.py tests
+# ===========================================================================
+
+
+class TestChecklist:
+    """Tests for checklist.py."""
+
+    # 1. All items assessed with valid statuses, exits 0
+    def test_checklist_valid_passes(self) -> None:
+        payload = _make_valid_checklist_input()
+        rc, data, stderr = run_script("checklist.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert "items" in data
+        assert len(data["items"]) == 25
+        assert "score_pct" in data
+        assert "pass_count" in data
+        assert "fail_count" in data
+        assert "warn_count" in data
+        assert "na_count" in data
+        assert "total" in data
+        assert data["total"] == 25
+        assert "input_mode" in data
+        assert data["input_mode"] == "conversation"
+        assert "metadata" in data
+        assert data["metadata"]["run_id"] == "20260319T143045Z"
+
+    # 2. Score computation: pass_count / (total - na) * 100
+    def test_checklist_score_computation(self) -> None:
+        # Use document mode which only gates NARR_03 (1 auto-gated).
+        # Override 3 items to fail and 1 to warn.
+        # Result: 20 pass, 3 fail, 1 warn, 1 na (NARR_03 gated)
+        # score = 20 / (25 - 1) * 100 = 83.3
+        overrides = {
+            "COVER_01": "fail",
+            "COVER_02": "fail",
+            "COVER_03": "fail",
+            "POS_01": "warn",
+        }
+        payload = _make_valid_checklist_input(input_mode="document", overrides=overrides)
+        rc, data, stderr = run_script("checklist.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data["pass_count"] == 20
+        assert data["fail_count"] == 3
+        assert data["warn_count"] == 1
+        assert data["na_count"] == 1
+        assert data["total"] == 25
+        expected_score = round(20 / (25 - 1) * 100, 1)
+        assert data["score_pct"] == expected_score
+
+    # 3. Deck mode auto-gates EVID_02 and EVID_04
+    def test_checklist_mode_gating_deck(self) -> None:
+        payload = _make_valid_checklist_input(input_mode="deck")
+        rc, data, stderr = run_script("checklist.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        items_by_id = {item["id"]: item for item in data["items"]}
+        # EVID_02 and EVID_04 should be auto-gated to not_applicable
+        assert items_by_id["EVID_02"]["status"] == "not_applicable"
+        assert items_by_id["EVID_04"]["status"] == "not_applicable"
+        # NARR_03 should remain active in deck mode
+        assert items_by_id["NARR_03"]["status"] != "not_applicable"
+        assert data["na_count"] >= 2
+
+    # 4. Conversation mode gates NARR_03 and EVID_04
+    def test_checklist_mode_gating_conversation(self) -> None:
+        payload = _make_valid_checklist_input(input_mode="conversation")
+        rc, data, stderr = run_script("checklist.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        items_by_id = {item["id"]: item for item in data["items"]}
+        # NARR_03 and EVID_04 should be auto-gated
+        assert items_by_id["NARR_03"]["status"] == "not_applicable"
+        assert items_by_id["EVID_04"]["status"] == "not_applicable"
+        # EVID_02 should remain active in conversation mode
+        assert items_by_id["EVID_02"]["status"] != "not_applicable"
+
+    # 5. Missing required item ID exits 1
+    def test_checklist_missing_item_fails(self) -> None:
+        payload = _make_valid_checklist_input()
+        # Remove one item
+        payload["items"] = [i for i in payload["items"] if i["id"] != "COVER_01"]
+        rc, data, stderr = run_script("checklist.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+
+    # 6. Invalid status exits 1
+    def test_checklist_invalid_status_fails(self) -> None:
+        payload = _make_valid_checklist_input()
+        payload["items"][0]["status"] = "maybe"
+        rc, data, stderr = run_script("checklist.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+
+    # 7. Data confidence qualifier appended when estimated
+    def test_checklist_data_confidence_qualifier(self) -> None:
+        payload = _make_valid_checklist_input(data_confidence="estimated")
+        rc, data, stderr = run_script("checklist.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        # Non-gated items should have the qualifier appended
+        for item in data["items"]:
+            if item["status"] != "not_applicable":
+                assert "(based on estimated inputs)" in item["evidence"], (
+                    f"Item {item['id']} missing confidence qualifier in evidence"
+                )
