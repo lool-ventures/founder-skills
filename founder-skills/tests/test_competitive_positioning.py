@@ -487,3 +487,339 @@ class TestScoreMoats:
         payload["moat_assessments"]["_startup"]["moats"][0]["trajectory"] = "declining"
         rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
         assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+
+
+# ---------------------------------------------------------------------------
+# Factory: valid positioning input for score_positioning.py
+# ---------------------------------------------------------------------------
+
+
+def _make_positioning_point(
+    competitor: str,
+    x: int | float,
+    y: int | float,
+) -> dict[str, Any]:
+    """Build a single positioning point entry."""
+    return {
+        "competitor": competitor,
+        "x": x,
+        "y": y,
+        "x_evidence": f"Evidence for {competitor} on x-axis",
+        "y_evidence": f"Evidence for {competitor} on y-axis",
+        "x_evidence_source": "researched",
+        "y_evidence_source": "researched",
+    }
+
+
+def _make_valid_positioning_input(
+    *,
+    views: list[dict[str, Any]] | None = None,
+    differentiation_claims: list[dict[str, Any]] | None = None,
+    data_confidence: str = "exact",
+    run_id: str = "20260319T143045Z",
+) -> dict[str, Any]:
+    """Build a valid score_positioning.py input with primary view + 5 competitors + _startup."""
+    if views is None:
+        views = [
+            {
+                "id": "primary",
+                "x_axis": {
+                    "name": "Deployment Speed",
+                    "description": "How fast the solution can be deployed",
+                    "rationale": "Speed-to-value is a key differentiator for SMB buyers",
+                },
+                "y_axis": {
+                    "name": "Data Privacy Level",
+                    "description": "Degree of data privacy guarantees",
+                    "rationale": "Privacy is a growing concern in the target market",
+                },
+                "points": [
+                    _make_positioning_point("_startup", 90, 85),
+                    _make_positioning_point("acme-corp", 60, 40),
+                    _make_positioning_point("beta-inc", 30, 70),
+                    _make_positioning_point("gamma-ltd", 50, 50),
+                    _make_positioning_point("delta-co", 20, 60),
+                    _make_positioning_point("epsilon-sa", 70, 30),
+                ],
+            }
+        ]
+    if differentiation_claims is None:
+        differentiation_claims = [
+            {
+                "claim": "Sub-5ms latency vs. competitors' 50-200ms",
+                "verifiable": True,
+                "evidence": "SDK-based approach avoids network hop",
+                "challenge": "No independent benchmark found",
+                "verdict": "holds",
+            }
+        ]
+    return {
+        "views": views,
+        "differentiation_claims": differentiation_claims,
+        "metadata": {"run_id": run_id},
+        "data_confidence": data_confidence,
+    }
+
+
+# ===========================================================================
+# score_positioning.py tests
+# ===========================================================================
+
+
+class TestScorePositioning:
+    """Tests for score_positioning.py."""
+
+    # 1. Well-formed input passes
+    def test_score_positioning_valid_passes(self) -> None:
+        payload = _make_valid_positioning_input()
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert "views" in data
+        assert len(data["views"]) == 1
+        assert "overall_differentiation" in data
+        assert "differentiation_claims" in data
+        assert "warnings" in data
+        assert "metadata" in data
+        assert data["metadata"]["run_id"] == "20260319T143045Z"
+        view = data["views"][0]
+        assert view["view_id"] == "primary"
+        assert view["competitor_count"] == 5
+        assert "differentiation_score" in view
+        assert "startup_x_rank" in view
+        assert "startup_y_rank" in view
+        assert "x_axis_vanity_flag" in view
+        assert "y_axis_vanity_flag" in view
+
+    # 2. Vanity axis detected when >80% of competitors cluster within 20% range
+    def test_score_positioning_vanity_axis_detected(self) -> None:
+        # 5 competitors all with x in [40, 60] (within 20% range), _startup at 90
+        points = [
+            _make_positioning_point("_startup", 90, 85),
+            _make_positioning_point("acme-corp", 42, 40),
+            _make_positioning_point("beta-inc", 45, 70),
+            _make_positioning_point("gamma-ltd", 50, 50),
+            _make_positioning_point("delta-co", 48, 60),
+            _make_positioning_point("epsilon-sa", 55, 30),
+        ]
+        views = [
+            {
+                "id": "primary",
+                "x_axis": {"name": "X", "description": "...", "rationale": "x rationale"},
+                "y_axis": {"name": "Y", "description": "...", "rationale": "y rationale"},
+                "points": points,
+            }
+        ]
+        payload = _make_valid_positioning_input(views=views)
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        view = data["views"][0]
+        # All 5 competitors (100% > 80%) are within [42, 55] — range of 13 < 20
+        assert view["x_axis_vanity_flag"] is True
+        # y-axis has spread [30, 70] — range 40 > 20, not vanity
+        assert view["y_axis_vanity_flag"] is False
+        # Should have VANITY_AXIS_WARNING
+        codes = [w["code"] for w in data["warnings"]]
+        assert "VANITY_AXIS_WARNING" in codes
+
+    # 3. Non-vanity axis — spread competitors don't trigger vanity
+    def test_score_positioning_non_vanity_axis(self) -> None:
+        points = [
+            _make_positioning_point("_startup", 90, 85),
+            _make_positioning_point("acme-corp", 10, 20),
+            _make_positioning_point("beta-inc", 30, 80),
+            _make_positioning_point("gamma-ltd", 50, 50),
+            _make_positioning_point("delta-co", 70, 40),
+            _make_positioning_point("epsilon-sa", 90, 10),
+        ]
+        views = [
+            {
+                "id": "primary",
+                "x_axis": {"name": "X", "description": "...", "rationale": "x rationale"},
+                "y_axis": {"name": "Y", "description": "...", "rationale": "y rationale"},
+                "points": points,
+            }
+        ]
+        payload = _make_valid_positioning_input(views=views)
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        view = data["views"][0]
+        assert view["x_axis_vanity_flag"] is False
+        assert view["y_axis_vanity_flag"] is False
+
+    # 4. Rank-based differentiation — startup ranked 1st scores high; middle scores low
+    def test_score_positioning_rank_based_differentiation(self) -> None:
+        # Startup at top of both axes (rank 1 on both)
+        points_top = [
+            _make_positioning_point("_startup", 95, 95),
+            _make_positioning_point("acme-corp", 80, 80),
+            _make_positioning_point("beta-inc", 60, 60),
+            _make_positioning_point("gamma-ltd", 40, 40),
+            _make_positioning_point("delta-co", 20, 20),
+        ]
+        views_top = [
+            {
+                "id": "primary",
+                "x_axis": {"name": "X", "description": "...", "rationale": "x rationale"},
+                "y_axis": {"name": "Y", "description": "...", "rationale": "y rationale"},
+                "points": points_top,
+            }
+        ]
+        payload_top = _make_valid_positioning_input(views=views_top)
+        rc, data_top, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload_top))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data_top is not None
+
+        # Startup in middle of both axes
+        points_mid = [
+            _make_positioning_point("_startup", 50, 50),
+            _make_positioning_point("acme-corp", 80, 80),
+            _make_positioning_point("beta-inc", 60, 60),
+            _make_positioning_point("gamma-ltd", 40, 40),
+            _make_positioning_point("delta-co", 20, 20),
+        ]
+        views_mid = [
+            {
+                "id": "primary",
+                "x_axis": {"name": "X", "description": "...", "rationale": "x rationale"},
+                "y_axis": {"name": "Y", "description": "...", "rationale": "y rationale"},
+                "points": points_mid,
+            }
+        ]
+        payload_mid = _make_valid_positioning_input(views=views_mid)
+        rc2, data_mid, stderr2 = run_script("score_positioning.py", stdin_data=json.dumps(payload_mid))
+        assert rc2 == 0, f"Expected exit 0, got {rc2}. stderr: {stderr2}"
+        assert data_mid is not None
+
+        top_score = data_top["views"][0]["differentiation_score"]
+        mid_score = data_mid["views"][0]["differentiation_score"]
+        assert top_score > mid_score, f"Top score {top_score} should exceed mid score {mid_score}"
+        # Top-ranked startup should score 100
+        assert top_score == 100.0
+        # Startup ranks: x=50 is rank 3 of 4 (behind 80, 60), y same => (4-3+1)/4 = 0.5 => 50.0
+        assert mid_score == 50.0
+
+    # 5. Secondary view gets its own scores
+    def test_score_positioning_secondary_view_scored(self) -> None:
+        views = [
+            {
+                "id": "primary",
+                "x_axis": {"name": "X1", "description": "...", "rationale": "x1 rationale"},
+                "y_axis": {"name": "Y1", "description": "...", "rationale": "y1 rationale"},
+                "points": [
+                    _make_positioning_point("_startup", 90, 80),
+                    _make_positioning_point("acme-corp", 60, 40),
+                    _make_positioning_point("beta-inc", 30, 70),
+                ],
+            },
+            {
+                "id": "secondary",
+                "x_axis": {"name": "X2", "description": "...", "rationale": "x2 rationale"},
+                "y_axis": {"name": "Y2", "description": "...", "rationale": "y2 rationale"},
+                "points": [
+                    _make_positioning_point("_startup", 20, 30),
+                    _make_positioning_point("acme-corp", 80, 90),
+                    _make_positioning_point("beta-inc", 50, 60),
+                ],
+            },
+        ]
+        payload = _make_valid_positioning_input(views=views)
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert len(data["views"]) == 2
+        ids = [v["view_id"] for v in data["views"]]
+        assert "primary" in ids
+        assert "secondary" in ids
+        # Each view has its own scores
+        for v in data["views"]:
+            assert "differentiation_score" in v
+            assert "startup_x_rank" in v
+            assert "startup_y_rank" in v
+
+    # 6. Aggregate differentiation computed across views
+    def test_score_positioning_aggregate_differentiation(self) -> None:
+        views = [
+            {
+                "id": "primary",
+                "x_axis": {"name": "X1", "description": "...", "rationale": "x1 rationale"},
+                "y_axis": {"name": "Y1", "description": "...", "rationale": "y1 rationale"},
+                "points": [
+                    _make_positioning_point("_startup", 95, 95),
+                    _make_positioning_point("acme-corp", 60, 40),
+                    _make_positioning_point("beta-inc", 30, 70),
+                ],
+            },
+            {
+                "id": "secondary",
+                "x_axis": {"name": "X2", "description": "...", "rationale": "x2 rationale"},
+                "y_axis": {"name": "Y2", "description": "...", "rationale": "y2 rationale"},
+                "points": [
+                    _make_positioning_point("_startup", 20, 30),
+                    _make_positioning_point("acme-corp", 80, 90),
+                    _make_positioning_point("beta-inc", 50, 60),
+                ],
+            },
+        ]
+        payload = _make_valid_positioning_input(views=views)
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        # overall_differentiation should be average of per-view scores
+        scores = [v["differentiation_score"] for v in data["views"]]
+        expected = round(sum(scores) / len(scores), 1)
+        assert data["overall_differentiation"] == expected
+
+    # 7. Missing _startup fails
+    def test_score_positioning_missing_startup_fails(self) -> None:
+        views = [
+            {
+                "id": "primary",
+                "x_axis": {"name": "X", "description": "...", "rationale": "x rationale"},
+                "y_axis": {"name": "Y", "description": "...", "rationale": "y rationale"},
+                "points": [
+                    _make_positioning_point("acme-corp", 60, 40),
+                    _make_positioning_point("beta-inc", 30, 70),
+                    _make_positioning_point("gamma-ltd", 50, 50),
+                ],
+            }
+        ]
+        payload = _make_valid_positioning_input(views=views)
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+
+    # 8. Stress-test passthrough — differentiation_claims passed through
+    def test_score_positioning_stress_test_passthrough(self) -> None:
+        claims = [
+            {
+                "claim": "Best latency in market",
+                "verifiable": True,
+                "evidence": "Benchmark data shows <5ms",
+                "challenge": "No third-party validation",
+                "verdict": "holds",
+            },
+            {
+                "claim": "Only GraphQL support",
+                "verifiable": True,
+                "evidence": "Competitor analysis confirms",
+                "challenge": "Others may add it soon",
+                "verdict": "partially_holds",
+            },
+        ]
+        payload = _make_valid_positioning_input(differentiation_claims=claims)
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert len(data["differentiation_claims"]) == 2
+        assert data["differentiation_claims"][0]["claim"] == "Best latency in market"
+        assert data["differentiation_claims"][1]["verdict"] == "partially_holds"
+
+    # 9. Data confidence passthrough
+    def test_score_positioning_data_confidence_passthrough(self) -> None:
+        payload = _make_valid_positioning_input(data_confidence="estimated")
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data.get("data_confidence") == "estimated"
