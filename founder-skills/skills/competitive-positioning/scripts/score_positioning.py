@@ -210,14 +210,15 @@ def _validate_input(data: dict[str, Any]) -> list[str]:
             if p.get("competitor") == "_startup":
                 has_startup = True
 
-            # Coordinate bounds
+            # Coordinate validation — x and y are required
             for coord in ("x", "y"):
                 val = p.get(coord)
-                if val is not None:
-                    if not isinstance(val, (int, float)):
-                        errors.append(f"views[{i}].points[{j}].{coord} must be a number")
-                    elif val < 0 or val > 100:
-                        errors.append(f"views[{i}].points[{j}].{coord}={val} out of range 0-100")
+                if val is None:
+                    errors.append(f"views[{i}].points[{j}].{coord} is required")
+                elif not isinstance(val, (int, float)):
+                    errors.append(f"views[{i}].points[{j}].{coord} must be a number")
+                elif val < 0 or val > 100:
+                    errors.append(f"views[{i}].points[{j}].{coord}={val} out of range 0-100")
 
         if not has_startup:
             errors.append(f"views[{i}] missing '_startup' in points")

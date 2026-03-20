@@ -242,13 +242,15 @@ cat "$ANALYSIS_DIR/positioning.json" | python3 "$SCRIPTS/score_positioning.py" -
 Assess all 25 checklist items with evidence from the analysis. Mode-based gating applies: when `input_mode` is `"conversation"`, research-dependent items auto-gate to `not_applicable`.
 
 ```bash
-cat <<'CHECK_EOF' | python3 "$SCRIPTS/checklist.py" --pretty -o "$ANALYSIS_DIR/checklist.json"
+cat <<CHECK_EOF | python3 "$SCRIPTS/checklist.py" --pretty -o "$ANALYSIS_DIR/checklist.json"
 {"items": [
   {"id": "...", "status": "pass", "evidence": "...", "notes": null},
   ...all 25 items...
-], "input_mode": "conversation", "metadata": {"run_id": "$RUN_ID"}}
+], "input_mode": "$INPUT_MODE", "metadata": {"run_id": "$RUN_ID"}}
 CHECK_EOF
 ```
+
+Use the actual `$INPUT_MODE` determined in Step 1 (`deck`, `conversation`, or `document`). The unquoted heredoc (`<<CHECK_EOF` not `<<'CHECK_EOF'`) ensures `$RUN_ID` and `$INPUT_MODE` are expanded.
 
 **Evidence is MANDATORY for every item:** Every `fail` and `warn` item MUST have a non-empty `evidence` string citing specific findings. Every `pass` item MUST have `evidence` noting what was checked. Empty evidence produces blank lines in the report.
 

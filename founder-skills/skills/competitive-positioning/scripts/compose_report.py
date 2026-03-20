@@ -119,7 +119,7 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _warn(code: str, message: str) -> dict[str, str]:
+def _warn(code: str, message: str) -> dict[str, Any]:
     """Create a warning dict with code, message, and severity."""
     return {
         "code": code,
@@ -207,9 +207,9 @@ def _count_founder_overrides(positioning: dict[str, Any]) -> int:
 
 def validate_artifacts(
     artifacts: dict[str, dict[str, Any] | None],
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Run validation checks across artifacts. Returns list of warnings."""
-    warnings: list[dict[str, str]] = []
+    warnings: list[dict[str, Any]] = []
 
     landscape = artifacts.get("landscape.json")
     positioning = artifacts.get("positioning.json")
@@ -699,7 +699,7 @@ def _section_key_findings(
     return "\n".join(lines) + "\n"
 
 
-def _section_warnings(warnings: list[dict[str, str]]) -> str:
+def _section_warnings(warnings: list[dict[str, Any]]) -> str:
     """Validation warnings from cross-artifact checks."""
     # Only show medium+ warnings in the report
     reportable = [w for w in warnings if w.get("severity") in ("high", "medium", "acknowledged")]
@@ -745,7 +745,7 @@ def compose(dir_path: str) -> dict[str, Any]:
     # Apply accepted_warnings from positioning.json (medium-severity only)
     positioning = artifacts.get("positioning.json")
     if _usable(positioning):
-        acceptances: list[dict[str, str]] = []
+        acceptances: list[dict[str, Any]] = []
         for aw in _as_list(positioning.get("accepted_warnings")):
             aw = _as_dict(aw)
             code = aw.get("code", "")
@@ -774,7 +774,7 @@ def compose(dir_path: str) -> dict[str, Any]:
             for acc in acceptances:
                 if w["code"] == acc["code"] and acc["match"].lower() in w.get("message", "").lower():
                     w["severity"] = "acknowledged"
-                    w["acknowledged"] = "true"
+                    w["acknowledged"] = True
                     w["acknowledge_reason"] = acc["reason"]
                     w["message"] += f" [Accepted: {acc['reason']}]"
                     break

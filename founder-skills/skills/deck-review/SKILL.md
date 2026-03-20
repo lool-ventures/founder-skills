@@ -144,7 +144,7 @@ Copy final deliverables to workspace root: `{Company}_Deck_Review.md`, `.html` (
 Before Step 3, check for a prior competitive-positioning landscape:
 
 ```bash
-python3 "$CLAUDE_PLUGIN_ROOT/scripts/find_artifact.py" --skill competitive-positioning --artifact landscape.json
+python3 "$CLAUDE_PLUGIN_ROOT/scripts/find_artifact.py" --skill competitive-positioning --artifact landscape.json --prefer newest
 ```
 
 If found, use it during Step 3 (slide reviews) to cross-validate competition slide claims:

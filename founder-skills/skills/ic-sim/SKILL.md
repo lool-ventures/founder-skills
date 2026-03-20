@@ -206,7 +206,7 @@ This skill imports artifacts from prior market-sizing, deck-review, and competit
 Check for competitive-positioning report:
 
 ```bash
-python3 "$CLAUDE_PLUGIN_ROOT/scripts/find_artifact.py" --skill competitive-positioning --artifact report.json
+python3 "$CLAUDE_PLUGIN_ROOT/scripts/find_artifact.py" --skill competitive-positioning --artifact report.json --prefer newest
 ```
 
 If found, extract the competitive narrative summary and inject into each partner's assessment context:
