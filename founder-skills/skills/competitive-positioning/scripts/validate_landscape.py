@@ -131,9 +131,9 @@ def validate_landscape(enriched: dict[str, Any]) -> tuple[dict[str, Any] | None,
         if category == "adjacent":
             has_adjacent = True
 
-        # key_differentiators must be a non-empty list
+        # key_differentiators must be a non-empty list (null is not valid)
         kd = comp.get("key_differentiators")
-        if kd is not None and (not isinstance(kd, list) or len(kd) == 0):
+        if not isinstance(kd, list) or len(kd) == 0:
             errors.append(f"Competitor {i} ({comp.get('name', '?')}): key_differentiators must be a non-empty array")
 
         # Build validated competitor entry (only output fields)

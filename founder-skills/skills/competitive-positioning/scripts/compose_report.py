@@ -301,6 +301,23 @@ def validate_artifacts(
                         )
                     )
 
+        # Reverse check: landscape competitors missing from positioning views
+        if _usable(positioning):
+            positioned_slugs: set[str] = set()
+            for view in _as_list(positioning.get("views")):
+                for point in _as_list(_as_dict(view).get("points")):
+                    cs = _as_dict(point).get("competitor", "")
+                    if cs and cs != "_startup":
+                        positioned_slugs.add(cs)
+            for ls in landscape_slugs:
+                if ls and ls not in positioned_slugs:
+                    warnings.append(
+                        _warn(
+                            "INCOMPLETE_SCORING",
+                            f"Competitor '{ls}' in landscape but missing from positioning views — map is incomplete",
+                        )
+                    )
+
     # 3b. Axis consistency — positioning view IDs must match positioning_scores view IDs
     if _usable(positioning) and _usable(positioning_scores):
         pos_view_ids = {_as_dict(v).get("id") for v in _as_list(positioning.get("views"))}
