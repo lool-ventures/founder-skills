@@ -279,7 +279,9 @@ Build the full positioning artifact:
 
 **Differentiation stress-tests:** For each of the startup's `differentiation_claims` from `product_profile.json`, assess: verifiable (boolean), supporting/challenging evidence, investor challenge, and verdict (`holds`/`partially_holds`/`does_not_hold`).
 
-**Accepted warnings:** If you intentionally omit a do-nothing alternative or accept a known limitation, add an `accepted_warnings` entry with the warning code, match pattern, and reason.
+**Accepted warnings:** If you intentionally omit a do-nothing alternative or accept a known limitation, add an `accepted_warnings` entry with the warning code, match pattern, and reason. Common expected warnings:
+- `SHALLOW_COMPETITOR_PROFILE` for do-nothing/status-quo alternatives (they always have thin evidence because they're not real companies)
+- `MOAT_WITHOUT_EVIDENCE` for do-nothing moats rated `absent` (expected — the status quo has no moats)
 
 Write `positioning.json` to `$ANALYSIS_DIR`. Consult `references/artifact-schemas.md` for the full schema.
 

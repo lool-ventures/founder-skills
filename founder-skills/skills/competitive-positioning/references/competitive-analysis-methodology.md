@@ -81,6 +81,24 @@ The positioning map is the centerpiece of the competitive analysis. Axis selecti
 
 5. **The startup should be differentiated on at least one axis.** If the map shows the startup in the middle of the pack on both axes, either the axes are wrong or the startup genuinely lacks differentiation (which is a finding, not a map failure).
 
+### When the Deck Already Has Axes
+
+If the founder's pitch deck includes a competition slide with its own positioning axes, you face a choice: use the deck's axes or propose better ones.
+
+**Use the deck's axes when:**
+- They follow the principles above (differentiate, matter to buyer, measurable)
+- The founder has built their narrative around them and investors have seen them
+- Changing axes would undermine an otherwise strong competition slide
+
+**Propose new axes when:**
+- The deck uses vanity axes (startup is alone in a quadrant by construction)
+- The deck axes don't differentiate (all competitors cluster together)
+- Research reveals a more meaningful competitive frame the founder hasn't considered
+
+**How to frame the difference:** At Gate 1, present both: "Your deck uses [X vs Y]. I'd recommend [A vs B] because [reason]. We can analyze both — the primary map uses the stronger axes, and a secondary view uses your deck's axes for comparison."
+
+This preserves the founder's existing narrative while adding analytical value. Never silently replace deck axes without discussing it.
+
 ### Good Axis Examples by Sector
 
 | Sector | X-Axis | Y-Axis | Why it works |
