@@ -774,6 +774,8 @@ def compose(dir_path: str) -> dict[str, Any]:
             for acc in acceptances:
                 if w["code"] == acc["code"] and acc["match"].lower() in w.get("message", "").lower():
                     w["severity"] = "acknowledged"
+                    w["acknowledged"] = "true"
+                    w["acknowledge_reason"] = acc["reason"]
                     w["message"] += f" [Accepted: {acc['reason']}]"
                     break
 

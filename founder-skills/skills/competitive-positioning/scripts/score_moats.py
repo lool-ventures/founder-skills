@@ -168,16 +168,21 @@ def _build_comparison(companies: dict[str, Any]) -> dict[str, Any]:
 
         # Compute startup rank: rank all companies by status strength, 1 = strongest
         if "_startup" in dim_statuses:
-            startup_status_rank = STATUS_RANK.get(dim_statuses["_startup"], 0)
-            # Count how many companies (including _startup) have strictly higher rank
-            all_ranks = [STATUS_RANK.get(s, 0) for s in dim_statuses.values()]
-            higher_count = sum(1 for r in all_ranks if r > startup_status_rank)
-            # Total = all companies that have a rankable status (exclude not_applicable for ranking)
-            rankable = [s for s in dim_statuses.values() if s != "not_applicable"]
-            startup_rank[mid] = {
-                "rank": higher_count + 1,
-                "total": len(rankable),
-            }
+            startup_status = dim_statuses["_startup"]
+            if startup_status == "not_applicable":
+                # Can't rank if startup has no assessment for this dimension
+                startup_rank[mid] = {"rank": -1, "total": 0}  # -1 = not rankable (n/a)
+            else:
+                startup_status_rank = STATUS_RANK.get(startup_status, 0)
+                # Only rank among companies that have a rankable status
+                rankable = {s: st for s, st in dim_statuses.items() if st != "not_applicable"}
+                higher_count = sum(
+                    1 for r in (STATUS_RANK.get(st, 0) for st in rankable.values()) if r > startup_status_rank
+                )
+                startup_rank[mid] = {
+                    "rank": higher_count + 1,
+                    "total": len(rankable),
+                }
 
     return {
         "by_dimension": by_dimension,

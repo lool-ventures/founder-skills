@@ -119,7 +119,9 @@ def validate_landscape(enriched: dict[str, Any]) -> tuple[dict[str, Any] | None,
 
         # Category validation
         category = comp.get("category", "")
-        if category and category not in VALID_CATEGORIES:
+        if not category:
+            errors.append(f"Competitor {i} ({comp.get('name', '?')}): category must be non-empty")
+        elif category not in VALID_CATEGORIES:
             errors.append(
                 f"Competitor {i} ({comp.get('name', '?')}): invalid category '{category}'. "
                 f"Must be one of: {sorted(VALID_CATEGORIES)}"
