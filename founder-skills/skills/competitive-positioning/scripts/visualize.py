@@ -486,7 +486,8 @@ def _chart_moat_radar(moat_scores: dict[str, Any] | None) -> str:
     if ph is not None:
         return f'<div class="chart-box"><h2>Moat Radar</h2>{ph}</div>'
 
-    companies = _as_dict(moat_scores.get("companies"))
+    ms = _as_dict(moat_scores)
+    companies = _as_dict(ms.get("companies"))
     startup_data = _as_dict(companies.get("_startup"))
     startup_moats = _as_list(startup_data.get("moats"))
 
@@ -494,7 +495,7 @@ def _chart_moat_radar(moat_scores: dict[str, Any] | None) -> str:
         return f'<div class="chart-box"><h2>Moat Radar</h2>{_placeholder("No moat data for startup")}</div>'
 
     # Find strongest competitor for overlay
-    comp_slug, comp_moats = _find_strongest_competitor(moat_scores)
+    comp_slug, comp_moats = _find_strongest_competitor(ms)
 
     dims = list(_CANONICAL_MOAT_DIMS)
     n = len(dims)
@@ -606,7 +607,8 @@ def _section_competitor_table(
     if ph is not None:
         return f'<div class="chart-box full"><h2>Competitor Comparison</h2>{ph}</div>'
 
-    competitors = _as_list(landscape.get("competitors"))
+    land = _as_dict(landscape)
+    competitors = _as_list(land.get("competitors"))
     companies = _as_dict(_as_dict(moat_scores).get("companies")) if _usable(moat_scores) else {}
 
     # Build rows with defensibility for sorting
