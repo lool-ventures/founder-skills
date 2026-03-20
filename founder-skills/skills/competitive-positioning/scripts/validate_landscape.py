@@ -105,14 +105,21 @@ def validate_landscape(enriched: dict[str, Any]) -> tuple[dict[str, Any] | None,
             if field not in comp:
                 errors.append(f"Competitor {i} ({comp.get('name', '?')}): missing required field '{field}'")
 
-        # Slug validation
+        # Slug validation — auto-convert underscores to hyphens for kebab-case
         slug = comp.get("slug", "")
         if not slug:
             errors.append(f"Competitor {i} ({comp.get('name', '?')}): slug must be non-empty")
-        elif slug in RESERVED_SLUGS:
-            errors.append(f"Competitor {i} ({comp.get('name', '?')}): slug '{slug}' is reserved")
-        elif not KEBAB_CASE_RE.match(slug):
-            errors.append(f"Competitor {i} ({comp.get('name', '?')}): slug '{slug}' must be kebab-case")
+        else:
+            # Auto-fix: convert underscores to hyphens (common agent mistake)
+            if "_" in slug and slug not in RESERVED_SLUGS:
+                original = slug
+                slug = slug.replace("_", "-")
+                comp["slug"] = slug  # fix in-place so output gets corrected slug
+                print(f"Note: auto-converted slug '{original}' -> '{slug}'", file=sys.stderr)
+            if slug in RESERVED_SLUGS:
+                errors.append(f"Competitor {i} ({comp.get('name', '?')}): slug '{slug}' is reserved")
+            elif not KEBAB_CASE_RE.match(slug):
+                errors.append(f"Competitor {i} ({comp.get('name', '?')}): slug '{slug}' must be kebab-case")
         if slug and slug not in RESERVED_SLUGS:
             if slug in slugs_seen:
                 errors.append(f"Competitor {i} ({comp.get('name', '?')}): duplicate slug '{slug}'")

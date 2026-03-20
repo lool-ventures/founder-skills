@@ -86,6 +86,7 @@ Contains the initial competitor identification and candidate axis pairs. Updated
 |-------|------|----------|-------------|
 | `competitors` | object[] | yes | 5-7 identified competitors |
 | `candidate_axes` | object[] | yes | 2-3 candidate positioning axis pairs with reasoning |
+| `deck_competitors_excluded` | object[] | no | Competitors from founder's deck intentionally excluded. Each: `{name, reason}`. Referenced by NARR_03 checklist. |
 | `metadata` | object | yes | `{run_id}` |
 
 ### competitors[] entry

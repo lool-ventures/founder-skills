@@ -239,7 +239,19 @@ class TestValidateLandscape:
         assert "research_depth" in stderr
         assert "high" in stderr
 
-    # 10c. empty slug rejected
+    # 10c. underscore slugs auto-converted to kebab-case
+    def test_underscore_slug_auto_converted(self) -> None:
+        payload = _make_valid_landscape()
+        payload["competitors"][0]["slug"] = "manual_campaigns"
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0 (auto-convert), got {rc}. stderr: {stderr}"
+        assert data is not None
+        slugs = [c["slug"] for c in data["competitors"]]
+        assert "manual-campaigns" in slugs, f"Expected auto-converted slug, got: {slugs}"
+        assert "manual_campaigns" not in slugs
+        assert "auto-converted" in stderr.lower()
+
+    # 10d. empty slug rejected
     def test_empty_slug_rejected(self) -> None:
         payload = _make_valid_landscape()
         payload["competitors"][0]["slug"] = ""

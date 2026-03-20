@@ -228,7 +228,11 @@ Spawn a `general-purpose` Task sub-agent to research and enrich each competitor.
 
 `research_depth` per competitor MUST be one of: `"full"`, `"partial"`, `"founder_provided"`. Do NOT use `"high"`, `"medium"`, `"low"`.
 
-Return to the main agent ONLY: (1) file path, (2) count of competitors enriched, (3) research_depth per competitor, (4) any `suggested_additions` found, (5) suggested axis pairs if any.
+All slugs MUST be kebab-case (lowercase, hyphens only, no underscores). Example: `"manual-campaigns"` not `"manual_campaigns"`. The validator auto-converts underscores to hyphens but it's better to get it right.
+
+**Before returning:** Run `ls "$ANALYSIS_DIR/landscape_enriched.json"` to verify the file was actually written. Report the file path from the `ls` output, not from memory.
+
+Return to the main agent ONLY: (1) verified file path from `ls`, (2) count of competitors enriched, (3) research_depth per competitor, (4) any `suggested_additions` found, (5) suggested axis pairs if any.
 
 **Graceful degradation:** If Task tool is unavailable, research sequentially in the main agent. If no search tools are available, enrich from agent knowledge and set `research_depth: "founder_provided"`.
 
@@ -281,7 +285,7 @@ Write `positioning.json` to `$ANALYSIS_DIR`. Consult `references/artifact-schema
 
 ### Step 6: Script Scoring Phase (Parallel)
 
-Run the three scoring scripts. These can run in parallel (three Bash calls in one message):
+**ALL THREE scripts below are MANDATORY. Do NOT skip any of them. `compose_report.py` will emit HIGH-severity warnings for any missing scoring artifact, and `--strict` will fail. Run all three — they can run in parallel (three Bash calls in one message):**
 
 **6a — Moat scores:**
 
@@ -347,7 +351,14 @@ python3 "$SCRIPTS/visualize.py" --dir "$ANALYSIS_DIR" -o "$ANALYSIS_DIR/report.h
 
 ### Step 8: Deliver Artifacts
 
-Copy final deliverables to workspace root: `{Company}_Competitive_Positioning.md`, `.html` (if generated), `.json` (optional).
+Copy final deliverables to workspace root with clean names:
+
+```bash
+cp "$ANALYSIS_DIR/report.md" "./${COMPANY_NAME}_Competitive_Positioning.md"
+cp "$ANALYSIS_DIR/report.html" "./${COMPANY_NAME}_Competitive_Positioning.html" 2>/dev/null
+```
+
+Where `COMPANY_NAME` is the company name with spaces replaced by underscores (e.g., "Acme Corp" -> "Acme_Corp"). Present the file paths to the user.
 
 ## Scoring
 
