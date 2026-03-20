@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-03-20
+
+### Highlights
+
+New Competitive Positioning & Moat Analyzer — maps a startup against competitors across product,
+distribution, data, pricing, and defensibility dimensions. Scores moat strength across 6+ types
+(network effects, data advantages, switching costs, regulatory barriers, cost structure, brand)
+with extensible custom dimensions. Generates an investor-ready competition narrative with
+positioning map, moat radar chart, and defensibility timeline.
+
+### Added
+
+- Competitive Positioning Agent with 6 scripts: `validate_landscape.py` (competitor list validation with slug uniqueness and provenance preservation), `score_moats.py` (6+ moat dimensions per company with aggregates and cross-company comparison), `score_positioning.py` (pair-centric positioning views with rank-based differentiation and vanity axis detection), `checklist.py` (25-criteria scoring across 6 categories with mode-based gating), `compose_report.py` (report assembly with cross-artifact validation, warning system, and accepted warnings), `visualize.py` (self-contained HTML with SVG positioning map, moat radar, competitor table, and defensibility timeline).
+- SKILL.md for competitive positioning (`/founder-skills:competitive-positioning` slash command).
+- Agent definition with 3 trigger examples and 5 gotchas.
+- Two-gate founder validation: Gate 1 validates competitor list and product understanding; Gate 2 validates positioning axes and moat assessments before final report.
+- Research sub-agent with two-phase research (broad scan then targeted cross-referencing) and graceful degradation when Task tool is unavailable.
+- Suggested additions mini-gate: research sub-agent can propose new competitors; founder approves before inclusion.
+- 4 reference files: artifact schemas (resolving 11 design follow-ups), moat type definitions, 25-item checklist criteria with mode gating, competitive analysis methodology.
+- Cross-agent integration: ic-sim imports `report.json` for partner debate enrichment; deck-review imports `landscape.json` for competition slide cross-validation.
+- 70 new regression tests (816 total across all 5 skills).
+
+### Changed
+
+- IC Simulation: added optional `competitive-positioning:report.json` import with per-partner enrichment (Visionary: market timing, Operator: GTM differentiation, Analyst: moat strength).
+- Deck Review: added optional `competitive-positioning:landscape.json` import for competition slide cross-validation.
+
+---
+
 ## [0.2.0] - 2026-03-18
 
 ### Highlights
