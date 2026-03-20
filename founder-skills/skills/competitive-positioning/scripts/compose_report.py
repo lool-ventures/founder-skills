@@ -151,6 +151,17 @@ def _humanize(value: str) -> str:
         "regulatory_barriers": "Regulatory Barriers",
         "cost_structure": "Cost Structure",
         "brand_reputation": "Brand Reputation",
+        "pre-seed": "Pre-Seed",
+        "seed": "Seed",
+        "series-a": "Series A",
+        "series-b": "Series B",
+        "series_a": "Series A",
+        "series_b": "Series B",
+        "later": "Later",
+        "growth": "Growth",
+        "deck": "Deck",
+        "conversation": "Conversation",
+        "document": "Document",
     }
     return _LABELS.get(value, value.replace("_", " ").title() if value else "?")
 
@@ -505,7 +516,7 @@ def _section_executive_summary(
     if product_profile is not None and not _is_stub(product_profile):
         lines.append(f"**Company:** {product_profile.get('company_name', '?')}")
         lines.append(f"**Product:** {product_profile.get('product_description', '?')}")
-        lines.append(f"**Stage:** {product_profile.get('stage', '?')}")
+        lines.append(f"**Stage:** {_humanize(str(product_profile.get('stage', '?')))}")
         lines.append(f"**Sector:** {product_profile.get('sector', '?')}")
         lines.append("")
 
@@ -560,7 +571,7 @@ def _section_competitor_landscape(landscape: dict[str, Any] | None) -> str:
     competitors = _as_list(landscape.get("competitors"))
     lines = ["## Competitor Landscape\n"]
     lines.append(f"**Competitors Analyzed:** {len(competitors)}")
-    lines.append(f"**Input Mode:** {landscape.get('input_mode', '?')}")
+    lines.append(f"**Input Mode:** {_humanize(str(landscape.get('input_mode', '?')))}")
     lines.append("")
 
     lines.append("| Name | Category | Research Depth | Sourced Fields |")
@@ -594,12 +605,12 @@ def _section_positioning(
         lines.append(f"### {vid} View\n")
         lines.append(f"- **X-Axis:** {view.get('x_axis_name', '?')}")
         lines.append(f"  - Rationale: {view.get('x_axis_rationale', '?')}")
-        vanity_x = " (VANITY)" if view.get("x_axis_vanity_flag") else ""
-        lines.append(f"  - Vanity flag: {view.get('x_axis_vanity_flag', '?')}{vanity_x}")
+        vanity_x = "Yes — axis may not reveal meaningful differentiation" if view.get("x_axis_vanity_flag") else "No"
+        lines.append(f"  - Vanity axis: {vanity_x}")
         lines.append(f"- **Y-Axis:** {view.get('y_axis_name', '?')}")
         lines.append(f"  - Rationale: {view.get('y_axis_rationale', '?')}")
-        vanity_y = " (VANITY)" if view.get("y_axis_vanity_flag") else ""
-        lines.append(f"  - Vanity flag: {view.get('y_axis_vanity_flag', '?')}{vanity_y}")
+        vanity_y = "Yes — axis may not reveal meaningful differentiation" if view.get("y_axis_vanity_flag") else "No"
+        lines.append(f"  - Vanity axis: {vanity_y}")
         lines.append(f"- **Differentiation Score:** {view.get('differentiation_score', '?')}%")
         lines.append(
             f"- **Startup Rank:** X={view.get('startup_x_rank', '?')}, "
