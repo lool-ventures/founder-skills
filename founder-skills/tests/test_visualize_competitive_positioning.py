@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Generator
 from typing import Any
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -638,7 +639,7 @@ _VALID_REPORT: dict[str, Any] = {
 
 
 @contextlib.contextmanager
-def _make_artifact_dir(artifacts: dict[str, Any]):
+def _make_artifact_dir(artifacts: dict[str, Any]) -> Generator[str, None, None]:
     """Create a temp dir with JSON artifacts. Yields dir path, cleans up on exit."""
     d = tempfile.mkdtemp(prefix="test-vis-cp-")
     try:
