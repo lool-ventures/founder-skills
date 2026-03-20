@@ -121,6 +121,40 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _humanize(value: str) -> str:
+    """Convert machine IDs to human-readable labels for report output."""
+    _LABELS: dict[str, str] = {
+        "full": "Full",
+        "partial": "Partial",
+        "founder_provided": "Founder Provided",
+        "researched": "Researched",
+        "agent_estimate": "Agent Estimate",
+        "founder_override": "Founder Override",
+        "direct": "Direct",
+        "adjacent": "Adjacent",
+        "do_nothing": "Do Nothing",
+        "emerging": "Emerging",
+        "custom": "Custom",
+        "building": "Building",
+        "stable": "Stable",
+        "eroding": "Eroding",
+        "strong": "Strong",
+        "moderate": "Moderate",
+        "weak": "Weak",
+        "absent": "Absent",
+        "not_applicable": "N/A",
+        "high": "High",
+        "low": "Low",
+        "network_effects": "Network Effects",
+        "data_advantages": "Data Advantages",
+        "switching_costs": "Switching Costs",
+        "regulatory_barriers": "Regulatory Barriers",
+        "cost_structure": "Cost Structure",
+        "brand_reputation": "Brand Reputation",
+    }
+    return _LABELS.get(value, value.replace("_", " ").title() if value else "?")
+
+
 def _warn(code: str, message: str) -> dict[str, Any]:
     """Create a warning dict with code, message, and severity."""
     return {
@@ -534,8 +568,8 @@ def _section_competitor_landscape(landscape: dict[str, Any] | None) -> str:
     for c in competitors:
         c = _as_dict(c)
         name = c.get("name", "?")
-        cat = c.get("category", "?")
-        rd = c.get("research_depth", "?")
+        cat = _humanize(str(c.get("category", "?")))
+        rd = _humanize(str(c.get("research_depth", "?")))
         sfc = c.get("sourced_fields_count", "?")
         lines.append(f"| {name} | {cat} | {rd} | {sfc} |")
 
@@ -588,8 +622,8 @@ def _section_moat_assessment(moat_scores: dict[str, Any] | None) -> str:
     startup = _as_dict(companies.get("_startup"))
 
     if startup:
-        defensibility = startup.get("overall_defensibility", "?")
-        strongest = startup.get("strongest_moat", "none")
+        defensibility = _humanize(str(startup.get("overall_defensibility", "?")))
+        strongest = _humanize(str(startup.get("strongest_moat", "none")))
         lines.append(f"**Overall Defensibility:** {defensibility}")
         lines.append(f"**Strongest Moat:** {strongest}")
         lines.append("")
@@ -599,10 +633,10 @@ def _section_moat_assessment(moat_scores: dict[str, Any] | None) -> str:
         lines.append("|------|--------|------------|----------------|")
         for moat in _as_list(startup.get("moats")):
             moat = _as_dict(moat)
-            mid = moat.get("id", "?")
-            status = moat.get("status", "?")
-            traj = moat.get("trajectory", "?")
-            src = moat.get("evidence_source", "?")
+            mid = _humanize(str(moat.get("id", "?")))
+            status = _humanize(str(moat.get("status", "?")))
+            traj = _humanize(str(moat.get("trajectory", "?")))
+            src = _humanize(str(moat.get("evidence_source", "?")))
             lines.append(f"| {mid} | {status} | {traj} | {src} |")
         lines.append("")
 
@@ -613,7 +647,7 @@ def _section_moat_assessment(moat_scores: dict[str, Any] | None) -> str:
         lines.append("### Startup Ranking by Moat Dimension\n")
         for dim, rank_info in startup_rank.items():
             ri = _as_dict(rank_info)
-            lines.append(f"- **{dim}:** Rank {ri.get('rank', '?')} of {ri.get('total', '?')}")
+            lines.append(f"- **{_humanize(dim)}:** Rank {ri.get('rank', '?')} of {ri.get('total', '?')}")
         lines.append("")
 
     return "\n".join(lines) + "\n"

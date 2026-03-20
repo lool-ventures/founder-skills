@@ -118,6 +118,41 @@ _MOAT_DIM_LABELS: dict[str, str] = {
     "brand_reputation": "Brand Reputation",
 }
 
+
+def _humanize(value: str) -> str:
+    """Convert machine IDs to human-readable labels."""
+    _LABELS: dict[str, str] = {
+        # research_depth
+        "full": "Full",
+        "partial": "Partial",
+        "founder_provided": "Founder Provided",
+        # evidence_source
+        "researched": "Researched",
+        "agent_estimate": "Agent Estimate",
+        "founder_override": "Founder Override",
+        # categories
+        "direct": "Direct",
+        "adjacent": "Adjacent",
+        "do_nothing": "Do Nothing",
+        "emerging": "Emerging",
+        "custom": "Custom",
+        # trajectories
+        "building": "Building",
+        "stable": "Stable",
+        "eroding": "Eroding",
+        # statuses
+        "strong": "Strong",
+        "moderate": "Moderate",
+        "weak": "Weak",
+        "absent": "Absent",
+        "not_applicable": "N/A",
+        # defensibility
+        "high": "High",
+        "low": "Low",
+    }
+    return _LABELS.get(value, value.replace("_", " ").title() if value else "?")
+
+
 _STATUS_SCORE: dict[str, float] = {
     "strong": 1.0,
     "moderate": 0.66,
@@ -620,8 +655,8 @@ def _section_competitor_table(
             continue
         name = _esc(str(comp.get("name", "?")))
         slug = str(comp.get("slug", ""))
-        category = _esc(str(comp.get("category", "?")).replace("_", " ").title())
-        research = _esc(str(comp.get("research_depth", "?")))
+        category = _esc(_humanize(str(comp.get("category", "?"))))
+        research = _esc(_humanize(str(comp.get("research_depth", "?"))))
 
         comp_data = _as_dict(companies.get(slug))
         defensibility = str(comp_data.get("overall_defensibility", "unknown")).lower()
@@ -735,7 +770,7 @@ def _section_defensibility_timeline(
         # Trajectory label
         svg.append(
             f'<text x="{label_w + bar_w + 30:.0f}" y="{y + 3:.0f}" '
-            f'font-size="9" fill="#6b7280">{_esc(trajectory)}</text>'
+            f'font-size="9" fill="#6b7280">{_esc(_humanize(trajectory))}</text>'
         )
 
     svg.append("</svg>")
