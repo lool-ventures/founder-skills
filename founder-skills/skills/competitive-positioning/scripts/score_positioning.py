@@ -196,8 +196,13 @@ def _validate_input(data: dict[str, Any]) -> list[str]:
         if "points" not in view:
             continue
 
+        points = view["points"]
+        if not isinstance(points, list):
+            errors.append(f"views[{i}].points must be an array, got {type(points).__name__}")
+            continue
+
         has_startup = False
-        for j, p in enumerate(view["points"]):
+        for j, p in enumerate(points):
             if not isinstance(p, dict):
                 errors.append(f"views[{i}].points[{j}] must be an object")
                 continue

@@ -9,7 +9,7 @@
 - **fail** = 0 points
 - **not_applicable** = excluded from denominator
 
-Overall score = `pass_count / (total - na_count) * 100`
+Overall score = `(pass_count + 0.5 * warn_count) / (total - na_count) * 100`
 
 ---
 
