@@ -9,6 +9,7 @@ metadata:
 imports:
   - "market-sizing:sizing.json (recommended — fund alignment and market validation)"
   - "deck-review:checklist.json (recommended — deck quality assessment)"
+  - "competitive-positioning:report.json (optional — competitive analysis for partner debate)"
 exports:
   - "report.json -> fundraise-readiness, dd-readiness"
 ---
@@ -19,7 +20,7 @@ Help startup founders prepare for the conversation that happens behind closed do
 
 ## Input Formats
 
-Accept any combination: pitch deck, financial model, data room contents, text descriptions, prior market-sizing or deck-review artifacts, or just a verbal description of the business.
+Accept any combination: pitch deck, financial model, data room contents, text descriptions, prior market-sizing, deck-review, or competitive-positioning artifacts, or just a verbal description of the business.
 
 ## Available Scripts
 
@@ -100,7 +101,7 @@ Ask the user (or infer from context):
 
 ### Steps 1-2: Extract Startup Profile and Import Prior Artifacts
 
-When files are provided, spawn a `general-purpose` Task sub-agent to read materials, extract startup profile, and import prior market-sizing/deck-review artifacts. The sub-agent deposits both `startup_profile.json` and `prior_artifacts.json` to `$SIM_DIR`.
+When files are provided, spawn a `general-purpose` Task sub-agent to read materials, extract startup profile, and import prior market-sizing/deck-review/competitive-positioning artifacts. The sub-agent deposits both `startup_profile.json` and `prior_artifacts.json` to `$SIM_DIR`.
 
 If missing fields are flagged, ask the user and patch the artifact. When only text is provided, extract directly without a sub-agent.
 
@@ -198,4 +199,19 @@ Copy final deliverables to workspace root: `{Company}_IC_Simulation.md`, `.html`
 
 ## Cross-Agent Integration
 
-This skill imports artifacts from prior market-sizing and deck-review analyses. Imported artifacts are recorded with dates. Imports older than 7 days are flagged as `STALE_IMPORT`.
+This skill imports artifacts from prior market-sizing, deck-review, and competitive-positioning analyses. Imported artifacts are recorded with dates. Imports older than 7 days are flagged as `STALE_IMPORT`.
+
+### Competitive Positioning Import
+
+Check for competitive-positioning report:
+
+```bash
+python3 "$CLAUDE_PLUGIN_ROOT/scripts/find_artifact.py" --skill competitive-positioning --artifact report.json --prefer newest
+```
+
+If found, extract the competitive narrative summary and inject into each partner's assessment context:
+- **Visionary:** Market timing vs. competitors — are they early, on-time, or late? How does the competitive landscape validate or challenge the market thesis?
+- **Operator:** GTM differentiation — what concrete advantages does the startup have in go-to-market execution vs. identified competitors?
+- **Analyst:** Moat strength — how durable are the competitive advantages? What do the moat scores indicate about long-term defensibility?
+
+If not found, proceed as normal — competitive positioning context is optional.

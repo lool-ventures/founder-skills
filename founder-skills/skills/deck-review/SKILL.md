@@ -6,6 +6,8 @@ compatibility: Requires Python 3.10+ and uv for script execution.
 metadata:
   author: lool-ventures
   version: "0.2.0"
+imports:
+  - "competitive-positioning:landscape.json (optional — cross-validate competition slide claims)"
 exports:
   - "checklist.json -> financial-model-review, ic-sim, fundraise-readiness"
 ---
@@ -134,6 +136,24 @@ python3 "$SCRIPTS/visualize.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.html"
 ### Step 7: Deliver Artifacts
 
 Copy final deliverables to workspace root: `{Company}_Deck_Review.md`, `.html` (if generated), `.json` (optional).
+
+## Cross-Skill Integration
+
+### Competitive Positioning Import
+
+Before Step 3, check for a prior competitive-positioning landscape:
+
+```bash
+python3 "$CLAUDE_PLUGIN_ROOT/scripts/find_artifact.py" --skill competitive-positioning --artifact landscape.json --prefer newest
+```
+
+If found, use it during Step 3 (slide reviews) to cross-validate competition slide claims:
+- Verify competitor names mentioned in the deck appear in the landscape
+- Flag competitors in the landscape that are missing from the competition slide
+- Check whether the deck's competitive categories align with the landscape's taxonomy
+- Note any competitor count discrepancies between the deck and the analysis
+
+Record cross-validation findings in `slide_reviews.json` for the competition slide(s). If no competitive-positioning artifact is found, proceed as normal.
 
 ## Scoring
 

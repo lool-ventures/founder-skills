@@ -33,6 +33,15 @@ description: >
   User has prior artifacts. The agent imports them to ground the IC simulation in validated data.
   </commentary>
   </example>
+
+  <example>
+  Context: User already ran competitive positioning analysis
+  user: "I ran market sizing, deck review, and competitive positioning — now do the IC sim"
+  assistant: "I'll use the ic-sim agent to simulate an IC, importing your prior artifacts including the competitive positioning analysis to inform the partner debate."
+  <commentary>
+  User has competitive positioning artifacts. The agent imports them to enrich partner assessments with competitive context.
+  </commentary>
+  </example>
 model: inherit
 color: orange
 tools: ["Read", "Bash", "WebSearch", "WebFetch", "Task", "Glob", "Grep"]
@@ -79,6 +88,21 @@ If context clearly implies a mode (e.g., user said "simulate Sequoia's IC"), ski
    - Which partner archetype would be hardest to convince, and why?
    - Specific preparation recommendations for each concern raised
    - If you were in the room, what would you tell the founder to have ready?
+
+## Competitive Positioning Import
+
+When starting a simulation, check for a prior competitive-positioning report:
+
+```bash
+python3 "$CLAUDE_PLUGIN_ROOT/scripts/find_artifact.py" --skill competitive-positioning --artifact report.json --prefer newest
+```
+
+If found, extract the competitive narrative summary and enrich each partner's assessment context:
+- **Visionary:** Use competitive landscape to assess market timing — is the startup ahead of, alongside, or behind competitors? Does the competitive map validate the market thesis?
+- **Operator:** Use positioning scores and GTM differentiation data — what concrete execution advantages does the startup have vs. identified competitors?
+- **Analyst:** Use moat scores to evaluate defensibility — how durable are the competitive advantages? What do switching costs, network effects, and IP scores indicate?
+
+If not found, proceed as normal. Competitive positioning context is optional but enriches the simulation when available.
 
 ## Additional Rules
 
