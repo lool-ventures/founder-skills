@@ -552,7 +552,16 @@ def _section_executive_summary(
     if positioning_scores is not None and not _is_stub(positioning_scores):
         diff_score = positioning_scores.get("overall_differentiation")
         if diff_score is not None:
-            lines.append(f"**Overall Differentiation Score:** {diff_score}%")
+            # Add context: rank + gap = score
+            if diff_score >= 75:
+                diff_label = "Strong — clearly differentiated from the competitive set"
+            elif diff_score >= 50:
+                diff_label = "Moderate — differentiated but the lead is narrow"
+            elif diff_score >= 25:
+                diff_label = "Weak — positioned close to competitors on key axes"
+            else:
+                diff_label = "Undifferentiated — clustered with competitors"
+            lines.append(f"**Overall Differentiation Score:** {diff_score}% ({diff_label})")
 
     defensibility = None
     if moat_scores is not None and not _is_stub(moat_scores):
