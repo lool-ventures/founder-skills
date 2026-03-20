@@ -152,18 +152,19 @@ Write `landscape_draft.json` to `$ANALYSIS_DIR`.
 
 ### Gate 1: Founder Validation of Competitor Set
 
-**MANDATORY STOP.** Use `AskUserQuestion` to present:
+**MANDATORY STOP.** Present the competitor list and candidate axes as a **normal chat message** (markdown table or formatted list — NOT inside `AskUserQuestion`). Include:
 
 1. The competitor list (names, categories, one-line descriptions)
 2. The candidate axis pairs with rationale
 
-Ask the founder:
-- Are there competitors we're missing?
-- Are any of these not real competitors?
-- Which axis pair best captures your competitive dynamic?
-- Do the categories feel right?
+Then use `AskUserQuestion` with a **short plain-text question** and options. The `AskUserQuestion` text field renders as plain text in Cowork — do NOT put markdown, tables, or long lists in it.
 
-Apply corrections to `landscape_draft.json` before proceeding.
+Example `AskUserQuestion` question: `Does this competitor set and axis selection look right?`
+Options: `Looks good` / `Add or remove competitors` / `Change axes` / `Other changes`
+
+If founder requests changes, switch to conversational mode, apply corrections, and re-present via `AskUserQuestion` for confirmation.
+
+Apply all corrections to `landscape_draft.json` before proceeding.
 
 ### Step 4: Research & Enrich Competitors -> `landscape_enriched.json` -> `landscape.json`
 
@@ -195,13 +196,12 @@ Fix any errors (exit 1) and re-run. Warnings are acceptable — address medium-s
 
 ### Gate 2: Founder Validation of Positioning
 
-**MANDATORY STOP.** Before writing `positioning.json`, present to the founder using `AskUserQuestion`:
+**MANDATORY STOP.** Before writing `positioning.json`, present the positioning preview as a **normal chat message** (markdown table showing competitor positions on chosen axes, moat highlights). Then use `AskUserQuestion` with a **short plain-text question**:
 
-1. The selected axis pair(s) with rationale
-2. A brief preview of where each competitor would be placed (high-level, not exact coordinates)
-3. The startup's proposed position
+Example question: `Does this positioning and axis selection look right?`
+Options: `Proceed to scoring` / `Adjust positions` / `Change axes` / `Other changes`
 
-Ask the founder to confirm or adjust. Apply corrections before proceeding to Step 5.
+If founder requests changes and changes an axis (not just coordinates), re-assign ALL competitor coordinates on the new axis with fresh evidence. Apply all corrections before proceeding to Step 5.
 
 ### Step 5: Positioning & Moat Assessment -> `positioning.json`
 
