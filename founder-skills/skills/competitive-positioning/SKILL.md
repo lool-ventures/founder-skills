@@ -152,17 +152,32 @@ Write `landscape_draft.json` to `$ANALYSIS_DIR`.
 
 ### Gate 1: Founder Validation of Competitor Set
 
-**MANDATORY STOP.** Present the competitor list and candidate axes as a **normal chat message** (markdown table or formatted list — NOT inside `AskUserQuestion`). Include:
+**MANDATORY STOP — TWO SEPARATE STEPS. DO NOT COMBINE THEM.**
 
-1. The competitor list (names, categories, one-line descriptions)
-2. The candidate axis pairs with rationale
+**Step A: Output a chat message** with the competitor list and candidate axes. Use a markdown table or formatted list. This is a normal assistant message — NOT an AskUserQuestion call. Example:
 
-Then use `AskUserQuestion` with a **short plain-text question** and options. The `AskUserQuestion` text field renders as plain text in Cowork — do NOT put markdown, tables, or long lists in it.
+```
+Here's the competitive landscape I've identified:
 
-Example `AskUserQuestion` question: `Does this competitor set and axis selection look right?`
-Options: `Looks good` / `Add or remove competitors` / `Change axes` / `Other changes`
+| # | Competitor | Category | Description |
+|---|---|---|---|
+| 1 | Acme Corp | Direct | Same product, same market |
+| 2 | Status quo | Do-nothing | Manual process |
+...
 
-If founder requests changes, switch to conversational mode, apply corrections, and re-present via `AskUserQuestion` for confirmation.
+Proposed positioning axes:
+- **X: Deployment Speed** — how fast to integrate
+- **Y: Detection Accuracy** — false positive rate
+```
+
+**Step B: AFTER the chat message, call `AskUserQuestion`** with ONLY a short question. The question field is plain text — NO markdown, NO tables, NO bullet points, NO competitor names.
+
+Question: `Does this competitor set look right?`
+Options: `Looks good` / `Missing competitors` / `Remove some` / `Change axes`
+
+**CRITICAL: The AskUserQuestion question must be ONE SHORT SENTENCE. Put ALL details in the chat message (Step A), not in the question.**
+
+If founder requests changes, apply corrections and repeat Steps A+B.
 
 Apply all corrections to `landscape_draft.json` before proceeding.
 
@@ -196,12 +211,16 @@ Fix any errors (exit 1) and re-run. Warnings are acceptable — address medium-s
 
 ### Gate 2: Founder Validation of Positioning
 
-**MANDATORY STOP.** Before writing `positioning.json`, present the positioning preview as a **normal chat message** (markdown table showing competitor positions on chosen axes, moat highlights). Then use `AskUserQuestion` with a **short plain-text question**:
+**MANDATORY STOP — TWO SEPARATE STEPS, same pattern as Gate 1.**
 
-Example question: `Does this positioning and axis selection look right?`
+**Step A: Output a chat message** with the positioning preview. Use a markdown table showing competitor positions on chosen axes and moat highlights.
+
+**Step B: AFTER the chat message, call `AskUserQuestion`** with ONLY a short question. NO details in the question field.
+
+Question: `Does this positioning look right?`
 Options: `Proceed to scoring` / `Adjust positions` / `Change axes` / `Other changes`
 
-If founder requests changes and changes an axis (not just coordinates), re-assign ALL competitor coordinates on the new axis with fresh evidence. Apply all corrections before proceeding to Step 5.
+If founder changes an axis (not just coordinates), re-assign ALL competitor coordinates on the new axis with fresh evidence. Apply all corrections before proceeding to Step 5.
 
 ### Step 5: Positioning & Moat Assessment -> `positioning.json`
 
