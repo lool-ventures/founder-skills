@@ -188,6 +188,7 @@ def validate_landscape(enriched: dict[str, Any]) -> tuple[dict[str, Any] | None,
         "competitors": validated_competitors,
         "input_mode": input_mode,
         "warnings": warnings,
+        "_produced_by": "validate_landscape",
         "metadata": metadata,
     }
 

@@ -259,7 +259,11 @@ def main() -> None:
     metadata = data.get("metadata", {})
 
     result = validate_and_score(data["items"], input_mode, data_confidence)
+    result["_produced_by"] = "checklist"
     result["metadata"] = metadata
+
+    if result["fail_count"] == 0 and result["warn_count"] == 0:
+        print("Note: all items passed — verify assessments are evidence-based, not defaulting to pass", file=sys.stderr)
 
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"

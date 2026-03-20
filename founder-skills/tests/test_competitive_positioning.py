@@ -1148,6 +1148,7 @@ def _make_landscape_artifact(
         "competitors": competitors,
         "input_mode": "conversation",
         "warnings": warnings or [],
+        "_produced_by": "validate_landscape",
         "metadata": {"run_id": run_id},
     }
 
@@ -1257,6 +1258,7 @@ def _make_moat_scores_artifact(
             },
         },
         "warnings": warnings or [],
+        "_produced_by": "score_moats",
         "metadata": {"run_id": run_id},
     }
 
@@ -1297,6 +1299,7 @@ def _make_positioning_scores_artifact(
             }
         ],
         "warnings": warnings or [],
+        "_produced_by": "score_positioning",
         "metadata": {"run_id": run_id},
     }
 
@@ -1327,6 +1330,7 @@ def _make_checklist_artifact(
         "na_count": 1,
         "total": 25,
         "input_mode": "conversation",
+        "_produced_by": "checklist",
         "metadata": {"run_id": run_id},
     }
 
@@ -1927,3 +1931,99 @@ class TestScorePositioningValidation:
         rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
         assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
         assert "duplicate" in stderr.lower()
+
+
+# ===========================================================================
+# Validation gate tests — script provenance and self-grading detection
+# ===========================================================================
+
+
+class TestProvenanceStamps:
+    """Tests for _produced_by provenance stamps in scoring scripts."""
+
+    def test_score_moats_has_produced_by(self) -> None:
+        payload = _make_valid_moat_input()
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data.get("_produced_by") == "score_moats"
+
+    def test_score_positioning_has_produced_by(self) -> None:
+        payload = _make_valid_positioning_input()
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data.get("_produced_by") == "score_positioning"
+
+    def test_checklist_has_produced_by(self) -> None:
+        payload = _make_valid_checklist_input()
+        rc, data, stderr = run_script("checklist.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data.get("_produced_by") == "checklist"
+
+    def test_validate_landscape_has_produced_by(self) -> None:
+        payload = _make_valid_landscape()
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data.get("_produced_by") == "validate_landscape"
+
+
+class TestValidationGates:
+    """Tests for compose_report.py validation gates."""
+
+    def test_compose_unvalidated_artifact_warns(self) -> None:
+        """Artifact without _produced_by triggers UNVALIDATED_ARTIFACT (high)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            # Overwrite moat_scores.json without _produced_by
+            ms = _make_moat_scores_artifact()
+            # Ensure no _produced_by key
+            ms.pop("_produced_by", None)
+            with open(os.path.join(tmp, "moat_scores.json"), "w") as f:
+                json.dump(ms, f)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            unval = [w for w in data["warnings"] if w["code"] == "UNVALIDATED_ARTIFACT"]
+            assert len(unval) >= 1, (
+                f"Expected UNVALIDATED_ARTIFACT warning, got: {[w['code'] for w in data['warnings']]}"
+            )
+            assert unval[0]["severity"] == "high"
+            assert "moat_scores.json" in unval[0]["message"]
+
+    def test_compose_checklist_all_pass_warns(self) -> None:
+        """All-pass checklist triggers CHECKLIST_ALL_PASS (info)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(
+                tmp,
+                checklist_overrides={
+                    "fail_count": 0,
+                    "warn_count": 0,
+                    "pass_count": 23,
+                    "na_count": 2,
+                    "score_pct": 100.0,
+                    "_produced_by": "checklist",
+                },
+            )
+            # Also add _produced_by to other artifacts to avoid UNVALIDATED_ARTIFACT noise
+            for fname, producer in [
+                ("landscape.json", "validate_landscape"),
+                ("moat_scores.json", "score_moats"),
+                ("positioning_scores.json", "score_positioning"),
+            ]:
+                path = os.path.join(tmp, fname)
+                with open(path) as f:
+                    artifact = json.load(f)
+                artifact["_produced_by"] = producer
+                with open(path, "w") as f:
+                    json.dump(artifact, f)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            all_pass = [w for w in data["warnings"] if w["code"] == "CHECKLIST_ALL_PASS"]
+            assert len(all_pass) == 1, (
+                f"Expected CHECKLIST_ALL_PASS warning, got: {[w['code'] for w in data['warnings']]}"
+            )
+            assert all_pass[0]["severity"] == "info"

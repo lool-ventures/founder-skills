@@ -318,6 +318,7 @@ def main() -> None:
         "overall_differentiation": overall,
         "differentiation_claims": data.get("differentiation_claims", []),
         "warnings": all_warnings,
+        "_produced_by": "score_positioning",
         "metadata": data.get("metadata", {}),
     }
 

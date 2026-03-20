@@ -296,6 +296,7 @@ def score_moats(data: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]
         "companies": companies,
         "comparison": comparison,
         "warnings": warnings,
+        "_produced_by": "score_moats",
         "metadata": metadata,
     }, []
 

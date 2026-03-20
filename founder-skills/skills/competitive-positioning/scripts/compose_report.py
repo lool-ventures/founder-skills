@@ -40,6 +40,7 @@ WARNING_SEVERITY: dict[str, str] = {
     "MISSING_POSITIONING": "high",
     "CORRUPT_ARTIFACT": "high",
     "STALE_ARTIFACT": "high",
+    "UNVALIDATED_ARTIFACT": "high",
     # Medium — show in report
     "SHALLOW_COMPETITOR_PROFILE": "medium",
     "VANITY_AXIS_WARNING": "medium",
@@ -52,6 +53,7 @@ WARNING_SEVERITY: dict[str, str] = {
     "FOUNDER_OVERRIDE_COUNT": "low",
     # Info
     "SEQUENTIAL_FALLBACK": "info",
+    "CHECKLIST_ALL_PASS": "info",
 }
 
 # Only medium-severity codes can be accepted. High-severity = integrity violations.
@@ -59,6 +61,7 @@ ACCEPTIBLE_SEVERITIES = {"medium"}
 
 # Human-readable warning code labels
 WARNING_LABELS: dict[str, str] = {
+    "UNVALIDATED_ARTIFACT": "Unvalidated Artifact",
     "MISSING_LANDSCAPE": "Missing Landscape",
     "MISSING_POSITIONING_SCORES": "Missing Positioning Scores",
     "MISSING_MOAT_SCORES": "Missing Moat Scores",
@@ -75,6 +78,7 @@ WARNING_LABELS: dict[str, str] = {
     "INCOMPLETE_SCORING": "Incomplete Scoring",
     "FOUNDER_OVERRIDE_COUNT": "Founder Override Count",
     "SEQUENTIAL_FALLBACK": "Sequential Fallback",
+    "CHECKLIST_ALL_PASS": "Checklist All Pass",
 }
 
 # Required artifacts — missing any of these produces a high-severity warning.
@@ -262,6 +266,24 @@ def validate_artifacts(
     positioning = artifacts.get("positioning.json")
     moat_scores = artifacts.get("moat_scores.json")
     positioning_scores = artifacts.get("positioning_scores.json")
+
+    # 0. UNVALIDATED_ARTIFACT — script provenance check
+    EXPECTED_PRODUCERS = {
+        "landscape.json": "validate_landscape",
+        "moat_scores.json": "score_moats",
+        "positioning_scores.json": "score_positioning",
+        "checklist.json": "checklist",
+    }
+    for name, expected in EXPECTED_PRODUCERS.items():
+        data = artifacts.get(name)
+        if _usable(data) and data.get("_produced_by") != expected:
+            warnings.append(
+                _warn(
+                    "UNVALIDATED_ARTIFACT",
+                    f"Artifact '{name}' exists but was not produced by {expected}.py — "
+                    f"run the script instead of writing the file directly",
+                )
+            )
 
     # 1. MISSING / CORRUPT — required artifacts
     for name in REQUIRED_ARTIFACTS:
@@ -474,7 +496,12 @@ def validate_artifacts(
             )
         )
 
-    # 9. FOUNDER_OVERRIDE_COUNT
+    # 9. CHECKLIST_ALL_PASS — suspicious perfect score
+    checklist = artifacts.get("checklist.json")
+    if _usable(checklist) and checklist.get("fail_count", 0) == 0 and checklist.get("warn_count", 0) == 0:
+        warnings.append(_warn("CHECKLIST_ALL_PASS", "All checklist items passed — review for self-grading bias"))
+
+    # 10. FOUNDER_OVERRIDE_COUNT
     if _usable(positioning):
         override_count = _count_founder_overrides(positioning)
         if override_count > 0:
