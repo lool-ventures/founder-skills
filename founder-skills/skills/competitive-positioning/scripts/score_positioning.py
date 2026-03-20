@@ -125,8 +125,10 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
             {
                 "code": "VANITY_AXIS_WARNING",
                 "severity": "medium",
-                "message": f"View '{view['id']}': X-axis '{view['x_axis']['name']}' flagged as vanity — "
-                f">80% of competitors cluster within 20% of the axis range",
+                "message": (
+                    f"View '{view['id']}': X-axis '{view.get('x_axis', {}).get('name', 'X')}'"
+                    " flagged as vanity — >80% of competitors cluster within 20% of the axis range"
+                ),
             }
         )
     if y_vanity:
@@ -134,8 +136,10 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
             {
                 "code": "VANITY_AXIS_WARNING",
                 "severity": "medium",
-                "message": f"View '{view['id']}': Y-axis '{view['y_axis']['name']}' flagged as vanity — "
-                f">80% of competitors cluster within 20% of the axis range",
+                "message": (
+                    f"View '{view['id']}': Y-axis '{view.get('y_axis', {}).get('name', 'Y')}'"
+                    " flagged as vanity — >80% of competitors cluster within 20% of the axis range"
+                ),
             }
         )
 
@@ -153,10 +157,10 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
 
     scored_view = {
         "view_id": view["id"],
-        "x_axis_name": view["x_axis"]["name"],
-        "y_axis_name": view["y_axis"]["name"],
-        "x_axis_rationale": view["x_axis"]["rationale"],
-        "y_axis_rationale": view["y_axis"]["rationale"],
+        "x_axis_name": view.get("x_axis", {}).get("name", "X"),
+        "y_axis_name": view.get("y_axis", {}).get("name", "Y"),
+        "x_axis_rationale": view.get("x_axis", {}).get("rationale", ""),
+        "y_axis_rationale": view.get("y_axis", {}).get("rationale", ""),
         "x_axis_vanity_flag": x_vanity,
         "y_axis_vanity_flag": y_vanity,
         "differentiation_score": diff_score,
@@ -193,6 +197,13 @@ def _validate_input(data: dict[str, Any]) -> list[str]:
             if field not in view:
                 errors.append(f"views[{i}] missing required field '{field}'")
 
+        for axis_key in ("x_axis", "y_axis"):
+            axis = view.get(axis_key)
+            if axis is not None and not isinstance(axis, dict):
+                errors.append(f"views[{i}].{axis_key} must be an object")
+            elif isinstance(axis, dict) and "name" not in axis:
+                errors.append(f"views[{i}].{axis_key} missing required field 'name'")
+
         if "points" not in view:
             continue
 
@@ -202,6 +213,7 @@ def _validate_input(data: dict[str, Any]) -> list[str]:
             continue
 
         has_startup = False
+        seen_competitors: set[str] = set()
         for j, p in enumerate(points):
             if not isinstance(p, dict):
                 errors.append(f"views[{i}].points[{j}] must be an object")
@@ -209,6 +221,12 @@ def _validate_input(data: dict[str, Any]) -> list[str]:
 
             if p.get("competitor") == "_startup":
                 has_startup = True
+
+            comp_slug = p.get("competitor", "")
+            if comp_slug:
+                if comp_slug in seen_competitors:
+                    errors.append(f"views[{i}].points[{j}]: duplicate competitor '{comp_slug}'")
+                seen_competitors.add(comp_slug)
 
             # Coordinate validation — x and y are required
             for coord in ("x", "y"):

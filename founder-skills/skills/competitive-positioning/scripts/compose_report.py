@@ -47,6 +47,7 @@ WARNING_SEVERITY: dict[str, str] = {
     "MISSING_DO_NOTHING": "medium",
     "RESEARCH_DEPTH_LOW": "medium",
     "MISSING_CANONICAL_MOAT": "medium",
+    "INCOMPLETE_SCORING": "medium",
     # Low
     "FOUNDER_OVERRIDE_COUNT": "low",
     # Info
@@ -71,6 +72,7 @@ WARNING_LABELS: dict[str, str] = {
     "MISSING_DO_NOTHING": "Missing Do-Nothing Alternative",
     "RESEARCH_DEPTH_LOW": "Research Depth Low",
     "MISSING_CANONICAL_MOAT": "Missing Canonical Moat",
+    "INCOMPLETE_SCORING": "Incomplete Scoring",
     "FOUNDER_OVERRIDE_COUNT": "Founder Override Count",
     "SEQUENTIAL_FALLBACK": "Sequential Fallback",
 }
@@ -284,6 +286,18 @@ def validate_artifacts(
                         _warn(
                             "CORRUPT_ARTIFACT",
                             f"Orphan competitor '{slug}' in positioning.json moat_assessments — not in landscape",
+                        )
+                    )
+
+        # Reverse check: landscape competitors missing from scoring
+        if _usable(moat_scores):
+            scored_slugs = set(_as_dict(moat_scores.get("companies")).keys())
+            for ls in landscape_slugs:
+                if ls and ls not in scored_slugs:
+                    warnings.append(
+                        _warn(
+                            "INCOMPLETE_SCORING",
+                            f"Competitor '{ls}' in landscape but missing from moat_scores — may distort rankings",
                         )
                     )
 

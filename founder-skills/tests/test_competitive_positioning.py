@@ -1787,3 +1787,68 @@ class TestCompose:
             messages = " ".join(w["message"] for w in data["warnings"])
             assert "orphan-view-slug" in messages
             assert "orphan-moat-slug" in messages
+
+    # 19. INCOMPLETE_SCORING: landscape competitor missing from moat_scores
+    def test_compose_incomplete_scoring_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # landscape has foo, but moat_scores.companies does not
+            comps = [
+                _make_competitor("Foo Corp", "foo", "direct"),
+                _make_competitor("Alpha Corp", "alpha-corp", "direct"),
+                _make_competitor("Beta Inc", "beta-inc", "adjacent"),
+                _make_competitor("Gamma Ltd", "gamma-ltd", "emerging"),
+                _make_competitor("Manual Process", "manual-process", "do_nothing"),
+            ]
+            _make_artifact_dir(tmp, landscape_overrides={"competitors": comps})
+            # moat_scores only has _startup and alpha-corp (no foo)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            incomplete = [w for w in data["warnings"] if w["code"] == "INCOMPLETE_SCORING"]
+            assert len(incomplete) > 0, "Expected at least one INCOMPLETE_SCORING warning"
+            assert all(w["severity"] == "medium" for w in incomplete)
+            foo_warns = [w for w in incomplete if "foo" in w["message"]]
+            assert len(foo_warns) == 1, f"Expected INCOMPLETE_SCORING for 'foo', got: {incomplete}"
+
+
+class TestScorePositioningValidation:
+    """Additional validation tests for score_positioning.py."""
+
+    # Malformed axis (missing name) exits 1
+    def test_score_positioning_malformed_axis_fails(self) -> None:
+        views = [
+            {
+                "id": "primary",
+                "x_axis": {},  # missing 'name'
+                "y_axis": {"name": "Y", "description": "...", "rationale": "y rationale"},
+                "points": [
+                    _make_positioning_point("_startup", 90, 85),
+                    _make_positioning_point("acme-corp", 60, 40),
+                    _make_positioning_point("beta-inc", 30, 70),
+                ],
+            }
+        ]
+        payload = _make_valid_positioning_input(views=views)
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+        assert "name" in stderr.lower()
+
+    # Duplicate competitor slugs within a view exits 1
+    def test_score_positioning_duplicate_points_fails(self) -> None:
+        views = [
+            {
+                "id": "primary",
+                "x_axis": {"name": "X", "description": "...", "rationale": "x rationale"},
+                "y_axis": {"name": "Y", "description": "...", "rationale": "y rationale"},
+                "points": [
+                    _make_positioning_point("_startup", 90, 85),
+                    _make_positioning_point("acme-corp", 60, 40),
+                    _make_positioning_point("acme-corp", 50, 50),  # duplicate
+                    _make_positioning_point("beta-inc", 30, 70),
+                ],
+            }
+        ]
+        payload = _make_valid_positioning_input(views=views)
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+        assert "duplicate" in stderr.lower()
