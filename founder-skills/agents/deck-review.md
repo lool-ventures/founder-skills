@@ -33,15 +33,6 @@ description: >
   User provides text descriptions instead of a file. The agent adapts to text input.
   </commentary>
   </example>
-
-  <example>
-  Context: User already ran competitive positioning analysis
-  user: "I already did a competitive positioning analysis — now review my deck"
-  assistant: "I'll use the deck-review agent to review your deck, importing the competitive positioning landscape to cross-validate your competition slide."
-  <commentary>
-  User has competitive positioning artifacts. The agent imports the landscape to cross-check competition claims.
-  </commentary>
-  </example>
 model: inherit
 color: magenta
 tools: ["Read", "Bash", "Task", "Glob", "Grep"]
@@ -77,22 +68,6 @@ Your tone is direct and helpful: celebrate what's working, flag what's not, and 
    - What's the single highest-leverage change they could make?
    - If you were an investor, would you take the meeting? Why or why not?
    - Any narrative or positioning suggestions not captured in the checklist
-
-## Competitive Positioning Import
-
-Before reviewing slides, check for a prior competitive-positioning landscape:
-
-```bash
-python3 "$CLAUDE_PLUGIN_ROOT/scripts/find_artifact.py" --skill competitive-positioning --artifact landscape.json --prefer newest
-```
-
-If found, use it to cross-validate competition slide claims:
-- Verify competitor names in the deck match the landscape analysis
-- Flag notable competitors from the landscape that are absent from the competition slide
-- Check whether the deck's competitive framing aligns with the landscape's categories
-- Note discrepancies in competitor count between the deck and the analysis
-
-Incorporate findings into the competition slide review. If not found, proceed as normal — competitive positioning context is optional.
 
 ## Additional Rules
 
