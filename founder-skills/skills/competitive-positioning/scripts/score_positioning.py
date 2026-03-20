@@ -143,15 +143,30 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
             }
         )
 
-    # Rank-based differentiation
+    # Rank-based differentiation with distance weighting
     rank_x = _compute_rank(startup_x, comp_x_vals)
     rank_y = _compute_rank(startup_y, comp_y_vals)
 
-    # Formula from schema: axis_score = (N - rank + 1) / N * 100
+    # Distance-weighted formula: rank contributes 50%, gap contributes 50%.
+    # This distinguishes "barely ahead" (rank 1, gap 2%) from "dramatically
+    # ahead" (rank 1, gap 40%).
     if n > 0:
-        x_score = (n - rank_x + 1) / n * 100
-        y_score = (n - rank_y + 1) / n * 100
-        diff_score = round((x_score + y_score) / 2, 1)
+        x_rank_score = (n - rank_x + 1) / n * 50
+        y_rank_score = (n - rank_y + 1) / n * 50
+
+        # Gap: how far ahead the startup is from the next-best competitor
+        # on each axis (0-1 scale, clamped to 0 if startup is behind).
+        sorted_x_desc = sorted(comp_x_vals, reverse=True)
+        sorted_y_desc = sorted(comp_y_vals, reverse=True)
+        next_best_x = sorted_x_desc[0] if sorted_x_desc else startup_x
+        next_best_y = sorted_y_desc[0] if sorted_y_desc else startup_y
+        gap_x = max(0.0, (startup_x - next_best_x) / 100)
+        gap_y = max(0.0, (startup_y - next_best_y) / 100)
+
+        x_gap_score = gap_x * 50
+        y_gap_score = gap_y * 50
+
+        diff_score = min(100.0, round((x_rank_score + x_gap_score + y_rank_score + y_gap_score) / 2, 1))
     else:
         diff_score = 0.0
 

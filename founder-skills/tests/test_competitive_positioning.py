@@ -230,7 +230,16 @@ class TestValidateLandscape:
         rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
         assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
 
-    # 10b. empty slug rejected
+    # 10b. Invalid research_depth enum value fails
+    def test_invalid_research_depth_fails(self) -> None:
+        payload = _make_valid_landscape()
+        payload["competitors"][0]["research_depth"] = "high"
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+        assert "research_depth" in stderr
+        assert "high" in stderr
+
+    # 10c. empty slug rejected
     def test_empty_slug_rejected(self) -> None:
         payload = _make_valid_landscape()
         payload["competitors"][0]["slug"] = ""
@@ -658,8 +667,9 @@ class TestScorePositioning:
         assert view["y_axis_vanity_flag"] is False
 
     # 4. Rank-based differentiation — startup ranked 1st scores high; middle scores low
+    #    Uses distance-weighted formula: rank 50% + gap 50%
     def test_score_positioning_rank_based_differentiation(self) -> None:
-        # Startup at top of both axes (rank 1 on both)
+        # Startup at top of both axes (rank 1 on both) with moderate gap
         points_top = [
             _make_positioning_point("_startup", 95, 95),
             _make_positioning_point("acme-corp", 80, 80),
@@ -704,10 +714,61 @@ class TestScorePositioning:
         top_score = data_top["views"][0]["differentiation_score"]
         mid_score = data_mid["views"][0]["differentiation_score"]
         assert top_score > mid_score, f"Top score {top_score} should exceed mid score {mid_score}"
-        # Top-ranked startup should score 100
-        assert top_score == 100.0
-        # Startup ranks: x=50 is rank 3 of 4 (behind 80, 60), y same => (4-3+1)/4 = 0.5 => 50.0
-        assert mid_score == 50.0
+        # Distance-weighted: rank 1 of 4 => rank_score = 50, gap (95-80)/100 = 0.15 => gap_score = 7.5
+        # Per axis: 57.5, average of two axes: 57.5
+        assert top_score == 57.5
+        # Mid: rank 3 of 4 => rank_score = 25, gap = 0 (behind top competitor)
+        # Per axis: 25.0, average: 25.0
+        assert mid_score == 25.0
+
+    # 4b. Distance-weighted scoring: larger gap produces higher score at same rank
+    def test_score_positioning_gap_distinguishes_barely_vs_dramatically_ahead(self) -> None:
+        # Scenario A: startup barely ahead (rank 1, gap 2%)
+        points_barely = [
+            _make_positioning_point("_startup", 82, 82),
+            _make_positioning_point("acme-corp", 80, 80),
+            _make_positioning_point("beta-inc", 60, 60),
+            _make_positioning_point("gamma-ltd", 40, 40),
+        ]
+        views_barely = [
+            {
+                "id": "primary",
+                "x_axis": {"name": "X", "description": "...", "rationale": "x rationale"},
+                "y_axis": {"name": "Y", "description": "...", "rationale": "y rationale"},
+                "points": points_barely,
+            }
+        ]
+        payload_barely = _make_valid_positioning_input(views=views_barely)
+        rc1, data_barely, stderr1 = run_script("score_positioning.py", stdin_data=json.dumps(payload_barely))
+        assert rc1 == 0, f"stderr: {stderr1}"
+        assert data_barely is not None
+
+        # Scenario B: startup dramatically ahead (rank 1, gap 40%)
+        points_dramatic = [
+            _make_positioning_point("_startup", 95, 95),
+            _make_positioning_point("acme-corp", 55, 55),
+            _make_positioning_point("beta-inc", 40, 40),
+            _make_positioning_point("gamma-ltd", 20, 20),
+        ]
+        views_dramatic = [
+            {
+                "id": "primary",
+                "x_axis": {"name": "X", "description": "...", "rationale": "x rationale"},
+                "y_axis": {"name": "Y", "description": "...", "rationale": "y rationale"},
+                "points": points_dramatic,
+            }
+        ]
+        payload_dramatic = _make_valid_positioning_input(views=views_dramatic)
+        rc2, data_dramatic, stderr2 = run_script("score_positioning.py", stdin_data=json.dumps(payload_dramatic))
+        assert rc2 == 0, f"stderr: {stderr2}"
+        assert data_dramatic is not None
+
+        barely_score = data_barely["views"][0]["differentiation_score"]
+        dramatic_score = data_dramatic["views"][0]["differentiation_score"]
+        # Both are rank 1, but dramatic gap should score meaningfully higher
+        assert dramatic_score > barely_score, (
+            f"Dramatic gap score {dramatic_score} should exceed barely-ahead score {barely_score}"
+        )
 
     # 5. Secondary view gets its own scores
     def test_score_positioning_secondary_view_scored(self) -> None:

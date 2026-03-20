@@ -52,6 +52,7 @@ def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any]
 # ---------------------------------------------------------------------------
 
 VALID_CATEGORIES = {"direct", "adjacent", "do_nothing", "emerging", "custom"}
+VALID_RESEARCH_DEPTHS = {"full", "partial", "founder_provided"}
 REQUIRED_COMPETITOR_FIELDS = {"name", "slug", "category", "description", "key_differentiators"}
 PROVENANCE_FIELDS = {"research_depth", "evidence_source", "sourced_fields_count"}
 KEBAB_CASE_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -146,6 +147,14 @@ def validate_landscape(enriched: dict[str, Any]) -> tuple[dict[str, Any] | None,
         for field in PROVENANCE_FIELDS:
             if field in comp:
                 validated_comp[field] = comp[field]
+
+        # Validate research_depth enum if present
+        rd = validated_comp.get("research_depth")
+        if rd is not None and rd not in VALID_RESEARCH_DEPTHS:
+            errors.append(
+                f"Competitor {i} ({comp.get('name', '?')}): research_depth '{rd}' "
+                f"must be one of {sorted(VALID_RESEARCH_DEPTHS)}"
+            )
 
         validated_competitors.append(validated_comp)
 

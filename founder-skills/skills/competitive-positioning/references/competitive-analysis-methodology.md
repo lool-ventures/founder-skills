@@ -46,6 +46,23 @@ Every competitive landscape should include competitors across multiple categorie
 - Markets where a tool is already universally adopted and the competition is between tools, not between tool-vs-no-tool
 - In these cases, use `accepted_warnings` with code `MISSING_DO_NOTHING` and a specific reason
 
+### Handling Deck Competitors Not in Analysis
+
+When the founder's pitch deck lists competitors that are not included in the formal landscape analysis, the agent must explicitly acknowledge them. Valid reasons for exclusion include:
+
+- **Too small / early:** The competitor is pre-product or has negligible market presence, making meaningful comparison impossible.
+- **Different market segment:** The competitor serves a fundamentally different buyer (e.g., enterprise vs. SMB) with no overlap in the target market.
+- **Redundant:** The competitor is functionally identical to another included competitor and would not add analytical value.
+- **Acqui-hired / shutdown:** The competitor no longer operates independently.
+
+**What to do:**
+
+1. Record excluded deck competitors in `landscape_draft.json` under `deck_competitors_excluded` with name and reason.
+2. In the final report, include a note: "The deck's competition slide includes [X, Y, Z] which were not included in this analysis because [reasons]."
+3. This prevents the NARR_03 checklist item ("Competition narrative aligns with deck claims") from failing without explanation. The checklist assessor can mark NARR_03 as `pass` with evidence citing the explicit exclusion rationale.
+
+**When NOT to exclude:** If the deck mentions a competitor that investors will immediately recognize as relevant (e.g., the market leader), include it even if the founder considers it a different segment. Investors will ask about it.
+
 ---
 
 ## 2. Positioning Axis Selection

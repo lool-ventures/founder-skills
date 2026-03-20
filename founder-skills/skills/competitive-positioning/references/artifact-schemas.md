@@ -615,7 +615,7 @@ Per-view positioning quality scores with vanity flags and rank-based differentia
 | `startup_y_rank` | integer | yes | Where `_startup` would rank among competitors on Y (1 = top) |
 | `competitor_count` | integer | yes | Number of competitors in this view (excluding `_startup`) |
 
-**Differentiation score formula:** For each axis, compute `_startup`'s rank among N competitors (1 = best, N = worst). Convert to a 0-100 score per axis: `axis_score = (N - rank + 1) / N * 100`. The view's `differentiation_score` is the average of x and y axis scores. `overall_differentiation` is the average across all views.
+**Differentiation score formula:** Distance-weighted: rank contributes 50%, gap contributes 50%. For each axis: `rank_score = (N - rank + 1) / N * 50`. Gap measures how far ahead the startup is from the next-best competitor: `gap = max(0, (startup_val - next_best_val) / 100) * 50`. Per-axis score = `rank_score + gap_score`. The view's `differentiation_score` is the average of x and y axis scores, capped at 100. `overall_differentiation` is the average across all views. This distinguishes "barely ahead" (rank 1, gap 2%) from "dramatically ahead" (rank 1, gap 40%).
 
 **Example:**
 ```json

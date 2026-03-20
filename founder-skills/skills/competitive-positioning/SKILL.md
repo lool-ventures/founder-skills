@@ -96,6 +96,8 @@ else
 fi
 ```
 
+The path setup handles both Claude Code (local filesystem) and Cowork (mounted sessions). In most cases, only the first branch (`./artifacts`) applies.
+
 If `CLAUDE_PLUGIN_ROOT` is empty, fall back: run `Glob` with pattern `**/founder-skills/skills/competitive-positioning/scripts/validate_landscape.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`.
 
 **If `ARTIFACTS_ROOT` resolves to `./artifacts` but no `artifacts/` directory exists at `$(pwd)`:** The workspace may not be mounted yet. Use `Glob` with pattern `**/artifacts/founder_context.json` to locate existing artifacts, and derive `ARTIFACTS_ROOT` from the result. If nothing is found, `mkdir -p ./artifacts` and proceed.
@@ -122,7 +124,7 @@ python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_R
 
 **Exit 0 (found):** Use the company slug and pre-filled fields. Proceed to Step 2.
 
-**Exit 1 (not found):** Use `AskUserQuestion` (NOT plain chat) to ask for company name, stage, sector, and geography. Provide at least 2 options. Then create:
+**Exit 1 (not found):** This is normal for a first run — do not treat it as an error. Use `AskUserQuestion` (NOT plain chat) to ask for company name, stage, sector, and geography. Provide at least 2 options. Note in the report metadata that no cross-skill validation was performed. Then create:
 
 ```bash
 python3 "$SHARED_SCRIPTS/founder_context.py" init \
@@ -147,6 +149,8 @@ If materials are sparse, use `AskUserQuestion` to gather missing fields. At mini
 Identify 5-7 competitors across categories: 2-3 direct, 1-2 adjacent, 1 do-nothing, 0-1 emerging. For each competitor, record: name, slug, category, description, key differentiators, and why included.
 
 Select 2-3 candidate positioning axis pairs with rationale for each. Follow the axis selection principles from the methodology reference — axes must differentiate, matter to the buyer, and be measurable.
+
+If the founder's deck mentions competitors you are excluding from the formal landscape (e.g., too small, different market segment, or redundant with an included competitor), note them with reasons in `landscape_draft.json` under a `deck_competitors_excluded` field. These will be referenced in the report to maintain deck alignment and prevent the NARR_03 checklist item from failing without explanation.
 
 Write `landscape_draft.json` to `$ANALYSIS_DIR`.
 
@@ -177,6 +181,8 @@ Options: `Looks good` / `Missing competitors` / `Remove some` / `Change axes`
 
 **CRITICAL: The AskUserQuestion question must be ONE SHORT SENTENCE. Put ALL details in the chat message (Step A), not in the question.**
 
+This two-step pattern (chat message then AskUserQuestion) is required because AskUserQuestion renders as plain text. Detailed content goes in the chat message; only the gate question goes in AskUserQuestion.
+
 If founder requests changes, apply corrections and repeat Steps A+B.
 
 Apply all corrections to `landscape_draft.json` before proceeding.
@@ -187,11 +193,42 @@ Spawn a `general-purpose` Task sub-agent to research and enrich each competitor.
 
 **Sub-agent instructions:**
 
-**Phase A — Enrich existing competitors:** For each competitor in `landscape_draft.json`, use web search to find: pricing model, funding history, team size, target customers, strengths, weaknesses. Record `evidence_source` per field (`"researched"` or `"agent_estimate"`). Set `research_depth` per competitor.
+**Phase A — Enrich existing competitors:** For each competitor in `landscape_draft.json`, use web search to find: pricing model, funding history, team size, target customers, strengths, weaknesses. Record `evidence_source` per field (`"researched"` or `"agent_estimate"`). Set `research_depth` per competitor — MUST be one of: `"full"` (web research completed), `"partial"` (added via suggested_additions), `"founder_provided"` (no web research). Do NOT use values like "high", "medium", "low".
 
-**Phase B — Gap detection:** After enriching, check for missing competitor categories. Search for: "alternatives to [startup product]", "[sector] competitors", G2/Capterra comparisons. If new competitors are found that would strengthen the analysis, add them to `suggested_additions[]` with `merged: false`.
+**Phase B — Gap detection:** After enriching, check for missing competitor categories. Search for: "alternatives to [startup product]", "[sector] competitors", G2/Capterra comparisons. If new competitors are found that would strengthen the analysis, add them to `suggested_additions[]` with `merged: false`. **CRITICAL: Do NOT add discovered competitors to `competitors[]` — only add them to `suggested_additions[]`. The main agent handles merging after founder approval.**
 
-Write `landscape_enriched.json` to `$ANALYSIS_DIR`. Return ONLY: (1) file path, (2) count of competitors enriched, (3) research_depth per competitor, (4) any `suggested_additions` found, (5) suggested axis pairs if any.
+**Output format:** `competitors[]` must contain ONLY the original competitors from `landscape_draft.json` — no additions. Discovered competitors go exclusively in `suggested_additions[]`. Write `landscape_enriched.json` to `$ANALYSIS_DIR` with this exact structure:
+
+```json
+{
+  "competitors": [
+    {
+      "name": "...", "slug": "...", "category": "...",
+      "description": "...", "key_differentiators": ["..."],
+      "research_depth": "full",
+      "evidence_source": {"pricing_model": "researched", "funding": "agent_estimate"},
+      "sourced_fields_count": 5,
+      "pricing_model": "...", "funding": "...", "team_size": "...",
+      "target_customers": ["..."], "strengths": ["..."], "weaknesses": ["..."]
+    }
+  ],
+  "suggested_additions": [
+    {
+      "name": "...", "slug": "...", "category": "...",
+      "rationale": "...", "partial_profile": {}, "merged": false
+    }
+  ],
+  "suggested_axes": [],
+  "assessment_mode": "sub-agent",
+  "research_depth": "full",
+  "input_mode": "...",
+  "metadata": {"run_id": "..."}
+}
+```
+
+`research_depth` per competitor MUST be one of: `"full"`, `"partial"`, `"founder_provided"`. Do NOT use `"high"`, `"medium"`, `"low"`.
+
+Return to the main agent ONLY: (1) file path, (2) count of competitors enriched, (3) research_depth per competitor, (4) any `suggested_additions` found, (5) suggested axis pairs if any.
 
 **Graceful degradation:** If Task tool is unavailable, research sequentially in the main agent. If no search tools are available, enrich from agent knowledge and set `research_depth: "founder_provided"`.
 
@@ -220,11 +257,15 @@ Fix any errors (exit 1) and re-run. Warnings are acceptable — address medium-s
 Question: `Does this positioning look right?`
 Options: `Proceed to scoring` / `Adjust positions` / `Change axes` / `Other changes`
 
+This two-step pattern (chat message then AskUserQuestion) is required because AskUserQuestion renders as plain text. Detailed content goes in the chat message; only the gate question goes in AskUserQuestion.
+
 If founder changes an axis (not just coordinates), re-assign ALL competitor coordinates on the new axis with fresh evidence. Apply all corrections before proceeding to Step 5.
 
 ### Step 5: Positioning & Moat Assessment -> `positioning.json`
 
 **REQUIRED — read `$REFS/moat-definitions.md` now.**
+
+Before writing `positioning.json`, read `landscape.json` to get the competitor list and use it to scaffold the JSON structure. Write each section (views, moat_assessments, differentiation_claims) separately to manage complexity. The competitor slugs from `landscape.json` plus `_startup` define the complete set of entities that must appear in views and moat_assessments.
 
 Build the full positioning artifact:
 
@@ -260,16 +301,13 @@ cat "$ANALYSIS_DIR/positioning.json" | python3 "$SCRIPTS/score_positioning.py" -
 
 Assess all 25 checklist items with evidence from the analysis. Mode-based gating applies: when `input_mode` is `"conversation"`, research-dependent items auto-gate to `not_applicable`.
 
+Write the checklist JSON to `$ANALYSIS_DIR/checklist_input.json` using the Write tool (which handles escaping safely — no shell interpretation of quotes, newlines, or special characters). Then pipe it to the script:
+
 ```bash
-cat <<CHECK_EOF | python3 "$SCRIPTS/checklist.py" --pretty -o "$ANALYSIS_DIR/checklist.json"
-{"items": [
-  {"id": "...", "status": "pass", "evidence": "...", "notes": null},
-  ...all 25 items...
-], "input_mode": "$INPUT_MODE", "metadata": {"run_id": "$RUN_ID"}}
-CHECK_EOF
+cat "$ANALYSIS_DIR/checklist_input.json" | python3 "$SCRIPTS/checklist.py" --pretty -o "$ANALYSIS_DIR/checklist.json"
 ```
 
-Use the actual `$INPUT_MODE` determined in Step 1 (`deck`, `conversation`, or `document`). The unquoted heredoc (`<<CHECK_EOF` not `<<'CHECK_EOF'`) ensures `$RUN_ID` and `$INPUT_MODE` are expanded.
+The JSON must contain: `{"items": [...all 25 items...], "input_mode": "<deck|conversation|document>", "metadata": {"run_id": "<RUN_ID>"}}`. Use the actual `input_mode` determined in Step 2 and the `RUN_ID` from Step 0.
 
 **Evidence is MANDATORY for every item:** Every `fail` and `warn` item MUST have a non-empty `evidence` string citing specific findings. Every `pass` item MUST have `evidence` noting what was checked. Empty evidence produces blank lines in the report.
 
@@ -277,13 +315,23 @@ Fix script errors (exit 1) and re-run. Script warnings are findings to present, 
 
 ### Step 7: Compose, Validate, and Visualize
 
-**7a — Compose report:**
+**7a — Compose report (two-pass pattern):**
+
+**Pass 1 (discovery):** Run compose WITHOUT `--strict` and WITHOUT `accepted_warnings` in `positioning.json`:
 
 ```bash
 python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --pretty -o "$ANALYSIS_DIR/report.json"
 ```
 
-Fix high-severity warnings and re-run. Use `--strict` to enforce a clean report. Medium-severity warnings are review findings to present, not data errors to fix.
+Inspect the warnings in the output. Fix any high-severity warnings (missing artifacts, stale run_id) and re-run Pass 1.
+
+**Pass 2 (with acceptances):** If any medium-severity warnings should be accepted (agent judgment based on context — e.g., `MISSING_DO_NOTHING` in a regulated market, `MOAT_WITHOUT_EVIDENCE` for a do-nothing alternative), add `accepted_warnings` to `positioning.json` with the warning code, match pattern, and reason. Then re-run with `--strict`:
+
+```bash
+python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --strict --pretty -o "$ANALYSIS_DIR/report.json"
+```
+
+This two-pass approach avoids the ordering problem where `accepted_warnings` must reference warnings that have not yet been generated. Medium-severity warnings are review findings to present, not data errors to fix.
 
 **Primary deliverable:** Read `report_markdown` from the output JSON, write it to `$ANALYSIS_DIR/report.md`, and display it to the user in full. **Present the file path** so the user can access it directly. Then add coaching commentary.
 
@@ -309,7 +357,7 @@ Copy final deliverables to workspace root: `{Company}_Competitive_Positioning.md
 - Overall defensibility: `high` (2+ strong), `moderate` (1 strong or 2+ moderate), `low` (all else)
 
 ### Positioning Scoring
-- Rank-based differentiation: where the startup would rank among competitors on each axis
+- Distance-weighted differentiation: rank contributes 50% (where the startup ranks among competitors) + gap contributes 50% (how far ahead of the next-best competitor). This distinguishes "barely ahead" from "dramatically ahead" at the same rank.
 - Vanity axis detection: >80% of competitors within 20% range on either axis
 - Differentiation strength: `strong` (top quartile both axes), `moderate` (top quartile one axis), `weak` (middle of pack), `undifferentiated` (bottom half both axes)
 
