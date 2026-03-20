@@ -55,6 +55,9 @@ VALID_CATEGORIES = {"direct", "adjacent", "do_nothing", "emerging", "custom"}
 REQUIRED_COMPETITOR_FIELDS = {"name", "slug", "category", "description", "key_differentiators"}
 PROVENANCE_FIELDS = {"research_depth", "evidence_source", "sourced_fields_count"}
 KEBAB_CASE_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+# Hard structural floor. The checklist (COVER_01) sets the investor bar at 5+
+# and fails below 4. This validator ensures a minimum viable landscape;
+# the checklist evaluates whether it meets investor expectations.
 MIN_COMPETITORS = 3
 MAX_COMPETITORS = 10
 RESERVED_SLUGS = {"_startup"}

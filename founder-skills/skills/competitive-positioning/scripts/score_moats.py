@@ -185,8 +185,12 @@ def _build_comparison(companies: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def score_moats(data: dict[str, Any]) -> dict[str, Any]:
-    """Validate moat assessments and produce scored output."""
+def score_moats(data: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
+    """Validate moat assessments and produce scored output.
+
+    Returns (result_dict, errors). On success errors is empty.
+    On failure result is None and errors contains messages.
+    """
     moat_assessments = data.get("moat_assessments", {})
     metadata = data.get("metadata", {})
     data_confidence = data.get("data_confidence")
@@ -324,6 +328,8 @@ def main() -> None:
         for err in errs:
             print(f"Error: {err}", file=sys.stderr)
         sys.exit(1)
+
+    assert result is not None  # guaranteed by errs check above
 
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"
