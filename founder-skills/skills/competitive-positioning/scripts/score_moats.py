@@ -196,8 +196,7 @@ def score_moats(data: dict[str, Any]) -> dict[str, Any]:
 
     if not isinstance(moat_assessments, dict) or not moat_assessments:
         errors.append("'moat_assessments' must be a non-empty object")
-        print(f"Error: {errors[0]}", file=sys.stderr)
-        sys.exit(1)
+        return None, errors
 
     # Data confidence qualifier
     confidence_suffix = ""
@@ -258,12 +257,6 @@ def score_moats(data: dict[str, Any]) -> dict[str, Any]:
                     }
                 )
 
-        if errors:
-            # Hard errors — exit
-            for err in errors:
-                print(f"Error: {err}", file=sys.stderr)
-            sys.exit(1)
-
         # Check for missing canonical moats (warning, not error)
         present_canonical = seen_ids & CANONICAL_MOAT_SET
         missing_canonical = CANONICAL_MOAT_SET - present_canonical
@@ -284,6 +277,10 @@ def score_moats(data: dict[str, Any]) -> dict[str, Any]:
             **aggregates,
         }
 
+    # Check for hard errors after processing ALL companies
+    if errors:
+        return None, errors
+
     comparison = _build_comparison(companies)
 
     return {
@@ -291,7 +288,7 @@ def score_moats(data: dict[str, Any]) -> dict[str, Any]:
         "comparison": comparison,
         "warnings": warnings,
         "metadata": metadata,
-    }
+    }, []
 
 
 def parse_args() -> argparse.Namespace:
@@ -322,7 +319,11 @@ def main() -> None:
         print("Error: JSON must be an object with a 'moat_assessments' key", file=sys.stderr)
         sys.exit(1)
 
-    result = score_moats(data)
+    result, errs = score_moats(data)
+    if errs:
+        for err in errs:
+            print(f"Error: {err}", file=sys.stderr)
+        sys.exit(1)
 
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"

@@ -232,7 +232,7 @@ def _artifact_placeholder(
         return _placeholder("Data unavailable")
     if _is_stub(data):
         reason = data.get("reason", "Skipped")
-        return _placeholder(f"{artifact_name} skipped: {_esc(reason)}")
+        return _placeholder(f"{artifact_name} skipped: {reason}")
     return None
 
 

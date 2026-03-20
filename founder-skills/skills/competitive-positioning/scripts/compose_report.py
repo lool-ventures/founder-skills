@@ -275,12 +275,13 @@ def validate_artifacts(
             if code in WARNING_SEVERITY:
                 warnings.append(_warn(code, w.get("message", f"Forwarded from landscape: {code}")))
 
-    # Forward from positioning_scores
+    # Forward from positioning_scores (skip VANITY_AXIS_WARNING — compose generates it
+    # directly from vanity flags with more detail)
     if _usable(positioning_scores):
         for w in _as_list(positioning_scores.get("warnings")):
             w = _as_dict(w)
             code = w.get("code", "")
-            if code in WARNING_SEVERITY:
+            if code in WARNING_SEVERITY and code != "VANITY_AXIS_WARNING":
                 warnings.append(_warn(code, w.get("message", f"Forwarded from positioning_scores: {code}")))
 
     # 5. SHALLOW_COMPETITOR_PROFILE — competitor with sourced_fields_count < 3
