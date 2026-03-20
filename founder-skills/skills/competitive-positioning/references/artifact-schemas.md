@@ -661,7 +661,7 @@ Quality criteria evaluation for the competitive analysis.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `items` | object[] | yes | All checklist items with assessments |
-| `score_pct` | number | yes | `pass_count / (total - not_applicable) * 100` |
+| `score_pct` | number | yes | `(pass_count + 0.5 * warn_count) / (total - not_applicable) * 100` |
 | `pass_count` | integer | yes | Items with status `pass` |
 | `warn_count` | integer | yes | Items with status `warn` |
 | `fail_count` | integer | yes | Items with status `fail` |

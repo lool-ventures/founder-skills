@@ -169,6 +169,10 @@ def validate_landscape(enriched: dict[str, Any]) -> tuple[dict[str, Any] | None,
     }
 
     # Optional passthroughs
+    if "research_depth" in enriched:
+        output["research_depth"] = enriched["research_depth"]
+    if "assessment_mode" in enriched:
+        output["assessment_mode"] = enriched["assessment_mode"]
     if "data_confidence" in enriched:
         output["data_confidence"] = enriched["data_confidence"]
 

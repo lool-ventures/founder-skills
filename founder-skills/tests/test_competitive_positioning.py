@@ -938,12 +938,12 @@ class TestChecklist:
         assert "metadata" in data
         assert data["metadata"]["run_id"] == "20260319T143045Z"
 
-    # 2. Score computation: pass_count / (total - na) * 100
+    # 2. Score computation: (pass_count + 0.5 * warn_count) / (total - na) * 100
     def test_checklist_score_computation(self) -> None:
         # Use document mode which only gates NARR_03 (1 auto-gated).
         # Override 3 items to fail and 1 to warn.
         # Result: 20 pass, 3 fail, 1 warn, 1 na (NARR_03 gated)
-        # score = 20 / (25 - 1) * 100 = 83.3
+        # score = (20 + 0.5 * 1) / (25 - 1) * 100 = 85.4
         overrides = {
             "COVER_01": "fail",
             "COVER_02": "fail",
@@ -959,7 +959,8 @@ class TestChecklist:
         assert data["warn_count"] == 1
         assert data["na_count"] == 1
         assert data["total"] == 25
-        expected_score = round(20 / (25 - 1) * 100, 1)
+        # warn counts as 0.5 points (matches deck-review pattern)
+        expected_score = round((20 + 0.5 * 1) / (25 - 1) * 100, 1)
         assert data["score_pct"] == expected_score
 
     # 3. Deck mode auto-gates EVID_02 and EVID_04
@@ -1721,3 +1722,60 @@ class TestCompose:
             assert "founder skills" in md
             assert "lool ventures" in md
             assert "Competitive Positioning Coach" in md
+
+    # 17. Missing positioning.json -> MISSING_POSITIONING (high)
+    def test_compose_missing_positioning_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp, include_positioning=False)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            codes = [w["code"] for w in data["warnings"]]
+            assert "MISSING_POSITIONING" in codes
+            warn = next(w for w in data["warnings"] if w["code"] == "MISSING_POSITIONING")
+            assert warn["severity"] == "high"
+
+    # 18. Orphan slugs in positioning.json views/moat_assessments -> CORRUPT_ARTIFACT
+    def test_compose_orphan_positioning_slug_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # positioning.json has an orphan slug in views[].points
+            views = [
+                {
+                    "id": "primary",
+                    "x_axis": {"name": "X", "description": "...", "rationale": "r"},
+                    "y_axis": {"name": "Y", "description": "...", "rationale": "r"},
+                    "points": [
+                        _make_positioning_point("_startup", 90, 85),
+                        _make_positioning_point("alpha-corp", 60, 40),
+                        _make_positioning_point("beta-inc", 30, 70),
+                        _make_positioning_point("gamma-ltd", 50, 50),
+                        _make_positioning_point("delta-co", 20, 60),
+                        _make_positioning_point("manual-process", 95, 15),
+                        _make_positioning_point("orphan-view-slug", 70, 70),
+                    ],
+                }
+            ]
+            moat_assessments: dict[str, Any] = {}
+            for slug in [
+                "_startup",
+                "alpha-corp",
+                "beta-inc",
+                "gamma-ltd",
+                "delta-co",
+                "manual-process",
+                "orphan-moat-slug",
+            ]:
+                moat_assessments[slug] = {"moats": [_make_moat_entry("network_effects")]}
+            _make_artifact_dir(
+                tmp,
+                positioning_overrides={
+                    "views": views,
+                    "moat_assessments": moat_assessments,
+                },
+            )
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            messages = " ".join(w["message"] for w in data["warnings"])
+            assert "orphan-view-slug" in messages
+            assert "orphan-moat-slug" in messages

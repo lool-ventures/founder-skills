@@ -37,6 +37,7 @@ WARNING_SEVERITY: dict[str, str] = {
     "MISSING_POSITIONING_SCORES": "high",
     "MISSING_MOAT_SCORES": "high",
     "MISSING_CHECKLIST": "high",
+    "MISSING_POSITIONING": "high",
     "CORRUPT_ARTIFACT": "high",
     "STALE_ARTIFACT": "high",
     # Medium — show in report
@@ -59,6 +60,7 @@ WARNING_LABELS: dict[str, str] = {
     "MISSING_LANDSCAPE": "Missing Landscape",
     "MISSING_POSITIONING_SCORES": "Missing Positioning Scores",
     "MISSING_MOAT_SCORES": "Missing Moat Scores",
+    "MISSING_POSITIONING": "Missing Positioning",
     "MISSING_CHECKLIST": "Missing Checklist",
     "CORRUPT_ARTIFACT": "Corrupt Artifact",
     "STALE_ARTIFACT": "Stale Artifact",
@@ -88,7 +90,7 @@ OPTIONAL_ARTIFACTS = [
 # Map artifact filename to missing-warning code.
 MISSING_CODES: dict[str, str] = {
     "landscape.json": "MISSING_LANDSCAPE",
-    "positioning.json": "CORRUPT_ARTIFACT",  # positioning is required but has no dedicated MISSING_ code
+    "positioning.json": "MISSING_POSITIONING",
     "moat_scores.json": "MISSING_MOAT_SCORES",
     "positioning_scores.json": "MISSING_POSITIONING_SCORES",
     "checklist.json": "MISSING_CHECKLIST",
@@ -255,6 +257,31 @@ def validate_artifacts(
                         _warn(
                             "CORRUPT_ARTIFACT",
                             f"Orphan competitor '{slug}' in moat_scores.json — not in landscape",
+                        )
+                    )
+
+        # Check positioning.json views[].points and moat_assessments
+        if _usable(positioning):
+            for view in _as_list(positioning.get("views")):
+                for point in _as_list(_as_dict(view).get("points")):
+                    p_slug = _as_dict(point).get("competitor", "")
+                    if p_slug == "_startup":
+                        continue
+                    if p_slug and p_slug not in landscape_slugs:
+                        warnings.append(
+                            _warn(
+                                "CORRUPT_ARTIFACT",
+                                f"Orphan competitor '{p_slug}' in positioning.json views — not in landscape",
+                            )
+                        )
+            for slug in _as_dict(positioning.get("moat_assessments")):
+                if slug == "_startup":
+                    continue
+                if slug not in landscape_slugs:
+                    warnings.append(
+                        _warn(
+                            "CORRUPT_ARTIFACT",
+                            f"Orphan competitor '{slug}' in positioning.json moat_assessments — not in landscape",
                         )
                     )
 

@@ -201,10 +201,10 @@ def validate_and_score(
         elif status == "not_applicable":
             na_count += 1
 
-    # Score: pass_count / (total - not_applicable) * 100
+    # Score: (pass_count + 0.5 * warn_count) / (total - not_applicable) * 100
     total = len(CHECKLIST_ITEMS)
     applicable = total - na_count
-    score_pct = round((pass_count / applicable) * 100, 1) if applicable > 0 else 0.0
+    score_pct = round(((pass_count + 0.5 * warn_count) / applicable) * 100, 1) if applicable > 0 else 0.0
 
     return {
         "items": enriched,

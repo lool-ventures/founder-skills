@@ -285,7 +285,7 @@ Copy final deliverables to workspace root: `{Company}_Competitive_Positioning.md
 ### Moat Scoring
 - 6 canonical dimensions per company, each: `strong` / `moderate` / `weak` / `absent` / `not_applicable`
 - Moat count = dimensions rated `strong` or `moderate`
-- Overall defensibility: `strong` (3+ strong), `moderate` (2+ moderate/strong), `weak` (1 moderate/strong), `minimal` (0)
+- Overall defensibility: `high` (2+ strong), `moderate` (1 strong or 2+ moderate), `low` (all else)
 
 ### Positioning Scoring
 - Rank-based differentiation: where the startup would rank among competitors on each axis
