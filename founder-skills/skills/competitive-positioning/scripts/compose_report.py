@@ -46,6 +46,7 @@ WARNING_SEVERITY: dict[str, str] = {
     "MOAT_WITHOUT_EVIDENCE": "medium",
     "MISSING_DO_NOTHING": "medium",
     "RESEARCH_DEPTH_LOW": "medium",
+    "MISSING_CANONICAL_MOAT": "medium",
     # Low
     "FOUNDER_OVERRIDE_COUNT": "low",
     # Info
@@ -69,6 +70,7 @@ WARNING_LABELS: dict[str, str] = {
     "MOAT_WITHOUT_EVIDENCE": "Moat Without Evidence",
     "MISSING_DO_NOTHING": "Missing Do-Nothing Alternative",
     "RESEARCH_DEPTH_LOW": "Research Depth Low",
+    "MISSING_CANONICAL_MOAT": "Missing Canonical Moat",
     "FOUNDER_OVERRIDE_COUNT": "Founder Override Count",
     "SEQUENTIAL_FALLBACK": "Sequential Fallback",
 }
@@ -284,6 +286,19 @@ def validate_artifacts(
                             f"Orphan competitor '{slug}' in positioning.json moat_assessments — not in landscape",
                         )
                     )
+
+    # 3b. Axis consistency — positioning view IDs must match positioning_scores view IDs
+    if _usable(positioning) and _usable(positioning_scores):
+        pos_view_ids = {_as_dict(v).get("id") for v in _as_list(positioning.get("views"))}
+        score_view_ids = {_as_dict(v).get("view_id") for v in _as_list(positioning_scores.get("views"))}
+        missing_in_scores = pos_view_ids - score_view_ids - {None}
+        if missing_in_scores:
+            warnings.append(
+                _warn(
+                    "CORRUPT_ARTIFACT",
+                    f"Positioning views {missing_in_scores} not found in positioning_scores — axis mismatch",
+                )
+            )
 
     # 4. Forward warnings from sub-artifacts
     # Forward from moat_scores

@@ -94,7 +94,7 @@ If context clearly implies a mode (e.g., user said "simulate Sequoia's IC"), ski
 When starting a simulation, check for a prior competitive-positioning report:
 
 ```bash
-python3 "$CLAUDE_PLUGIN_ROOT/scripts/find_artifact.py" --skill competitive-positioning --artifact report.json
+python3 "$CLAUDE_PLUGIN_ROOT/scripts/find_artifact.py" --skill competitive-positioning --artifact report.json --prefer newest
 ```
 
 If found, extract the competitive narrative summary and enrich each partner's assessment context:

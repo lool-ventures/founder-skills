@@ -106,11 +106,13 @@ def validate_landscape(enriched: dict[str, Any]) -> tuple[dict[str, Any] | None,
 
         # Slug validation
         slug = comp.get("slug", "")
-        if slug:
-            if slug in RESERVED_SLUGS:
-                errors.append(f"Competitor {i} ({comp.get('name', '?')}): slug '{slug}' is reserved")
-            elif not KEBAB_CASE_RE.match(slug):
-                errors.append(f"Competitor {i} ({comp.get('name', '?')}): slug '{slug}' must be kebab-case")
+        if not slug:
+            errors.append(f"Competitor {i} ({comp.get('name', '?')}): slug must be non-empty")
+        elif slug in RESERVED_SLUGS:
+            errors.append(f"Competitor {i} ({comp.get('name', '?')}): slug '{slug}' is reserved")
+        elif not KEBAB_CASE_RE.match(slug):
+            errors.append(f"Competitor {i} ({comp.get('name', '?')}): slug '{slug}' must be kebab-case")
+        if slug and slug not in RESERVED_SLUGS:
             if slug in slugs_seen:
                 errors.append(f"Competitor {i} ({comp.get('name', '?')}): duplicate slug '{slug}'")
             slugs_seen.add(slug)

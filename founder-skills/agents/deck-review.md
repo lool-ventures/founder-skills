@@ -83,7 +83,7 @@ Your tone is direct and helpful: celebrate what's working, flag what's not, and 
 Before reviewing slides, check for a prior competitive-positioning landscape:
 
 ```bash
-python3 "$CLAUDE_PLUGIN_ROOT/scripts/find_artifact.py" --skill competitive-positioning --artifact landscape.json
+python3 "$CLAUDE_PLUGIN_ROOT/scripts/find_artifact.py" --skill competitive-positioning --artifact landscape.json --prefer newest
 ```
 
 If found, use it to cross-validate competition slide claims:

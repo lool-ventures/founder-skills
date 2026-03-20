@@ -230,6 +230,14 @@ class TestValidateLandscape:
         rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
         assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
 
+    # 10b. empty slug rejected
+    def test_empty_slug_rejected(self) -> None:
+        payload = _make_valid_landscape()
+        payload["competitors"][0]["slug"] = ""
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+        assert "non-empty" in stderr.lower()
+
     # 11. data_confidence passthrough
     def test_data_confidence_passthrough(self) -> None:
         payload = _make_valid_landscape(data_confidence=0.85)
