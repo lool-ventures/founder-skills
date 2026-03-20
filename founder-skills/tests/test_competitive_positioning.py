@@ -1051,12 +1051,13 @@ class TestChecklist:
         assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
         assert data is not None
         items_by_id = {item["id"]: item for item in data["items"]}
-        # EVID_02 and EVID_04 should be auto-gated to not_applicable
-        assert items_by_id["EVID_02"]["status"] == "not_applicable"
+        # EVID_04 should be auto-gated to not_applicable in deck mode
         assert items_by_id["EVID_04"]["status"] == "not_applicable"
+        # EVID_02 is NOT gated in deck mode (research always happens)
+        assert items_by_id["EVID_02"]["status"] != "not_applicable"
         # NARR_03 should remain active in deck mode
         assert items_by_id["NARR_03"]["status"] != "not_applicable"
-        assert data["na_count"] >= 2
+        assert data["na_count"] >= 1
 
     # 4. Conversation mode gates NARR_03 and EVID_04
     def test_checklist_mode_gating_conversation(self) -> None:

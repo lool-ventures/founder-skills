@@ -34,7 +34,7 @@ Items are auto-gated to `not_applicable` based on `input_mode` (from `landscape.
 | `MOAT_03` | Trajectory included for each moat | active | active | active |
 | `MOAT_04` | Custom moats justified (if present) | active | active | active |
 | `EVID_01` | Per-competitor research depth recorded | active | active | active |
-| `EVID_02` | Majority of competitors have sourced evidence | **gated** | active | active |
+| `EVID_02` | Majority of competitors have sourced evidence | active | active | active |
 | `EVID_03` | Evidence sources distinguished (researched vs. estimated) | active | active | active |
 | `EVID_04` | Competitor financials/pricing sourced | **gated** | **gated** | active |
 | `NARR_01` | Differentiation claims stress-tested | active | active | active |
@@ -46,7 +46,7 @@ Items are auto-gated to `not_applicable` based on `input_mode` (from `landscape.
 | `MISS_03` | No feature-checkbox thinking | active | active | active |
 
 **Gated items by mode:**
-- **`deck`**: `EVID_02` (deck-sourced analyses rely more on deck claims than web research), `EVID_04` (deck rarely contains competitor financials)
+- **`deck`**: `EVID_04` (deck rarely contains competitor financials)
 - **`conversation`**: `NARR_03` (no deck to cross-check), `EVID_04` (conversation mode typically lacks competitor financial detail)
 - **`document`**: `NARR_03` (no deck to cross-check)
 

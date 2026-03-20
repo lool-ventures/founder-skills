@@ -238,7 +238,7 @@ Return to the main agent ONLY: (1) verified file path from `ls`, (2) count of co
 
 **After the sub-agent returns:**
 
-If `suggested_additions` exist, run a mini-gate: present discovered competitors to the founder using `AskUserQuestion` and ask which to include. Merge approved additions into `competitors[]` (set `merged: true`), mark declined ones as `merged: false`.
+If `suggested_additions` exist, run a mini-gate: present discovered competitors to the founder (each entry has a `rationale` field — the sub-agent may also use `reason` as an alias, check both). Use `AskUserQuestion` to ask which to include. Merge approved additions into `competitors[]` (set `merged: true`), mark declined ones as `merged: false`.
 
 **Validate and normalize:**
 
@@ -337,7 +337,13 @@ python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --strict --pretty -o 
 
 This two-pass approach avoids the ordering problem where `accepted_warnings` must reference warnings that have not yet been generated. Medium-severity warnings are review findings to present, not data errors to fix.
 
-**Primary deliverable:** Read `report_markdown` from the output JSON, write it to `$ANALYSIS_DIR/report.md`, and display it to the user in full. **Present the file path** so the user can access it directly. Then add coaching commentary.
+**Primary deliverable:** Read `report_markdown` from the output JSON. Insert your `## Coaching Commentary` section immediately before the final `---` separator line (the footer). The coaching commentary is agent-written (not script-generated) and should include:
+- 2-3 competitive strengths to lead with in investor meetings
+- The single highest-leverage improvement to the competitive narrative
+- What investors will push on and how to prepare
+- Defensibility roadmap: which moats to build and in what order
+
+Write the combined output (report_markdown + coaching commentary) to `$ANALYSIS_DIR/report.md` and display it to the user in full. **Present the file path** so the user can access it directly.
 
 **7b — Visualize (optional):**
 

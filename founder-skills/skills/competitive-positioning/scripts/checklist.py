@@ -95,7 +95,7 @@ ITEM_LOOKUP = {item["id"]: item for item in CHECKLIST_ITEMS}
 # ---------------------------------------------------------------------------
 
 MODE_GATING: dict[str, set[str]] = {
-    "deck": {"EVID_02", "EVID_04"},
+    "deck": {"EVID_04"},
     "conversation": {"NARR_03", "EVID_04"},
     "document": {"NARR_03"},
 }
