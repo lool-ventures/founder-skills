@@ -32,6 +32,7 @@ All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/scripts
 - **`checklist.py`** — Scores 25 criteria across 6 categories (pass/fail/warn/not_applicable) with mode-based gating by input_mode
 - **`compose_report.py`** — Assembles report with cross-artifact validation; `--strict` exits 1 on high-severity warnings
 - **`visualize.py`** — Generates self-contained HTML with SVG charts (not JSON)
+- **`explore.py`** — Generates interactive HTML explorer with Chart.js scatter plot, view switching, bubble encoding controls, and company detail panels (not JSON)
 
 Also available from `${CLAUDE_PLUGIN_ROOT}/scripts/` (shared):
 
