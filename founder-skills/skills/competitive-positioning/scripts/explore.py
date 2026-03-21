@@ -285,7 +285,8 @@ def compose_explorer(dir_path: str) -> str:
 
 <div class="tab-bar">
   <button class="tab active" data-tab="2d" onclick="switchTab('2d')">2D Explorer</button>
-  <button class="tab" data-tab="3d" id="tab-3d" onclick="switchTab('3d')">3D View</button>
+  <button class="tab" data-tab="3d" id="tab-3d" onclick="switchTab('3d')"
+    title="Requires opening in a browser (Chrome, Firefox, Safari)">3D View &#127760;</button>
 </div>
 
 <div class="toolbar" id="toolbar-2d">
@@ -329,8 +330,20 @@ def compose_explorer(dir_path: str) -> str:
     <div class="placeholder" id="3d-placeholder">
       <span class="spinner"></span> Loading 3D view&hellip;
     </div>
-    <div class="placeholder" id="3d-fallback" style="display:none;">
-      3D view requires network access and WebGL support.
+    <div id="3d-fallback" style="display:none; padding: 3rem 2rem; text-align: center;">
+      <div style="max-width: 480px; margin: 0 auto; background: #fff; border: 1px solid #e2e8f0;
+                  border-radius: 12px; padding: 2.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+        <div style="font-size: 2.5rem; margin-bottom: 1rem;">&#127760;</div>
+        <h3 style="font-size: 1.1rem; color: #1e293b; margin-bottom: 0.75rem;">
+          3D View &mdash; Open in Browser</h3>
+        <p style="font-size: 0.9rem; color: #64748b; line-height: 1.6; margin-bottom: 1.25rem;">
+          The interactive 3D positioning map requires a full browser environment.
+          It cannot load inside embedded viewers like Claude Cowork.</p>
+        <p style="font-size: 0.85rem; color: #475569; background: #f1f5f9;
+                  border-radius: 8px; padding: 0.75rem 1rem; line-height: 1.5;">
+          <strong>To use 3D:</strong> Open the <code>explore.html</code> file
+          directly in Chrome, Firefox, or Safari.</p>
+      </div>
     </div>
   </div>
 </div>

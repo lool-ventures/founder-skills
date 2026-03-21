@@ -246,4 +246,4 @@ def test_3d_fallback_message() -> None:
         rc, stdout, stderr = _run_explore(d)
         assert rc == 0, f"exit {rc}, stderr={stderr}"
         assert "3d-fallback" in stdout
-        assert "requires network" in stdout.lower() or "webgl" in stdout.lower()
+        assert "open in browser" in stdout.lower() or "browser environment" in stdout.lower()
