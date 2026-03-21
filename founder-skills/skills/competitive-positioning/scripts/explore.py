@@ -195,7 +195,7 @@ def _css() -> str:
     .toolbar select { font-size: 0.8rem; padding: 4px 8px; border: 1px solid #cbd5e1;
                       border-radius: 4px; background: #fff; }
     .main { display: flex; gap: 0; min-height: calc(100vh - 140px); }
-    .chart-area { flex: 1; padding: 1.5rem; min-width: 0; }
+    .chart-area { flex: 1; padding: 1.5rem; min-width: 0; height: calc(100vh - 220px); }
     .sidebar { width: 320px; border-left: 1px solid #e2e8f0; background: #fff;
                overflow-y: auto; padding: 1rem; }
     .sidebar h3 { font-size: 0.85rem; color: #374151; margin-bottom: 0.5rem; padding-bottom: 0.25rem;
@@ -326,6 +326,10 @@ def compose_explorer(dir_path: str) -> str:
 </div>
 
 <div class="tab-panel" id="panel-3d">
+  <div id="3d-axes-bar" style="display:none; padding: 0.5rem 2rem; background: #fff;
+       border-bottom: 1px solid #e2e8f0; font-size: 0.8rem; color: #475569;
+       display: flex; gap: 2rem; flex-wrap: wrap;">
+  </div>
   <div id="chart-3d-container">
     <div class="placeholder" id="3d-placeholder">
       <span class="spinner"></span> Loading 3D view&hellip;
@@ -616,8 +620,7 @@ function render2D() {{
     data: {{ datasets: datasets }},
     options: {{
       responsive: true,
-      maintainAspectRatio: true,
-      aspectRatio: 1.33,
+      maintainAspectRatio: false,
       scales: {{
         x: {{
           min: 0, max: 100,
@@ -754,6 +757,20 @@ function render3D() {{
   var xName = (view.x_axis && view.x_axis.name) || 'X';
   var yName = (view.y_axis && view.y_axis.name) || 'Y';
 
+  // Show axis legend bar
+  var axesBar = document.getElementById('3d-axes-bar');
+  axesBar.innerHTML =
+    '<span style="display:inline-flex;align-items:center;gap:6px;">' +
+      '<span style="width:14px;height:3px;background:#1e40af;border-radius:2px;"></span>' +
+      '<strong style="color:#1e40af;">X:</strong> ' + escHtml(xName) + '</span>' +
+    '<span style="display:inline-flex;align-items:center;gap:6px;">' +
+      '<span style="width:14px;height:3px;background:#ea580c;border-radius:2px;"></span>' +
+      '<strong style="color:#ea580c;">Y:</strong> ' + escHtml(yName) + '</span>' +
+    '<span style="display:inline-flex;align-items:center;gap:6px;">' +
+      '<span style="width:14px;height:3px;background:#10b981;border-radius:2px;"></span>' +
+      '<strong style="color:#10b981;">Z:</strong> Defensibility</span>';
+  axesBar.style.display = 'flex';
+
   // Build custom hover text with axis names and defensibility label
   var defLabels = {{1: 'Low', 2: 'Moderate', 3: 'High'}};
   var hoverText = text.map(function(name, i) {{
@@ -780,13 +797,25 @@ function render3D() {{
     }}
   }}], {{
     scene: {{
-      xaxis: {{ title: xName, range: [0, 100] }},
-      yaxis: {{ title: yName, range: [0, 100] }},
-      zaxis: {{ title: 'Defensibility', range: [0, 4],
-               tickvals: [1, 2, 3], ticktext: ['Low', 'Moderate', 'High'] }},
-      camera: {{ eye: {{ x: 1.5, y: 1.5, z: 1.2 }} }}
+      xaxis: {{ title: '', range: [0, 100],
+               tickfont: {{ color: '#1e40af' }},
+               gridcolor: 'rgba(30, 64, 175, 0.15)',
+               linecolor: '#1e40af' }},
+      yaxis: {{ title: '', range: [0, 100],
+               tickfont: {{ color: '#ea580c' }},
+               gridcolor: 'rgba(234, 88, 12, 0.15)',
+               linecolor: '#ea580c' }},
+      zaxis: {{ title: '', range: [0, 4],
+               tickvals: [1, 2, 3], ticktext: ['Low', 'Moderate', 'High'],
+               tickfont: {{ color: '#10b981' }},
+               gridcolor: 'rgba(16, 185, 129, 0.15)',
+               linecolor: '#10b981' }},
+      camera: {{ eye: {{ x: 1.5, y: 1.5, z: 1.2 }} }},
+      aspectmode: 'cube',
+      annotations: []
     }},
-    margin: {{ l: 0, r: 0, t: 30, b: 0 }},
+    height: document.getElementById('chart-3d-container').clientHeight - 50 || 650,
+    margin: {{ l: 20, r: 20, t: 20, b: 20 }},
     showlegend: false
   }}, {{ responsive: true }});
 }}
