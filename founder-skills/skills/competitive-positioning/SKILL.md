@@ -138,6 +138,8 @@ python3 "$SHARED_SCRIPTS/founder_context.py" init \
 
 Extract from the founder's materials or conversation: company name, product description, target customers, value propositions, differentiation claims, stage, sector, business model, and input_mode (`"deck"`, `"conversation"`, or `"document"`).
 
+**For deck mode:** Read ALL pages of the deck systematically — not just the competition slide. Problem, solution, traction, and team slides contain competitive claims and differentiation context that inform the analysis. If the deck has a competition slide with its own positioning axes, record them in `product_profile.json` under `deck_axes` for potential use as a secondary positioning view.
+
 Write `product_profile.json` to `$ANALYSIS_DIR`. Consult `references/artifact-schemas.md` for the schema.
 
 If materials are sparse, use `AskUserQuestion` to gather missing fields. At minimum: product description, target customers, and what the founder believes differentiates them.
@@ -238,7 +240,7 @@ Return to the main agent ONLY: (1) verified file path from `ls`, (2) count of co
 
 **After the sub-agent returns:**
 
-If `suggested_additions` exist, run a mini-gate: present discovered competitors to the founder (each entry has a `rationale` field — the sub-agent may also use `reason` as an alias, check both). Use `AskUserQuestion` to ask which to include. Merge approved additions into `competitors[]` (set `merged: true`), mark declined ones as `merged: false`.
+If `suggested_additions` exist, review them first. If all discoveries are clearly irrelevant (wrong market, integration partners not competitors, too small to matter), you may skip the mini-gate and mark all as `merged: false` with a note explaining why. Otherwise, present relevant discoveries to the founder (each entry has a `rationale` field — the sub-agent may also use `reason` as an alias, check both). Use `AskUserQuestion` to ask which to include. Merge approved additions into `competitors[]` (set `merged: true`), mark declined ones as `merged: false`.
 
 **Validate and normalize:**
 
@@ -273,7 +275,7 @@ Before writing `positioning.json`, read `landscape.json` to get the competitor l
 
 Build the full positioning artifact:
 
-**Views:** 1-2 positioning views (primary required, secondary optional). For each view, assign coordinates (0-100) for every competitor and `_startup`. Every point needs `x_evidence`, `y_evidence`, and provenance source fields.
+**Views:** 1-2 positioning views (primary required, secondary optional). For each view, assign coordinates (0-100) for every competitor and `_startup`. Every point needs `x_evidence`, `y_evidence`, and provenance source fields. **When `input_mode` is `"deck"` and the deck has its own competition axes** (recorded in `product_profile.json` as `deck_axes`), create a secondary view using the deck's axes. This strengthens NARR_03 (deck alignment) and gives the founder a direct comparison between their existing narrative and the analytically recommended positioning.
 
 **Moat assessments:** Score every slug in `landscape.json` (including `_startup`) across 6 canonical moat dimensions: `network_effects`, `data_advantages`, `switching_costs`, `regulatory_barriers`, `cost_structure`, `brand_reputation`. Each moat gets: status (`strong`/`moderate`/`weak`/`absent`/`not_applicable`), evidence (required even for `not_applicable`), evidence_source, and trajectory (`building`/`stable`/`eroding`).
 
