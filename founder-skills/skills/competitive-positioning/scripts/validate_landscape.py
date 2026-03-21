@@ -144,16 +144,11 @@ def validate_landscape(enriched: dict[str, Any]) -> tuple[dict[str, Any] | None,
         if not isinstance(kd, list) or len(kd) == 0:
             errors.append(f"Competitor {i} ({comp.get('name', '?')}): key_differentiators must be a non-empty array")
 
-        # Build validated competitor entry (only output fields)
-        validated_comp: dict[str, Any] = {}
-        for field in ("name", "slug", "category", "description", "key_differentiators"):
-            if field in comp:
-                validated_comp[field] = comp[field]
-
-        # Preserve provenance fields
-        for field in PROVENANCE_FIELDS:
-            if field in comp:
-                validated_comp[field] = comp[field]
+        # Build validated competitor entry — preserve ALL fields from input.
+        # Required fields were already validated above; enrichment fields
+        # (pricing_model, funding, team_size, strengths, weaknesses, etc.)
+        # are passed through so compose_report can use them in the narrative.
+        validated_comp: dict[str, Any] = dict(comp)
 
         # Validate research_depth enum if present
         rd = validated_comp.get("research_depth")
