@@ -94,6 +94,7 @@
 - **`checklist.py`** — Scores ~25 quality criteria across 6 categories with mode-based gating
 - **`compose_report.py`** — Assembles report with cross-artifact validation, warning system, and accepted warnings
 - **`visualize.py`** — Generates self-contained HTML with SVG positioning map, moat radar, competitor table; outputs HTML (not JSON)
+- **`explore.py`** — Generates interactive HTML explorer with Chart.js scatter plot, view switching, bubble encoding controls, and company detail panels; outputs HTML (not JSON). Requires network for Chart.js CDN (inlining deferred to follow-up)
 
 ## Dev Setup
 

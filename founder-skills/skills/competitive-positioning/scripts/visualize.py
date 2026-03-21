@@ -177,6 +177,71 @@ _CLR_PRIMARY = "#0d549d"
 _CLR_ACCENT = "#21a2e3"
 _CLR_STARTUP = "#e11d48"  # distinct rose/red for startup
 
+_CATEGORY_COLORS: dict[str, str] = {
+    "_startup": "#e11d48",  # rose/red (matches _CLR_STARTUP)
+    "direct": "#1e40af",  # dark blue
+    "adjacent": "#ea580c",  # orange (NOT #f59e0b — avoids collision with _DEFENSIBILITY_COLORS moderate)
+    "do_nothing": "#9ca3af",  # gray
+    "emerging": "#8b5cf6",  # purple
+    "custom": "#14b8a6",  # teal
+}
+
+_DEFENSIBILITY_RADII: dict[str, float] = {
+    "high": 12.0,
+    "moderate": 8.0,
+    "low": 5.0,
+}
+
+_STARTUP_MIN_RADIUS: float = 8.0  # _startup never smaller than this
+
+
+def _build_point_style_lookup(
+    moat_scores: dict[str, Any] | None,
+    landscape: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    """Build slug -> {category, defensibility, radius, color} for positioning map points."""
+    lookup: dict[str, dict[str, Any]] = {}
+
+    # Build category map from landscape.json (competitors only, _startup not present)
+    cat_map: dict[str, str] = {}
+    if _usable(landscape):
+        for comp in _as_list(landscape.get("competitors")):
+            if isinstance(comp, dict):
+                slug = str(comp.get("slug", ""))
+                cat = str(comp.get("category", "direct"))
+                if slug:
+                    cat_map[slug] = cat
+
+    # Build defensibility map from moat_scores.json (includes _startup)
+    def_map: dict[str, str] = {}
+    if _usable(moat_scores):
+        companies = _as_dict(moat_scores.get("companies"))
+        for slug, co_data in companies.items():
+            if isinstance(co_data, dict):
+                def_map[slug] = str(co_data.get("overall_defensibility", "")).lower()
+
+    # Merge: every slug we know about gets an entry
+    all_slugs = set(cat_map.keys()) | set(def_map.keys())
+    all_slugs.add("_startup")  # always present
+
+    for slug in all_slugs:
+        is_startup = slug == "_startup"
+        category = "_startup" if is_startup else cat_map.get(slug, "direct")
+        defensibility = def_map.get(slug, "")
+
+        base_radius = _DEFENSIBILITY_RADII.get(defensibility, 5.0)
+        radius = max(base_radius, _STARTUP_MIN_RADIUS) if is_startup else base_radius
+        color = _CATEGORY_COLORS.get(category, _CATEGORY_COLORS.get("direct", "#1e40af"))
+
+        lookup[slug] = {
+            "category": category,
+            "defensibility": defensibility,
+            "radius": radius,
+            "color": color,
+        }
+
+    return lookup
+
 
 # ---------------------------------------------------------------------------
 # CSS
@@ -340,6 +405,7 @@ def _chart_positioning_map(
     view: dict[str, Any],
     view_scores: dict[str, Any] | None,
     company_name: str,
+    point_styles: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     """Render a 2D SVG scatter plot for one positioning view."""
     view_id = str(view.get("id", "primary"))
@@ -440,13 +506,21 @@ def _chart_positioning_map(
         cy = pad_top + (1.0 - py / 100.0) * plot_h
 
         is_startup = slug == "_startup"
-        radius = 8 if is_startup else 5
-        fill = _CLR_STARTUP if is_startup else _CLR_ACCENT
+
+        # Get style from lookup, fall back to legacy behavior
+        if point_styles and slug in point_styles:
+            style = point_styles[slug]
+            radius = style["radius"]
+            fill = style["color"]
+        else:
+            radius = 8 if is_startup else 5
+            fill = _CLR_STARTUP if is_startup else _CLR_ACCENT
+
         stroke = "#fff" if is_startup else "none"
         stroke_w = "2" if is_startup else "0"
 
         svg.append(
-            f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{radius}" '
+            f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{radius:.0f}" '
             f'fill="{fill}" stroke="{stroke}" stroke-width="{stroke_w}"/>'
         )
 
@@ -476,6 +550,50 @@ def _chart_positioning_map(
         )
 
     return f'<div class="chart-box full"><h2>{title}</h2>{"".join(svg)}{vanity_note}</div>'
+
+
+def _chart_legends(point_styles: dict[str, dict[str, Any]] | None) -> str:
+    """Render size and color legends for the positioning map."""
+    if not point_styles:
+        return ""
+
+    parts: list[str] = []
+
+    # Size legend — uses CSS border-radius spans, NOT <svg><circle>, so tests can distinguish from chart
+    parts.append('<div class="chart-box" style="padding: 1rem;">')
+    parts.append('<h3 style="margin: 0 0 0.5rem; font-size: 0.85rem; color: #374151;">Size = Defensibility</h3>')
+    parts.append('<div class="size-legend" style="display: flex; gap: 1.5rem; align-items: center;">')
+    for label, radius in [("Low", 5), ("Moderate", 8), ("High", 12)]:
+        d = radius * 2
+        parts.append(
+            f'<span style="display: flex; align-items: center; gap: 4px;">'
+            f'<span style="width:{d}px;height:{d}px;border-radius:50%;background:#9ca3af;'
+            f'border:1px solid #e5e7eb;display:inline-block;"></span>'
+            f'<span style="font-size: 0.75rem; color: #6b7280;">{label}</span></span>'
+        )
+    parts.append("</div>")
+
+    # Color legend
+    parts.append('<h3 style="margin: 1rem 0 0.5rem; font-size: 0.85rem; color: #374151;">Color = Category</h3>')
+    parts.append('<div class="color-legend" style="display: flex; flex-wrap: wrap; gap: 1rem;">')
+    legend_items = [
+        ("Your Company", _CATEGORY_COLORS["_startup"]),
+        ("Direct", _CATEGORY_COLORS["direct"]),
+        ("Adjacent", _CATEGORY_COLORS["adjacent"]),
+        ("Do Nothing", _CATEGORY_COLORS["do_nothing"]),
+        ("Emerging", _CATEGORY_COLORS["emerging"]),
+        ("Custom", _CATEGORY_COLORS["custom"]),
+    ]
+    for label, color in legend_items:
+        parts.append(
+            f'<span style="display: flex; align-items: center; gap: 4px;">'
+            f'<span style="width:12px;height:12px;border-radius:50%;'
+            f'background:{color};display:inline-block;"></span>'
+            f'<span style="font-size: 0.75rem; color: #6b7280;">{label}</span></span>'
+        )
+    parts.append("</div></div>")
+
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -802,6 +920,9 @@ def compose_html(dir_path: str) -> str:
         meta = _as_dict(report.get("metadata"))
         company_name = str(meta.get("company_name", "Unknown"))
 
+    # Build point style lookup for bubble encoding
+    point_styles = _build_point_style_lookup(moat_scores, landscape)
+
     # Header
     header = _section_header(report, positioning_scores, moat_scores)
 
@@ -820,13 +941,16 @@ def compose_html(dir_path: str) -> str:
                 continue
             view_id = str(view.get("id", ""))
             view_score = scores_by_id.get(view_id)
-            positioning_maps.append(_chart_positioning_map(view, view_score, company_name))
+            positioning_maps.append(_chart_positioning_map(view, view_score, company_name, point_styles))
 
     if not positioning_maps:
         positioning_maps.append(
             f'<div class="chart-box full"><h2>Positioning Map</h2>'
             f"{_placeholder('Positioning data not available')}</div>"
         )
+
+    # Legends for positioning maps
+    legends_html = _chart_legends(point_styles if _usable(moat_scores) or _usable(landscape) else None)
 
     # Moat radar
     moat_radar = _chart_moat_radar(moat_scores)
@@ -845,6 +969,7 @@ def compose_html(dir_path: str) -> str:
     body = f"""
 {header}
 {maps_html}
+{legends_html}
 <div class="chart-grid">
 {moat_radar}
 </div>

@@ -66,7 +66,8 @@ Every analysis deposits structured JSON artifacts into a working directory. The 
 | 6b | `positioning_scores.json` | `score_positioning.py` |
 | 6c | `checklist.json` | `checklist.py` |
 | 7 | `report.json` | `compose_report.py` reads all |
-| 7b | `report.html` | `visualize.py` |
+| 7d | `report.html` | `visualize.py` |
+| 7e | `explore.html` | `explore.py` |
 
 **Rules:**
 - Deposit each artifact before proceeding to the next step
@@ -114,7 +115,7 @@ Pass `RUN_ID` to all sub-agents. Every artifact must include `"metadata": {"run_
 
 If `ANALYSIS_DIR` already contains artifacts from a previous run, remove them before starting:
 
-    rm -f "$ANALYSIS_DIR"/{product_profile,landscape_draft,landscape_enriched,landscape,positioning,moat_scores,positioning_scores,checklist,report}.json "$ANALYSIS_DIR/report.html"
+    rm -f "$ANALYSIS_DIR"/{product_profile,landscape_draft,landscape_enriched,landscape,positioning,moat_scores,positioning_scores,checklist,report}.json "$ANALYSIS_DIR/report.html" "$ANALYSIS_DIR/explore.html"
 
 ### Step 1: Read or Create Founder Context
 
@@ -323,7 +324,7 @@ Fix script errors (exit 1) and re-run. Script warnings are findings to present, 
 
 ### Step 7: Compose, Validate, and Visualize
 
-**7a — Compose report (two-pass pattern):**
+**7a — Compose report JSON (two-pass pattern):**
 
 **Pass 1 (discovery):** Run compose WITHOUT `--strict` and WITHOUT `accepted_warnings` in `positioning.json`:
 
@@ -341,15 +342,18 @@ python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --strict --pretty -o 
 
 This two-pass approach avoids the ordering problem where `accepted_warnings` must reference warnings that have not yet been generated. Medium-severity warnings are review findings to present, not data errors to fix.
 
-**Primary deliverable:** Read `report_markdown` from the output JSON. Insert your `## Coaching Commentary` section immediately before the final `---` separator line (the footer). The coaching commentary is agent-written (not script-generated) and should include:
+**7b — Cross-skill lookups:** Use `find_artifact.py` to locate prior deck-review and market-sizing artifacts. If deck-review found, cross-reference competition slide claims against the analysis. If market-sizing found, validate market scope consistency. Note findings for inclusion in coaching commentary.
+
+**7c — Write report and coaching commentary:** Read `report_markdown` from the compose output JSON. Insert your `## Coaching Commentary` section immediately before the final `---` separator line (the footer). The coaching commentary is agent-written (not script-generated) and should include:
 - 2-3 competitive strengths to lead with in investor meetings
 - The single highest-leverage improvement to the competitive narrative
 - What investors will push on and how to prepare
 - Defensibility roadmap: which moats to build and in what order
+- Cross-skill findings from step 7b (if any prior artifacts were found)
 
 Write the combined output (report_markdown + coaching commentary) to `$ANALYSIS_DIR/report.md` and display it to the user in full. **Present the file path** so the user can access it directly.
 
-**7b — Visualize (optional):**
+**7d — Visualize (optional):**
 
 ```bash
 python3 "$SCRIPTS/visualize.py" --dir "$ANALYSIS_DIR" -o "$ANALYSIS_DIR/report.html"
@@ -357,7 +361,13 @@ python3 "$SCRIPTS/visualize.py" --dir "$ANALYSIS_DIR" -o "$ANALYSIS_DIR/report.h
 
 **Present the HTML file path** to the user.
 
-**7c — Cross-skill lookups:** Use `find_artifact.py` to locate prior deck-review and market-sizing artifacts. If deck-review found, cross-reference competition slide claims against the analysis. If market-sizing found, validate market scope consistency. Record findings for coaching commentary.
+**7e — Explorer (optional):**
+
+```bash
+python3 "$SCRIPTS/explore.py" --dir "$ANALYSIS_DIR" -o "$ANALYSIS_DIR/explore.html"
+```
+
+**Present the HTML file path** to the user.
 
 ### Step 8: Deliver Artifacts
 
@@ -366,6 +376,7 @@ Copy final deliverables to workspace root with clean names:
 ```bash
 cp "$ANALYSIS_DIR/report.md" "./${COMPANY_NAME}_Competitive_Positioning.md"
 cp "$ANALYSIS_DIR/report.html" "./${COMPANY_NAME}_Competitive_Positioning.html" 2>/dev/null
+cp "$ANALYSIS_DIR/explore.html" "./${COMPANY_NAME}_Competitive_Explorer.html" 2>/dev/null
 ```
 
 Where `COMPANY_NAME` is the company name with spaces replaced by underscores (e.g., "Acme Corp" -> "Acme_Corp"). Present the file paths to the user.
