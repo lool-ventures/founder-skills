@@ -741,6 +741,15 @@ function render3D() {{
   var xName = (view.x_axis && view.x_axis.name) || 'X';
   var yName = (view.y_axis && view.y_axis.name) || 'Y';
 
+  // Build custom hover text with axis names and defensibility label
+  var defLabels = {{1: 'Low', 2: 'Moderate', 3: 'High'}};
+  var hoverText = text.map(function(name, i) {{
+    return '<b>' + name + '</b><br>' +
+      xName + ': ' + x[i] + '<br>' +
+      yName + ': ' + y[i] + '<br>' +
+      'Defensibility: ' + (defLabels[z[i]] || 'Unknown');
+  }});
+
   Plotly.newPlot('chart-3d-container', [{{
     type: 'scatter3d',
     mode: 'markers+text',
@@ -748,6 +757,8 @@ function render3D() {{
     text: text,
     textposition: 'top center',
     textfont: {{ size: 10 }},
+    hovertext: hoverText,
+    hoverinfo: 'text',
     marker: {{
       size: sizes,
       color: colors,
