@@ -227,7 +227,7 @@ def _css() -> str:
     .tab:disabled { color: #cbd5e1; cursor: not-allowed; }
     .tab-panel { display: none; }
     .tab-panel.active { display: block; }
-    #chart-3d-container { width: 100%; height: 500px; }
+    #chart-3d-container { width: 100%; height: calc(100vh - 100px); min-height: 400px; }
     .spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid #e2e8f0;
                border-top-color: #0d549d; border-radius: 50%; animation: spin 0.6s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
