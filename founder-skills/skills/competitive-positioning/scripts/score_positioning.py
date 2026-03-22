@@ -328,11 +328,17 @@ def main() -> None:
 
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"
-    _write_output(
-        out,
-        args.output,
-        summary={"overall_differentiation": overall} if scored_views else None,
-    )
+    summary = {"overall_differentiation": overall} if scored_views else None
+    _write_output(out, args.output, summary=summary)
+
+    # Summary to stderr for visibility in batch runs
+    if scored_views:
+        print(
+            f"score_positioning: overall_differentiation={overall:.1f}%"
+            f", views={len(scored_views)}"
+            f", warnings={len(result.get('warnings', []))}",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":

@@ -341,16 +341,24 @@ def main() -> None:
     out = json.dumps(result, indent=indent) + "\n"
 
     startup_co = result["companies"].get("_startup", {})
-    _write_output(
-        out,
-        args.output,
-        summary={
+    summary = (
+        {
             "startup_defensibility": startup_co.get("overall_defensibility"),
             "warning_count": len(result["warnings"]),
         }
         if startup_co
-        else None,
+        else None
     )
+    _write_output(out, args.output, summary=summary)
+
+    # Summary to stderr for visibility in batch runs
+    if startup_co:
+        print(
+            f"score_moats: startup_defensibility={startup_co.get('overall_defensibility')}"
+            f", companies={len(result['companies'])}"
+            f", warnings={len(result['warnings'])}",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":

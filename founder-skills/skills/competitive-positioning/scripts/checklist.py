@@ -274,6 +274,15 @@ def main() -> None:
     }
     _write_output(out, args.output, summary=summary)
 
+    # Summary to stderr for visibility in batch runs
+    print(
+        f"checklist: score={result['score_pct']:.1f}%"
+        f", pass={result['pass_count']}"
+        f", fail={result['fail_count']}"
+        f", warn={result.get('warn_count', 0)}",
+        file=sys.stderr,
+    )
+
 
 if __name__ == "__main__":
     main()
