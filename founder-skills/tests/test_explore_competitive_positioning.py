@@ -247,3 +247,54 @@ def test_3d_fallback_message() -> None:
         assert rc == 0, f"exit {rc}, stderr={stderr}"
         assert "3d-fallback" in stdout
         assert "open in browser" in stdout.lower() or "browser environment" in stdout.lower()
+
+
+def test_axis_rationale_container_exists() -> None:
+    """Explorer HTML contains the axis-rationale container element."""
+    arts = _all_artifacts()
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        assert 'id="axis-rationale"' in stdout, "Should contain axis-rationale container"
+
+
+def test_axis_rationale_render_uses_escaping() -> None:
+    """The JS render path for axis rationale uses escHtml for safety."""
+    arts = _all_artifacts()
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        # Structural check: the JS near 'axis-rationale' uses escHtml
+        import re
+
+        # Find the JS block that populates the rationale div
+        rationale_js = re.search(
+            r"axis-rationale.*?escHtml\(.*?rationale",
+            stdout,
+            re.DOTALL | re.IGNORECASE,
+        )
+        assert rationale_js is not None, "JS code populating axis-rationale should use escHtml on rationale values"
+
+
+def test_axis_rationale_in_embedded_data() -> None:
+    """Rationale text from fixtures is present in the embedded DATA payload."""
+    import re
+
+    arts = _all_artifacts()
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        # Extract the DATA JSON
+        match = re.search(
+            r"/\*DATA_START\*/\s*const DATA = (.*?);\s*/\*DATA_END\*/",
+            stdout,
+            re.DOTALL,
+        )
+        assert match is not None
+        import json
+
+        data = json.loads(match.group(1))
+        # Check rationale exists in views
+        assert len(data["views"]) >= 1
+        v = data["views"][0]
+        assert v.get("x_axis", {}).get("rationale"), "View should have x_axis rationale in DATA"

@@ -298,6 +298,12 @@ def _css() -> str:
             color: #f59e0b; font-size: 0.75rem; font-style: italic;
             margin-top: 0.25rem;
         }
+        .axis-rationale {
+            font-size: 0.75rem; color: #64748b; background: #f8fafc;
+            border: 1px solid #e5e7eb; border-radius: 6px;
+            padding: 0.75rem; margin-top: 0.5rem; line-height: 1.5;
+        }
+        .axis-rationale strong { color: #374151; }
         svg { max-width: 100%; height: auto; }
         @media (max-width: 768px) {
             body { padding: 1rem; }
@@ -413,6 +419,8 @@ def _chart_positioning_map(
     y_axis = _as_dict(view.get("y_axis"))
     x_name = str(x_axis.get("name", "X"))
     y_name = str(y_axis.get("name", "Y"))
+    x_rationale = str(x_axis.get("rationale", ""))
+    y_rationale = str(y_axis.get("rationale", ""))
     points = _as_list(view.get("points"))
 
     # Check vanity flags from scores
@@ -492,8 +500,9 @@ def _chart_positioning_map(
         f'transform="rotate(-90, 14, {pad_top + plot_h / 2:.0f})">{y_label}</text>'
     )
 
-    # Plot points
+    # Plot points — two passes: circles first, then labels on top
     startup_label = _esc(company_name) if company_name != "Unknown" else "Your Company"
+    label_entries: list[tuple[float, float, float, str, str]] = []  # cx, cy, radius, label, weight
     for pt in points:
         if not isinstance(pt, dict):
             continue
@@ -524,13 +533,18 @@ def _chart_positioning_map(
             f'fill="{fill}" stroke="{stroke}" stroke-width="{stroke_w}"/>'
         )
 
-        # Label
         label = startup_label if is_startup else _esc(slug.replace("-", " ").title())
         font_weight = "bold" if is_startup else "normal"
+        label_entries.append((cx, cy, radius, label, font_weight))
+
+    # Second pass: labels rendered after all circles so text is never occluded
+    # White outline via paint-order: stroke painted first, then fill on top
+    for cx, cy, radius, label, font_weight in label_entries:
         label_y = cy - radius - 4
         svg.append(
             f'<text x="{cx:.1f}" y="{label_y:.1f}" text-anchor="middle" '
-            f'font-size="9" font-weight="{font_weight}" fill="#374151">{label}</text>'
+            f'font-size="9" font-weight="{font_weight}" fill="#374151" '
+            f'stroke="rgba(255,255,255,0.7)" stroke-width="2" paint-order="stroke">{label}</text>'
         )
 
     svg.append("</svg>")
@@ -548,6 +562,15 @@ def _chart_positioning_map(
             f"{', '.join(flagged)} — competitors cluster tightly, "
             f"differentiation may be overstated</div>"
         )
+
+    # Axis rationale caption
+    rationale_parts: list[str] = []
+    if x_rationale:
+        rationale_parts.append(f"<div><strong>X \u2014 {_esc(x_name)}:</strong> {_esc(x_rationale)}</div>")
+    if y_rationale:
+        rationale_parts.append(f"<div><strong>Y \u2014 {_esc(y_name)}:</strong> {_esc(y_rationale)}</div>")
+    if rationale_parts:
+        vanity_note += f'<div class="axis-rationale">{"".join(rationale_parts)}</div>'
 
     return f'<div class="chart-box full"><h2>{title}</h2>{"".join(svg)}{vanity_note}</div>'
 

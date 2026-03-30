@@ -194,8 +194,10 @@ def _css() -> str:
     .toolbar label { font-size: 0.8rem; color: #475569; font-weight: 500; }
     .toolbar select { font-size: 0.8rem; padding: 4px 8px; border: 1px solid #cbd5e1;
                       border-radius: 4px; background: #fff; }
-    .main { display: flex; gap: 0; min-height: calc(100vh - 140px); }
-    .chart-area { flex: 1; padding: 1.5rem; min-width: 0; height: calc(100vh - 220px); }
+    .main { display: flex; gap: 0; height: calc(100vh - 180px); overflow: hidden; }
+    .chart-area { flex: 1; padding: 1rem 1.5rem; min-width: 0; display: flex;
+                  flex-direction: column; overflow-y: auto; }
+    .chart-area canvas { flex: 1; min-height: 300px; }
     .sidebar { width: 320px; border-left: 1px solid #e2e8f0; background: #fff;
                overflow-y: auto; padding: 1rem; }
     .sidebar h3 { font-size: 0.85rem; color: #374151; margin-bottom: 0.5rem; padding-bottom: 0.25rem;
@@ -232,6 +234,12 @@ def _css() -> str:
                border-top-color: #0d549d; border-radius: 50%; animation: spin 0.6s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .not-scored { font-size: 0.7rem; color: #94a3b8; font-style: italic; }
+    .axis-rationale {
+        font-size: 0.75rem; color: #64748b; background: #f8fafc;
+        border: 1px solid #e5e7eb; border-radius: 6px;
+        padding: 0.75rem; margin-top: 0.5rem; line-height: 1.5;
+    }
+    .axis-rationale strong { color: #374151; }
     @media (max-width: 768px) {
       .main { flex-direction: column; }
       .sidebar { width: 100%; border-left: none; border-top: 1px solid #e2e8f0; }
@@ -316,6 +324,7 @@ def compose_explorer(dir_path: str) -> str:
   <div class="main">
     <div class="chart-area">
       <canvas id="chart-2d"></canvas>
+      <div id="axis-rationale" class="axis-rationale" style="display:none;"></div>
     </div>
     <div class="sidebar" id="sidebar">
       <h3>Companies</h3>
@@ -654,6 +663,19 @@ function render2D() {{
 
   // Update legend bar
   updateLegend();
+
+  // Update axis rationale
+  var ratDiv = document.getElementById('axis-rationale');
+  var xRat = (view.x_axis && view.x_axis.rationale) || '';
+  var yRat = (view.y_axis && view.y_axis.rationale) || '';
+  if (xRat || yRat) {{
+    ratDiv.innerHTML =
+      (xRat ? '<div><strong>X \u2014 ' + escHtml(xName) + ':</strong> ' + escHtml(xRat) + '</div>' : '') +
+      (yRat ? '<div><strong>Y \u2014 ' + escHtml(yName) + ':</strong> ' + escHtml(yRat) + '</div>' : '');
+    ratDiv.style.display = 'block';
+  }} else {{
+    ratDiv.style.display = 'none';
+  }}
 }}
 
 function updateLegend() {{

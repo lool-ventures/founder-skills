@@ -399,3 +399,71 @@ def test_graceful_no_landscape() -> None:
         assert rc == 0, f"exit {rc}, stderr={stderr}"
         assert "<svg" in stdout, "Should still render SVG"
         assert "#e11d48" in stdout, "_startup should still be rose/red"
+
+
+def test_axis_rationale_displayed() -> None:
+    """Axis rationale from positioning data appears in an axis-rationale block."""
+    arts = _all_artifacts()
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_visualize(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        # Must have the rationale container
+        assert 'class="axis-rationale"' in stdout, "Should contain axis-rationale block"
+        # Check rationale text is inside the block (scoped check)
+        import re
+
+        rationale_blocks = re.findall(
+            r'<div class="axis-rationale">(.*?)</div>\s*</div>',
+            stdout,
+            re.DOTALL,
+        )
+        assert len(rationale_blocks) >= 1, "Should have at least one rationale block"
+        # The fixture has rationale text — check it appears in the block
+        block_content = rationale_blocks[0]
+        assert "Deployment Complexity" in block_content or "deployment" in block_content.lower()
+
+
+def test_axis_rationale_omitted_when_missing() -> None:
+    """No axis-rationale block when rationale is not in the data."""
+    arts = _all_artifacts()
+    # Strip rationale from views
+    pos = dict(arts["positioning.json"])
+    pos["views"] = []
+    for v in arts["positioning.json"]["views"]:
+        v2 = dict(v)
+        v2["x_axis"] = {k: v for k, v in v2["x_axis"].items() if k != "rationale"}
+        v2["y_axis"] = {k: v for k, v in v2["y_axis"].items() if k != "rationale"}
+        pos["views"].append(v2)
+    arts["positioning.json"] = pos
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_visualize(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        assert 'class="axis-rationale"' not in stdout, "Should not contain rationale block"
+
+
+def test_axis_rationale_xss() -> None:
+    """Malicious rationale text is HTML-escaped in the axis-rationale block."""
+    import re
+
+    arts = _all_artifacts()
+    pos = dict(arts["positioning.json"])
+    pos["views"] = []
+    for v in arts["positioning.json"]["views"]:
+        v2 = dict(v)
+        v2["x_axis"] = dict(v2["x_axis"])
+        v2["x_axis"]["rationale"] = '<script>alert("xss")</script>'
+        pos["views"].append(v2)
+    arts["positioning.json"] = pos
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_visualize(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        # Find the rationale block specifically
+        rationale_blocks = re.findall(
+            r'<div class="axis-rationale">(.*?)</div>\s*</div>',
+            stdout,
+            re.DOTALL,
+        )
+        assert len(rationale_blocks) >= 1
+        block = rationale_blocks[0]
+        assert "<script>" not in block, "Raw <script> should not appear in rationale block"
+        assert "&lt;script&gt;" in block, "Script tag should be HTML-escaped"
