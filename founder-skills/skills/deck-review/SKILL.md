@@ -26,6 +26,10 @@ All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/deck-review/scripts/`:
 - **`compose_report.py`** — Assembles artifacts into final report with cross-artifact validation; `--strict` exits 1 on high/medium warnings
 - **`visualize.py`** — Generates self-contained HTML with SVG charts (not JSON)
 
+Also available from `${CLAUDE_PLUGIN_ROOT}/scripts/` (shared):
+
+- **`founder_context.py`** — Per-company context management (init/read/merge/validate)
+
 Run with: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/deck-review/scripts/<script>.py --pretty [args]`
 
 ## Available References
@@ -42,26 +46,28 @@ Every review deposits structured JSON artifacts into a working directory. The fi
 
 | Step | Artifact | Producer |
 |------|----------|----------|
-| 1 | `deck_inventory.json` | Agent (heredoc) |
-| 2 | `stage_profile.json` | Agent (heredoc) |
-| 3 | `slide_reviews.json` | Agent (heredoc) |
-| 4 | `checklist.json` | `checklist.py` |
-| 5 | Report | `compose_report.py` |
+| 1 | founder context | `founder_context.py` read/init |
+| 2 | `deck_inventory.json` | Agent (heredoc) |
+| 3 | `stage_profile.json` | Agent (heredoc) |
+| 4 | `slide_reviews.json` | Agent (heredoc) |
+| 5 | `checklist.json` | `checklist.py` |
+| 6 | Report | `compose_report.py` |
 
 **Rules:**
 - Deposit each artifact before proceeding to the next step
-- For agent-written artifacts (Steps 1-3), consult `references/artifact-schemas.md` for the JSON schema
+- For agent-written artifacts (Steps 2-4), consult `references/artifact-schemas.md` for the JSON schema
 - If a step is not applicable, deposit a stub: `{"skipped": true, "reason": "..."}`
 
-Keep the founder informed with brief, plain-language updates at each step. Never mention file names, scripts, or JSON. After each analytical step (3–4), share a one-sentence finding before moving on.
+Keep the founder informed with brief, plain-language updates at each step. Never mention file names, scripts, or JSON. After each analytical step (4–5), share a one-sentence finding before moving on.
 
 ## Workflow
 
-### Path Setup
+### Step 0: Path Setup
 
 ```bash
 SCRIPTS="$CLAUDE_PLUGIN_ROOT/skills/deck-review/scripts"
 REFS="$CLAUDE_PLUGIN_ROOT/skills/deck-review/references"
+SHARED_SCRIPTS="$CLAUDE_PLUGIN_ROOT/scripts"
 if ls "$(pwd)"/mnt/*/ >/dev/null 2>&1; then
   ARTIFACTS_ROOT="$(ls -d "$(pwd)"/mnt/*/ | head -1)artifacts"
 elif ls "$(pwd)"/sessions/*/mnt/*/ >/dev/null 2>&1; then
@@ -71,12 +77,14 @@ else
 fi
 ```
 
-If `CLAUDE_PLUGIN_ROOT` is empty, fall back: `Glob` for `**/founder-skills/skills/deck-review/scripts/checklist.py`, strip to get `SCRIPTS`, derive `REFS`.
+If `CLAUDE_PLUGIN_ROOT` is empty, fall back: `Glob` for `**/founder-skills/skills/deck-review/scripts/checklist.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`.
 
 **If `ARTIFACTS_ROOT` resolves to `$(pwd)/artifacts` but no `artifacts/` directory exists at `$(pwd)`:** The workspace may not be mounted yet. Use `Glob` with pattern `**/artifacts/founder_context.json` to locate existing artifacts, and derive `ARTIFACTS_ROOT` from the result. If nothing is found, `mkdir -p "$ARTIFACTS_ROOT"` and proceed.
 
+After Step 1 (when the slug is known):
+
 ```bash
-REVIEW_DIR="$ARTIFACTS_ROOT/deck-review-{company-slug}"
+REVIEW_DIR="$ARTIFACTS_ROOT/deck-review-${SLUG}"
 mkdir -p "$REVIEW_DIR"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 ```
@@ -89,11 +97,29 @@ If `REVIEW_DIR` already contains artifacts from a previous run, remove them befo
 
 In Cowork, file deletion may require explicit permission. If cleanup fails with "Operation not permitted", request delete permission and retry before proceeding.
 
-### Step 1: Ingest Deck -> `deck_inventory.json`
+### Step 1: Read or Create Founder Context
+
+```bash
+python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --pretty
+```
+
+**Exit 0 (found):** Use the company slug and pre-filled fields. Proceed to Step 2.
+
+**Exit 1 (not found):** This is normal for a first run — do not treat it as an error. Use `AskUserQuestion` (NOT plain chat) to ask for company name, stage, sector, and geography. Provide at least 2 options. Then create:
+
+```bash
+python3 "$SHARED_SCRIPTS/founder_context.py" init \
+  --company-name "Acme Corp" --stage seed --sector "B2B SaaS" \
+  --geography "US" --artifacts-root "$ARTIFACTS_ROOT"
+```
+
+**Exit 2 (multiple):** Present the list, ask which company, re-read with `--slug`.
+
+### Step 2: Ingest Deck -> `deck_inventory.json`
 
 Read the provided deck. For each slide, extract: headline, content summary, visuals description, word count estimate. Record metadata: company name, total slides, format, any claimed stage or raise amount.
 
-### Step 2: Detect Stage -> `stage_profile.json`
+### Step 3: Detect Stage -> `stage_profile.json`
 
 Determine pre-seed/seed/series-a from signals in the deck. Read `references/deck-best-practices.md` for stage-specific frameworks. Record: detected stage, confidence, evidence, whether AI company, expected slide framework, stage benchmarks.
 
@@ -133,7 +159,7 @@ Options: `Stop review` / `Different stage` / `Proceed anyway (best-effort)`
 
 This two-step pattern (chat message then AskUserQuestion) is required because AskUserQuestion renders as plain text. Detailed content goes in the chat message; only the gate question goes in AskUserQuestion.
 
-**If the founder selects "Looks right":** Proceed to Step 3 (Review Each Slide) with the detected stage.
+**If the founder selects "Looks right":** Proceed to Step 4 (Review Each Slide) with the detected stage.
 
 **If the founder selects "Different stage":** Ask which stage they want to use (pre-seed / seed / series-a / series-b / growth). Then rebuild `stage_profile.json` for the corrected stage (do not re-read the deck or re-detect signals — the deck evidence is unchanged): re-read `references/deck-best-practices.md` for the new stage's framework and benchmarks, rebuild the artifact, and repeat the gate.
 
@@ -144,21 +170,21 @@ For the rebuilt `stage_profile.json`:
 - `is_ai_company`, `ai_evidence`: unchanged from original detection unless the founder also corrected those inputs
 - `expected_framework`, `stage_benchmarks`: rebuild from `deck-best-practices.md` only if the corrected stage is `pre_seed`, `seed`, or `series_a`
 
-**If the corrected stage is still `"series_b"` or `"growth"`:** stop after the gate. Do not continue to Step 3 or any later steps. Do **not** use Series A as a proxy for later-stage companies.
+**If the corrected stage is still `"series_b"` or `"growth"`:** stop after the gate. Do not continue to Step 4 or any later steps. Do **not** use Series A as a proxy for later-stage companies.
 
-**If the founder selects "Stop review":** stop the skill here. Do not continue to Step 3 (Review Each Slide), Step 4 (Score Checklist), or report composition.
+**If the founder selects "Stop review":** stop the skill here. Do not continue to Step 4 (Review Each Slide), Step 5 (Score Checklist), or report composition.
 
 **If "Proceed anyway (best-effort)":** Use Series A criteria as the closest available proxy. Set `confidence: "low"` in `stage_profile.json` and add `"Founder chose best-effort review for out-of-scope stage"` to evidence. Include a prominent disclaimer in the final coaching commentary that scoring criteria are calibrated for pre-seed through Series A and may not reflect later-stage investor expectations.
 
 **If "Not sure — proceed anyway":** Use the detected stage but note the uncertainty in `stage_profile.json` under `confidence: "low"`. Mention in the final coaching commentary that the founder should confirm their stage positioning.
 
-### Step 3: Review Each Slide -> `slide_reviews.json`
+### Step 4: Review Each Slide -> `slide_reviews.json`
 
 Compare each slide against the stage-specific framework and non-negotiable principles. For each slide: identify strengths, weaknesses, and specific recommendations. Map to expected framework. Flag missing expected slides.
 
 **Critical:** Every critique must cite a specific best-practice principle. No vague feedback.
 
-### Step 4: Score Checklist -> `checklist.json`
+### Step 5: Score Checklist -> `checklist.json`
 
 Evaluate all 35 criteria from `references/checklist-criteria.md`. For non-AI companies, mark AI category items as `not_applicable`.
 
@@ -175,7 +201,7 @@ CHECKLIST_EOF
 
 **Evidence required:** Always provide `evidence` for `fail` and `warn` items.
 
-### Step 5: Compose Report
+### Step 6: Compose Report
 
 ```bash
 python3 "$SCRIPTS/compose_report.py" --dir "$REVIEW_DIR" --pretty -o "$REVIEW_DIR/report.json"
@@ -185,7 +211,7 @@ Fix high-severity warnings and re-run. Use `--strict` to enforce a clean report.
 
 **Primary deliverable:** Read `report_markdown` from the output JSON, write it to `$REVIEW_DIR/report.md`, and display it to the user in full. **Present the file path** so the user can access it directly. Then add coaching commentary.
 
-### Step 6 (Optional): Generate Visual Report
+### Step 7 (Optional): Generate Visual Report
 
 ```bash
 python3 "$SCRIPTS/visualize.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.html"
@@ -193,7 +219,7 @@ python3 "$SCRIPTS/visualize.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.html"
 
 **Present the HTML file path** to the user so they can open the visual report.
 
-### Step 7: Deliver Artifacts
+### Step 8: Deliver Artifacts
 
 Copy final deliverables to workspace root: `{Company}_Deck_Review.md`, `.html` (if generated), `.json` (optional).
 

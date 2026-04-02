@@ -30,6 +30,10 @@ All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/scripts/`:
 - **`compose_report.py`** — Assembles report with cross-artifact validation; `--strict` exits 1 on high/medium warnings
 - **`visualize.py`** — Generates self-contained HTML with SVG charts (not JSON)
 
+Also available from `${CLAUDE_PLUGIN_ROOT}/scripts/` (shared):
+
+- **`founder_context.py`** — Per-company context management (init/read/merge/validate)
+
 Run with: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/scripts/<script>.py --pretty [args]`
 
 ## Available References
@@ -46,29 +50,31 @@ Every analysis deposits structured JSON artifacts into a working directory. The 
 
 | Step | Artifact | Producer |
 |------|----------|----------|
-| 1 | `inputs.json` | Sub-agent (Task) or agent (heredoc) |
-| 2 | `methodology.json` | Sub-agent (Task) or agent (heredoc) |
-| 3 | `validation.json` | Agent (consolidates sub-agent web research) |
-| 4 | `sizing.json` | `market_sizing.py -o` |
-| 5 | `sensitivity.json` | Sub-agent (Task) + `sensitivity.py` |
-| 6 | `checklist.json` | Sub-agent (Task) + `checklist.py` |
-| 7 | Report | `compose_report.py` reads all |
+| 1 | founder context | `founder_context.py` read/init |
+| 2 | `inputs.json` | Sub-agent (Task) or agent (heredoc) |
+| 3 | `methodology.json` | Sub-agent (Task) or agent (heredoc) |
+| 4 | `validation.json` | Agent (consolidates sub-agent web research) |
+| 5 | `sizing.json` | `market_sizing.py -o` |
+| 6 | `sensitivity.json` | Sub-agent (Task) + `sensitivity.py` |
+| 7 | `checklist.json` | Sub-agent (Task) + `checklist.py` |
+| 8 | Report | `compose_report.py` reads all |
 
 **Rules:**
 - Deposit each artifact before proceeding to the next step
-- For agent-written artifacts (Steps 1-3), consult `references/artifact-schemas.md` for the JSON schema
+- For agent-written artifacts (Steps 2-4), consult `references/artifact-schemas.md` for the JSON schema
 - If a step is not applicable, deposit a stub: `{"skipped": true, "reason": "..."}`
 - **Do NOT use `isolation: "worktree"`** for sub-agents — files written in a worktree won't appear in the main `$ANALYSIS_DIR`
 
-Keep the founder informed with brief, plain-language updates at each step. Never mention file names, scripts, or JSON. After each analytical step (4–6), share a one-sentence finding before moving on.
+Keep the founder informed with brief, plain-language updates at each step. Never mention file names, scripts, or JSON. After each analytical step (5–7), share a one-sentence finding before moving on.
 
 ## Workflow
 
-### Path Setup
+### Step 0: Path Setup
 
 ```bash
 SCRIPTS="$CLAUDE_PLUGIN_ROOT/skills/market-sizing/scripts"
 REFS="$CLAUDE_PLUGIN_ROOT/skills/market-sizing/references"
+SHARED_SCRIPTS="$CLAUDE_PLUGIN_ROOT/scripts"
 SHARED_REFS="$CLAUDE_PLUGIN_ROOT/references"
 if ls "$(pwd)"/mnt/*/ >/dev/null 2>&1; then
   ARTIFACTS_ROOT="$(ls -d "$(pwd)"/mnt/*/ | head -1)artifacts"
@@ -79,12 +85,14 @@ else
 fi
 ```
 
-If `CLAUDE_PLUGIN_ROOT` is empty, fall back: `Glob` for `**/founder-skills/skills/market-sizing/scripts/market_sizing.py`, strip to get `SCRIPTS`, derive `REFS`.
+If `CLAUDE_PLUGIN_ROOT` is empty, fall back: `Glob` for `**/founder-skills/skills/market-sizing/scripts/market_sizing.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`.
 
 **If `ARTIFACTS_ROOT` resolves to `$(pwd)/artifacts` but no `artifacts/` directory exists at `$(pwd)`:** The workspace may not be mounted yet. Use `Glob` with pattern `**/artifacts/founder_context.json` to locate existing artifacts, and derive `ARTIFACTS_ROOT` from the result. If nothing is found, `mkdir -p "$ARTIFACTS_ROOT"` and proceed.
 
+After Step 1 (when the slug is known):
+
 ```bash
-ANALYSIS_DIR="$ARTIFACTS_ROOT/market-sizing-{company-slug}"
+ANALYSIS_DIR="$ARTIFACTS_ROOT/market-sizing-${SLUG}"
 mkdir -p "$ANALYSIS_DIR"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 ```
@@ -97,9 +105,27 @@ If `ANALYSIS_DIR` already contains artifacts from a previous run, remove them be
 
 In Cowork, file deletion may require explicit permission. If cleanup fails with "Operation not permitted", request delete permission and retry before proceeding.
 
-### Steps 1-2: Extract Inputs & Choose Methodology
+### Step 1: Read or Create Founder Context
 
-**When files are provided (deck, model, market data),** spawn a `general-purpose` Task sub-agent to read materials and determine methodology. The sub-agent receives: file path(s), `SCRIPTS`, `REFS`, `SHARED_REFS`, and `ANALYSIS_DIR` paths. **Do NOT use `isolation: "worktree"`.**
+```bash
+python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --pretty
+```
+
+**Exit 0 (found):** Use the company slug and pre-filled fields. Proceed to Step 2.
+
+**Exit 1 (not found):** This is normal for a first run — do not treat it as an error. Use `AskUserQuestion` (NOT plain chat) to ask for company name, stage, sector, and geography. Provide at least 2 options. Then create:
+
+```bash
+python3 "$SHARED_SCRIPTS/founder_context.py" init \
+  --company-name "Acme Corp" --stage seed --sector "B2B SaaS" \
+  --geography "US" --artifacts-root "$ARTIFACTS_ROOT"
+```
+
+**Exit 2 (multiple):** Present the list, ask which company, re-read with `--slug`.
+
+### Steps 2-3: Extract Inputs & Choose Methodology
+
+**When files are provided (deck, model, market data),** spawn a `general-purpose` Task sub-agent to read materials and determine methodology. The sub-agent receives: file path(s), `SCRIPTS`, `REFS`, `SHARED_SCRIPTS`, `SHARED_REFS`, and `ANALYSIS_DIR` paths. **Do NOT use `isolation: "worktree"`.**
 
 The sub-agent:
 1. Reads the provided file(s)
@@ -169,13 +195,13 @@ Options: `Looks good` / `Change methodology` / `Correct or add data`
 
 This two-step pattern (chat message then AskUserQuestion) is required because AskUserQuestion renders as plain text. Detailed content goes in the chat message; only the gate question goes in AskUserQuestion.
 
-**If the founder selects "Looks good":** Proceed to Step 3 (External Validation).
+**If the founder selects "Looks good":** Proceed to Step 4 (External Validation).
 
 **If "Change methodology":** Ask which approach they prefer (top-down / bottom-up / both) and why. Update `methodology.json` and repeat Steps A+B.
 
 **If "Correct or add data":** Ask which values are wrong or missing, correct/patch `inputs.json`, and check whether the updated inputs change what methodology is viable (e.g., fixing customer count from 0 to 50 may enable bottom-up that wasn't feasible before). If so, update `methodology.json` too. Repeat Steps A+B.
 
-### Step 3: External Validation -> `validation.json`
+### Step 4: External Validation -> `validation.json`
 
 **When methodology is "both",** spawn 2 `general-purpose` Task sub-agents **in a single message** (parallel, no `isolation: "worktree"`). Each receives: company description, product/service, geography, segments from `inputs.json`, and methodology context.
 
@@ -196,7 +222,7 @@ Triangulate key numbers with 2+ independent sources. Track every source with qua
 
 **Graceful degradation:** If Task tool is unavailable, research directly in the main agent.
 
-### Step 4: Calculate TAM/SAM/SOM -> `sizing.json`
+### Step 5: Calculate TAM/SAM/SOM -> `sizing.json`
 
 ```bash
 cat <<'SIZING_EOF' | python3 "$SCRIPTS/market_sizing.py" --stdin --pretty -o "$ANALYSIS_DIR/sizing.json"
@@ -215,7 +241,7 @@ For "both" mode, check the comparison section — a >30% TAM discrepancy means i
 
 Default to full-scope TAM. Only narrow to beachhead if the user explicitly requests it.
 
-### Step 4.5: Reality Check
+### Step 5.5: Reality Check
 
 Before proceeding, answer:
 
@@ -226,9 +252,9 @@ Before proceeding, answer:
 
 This step produces no artifact. If it reveals problems, fix them before proceeding.
 
-### Steps 5 & 6: Parallel Analysis (Sensitivity + Checklist)
+### Steps 6 & 7: Parallel Analysis (Sensitivity + Checklist)
 
-Spawn 2 `general-purpose` Task sub-agents **in a single message** (parallel, no `isolation: "worktree"`) after Step 4.5 reality check passes. Each receives the expanded `SCRIPTS`, `REFS`, and `ANALYSIS_DIR` paths.
+Spawn 2 `general-purpose` Task sub-agents **in a single message** (parallel, no `isolation: "worktree"`) after Step 5.5 reality check passes. Each receives the expanded `SCRIPTS`, `REFS`, and `ANALYSIS_DIR` paths.
 
 **Sub-agent A — Sensitivity:**
 
@@ -259,11 +285,11 @@ CHECK_EOF
 
 Instruct Sub-agent B to return ONLY: (1) file path written, (2) `score_pct`, (3) `overall_status`, (4) list of failed items.
 
-**Graceful degradation:** If Task tool is unavailable, run Steps 5-6 sequentially in the main agent.
+**Graceful degradation:** If Task tool is unavailable, run Steps 6-7 sequentially in the main agent.
 
-After both sub-agents return, share a coaching update with the founder before proceeding to Step 7.
+After both sub-agents return, share a coaching update with the founder before proceeding to Step 8.
 
-### Step 7: Compose and Validate Report
+### Step 8: Compose and Validate Report
 
 ```bash
 python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --pretty -o "$ANALYSIS_DIR/report.json"
@@ -273,7 +299,7 @@ Fix high-severity warnings and re-run. Use `--strict` to enforce a clean report.
 
 **Primary deliverable:** Read `report_markdown` from the output JSON, write it to `$ANALYSIS_DIR/report.md`, and display it to the user in full. **Present the file path** so the user can access it directly. Then add coaching commentary: what to feel confident about, the highest-leverage fix, whether the market story holds together, and which 1-2 sensitivity parameters to prioritize sourcing.
 
-### Step 8 (Optional): Generate Visual Report
+### Step 9 (Optional): Generate Visual Report
 
 ```bash
 python3 "$SCRIPTS/visualize.py" --dir "$ANALYSIS_DIR" -o "$ANALYSIS_DIR/report.html"
@@ -281,7 +307,7 @@ python3 "$SCRIPTS/visualize.py" --dir "$ANALYSIS_DIR" -o "$ANALYSIS_DIR/report.h
 
 **Present the HTML file path** to the user so they can open the visual report.
 
-### Step 9: Deliver Artifacts
+### Step 10: Deliver Artifacts
 
 Copy final deliverables to workspace root: `{Company}_Market_Sizing.md`, `.html` (if generated), `.json` (optional).
 
