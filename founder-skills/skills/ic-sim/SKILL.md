@@ -141,6 +141,8 @@ If missing fields are flagged, ask the user and patch the artifact. When only te
 
 **Graceful degradation:** If Task tool is unavailable, extract directly.
 
+After the sub-agent returns, verify that `$SIM_DIR` contains `startup_profile.json` and `prior_artifacts.json`. If either is missing, the sub-agent failed — re-run it before proceeding to Mode Selection.
+
 ### Step 4: Build Fund Profile -> `fund_profile.json`
 
 **REQUIRED — read `$REFS/partner-archetypes.md` now.**
@@ -178,6 +180,8 @@ CONFLICT_EOF
 Spawn 3 `general-purpose` Task sub-agents **in a single message** (parallel, no `isolation: "worktree"`). Each receives: archetype persona, startup_profile, fund_profile, conflict_check, prior_artifacts, and relevant evaluation criteria. Each independently produces `partner_assessment_{role}.json`. Instruct each sub-agent to return ONLY: (1) the file path written, (2) the verdict, and (3) a one-sentence rationale — do not echo the full assessment back.
 
 **Graceful degradation:** If Task tool unavailable, generate sequentially with strict persona separation. Set `assessment_mode: "sequential"` and `"assessment_mode_intentional": true` in discussion.json.
+
+After all three sub-agents return, verify that `$SIM_DIR` contains `partner_assessment_visionary.json`, `partner_assessment_operator.json`, and `partner_assessment_analyst.json`. If any are missing, re-run the failed sub-agent before proceeding to Step 6d.
 
 **Step 6d: Orchestrate Discussion -> `discussion.json`**
 

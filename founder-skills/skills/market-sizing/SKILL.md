@@ -154,6 +154,8 @@ After the sub-agent returns, review the summary. Note any missing fields — the
 
 **Graceful degradation:** If Task tool is unavailable, extract directly in the main agent.
 
+After the sub-agent returns, verify that `$ANALYSIS_DIR` contains `inputs.json` and `methodology.json`. If either is missing, the sub-agent failed — re-run it before proceeding to the Gate.
+
 ### Gate: Confirm Methodology and Inputs
 
 **MANDATORY STOP — TWO SEPARATE STEPS. DO NOT COMBINE THEM.**
@@ -287,7 +289,7 @@ Instruct Sub-agent B to return ONLY: (1) file path written, (2) `score_pct`, (3)
 
 **Graceful degradation:** If Task tool is unavailable, run Steps 6-7 sequentially in the main agent.
 
-After both sub-agents return, share a coaching update with the founder before proceeding to Step 8.
+After both sub-agents return, verify that `$ANALYSIS_DIR` contains fresh `sensitivity.json` and `checklist.json`. If either is missing, re-run the failed sub-agent before proceeding to Step 8. Then share a coaching update with the founder.
 
 ### Step 8: Compose and Validate Report
 

@@ -4,7 +4,7 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
 
 ## deck_inventory.json
 
-**Producer:** Agent (heredoc, Step 1)
+**Producer:** Agent (heredoc, Step 2)
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -51,7 +51,7 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
 
 ## stage_profile.json
 
-**Producer:** Agent (heredoc, Step 2)
+**Producer:** Agent (heredoc, Step 3)
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -112,7 +112,7 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
 
 ## slide_reviews.json
 
-**Producer:** Agent (heredoc, Step 3)
+**Producer:** Agent (heredoc, Step 4)
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -167,7 +167,7 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
 
 ## checklist.json
 
-**Producer:** `checklist.py` (Step 4, from agent-provided JSON input)
+**Producer:** `checklist.py` (Step 5, from agent-provided JSON input)
 
 ### Input format (stdin to checklist.py)
 

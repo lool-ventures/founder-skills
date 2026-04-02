@@ -1,7 +1,7 @@
 ---
 name: deck-review
 disable-model-invocation: true
-description: "Scores and strengthens startup pitch decks against 35 investor-grade criteria before founders send them to VCs. Use when user asks to 'review my deck', 'pitch deck feedback', 'check my slides', 'is my deck ready', 'review this pitch deck', 'deck critique', 'improve my pitch deck', 'what's wrong with my deck', 'pitch deck review', 'fundraising deck feedback', or provides a pitch deck (PDF, PPTX, markdown, or text) for evaluation. Covers pre-seed, seed, and Series A against 2026 best practices from Sequoia, DocSend, YC, a16z, and Carta data. Do NOT use for financial model review, market sizing, or general document editing."
+description: "Scores and strengthens startup pitch decks against 35 investor-grade criteria before founders send them to VCs. Use when user asks to 'review my deck', 'pitch deck feedback', 'check my slides', 'is my deck ready', 'review this pitch deck', 'deck critique', 'improve my pitch deck', 'what's wrong with my deck', 'pitch deck review', 'fundraising deck feedback', or provides a pitch deck (PDF, PPTX, markdown, or text) for evaluation. Covers pre-seed, seed, and Series A against current best practices from Sequoia, DocSend, YC, a16z, and Carta data. Do NOT use for financial model review, market sizing, or general document editing."
 compatibility: Requires Python 3.10+ and uv for script execution.
 metadata:
   author: lool-ventures
@@ -12,7 +12,7 @@ exports:
 
 # Deck Review Skill
 
-Help startup founders strengthen their pitch decks before sending them to investors. Produce a structured, scored review with specific, actionable recommendations grounded in 2026 best practices from Sequoia, DocSend, YC, a16z, and Carta data. The tone is founder-first: a candid coaching session, not a VC evaluation.
+Help startup founders strengthen their pitch decks before sending them to investors. Produce a structured, scored review with specific, actionable recommendations grounded in current best practices from Sequoia, DocSend, YC, a16z, and Carta data. The tone is founder-first: a candid coaching session, not a VC evaluation.
 
 ## Input Formats
 
@@ -36,7 +36,7 @@ Run with: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/deck-review/scripts/<script>.py 
 
 Read as needed from `${CLAUDE_PLUGIN_ROOT}/skills/deck-review/references/`:
 
-- **`deck-best-practices.md`** — Full 2026 best practices: slide frameworks, stage-specific guidelines, design rules, AI-company requirements
+- **`deck-best-practices.md`** — Full best practices: slide frameworks, stage-specific guidelines, design rules, AI-company requirements
 - **`checklist-criteria.md`** — Definitions for all 35 criteria with pass/fail/warn thresholds
 - **`artifact-schemas.md`** — JSON schemas for all artifacts
 
@@ -117,6 +117,14 @@ python3 "$SHARED_SCRIPTS/founder_context.py" init \
 
 ### Step 2: Ingest Deck -> `deck_inventory.json`
 
+**Ingestion pitfalls — common issues that degrade review quality:**
+
+1. **PDF image-only slides:** Some PDFs embed slides as images with no extractable text. If Read returns blank or garbled content, note `input_quality: "image_only"` in `deck_inventory.json` and base the review on visual description + OCR-level best effort. Flag reduced confidence in coaching commentary.
+2. **PPTX speaker notes vs. slide content:** Speaker notes often contain the real narrative; slide text is abbreviated. Extract both — notes go into `content_summary`, slide text into `headline`. Do not discard notes.
+3. **Multi-file submissions:** Founder sends v1 + v2, or deck + appendix as separate files. Ask which is the primary deck before proceeding. Do not merge or review both simultaneously.
+4. **Partial decks:** Deck has fewer than 5 slides or is clearly a subset. Proceed but set `confidence: "low"` in stage_profile and note the limitation. Missing-slides detection still runs normally.
+5. **Wrong file type:** File named `.pdf` but is actually a Word doc or image. If Read fails, try alternate format before asking the founder for a re-upload.
+
 Read the provided deck. For each slide, extract: headline, content summary, visuals description, word count estimate. Record metadata: company name, total slides, format, any claimed stage or raise amount.
 
 ### Step 3: Detect Stage -> `stage_profile.json`
@@ -124,6 +132,8 @@ Read the provided deck. For each slide, extract: headline, content summary, visu
 Determine pre-seed/seed/series-a from signals in the deck. Read `references/deck-best-practices.md` for stage-specific frameworks. Record: detected stage, confidence, evidence, whether AI company, expected slide framework, stage benchmarks.
 
 **Stage signals:** Pre-seed: no revenue, LOIs/waitlist, prototype, <$2.5M ask. Seed: early ARR, paying customers, <$6M ask. Series A: $1M+ ARR, cohort data, repeatable GTM, $10M+ ask. Later-stage: set detected_stage to `"series_b"` or `"growth"` — use the Gate below. Do not ask outside the gate.
+
+**AI company detection signals:** The company is AI-first if ANY of: (1) core product uses ML/AI for its primary value proposition, (2) inference or training costs appear in COGS or margins, (3) deck mentions foundation models, fine-tuning, or AI infrastructure as product components, (4) retention or engagement metrics reference AI-specific patterns (usage retention vs. seat retention). Set `is_ai_company: true` and record the evidence in `ai_evidence`. When in doubt, flag it — the gate will let the founder correct.
 
 ### Gate: Confirm Stage and Scope
 
@@ -199,7 +209,11 @@ cat <<'CHECKLIST_EOF' | python3 "$SCRIPTS/checklist.py" --pretty -o "$REVIEW_DIR
 CHECKLIST_EOF
 ```
 
-**Evidence required:** Always provide `evidence` for `fail` and `warn` items.
+**Evidence quality rules:**
+- Every `fail` and `warn` MUST cite a specific best-practice principle or benchmark (e.g., "Sequoia: single declarative sentence" or "DocSend: median 11 slides for seed").
+- Every `pass` MUST note what was checked — not just "pass" with empty evidence.
+- `not_applicable` items MUST include a reason (e.g., "Not an AI company — AI category gated").
+- Empty `evidence` on any non-pass item = quality gate failure. Fix before running compose.
 
 ### Step 6: Compose Report
 
@@ -222,6 +236,14 @@ python3 "$SCRIPTS/visualize.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.html"
 ### Step 8: Deliver Artifacts
 
 Copy final deliverables to workspace root: `{Company}_Deck_Review.md`, `.html` (if generated), `.json` (optional).
+
+## Gotchas
+
+- **"Looks polished" bias:** A well-designed deck is not a strong deck. Score content, narrative, and evidence independently of visual quality. The checklist separates design (5 items) from content (8 items) for this reason.
+- **Template / AI-generated copy:** If multiple slides use generic phrasing ("revolutionize," "disrupt," "world-class team") with no specifics, flag this in coaching commentary as a credibility risk — investors notice formulaic decks. This is not a checklist item but affects overall narrative assessment.
+- **Benchmarks are medians, not gates:** A $3M seed round in a $1B TAM market is not automatically wrong — context matters. Use benchmarks from `deck-best-practices.md` as reference points, not hard pass/fail thresholds. The coaching commentary should explain deviations rather than penalize them.
+- **Founder provided text, not a file:** When the founder describes slides in conversation rather than uploading a file, adapt: write `deck_inventory.json` from the conversation, set `input_format: "text"`, and note reduced confidence in visual/design assessments. Design category items become `not_applicable` unless the founder shares screenshots.
+- **Cross-skill context:** If `founder_context.py` returned prior market-sizing or financial-model-review runs, mention relevant findings in coaching commentary (e.g., "Your market sizing calculated $X TAM — your deck claims $Y"). Do not hard-fail on discrepancies; flag them for the founder.
 
 ## Scoring
 
