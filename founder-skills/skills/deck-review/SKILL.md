@@ -88,7 +88,60 @@ Read the provided deck. For each slide, extract: headline, content summary, visu
 
 Determine pre-seed/seed/series-a from signals in the deck. Read `references/deck-best-practices.md` for stage-specific frameworks. Record: detected stage, confidence, evidence, whether AI company, expected slide framework, stage benchmarks.
 
-**Stage signals:** Pre-seed: no revenue, LOIs/waitlist, prototype, <$2.5M ask. Seed: early ARR, paying customers, <$6M ask. Series A: $1M+ ARR, cohort data, repeatable GTM, $10M+ ask. Later-stage: set detected_stage to `"series_b"` or `"growth"` — compose report flags this as out of calibrated scope. If ambiguous, ask the user.
+**Stage signals:** Pre-seed: no revenue, LOIs/waitlist, prototype, <$2.5M ask. Seed: early ARR, paying customers, <$6M ask. Series A: $1M+ ARR, cohort data, repeatable GTM, $10M+ ask. Later-stage: set detected_stage to `"series_b"` or `"growth"` — use the Gate below. Do not ask outside the gate.
+
+### Gate: Confirm Stage and Scope
+
+**MANDATORY STOP — TWO SEPARATE STEPS. DO NOT COMBINE THEM.**
+
+**Step A: Output a chat message** with the stage detection results. Use a formatted summary. This is a normal assistant message — NOT an AskUserQuestion call. Example:
+
+```
+Based on the deck, here's what I'm seeing:
+
+- **Detected stage:** Seed
+- **Confidence:** High
+- **Key evidence:** $4.2M ARR, 3 paying enterprise customers, $5M raise ask
+- **AI company:** Yes — inference costs in COGS
+- **Expected framework:** Sequoia seed (12-15 slides)
+- **Slides in deck:** 14
+```
+
+**If `detected_stage` is `pre_seed`, `seed`, or `series_a`:**
+
+**Step B: AFTER the chat message, call `AskUserQuestion`** with ONLY a short question. The question field is plain text — NO markdown, NO tables, NO bullet points.
+
+Question: `Does this stage detection look right?`
+Options: `Looks right` / `Different stage` / `Not sure — proceed anyway`
+
+**If `detected_stage` is `"series_b"` or `"growth"`:** include a note in Step A: "This skill is calibrated only for pre-seed through Series A, so this deck is currently out of scope."
+
+Then call `AskUserQuestion` with:
+Question: `This looks out of scope for this skill. What should I do?`
+Options: `Stop review` / `Different stage` / `Proceed anyway (best-effort)`
+
+**CRITICAL: The AskUserQuestion question must be ONE SHORT SENTENCE. Put ALL details in the chat message (Step A), not in the question.**
+
+This two-step pattern (chat message then AskUserQuestion) is required because AskUserQuestion renders as plain text. Detailed content goes in the chat message; only the gate question goes in AskUserQuestion.
+
+**If the founder selects "Looks right":** Proceed to Step 3 (Review Each Slide) with the detected stage.
+
+**If the founder selects "Different stage":** Ask which stage they want to use (pre-seed / seed / series-a / series-b / growth). Then rebuild `stage_profile.json` for the corrected stage (do not re-read the deck or re-detect signals — the deck evidence is unchanged): re-read `references/deck-best-practices.md` for the new stage's framework and benchmarks, rebuild the artifact, and repeat the gate.
+
+For the rebuilt `stage_profile.json`:
+- `detected_stage`: the founder's corrected value
+- `confidence`: `"high"` (founder confirmed directly)
+- `evidence`: include original detection signals plus `"Founder corrected stage from X to Y"`
+- `is_ai_company`, `ai_evidence`: unchanged from original detection unless the founder also corrected those inputs
+- `expected_framework`, `stage_benchmarks`: rebuild from `deck-best-practices.md` only if the corrected stage is `pre_seed`, `seed`, or `series_a`
+
+**If the corrected stage is still `"series_b"` or `"growth"`:** stop after the gate. Do not continue to Step 3 or any later steps. Do **not** use Series A as a proxy for later-stage companies.
+
+**If the founder selects "Stop review":** stop the skill here. Do not continue to Step 3 (Review Each Slide), Step 4 (Score Checklist), or report composition.
+
+**If "Proceed anyway (best-effort)":** Use Series A criteria as the closest available proxy. Set `confidence: "low"` in `stage_profile.json` and add `"Founder chose best-effort review for out-of-scope stage"` to evidence. Include a prominent disclaimer in the final coaching commentary that scoring criteria are calibrated for pre-seed through Series A and may not reflect later-stage investor expectations.
+
+**If "Not sure — proceed anyway":** Use the detected stage but note the uncertainty in `stage_profile.json` under `confidence: "low"`. Mention in the final coaching commentary that the founder should confirm their stage positioning.
 
 ### Step 3: Review Each Slide -> `slide_reviews.json`
 
