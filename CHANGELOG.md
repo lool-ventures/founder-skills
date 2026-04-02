@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-04-02
+
+### Highlights
+
+New Competitive Positioning Agent — maps a startup's competitive landscape, scores differentiation
+and moat strength, and stress-tests positioning claims to produce investor-ready competitive analysis.
+Also adds resilience improvements across all scoring scripts so common LLM output shape variations
+are accepted and normalized rather than rejected.
+
+### Added
+
+- Competitive Positioning Agent with 7 scripts: `validate_landscape.py` (competitor list validation with slug uniqueness and provenance), `score_moats.py` (6 moat dimensions per company with aggregates and cross-company comparison), `score_positioning.py` (pair-centric positioning views with rank-based differentiation and vanity axis detection), `checklist.py` (25-item quality checklist across 6 categories with mode-based gating), `compose_report.py` (report assembly with cross-artifact validation and accepted warnings), `visualize.py` (self-contained HTML with SVG positioning map, moat radar, and competitor table), and `explore.py` (interactive HTML explorer with Chart.js scatter plot, view switching, bubble encoding controls, and company detail panels).
+- SKILL.md for competitive positioning (`/founder-skills:competitive-positioning` slash command).
+- Deck review now imports competitive positioning landscape for cross-validation.
+- IC simulation now imports competitive positioning report.
+- Hard validation gates with script provenance stamps and self-grading detection.
+- Axis rationale captions and label readability improvements in visualizations.
+
+### Changed
+
+- `score_moats.py`, `score_positioning.py`: accept and normalize common LLM output shape mismatches — array-of-objects normalized to dict-keyed format for moat assessments; bare strings wrapped as `{name, description, rationale}` objects for axes; `slug` accepted as alias for `competitor` in positioning points.
+- Validation error messages now include expected shape hints.
+- stderr summary lines added to scoring scripts for batch visibility.
+
 ## [0.2.0] - 2026-03-18
 
 ### Highlights
