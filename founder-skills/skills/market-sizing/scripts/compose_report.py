@@ -32,6 +32,7 @@ WARNING_SEVERITY: dict[str, str] = {
     # High severity — agent must fix before presenting report
     "CORRUPT_ARTIFACT": "high",
     "MISSING_ARTIFACT": "high",
+    "STALE_ARTIFACT": "high",
     "CHECKLIST_FAILURES": "high",
     "OVERCLAIMED_VALIDATION": "high",
     "UNVALIDATED_CLAIMS": "high",
@@ -324,6 +325,26 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             warnings.append(_warn("CORRUPT_ARTIFACT", f"Artifact has invalid JSON: {name}"))
         elif data is None:
             warnings.append(_warn("MISSING_OPTIONAL_ARTIFACT", f"Optional artifact missing: {name}"))
+
+    # 2b. STALE_ARTIFACT — run_id mismatch across artifacts
+    run_ids: dict[str, str] = {}
+    for name in REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS:
+        artifact_data = artifacts.get(name)
+        if _usable(artifact_data):
+            assert artifact_data is not None
+            rid = _as_dict(artifact_data.get("metadata")).get("run_id")
+            if isinstance(rid, str) and rid:
+                run_ids[name] = rid
+    if run_ids:
+        primary_rid = next(iter(run_ids.values()))
+        for name, rid in run_ids.items():
+            if rid != primary_rid:
+                warnings.append(
+                    _warn(
+                        "STALE_ARTIFACT",
+                        f"{name} has run_id '{rid}' but expected '{primary_rid}'",
+                    )
+                )
 
     # 3. UNSOURCED_ASSUMPTIONS — agent_estimate assumptions not in sensitivity
     if _usable(validation):

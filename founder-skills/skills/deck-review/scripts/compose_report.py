@@ -34,6 +34,7 @@ WARNING_SEVERITY: dict[str, str] = {
     # High — structural integrity violations
     "CORRUPT_ARTIFACT": "high",
     "MISSING_ARTIFACT": "high",
+    "STALE_ARTIFACT": "high",
     "CHECKLIST_FAILURES_CRITICAL": "high",
     # Medium — quality concerns worth surfacing
     "STAGE_MISMATCH": "medium",
@@ -54,6 +55,7 @@ ACCEPTIBLE_SEVERITIES = {"medium"}
 WARNING_LABELS: dict[str, str] = {
     "CORRUPT_ARTIFACT": "Corrupt Artifact",
     "MISSING_ARTIFACT": "Missing Artifact",
+    "STALE_ARTIFACT": "Stale Artifact",
     "CHECKLIST_FAILURES_CRITICAL": "Checklist Failures (Critical)",
     "STAGE_MISMATCH": "Stage Mismatch",
     "SLIDE_COUNT_EXTREME": "Slide Count",
@@ -157,6 +159,25 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             warnings.append(_warn("CORRUPT_ARTIFACT", f"Artifact has invalid JSON: {name}"))
         elif data is None:
             warnings.append(_warn("MISSING_ARTIFACT", f"Required artifact missing: {name}"))
+
+    # 2. STALE_ARTIFACT — run_id mismatch across artifacts
+    run_ids: dict[str, str] = {}
+    for name in REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS:
+        artifact_data = artifacts.get(name)
+        if _usable(artifact_data):
+            rid = _as_dict(artifact_data.get("metadata")).get("run_id")
+            if isinstance(rid, str) and rid:
+                run_ids[name] = rid
+    if run_ids:
+        primary_rid = next(iter(run_ids.values()))
+        for name, rid in run_ids.items():
+            if rid != primary_rid:
+                warnings.append(
+                    _warn(
+                        "STALE_ARTIFACT",
+                        f"{name} has run_id '{rid}' but expected '{primary_rid}'",
+                    )
+                )
 
     # 3. CHECKLIST_FAILURES_CRITICAL — more than 10 failed items
     if _usable(checklist):

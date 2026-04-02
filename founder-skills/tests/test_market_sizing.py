@@ -731,6 +731,7 @@ def test_compose_severity_map_complete() -> None:
     expected_codes = [
         "CORRUPT_ARTIFACT",
         "MISSING_ARTIFACT",
+        "STALE_ARTIFACT",
         "CHECKLIST_FAILURES",
         "OVERCLAIMED_VALIDATION",
         "UNVALIDATED_CLAIMS",
@@ -747,12 +748,13 @@ def test_compose_severity_map_complete() -> None:
         "DECK_CLAIM_MISMATCH",
         "PROVENANCE_UNRESOLVED",
     ]
-    assert len(sev_map) == 17, f"expected 17 codes, got {len(sev_map)}"
+    assert len(sev_map) == 18, f"expected 18 codes, got {len(sev_map)}"
     for code in expected_codes:
         assert code in sev_map, f"{code} missing from severity map"
     # All values are "high", "medium", or "low"
     valid_severities = {"high", "medium", "low"}
     assert all(v in valid_severities for v in sev_map.values())
+    assert sev_map.get("STALE_ARTIFACT") == "high"
     assert sev_map.get("UNVALIDATED_CLAIMS") == "high"
     assert sev_map.get("CORRUPT_ARTIFACT") == "high"
     assert sev_map.get("MISSING_OPTIONAL_ARTIFACT") == "low"
@@ -762,6 +764,80 @@ def test_compose_severity_map_complete() -> None:
     high_codes = [c for c, s in sev_map.items() if s == "high"]
     for code in high_codes:
         assert sev_map[code] not in acceptible, f"high-severity {code} should not be acceptible"
+
+
+def test_compose_stale_artifact_mismatched_run_ids() -> None:
+    """Mismatched run_id across artifacts triggers STALE_ARTIFACT warning."""
+    import copy
+
+    inputs = copy.deepcopy(_VALID_INPUTS)
+    inputs["metadata"] = {"run_id": "run-001"}
+    methodology = copy.deepcopy(_VALID_METHODOLOGY)
+    methodology["metadata"] = {"run_id": "run-001"}
+    validation = copy.deepcopy(_VALID_VALIDATION)
+    validation["metadata"] = {"run_id": "run-001"}
+    sizing = copy.deepcopy(_VALID_SIZING)
+    sizing["metadata"] = {"run_id": "run-002"}  # stale!
+    sensitivity = copy.deepcopy(_VALID_SENSITIVITY)
+    sensitivity["metadata"] = {"run_id": "run-001"}
+    checklist = copy.deepcopy(_VALID_CHECKLIST)
+    checklist["metadata"] = {"run_id": "run-001"}
+    d = _make_artifact_dir(
+        {
+            "inputs.json": inputs,
+            "methodology.json": methodology,
+            "validation.json": validation,
+            "sizing.json": sizing,
+            "sensitivity.json": sensitivity,
+            "checklist.json": checklist,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "STALE_ARTIFACT" in codes
+
+
+def test_compose_matching_run_ids_no_stale_warning() -> None:
+    """Matching run_id across all artifacts produces no STALE_ARTIFACT warning."""
+    import copy
+
+    artifacts = {
+        "inputs.json": copy.deepcopy(_VALID_INPUTS),
+        "methodology.json": copy.deepcopy(_VALID_METHODOLOGY),
+        "validation.json": copy.deepcopy(_VALID_VALIDATION),
+        "sizing.json": copy.deepcopy(_VALID_SIZING),
+        "sensitivity.json": copy.deepcopy(_VALID_SENSITIVITY),
+        "checklist.json": copy.deepcopy(_VALID_CHECKLIST),
+    }
+    for art in artifacts.values():
+        art["metadata"] = {"run_id": "run-001"}
+    d = _make_artifact_dir(artifacts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "STALE_ARTIFACT" not in codes
+
+
+def test_compose_no_run_ids_graceful() -> None:
+    """No run_id in any artifact -> graceful degradation, no STALE_ARTIFACT."""
+    d = _make_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "methodology.json": _VALID_METHODOLOGY,
+            "validation.json": _VALID_VALIDATION,
+            "sizing.json": _VALID_SIZING,
+            "sensitivity.json": _VALID_SENSITIVITY,
+            "checklist.json": _VALID_CHECKLIST,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "STALE_ARTIFACT" not in codes
 
 
 def test_compose_low_checklist_coverage() -> None:

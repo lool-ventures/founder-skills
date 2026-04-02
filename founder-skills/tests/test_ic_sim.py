@@ -1041,6 +1041,7 @@ def test_compose_severity_map_complete() -> None:
     expected = [
         "CORRUPT_ARTIFACT",
         "MISSING_ARTIFACT",
+        "STALE_ARTIFACT",
         "BLOCKING_CONFLICT",
         "ORPHANED_CONFLICT",
         "VERDICT_SCORE_MISMATCH",
@@ -1071,6 +1072,7 @@ def test_compose_severity_map_complete() -> None:
 
     # Verify severity levels
     assert sev_map["MISSING_ARTIFACT"] == "high"
+    assert sev_map["STALE_ARTIFACT"] == "high"
     assert sev_map["BLOCKING_CONFLICT"] == "high"
     assert sev_map["ORPHANED_CONFLICT"] == "high"
     assert sev_map["VERDICT_SCORE_MISMATCH"] == "high"
@@ -1083,6 +1085,50 @@ def test_compose_severity_map_complete() -> None:
     assert sev_map["STAGE_OUT_OF_SCOPE"] == "low"
     assert sev_map["SEQUENTIAL_FALLBACK"] == "info"
     assert sev_map["PARTNER_CONVERGENCE"] == "info"
+
+
+def test_compose_stale_artifact_mismatched_run_ids() -> None:
+    """Mismatched run_id across artifacts triggers STALE_ARTIFACT warning."""
+    import copy
+
+    arts = _all_required_artifacts()
+    for key in arts:
+        arts[key] = copy.deepcopy(arts[key])
+        arts[key]["metadata"] = {"run_id": "run-001"}
+    # Stamp one artifact with a different run_id
+    arts["discussion.json"]["metadata"] = {"run_id": "run-002"}  # stale!
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "STALE_ARTIFACT" in codes
+
+
+def test_compose_matching_run_ids_no_stale_warning() -> None:
+    """Matching run_id across all artifacts produces no STALE_ARTIFACT warning."""
+    import copy
+
+    arts = _all_required_artifacts()
+    for key in arts:
+        arts[key] = copy.deepcopy(arts[key])
+        arts[key]["metadata"] = {"run_id": "run-001"}
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "STALE_ARTIFACT" not in codes
+
+
+def test_compose_no_run_ids_graceful() -> None:
+    """No run_id in any artifact -> graceful degradation, no STALE_ARTIFACT."""
+    d = _make_artifact_dir(_all_required_artifacts())
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "STALE_ARTIFACT" not in codes
 
 
 def test_compose_stage_out_of_scope() -> None:

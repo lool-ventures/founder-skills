@@ -88,7 +88,16 @@ If `CLAUDE_PLUGIN_ROOT` is empty, fall back: `Glob` for `**/founder-skills/skill
 ```bash
 SIM_DIR="$ARTIFACTS_ROOT/ic-sim-{company-slug}"
 mkdir -p "$SIM_DIR"
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 ```
+
+Pass `RUN_ID` to all sub-agents. Every artifact written to `$SIM_DIR` must include `"metadata": {"run_id": "$RUN_ID"}` at the top level. `compose_report.py` checks that all artifact run IDs match — a mismatch triggers a `STALE_ARTIFACT` high-severity warning, blocking under `--strict`.
+
+If `SIM_DIR` already contains artifacts from a previous run, remove them before starting:
+
+    rm -f "$SIM_DIR"/{startup_profile,prior_artifacts,fund_profile,conflict_check,discussion,score_dimensions,partner_assessment_visionary,partner_assessment_operator,partner_assessment_analyst,report}.json "$SIM_DIR"/report.{html,md}
+
+In Cowork, file deletion may require explicit permission. If cleanup fails with "Operation not permitted", request delete permission and retry before proceeding.
 
 ### Mode Selection
 

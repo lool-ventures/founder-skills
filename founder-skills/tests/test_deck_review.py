@@ -698,6 +698,7 @@ def test_compose_severity_map_complete() -> None:
     expected = [
         "CORRUPT_ARTIFACT",
         "MISSING_ARTIFACT",
+        "STALE_ARTIFACT",
         "CHECKLIST_FAILURES_CRITICAL",
         "STAGE_MISMATCH",
         "SLIDE_COUNT_EXTREME",
@@ -712,7 +713,72 @@ def test_compose_severity_map_complete() -> None:
     assert len(sev_map) == len(expected), f"expected {len(expected)} codes, got {len(sev_map)}"
     for code in expected:
         assert code in sev_map, f"{code} missing from severity map"
+    assert sev_map["STALE_ARTIFACT"] == "high"
     assert sev_map["STAGE_OUT_OF_SCOPE"] == "low"
+
+
+def test_compose_stale_artifact_mismatched_run_ids() -> None:
+    """Mismatched run_id across artifacts triggers STALE_ARTIFACT warning."""
+    import copy
+
+    inventory = copy.deepcopy(_VALID_INVENTORY)
+    inventory["metadata"] = {"run_id": "run-001"}
+    profile = copy.deepcopy(_VALID_PROFILE)
+    profile["metadata"] = {"run_id": "run-001"}
+    reviews = copy.deepcopy(_VALID_REVIEWS)
+    reviews["metadata"] = {"run_id": "run-002"}  # stale!
+    checklist = copy.deepcopy(_VALID_CHECKLIST)
+    checklist["metadata"] = {"run_id": "run-001"}
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": inventory,
+            "stage_profile.json": profile,
+            "slide_reviews.json": reviews,
+            "checklist.json": checklist,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "STALE_ARTIFACT" in codes
+
+
+def test_compose_matching_run_ids_no_stale_warning() -> None:
+    """Matching run_id across all artifacts produces no STALE_ARTIFACT warning."""
+    import copy
+
+    artifacts = {
+        "deck_inventory.json": copy.deepcopy(_VALID_INVENTORY),
+        "stage_profile.json": copy.deepcopy(_VALID_PROFILE),
+        "slide_reviews.json": copy.deepcopy(_VALID_REVIEWS),
+        "checklist.json": copy.deepcopy(_VALID_CHECKLIST),
+    }
+    for art in artifacts.values():
+        art["metadata"] = {"run_id": "run-001"}
+    d = _make_artifact_dir(artifacts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "STALE_ARTIFACT" not in codes
+
+
+def test_compose_no_run_ids_graceful() -> None:
+    """No run_id in any artifact -> graceful degradation, no STALE_ARTIFACT."""
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "STALE_ARTIFACT" not in codes
 
 
 def test_compose_stage_out_of_scope_detected() -> None:

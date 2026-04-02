@@ -78,7 +78,16 @@ If `CLAUDE_PLUGIN_ROOT` is empty, fall back: `Glob` for `**/founder-skills/skill
 ```bash
 REVIEW_DIR="$ARTIFACTS_ROOT/deck-review-{company-slug}"
 mkdir -p "$REVIEW_DIR"
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 ```
+
+Pass `RUN_ID` to all sub-agents. Every artifact written to `$REVIEW_DIR` must include `"metadata": {"run_id": "$RUN_ID"}` at the top level. `compose_report.py` checks that all artifact run IDs match — a mismatch triggers a `STALE_ARTIFACT` high-severity warning, blocking under `--strict`.
+
+If `REVIEW_DIR` already contains artifacts from a previous run, remove them before starting:
+
+    rm -f "$REVIEW_DIR"/{deck_inventory,stage_profile,slide_reviews,checklist,report}.json "$REVIEW_DIR"/report.{html,md}
+
+In Cowork, file deletion may require explicit permission. If cleanup fails with "Operation not permitted", request delete permission and retry before proceeding.
 
 ### Step 1: Ingest Deck -> `deck_inventory.json`
 
