@@ -9,6 +9,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/lool-ventures/founder-skills)
 [![Built with Skill Creator Plus](https://img.shields.io/badge/Built_with-Skill_Creator_Plus-4ecdc4?style=flat-square)](https://github.com/yaniv-golan/skill-creator-plus)
+[![Install in Claude Desktop](https://img.shields.io/badge/Install_in_Claude_Desktop-D97757?style=for-the-badge&logo=claude&logoColor=white)](https://lool-ventures.github.io/founder-skills/static/install-claude-desktop.html)
 
 Skills for startup founders by [lool ventures](https://lool.vc).
 
@@ -139,6 +140,26 @@ Maps a startup's competitive landscape, scores differentiation and moat strength
 > Full workflow details: [`founder-skills/skills/competitive-positioning/SKILL.md`](founder-skills/skills/competitive-positioning/SKILL.md)
 
 ## Getting Started
+
+### Claude Desktop
+
+[![Install in Claude Desktop](https://img.shields.io/badge/Install_in_Claude_Desktop-D97757?style=for-the-badge&logo=claude&logoColor=white)](https://lool-ventures.github.io/founder-skills/static/install-claude-desktop.html)
+
+*— or install manually —*
+
+1. Click **Customize** in the sidebar
+2. Click **Browse Plugins**
+3. Switch to the **Personal** tab and click **+**
+4. Choose **Add marketplace**
+5. Enter `lool-ventures/founder-skills` and click **Sync**
+
+### Any Agent (npx)
+
+Works with Claude Code, Cursor, Copilot, Windsurf, and other compatible agents:
+
+```bash
+npx skills add lool-ventures/founder-skills
+```
 
 ### Claude Cowork
 
