@@ -113,11 +113,58 @@ Instruct the sub-agent to return ONLY:
 
 Do not echo the full artifacts or raw document content. The company brief must be rich enough for the main agent to direct web research, construct sizing calculations, perform reality checks, and provide contextual coaching — without needing to re-read the source materials.
 
-After the sub-agent returns, review the summary. If missing fields are flagged, ask the founder and patch `inputs.json`. Share a brief update.
+After the sub-agent returns, review the summary. Note any missing fields — these will be presented to the founder in the Gate step below. Share a brief update.
 
 **When conversational input (no files):** Handle directly in the main agent — the data is already in the conversation. Read `references/tam-sam-som-methodology.md`, choose the approach, and write both artifacts directly.
 
 **Graceful degradation:** If Task tool is unavailable, extract directly in the main agent.
+
+### Gate: Confirm Methodology and Inputs
+
+**MANDATORY STOP — TWO SEPARATE STEPS. DO NOT COMBINE THEM.**
+
+**Step A: Output a chat message** with the methodology choice and key inputs. Use a formatted summary. This is a normal assistant message — NOT an AskUserQuestion call. Example:
+
+```
+Here's what I've extracted and how I plan to approach the sizing:
+
+**Company:** Acme Corp — AI-powered compliance for fintechs
+**Geography:** US
+**Target segments:** Mid-market fintechs ($10M-$500M revenue)
+
+**Methodology:** Both top-down and bottom-up
+- Top-down: Global RegTech market → US share → fintech compliance segment
+- Bottom-up: ~2,400 target fintechs × $48K ARPU
+
+**Key inputs found:**
+| Input | Value | Source |
+|-------|-------|--------|
+| Current ARR | $850K | Deck slide 7 |
+| Customers | 12 | Deck slide 8 |
+| ARPU (monthly) | $4,000 | Derived from ARR/customers |
+| Growth rate | 15% MoM | Deck slide 9 |
+
+**Missing / needs clarification:**
+- Geographic expansion plans (US only or international?)
+- Enterprise vs SMB customer split
+```
+
+If `existing_claims` were found in the deck, include them: "Your deck claims TAM of $X — I'll validate this against external sources."
+
+**Step B: AFTER the chat message, call `AskUserQuestion`** with ONLY a short question. The question field is plain text — NO markdown, NO tables, NO bullet points.
+
+Question: `Does this approach and these inputs look right?`
+Options: `Looks good` / `Change methodology` / `Correct or add data`
+
+**CRITICAL: The AskUserQuestion question must be ONE SHORT SENTENCE. Put ALL details in the chat message (Step A), not in the question.**
+
+This two-step pattern (chat message then AskUserQuestion) is required because AskUserQuestion renders as plain text. Detailed content goes in the chat message; only the gate question goes in AskUserQuestion.
+
+**If the founder selects "Looks good":** Proceed to Step 3 (External Validation).
+
+**If "Change methodology":** Ask which approach they prefer (top-down / bottom-up / both) and why. Update `methodology.json` and repeat Steps A+B.
+
+**If "Correct or add data":** Ask which values are wrong or missing, correct/patch `inputs.json`, and check whether the updated inputs change what methodology is viable (e.g., fixing customer count from 0 to 50 may enable bottom-up that wasn't feasible before). If so, update `methodology.json` too. Repeat Steps A+B.
 
 ### Step 3: External Validation -> `validation.json`
 
