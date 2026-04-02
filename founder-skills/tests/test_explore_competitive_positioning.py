@@ -113,25 +113,13 @@ def test_generates_html() -> None:
 
 
 def test_chartjs_loaded() -> None:
-    """Chart.js must be available — either inlined or via CDN <script> tag.
-
-    MVP uses CDN; follow-up will inline. Either way, 'new Chart(' must
-    appear in the HTML (proving app code references Chart.js) and the
-    library must be loadable (CDN tag or inlined source).
-    """
+    """Chart.js must be inlined — the vendored source must appear in HTML."""
     arts = _all_artifacts()
     with _make_artifact_dir(arts) as d:
         rc, stdout, stderr = _run_explore(d)
         assert rc == 0, f"exit {rc}, stderr={stderr}"
-        # App code must reference Chart constructor
         assert "new Chart(" in stdout, "Explorer must use Chart.js (new Chart(...))"
-        # Chart.js must be loadable — either via CDN script tag or inlined
-        checker = _ExternalResourceChecker()
-        checker.feed(stdout)
-        chartjs_scripts = [s for s in checker.external_scripts if "chart.js" in s.lower()]
-        has_cdn = len(chartjs_scripts) > 0
-        has_inline = "Chart.register" in stdout or "/*!\\n * Chart.js" in stdout
-        assert has_cdn or has_inline, "Chart.js must be loaded via CDN <script> or inlined source"
+        assert "Chart.js v" in stdout, "Chart.js source must be inlined (vendored)"
 
 
 def test_no_external_stylesheets() -> None:

@@ -1,0 +1,25 @@
+# Extraction Pitfalls
+
+Common errors that produce wildly wrong downstream results. Read this before constructing `inputs.json` from a financial model.
+
+1. **Model denominated in thousands or millions.** Many financial models express values in thousands (`$000`, `in $K`) or millions. **Before extracting any numbers, check for scale indicators:**
+   - Headers or sub-headers containing `($000)`, `(in thousands)`, `($K)`, `($M)`, `(in millions)`
+   - A "Controls", "Settings", or "Assumptions" tab with a "Units" or "Denomination" field
+   - Implausibly small values — e.g., cash balance of `4000` for a seed company (likely $4M = $4,000K)
+   - Revenue values in single/double digits when customer count is >10 (likely in thousands)
+
+   If the model is in thousands, **multiply all monetary values by 1,000** before writing to `inputs.json`. Record `metadata.scale_factor: 1000` (or `1000000` for millions). Do NOT leave values at face value — a $4K cash balance for a seed company with 6 employees is nonsensical and produces 0-month runway. **Headcount counts and percentages (churn rate, growth rate, tax rate) are NOT scaled** — only dollar amounts. If unsure, cross-check: a seed company's monthly burn should typically be $50K–$500K, not $50–$500.
+
+2. **Company name from Controls tab.** Many models have a "Controls" or "Settings" tab with a "Company Name" field. **Always prefer this over filenames or cover page text.** The filename often contains template names (e.g., "Sample-Financial-Model-v1.64") rather than the actual company name.
+
+3. **Department payroll vs COGS payroll.** Many financial models have a COGS section with `Payroll: $0` (correct — no COGS headcount), then separate R&D, S&M, and G&A sections each with their own payroll line items. **Always sum payroll across all department sections** (R&D + S&M + G&A + COGS), not just the first `Payroll` row you encounter. Populate `expenses.headcount[]` entries with per-role or per-department salary data, and `expenses.opex_monthly[]` for non-payroll operating expenses (rent, software, travel, professional services, etc.). If per-role detail is unavailable, use department totals (e.g., one headcount entry for "R&D" with aggregate salary). **NEVER estimate or guess salary values.** Use the actual dollar amounts from the P&L. If the P&L shows "R&D: $725K/quarter," that's $2.9M/year — use that as `salary_annual` for the R&D headcount entry. Generic estimates (e.g., "$82K per engineer") produce expense coverage errors that cascade through the entire review.
+
+4. **Collections vs recognized revenue.** For companies with `annual-contracts` trait or enterprise sales-led models, the spreadsheet often has both a "Collections" row (cash received — lumpy, timing-dependent) and a "Revenue" or "RevRec" row (recognized revenue — smoother, accrual-based). **Use recognized revenue for `revenue.monthly[]` totals, MRR, and growth rate.** Use collections only for cash flow analysis. Mixing collections into revenue produces fake growth rates — a $115K annual contract collected in one month is not $115K MRR. If only collections are available and no RevRec row exists, divide annual contract values by 12 to approximate monthly recognized revenue, note `data_confidence: "estimated"`, and set `growth_rate_monthly` to `null`.
+
+5. **Expense cross-check.** After extracting headcount and opex, verify that the sum roughly matches the model's total expense row or the implied burn (burn = expenses − revenue). If extracted expenses cover less than 50% of the stated `monthly_net_burn + revenue`, critical cost categories were likely missed — re-examine the source data for department-level line items. Validation will flag this as `EXPENSE_COVERAGE_SUSPECT`. **Common misses:** travel expenses, commissions, contractor fees — check Actuals or P&L line items beyond payroll.
+
+6. **SaaS metrics tabs.** Many models have dedicated CAC, LTV, and Margins tabs. **Explicitly check for these** and extract `unit_economics.cac.total`, `unit_economics.cac.components`, `unit_economics.ltv`, and `unit_economics.gross_margin` from them. Do not return null for these fields when the data exists in a named tab.
+
+7. **Actuals vs forecast disconnect.** Template-based models often have an Actuals tab with real data and Summary/forecast tabs with uncalibrated projections. **Always prefer Actuals for current-state metrics** (MRR, customers, burn, cash). Use forecast tabs only for forward-looking fields (growth assumptions, scenarios). If Actuals show $370K/mo revenue but Summary shows $1.2K/mo, Actuals are ground truth — note the disconnect in `metadata.extraction_notes`.
+
+8. **Lumpy/volatile MRR growth.** For models with highly volatile month-to-month MRR (±15% swings), do not compute growth rate from two adjacent months. Instead, use a **trailing 3-month or 6-month CAGR**: `growth_rate_monthly = (MRR_latest / MRR_N_months_ago) ^ (1/N) - 1`. If the series is too short or too volatile for any method to be reliable, set `growth_rate_monthly` to `null`.

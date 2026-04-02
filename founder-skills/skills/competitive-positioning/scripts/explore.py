@@ -6,8 +6,8 @@
 """
 Generate self-contained interactive HTML explorer for competitive positioning.
 
-Outputs HTML (not JSON). Uses Chart.js for interactive scatter plot with
-view switching, bubble encoding controls, and company detail panels.
+Outputs HTML (not JSON). Embeds Chart.js (vendored) for interactive scatter
+plot with view switching, bubble encoding controls, and company detail panels.
 
 Usage:
     python explore.py --dir ./competitive-positioning-secureflow/
@@ -21,6 +21,7 @@ import html
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any, TypeGuard
 
 # ---------------------------------------------------------------------------
@@ -174,9 +175,14 @@ def _build_data_payload(dir_path: str) -> dict[str, Any]:
 # HTML template
 # ---------------------------------------------------------------------------
 
-# Chart.js loaded via CDN for MVP. Inlining deferred to follow-up task.
-_CHARTJS_CDN = "https://cdn.jsdelivr.net/npm/chart.js@4.4"
+_VENDOR_DIR = Path(__file__).resolve().parent / "vendor"
 _PLOTLY_CDN = "https://cdn.plot.ly/plotly-gl3d-2.35.2.min.js"
+
+
+def _chartjs_source() -> str:
+    """Return Chart.js source for inline embedding (no CDN)."""
+    js_path = _VENDOR_DIR / "chart.min.js"
+    return js_path.read_text(encoding="utf-8")
 
 
 def _css() -> str:
@@ -280,7 +286,7 @@ def compose_explorer(dir_path: str) -> str:
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Competitive Explorer: {company_name}</title>
-<script src="{_CHARTJS_CDN}"></script>
+<script>{_chartjs_source()}</script>
 {_css()}
 </head>
 <body>
