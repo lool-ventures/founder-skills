@@ -8,10 +8,11 @@
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/lool-ventures/founder-skills)
+[![Built with Skill Creator Plus](https://img.shields.io/badge/Built_with-Skill_Creator_Plus-4ecdc4?style=flat-square)](https://github.com/yaniv-golan/skill-creator-plus)
 
 Skills for startup founders by [lool ventures](https://lool.vc).
 
-A [Claude Cowork](https://claude.com/blog/cowork-plugins) plugin that gives founders four AI-powered coaching agents: market sizing, pitch deck review, financial model review, and IC simulation. Each agent follows a structured, script-backed workflow to produce analysis that holds up under investor scrutiny.
+A [Claude Cowork](https://claude.com/blog/cowork-plugins) plugin that gives founders five AI-powered coaching agents: market sizing, pitch deck review, financial model review, IC simulation, and competitive positioning. Each agent follows a structured, script-backed workflow to produce analysis that holds up under investor scrutiny.
 
 ## Skills
 
@@ -112,6 +113,31 @@ Reviews startup financial models for investor readiness — validating structure
 
 > Full workflow details: [`founder-skills/skills/financial-model-review/SKILL.md`](founder-skills/skills/financial-model-review/SKILL.md)
 
+![Competitive Positioning Agent](assets/competitive_positioning.png)
+
+### Competitive Positioning Agent
+
+Maps a startup's competitive landscape, scores differentiation and moat strength, and stress-tests positioning claims — producing investor-ready competitive analysis.
+
+**What it does:**
+- Identifies 5-7 competitors across direct, adjacent, emerging, and do-nothing categories
+- Scores positioning on 2D axes with rank-based differentiation and vanity axis detection
+- Assesses 6 canonical moat dimensions per company with trajectory tracking
+- Stress-tests differentiation claims against competitive evidence
+- Runs a 25-item quality checklist with mode-based gating
+- Optionally enriches the landscape via research sub-agent with web search
+
+**What to provide:** A pitch deck, product description, or conversation about the business. The agent will identify competitors, select meaningful positioning axes, and build the analysis. Works best after running deck review — competition slide claims are cross-validated automatically.
+
+**What you get back:** A scored competitive landscape with positioning maps, moat radar charts, differentiation scores with stress-test results, a quality checklist, and an interactive explorer for navigating the competitive set.
+
+**Example prompts:**
+- "Analyze our competitive positioning"
+- "Who are our main competitors and how do we differentiate?"
+- "I just did a deck review -- now analyze our competitive positioning"
+
+> Full workflow details: [`founder-skills/skills/competitive-positioning/SKILL.md`](founder-skills/skills/competitive-positioning/SKILL.md)
+
 ## Getting Started
 
 ### Claude Cowork
@@ -132,7 +158,7 @@ claude plugin marketplace add lool-ventures/founder-skills
 claude plugin install founder-skills@lool-founder-skills
 ```
 
-Once installed, the agents activate automatically when you ask about market sizing, deck review, financial model review, or IC simulation. No additional configuration required.
+Once installed, the agents activate automatically when you ask about market sizing, deck review, financial model review, IC simulation, or competitive positioning. No additional configuration required.
 
 ### Manus
 
@@ -186,3 +212,7 @@ We welcome contributions — new skills, improvements to existing ones, and bug 
 ## License
 
 [Apache 2.0](LICENSE)
+
+---
+
+Built with [Skill Creator Plus](https://github.com/yaniv-golan/skill-creator-plus).
