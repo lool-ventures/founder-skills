@@ -272,6 +272,14 @@ Contains the canonical positioning views, moat assessments, differentiation stre
 | `accepted_warnings` | object[] | no | Warnings the agent acknowledges. Only medium-severity codes can be accepted. |
 | `metadata` | object | yes | `{run_id}` |
 
+> **⚠ Common mistake — `moat_assessments`:** This MUST be a **dict keyed by company slug**, NOT an array of objects. `score_moats.py` has a compatibility shim that normalizes arrays, but canonical artifacts must use the dict format. Scoring scripts have compatibility shims, but always use canonical format — other consumers may not normalize.
+> ```json
+> "moat_assessments": {
+>   "_startup": {"moats": [...]},
+>   "competitor-slug": {"moats": [...]}
+> }
+> ```
+
 ### views[] entry
 
 | Field | Type | Required | Description |
@@ -280,6 +288,11 @@ Contains the canonical positioning views, moat assessments, differentiation stre
 | `x_axis` | object | yes | `{name, description, rationale}` — rationale explains why this axis differentiates |
 | `y_axis` | object | yes | `{name, description, rationale}` |
 | `points` | object[] | yes | Per-competitor + `_startup` coordinate assignments |
+
+> **⚠ Common mistake — `x_axis` / `y_axis`:** These MUST be **objects**, not bare strings. `score_positioning.py` has a compatibility shim that wraps strings, but canonical artifacts must use the object format. Scoring scripts have compatibility shims, but always use canonical format — other consumers may not normalize.
+> ```json
+> "x_axis": {"name": "Axis Name", "description": "What this measures", "rationale": "Why this differentiates"}
+> ```
 
 ### points[] entry
 
@@ -292,6 +305,8 @@ Contains the canonical positioning views, moat assessments, differentiation stre
 | `y_evidence` | string | yes | Evidence supporting the Y coordinate |
 | `x_evidence_source` | string | yes | `"researched"`, `"agent_estimate"`, or `"founder_override"` |
 | `y_evidence_source` | string | yes | `"researched"`, `"agent_estimate"`, or `"founder_override"` |
+
+> **⚠ Common mistake — `competitor`:** The field name is `competitor`, NOT `slug`. `score_positioning.py` has a compatibility shim that renames `slug`, but canonical artifacts must use `competitor`. Always use canonical format — other consumers may not normalize.
 
 **Coordinate nature:** The 0-100 values are ordinal rankings within this specific competitive set, not cardinal measurements. "85" means "near the top of this group on this axis," not a universally calibrated score. Different runs with different competitor sets will produce different coordinates.
 

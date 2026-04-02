@@ -187,6 +187,64 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
 
 
 # ---------------------------------------------------------------------------
+# Normalization
+# ---------------------------------------------------------------------------
+
+
+def _normalize_positioning_input(data: dict[str, Any]) -> list[str]:
+    """Normalize common LLM output shape mismatches in-place.
+    Fixes: String axes → {name: <string>}, points[].slug → points[].competitor
+    Returns list of error strings (empty on success).
+    """
+    normalized = False
+    errors: list[str] = []
+    views = data.get("views")
+    if not isinstance(views, list):
+        return errors
+
+    for i, view in enumerate(views):
+        if not isinstance(view, dict):
+            continue
+        # Normalize string axes to objects (reject blank strings)
+        for axis_key in ("x_axis", "y_axis"):
+            val = view.get(axis_key)
+            if isinstance(val, str):
+                if not val.strip():
+                    errors.append(f"views[{i}].{axis_key}: axis name is blank")
+                    continue
+                view[axis_key] = {"name": val}
+                normalized = True
+        # Normalize slug → competitor in points
+        points = view.get("points")
+        if not isinstance(points, list):
+            continue
+        for j, point in enumerate(points):
+            if not isinstance(point, dict):
+                continue
+            if "slug" in point and "competitor" not in point:
+                slug_val = point["slug"]
+                if not isinstance(slug_val, str) or not slug_val.strip():
+                    errors.append(f"views[{i}].points[{j}]: 'slug' is empty/blank, cannot normalize to 'competitor'")
+                    continue
+                point["competitor"] = point.pop("slug")
+                normalized = True
+            elif "slug" in point and "competitor" in point:
+                slug_val = point.pop("slug")
+                if slug_val != point["competitor"]:
+                    errors.append(
+                        f"views[{i}].points[{j}]: conflicting 'slug' ('{slug_val}')"
+                        f" and 'competitor' ('{point['competitor']}')"
+                    )
+                else:
+                    normalized = True
+    if errors:
+        return errors
+    if normalized:
+        print("score_positioning: normalized input (string axes or slug→competitor)", file=sys.stderr)
+    return []
+
+
+# ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
 
@@ -215,9 +273,16 @@ def _validate_input(data: dict[str, Any]) -> list[str]:
         for axis_key in ("x_axis", "y_axis"):
             axis = view.get(axis_key)
             if axis is not None and not isinstance(axis, dict):
-                errors.append(f"views[{i}].{axis_key} must be an object")
+                errors.append(
+                    f"views[{i}].{axis_key} must be an object with at least a 'name' field, "
+                    f'e.g. {{"name": "..."}}, got {type(axis).__name__}'
+                )
             elif isinstance(axis, dict) and "name" not in axis:
-                errors.append(f"views[{i}].{axis_key} missing required field 'name'")
+                errors.append(
+                    f"views[{i}].{axis_key} missing required field 'name'. "
+                    'Expected: {"name": "Axis Name", "description": "...", "rationale": "..."} '
+                    "(description and rationale are recommended but not enforced)"
+                )
 
         if "points" not in view:
             continue
@@ -232,6 +297,11 @@ def _validate_input(data: dict[str, Any]) -> list[str]:
         for j, p in enumerate(points):
             if not isinstance(p, dict):
                 errors.append(f"views[{i}].points[{j}] must be an object")
+                continue
+
+            comp = p.get("competitor")
+            if not isinstance(comp, str) or not comp.strip():
+                errors.append(f"views[{i}].points[{j}]: 'competitor' must be a non-empty string")
                 continue
 
             if p.get("competitor") == "_startup":
@@ -290,6 +360,12 @@ def main() -> None:
 
     if not isinstance(data, dict):
         print("Error: JSON must be an object", file=sys.stderr)
+        sys.exit(1)
+
+    norm_errors = _normalize_positioning_input(data)
+    if norm_errors:
+        for err in norm_errors:
+            print(f"Error: {err}", file=sys.stderr)
         sys.exit(1)
 
     errors = _validate_input(data)

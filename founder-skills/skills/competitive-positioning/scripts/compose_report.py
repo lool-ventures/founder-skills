@@ -233,6 +233,55 @@ def _write_output(
 
 
 # ---------------------------------------------------------------------------
+# Positioning normalization
+# ---------------------------------------------------------------------------
+
+
+def _normalize_positioning(positioning: dict[str, Any]) -> None:
+    """Best-effort normalization of common LLM shape mismatches in positioning.json.
+
+    Unlike the strict normalizers in score_moats.py/score_positioning.py, this
+    skips malformed entries silently — compose is a report assembler, not a gate.
+    The strict scoring scripts already validate upstream.
+
+    Fixes:
+    - moat_assessments: array-of-objects → dict keyed by slug
+    - views[].x_axis/y_axis: string → {name: string}
+    - views[].points[].slug → competitor
+    """
+    # Normalize moat_assessments array → dict
+    raw_moats = positioning.get("moat_assessments")
+    if isinstance(raw_moats, list):
+        result: dict[str, Any] = {}
+        for entry in raw_moats:
+            if not isinstance(entry, dict):
+                continue
+            slug = entry.get("slug", "")
+            if not isinstance(slug, str) or not slug.strip():
+                continue
+            if slug in result:
+                continue
+            value = {k: v for k, v in entry.items() if k != "slug"}
+            result[slug] = value
+        if result:
+            positioning["moat_assessments"] = result
+
+    # Normalize views
+    for view in _as_list(positioning.get("views")):
+        view = _as_dict(view)
+        for axis_key in ("x_axis", "y_axis"):
+            val = view.get(axis_key)
+            if isinstance(val, str) and val.strip():
+                view[axis_key] = {"name": val}
+        for point in _as_list(view.get("points")):
+            point = _as_dict(point)
+            if "slug" in point and "competitor" not in point:
+                slug_val = point.get("slug")
+                if isinstance(slug_val, str) and slug_val.strip():
+                    point["competitor"] = point.pop("slug")
+
+
+# ---------------------------------------------------------------------------
 # Cross-artifact validation
 # ---------------------------------------------------------------------------
 
@@ -848,6 +897,11 @@ def compose(dir_path: str) -> dict[str, Any]:
     artifacts: dict[str, dict[str, Any] | None] = {}
     for name in all_names:
         artifacts[name] = _load_artifact(dir_path, name)
+
+    # Normalize positioning.json before validation (best-effort)
+    positioning_raw = artifacts.get("positioning.json")
+    if _usable(positioning_raw):
+        _normalize_positioning(positioning_raw)
 
     artifacts_loaded = [n for n in all_names if artifacts[n] is not None and artifacts[n] is not _CORRUPT]
 

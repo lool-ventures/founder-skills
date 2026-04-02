@@ -190,13 +190,55 @@ def _build_comparison(companies: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_moat_assessments(raw: Any) -> dict[str, Any] | list[str]:
+    """Normalize moat_assessments: accept array-of-objects and convert to dict-keyed.
+
+    Expected dict format: {"slug": {"moats": [...]}}
+    Also accepted: [{"slug": "slug-value", "moats": [...]}]
+
+    Returns the normalized dict, or a list of error strings if conversion fails.
+    """
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, list):
+        result: dict[str, Any] = {}
+        errors: list[str] = []
+        for i, entry in enumerate(raw):
+            if not isinstance(entry, dict):
+                errors.append(f"moat_assessments[{i}]: expected object, got {type(entry).__name__}")
+                continue
+            slug = entry.get("slug", "")
+            if not isinstance(slug, str) or not slug.strip():
+                errors.append(
+                    f"moat_assessments[{i}]: 'slug' must be a non-empty string, got {type(slug).__name__}: {slug!r}"
+                )
+                continue
+            if slug in result:
+                errors.append(f"moat_assessments: duplicate slug '{slug}'")
+                continue
+            value = {k: v for k, v in entry.items() if k != "slug"}
+            result[slug] = value
+        if errors:
+            return errors
+        print(
+            f"score_moats: normalized array moat_assessments to dict ({len(result)} companies)",
+            file=sys.stderr,
+        )
+        return result
+    return [f"'moat_assessments' must be an object or array, got {type(raw).__name__}"]
+
+
 def score_moats(data: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
     """Validate moat assessments and produce scored output.
 
     Returns (result_dict, errors). On success errors is empty.
     On failure result is None and errors contains messages.
     """
-    moat_assessments = data.get("moat_assessments", {})
+    normalized = _normalize_moat_assessments(data.get("moat_assessments", {}))
+    if isinstance(normalized, list):
+        # normalization returned errors
+        return None, normalized
+    moat_assessments = normalized
     metadata = data.get("metadata", {})
     data_confidence = data.get("data_confidence")
 
@@ -204,7 +246,10 @@ def score_moats(data: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]
     warnings: list[dict[str, Any]] = []
 
     if not isinstance(moat_assessments, dict) or not moat_assessments:
-        errors.append("'moat_assessments' must be a non-empty object")
+        errors.append(
+            "'moat_assessments' must be a non-empty object keyed by company slug, "
+            'e.g. {"_startup": {"moats": [...]}, "competitor-slug": {"moats": [...]}}'
+        )
         return None, errors
 
     # Data confidence qualifier
@@ -218,7 +263,11 @@ def score_moats(data: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]
 
     for slug, company_data in moat_assessments.items():
         if not isinstance(company_data, dict) or "moats" not in company_data:
-            errors.append(f"{slug}: missing 'moats' array")
+            errors.append(
+                f"{slug}: missing 'moats' array. Expected format: "
+                '{"moats": [{"id": "...", "status": "...", "evidence": "...",'
+                ' "evidence_source": "...", "trajectory": "..."}]}'
+            )
             continue
 
         moats = company_data["moats"]

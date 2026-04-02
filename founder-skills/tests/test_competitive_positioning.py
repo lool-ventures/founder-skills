@@ -517,6 +517,101 @@ class TestScoreMoats:
         rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
         assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
 
+    # 10. Array-of-objects moat_assessments is normalized to dict-keyed format
+    def test_score_moats_array_format_normalized(self) -> None:
+        """Array-of-objects moat_assessments is normalized to dict-keyed format."""
+        payload = _make_valid_moat_input()
+        dict_assessments = payload["moat_assessments"]
+        expected_slugs = set(dict_assessments.keys())
+        array_assessments = []
+        for slug, company_data in dict_assessments.items():
+            entry = {"slug": slug}
+            entry.update(company_data)
+            array_assessments.append(entry)
+        payload["moat_assessments"] = array_assessments
+
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert set(data["companies"].keys()) == expected_slugs
+        assert "normalized" in stderr.lower()
+
+    # 11. Array entry without 'slug' key produces an error, not silent drop
+    def test_score_moats_array_missing_slug_errors(self) -> None:
+        """Array entry without 'slug' key produces an error, not silent drop."""
+        payload = _make_valid_moat_input()
+        dict_assessments = payload["moat_assessments"]
+        array_assessments = []
+        for slug, company_data in dict_assessments.items():
+            entry = {"slug": slug}
+            entry.update(company_data)
+            array_assessments.append(entry)
+        array_assessments.append({"moats": []})
+        payload["moat_assessments"] = array_assessments
+
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1 for malformed entry, got {rc}. stderr: {stderr}"
+        assert "slug" in stderr.lower()
+
+    # 12. Non-string slug values in array format produce an error
+    def test_score_moats_array_non_string_slug_errors(self) -> None:
+        """Non-string slug values in array format produce an error."""
+        payload = _make_valid_moat_input()
+        dict_assessments = payload["moat_assessments"]
+        array_assessments = []
+        for slug, company_data in dict_assessments.items():
+            entry = {"slug": slug}
+            entry.update(company_data)
+            array_assessments.append(entry)
+        array_assessments[0]["slug"] = 123
+        payload["moat_assessments"] = array_assessments
+
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1 for non-string slug, got {rc}. stderr: {stderr}"
+        assert "non-empty string" in stderr.lower() or "int" in stderr.lower()
+
+    # 13. Duplicate slugs in array format produce an error
+    def test_score_moats_array_duplicate_slug_errors(self) -> None:
+        """Duplicate slugs in array format produce an error."""
+        payload = _make_valid_moat_input()
+        dict_assessments = payload["moat_assessments"]
+        array_assessments = []
+        for slug, company_data in dict_assessments.items():
+            entry = {"slug": slug}
+            entry.update(company_data)
+            array_assessments.append(entry)
+        array_assessments.append(array_assessments[0].copy())
+        payload["moat_assessments"] = array_assessments
+
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1 for duplicate slug, got {rc}. stderr: {stderr}"
+        assert "duplicate" in stderr.lower()
+
+    # 14. Error message for invalid moat_assessments hints at expected format
+    def test_score_moats_error_shows_expected_shape(self) -> None:
+        """Error message for invalid moat_assessments hints at expected format."""
+        payload = {"moat_assessments": "not_valid", "metadata": {"run_id": "test"}}
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 1
+        assert "object or array" in stderr.lower()
+
+    # 15. Error for empty dict moat_assessments includes keyed-by-slug hint
+    def test_score_moats_empty_dict_error_shows_expected_shape(self) -> None:
+        """Error for empty dict moat_assessments includes keyed-by-slug hint."""
+        payload = {"moat_assessments": {}, "metadata": {"run_id": "test"}}
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 1
+        assert "keyed by" in stderr.lower() or '{"_startup"' in stderr
+
+    # 16. Error for company missing 'moats' array hints at expected entry format
+    def test_score_moats_missing_moats_array_error_shows_shape(self) -> None:
+        """Error for company missing 'moats' array hints at expected entry format."""
+        payload = _make_valid_moat_input()
+        del payload["moat_assessments"]["_startup"]["moats"]
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 1
+        assert "expected format" in stderr.lower() or '"id"' in stderr
+
 
 # ---------------------------------------------------------------------------
 # Factory: valid positioning input for score_positioning.py
@@ -904,6 +999,91 @@ class TestScorePositioning:
         assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
         assert data is not None
         assert data.get("data_confidence") == "estimated"
+
+    # 10. String axis values are normalized to {name: <string>} objects
+    def test_score_positioning_string_axes_normalized(self) -> None:
+        """String axis values are normalized to {name: <string>} objects."""
+        payload = _make_valid_positioning_input()
+        payload["views"][0]["x_axis"] = "Compute Efficiency"
+        payload["views"][0]["y_axis"] = "Market Reach"
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data["views"][0]["x_axis_name"] == "Compute Efficiency"
+        assert data["views"][0]["y_axis_name"] == "Market Reach"
+        assert "normalized" in stderr.lower()
+
+    # 11. Points with 'slug' key instead of 'competitor' are normalized and scored identically
+    def test_score_positioning_slug_key_accepted(self) -> None:
+        """Points with 'slug' key instead of 'competitor' are normalized and scored identically."""
+        payload_baseline = _make_valid_positioning_input()
+        rc_base, data_base, _ = run_script("score_positioning.py", stdin_data=json.dumps(payload_baseline))
+        assert rc_base == 0
+        payload = _make_valid_positioning_input()
+        for point in payload["views"][0]["points"]:
+            point["slug"] = point.pop("competitor")
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert "normalized" in stderr.lower()
+        assert data["views"][0]["competitor_count"] == data_base["views"][0]["competitor_count"]
+        assert data["views"][0]["differentiation_score"] == data_base["views"][0]["differentiation_score"]
+
+    # 12. Points with empty 'slug' key are rejected
+    def test_score_positioning_empty_slug_rejected(self) -> None:
+        """Points with empty 'slug' key are rejected."""
+        payload = _make_valid_positioning_input()
+        for point in payload["views"][0]["points"]:
+            point["slug"] = point.pop("competitor")
+        payload["views"][0]["points"][0]["slug"] = ""
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1 for empty slug, got {rc}. stderr: {stderr}"
+        assert "empty" in stderr.lower() or "blank" in stderr.lower()
+
+    # 13. Points with both 'slug' and 'competitor' that disagree are rejected
+    def test_score_positioning_conflicting_slug_competitor_rejected(self) -> None:
+        """Points with both 'slug' and 'competitor' that disagree are rejected."""
+        payload = _make_valid_positioning_input()
+        payload["views"][0]["points"][0]["slug"] = "wrong-slug"
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1 for conflicting slug/competitor, got {rc}. stderr: {stderr}"
+        assert "conflicting" in stderr.lower()
+
+    # 14. Blank string axis is rejected
+    def test_score_positioning_blank_axis_string_rejected(self) -> None:
+        """Blank string axis is rejected, not normalized to {'name': ''}."""
+        payload = _make_valid_positioning_input()
+        payload["views"][0]["x_axis"] = ""
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1 for blank axis, got {rc}. stderr: {stderr}"
+        assert "blank" in stderr.lower()
+
+    # 15. Points without 'competitor' key are rejected by validation
+    def test_score_positioning_missing_competitor_rejected(self) -> None:
+        """Points without 'competitor' key are rejected by validation."""
+        payload = _make_valid_positioning_input()
+        del payload["views"][0]["points"][0]["competitor"]
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1 for missing competitor, got {rc}. stderr: {stderr}"
+        assert "competitor" in stderr.lower()
+
+    # 16. Error for invalid axis hints at expected shape with required 'name' field
+    def test_score_positioning_axis_error_shows_expected_shape(self) -> None:
+        """Error for invalid axis hints at expected shape with required 'name' field."""
+        payload = _make_valid_positioning_input()
+        payload["views"][0]["x_axis"] = 42  # Not string (would normalize) or object
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 1
+        assert "name" in stderr.lower()
+
+    # 17. Error for axis object missing 'name' includes recommended shape
+    def test_score_positioning_missing_name_error_shows_shape(self) -> None:
+        """Error for axis object missing 'name' includes recommended shape."""
+        payload = _make_valid_positioning_input()
+        payload["views"][0]["x_axis"] = {"description": "test"}
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 1
+        assert "recommended" in stderr.lower() or '"name"' in stderr
 
 
 # ---------------------------------------------------------------------------
@@ -1865,6 +2045,79 @@ class TestCompose:
             messages = " ".join(w["message"] for w in data["warnings"])
             assert "orphan-view-slug" in messages
             assert "orphan-moat-slug" in messages
+
+    # 18b. Slug-keyed points normalised; no spurious INCOMPLETE_SCORING
+    def test_compose_normalizes_slug_key_points(self) -> None:
+        """compose_report.py normalizes slug-keyed points; no spurious INCOMPLETE_SCORING."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            rc_base, data_base, _ = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc_base == 0
+            base_incomplete = [w for w in data_base["warnings"] if w.get("code") == "INCOMPLETE_SCORING"]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            pos_path = os.path.join(tmp, "positioning.json")
+            with open(pos_path) as f:
+                positioning = json.load(f)
+            for view in positioning["views"]:
+                for point in view["points"]:
+                    point["slug"] = point.pop("competitor")
+            with open(pos_path, "w") as f:
+                json.dump(positioning, f)
+
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            incomplete = [w for w in data["warnings"] if w.get("code") == "INCOMPLETE_SCORING"]
+            assert len(incomplete) == len(base_incomplete), (
+                f"Slug normalization failed: got {len(incomplete)} INCOMPLETE_SCORING "
+                f"warnings vs {len(base_incomplete)} baseline. Warnings: {incomplete}"
+            )
+
+    # 18c. Array moat_assessments normalised; founder_override_count preserved
+    def test_compose_normalizes_array_moat_assessments(self) -> None:
+        """compose_report.py normalizes array moat_assessments; founder_override_count preserved."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            pos_path = os.path.join(tmp, "positioning.json")
+            with open(pos_path) as f:
+                positioning = json.load(f)
+            first_slug = next(s for s in positioning["moat_assessments"] if s != "_startup")
+            positioning["moat_assessments"][first_slug]["moats"][0]["evidence_source"] = "founder_override"
+            with open(pos_path, "w") as f:
+                json.dump(positioning, f)
+
+            rc_base, data_base, _ = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc_base == 0
+            base_override_count = data_base["metadata"]["founder_override_count"]
+            assert base_override_count > 0, "Baseline must have at least one founder_override"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            pos_path = os.path.join(tmp, "positioning.json")
+            with open(pos_path) as f:
+                positioning = json.load(f)
+            first_slug = next(s for s in positioning["moat_assessments"] if s != "_startup")
+            positioning["moat_assessments"][first_slug]["moats"][0]["evidence_source"] = "founder_override"
+            dict_moats = positioning["moat_assessments"]
+            array_moats = []
+            for slug, company_data in dict_moats.items():
+                entry = {"slug": slug}
+                entry.update(company_data)
+                array_moats.append(entry)
+            positioning["moat_assessments"] = array_moats
+            with open(pos_path, "w") as f:
+                json.dump(positioning, f)
+
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            actual_count = data["metadata"]["founder_override_count"]
+            assert actual_count == base_override_count, (
+                f"Array moat normalization failed: founder_override_count="
+                f"{actual_count} vs baseline={base_override_count}"
+            )
 
     # 19. INCOMPLETE_SCORING: landscape competitor missing from moat_scores
     def test_compose_incomplete_scoring_warns(self) -> None:
