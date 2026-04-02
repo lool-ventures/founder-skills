@@ -24,6 +24,10 @@
 - `founder-skills/agents/financial-model-review.md` — Financial model review agent definition
 - `founder-skills/tests/test_financial_model_review.py` — Financial model review regression tests
 - `founder-skills/tests/test_visualize_financial_model_review.py` — Financial model review HTML visualization tests
+- `founder-skills/skills/competitive-positioning/` — Competitive positioning skill with scripts and references
+- `founder-skills/agents/competitive-positioning.md` — Competitive positioning agent definition
+- `founder-skills/tests/test_competitive_positioning.py` — Competitive positioning regression tests
+- `founder-skills/tests/test_visualize_competitive_positioning.py` — Competitive positioning HTML visualization tests
 - `artifacts/` — Persistent working directory for skill run artifacts (gitignored, created at runtime)
 
 ## Plugin Structure
@@ -82,6 +86,16 @@
 - **`apply_corrections.py`** — Processes founder's downloaded corrections file: coerces, normalizes, merges overrides, writes corrected_inputs.json + extraction_corrections.json
 - **`verify_review.py`** — Review completeness gate: checks artifact existence, content quality (evidence, critical fields, metrics), and cross-artifact consistency; exit 0 = publishable, exit 1 = gaps
 
+## Competitive Positioning Scripts
+
+- **`validate_landscape.py`** — Validates competitor list structure, checks slug uniqueness, preserves provenance
+- **`score_moats.py`** — Scores 6+ moat dimensions per company with aggregates and cross-company comparison
+- **`score_positioning.py`** — Scores pair-centric positioning views with rank-based differentiation and vanity detection
+- **`checklist.py`** — Scores ~25 quality criteria across 6 categories with mode-based gating
+- **`compose_report.py`** — Assembles report with cross-artifact validation, warning system, and accepted warnings
+- **`visualize.py`** — Generates self-contained HTML with SVG positioning map, moat radar, competitor table; outputs HTML (not JSON)
+- **`explore.py`** — Generates interactive HTML explorer with Chart.js scatter plot, view switching, bubble encoding controls, and company detail panels; outputs HTML (not JSON). Requires network for Chart.js CDN (inlining deferred to follow-up)
+
 ## Dev Setup
 
 Install dev dependencies:
@@ -108,6 +122,7 @@ uv run mypy founder-skills/skills/market-sizing/scripts/
 uv run mypy founder-skills/skills/deck-review/scripts/
 uv run mypy founder-skills/skills/ic-sim/scripts/
 uv run mypy founder-skills/skills/financial-model-review/scripts/
+uv run mypy founder-skills/skills/competitive-positioning/scripts/
 uv run mypy founder-skills/tests/
 ```
 
