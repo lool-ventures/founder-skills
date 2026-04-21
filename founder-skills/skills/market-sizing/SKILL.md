@@ -1,7 +1,7 @@
 ---
 name: market-sizing
 disable-model-invocation: true
-description: "Builds credible TAM/SAM/SOM analysis with external validation and sensitivity testing for startup fundraising. Use when user asks to 'size this market', 'what's the TAM', 'analyze this market', 'validate these market numbers', 'review the market sizing slide', 'is this market big enough', 'market sizing', 'TAM/SAM/SOM', 'stress-test market assumptions', or provides a pitch deck, financial model, or market data for analysis. Supports top-down, bottom-up, or dual-methodology approaches. Do NOT use for general market research without sizing, competitive landscape analysis, or financial model review (use financial-model-review)."
+description: "Builds credible TAM/SAM/SOM analysis with external validation and sensitivity testing for startup fundraising. Supports top-down, bottom-up, or dual-methodology approaches."
 compatibility: Requires Python 3.10+ and uv for script execution.
 metadata:
   author: lool-ventures

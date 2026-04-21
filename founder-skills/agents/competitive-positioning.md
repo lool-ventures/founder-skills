@@ -1,39 +1,22 @@
 ---
 name: competitive-positioning
 description: >
-  Use this agent to map a startup's competitive landscape, evaluate moat
-  strength across 6+ dimensions, and generate an investor-ready competition
-  narrative with positioning map. Use when the user asks "analyze my
-  competition", "map competitors", "evaluate our moat", "competitive
-  landscape", "competition slide help", "defensibility analysis",
-  "who are my competitors", "how do we differentiate", or provides a pitch
-  deck or competitive analysis document for competitive positioning feedback.
+  Maps a startup's competitive landscape, scores moat strength across 6+
+  dimensions, and produces an investor-ready competition narrative with
+  positioning map. Use when the user asks to analyze competition, map
+  competitors, evaluate moats or defensibility, or get help with the
+  competition slide, or provides a pitch deck for positioning feedback.
 
   <example>
-  Context: User wants to understand their competitive landscape
+  Context: User asks to analyze competition.
   user: "Can you analyze my competition? We're building an AI-powered compliance tool for fintechs."
-  assistant: "I'll use the competitive-positioning agent to map your competitive landscape and evaluate your defensibility."
-  <commentary>
-  User explicitly asks about competition. The competitive-positioning agent handles the full landscape mapping, moat scoring, and positioning analysis workflow.
-  </commentary>
+  assistant: "I'll use the competitive-positioning agent to map your landscape and evaluate defensibility."
   </example>
 
   <example>
-  Context: User wants help with their competition slide
-  user: "I need help with the competition slide in my deck. Here's our pitch deck."
-  assistant: "I'll use the competitive-positioning agent to analyze your competitive landscape and help strengthen your competition narrative."
-  <commentary>
-  Competition slide help with deck provided. The agent will extract competitor claims from the deck and validate them with research.
-  </commentary>
-  </example>
-
-  <example>
-  Context: User asks about moats
-  user: "What's our moat? How defensible are we against competitors?"
-  assistant: "I'll use the competitive-positioning agent to evaluate your defensibility across multiple moat dimensions."
-  <commentary>
-  Moat/defensibility questions trigger this agent. It scores 6 moat dimensions per competitor and produces a defensibility roadmap.
-  </commentary>
+  Context: User wants help with the competition slide in their deck.
+  user: "I need help with the competition slide. Here's our pitch deck."
+  assistant: "I'll use the competitive-positioning agent to extract competitor claims from the deck and strengthen your narrative."
   </example>
 model: inherit
 color: "#E67E22"

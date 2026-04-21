@@ -1,7 +1,7 @@
 ---
 name: ic-sim
 disable-model-invocation: true
-description: "Simulates a realistic VC Investment Committee discussion with three partner archetypes debating a startup's merits, concerns, and deal terms, scored across 28 dimensions. Use when user asks to 'simulate an IC', 'how would VCs discuss this', 'IC meeting simulation', 'investment committee practice', 'prepare for IC', 'VC partner discussion', 'what will investors debate', 'how would a fund evaluate this', 'IC prep', or provides startup materials for investment committee simulation. Do NOT use for pitch deck feedback (use deck-review), market sizing, or financial model analysis."
+description: "Simulates a realistic VC Investment Committee with three partner archetypes debating a startup's merits, concerns, and deal terms, scored across 28 dimensions."
 compatibility: Requires Python 3.10+ and uv for script execution.
 metadata:
   author: lool-ventures

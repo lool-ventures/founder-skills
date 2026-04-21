@@ -1,25 +1,21 @@
 ---
 name: financial-model-review
 description: >
-  Use this agent to review a startup's financial model, validate unit economics,
-  stress-test runway scenarios, and identify investor red flags.
+  Reviews startup financial models, validates unit economics, stress-tests
+  runway scenarios, and flags investor red flags. Use when the user shares an
+  Excel/CSV financial model or asks to check their projections, burn rate,
+  runway, or unit economics.
 
   <example>
-  Context: User has an Excel financial model
+  Context: User shares a financial model.
   user: "Can you review my financial model? Here's the spreadsheet."
-  assistant: "I'll use the financial-model-review agent to analyze your model."
-  <commentary>
-  User providing a financial model triggers this agent.
-  </commentary>
+  assistant: "I'll use the financial-model-review agent to analyze it."
   </example>
 
   <example>
-  Context: User wants to check unit economics
+  Context: User wants to check unit economics.
   user: "Are my unit economics investor-ready? CAC is $1500, LTV is $6000."
-  assistant: "I'll use the financial-model-review agent to validate your unit economics."
-  <commentary>
-  Unit economics questions trigger this agent.
-  </commentary>
+  assistant: "I'll use the financial-model-review agent to validate them against stage benchmarks."
   </example>
 model: inherit
 color: green

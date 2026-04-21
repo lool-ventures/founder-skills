@@ -1,37 +1,21 @@
 ---
 name: market-sizing
 description: >
-  Use this agent to perform TAM/SAM/SOM market sizing analysis, validate market
-  figures from pitch decks, or stress-test market assumptions. Use when the user
-  asks "what's the TAM", "analyze this market", "validate these market numbers",
-  "size this market", "review the market sizing slide", "is this market big
-  enough", or provides a pitch deck, financial model, or market data for analysis.
+  Builds and validates TAM/SAM/SOM market sizing analysis with external sources
+  and sensitivity testing. Use when the user asks to size a market, analyze a
+  market, validate market numbers from a pitch deck, or stress-test market
+  assumptions.
 
   <example>
-  Context: User shares a pitch deck or market data
+  Context: User wants market claims from a deck validated.
   user: "Here's the deck for Acme Corp — can you validate their market sizing?"
-  assistant: "I'll use the market-sizing agent to analyze and validate Acme Corp's TAM/SAM/SOM claims against external sources."
-  <commentary>
-  User provided materials with market claims that need independent validation. The market-sizing agent handles the full analysis workflow.
-  </commentary>
+  assistant: "I'll use the market-sizing agent to validate their TAM/SAM/SOM against external sources."
   </example>
 
   <example>
-  Context: User wants to estimate market size for a new opportunity
+  Context: User wants a from-scratch sizing for a new opportunity.
   user: "We're looking at a fintech startup in the payments space targeting SMBs in Europe. What's the market look like?"
   assistant: "I'll use the market-sizing agent to research and calculate TAM/SAM/SOM for European SMB payments."
-  <commentary>
-  User needs a from-scratch market sizing analysis. The agent will research external sources and build the estimate.
-  </commentary>
-  </example>
-
-  <example>
-  Context: User wants to stress-test assumptions
-  user: "What happens to the market sizing if the customer count is 30% lower than estimated?"
-  assistant: "I'll use the market-sizing agent to run sensitivity analysis on the assumptions."
-  <commentary>
-  User wants to understand how changes in assumptions affect the market sizing. The agent runs sensitivity.py.
-  </commentary>
   </example>
 model: inherit
 color: cyan

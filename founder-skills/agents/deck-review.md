@@ -1,37 +1,22 @@
 ---
 name: deck-review
 description: >
-  Use this agent to review startup pitch decks against 2026 investor best
-  practices. Use when the user asks "review my deck", "pitch deck feedback",
-  "check my slides", "is my deck ready", "critique this pitch deck",
-  "what's wrong with my deck", or provides a pitch deck (PDF, PPTX, markdown,
-  or text) for evaluation. Covers pre-seed, seed, and Series A.
+  Reviews startup pitch decks (pre-seed, seed, Series A) against 2026 investor
+  best practices, producing a scored assessment with specific recommendations.
+  Use when the user asks to review their deck, check whether it's
+  investor-ready, critique their slides, or provides a pitch deck (PDF, PPTX,
+  markdown, or text) for evaluation.
 
   <example>
-  Context: User shares a pitch deck for review
+  Context: User shares a pitch deck for review.
   user: "Here's our seed deck — can you review it?"
-  assistant: "I'll use the deck-review agent to analyze your deck against 2026 best practices and provide a scored assessment with specific recommendations."
-  <commentary>
-  User provided a deck for review. The deck-review agent handles the full structured review workflow.
-  </commentary>
+  assistant: "I'll use the deck-review agent to score it against 2026 best practices and return specific recommendations."
   </example>
 
   <example>
-  Context: User wants to know if their deck is investor-ready
+  Context: User wants a readiness check at a specific stage.
   user: "Is this deck ready to send to investors? We're raising a pre-seed round."
-  assistant: "I'll use the deck-review agent to evaluate your deck against pre-seed stage expectations and investor best practices."
-  <commentary>
-  User wants readiness assessment. The agent detects stage, applies stage-specific criteria, and produces a scored review.
-  </commentary>
-  </example>
-
-  <example>
-  Context: User describes their slides as text
-  user: "I have 10 slides: Slide 1 is our company intro with the tagline 'AI-powered compliance for fintechs'..."
-  assistant: "I'll use the deck-review agent to review your deck based on the slide descriptions you've provided."
-  <commentary>
-  User provides text descriptions instead of a file. The agent adapts to text input.
-  </commentary>
+  assistant: "I'll use the deck-review agent with pre-seed stage criteria and return a scored review."
   </example>
 model: inherit
 color: magenta

@@ -1,37 +1,21 @@
 ---
 name: ic-sim
 description: >
-  Use this agent to simulate a VC Investment Committee discussion about a startup.
-  Use when the user asks "simulate an IC", "how would VCs discuss this", "IC meeting
-  simulation", "investment committee practice", "prepare for IC", "VC partner discussion",
-  "what will investors debate", "how would a fund evaluate this", "IC prep", or provides
-  startup materials for investment committee simulation.
+  Simulates a VC Investment Committee discussion with three partner archetypes
+  debating a startup's merits, concerns, and deal terms, scored across 28
+  dimensions. Use when the user asks to simulate an IC, prepare for an IC,
+  hear what partners would debate, or how a specific fund would evaluate them.
 
   <example>
-  Context: User wants to prepare for IC meetings
+  Context: User wants to prepare for IC meetings.
   user: "Can you simulate an IC discussion for our startup? We're raising a seed round."
-  assistant: "I'll use the ic-sim agent to simulate a realistic Investment Committee discussion with three partner archetypes debating your startup."
-  <commentary>
-  User wants IC preparation. The ic-sim agent handles the full simulation workflow with partner assessments and debate.
-  </commentary>
+  assistant: "I'll use the ic-sim agent to run a realistic IC with three partner archetypes debating your startup."
   </example>
 
   <example>
-  Context: User wants to know how a specific fund would evaluate them
+  Context: User wants to simulate a specific fund's IC.
   user: "How would Sequoia's partners discuss our company in their IC?"
-  assistant: "I'll use the ic-sim agent in fund-specific mode to research Sequoia's partners and simulate their IC discussion."
-  <commentary>
-  User wants fund-specific simulation. The agent will use WebSearch to research the fund before simulating.
-  </commentary>
-  </example>
-
-  <example>
-  Context: User already ran market sizing and deck review
-  user: "I just did market sizing and a deck review -- now simulate the IC"
-  assistant: "I'll use the ic-sim agent to simulate an IC, importing your prior market sizing and deck review artifacts."
-  <commentary>
-  User has prior artifacts. The agent imports them to ground the IC simulation in validated data.
-  </commentary>
+  assistant: "I'll use the ic-sim agent in fund-specific mode to research Sequoia's partners and simulate their IC."
   </example>
 model: inherit
 color: orange
