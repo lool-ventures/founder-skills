@@ -5,7 +5,7 @@ description: "Reviews startup financial models for investor readiness — valida
 compatibility: Requires Python 3.10+ and uv for script execution. openpyxl required for Excel parsing.
 metadata:
   author: lool-ventures
-  version: "0.2.0"
+  version: "0.3.0"
 imports:
   - "market-sizing:sizing.json (optional — validate revenue-to-SOM consistency)"
   - "deck-review:checklist.json (optional — cross-check model-to-deck number alignment)"

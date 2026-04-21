@@ -5,7 +5,7 @@ description: "Scores and strengthens startup pitch decks (pre-seed through Serie
 compatibility: Requires Python 3.10+ and uv for script execution.
 metadata:
   author: lool-ventures
-  version: "0.2.0"
+  version: "0.3.0"
 exports:
   - "checklist.json -> financial-model-review, ic-sim, fundraise-readiness"
 ---

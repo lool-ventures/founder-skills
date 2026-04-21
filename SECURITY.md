@@ -18,6 +18,8 @@ Security-relevant code in this project includes scripts that process user input:
 - `founder-skills/skills/market-sizing/scripts/` — market sizing calculators and validators
 - `founder-skills/skills/deck-review/scripts/` — deck review scoring and report assembly
 - `founder-skills/skills/ic-sim/scripts/` — IC simulation scoring and conflict detection
+- `founder-skills/skills/financial-model-review/scripts/` — financial model extraction, validation, and scoring
+- `founder-skills/skills/competitive-positioning/scripts/` — competitor landscape validation, moat scoring, and positioning analysis
 
 All scripts accept structured input (JSON/CLI arguments) and produce structured output. The primary risk surface is malformed input leading to unexpected behavior.
 

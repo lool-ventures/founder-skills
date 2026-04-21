@@ -5,7 +5,7 @@ description: "Simulates a realistic VC Investment Committee with three partner a
 compatibility: Requires Python 3.10+ and uv for script execution.
 metadata:
   author: lool-ventures
-  version: "0.2.0"
+  version: "0.3.0"
 imports:
   - "market-sizing:sizing.json (recommended — fund alignment and market validation)"
   - "deck-review:checklist.json (recommended — deck quality assessment)"

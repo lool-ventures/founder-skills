@@ -5,7 +5,7 @@ description: "Maps a startup's competitive landscape, scores moat strength acros
 compatibility: Requires Python 3.10+ and uv for script execution.
 metadata:
   author: lool-ventures
-  version: "0.2.0"
+  version: "0.3.0"
 imports:
   - "deck-review:checklist.json (optional — competition slide claims for cross-validation)"
   - "market-sizing:sizing.json (optional — validate market claims in positioning)"

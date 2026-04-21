@@ -76,7 +76,7 @@ Good analysis acknowledges uncertainty. Skills are designed to pressure-test the
 
 - **Sensitivity analysis** varies each parameter independently and ranks by impact on the bottom line (SOM swing)
 - **Confidence-based range widening** automatically expands ranges for less-certain inputs: `sourced` assumptions get no minimum range, `derived` assumptions get ±30%, `agent_estimate` gets ±50%
-- **Self-check checklists** score the analysis against known pitfalls (22 items for market sizing, 35 for deck review, 46 for financial model review, 28 for IC simulation)
+- **Self-check checklists** score the analysis against known pitfalls (22 items for market sizing, 35 for deck review, 46 for financial model review, 28 for IC simulation, 25 for competitive positioning)
 
 If a checklist item fails, the report flags it. The agent doesn't hide weaknesses — it explains them and coaches on how to address them.
 
