@@ -770,17 +770,17 @@ def test_compose_stale_artifact_mismatched_run_ids() -> None:
     """Mismatched run_id across artifacts triggers STALE_ARTIFACT warning."""
     import copy
 
-    inputs = copy.deepcopy(_VALID_INPUTS)
+    inputs: dict[str, Any] = copy.deepcopy(_VALID_INPUTS)
     inputs["metadata"] = {"run_id": "run-001"}
-    methodology = copy.deepcopy(_VALID_METHODOLOGY)
+    methodology: dict[str, Any] = copy.deepcopy(_VALID_METHODOLOGY)
     methodology["metadata"] = {"run_id": "run-001"}
-    validation = copy.deepcopy(_VALID_VALIDATION)
+    validation: dict[str, Any] = copy.deepcopy(_VALID_VALIDATION)
     validation["metadata"] = {"run_id": "run-001"}
-    sizing = copy.deepcopy(_VALID_SIZING)
+    sizing: dict[str, Any] = copy.deepcopy(_VALID_SIZING)
     sizing["metadata"] = {"run_id": "run-002"}  # stale!
-    sensitivity = copy.deepcopy(_VALID_SENSITIVITY)
+    sensitivity: dict[str, Any] = copy.deepcopy(_VALID_SENSITIVITY)
     sensitivity["metadata"] = {"run_id": "run-001"}
-    checklist = copy.deepcopy(_VALID_CHECKLIST)
+    checklist: dict[str, Any] = copy.deepcopy(_VALID_CHECKLIST)
     checklist["metadata"] = {"run_id": "run-001"}
     d = _make_artifact_dir(
         {
@@ -803,7 +803,7 @@ def test_compose_matching_run_ids_no_stale_warning() -> None:
     """Matching run_id across all artifacts produces no STALE_ARTIFACT warning."""
     import copy
 
-    artifacts = {
+    artifacts: dict[str, dict[str, Any]] = {
         "inputs.json": copy.deepcopy(_VALID_INPUTS),
         "methodology.json": copy.deepcopy(_VALID_METHODOLOGY),
         "validation.json": copy.deepcopy(_VALID_VALIDATION),

@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from typing import Any
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DECK_REVIEW_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "deck-review", "scripts")
@@ -721,13 +722,13 @@ def test_compose_stale_artifact_mismatched_run_ids() -> None:
     """Mismatched run_id across artifacts triggers STALE_ARTIFACT warning."""
     import copy
 
-    inventory = copy.deepcopy(_VALID_INVENTORY)
+    inventory: dict[str, Any] = copy.deepcopy(_VALID_INVENTORY)
     inventory["metadata"] = {"run_id": "run-001"}
-    profile = copy.deepcopy(_VALID_PROFILE)
+    profile: dict[str, Any] = copy.deepcopy(_VALID_PROFILE)
     profile["metadata"] = {"run_id": "run-001"}
-    reviews = copy.deepcopy(_VALID_REVIEWS)
+    reviews: dict[str, Any] = copy.deepcopy(_VALID_REVIEWS)
     reviews["metadata"] = {"run_id": "run-002"}  # stale!
-    checklist = copy.deepcopy(_VALID_CHECKLIST)
+    checklist: dict[str, Any] = copy.deepcopy(_VALID_CHECKLIST)
     checklist["metadata"] = {"run_id": "run-001"}
     d = _make_artifact_dir(
         {
@@ -748,7 +749,7 @@ def test_compose_matching_run_ids_no_stale_warning() -> None:
     """Matching run_id across all artifacts produces no STALE_ARTIFACT warning."""
     import copy
 
-    artifacts = {
+    artifacts: dict[str, dict[Any, Any]] = {
         "deck_inventory.json": copy.deepcopy(_VALID_INVENTORY),
         "stage_profile.json": copy.deepcopy(_VALID_PROFILE),
         "slide_reviews.json": copy.deepcopy(_VALID_REVIEWS),

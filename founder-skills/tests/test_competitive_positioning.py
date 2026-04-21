@@ -1019,6 +1019,7 @@ class TestScorePositioning:
         payload_baseline = _make_valid_positioning_input()
         rc_base, data_base, _ = run_script("score_positioning.py", stdin_data=json.dumps(payload_baseline))
         assert rc_base == 0
+        assert data_base is not None
         payload = _make_valid_positioning_input()
         for point in payload["views"][0]["points"]:
             point["slug"] = point.pop("competitor")
@@ -2053,6 +2054,7 @@ class TestCompose:
             _make_artifact_dir(tmp)
             rc_base, data_base, _ = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
             assert rc_base == 0
+            assert data_base is not None
             base_incomplete = [w for w in data_base["warnings"] if w.get("code") == "INCOMPLETE_SCORING"]
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -2090,6 +2092,7 @@ class TestCompose:
 
             rc_base, data_base, _ = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
             assert rc_base == 0
+            assert data_base is not None
             base_override_count = data_base["metadata"]["founder_override_count"]
             assert base_override_count > 0, "Baseline must have at least one founder_override"
 
