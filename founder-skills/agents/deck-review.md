@@ -20,7 +20,7 @@ description: >
   </example>
 model: inherit
 color: magenta
-tools: ["Read", "Bash", "Task", "Glob", "Grep"]
+tools: ["Read", "Write", "Edit", "Bash", "Task", "Glob", "Grep"]
 skills: ["deck-review"]
 ---
 

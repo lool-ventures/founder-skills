@@ -19,7 +19,7 @@ description: >
   </example>
 model: inherit
 color: cyan
-tools: ["Read", "Bash", "WebSearch", "WebFetch", "Task", "Glob", "Grep"]
+tools: ["Read", "Write", "Edit", "Bash", "WebSearch", "WebFetch", "Task", "Glob", "Grep"]
 skills: ["market-sizing"]
 ---
 
