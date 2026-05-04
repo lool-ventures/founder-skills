@@ -1,0 +1,82 @@
+name: Version Bump Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check that version bumps when plugin content changes
+        run: |
+          set -euo pipefail
+
+          BASE="origin/${{ github.base_ref }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+
+          # Files that require a version bump when changed.
+          # Mirrors the "No Version Bump Needed" list in VERSIONING.md.
+          # Note: bash `case` glob `*` matches `/`, so `founder-skills/*`
+          # matches any depth under founder-skills/.
+          requires_bump() {
+            case "$1" in
+              founder-skills/tests/*) return 1 ;;
+              .github/*) return 1 ;;
+              docs/*) return 1 ;;
+              *.md) return 1 ;;
+              .gitignore|.editorconfig) return 1 ;;
+              uv.lock) return 1 ;;
+              founder-skills/*) return 0 ;;
+              pyproject.toml) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          mapfile -t CHANGED < <(git diff --name-only "$BASE"..."$HEAD")
+
+          NEEDS_BUMP=0
+          for f in "${CHANGED[@]}"; do
+            if requires_bump "$f"; then
+              echo "  - $f (requires version bump)"
+              NEEDS_BUMP=1
+            fi
+          done
+
+          if [ "$NEEDS_BUMP" -eq 0 ]; then
+            echo "No content changes that require a version bump."
+            exit 0
+          fi
+
+          BASE_VERSION=$(git show "$BASE":founder-skills/.claude-plugin/plugin.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          HEAD_VERSION=$(python3 -c 'import json; print(json.load(open("founder-skills/.claude-plugin/plugin.json"))["version"])')
+
+          echo "Base version: $BASE_VERSION"
+          echo "Head version: $HEAD_VERSION"
+
+          if [ "$BASE_VERSION" = "$HEAD_VERSION" ]; then
+            echo ""
+            echo "ERROR: This PR changes plugin content but does not bump"
+            echo "       founder-skills/.claude-plugin/plugin.json#version."
+            echo ""
+            echo "       The marketplace serves whatever is on main, and"
+            echo "       'claude plugin update' keys off the version field."
+            echo "       Without a bump, installed consumers cannot pick up"
+            echo "       these changes."
+            echo ""
+            echo "       See VERSIONING.md → Release Discipline."
+            exit 1
+          fi
+
+          # Sanity: head version must be strictly greater (lexical SemVer compare via sort -V).
+          GREATER=$(printf '%s\n%s\n' "$BASE_VERSION" "$HEAD_VERSION" | sort -V | tail -1)
+          if [ "$GREATER" != "$HEAD_VERSION" ] || [ "$BASE_VERSION" = "$HEAD_VERSION" ]; then
+            echo "ERROR: Head version ($HEAD_VERSION) must be greater than base ($BASE_VERSION)."
+            exit 1
+          fi
+
+          echo "Version bumped: $BASE_VERSION -> $HEAD_VERSION"

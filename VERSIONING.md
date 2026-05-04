@@ -68,6 +68,27 @@ Write for the founder, not the developer.
 - ...
 ```
 
+## Release Discipline
+
+Two non-negotiable rules. CI enforces the second mechanically (see `.github/workflows/version-check.yml`).
+
+### 1. `main` is the only canonical release branch
+
+The marketplace clone tracks `main`. A release that lives on a feature branch — even if tagged — has not been released to consumers.
+
+- Every release must merge to `main`. No long-lived `release/*` branches as a substitute.
+- Tagging is a courtesy for `git log` archeology; the `version` field on `main` is what users actually see.
+
+### 2. Every content change on `main` must bump the version
+
+`claude plugin update` keys off `plugin.json#version`. If two commits land on `main` under the same version, the second is invisible to anyone who installed at the first — `update` becomes a permanent no-op for them.
+
+- Treat `plugin.json#version` as immutable per `main` commit-state.
+- If you've already pushed `0.4.0` and need to add a fix: bump to `0.4.1`. Don't sneak fixes under the existing version.
+- The version bump should be the **last** commit of a release branch (or part of the merge commit) — never the first. If you bump early and then add more commits, bump again before merging.
+
+The "No Version Bump Needed" cases above (test-only changes, CI workflow changes, etc.) are exceptions enforced by the path filter in the CI check.
+
 ## How to Release
 
 Releases are manual. On version bump:
@@ -75,7 +96,7 @@ Releases are manual. On version bump:
 1. Update `version` in `founder-skills/.claude-plugin/plugin.json`
 2. Update `version` in `pyproject.toml` to match
 3. Update `CHANGELOG.md` — move items from `[Unreleased]` to the new version, add `### Highlights`
-4. Commit, push to `main`
+4. Commit, push to `main` (this should be the **last** commit of the release; if more fixes follow, bump the patch version again)
 5. Tag and create a GitHub Release:
 
 ```bash
