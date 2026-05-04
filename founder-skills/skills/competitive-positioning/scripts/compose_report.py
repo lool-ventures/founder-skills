@@ -22,6 +22,7 @@ import argparse
 import json
 import os
 import sys
+import uuid
 from datetime import date
 from typing import Any, TypeGuard
 
@@ -51,6 +52,8 @@ WARNING_SEVERITY: dict[str, str] = {
     "INCOMPLETE_SCORING": "medium",
     # Low
     "FOUNDER_OVERRIDE_COUNT": "low",
+    # v0.4.2 Mitigation 2 — informational only (uuid is per-run, won't collide)
+    "MARKER_COLLISION": "low",
     # Info
     "SEQUENTIAL_FALLBACK": "info",
     "CHECKLIST_ALL_PASS": "info",
@@ -77,6 +80,7 @@ WARNING_LABELS: dict[str, str] = {
     "MISSING_CANONICAL_MOAT": "Missing Canonical Moat",
     "INCOMPLETE_SCORING": "Incomplete Scoring",
     "FOUNDER_OVERRIDE_COUNT": "Founder Override Count",
+    "MARKER_COLLISION": "Marker Collision",
     "SEQUENTIAL_FALLBACK": "Sequential Fallback",
     "CHECKLIST_ALL_PASS": "Checklist All Pass",
 }
@@ -547,8 +551,17 @@ def validate_artifacts(
 
     # 9. CHECKLIST_ALL_PASS — suspicious perfect score
     checklist = artifacts.get("checklist.json")
-    if _usable(checklist) and checklist.get("fail_count", 0) == 0 and checklist.get("warn_count", 0) == 0:
-        warnings.append(_warn("CHECKLIST_ALL_PASS", "All checklist items passed — review for self-grading bias"))
+    if _usable(checklist):
+        # Prefer summary block (post-v0.4.2), fall back to legacy flat fields.
+        cl_summary = _as_dict(checklist.get("summary"))
+        if cl_summary:
+            fail_c = cl_summary.get("fail", 0)
+            warn_c = cl_summary.get("warn", 0)
+        else:
+            fail_c = checklist.get("fail_count", 0)
+            warn_c = checklist.get("warn_count", 0)
+        if fail_c == 0 and warn_c == 0:
+            warnings.append(_warn("CHECKLIST_ALL_PASS", "All checklist items passed — review for self-grading bias"))
 
     # 10. FOUNDER_OVERRIDE_COUNT
     if _usable(positioning):
@@ -621,7 +634,9 @@ def _section_executive_summary(
 
     checklist_score = None
     if checklist is not None and not _is_stub(checklist):
-        checklist_score = checklist.get("score_pct")
+        # Prefer summary block (post-v0.4.2), fall back to legacy flat field.
+        cl_summary = _as_dict(checklist.get("summary"))
+        checklist_score = cl_summary.get("score_pct") if cl_summary else checklist.get("score_pct")
         if checklist_score is not None:
             lines.append(f"**Analysis Quality Score:** {checklist_score}%")
 
@@ -839,7 +854,9 @@ def _section_key_findings(
 
     # From checklist
     if checklist is not None and not _is_stub(checklist):
-        score = checklist.get("score_pct")
+        # Prefer summary block (post-v0.4.2), fall back to legacy flat field.
+        cl_summary = _as_dict(checklist.get("summary"))
+        score = cl_summary.get("score_pct") if cl_summary else checklist.get("score_pct")
         if isinstance(score, (int, float)):
             if score >= 80:
                 findings.append(f"Analysis quality score of {score}% indicates a thorough competitive analysis.")
@@ -891,7 +908,42 @@ def _section_warnings(warnings: list[dict[str, Any]]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def compose(dir_path: str) -> dict[str, Any]:
+def _emit_coaching_payload(
+    product_profile: dict[str, Any],
+    checklist: dict[str, Any],
+    warnings: list[dict[str, Any]],
+    review_dir: str,
+    report_path: str,
+    insertion_marker: str,
+) -> dict[str, Any]:
+    """Build the v0.4.2 coaching_payload for competitive-positioning.
+
+    Read from existing artifacts; do not fabricate fields.
+    No stage or is_ai_company fields (no analog in this skill).
+    """
+    summary = _as_dict(checklist.get("summary"))
+    return {
+        "schema_version": "v0.4.2-competitive-positioning",
+        "summary": {
+            "score_pct": summary.get("score_pct"),
+            "overall_status": summary.get("overall_status"),
+            "total": summary.get("total"),
+            "pass": summary.get("pass"),
+            "fail": summary.get("fail"),
+            "warn": summary.get("warn"),
+            "not_applicable": summary.get("not_applicable"),
+        },
+        "failed_items": summary.get("failed_items", []),
+        "warned_items": summary.get("warned_items", []),
+        "high_severity_warnings": [w["code"] for w in warnings if w.get("severity") == "high"],
+        "company_name": product_profile.get("company_name"),
+        "review_dir": review_dir,
+        "report_path": report_path,
+        "insertion_marker": insertion_marker,
+    }
+
+
+def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     """Main composition: load artifacts, validate, assemble report."""
     all_names = REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS
     artifacts: dict[str, dict[str, Any] | None] = {}
@@ -969,8 +1021,28 @@ def compose(dir_path: str) -> dict[str, Any]:
     ]
 
     report_markdown = "\n".join(s for s in sections if s)
+
+    # v0.4.2 Mitigation 2: per-run uuid marker for Context B's Edit
+    marker = f"<!-- COACHING_INSERTION_POINT_{uuid.uuid4().hex[:8]} -->"
+
+    # Pre-scan: check assembled body BEFORE appending the marker (otherwise we
+    # always find our own emission). Agent post-Edit verification uses the
+    # EXACT uuid (per-run), so substring collisions with body content are
+    # informational only — but worth flagging so authors can sanitize.
+    if "<!-- COACHING_INSERTION_POINT_" in report_markdown:
+        warnings.append(
+            _warn(
+                "MARKER_COLLISION",
+                (
+                    "Body content contains marker substring; agent post-Edit verification "
+                    "uses the EXACT uuid (per-run) so this is informational only — "
+                    "body sanitization recommended."
+                ),
+            )
+        )
+
     report_markdown += (
-        "\n---\n"
+        f"\n\n{marker}\n\n---\n"
         "*Generated by [founder skills](https://github.com/lool-ventures/founder-skills)"
         " by [lool ventures](https://lool.vc)"
         " — Competitive Positioning Coach*\n"
@@ -1018,7 +1090,9 @@ def compose(dir_path: str) -> dict[str, Any]:
     # Scoring summary
     checklist_score_pct = 0.0
     if checklist is not None and not _is_stub(checklist):
-        checklist_score_pct = checklist.get("score_pct", 0.0)
+        # Prefer summary block (post-v0.4.2), fall back to legacy flat field.
+        cl_summary = _as_dict(checklist.get("summary"))
+        checklist_score_pct = cl_summary.get("score_pct", 0.0) if cl_summary else checklist.get("score_pct", 0.0)
 
     overall_differentiation = 0.0
     if positioning_scores is not None and not _is_stub(positioning_scores):
@@ -1053,6 +1127,18 @@ def compose(dir_path: str) -> dict[str, Any]:
     else:
         print("No warnings.", file=sys.stderr)
 
+    # v0.4.2 Mitigation 2: structured coaching payload for Context B agent.
+    # Use the same uuid marker generated above as the single source of truth.
+    resolved_report_path = report_path or os.path.join(os.path.abspath(dir_path), "report.md")
+    coaching_payload = _emit_coaching_payload(
+        product_profile=_as_dict(product_profile),
+        checklist=_as_dict(checklist),
+        warnings=warnings,
+        review_dir=os.path.abspath(dir_path),
+        report_path=resolved_report_path,
+        insertion_marker=marker,
+    )
+
     return {
         "report_markdown": report_markdown,
         "metadata": {
@@ -1072,6 +1158,7 @@ def compose(dir_path: str) -> dict[str, Any]:
             "overall_differentiation": overall_differentiation,
             "startup_defensibility": startup_defensibility,
         },
+        "coaching_payload": coaching_payload,
     }
 
 
@@ -1085,6 +1172,10 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Exit 1 if any high-severity warnings",
     )
+    p.add_argument(
+        "--write-md",
+        help="Also write the report markdown to this path (in addition to JSON output via -o)",
+    )
     return p.parse_args()
 
 
@@ -1095,7 +1186,25 @@ def main() -> None:
         print(f"Error: directory not found: {args.dir}", file=sys.stderr)
         sys.exit(1)
 
-    result = compose(args.dir)
+    report_path = os.path.abspath(args.write_md) if args.write_md else None
+    result = compose(args.dir, report_path=report_path)
+
+    if args.write_md:
+        report_markdown = result.get("report_markdown", "")
+        md_path = os.path.abspath(args.write_md)
+        parent = os.path.dirname(md_path)
+        if parent:
+            try:
+                os.makedirs(parent, exist_ok=True)
+            except OSError as e:
+                print(f"Error: cannot create directory for --write-md: {e}", file=sys.stderr)
+                sys.exit(2)
+        try:
+            with open(md_path, "w", encoding="utf-8") as f:
+                f.write(report_markdown if report_markdown.endswith("\n") else report_markdown + "\n")
+        except OSError as e:
+            print(f"Error: cannot write --write-md file: {e}", file=sys.stderr)
+            sys.exit(2)
 
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"
@@ -1108,6 +1217,24 @@ def main() -> None:
             "artifacts_loaded": len(result["artifacts_loaded"]),
         },
     )
+
+    # Post-write on-disk verification: confirm declared output files exist and are non-empty.
+    if args.output:
+        abs_out = os.path.abspath(args.output)
+        if not os.path.isfile(abs_out) or os.path.getsize(abs_out) == 0:
+            print(
+                f"Error: output file missing or empty after write: {abs_out}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+    if args.write_md:
+        abs_md = os.path.abspath(args.write_md)
+        if not os.path.isfile(abs_md) or os.path.getsize(abs_md) == 0:
+            print(
+                f"Error: --write-md file missing or empty after write: {abs_md}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
 
     if args.strict:
         blocking = [w for w in result["warnings"] if w["severity"] == "high"]

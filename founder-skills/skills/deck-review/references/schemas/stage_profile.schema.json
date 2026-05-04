@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "stage_profile",
+  "type": "object",
+  "required": ["metadata", "detected_stage", "confidence", "evidence", "is_ai_company", "expected_framework", "stage_benchmarks", "reference_file_read"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["run_id"],
+      "properties": {"run_id": {"type": "string"}}
+    },
+    "detected_stage": {"type": "string", "enum": ["pre_seed", "seed", "series_a", "series_b", "growth"]},
+    "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+    "evidence": {"type": "array", "items": {"type": "string"}},
+    "is_ai_company": {"type": "boolean"},
+    "ai_evidence": {"type": "string"},
+    "expected_framework": {"type": "array", "items": {"type": "string"}},
+    "stage_benchmarks": {
+      "type": "object",
+      "required": ["round_size_range", "expected_traction", "runway_expectation"],
+      "properties": {
+        "round_size_range": {"type": "string"},
+        "expected_traction": {"type": "string"},
+        "runway_expectation": {"type": "string"}
+      }
+    },
+    "reference_file_read": {"type": "array", "items": {"type": "string"}},
+    "accepted_warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "reason", "match"],
+        "properties": {
+          "code": {"type": "string"},
+          "reason": {"type": "string"},
+          "match": {"type": "string"}
+        }
+      }
+    }
+  }
+}

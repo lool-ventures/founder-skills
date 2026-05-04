@@ -8,12 +8,18 @@
 Run:  pytest founder-skills/tests/test_founder_context.py -v
 
 All tests use subprocess to exercise the script exactly as agents do.
+
+# Touched in this commit (Task 5 — metadata block migration):
+#   founder-skills/scripts/founder_context.py  — cmd_init, cmd_merge, cmd_update_identity, sp_init --run-id
+#   founder-skills/tests/test_founder_context.py — audit fixes + 2 new tests
+#   Audit found zero hits in other-skill production scripts (no skill reads founder-context last_updated/run_id).
 """
 
 from __future__ import annotations
 
 import json
 import os
+import pathlib
 import subprocess
 import sys
 import tempfile
@@ -63,7 +69,7 @@ def test_init_creates_file() -> None:
         assert data["stage"] == "seed"
         assert data["sector"] == "fintech"
         assert data["geography"] == "US"
-        assert "last_updated" in data
+        assert "last_updated" in data.get("metadata", {})
         # File should exist on disk
         path = os.path.join(root, "founder-context-acme-corp.json")
         assert os.path.isfile(path)
@@ -191,7 +197,9 @@ def test_merge_updates_last_updated() -> None:
         # read initial
         _, data_before, _ = run_context(["read", "--slug", "delta-llc"], artifacts_root=root)
         assert data_before is not None
-        ts_before = data_before["last_updated"]
+        meta_before = data_before.get("metadata", {})
+        ts_before: str = meta_before.get("last_updated") or data_before.get("last_updated") or ""
+        assert ts_before, "Expected last_updated to be set after init"
 
         # merge something
         merge_data = json.dumps({"team_size": 5})
@@ -209,7 +217,9 @@ def test_merge_updates_last_updated() -> None:
         )
         assert rc == 0, f"merge failed: {stderr}"
         assert data_after is not None
-        assert data_after["last_updated"] >= ts_before
+        meta_after = data_after.get("metadata", {})
+        ts_after: str = meta_after.get("last_updated") or data_after.get("last_updated") or ""
+        assert ts_after >= ts_before
 
 
 def test_merge_does_not_overwrite_stable_fields() -> None:
@@ -873,3 +883,81 @@ def test_update_identity_no_context_files_stderr() -> None:
         )
         assert rc == 1
         assert "no founder context files found" in stderr.lower()
+
+
+# --- metadata block ---
+
+
+def test_init_writes_metadata_block_with_run_id(tmp_path: pathlib.Path) -> None:
+    """init produces a metadata block with run_id, review_date, last_updated."""
+    artifacts_root = str(tmp_path / "artifacts")
+    script = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "scripts",
+        "founder_context.py",
+    )
+    res = subprocess.run(
+        [
+            sys.executable,
+            script,
+            "init",
+            "--company-name",
+            "Acme Corp",
+            "--stage",
+            "seed",
+            "--sector",
+            "B2B SaaS",
+            "--geography",
+            "US",
+            "--artifacts-root",
+            artifacts_root,
+            "--run-id",
+            "20260503T120000Z",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stderr
+    with open(os.path.join(artifacts_root, "founder-context-acme-corp.json")) as f:
+        ctx = json.load(f)
+    assert "metadata" in ctx
+    assert ctx["metadata"]["run_id"] == "20260503T120000Z"
+    assert "review_date" in ctx["metadata"]
+    assert "last_updated" in ctx["metadata"]
+    # last_updated and review_date no longer at top level
+    assert "last_updated" not in {k for k in ctx if k != "metadata"}
+
+
+def test_init_generates_run_id_when_not_provided(tmp_path: pathlib.Path) -> None:
+    """init auto-generates a run_id in ISO format when --run-id is omitted."""
+    import re
+
+    artifacts_root = str(tmp_path / "artifacts")
+    script = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "scripts",
+        "founder_context.py",
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            script,
+            "init",
+            "--company-name",
+            "Acme",
+            "--stage",
+            "seed",
+            "--sector",
+            "saas",
+            "--geography",
+            "US",
+            "--artifacts-root",
+            artifacts_root,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    with open(os.path.join(artifacts_root, "founder-context-acme.json")) as f:
+        ctx = json.load(f)
+    assert re.match(r"^\d{8}T\d{6}Z$", ctx["metadata"]["run_id"])

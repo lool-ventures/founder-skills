@@ -604,6 +604,30 @@ def _item_applicable(meta: dict[str, Any], company: dict[str, Any]) -> tuple[boo
 
 _STRUCTURAL_CATEGORIES = {"Structure & Presentation", "Expenses, Cash & Runway"}
 
+# Per-criterion severity classification (v0.4.2 Phase 1 Task 2).
+# Used by Phase 3's coaching_payload to enable severity-sorted truncation
+# (top 15 high + top 15 medium when failed_items + warned_items > 30).
+#
+# Mapping rules:
+#   - high:   cash/runway/burn (core viability) and fundraising bridge.
+#   - medium: revenue/unit-economics, headline metrics, sector-specific,
+#             overall. Default for any future/unknown category.
+#   - low:    structural/formatting issues — cosmetic, not viability-critical.
+_CATEGORY_SEVERITY: dict[str, str] = {
+    "Structure & Presentation": "low",
+    "Revenue & Unit Economics": "medium",
+    "Expenses, Cash & Runway": "high",
+    "Metrics & Efficiency": "medium",
+    "Fundraising Bridge": "high",
+    "Sector-Specific": "medium",
+    "Overall": "medium",
+}
+
+
+def _severity_for_category(category: str) -> str:
+    """Return severity (high|medium|low) for a checklist category. Defaults to medium."""
+    return _CATEGORY_SEVERITY.get(category, "medium")
+
 
 def validate_checklist(
     items: list[dict[str, Any]],
@@ -704,6 +728,7 @@ def validate_checklist(
                     "label": meta["label"],
                     "evidence": evidence,
                     "notes": notes,
+                    "severity": _severity_for_category(category),
                 }
             )
         elif status == "warn":
@@ -716,6 +741,7 @@ def validate_checklist(
                     "label": meta["label"],
                     "evidence": evidence,
                     "notes": notes,
+                    "severity": _severity_for_category(category),
                 }
             )
         elif status == "not_applicable":

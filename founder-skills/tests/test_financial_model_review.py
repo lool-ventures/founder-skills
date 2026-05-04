@@ -456,6 +456,78 @@ def test_checklist_some_fail() -> None:
     assert data["summary"]["score_pct"] < 100.0
 
 
+def test_failed_items_have_severity() -> None:
+    """Every entry in summary.failed_items must carry a severity in {high, medium, low}."""
+    items = _make_checklist_items(
+        overrides={
+            "STRUCT_01": {"status": "fail", "evidence": "Assumptions buried"},
+            "UNIT_11": {"status": "fail", "evidence": "Zero churn"},
+            "CASH_23": {"status": "fail", "evidence": "Runway unclear"},
+        }
+    )
+    payload = json.dumps({"items": items})
+    rc, data, _ = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    failed = data["summary"]["failed_items"]
+    assert len(failed) == 3
+    for entry in failed:
+        assert "severity" in entry, f"failed_item missing severity: {entry}"
+        assert entry["severity"] in {"high", "medium", "low"}, f"unexpected severity {entry['severity']!r} in {entry}"
+
+
+def test_warned_items_have_severity() -> None:
+    """Every entry in summary.warned_items must carry a severity in {high, medium, low}."""
+    items = _make_checklist_items(
+        overrides={
+            "STRUCT_01": {"status": "warn", "evidence": "Assumptions partially exposed"},
+            "UNIT_11": {"status": "warn", "evidence": "Churn estimated"},
+            "CASH_23": {"status": "warn", "evidence": "Runway approximated"},
+        }
+    )
+    payload = json.dumps({"items": items})
+    rc, data, _ = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    warned = data["summary"]["warned_items"]
+    assert len(warned) == 3
+    for entry in warned:
+        assert "severity" in entry, f"warned_item missing severity: {entry}"
+        assert entry["severity"] in {"high", "medium", "low"}, f"unexpected severity {entry['severity']!r} in {entry}"
+
+
+def test_severity_distribution_matches_category_mapping() -> None:
+    """Severity must match category mapping: STRUCT (low), UNIT (medium), CASH (high)."""
+    items = _make_checklist_items(
+        overrides={
+            "STRUCT_01": {"status": "fail", "evidence": "Assumptions buried"},  # Structure & Presentation -> low
+            "UNIT_11": {"status": "fail", "evidence": "Zero churn"},  # Revenue & Unit Economics -> medium
+            "CASH_23": {"status": "fail", "evidence": "Runway unclear"},  # Expenses, Cash & Runway -> high
+        }
+    )
+    payload = json.dumps({"items": items})
+    rc, data, _ = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    by_id = {entry["id"]: entry for entry in data["summary"]["failed_items"]}
+    assert by_id["STRUCT_01"]["severity"] == "low"
+    assert by_id["UNIT_11"]["severity"] == "medium"
+    assert by_id["CASH_23"]["severity"] == "high"
+
+
+def test_existing_summary_fields_unchanged() -> None:
+    """Adding severity must not remove or rename existing failed_items keys."""
+    items = _make_checklist_items(overrides={"STRUCT_01": {"status": "fail", "evidence": "buried"}})
+    payload = json.dumps({"items": items})
+    rc, data, _ = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    entry = data["summary"]["failed_items"][0]
+    # All pre-Phase-1-Task-2 keys still present.
+    for key in ("id", "category", "label", "evidence", "notes"):
+        assert key in entry, f"existing key {key!r} missing from failed_items entry"
+
+
 def test_checklist_gating_unknown_sector_warns() -> None:
     """When sector_type is missing, a warning about sector_type is emitted on stderr."""
     company = {"stage": "seed", "geography": "us", "sector": "fintech", "traits": []}
@@ -2221,6 +2293,337 @@ def test_compose_validation_model_format_default_spreadsheet() -> None:
     assert data["validation"]["model_format"] == "spreadsheet"
 
 
+# --- v0.4.2 Phase 3: coaching_payload + uuid marker + severity truncation ---
+
+
+def _make_fmr_v042_artifact_dir(checklist_overrides: dict | None = None) -> str:
+    """Build a complete FMR artifact dir for v0.4.2 coaching_payload tests."""
+    checklist = {**_VALID_CHECKLIST, **(checklist_overrides or {})}
+    return _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": checklist,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+
+
+def test_compose_severity_map_complete() -> None:
+    """WARNING_SEVERITY contains all expected codes including MARKER_COLLISION."""
+    import subprocess as _subprocess
+
+    snippet = (
+        f"import sys, os; sys.path.insert(0, {FMR_SCRIPTS_DIR!r}); "
+        "from compose_report import WARNING_SEVERITY; "
+        "import json; print(json.dumps(WARNING_SEVERITY))"
+    )
+    result = _subprocess.run([sys.executable, "-c", snippet], capture_output=True, text=True)
+    try:
+        sev_map = json.loads(result.stdout)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise AssertionError(f"can't import WARNING_SEVERITY: stdout={result.stdout}, stderr={result.stderr}") from exc
+
+    expected_codes = [
+        "CORRUPT_ARTIFACT",
+        "MISSING_ARTIFACT",
+        "STALE_ARTIFACT",
+        "CHECKLIST_FAILURES",
+        "MISSING_OPTIONAL_ARTIFACT",
+        "CHECKLIST_INCOMPLETE",
+        "RUNWAY_INCONSISTENCY",
+        "METRICS_GAPS",
+        "MARKER_COLLISION",
+    ]
+    for code in expected_codes:
+        assert code in sev_map, f"WARNING_SEVERITY missing code: {code}"
+    assert sev_map["MARKER_COLLISION"] == "low", "MARKER_COLLISION should be low severity"
+
+
+def test_compose_emits_coaching_payload() -> None:
+    """compose emits a coaching_payload block with all v0.4.2 fields."""
+    import re
+
+    d = _make_fmr_v042_artifact_dir()
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0, stderr
+    assert data is not None
+    assert "coaching_payload" in data, "report.json missing coaching_payload block"
+
+    payload = data["coaching_payload"]
+    assert payload["schema_version"] == "v0.4.2-financial-model-review"
+
+    # All expected top-level keys present
+    for key in (
+        "schema_version",
+        "summary",
+        "failed_items",
+        "warned_items",
+        "high_severity_warnings",
+        "company_name",
+        "review_dir",
+        "report_path",
+        "insertion_marker",
+        "truncated",
+        "truncated_count",
+    ):
+        assert key in payload, f"coaching_payload missing key: {key}"
+
+    # Summary mirrors checklist counts
+    s = payload["summary"]
+    for sk in ("score_pct", "overall_status", "total", "pass", "fail", "warn", "not_applicable"):
+        assert sk in s, f"coaching_payload.summary missing {sk}"
+
+    # Company name sourced from inputs.json → company.company_name
+    assert payload["company_name"] == "TestCo"
+
+    # Insertion marker matches uuid format
+    assert re.fullmatch(r"<!-- COACHING_INSERTION_POINT_[0-9a-f]{8} -->", payload["insertion_marker"]), (
+        f"unexpected marker shape: {payload['insertion_marker']}"
+    )
+
+    # Backward-compat: existing top-level keys still present
+    assert "report_markdown" in data
+    assert "validation" in data
+
+
+def test_compose_inserts_uuid_marker() -> None:
+    """report_markdown contains exactly one uuid marker matching coaching_payload.insertion_marker."""
+    import re
+
+    d = _make_fmr_v042_artifact_dir()
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0, stderr
+    assert data is not None
+
+    md = data["report_markdown"]
+    matches = re.findall(r"<!-- COACHING_INSERTION_POINT_[0-9a-f]{8} -->", md)
+    assert len(matches) == 1, f"expected exactly one marker, found {len(matches)}: {matches}"
+    assert matches[0] == data["coaching_payload"]["insertion_marker"], (
+        "marker in report_markdown must equal coaching_payload.insertion_marker"
+    )
+
+
+def test_compose_warns_on_marker_collision() -> None:
+    """Body content containing the marker substring triggers MARKER_COLLISION (non-fatal)."""
+    # Adversarial: a failed_item evidence string containing the literal marker substring.
+    adversarial_items = [
+        {
+            "id": item_id,
+            "category": "Test",
+            "label": f"Label for {item_id}",
+            "status": "pass",
+            "evidence": f"Evidence for {item_id}",
+            "notes": None,
+        }
+        for item_id in _CHECKLIST_IDS
+    ]
+    adversarial_items[0] = {
+        "id": _CHECKLIST_IDS[0],
+        "category": "Overall",
+        "label": "Test fail",
+        "status": "fail",
+        "evidence": "Sneaky body content with <!-- COACHING_INSERTION_POINT_aaaaaaaa --> embedded",
+        "notes": "Watch out",
+    }
+    checklist_overrides: dict[str, Any] = {
+        "items": adversarial_items,
+        "summary": {
+            "total": 46,
+            "pass": 45,
+            "fail": 1,
+            "warn": 0,
+            "not_applicable": 0,
+            "score_pct": 97.8,
+            "overall_status": "strong",
+            "by_category": {},
+            "failed_items": [
+                {
+                    "id": _CHECKLIST_IDS[0],
+                    "category": "Overall",
+                    "label": "Test fail",
+                    "evidence": "Sneaky body content with <!-- COACHING_INSERTION_POINT_aaaaaaaa --> embedded",
+                    "notes": "Watch out",
+                    "severity": "medium",
+                }
+            ],
+            "warned_items": [],
+        },
+    }
+    d = _make_fmr_v042_artifact_dir(checklist_overrides=checklist_overrides)
+    rc, data, stderr = _run_compose(d)
+    # Compose still succeeds (warning, not error)
+    assert rc == 0, stderr
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "MARKER_COLLISION" in codes, f"expected MARKER_COLLISION in warnings, got: {codes}"
+
+
+def test_payload_arrays_match_summary_counts() -> None:
+    """coaching_payload.failed_items length matches summary.fail; warned_items matches summary.warn (no truncation)."""
+    items = [
+        {
+            "id": item_id,
+            "category": "Test",
+            "label": f"Label for {item_id}",
+            "status": "pass",
+            "evidence": "ok",
+            "notes": None,
+        }
+        for item_id in _CHECKLIST_IDS
+    ]
+    items[0] = {**items[0], "status": "fail", "severity": "medium"}
+    items[1] = {**items[1], "status": "fail", "severity": "medium"}
+    items[2] = {**items[2], "status": "warn", "severity": "low"}
+
+    failed_items = [
+        {"id": _CHECKLIST_IDS[0], "category": "Test", "label": "L0", "evidence": "e", "severity": "medium"},
+        {"id": _CHECKLIST_IDS[1], "category": "Test", "label": "L1", "evidence": "e", "severity": "medium"},
+    ]
+    warned_items = [
+        {"id": _CHECKLIST_IDS[2], "category": "Test", "label": "L2", "evidence": "e", "severity": "low"},
+    ]
+    checklist_overrides: dict[str, Any] = {
+        "items": items,
+        "summary": {
+            "total": 46,
+            "pass": 43,
+            "fail": 2,
+            "warn": 1,
+            "not_applicable": 0,
+            "score_pct": 93.5,
+            "overall_status": "strong",
+            "by_category": {},
+            "failed_items": failed_items,
+            "warned_items": warned_items,
+        },
+    }
+    d = _make_fmr_v042_artifact_dir(checklist_overrides=checklist_overrides)
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0, stderr
+    assert data is not None
+    payload = data["coaching_payload"]
+    assert len(payload["failed_items"]) == payload["summary"]["fail"] == 2
+    assert len(payload["warned_items"]) == payload["summary"]["warn"] == 1
+
+
+def test_payload_truncation_under_30() -> None:
+    """When total actionable items <= 30: truncated=false, truncated_count=0, all items present."""
+    # 10 fails + 10 warns = 20 total — under threshold
+    failed_items = [
+        {
+            "id": f"CASH_{20 + i}",
+            "category": "Expenses, Cash & Runway",
+            "label": f"F{i}",
+            "evidence": "e",
+            "severity": "high",
+        }
+        for i in range(10)
+    ]
+    warned_items = [
+        {
+            "id": f"UNIT_{10 + i}",
+            "category": "Revenue & Unit Economics",
+            "label": f"W{i}",
+            "evidence": "e",
+            "severity": "medium",
+        }
+        for i in range(10)
+    ]
+    checklist_overrides: dict[str, Any] = {
+        "summary": {
+            "total": 46,
+            "pass": 26,
+            "fail": 10,
+            "warn": 10,
+            "not_applicable": 0,
+            "score_pct": 60.0,
+            "overall_status": "major_revision",
+            "by_category": {},
+            "failed_items": failed_items,
+            "warned_items": warned_items,
+        },
+    }
+    d = _make_fmr_v042_artifact_dir(checklist_overrides=checklist_overrides)
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0, stderr
+    assert data is not None
+    payload = data["coaching_payload"]
+    assert payload["truncated"] is False, "should not truncate when total <= 30"
+    assert payload["truncated_count"] == 0
+    assert len(payload["failed_items"]) == 10
+    assert len(payload["warned_items"]) == 10
+
+
+def test_payload_truncation_over_30() -> None:
+    """When total actionable items > 30: truncated=true, severity ordering preserved, dropped_count correct."""
+    # 20 high-severity fails + 15 medium warns = 35 total → 5 dropped
+    # Expected: all 20 high fails + 10 medium warns kept (30 total)
+    failed_items = [
+        {
+            "id": f"CASH_{20 + i}",
+            "category": "Expenses, Cash & Runway",
+            "label": f"HighFail{i}",
+            "evidence": f"e{i}",
+            "severity": "high",
+        }
+        for i in range(20)
+    ]
+    warned_items = [
+        {
+            "id": f"UNIT_{10 + i}",
+            "category": "Revenue & Unit Economics",
+            "label": f"MedWarn{i}",
+            "evidence": f"w{i}",
+            "severity": "medium",
+        }
+        for i in range(15)
+    ]
+    checklist_overrides: dict[str, Any] = {
+        "summary": {
+            "total": 46,
+            "pass": 11,
+            "fail": 20,
+            "warn": 15,
+            "not_applicable": 0,
+            "score_pct": 30.0,
+            "overall_status": "major_revision",
+            "by_category": {},
+            "failed_items": failed_items,
+            "warned_items": warned_items,
+        },
+    }
+    d = _make_fmr_v042_artifact_dir(checklist_overrides=checklist_overrides)
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0, stderr
+    assert data is not None
+    payload = data["coaching_payload"]
+
+    assert payload["truncated"] is True
+    assert payload["truncated_count"] == 5  # 35 - 30
+
+    # Total kept is exactly 30
+    assert len(payload["failed_items"]) + len(payload["warned_items"]) == 30
+
+    # All 20 high-severity fails are kept (high > medium in priority)
+    assert len(payload["failed_items"]) == 20
+
+    # Only 10 of the 15 medium warns are kept
+    assert len(payload["warned_items"]) == 10
+
+    # Severity ordering: all failed_items should be high, all warned_items medium
+    for item in payload["failed_items"]:
+        assert item["severity"] == "high", f"Expected high severity in failed_items: {item}"
+    for item in payload["warned_items"]:
+        assert item["severity"] == "medium", f"Expected medium severity in warned_items: {item}"
+
+    # Original order preserved within each severity tier (first 10 warns kept)
+    kept_warn_ids = [item["id"] for item in payload["warned_items"]]
+    assert kept_warn_ids == [f"UNIT_{10 + i}" for i in range(10)], (
+        f"Original order not preserved in warned_items: {kept_warn_ids}"
+    )
+
+
 # --- B3: burn multiple ARR floor ---
 
 
@@ -3627,3 +4030,124 @@ def test_runway_cash_direction_warning_with_grant_no_profitability() -> None:
     assert base.get("cash_direction_warning") is not None
     # Risk narrative should NOT say "reaches profitability"
     assert "reaches profitability" not in data.get("risk_assessment", "")
+
+
+# === v0.4.1 Phase 3 Task 9: compose on-disk verification + tolerant JSON extraction ===
+
+
+def test_compose_verifies_outputs_exist_after_write(tmp_path: Any) -> None:
+    """After successful compose, both report.json and report.md must exist on disk."""
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    json_path = os.path.join(d, "report.json")
+    md_path = os.path.join(d, "report.md")
+    rc, _, err = run_script(
+        "compose_report.py",
+        ["-d", d, "-o", json_path, "--write-md", md_path],
+    )
+    assert rc == 0, err
+    assert os.path.isfile(json_path)
+    assert os.path.isfile(md_path)
+    assert os.path.getsize(json_path) > 0
+    assert os.path.getsize(md_path) > 0
+
+
+def test_compose_exits_nonzero_if_write_md_path_unwritable(tmp_path: Any) -> None:
+    """Compose must exit nonzero if --write-md target dir doesn't exist and can't be created."""
+    import pathlib
+
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    # Point --write-md at a path inside a read-only parent
+    ro_parent = pathlib.Path(str(tmp_path)) / "readonly"
+    ro_parent.mkdir(mode=0o555)
+    bad_md_path = str(ro_parent / "no-write" / "report.md")
+    json_path = os.path.join(d, "report.json")
+    rc, _, err = run_script(
+        "compose_report.py",
+        ["-d", d, "-o", json_path, "--write-md", bad_md_path],
+    )
+    assert rc != 0, "compose should exit nonzero when --write-md target is unwritable"
+    # Cleanup: restore writable mode so tmp_path can be deleted
+    os.chmod(str(ro_parent), 0o755)
+
+
+# === v0.4.1 Phase 3 Task 9: tolerant JSON extraction from sub-agent messages ===
+
+
+def test_extract_dispatch_json_raw_object() -> None:
+    import sys
+
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "financial-model-review", "scripts"),
+    )
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    assert extract_dispatch_json('{"a": 1, "b": 2}') == {"a": 1, "b": 2}
+
+
+def test_extract_dispatch_json_fenced() -> None:
+    import sys
+
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "financial-model-review", "scripts"),
+    )
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    assert extract_dispatch_json('```json\n{"a": 1}\n```') == {"a": 1}
+
+
+def test_extract_dispatch_json_nested() -> None:
+    """Critical regression test: must not truncate on inner }."""
+    import sys
+
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "financial-model-review", "scripts"),
+    )
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    text = '```json\n{"a": {"b": 1}, "c": 2}\n```'
+    assert extract_dispatch_json(text) == {"a": {"b": 1}, "c": 2}
+
+
+def test_extract_dispatch_json_embedded_in_prose() -> None:
+    import sys
+
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "financial-model-review", "scripts"),
+    )
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    text = 'Here is the result:\n{"a": 1, "b": 2}\nLet me know if anything is wrong.'
+    assert extract_dispatch_json(text) == {"a": 1, "b": 2}
+
+
+def test_extract_dispatch_json_raises_when_no_json() -> None:
+    import sys
+
+    import pytest
+
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "financial-model-review", "scripts"),
+    )
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    with pytest.raises(ValueError):
+        extract_dispatch_json("Just some prose with no JSON object anywhere.")

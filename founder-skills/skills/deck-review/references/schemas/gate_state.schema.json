@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "gate_state",
+  "type": "object",
+  "required": ["metadata", "gate_id", "question", "options", "context_summary"],
+  "properties": {
+    "metadata": {"type": "object", "required": ["run_id"], "properties": {"run_id": {"type": "string"}}},
+    "gate_id": {"type": "string", "enum": ["stage_confirmation", "out_of_scope_choice", "stage_choice"]},
+    "question": {"type": "string"},
+    "options": {"type": "array", "items": {"type": "string"}},
+    "context_summary": {"type": "string"},
+    "answer": {"type": "string"}
+  }
+}

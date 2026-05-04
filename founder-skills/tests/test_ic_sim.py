@@ -1026,7 +1026,7 @@ def test_compose_sequential_fallback() -> None:
 
 
 def test_compose_severity_map_complete() -> None:
-    """WARNING_SEVERITY contains all 23 expected codes."""
+    """WARNING_SEVERITY contains all 24 expected codes."""
     snippet = (
         f"import sys, os; sys.path.insert(0, '{IC_SIM_DIR}'); "
         "from compose_report import WARNING_SEVERITY; "
@@ -1063,6 +1063,7 @@ def test_compose_severity_map_complete() -> None:
         "SCORE_DIMENSIONS_VALIDATION_ERROR",
         "INCOMPLETE_PORTFOLIO_REVIEW",
         "INVALID_PARTNER_COUNT",
+        "MARKER_COLLISION",
     ]
     assert len(sev_map) == len(expected), (
         f"expected {len(expected)} codes, got {len(sev_map)}: {sorted(sev_map.keys())}"
@@ -1083,6 +1084,7 @@ def test_compose_severity_map_complete() -> None:
     assert sev_map["HIGH_NA_COUNT"] == "medium"
     assert sev_map["SCHEMA_DRIFT"] == "low"
     assert sev_map["STAGE_OUT_OF_SCOPE"] == "low"
+    assert sev_map["MARKER_COLLISION"] == "low"
     assert sev_map["SEQUENTIAL_FALLBACK"] == "info"
     assert sev_map["PARTNER_CONVERGENCE"] == "info"
 
@@ -1172,7 +1174,7 @@ def test_compose_report_sections() -> None:
     assert "## Conflict Check" in report
     assert "## Discussion Summary" in report
     assert "## Dimension Scorecard" in report
-    assert "## Founder Coaching" in report
+    assert "## Founder Coaching" not in report
 
 
 def test_compose_sub_agent_all_partner_files_clean() -> None:
@@ -1942,88 +1944,247 @@ def test_compose_executive_summary_notes_consensus_mismatch() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Fix 2: Coaching ordering test
+# v0.4.2 Phase 3 Task 7: coaching_payload + uuid insertion marker tests
 # ---------------------------------------------------------------------------
 
 
-def test_compose_coaching_includes_evidence_and_prepare() -> None:
-    """Dealbreaker coaching items should include evidence and 'Prepare:' guidance."""
+def test_compose_emits_coaching_payload() -> None:
+    """compose emits a coaching_payload block with all v0.4.2-ic-sim fields."""
+    import re
+
     arts = _all_required_artifacts()
-    score = dict(_VALID_SCORE)
-    score["items"] = list(_VALID_SCORE["items"])
-    # Make first item a dealbreaker with evidence
-    score["items"][0] = dict(score["items"][0])
-    score["items"][0]["status"] = "dealbreaker"
-    score["items"][0]["evidence"] = "No founding team disclosed in materials"
-    score["summary"] = dict(_VALID_SCORE["summary"])
-    score["summary"]["dealbreakers"] = [
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    assert "coaching_payload" in data, "report.json missing coaching_payload block"
+
+    payload = data["coaching_payload"]
+    assert payload["schema_version"] == "v0.4.2-ic-sim"
+
+    # All expected top-level keys present
+    for key in (
+        "schema_version",
+        "summary",
+        "dealbreakers",
+        "concerns",
+        "high_severity_warnings",
+        "company_name",
+        "review_dir",
+        "report_path",
+        "insertion_marker",
+    ):
+        assert key in payload, f"coaching_payload missing key: {key}"
+
+    # Summary mirrors score_dimensions conviction counts
+    s = payload["summary"]
+    for sk in (
+        "verdict",
+        "conviction_score",
+        "strong_conviction_count",
+        "moderate_conviction_count",
+        "concern_count",
+        "dealbreaker_count",
+    ):
+        assert sk in s, f"coaching_payload.summary missing {sk}"
+
+    # Company name surfaced from startup_profile
+    assert payload["company_name"] == "TestCo"
+
+    # Insertion marker matches uuid format
+    assert re.fullmatch(r"<!-- COACHING_INSERTION_POINT_[0-9a-f]{8} -->", payload["insertion_marker"]), (
+        f"unexpected marker shape: {payload['insertion_marker']}"
+    )
+
+    # Backward-compat: existing top-level keys still present
+    assert "report_markdown" in data
+    assert "validation" in data
+
+
+def test_compose_inserts_uuid_marker() -> None:
+    """report.md contains exactly one uuid marker matching coaching_payload.insertion_marker."""
+    import re
+
+    arts = _all_required_artifacts()
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+
+    md = data["report_markdown"]
+    matches = re.findall(r"<!-- COACHING_INSERTION_POINT_[0-9a-f]{8} -->", md)
+    assert len(matches) == 1, f"expected exactly one marker, found {len(matches)}: {matches}"
+    assert matches[0] == data["coaching_payload"]["insertion_marker"], (
+        "marker in report.md must equal coaching_payload.insertion_marker"
+    )
+
+
+def test_compose_warns_on_marker_collision() -> None:
+    """Body content containing the marker substring triggers MARKER_COLLISION (non-fatal)."""
+    # Adversarial: a debate exchange position that contains the literal marker substring.
+    # The discussion section renders exchange positions directly into report.md.
+    arts = _all_required_artifacts()
+    discussion = dict(_VALID_DISCUSSION)
+    discussion["debate_sections"] = [
         {
-            "id": "team_founder_market_fit",
-            "label": "Founder-Market Fit",
-            "category": "Team",
-            "evidence": "No founding team disclosed in materials",
+            "topic": "GTM Motion",
+            "exchanges": [
+                {
+                    "partner": "operator",
+                    "position": ("Sneaky body content with <!-- COACHING_INSERTION_POINT_aaaaaaaa --> embedded"),
+                },
+            ],
         },
     ]
-    arts["score_dimensions.json"] = score
+    arts["discussion.json"] = discussion
     d = _make_artifact_dir(arts)
-    rc, data, _ = _run_compose(d)
-    assert rc == 0
+    rc, data, err = _run_compose(d)
+    # Compose still succeeds (warning, not error)
+    assert rc == 0, err
     assert data is not None
-    md = data["report_markdown"]
-    assert "No founding team disclosed" in md
-    assert "Prepare:" in md
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "MARKER_COLLISION" in codes, f"expected MARKER_COLLISION in warnings, got: {codes}"
 
 
-def test_compose_coaching_evidence_fallback_from_items() -> None:
-    """When summary.dealbreakers lacks evidence, coaching falls back to items_by_id."""
+def test_payload_summary_counts_match_score_dimensions() -> None:
+    """coaching_payload.summary.dealbreaker_count == len(dealbreakers); concern_count == len(concerns)."""
     arts = _all_required_artifacts()
     score = dict(_VALID_SCORE)
-    score["items"] = list(_VALID_SCORE["items"])
-    # Make first item a dealbreaker WITH evidence in the items array
-    score["items"][0] = dict(score["items"][0])
-    score["items"][0]["id"] = "team_founder_market_fit"
-    score["items"][0]["status"] = "dealbreaker"
-    score["items"][0]["evidence"] = "Founded by a solo non-technical founder"
     score["summary"] = dict(_VALID_SCORE["summary"])
-    # Dealbreaker entry in summary has NO evidence (empty string)
     score["summary"]["dealbreakers"] = [
         {
-            "id": "team_founder_market_fit",
-            "label": "Founder-Market Fit",
-            "category": "Team",
+            "id": "risk_single_point_failure",
+            "label": "Single Point",
+            "category": "Risk",
+            "evidence": "No redundancy",
+            "notes": None,
+        },
+    ]
+    score["summary"]["top_concerns"] = [
+        {
+            "id": "biz_unit_economics",
+            "label": "Unit Economics",
+            "category": "Business Model",
+            "evidence": "CAC > LTV",
+            "notes": None,
+        },
+        {"id": "market_timing", "label": "Timing", "category": "Market", "evidence": "Market nascent", "notes": None},
+    ]
+    score["summary"]["dealbreaker"] = 1
+    score["summary"]["concern"] = 2
+    arts["score_dimensions.json"] = score
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    payload = data["coaching_payload"]
+    assert payload["summary"]["dealbreaker_count"] == len(payload["dealbreakers"]) == 1
+    assert payload["summary"]["concern_count"] == len(payload["concerns"]) == 2
+
+
+def test_payload_dealbreakers_have_severity() -> None:
+    """Every dealbreaker entry in coaching_payload has severity == 'high'."""
+    arts = _all_required_artifacts()
+    score = dict(_VALID_SCORE)
+    score["summary"] = dict(_VALID_SCORE["summary"])
+    score["summary"]["dealbreakers"] = [
+        {
+            "id": "risk_single_point_failure",
+            "label": "Single Point",
+            "category": "Risk",
+            "evidence": "Key person dependency",
+            "notes": None,
+        },
+        {
+            "id": "biz_unit_economics",
+            "label": "Unit Economics",
+            "category": "Business Model",
+            "evidence": "Negative margin",
+            "notes": None,
+        },
+    ]
+    score["summary"]["dealbreaker"] = 2
+    arts["score_dimensions.json"] = score
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    payload = data["coaching_payload"]
+    assert len(payload["dealbreakers"]) == 2
+    for db in payload["dealbreakers"]:
+        assert db.get("severity") == "high", f"dealbreaker entry missing severity:high — got: {db}"
+
+
+def test_payload_concerns_have_description() -> None:
+    """Every concern entry in coaching_payload has a non-empty description."""
+    arts = _all_required_artifacts()
+    score = dict(_VALID_SCORE)
+    score["summary"] = dict(_VALID_SCORE["summary"])
+    score["summary"]["top_concerns"] = [
+        {
+            "id": "market_timing",
+            "label": "Timing",
+            "category": "Market",
+            "evidence": "Market still nascent",
+            "notes": None,
+        },
+        {
+            "id": "fin_runway_plan",
+            "label": "Runway Plan",
+            "category": "Financials",
             "evidence": "",
+            "notes": "No runway plan provided",
         },
     ]
+    score["summary"]["concern"] = 2
     arts["score_dimensions.json"] = score
     d = _make_artifact_dir(arts)
-    rc, data, _ = _run_compose(d)
-    assert rc == 0
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
     assert data is not None
-    md = data["report_markdown"]
-    # Should have pulled evidence from items array via fallback
-    assert "solo non-technical founder" in md, "Evidence from items_by_id fallback should appear in coaching"
-    assert "Prepare:" in md
+    payload = data["coaching_payload"]
+    assert len(payload["concerns"]) == 2
+    for c in payload["concerns"]:
+        assert "description" in c, f"concern entry missing description key — got: {c}"
+        assert isinstance(c["description"], str) and len(c["description"]) > 0, (
+            f"concern entry has empty description — got: {c}"
+        )
 
 
-def test_compose_coaching_dealbreakers_before_concerns() -> None:
-    """Dealbreakers appear before concerns in coaching section."""
+def test_payload_dealbreakers_precede_concerns_in_serialization() -> None:
+    """When serialized to JSON, dealbreakers key comes before concerns key (insertion order)."""
     arts = _all_required_artifacts()
     score = dict(_VALID_SCORE)
     score["summary"] = dict(_VALID_SCORE["summary"])
     score["summary"]["dealbreakers"] = [
-        {"id": "risk_single_point_failure", "label": "Single Point", "category": "Risk"},
+        {
+            "id": "risk_single_point_failure",
+            "label": "Single Point",
+            "category": "Risk",
+            "evidence": "No redundancy",
+            "notes": None,
+        },
     ]
+    score["summary"]["top_concerns"] = [
+        {"id": "market_timing", "label": "Timing", "category": "Market", "evidence": "Market nascent", "notes": None},
+    ]
+    score["summary"]["dealbreaker"] = 1
+    score["summary"]["concern"] = 1
     arts["score_dimensions.json"] = score
     d = _make_artifact_dir(arts)
-    rc, data, _ = _run_compose(d)
-    assert rc == 0
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
     assert data is not None
-    md = data["report_markdown"]
-    db_pos = md.find("CRITICAL")
-    concern_pos = md.find("Address this concern proactively")
-    assert db_pos != -1, "Dealbreaker text not found"
-    assert concern_pos != -1, "Concern text not found"
-    assert db_pos < concern_pos, "Dealbreakers should appear before concerns in coaching"
+    payload = data["coaching_payload"]
+    # Serialize with sort_keys=False to preserve insertion order (Python 3.7+ guarantee)
+    serialized = json.dumps(payload, sort_keys=False)
+    db_pos = serialized.find('"dealbreakers"')
+    concerns_pos = serialized.find('"concerns"')
+    assert db_pos != -1, '"dealbreakers" key not found in serialized payload'
+    assert concerns_pos != -1, '"concerns" key not found in serialized payload'
+    assert db_pos < concerns_pos, (
+        f'"dealbreakers" should appear before "concerns" in JSON (got positions {db_pos} vs {concerns_pos})'
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2225,3 +2386,110 @@ def test_compose_no_unanimous_verdict_mismatch_aligned() -> None:
     assert data is not None
     codes = [w["code"] for w in data["validation"]["warnings"]]
     assert "UNANIMOUS_VERDICT_MISMATCH" not in codes
+
+
+# === v0.4.1 Phase 3 Task 10: compose on-disk verification + tolerant JSON extraction ===
+
+
+def test_compose_writes_md_flag(tmp_path: Any) -> None:
+    """After successful compose with --write-md, both report.json and report.md must exist on disk."""
+    d = _make_artifact_dir(_all_required_artifacts())
+    json_path = os.path.join(d, "report.json")
+    md_path = os.path.join(d, "report.md")
+    rc, _, err = run_script(
+        "compose_report.py",
+        ["--dir", d, "-o", json_path, "--write-md", md_path],
+    )
+    assert rc == 0, err
+    assert os.path.isfile(json_path)
+    assert os.path.isfile(md_path)
+    assert os.path.getsize(json_path) > 0
+    assert os.path.getsize(md_path) > 0
+
+
+def test_compose_exits_nonzero_if_write_md_path_unwritable(tmp_path: Any) -> None:
+    """Compose must exit nonzero if --write-md target dir doesn't exist and can't be created."""
+    import pathlib
+
+    d = _make_artifact_dir(_all_required_artifacts())
+    # Point --write-md at a path inside a read-only parent
+    ro_parent = pathlib.Path(str(tmp_path)) / "readonly"
+    ro_parent.mkdir(mode=0o555)
+    bad_md_path = str(ro_parent / "no-write" / "report.md")
+    json_path = os.path.join(d, "report.json")
+    rc, _, err = run_script(
+        "compose_report.py",
+        ["--dir", d, "-o", json_path, "--write-md", bad_md_path],
+    )
+    assert rc != 0, "compose should exit nonzero when --write-md target is unwritable"
+    # Cleanup: restore writable mode so tmp_path can be deleted
+    os.chmod(str(ro_parent), 0o755)
+
+
+# === v0.4.1 Phase 3 Task 10: tolerant JSON extraction from sub-agent messages ===
+
+
+def test_extract_dispatch_json_raw_object() -> None:
+    import sys
+
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "ic-sim", "scripts"),
+    )
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    assert extract_dispatch_json('{"a": 1, "b": 2}') == {"a": 1, "b": 2}
+
+
+def test_extract_dispatch_json_fenced() -> None:
+    import sys
+
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "ic-sim", "scripts"),
+    )
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    assert extract_dispatch_json('```json\n{"a": 1}\n```') == {"a": 1}
+
+
+def test_extract_dispatch_json_nested() -> None:
+    """Critical regression test: must not truncate on inner }."""
+    import sys
+
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "ic-sim", "scripts"),
+    )
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    text = '```json\n{"a": {"b": 1}, "c": 2}\n```'
+    assert extract_dispatch_json(text) == {"a": {"b": 1}, "c": 2}
+
+
+def test_extract_dispatch_json_embedded_in_prose() -> None:
+    import sys
+
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "ic-sim", "scripts"),
+    )
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    text = 'Here is the result:\n{"a": 1, "b": 2}\nLet me know if anything is wrong.'
+    assert extract_dispatch_json(text) == {"a": 1, "b": 2}
+
+
+def test_extract_dispatch_json_raises_when_no_json() -> None:
+    import sys
+
+    import pytest
+
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "ic-sim", "scripts"),
+    )
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    with pytest.raises(ValueError):
+        extract_dispatch_json("Just some prose with no JSON object anywhere.")

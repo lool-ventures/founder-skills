@@ -1,10 +1,18 @@
 # Deck Review Artifact Schemas
 
+> **Source of truth:** the JSON Schema files in `references/schemas/`.
+> This document is a human-readable summary kept in sync with those schemas.
+> Producer scripts (`deck_inventory.py`, `stage_profile.py`, `slide_reviews.py`,
+> `checklist.py`, `compose_report.py`) load and validate against the
+> `.schema.json` files at runtime. **Never** hand-write artifacts —
+> always invoke the producer script.
+
 JSON schemas for all artifacts deposited during the deck review workflow. Each artifact is a JSON file written to the `REVIEW_DIR` working directory.
 
 ## deck_inventory.json
 
-**Producer:** Agent (heredoc, Step 2)
+**Producer:** `deck_inventory.py` (Step 2)
+**Schema:** `references/schemas/deck_inventory.schema.json`
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -51,7 +59,8 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
 
 ## stage_profile.json
 
-**Producer:** Agent (heredoc, Step 3)
+**Producer:** `stage_profile.py` (Step 3)
+**Schema:** `references/schemas/stage_profile.schema.json`
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -112,7 +121,8 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
 
 ## slide_reviews.json
 
-**Producer:** Agent (heredoc, Step 4)
+**Producer:** `slide_reviews.py` (Step 4)
+**Schema:** `references/schemas/slide_reviews.schema.json`
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -168,6 +178,7 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
 ## checklist.json
 
 **Producer:** `checklist.py` (Step 5, from agent-provided JSON input)
+**Schema:** `references/schemas/checklist.schema.json`
 
 ### Input format (stdin to checklist.py)
 

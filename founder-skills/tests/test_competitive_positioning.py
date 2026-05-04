@@ -1281,6 +1281,92 @@ class TestChecklist:
                     f"Item {item['id']} missing confidence qualifier in evidence"
                 )
 
+    # ---- v0.4.2 Phase 1 Task 1: summary block parity ----
+
+    # 8. Output includes a `summary` block with the unified shape.
+    def test_checklist_emits_summary_block(self) -> None:
+        payload = _make_valid_checklist_input()
+        rc, data, stderr = run_script("checklist.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert "summary" in data, "checklist output must include a top-level 'summary' block"
+        summary = data["summary"]
+        for key in (
+            "score_pct",
+            "overall_status",
+            "total",
+            "pass",
+            "fail",
+            "warn",
+            "not_applicable",
+            "failed_items",
+            "warned_items",
+        ):
+            assert key in summary, f"summary missing required key '{key}'"
+        # overall_status must be one of the four documented tiers
+        assert summary["overall_status"] in {"strong", "solid", "needs_work", "major_revision"}
+
+    # 9. failed_items array length matches summary.fail count and item shape is correct.
+    def test_checklist_summary_failed_items_array(self) -> None:
+        overrides = {"COVER_01": "fail", "COVER_02": "fail"}
+        payload = _make_valid_checklist_input(input_mode="document", overrides=overrides)
+        rc, data, stderr = run_script("checklist.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        summary = data["summary"]
+        failed = summary["failed_items"]
+        assert isinstance(failed, list)
+        assert len(failed) == summary["fail"], "failed_items length must equal summary.fail"
+        assert len(failed) == 2
+        for entry in failed:
+            for k in ("id", "category", "criterion", "status", "evidence", "principle"):
+                assert k in entry, f"failed_items entry missing key '{k}'"
+            assert entry["status"] == "fail"
+
+    # 10. warned_items array length matches summary.warn count and item shape is correct.
+    def test_checklist_summary_warned_items_array(self) -> None:
+        overrides = {"POS_01": "warn", "POS_02": "warn", "POS_03": "warn"}
+        payload = _make_valid_checklist_input(input_mode="document", overrides=overrides)
+        rc, data, stderr = run_script("checklist.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        summary = data["summary"]
+        warned = summary["warned_items"]
+        assert isinstance(warned, list)
+        assert len(warned) == summary["warn"], "warned_items length must equal summary.warn"
+        assert len(warned) == 3
+        for entry in warned:
+            for k in ("id", "category", "criterion", "status", "evidence", "principle"):
+                assert k in entry, f"warned_items entry missing key '{k}'"
+            assert entry["status"] == "warn"
+
+    # 11. Backward-compat: legacy flat fields still present at top level alongside summary.
+    def test_checklist_backward_compat_flat_fields(self) -> None:
+        payload = _make_valid_checklist_input()
+        rc, data, stderr = run_script("checklist.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        # All legacy flat fields must remain at top level for backward compatibility.
+        for legacy_key in (
+            "pass_count",
+            "fail_count",
+            "warn_count",
+            "na_count",
+            "total",
+            "score_pct",
+            "items",
+        ):
+            assert legacy_key in data, f"legacy top-level key '{legacy_key}' must remain for backward compat"
+        # And the new summary block coexists.
+        assert "summary" in data
+        # Sanity: legacy and summary fields agree.
+        assert data["pass_count"] == data["summary"]["pass"]
+        assert data["fail_count"] == data["summary"]["fail"]
+        assert data["warn_count"] == data["summary"]["warn"]
+        assert data["na_count"] == data["summary"]["not_applicable"]
+        assert data["score_pct"] == data["summary"]["score_pct"]
+        assert data["total"] == data["summary"]["total"]
+
 
 # ===========================================================================
 # compose_report.py tests
@@ -1600,6 +1686,60 @@ class TestCompose:
             assert data["scoring_summary"]["checklist_score_pct"] == 82.6
             assert data["scoring_summary"]["overall_differentiation"] == 75.0
             assert data["scoring_summary"]["startup_defensibility"] == "moderate"
+
+    # 1b. Compose reads checklist score from summary block (post-v0.4.2 shape).
+    def test_compose_reads_checklist_score_from_summary_block(self) -> None:
+        """Compose must prefer summary.score_pct over the legacy flat score_pct.
+
+        Uses divergent values (summary=91.0, flat=88.0): if compose accidentally
+        reads only the legacy flat field, this assertion sees 88.0 and fails.
+        Guards against regression of the summary-read branch in compose_report.py.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            # Overwrite checklist.json with the new summary-block shape, where
+            # summary.score_pct (91.0) differs from legacy flat score_pct (88.0).
+            cl_with_summary = {
+                "items": [
+                    {
+                        "id": item_id,
+                        "category": item_id.split("_")[0],
+                        "label": f"Label for {item_id}",
+                        "status": "pass",
+                        "evidence": f"Evidence for {item_id}",
+                    }
+                    for item_id in CHECKLIST_IDS
+                ],
+                "summary": {
+                    "score_pct": 91.0,  # summary value — MUST be the one compose reads
+                    "overall_status": "strong",
+                    "total": 25,
+                    "pass": 24,
+                    "fail": 0,
+                    "warn": 1,
+                    "not_applicable": 0,
+                    "failed_items": [],
+                    "warned_items": [],
+                },
+                # Legacy flat fields with a DIFFERENT score_pct (the fallback path).
+                "score_pct": 88.0,
+                "pass_count": 24,
+                "fail_count": 0,
+                "warn_count": 1,
+                "na_count": 0,
+                "total": 25,
+                "input_mode": "conversation",
+                "_produced_by": "checklist",
+                "metadata": {"run_id": "20260319T143045Z"},
+            }
+            with open(os.path.join(tmp, "checklist.json"), "w") as f:
+                json.dump(cl_with_summary, f)
+
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            # The summary-block value (91.0) must win over the legacy flat (88.0).
+            assert data["scoring_summary"]["checklist_score_pct"] == 91.0
 
     # 2. Missing landscape.json -> MISSING_LANDSCAPE (high)
     def test_compose_missing_landscape_warns(self) -> None:
@@ -2283,3 +2423,429 @@ class TestValidationGates:
                 f"Expected CHECKLIST_ALL_PASS warning, got: {[w['code'] for w in data['warnings']]}"
             )
             assert all_pass[0]["severity"] == "info"
+
+
+# === v0.4.1 Phase 3 Task 8: compose on-disk verification + tolerant JSON extraction ===
+
+
+def test_compose_verifies_outputs_exist_after_write(tmp_path: Any) -> None:
+    """After successful compose, both report.json and report.md must exist on disk."""
+    import pathlib
+
+    review_dir = pathlib.Path(str(tmp_path)) / "cp-testco"
+    review_dir.mkdir()
+    _make_artifact_dir(str(review_dir))
+    json_path = str(review_dir / "report.json")
+    md_path = str(review_dir / "report.md")
+    rc, _, err = run_script(
+        "compose_report.py",
+        ["-d", str(review_dir), "-o", json_path, "--write-md", md_path],
+    )
+    assert rc == 0, err
+    assert os.path.isfile(json_path)
+    assert os.path.isfile(md_path)
+    assert os.path.getsize(json_path) > 0
+    assert os.path.getsize(md_path) > 0
+
+
+def test_compose_exits_nonzero_if_write_md_path_unwritable(tmp_path: Any) -> None:
+    """Compose must exit nonzero if --write-md target dir doesn't exist and can't be created."""
+    import pathlib
+
+    review_dir = pathlib.Path(str(tmp_path)) / "cp-testco"
+    review_dir.mkdir()
+    _make_artifact_dir(str(review_dir))
+    # Point --write-md at a path inside a read-only parent
+    ro_parent = pathlib.Path(str(tmp_path)) / "readonly"
+    ro_parent.mkdir(mode=0o555)
+    bad_md_path = str(ro_parent / "no-write" / "report.md")
+    json_path = str(review_dir / "report.json")
+    rc, _, err = run_script(
+        "compose_report.py",
+        ["-d", str(review_dir), "-o", json_path, "--write-md", bad_md_path],
+    )
+    assert rc != 0, "compose should exit nonzero when --write-md target is unwritable"
+    # Cleanup: restore writable mode so tmp_path can be deleted
+    os.chmod(str(ro_parent), 0o755)
+
+
+# === v0.4.1 Phase 3 Task 8: tolerant JSON extraction ===
+
+
+def test_extract_dispatch_json_raw_object() -> None:
+    import sys
+
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "competitive-positioning", "scripts"),
+    )
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    assert extract_dispatch_json('{"a": 1, "b": 2}') == {"a": 1, "b": 2}
+
+
+def test_extract_dispatch_json_fenced() -> None:
+    import sys
+
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "competitive-positioning", "scripts"),
+    )
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    assert extract_dispatch_json('```json\n{"a": 1}\n```') == {"a": 1}
+
+
+def test_extract_dispatch_json_nested() -> None:
+    """Critical regression test: must not truncate on inner }."""
+    import sys
+
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "competitive-positioning", "scripts"),
+    )
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    text = '```json\n{"a": {"b": 1}, "c": 2}\n```'
+    assert extract_dispatch_json(text) == {"a": {"b": 1}, "c": 2}
+
+
+def test_extract_dispatch_json_embedded_in_prose() -> None:
+    import sys
+
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "competitive-positioning", "scripts"),
+    )
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    text = 'Here is the result:\n{"a": 1, "b": 2}\nLet me know if anything is wrong.'
+    assert extract_dispatch_json(text) == {"a": 1, "b": 2}
+
+
+def test_extract_dispatch_json_raises_when_no_json() -> None:
+    import sys
+
+    import pytest
+
+    sys.path.insert(
+        0,
+        os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "competitive-positioning", "scripts"),
+    )
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    with pytest.raises(ValueError):
+        extract_dispatch_json("Just some prose with no JSON object anywhere.")
+
+
+# ===========================================================================
+# v0.4.2 Phase 1 Task 1: visualize.py tolerance for new + legacy checklist shapes
+# ===========================================================================
+
+
+def _run_visualize_raw(args: list[str]) -> tuple[int, str, str]:
+    """Run visualize.py and return (exit_code, raw_stdout, stderr)."""
+    cmd = [sys.executable, os.path.join(CP_SCRIPTS_DIR, "visualize.py"), *args]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return result.returncode, result.stdout, result.stderr
+
+
+class TestVisualizeChecklistShapes:
+    """Verify visualize.py works for both new (summary block) and legacy (flat) checklist artifacts."""
+
+    def test_visualize_reads_summary_block(self) -> None:
+        """visualize.py runs successfully when checklist.json has the new summary block."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            # Overwrite checklist.json with the new summary-block shape
+            # (legacy flat fields kept too — additive).
+            cl_summary_shape = {
+                "items": [
+                    {
+                        "id": item_id,
+                        "category": item_id.split("_")[0],
+                        "label": f"Label for {item_id}",
+                        "status": "pass",
+                        "evidence": f"Evidence for {item_id}",
+                    }
+                    for item_id in CHECKLIST_IDS
+                ],
+                # New summary block — DIFFERENT value from the legacy flat field.
+                # If compose accidentally falls through to the flat field, the assertion
+                # below would see 88.0 (flat) instead of 91.0 (summary) and fail.
+                "summary": {
+                    "score_pct": 91.0,
+                    "overall_status": "strong",
+                    "total": 25,
+                    "pass": 24,
+                    "fail": 0,
+                    "warn": 1,
+                    "not_applicable": 0,
+                    "failed_items": [],
+                    "warned_items": [],
+                },
+                # Legacy flat fields (also present, but with a DIFFERENT score_pct
+                # so we can distinguish which branch compose actually read).
+                "score_pct": 88.0,
+                "pass_count": 24,
+                "fail_count": 0,
+                "warn_count": 1,
+                "na_count": 0,
+                "total": 25,
+                "input_mode": "conversation",
+                "_produced_by": "checklist",
+                "metadata": {"run_id": "20260319T143045Z"},
+            }
+            with open(os.path.join(tmp, "checklist.json"), "w") as f:
+                json.dump(cl_summary_shape, f)
+
+            # First compose so report.json exists (visualize uses it for the badge).
+            rc_c, _, stderr_c = run_script(
+                "compose_report.py",
+                args=["--dir", tmp, "-o", os.path.join(tmp, "report.json")],
+            )
+            assert rc_c == 0, f"compose failed: {stderr_c}"
+            # Compose must read score_pct from the summary block (91.0), NOT the
+            # legacy flat field (88.0). This proves the summary-read branch is
+            # exercised and the fallback isn't masking a regression.
+            with open(os.path.join(tmp, "report.json")) as f:
+                rep = json.load(f)
+            assert rep["scoring_summary"]["checklist_score_pct"] == 91.0
+
+            rc, html_out, stderr = _run_visualize_raw(["--dir", tmp])
+            assert rc == 0, f"visualize failed (summary shape): {stderr}"
+            assert "<html" in html_out.lower()
+            assert "competitive positioning" in html_out.lower()
+
+    def test_visualize_reads_legacy_flat_fields(self) -> None:
+        """visualize.py runs successfully when checklist.json has only legacy flat fields (no summary block)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            # Overwrite checklist.json with the legacy flat-only shape (no summary block).
+            cl_legacy = {
+                "items": [
+                    {
+                        "id": item_id,
+                        "category": item_id.split("_")[0],
+                        "label": f"Label for {item_id}",
+                        "status": "pass",
+                        "evidence": f"Evidence for {item_id}",
+                    }
+                    for item_id in CHECKLIST_IDS
+                ],
+                "score_pct": 75.0,
+                "pass_count": 20,
+                "fail_count": 2,
+                "warn_count": 1,
+                "na_count": 2,
+                "total": 25,
+                "input_mode": "conversation",
+                "_produced_by": "checklist",
+                "metadata": {"run_id": "20260319T143045Z"},
+                # NOTE: no "summary" key — pre-Phase-1 artifact shape.
+            }
+            with open(os.path.join(tmp, "checklist.json"), "w") as f:
+                json.dump(cl_legacy, f)
+
+            # Compose first so the report.json badge data exists.
+            rc_c, c_data, stderr_c = run_script(
+                "compose_report.py", args=["--dir", tmp, "--pretty", "-o", os.path.join(tmp, "report.json")]
+            )
+            assert rc_c == 0, f"compose failed: {stderr_c}"
+            # Compose must still pick up the legacy flat score_pct (fallback path).
+            with open(os.path.join(tmp, "report.json")) as f:
+                rep = json.load(f)
+            assert rep["scoring_summary"]["checklist_score_pct"] == 75.0
+
+            rc, html_out, stderr = _run_visualize_raw(["--dir", tmp])
+            assert rc == 0, f"visualize failed (legacy shape): {stderr}"
+            assert "<html" in html_out.lower()
+            assert "competitive positioning" in html_out.lower()
+
+
+# ---------------------------------------------------------------------------
+# v0.4.2 Mitigation 2: coaching_payload + uuid insertion marker
+# ---------------------------------------------------------------------------
+
+# Helper: build a checklist.json artifact that includes the summary block
+# (post-v0.4.2 shape) so coaching_payload has real data to draw from.
+
+
+def _make_checklist_with_summary(
+    *,
+    run_id: str = "20260319T143045Z",
+    fail: int = 0,
+    warn: int = 0,
+    failed_items: list[dict] | None = None,
+    warned_items: list[dict] | None = None,
+) -> dict:
+    """Build a checklist.json artifact with a proper summary block."""
+    items = []
+    for item_id in CHECKLIST_IDS:
+        items.append(
+            {
+                "id": item_id,
+                "category": item_id.split("_")[0],
+                "label": f"Label for {item_id}",
+                "status": "pass",
+                "evidence": f"Evidence for {item_id}",
+            }
+        )
+    pass_count = 25 - fail - warn
+    return {
+        "items": items,
+        "summary": {
+            "score_pct": 92.0,
+            "overall_status": "strong",
+            "total": 25,
+            "pass": pass_count,
+            "fail": fail,
+            "warn": warn,
+            "not_applicable": 0,
+            "failed_items": failed_items or [],
+            "warned_items": warned_items or [],
+        },
+        "score_pct": 92.0,
+        "pass_count": pass_count,
+        "fail_count": fail,
+        "warn_count": warn,
+        "na_count": 0,
+        "total": 25,
+        "input_mode": "conversation",
+        "_produced_by": "checklist",
+        "metadata": {"run_id": run_id},
+    }
+
+
+def _make_v042_artifact_dir(
+    checklist_overrides: dict | None = None,
+) -> str:
+    """Build a complete artifact dir with a summary-block checklist for v0.4.2 tests."""
+    tmp = tempfile.mkdtemp()
+    _make_artifact_dir(tmp)
+    # Replace the checklist with a version that has a summary block.
+    cl = _make_checklist_with_summary()
+    if checklist_overrides:
+        cl.update(checklist_overrides)
+    with open(os.path.join(tmp, "checklist.json"), "w") as f:
+        json.dump(cl, f)
+    return tmp
+
+
+def test_compose_emits_coaching_payload() -> None:
+    """compose emits a coaching_payload block with all v0.4.2 fields."""
+    import re
+
+    d = _make_v042_artifact_dir()
+    rc, data, err = run_script("compose_report.py", args=["--dir", d, "--pretty"])
+    assert rc == 0, err
+    assert data is not None
+    assert "coaching_payload" in data, "report.json missing coaching_payload block"
+
+    payload = data["coaching_payload"]
+    assert payload["schema_version"] == "v0.4.2-competitive-positioning"
+
+    # All expected top-level keys present
+    for key in (
+        "schema_version",
+        "summary",
+        "failed_items",
+        "warned_items",
+        "high_severity_warnings",
+        "company_name",
+        "review_dir",
+        "report_path",
+        "insertion_marker",
+    ):
+        assert key in payload, f"coaching_payload missing key: {key}"
+
+    # No stage or is_ai_company (competitive-positioning has no analog)
+    assert "stage" not in payload, "coaching_payload must not include 'stage'"
+    assert "is_ai_company" not in payload, "coaching_payload must not include 'is_ai_company'"
+
+    # Summary mirrors checklist counts
+    s = payload["summary"]
+    for sk in ("score_pct", "overall_status", "total", "pass", "fail", "warn", "not_applicable"):
+        assert sk in s, f"coaching_payload.summary missing {sk}"
+
+    # Company surfaced from product_profile
+    assert payload["company_name"] == "TestCo"
+
+    # Insertion marker matches uuid format
+    assert re.fullmatch(r"<!-- COACHING_INSERTION_POINT_[0-9a-f]{8} -->", payload["insertion_marker"]), (
+        f"unexpected marker shape: {payload['insertion_marker']}"
+    )
+
+    # Backward-compat: existing top-level keys still present
+    assert "report_markdown" in data
+    assert "metadata" in data
+    assert "warnings" in data
+
+
+def test_compose_inserts_uuid_marker() -> None:
+    """report.md contains exactly one uuid marker matching coaching_payload.insertion_marker."""
+    import re
+
+    d = _make_v042_artifact_dir()
+    rc, data, err = run_script("compose_report.py", args=["--dir", d, "--pretty"])
+    assert rc == 0, err
+    assert data is not None
+
+    md = data["report_markdown"]
+    matches = re.findall(r"<!-- COACHING_INSERTION_POINT_[0-9a-f]{8} -->", md)
+    assert len(matches) == 1, f"expected exactly one marker, found {len(matches)}: {matches}"
+    assert matches[0] == data["coaching_payload"]["insertion_marker"], (
+        "marker in report_markdown must equal coaching_payload.insertion_marker"
+    )
+
+
+def test_compose_warns_on_marker_collision() -> None:
+    """Body content containing the marker substring triggers MARKER_COLLISION (non-fatal)."""
+    # Adversarial: inject the marker substring into the company name so it is rendered
+    # verbatim in the report title and executive summary sections.
+    adversarial_name = "TestCo <!-- COACHING_INSERTION_POINT_aaaaaaaa --> Ltd"
+
+    tmp = tempfile.mkdtemp()
+    _make_artifact_dir(tmp, product_profile_overrides={"company_name": adversarial_name})
+    # Use a checklist with a summary block.
+    cl = _make_checklist_with_summary()
+    with open(os.path.join(tmp, "checklist.json"), "w") as f:
+        json.dump(cl, f)
+
+    rc, data, err = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+    # Compose still succeeds (warning, not error)
+    assert rc == 0, err
+    assert data is not None
+    codes = [w["code"] for w in data["warnings"]]
+    assert "MARKER_COLLISION" in codes, f"expected MARKER_COLLISION in warnings, got: {codes}"
+
+
+def test_payload_arrays_match_summary_counts() -> None:
+    """coaching_payload.failed_items length matches summary.fail; warned_items matches summary.warn."""
+    failed_items = [
+        {"id": CHECKLIST_IDS[0], "category": "COVER", "label": "L0", "evidence": "e"},
+        {"id": CHECKLIST_IDS[1], "category": "COVER", "label": "L1", "evidence": "e"},
+    ]
+    warned_items = [
+        {"id": CHECKLIST_IDS[2], "category": "COVER", "label": "L2", "evidence": "e"},
+    ]
+    cl = _make_checklist_with_summary(
+        fail=2,
+        warn=1,
+        failed_items=failed_items,
+        warned_items=warned_items,
+    )
+    cl["summary"]["score_pct"] = 88.0
+    cl["summary"]["pass"] = 22
+
+    tmp = tempfile.mkdtemp()
+    _make_artifact_dir(tmp)
+    with open(os.path.join(tmp, "checklist.json"), "w") as f:
+        json.dump(cl, f)
+
+    rc, data, err = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+    assert rc == 0, err
+    assert data is not None
+    payload = data["coaching_payload"]
+    assert len(payload["failed_items"]) == payload["summary"]["fail"] == 2
+    assert len(payload["warned_items"]) == payload["summary"]["warn"] == 1

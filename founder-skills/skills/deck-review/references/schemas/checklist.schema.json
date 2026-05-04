@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "checklist",
+  "type": "object",
+  "required": ["metadata", "items", "summary"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["run_id"],
+      "properties": {"run_id": {"type": "string"}}
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "category", "label", "status"],
+        "properties": {
+          "id": {"type": "string"},
+          "category": {"type": "string"},
+          "label": {"type": "string"},
+          "status": {"type": "string", "enum": ["pass", "fail", "warn", "not_applicable"]},
+          "evidence": {"type": "string"},
+          "notes": {"type": "string"}
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["total", "pass", "fail", "warn", "not_applicable", "score_pct", "overall_status"],
+      "properties": {
+        "total": {"type": "integer"},
+        "pass": {"type": "integer"},
+        "fail": {"type": "integer"},
+        "warn": {"type": "integer"},
+        "not_applicable": {"type": "integer"},
+        "score_pct": {"type": "number"},
+        "overall_status": {"type": "string", "enum": ["strong", "solid", "needs_work", "major_revision"]}
+      }
+    }
+  }
+}

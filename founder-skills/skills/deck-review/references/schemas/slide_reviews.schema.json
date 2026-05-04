@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "slide_reviews",
+  "type": "object",
+  "required": ["metadata", "reviews", "missing_slides", "overall_narrative_assessment"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["run_id"],
+      "properties": {"run_id": {"type": "string"}}
+    },
+    "reviews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["slide_number", "maps_to", "strengths", "weaknesses", "recommendations", "best_practice_refs"],
+        "properties": {
+          "slide_number": {"type": "integer"},
+          "maps_to": {"type": "string"},
+          "strengths": {"type": "array", "items": {"type": "string"}},
+          "weaknesses": {"type": "array", "items": {"type": "string"}},
+          "recommendations": {"type": "array", "items": {"type": "string"}},
+          "best_practice_refs": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "missing_slides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["expected_type", "importance", "recommendation"],
+        "properties": {
+          "expected_type": {"type": "string"},
+          "importance": {"type": "string", "enum": ["critical", "important", "nice_to_have"]},
+          "recommendation": {"type": "string"}
+        }
+      }
+    },
+    "overall_narrative_assessment": {"type": "string"}
+  }
+}

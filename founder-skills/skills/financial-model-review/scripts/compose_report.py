@@ -22,6 +22,7 @@ import argparse
 import json
 import os
 import sys
+import uuid
 from typing import Any, TypeGuard
 
 # Sentinel for corrupt (unparseable) artifact files
@@ -41,6 +42,8 @@ WARNING_SEVERITY: dict[str, str] = {
     "CHECKLIST_INCOMPLETE": "medium",
     "RUNWAY_INCONSISTENCY": "medium",
     "METRICS_GAPS": "medium",
+    # v0.4.2 Mitigation 2 — informational only (uuid is per-run, won't collide)
+    "MARKER_COLLISION": "low",
 }
 
 REQUIRED_ARTIFACTS = ["inputs.json", "checklist.json", "unit_economics.json", "runway.json"]
@@ -56,6 +59,7 @@ WARNING_LABELS: dict[str, str] = {
     "CHECKLIST_INCOMPLETE": "Checklist Incomplete",
     "RUNWAY_INCONSISTENCY": "Runway Inconsistency",
     "METRICS_GAPS": "Metrics Gaps",
+    "MARKER_COLLISION": "Marker Collision",
 }
 
 # Rating display labels
@@ -696,7 +700,93 @@ def _section_warnings(warnings: list[dict[str, str]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def compose(dir_path: str) -> dict[str, Any]:
+_SEVERITY_RANK: dict[str, int] = {"high": 0, "medium": 1, "low": 2}
+
+
+def _truncate_actionable_items(
+    failed: list[dict[str, Any]],
+    warned: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], bool, int]:
+    """Severity-sorted truncation for coaching_payload.
+
+    When total failed + warned > 30, keep top-30 entries prioritizing high
+    severity then medium then low. Within each severity tier, original list
+    order is preserved (stable sort). Failed items are always prioritized over
+    warned items at the same severity level.
+
+    Returns (failed_out, warned_out, was_truncated, dropped_count).
+    """
+    total = len(failed) + len(warned)
+    if total <= 30:
+        return failed, warned, False, 0
+
+    # Tag each item with its source list so we can redistribute after sorting.
+    tagged_failed = [("failed", item) for item in failed]
+    tagged_warned = [("warned", item) for item in warned]
+    combined = tagged_failed + tagged_warned
+
+    # Stable sort: failed-before-warned at same severity is already guaranteed
+    # because tagged_failed comes first in combined (Python sort is stable).
+    combined.sort(key=lambda t: _SEVERITY_RANK.get(t[1].get("severity", "low"), 2))
+
+    kept = combined[:30]
+    dropped_count = total - 30
+
+    failed_out = [item for src, item in kept if src == "failed"]
+    warned_out = [item for src, item in kept if src == "warned"]
+    return failed_out, warned_out, True, dropped_count
+
+
+def _emit_coaching_payload(
+    inputs: dict[str, Any] | None,
+    checklist: dict[str, Any] | None,
+    validation_warnings: list[dict[str, str]],
+    review_dir: str,
+    report_path: str,
+    insertion_marker: str,
+) -> dict[str, Any]:
+    """Build the v0.4.2 coaching_payload for financial-model-review.
+
+    Read from existing artifacts; do not fabricate fields.
+    company_name is sourced from inputs.json → company.company_name.
+    """
+    summary: dict[str, Any] = {}
+    if checklist is not None:
+        summary = _as_dict(checklist.get("summary"))
+
+    raw_failed: list[dict[str, Any]] = _as_list(summary.get("failed_items"))
+    raw_warned: list[dict[str, Any]] = _as_list(summary.get("warned_items"))
+
+    failed_items, warned_items, truncated, truncated_count = _truncate_actionable_items(raw_failed, raw_warned)
+
+    company_name: str | None = None
+    if inputs is not None:
+        company_name = _as_dict(inputs.get("company")).get("company_name")
+
+    return {
+        "schema_version": "v0.4.2-financial-model-review",
+        "summary": {
+            "score_pct": summary.get("score_pct"),
+            "overall_status": summary.get("overall_status"),
+            "total": summary.get("total"),
+            "pass": summary.get("pass"),
+            "fail": summary.get("fail"),
+            "warn": summary.get("warn"),
+            "not_applicable": summary.get("not_applicable"),
+        },
+        "failed_items": failed_items,
+        "warned_items": warned_items,
+        "high_severity_warnings": [w["code"] for w in validation_warnings if w.get("severity") == "high"],
+        "company_name": company_name,
+        "review_dir": review_dir,
+        "report_path": report_path,
+        "insertion_marker": insertion_marker,
+        "truncated": truncated,
+        "truncated_count": truncated_count,
+    }
+
+
+def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     """Main composition: load artifacts, validate, assemble report."""
     # Load all artifacts
     all_names = REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS
@@ -734,8 +824,28 @@ def compose(dir_path: str) -> dict[str, Any]:
     ]
 
     report_markdown = "\n".join(sections)
+
+    # v0.4.2 Mitigation 2: per-run uuid marker for Context B's Edit
+    marker = f"<!-- COACHING_INSERTION_POINT_{uuid.uuid4().hex[:8]} -->"
+
+    # Pre-scan: check assembled body BEFORE appending the marker (otherwise we
+    # always find our own emission). Agent post-Edit verification uses the
+    # EXACT uuid (per-run), so substring collisions with body content are
+    # informational only — but worth flagging so authors can sanitize.
+    if "<!-- COACHING_INSERTION_POINT_" in report_markdown:
+        warnings.append(
+            _warn(
+                "MARKER_COLLISION",
+                (
+                    "Body content contains marker substring; agent post-Edit verification "
+                    "uses the EXACT uuid (per-run) so this is informational only — "
+                    "body sanitization recommended."
+                ),
+            )
+        )
+
     report_markdown += (
-        "\n\n---\n"
+        f"\n\n{marker}\n\n---\n"
         "*Generated by [founder skills](https://github.com/lool-ventures/founder-skills)"
         " by [lool ventures](https://lool.vc)"
         " — Financial Model Review Agent*\n"
@@ -752,6 +862,18 @@ def compose(dir_path: str) -> dict[str, Any]:
     else:
         print("No warnings.", file=sys.stderr)
 
+    # v0.4.2 Mitigation 2: structured coaching payload for Context B agent.
+    # Use the same uuid marker generated above as the single source of truth.
+    resolved_report_path = report_path or os.path.join(os.path.abspath(dir_path), "report.md")
+    coaching_payload = _emit_coaching_payload(
+        inputs=inputs,
+        checklist=checklist,
+        validation_warnings=warnings,
+        review_dir=os.path.abspath(dir_path),
+        report_path=resolved_report_path,
+        insertion_marker=marker,
+    )
+
     # Determine model_format for --strict context
     model_format = "spreadsheet"
     if _usable(inputs):
@@ -766,6 +888,7 @@ def compose(dir_path: str) -> dict[str, Any]:
             "artifacts_missing": artifacts_missing,
             "model_format": model_format,
         },
+        "coaching_payload": coaching_payload,
     }
 
 
@@ -775,6 +898,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
     p.add_argument("--strict", action="store_true", help="Exit 1 if any high/medium warnings (CI mode)")
+    p.add_argument(
+        "--write-md",
+        help="Also write the report markdown to this path (in addition to JSON output via -o)",
+    )
     return p.parse_args()
 
 
@@ -785,7 +912,25 @@ def main() -> None:
         print(f"Error: directory not found: {args.dir}", file=sys.stderr)
         sys.exit(1)
 
-    result = compose(args.dir)
+    report_path = os.path.abspath(args.write_md) if args.write_md else None
+    result = compose(args.dir, report_path=report_path)
+
+    if args.write_md:
+        report_markdown = result.get("report_markdown", "")
+        md_path = os.path.abspath(args.write_md)
+        parent = os.path.dirname(md_path)
+        if parent:
+            try:
+                os.makedirs(parent, exist_ok=True)
+            except OSError as e:
+                print(f"Error: cannot create directory for --write-md: {e}", file=sys.stderr)
+                sys.exit(2)
+        try:
+            with open(md_path, "w", encoding="utf-8") as f:
+                f.write(report_markdown if report_markdown.endswith("\n") else report_markdown + "\n")
+        except OSError as e:
+            print(f"Error: cannot write --write-md file: {e}", file=sys.stderr)
+            sys.exit(2)
 
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"
@@ -795,6 +940,24 @@ def main() -> None:
         args.output,
         summary={"validation": v["status"], "warnings": len(v["warnings"])},
     )
+
+    # Post-write on-disk verification: confirm declared output files exist and are non-empty.
+    if args.output:
+        abs_out = os.path.abspath(args.output)
+        if not os.path.isfile(abs_out) or os.path.getsize(abs_out) == 0:
+            print(
+                f"Error: output file missing or empty after write: {abs_out}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+    if args.write_md:
+        abs_md = os.path.abspath(args.write_md)
+        if not os.path.isfile(abs_md) or os.path.getsize(abs_md) == 0:
+            print(
+                f"Error: --write-md file missing or empty after write: {abs_md}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
 
     # Exit 1 if any required artifacts are missing (regardless of strict mode)
     missing_required = [w for w in result["validation"]["warnings"] if w["code"] == "MISSING_ARTIFACT"]

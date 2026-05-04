@@ -293,6 +293,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Deck review checklist scorer (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
+    p.add_argument("--run-id", help="Inject metadata.run_id into output")
     return p.parse_args()
 
 
@@ -337,6 +338,9 @@ def main() -> None:
         result["validation"] = {"status": "invalid", "errors": errors}
     else:
         result["validation"] = {"status": "valid", "errors": []}
+
+    if args.run_id:
+        result["metadata"] = {"run_id": args.run_id}
 
     out = json.dumps(result, indent=indent) + "\n"
     s = result["summary"]

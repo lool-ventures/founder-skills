@@ -311,16 +311,22 @@ def cmd_init(args: argparse.Namespace) -> None:
     artifacts_root: str = args.artifacts_root
     os.makedirs(artifacts_root, exist_ok=True)
 
+    run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    now = _now_iso()
+
     context: dict[str, Any] = {
+        "metadata": {
+            "run_id": run_id,
+            "review_date": now[:10],  # YYYY-MM-DD
+            "last_updated": now,
+        },
         "company_name": args.company_name,
         "slug": slug,
         "stage": args.stage,
         "sector": args.sector,
         "geography": args.geography,
-        "last_updated": _now_iso(),
     }
 
-    # Derive sector_type
     if hasattr(args, "sector_type") and args.sector_type:
         context["sector_type"] = args.sector_type
     else:
@@ -407,7 +413,8 @@ def cmd_merge(args: argparse.Namespace) -> None:
         context["prior_skill_runs"] = runs
 
     # Always update timestamp
-    context["last_updated"] = _now_iso()
+    meta = context.setdefault("metadata", {})
+    meta["last_updated"] = _now_iso()
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(context, f, indent=2)
@@ -505,7 +512,8 @@ def cmd_update_identity(args: argparse.Namespace) -> None:
     if args.geography:
         context["geography"] = args.geography
 
-    context["last_updated"] = _now_iso()
+    meta = context.setdefault("metadata", {})
+    meta["last_updated"] = _now_iso()
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(context, f, indent=2)
@@ -557,6 +565,10 @@ def parse_args() -> argparse.Namespace:
         "--sector-type",
         choices=sorted(CANONICAL_SECTOR_TYPES),
         help="Override auto-derived sector type",
+    )
+    sp_init.add_argument(
+        "--run-id",
+        help="Override generated run_id (default: ISO timestamp)",
     )
     _add_common(sp_init)
 

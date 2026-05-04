@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "deck_inventory",
+  "type": "object",
+  "required": ["metadata", "company_name", "review_date", "input_format", "total_slides", "slides"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "required": ["run_id"],
+      "properties": {
+        "run_id": {"type": "string"},
+        "review_date": {"type": "string"},
+        "last_updated": {"type": "string"}
+      }
+    },
+    "company_name": {"type": "string"},
+    "review_date": {"type": "string"},
+    "input_format": {"type": "string", "enum": ["pdf", "pptx", "markdown", "text"]},
+    "total_slides": {"type": "integer"},
+    "claimed_stage": {"type": "string"},
+    "claimed_raise": {"type": "string"},
+    "input_quality": {"type": "string", "enum": ["good", "image_only", "partial"]},
+    "slides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["number", "headline", "content_summary"],
+        "properties": {
+          "number": {"type": "integer"},
+          "headline": {"type": "string"},
+          "content_summary": {"type": "string"},
+          "visuals": {"type": "string"},
+          "word_count_estimate": {"type": "integer"}
+        }
+      }
+    }
+  }
+}

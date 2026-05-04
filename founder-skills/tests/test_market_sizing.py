@@ -708,7 +708,7 @@ def test_compose_strict_mode() -> None:
 
 
 def test_compose_severity_map_complete() -> None:
-    """WARNING_SEVERITY contains all 14 codes with correct severities."""
+    """WARNING_SEVERITY contains all 19 codes with correct severities."""
     # Import WARNING_SEVERITY and ACCEPTIBLE_SEVERITIES by running a small Python snippet
     snippet = (
         f"import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath('{MARKET_SIZING_DIR}'))); "
@@ -747,8 +747,9 @@ def test_compose_severity_map_complete() -> None:
         "REFUTED_MISSING_REASON",
         "DECK_CLAIM_MISMATCH",
         "PROVENANCE_UNRESOLVED",
+        "MARKER_COLLISION",
     ]
-    assert len(sev_map) == 18, f"expected 18 codes, got {len(sev_map)}"
+    assert len(sev_map) == 19, f"expected 19 codes, got {len(sev_map)}"
     for code in expected_codes:
         assert code in sev_map, f"{code} missing from severity map"
     # All values are "high", "medium", or "low"
@@ -760,6 +761,7 @@ def test_compose_severity_map_complete() -> None:
     assert sev_map.get("MISSING_OPTIONAL_ARTIFACT") == "low"
     assert sev_map.get("DECK_CLAIM_MISMATCH") == "low"
     assert sev_map.get("PROVENANCE_UNRESOLVED") == "low"
+    assert sev_map.get("MARKER_COLLISION") == "low"
     # Safety constraint: all high-severity codes must NOT be in ACCEPTIBLE_SEVERITIES
     high_codes = [c for c, s in sev_map.items() if s == "high"]
     for code in high_codes:
@@ -2524,3 +2526,288 @@ def test_compose_deck_claim_mismatch_low_severity() -> None:
     # --strict should NOT exit 1 for low-severity warnings (only high/medium)
     rc_strict, _, _stderr_strict = run_script("compose_report.py", ["--dir", d, "--strict"])
     assert rc_strict == 0, "Low-severity DECK_CLAIM_MISMATCH should not block --strict"
+
+
+# === v0.4.1 Phase 3 Task 11: compose on-disk verification + tolerant JSON extraction ===
+
+from pathlib import Path  # noqa: E402
+
+
+def _make_full_sizing_dir(review_dir: Path) -> None:
+    """Write all 6 required artifacts plus valid checklist into review_dir."""
+    arts = {
+        "inputs.json": _VALID_INPUTS,
+        "methodology.json": _VALID_METHODOLOGY,
+        "validation.json": _VALID_VALIDATION,
+        "sizing.json": _VALID_SIZING,
+        "sensitivity.json": _VALID_SENSITIVITY,
+        "checklist.json": _VALID_CHECKLIST,
+    }
+    for name, data in arts.items():
+        with open(review_dir / name, "w") as f:
+            json.dump(data, f)
+
+
+def test_compose_verifies_outputs_exist_after_write(tmp_path: Path) -> None:
+    """After successful compose, both report.json and report.md must exist on disk."""
+    sizing_dir = tmp_path / "market-sizing-testco"
+    sizing_dir.mkdir()
+    _make_full_sizing_dir(sizing_dir)
+    json_path = str(sizing_dir / "report.json")
+    md_path = str(sizing_dir / "report.md")
+    rc, _, err = run_script(
+        "compose_report.py",
+        ["--dir", str(sizing_dir), "-o", json_path, "--write-md", md_path],
+    )
+    assert rc == 0, err
+    assert os.path.isfile(json_path)
+    assert os.path.isfile(md_path)
+    assert os.path.getsize(json_path) > 0
+    assert os.path.getsize(md_path) > 0
+
+
+def test_compose_exits_nonzero_if_write_md_path_unwritable(tmp_path: Path) -> None:
+    """Compose must exit nonzero if --write-md target dir doesn't exist and can't be created."""
+    sizing_dir = tmp_path / "market-sizing-testco"
+    sizing_dir.mkdir()
+    _make_full_sizing_dir(sizing_dir)
+    # Point --write-md at a path inside a read-only parent
+    ro_parent = tmp_path / "readonly"
+    ro_parent.mkdir(mode=0o555)
+    bad_md_path = str(ro_parent / "no-write" / "report.md")
+    json_path = str(sizing_dir / "report.json")
+    rc, _, err = run_script(
+        "compose_report.py",
+        ["--dir", str(sizing_dir), "-o", json_path, "--write-md", bad_md_path],
+    )
+    assert rc != 0, "compose should exit nonzero when --write-md target is unwritable"
+    # Cleanup: restore writable mode so tmp_path can be deleted
+    os.chmod(ro_parent, 0o755)
+
+
+# === v0.4.1 Phase 3 Task 11: tolerant JSON extraction ===
+
+
+def test_extract_dispatch_json_raw_object() -> None:
+    import sys
+
+    sys.path.insert(0, os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "market-sizing", "scripts"))
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    assert extract_dispatch_json('{"a": 1, "b": 2}') == {"a": 1, "b": 2}
+
+
+def test_extract_dispatch_json_fenced() -> None:
+    import sys
+
+    sys.path.insert(0, os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "market-sizing", "scripts"))
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    assert extract_dispatch_json('```json\n{"a": 1}\n```') == {"a": 1}
+
+
+def test_extract_dispatch_json_nested() -> None:
+    """Critical regression test: must not truncate on inner }."""
+    import sys
+
+    sys.path.insert(0, os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "market-sizing", "scripts"))
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    text = '```json\n{"a": {"b": 1}, "c": 2}\n```'
+    assert extract_dispatch_json(text) == {"a": {"b": 1}, "c": 2}
+
+
+def test_extract_dispatch_json_embedded_in_prose() -> None:
+    import sys
+
+    sys.path.insert(0, os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "market-sizing", "scripts"))
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    text = 'Here is the result:\n{"a": 1, "b": 2}\nLet me know if anything is wrong.'
+    assert extract_dispatch_json(text) == {"a": 1, "b": 2}
+
+
+def test_extract_dispatch_json_raises_when_no_json() -> None:
+    import sys
+
+    import pytest
+
+    sys.path.insert(0, os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "market-sizing", "scripts"))
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    with pytest.raises(ValueError):
+        extract_dispatch_json("Just some prose with no JSON object anywhere.")
+
+
+# === v0.4.2 Phase 3 Task 8: coaching_payload + uuid insertion marker ===
+
+
+def _make_full_sizing_arts() -> dict[str, Any]:
+    """Return a dict of all 6 required artifacts for compose tests."""
+    return {
+        "inputs.json": _VALID_INPUTS,
+        "methodology.json": _VALID_METHODOLOGY,
+        "validation.json": _VALID_VALIDATION,
+        "sizing.json": _VALID_SIZING,
+        "sensitivity.json": _VALID_SENSITIVITY,
+        "checklist.json": _VALID_CHECKLIST,
+    }
+
+
+def test_compose_emits_coaching_payload() -> None:
+    """compose emits a coaching_payload block with all v0.4.2-market-sizing fields."""
+    import re
+
+    d = _make_artifact_dir(_make_full_sizing_arts())
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    assert "coaching_payload" in data, "report.json missing coaching_payload block"
+
+    payload = data["coaching_payload"]
+    assert payload["schema_version"] == "v0.4.2-market-sizing"
+
+    # All expected top-level keys present
+    for key in (
+        "schema_version",
+        "summary",
+        "failed_items",
+        "warned_items",
+        "high_severity_warnings",
+        "company_name",
+        "methodology",
+        "review_dir",
+        "report_path",
+        "insertion_marker",
+    ):
+        assert key in payload, f"coaching_payload missing key: {key}"
+
+    # Summary mirrors checklist counts (no warn key — market-sizing only has pass/fail/na)
+    s = payload["summary"]
+    for sk in ("score_pct", "overall_status", "total", "pass", "fail", "not_applicable"):
+        assert sk in s, f"coaching_payload.summary missing {sk}"
+
+    # company_name and methodology surfaced from artifacts
+    assert payload["company_name"] == "TestCo"
+    assert payload["methodology"] == "both"
+
+    # warned_items is always an explicit empty list
+    assert payload["warned_items"] == [], "warned_items must be explicit empty list"
+
+    # Insertion marker matches uuid format
+    assert re.fullmatch(r"<!-- COACHING_INSERTION_POINT_[0-9a-f]{8} -->", payload["insertion_marker"]), (
+        f"unexpected marker shape: {payload['insertion_marker']}"
+    )
+
+    # Backward-compat: existing top-level keys still present
+    assert "report_markdown" in data
+    assert "validation" in data
+
+
+def test_compose_inserts_uuid_marker() -> None:
+    """report.md contains exactly one uuid marker matching coaching_payload.insertion_marker."""
+    import re
+
+    d = _make_artifact_dir(_make_full_sizing_arts())
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+
+    md = data["report_markdown"]
+    matches = re.findall(r"<!-- COACHING_INSERTION_POINT_[0-9a-f]{8} -->", md)
+    assert len(matches) == 1, f"expected exactly one marker, found {len(matches)}: {matches}"
+    assert matches[0] == data["coaching_payload"]["insertion_marker"], (
+        "marker in report.md must equal coaching_payload.insertion_marker"
+    )
+
+
+def test_compose_warns_on_marker_collision() -> None:
+    """Body content containing the marker substring triggers MARKER_COLLISION (non-fatal)."""
+    import copy
+
+    # Inject the marker substring into a source title, which is rendered in _section_sources.
+    validation: dict[str, Any] = copy.deepcopy(_VALID_VALIDATION)
+    validation["sources"] = [
+        {
+            "title": "Sneaky body content with <!-- COACHING_INSERTION_POINT_aaaaaaaa --> embedded",
+            "publisher": "Test",
+            "url": "https://example.com",
+            "date_accessed": "2026-01-15",
+            "supported": "TAM figure",
+        }
+    ]
+
+    arts = _make_full_sizing_arts()
+    arts["validation.json"] = validation
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    # Compose still succeeds (warning, not error)
+    assert rc == 0, err
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "MARKER_COLLISION" in codes, f"expected MARKER_COLLISION in warnings, got: {codes}"
+
+
+def test_payload_failed_items_match_summary_fail() -> None:
+    """coaching_payload.failed_items length matches summary.fail count."""
+    import copy
+
+    checklist: dict[str, Any] = copy.deepcopy(_VALID_CHECKLIST)
+    items = checklist["items"]
+    # Make 3 items fail
+    for i in range(3):
+        items[i] = dict(items[i])
+        items[i]["status"] = "fail"
+    failed_items = [
+        {"id": items[i]["id"], "category": items[i]["category"], "label": items[i]["label"], "notes": None}
+        for i in range(3)
+    ]
+    checklist["summary"] = {
+        "total": 22,
+        "pass": 19,
+        "fail": 3,
+        "not_applicable": 0,
+        "score_pct": 86.4,
+        "overall_status": "fail",
+        "failed_items": failed_items,
+    }
+
+    arts = _make_full_sizing_arts()
+    arts["checklist.json"] = checklist
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    payload = data["coaching_payload"]
+    assert len(payload["failed_items"]) == payload["summary"]["fail"] == 3
+
+
+def test_payload_warned_items_always_empty() -> None:
+    """coached_payload.warned_items is always [] even if checklist had warn entries (schema parity).
+
+    market-sizing's checklist has no warn status. This test verifies the field is
+    invariantly an explicit empty list regardless of what's in checklist data.
+    """
+    import copy
+
+    # Construct a checklist summary that (hypothetically) has a warned_items list —
+    # market-sizing can't produce this but the schema should be robust against it.
+    checklist: dict[str, Any] = copy.deepcopy(_VALID_CHECKLIST)
+    checklist["summary"] = dict(checklist["summary"])
+    # Inject warned_items into the summary (not a valid market-sizing output,
+    # but we're testing the compose layer's invariant)
+    checklist["summary"]["warned_items"] = [
+        {"id": "some_item", "category": "Test", "label": "Test warn", "notes": None}
+    ]
+
+    arts = _make_full_sizing_arts()
+    arts["checklist.json"] = checklist
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    payload = data["coaching_payload"]
+    # Must always be empty list regardless of checklist content
+    assert payload["warned_items"] == [], (
+        "coached_payload.warned_items must always be [] for market-sizing (no warn status)"
+    )

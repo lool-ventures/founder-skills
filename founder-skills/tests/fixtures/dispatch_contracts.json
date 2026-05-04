@@ -1,0 +1,194 @@
+{
+  "deck-review": {
+    "SLIDE_REVIEWS": {
+      "schema": "slide_reviews.schema.json",
+      "validates_via": "schema",
+      "required_fields_minus_metadata": ["reviews", "missing_slides", "overall_narrative_assessment"],
+      "notes": "deck-review has _schema_validator.py + JSON Schema files; producer script (slide_reviews.py) loads schema, validates input, injects metadata.run_id. Each reviews[] item requires slide_number, maps_to, strengths, weaknesses, recommendations, best_practice_refs."
+    },
+    "CHECKLIST": {
+      "schema": "checklist.schema.json",
+      "validates_via": "schema",
+      "required_fields_minus_metadata": ["items"],
+      "notes": "Agent dispatch returns {items: [...]} where each item requires id, category, label, status. Producer script (checklist.py) computes summary (total/pass/fail/warn/not_applicable/score_pct/overall_status) and injects metadata.run_id — summary is NOT part of the agent's required input."
+    },
+    "POST_COMPOSE_COACHING": {
+      "schema_version": "v0.4.2-deck-review",
+      "validates_via": "test_deck_review_context_b_contract_documented",
+      "required_input_keys": ["coaching_payload"],
+      "required_actions": [
+        "grep_idempotency_check",
+        "edit_via_marker",
+        "self_verify_artifacts_via_grep_run_id"
+      ],
+      "forbidden_actions": ["read_full_report_md"],
+      "return_payload_keys": [
+        "status", "review_dir", "report_path",
+        "score_pct", "overall_status", "high_severity_warnings"
+      ],
+      "notes": "Context B; reads coaching_payload from dispatch prompt; tightened idempotency (commentary==1 AND marker==0 means already-inserted; any other state BLOCKED)"
+    }
+  },
+  "competitive-positioning": {
+    "LANDSCAPE_RESEARCH": {
+      "schema": "",
+      "validates_via": "inline_dict_check",
+      "required_fields_minus_metadata": ["competitors"],
+      "notes": "validate_landscape.py reads stdin JSON and requires 'competitors' (non-empty array). Each competitor must have name, slug (kebab-case), category (direct|adjacent|do_nothing|emerging|custom), description, key_differentiators (non-empty array). Min 3, max 10 competitors. Optional passthrough fields: input_mode, assessment_mode, data_confidence."
+    },
+    "MOAT_SCORING": {
+      "schema": "",
+      "validates_via": "inline_dict_check",
+      "required_fields_minus_metadata": ["moat_assessments"],
+      "notes": "score_moats.py requires 'moat_assessments' keyed by company slug (including '_startup'). Also accepts array-of-objects form [{slug, moats:[...]}] and normalizes to dict. Each company entry requires moats array; each moat entry requires id (canonical or custom_*), status (strong|moderate|weak|absent|not_applicable), trajectory (building|stable|eroding), evidence_source (researched|agent_estimate|founder_override), evidence (string)."
+    },
+    "POSITIONING_SCORING": {
+      "schema": "",
+      "validates_via": "inline_dict_check",
+      "required_fields_minus_metadata": ["views"],
+      "notes": "score_positioning.py requires 'views' (non-empty array). Each view requires id, x_axis (object with name), y_axis (object with name), points (array). Each point requires competitor (string, '_startup' must be present), x (0-100), y (0-100). Script normalizes string axes to {name: str} and slug->competitor field name. Optional passthrough: differentiation_claims, data_confidence."
+    },
+    "CHECKLIST": {
+      "schema": "",
+      "validates_via": "inline_dict_check",
+      "required_fields_minus_metadata": ["items"],
+      "notes": "competitive-positioning/checklist.py requires 'items' (array of all 25 canonical IDs: COVER_01..05, POS_01..05, MOAT_01..04, EVID_01..04, NARR_01..04, MISS_01..03). Each item requires id, status (pass|fail|warn|not_applicable), evidence (non-empty string). Optional: input_mode (deck|conversation|document, default conversation) controls mode-based gating; data_confidence."
+    },
+    "POST_COMPOSE_COACHING": {
+      "schema_version": "v0.4.2-competitive-positioning",
+      "validates_via": "test_competitive_positioning_context_b_contract_documented",
+      "required_input_keys": ["coaching_payload"],
+      "required_actions": [
+        "grep_idempotency_check",
+        "edit_via_marker",
+        "self_verify_artifacts_via_grep_run_id"
+      ],
+      "forbidden_actions": ["read_full_report_md"],
+      "return_payload_keys": [
+        "status", "review_dir", "report_path",
+        "landscape_summary", "top_moats", "high_severity_warnings"
+      ],
+      "notes": "Context B; reads coaching_payload from dispatch prompt; tightened idempotency (commentary==1 AND marker==0 means already-inserted; any other state BLOCKED)"
+    }
+  },
+  "financial-model-review": {
+    "INPUTS_REVIEW": {
+      "schema": "",
+      "validates_via": "argparse",
+      "required_fields_minus_metadata": ["changes", "base_hash"],
+      "notes": "apply_corrections.py takes two file arguments (not stdin): corrections.json and --original inputs.json, plus --output-dir. New-style corrections payload requires 'changes' (array of {path, expected_old, new, type}) and 'base_hash' (sha256 of original for stale-edit detection). Legacy style uses 'corrected' object directly. Optional: warning_overrides, ils_fields. Output: corrected_inputs.json + extraction_corrections.json."
+    },
+    "UNIT_ECONOMICS": {
+      "schema": "",
+      "validates_via": "inline_dict_check",
+      "required_fields_minus_metadata": ["company"],
+      "notes": "unit_economics.py reads stdin inputs.json and requires 'company' (with stage, sector, revenue_model_type). Computes 11 metrics from optional nested fields: revenue (mrr.value, arr.value, customers, growth_rate_monthly, churn_monthly, nrr, grr, monthly[], quarterly[]), expenses (headcount[], opex_monthly[], cogs), unit_economics (cac.total, ltv.value, ltv.inputs, gross_margin, payback_months, burn_multiple), cash (monthly_net_burn). All metric fields are optional — missing data yields not_rated."
+    },
+    "RUNWAY_SCENARIOS": {
+      "schema": "",
+      "validates_via": "inline_dict_check",
+      "required_fields_minus_metadata": ["company", "cash"],
+      "notes": "runway.py reads stdin inputs.json and requires 'company' (for name/slug/stage/data_confidence) and 'cash' (current_balance, monthly_net_burn). Optional: revenue (mrr.value, growth_rate_monthly, monthly[], quarterly[]), israel_specific (fx_rate_ils_usd, ils_expense_fraction), cash.grants (iia_approved, iia_pending, iia_disbursement_months, iia_start_month), scenarios (dict of name->params with growth_rate, burn_change), bridge (runway_target_months). Gracefully handles missing cash data with sensitivity tables."
+    },
+    "CHECKLIST": {
+      "schema": "",
+      "validates_via": "inline_dict_check",
+      "required_fields_minus_metadata": ["items"],
+      "notes": "financial-model-review/checklist.py requires 'items' (array of all 46 canonical IDs: STRUCT_01..09, UNIT_10..19, CASH_20..32, METRIC_33..35, SCENARIO_36..38, BRIDGE_37..38, SECTOR_39..44, OVERALL_45..46). Each item requires id, status (pass|fail|warn|not_applicable). Optional: company (for profile-based auto-gating by stage/geography/sector/model_format), inputs (for SECTOR_40 AI-cost detection), metadata."
+    },
+    "POST_COMPOSE_COACHING": {
+      "schema_version": "v0.4.2-financial-model-review",
+      "validates_via": "test_financial_model_review_context_b_contract_documented",
+      "required_input_keys": ["coaching_payload"],
+      "required_actions": [
+        "grep_idempotency_check",
+        "edit_via_marker",
+        "self_verify_artifacts_via_grep_run_id"
+      ],
+      "forbidden_actions": ["read_full_report_md"],
+      "return_payload_keys": [
+        "status", "review_dir", "report_path",
+        "runway_months", "unit_economics_status", "red_flags", "high_severity_warnings"
+      ],
+      "notes": "Context B; reads coaching_payload from dispatch prompt (includes truncated/truncated_count flags); tightened idempotency (commentary==1 AND marker==0 means already-inserted; any other state BLOCKED)"
+    }
+  },
+  "ic-sim": {
+    "POST_COMPOSE_COACHING": {
+      "schema_version": "v0.4.2-ic-sim",
+      "validates_via": "test_ic_sim_context_b_contract_documented",
+      "required_input_keys": ["coaching_payload"],
+      "required_actions": [
+        "grep_idempotency_check",
+        "edit_via_marker",
+        "self_verify_artifacts_via_grep_run_id"
+      ],
+      "forbidden_actions": ["read_full_report_md"],
+      "return_payload_keys": [
+        "status", "review_dir", "report_path",
+        "decision", "consensus_strength", "key_concerns", "high_severity_warnings"
+      ],
+      "notes": "Context B; reads coaching_payload from dispatch prompt; dimension-based schema (dealbreakers with severity, concerns with description, summary with verdict/conviction_score/conviction counts). Tightened idempotency (commentary==1 AND marker==0 means already-inserted; any other state BLOCKED)"
+    },
+    "PARTNER_ANALYSIS": {
+      "schema": "",
+      "validates_via": "argparse",
+      "required_fields_minus_metadata": ["partner", "verdict", "rationale", "conviction_points", "key_concerns", "questions_for_founders", "diligence_requirements"],
+      "notes": "SYNTHETIC CONTRACT — no dedicated producer script. Three sub-agents (visionary/operator/analyst) each produce partner_assessment_{role}.json independently. Fields per artifact-schemas.md: partner (visionary|operator|analyst), verdict (invest|more_diligence|pass|hard_pass), rationale (string), conviction_points (string[]), key_concerns (string[]), questions_for_founders (string[]), diligence_requirements (string[]). Main thread combines three assessments into discussion.json for score_dimensions.py."
+    },
+    "SCORE_DIMENSIONS": {
+      "schema": "",
+      "validates_via": "inline_dict_check",
+      "required_fields_minus_metadata": ["items"],
+      "notes": "score_dimensions.py requires 'items' (array of all 28 canonical dimension IDs across 7 categories: team_*, market_*, product_*, biz_*, fin_*, risk_*, fit_*). Each item requires id and status (strong_conviction|moderate_conviction|concern|dealbreaker|not_applicable). Optional per item: evidence, notes. Script produces verdict (invest|more_diligence|pass|hard_pass) based on conviction_score and dealbreaker presence."
+    },
+    "DETECT_CONFLICTS": {
+      "schema": "",
+      "validates_via": "inline_dict_check",
+      "required_fields_minus_metadata": ["portfolio_size", "conflicts"],
+      "notes": "detect_conflicts.py requires 'portfolio_size' (non-negative integer) and 'conflicts' (array, may be empty). Each conflict entry requires company (string), type (direct|adjacent|customer_overlap), severity (blocking|manageable), rationale (string). Script deduplicates by normalized (company, type), computes summary (total_checked, conflict_count, has_blocking_conflict, overall_severity), adds validation.status."
+    }
+  },
+  "market-sizing": {
+    "POST_COMPOSE_COACHING": {
+      "schema_version": "v0.4.2-market-sizing",
+      "validates_via": "test_market_sizing_context_b_contract_documented",
+      "required_input_keys": ["coaching_payload"],
+      "required_actions": [
+        "grep_idempotency_check",
+        "edit_via_marker",
+        "self_verify_artifacts_via_grep_run_id"
+      ],
+      "forbidden_actions": ["read_full_report_md"],
+      "return_payload_keys": [
+        "status", "review_dir", "report_path",
+        "tam", "sam", "som", "methodology", "confidence", "high_severity_warnings"
+      ],
+      "notes": "Context B; reads coaching_payload from dispatch prompt; market-sizing checklist has no warn status so warned_items is always []; agent reasons from failed_items only. Tightened idempotency (commentary==1 AND marker==0 means already-inserted; any other state BLOCKED)"
+    },
+    "TOP_DOWN_METHODOLOGY": {
+      "schema": "",
+      "validates_via": "argparse",
+      "required_fields_minus_metadata": ["approach", "industry_total", "segment_pct", "share_pct"],
+      "notes": "market_sizing.py --stdin reads JSON from stdin. For top-down: requires industry_total (float > 0), segment_pct (0-100), share_pct (0-100). 'approach' must be 'top_down' (or 'top-down'). Optional: growth_rate, years (int, default 0), currency (default USD). Output: {approach, currency, top_down: {tam, sam, som, ...}}."
+    },
+    "BOTTOM_UP_METHODOLOGY": {
+      "schema": "",
+      "validates_via": "argparse",
+      "required_fields_minus_metadata": ["approach", "customer_count", "arpu", "serviceable_pct", "target_pct"],
+      "notes": "market_sizing.py --stdin reads JSON from stdin. For bottom-up: requires customer_count (positive integer), arpu (float > 0), serviceable_pct (0-100), target_pct (0-100). 'approach' must be 'bottom_up' (or 'bottom-up'). Optional: growth_rate, years (int, default 0), currency (default USD). Output: {approach, currency, bottom_up: {tam, sam, som, ...}}."
+    },
+    "SENSITIVITY_TEST": {
+      "schema": "",
+      "validates_via": "inline_dict_check",
+      "required_fields_minus_metadata": ["approach", "base", "ranges"],
+      "notes": "sensitivity.py reads stdin JSON. Requires 'approach' (top_down|bottom_up|both), 'base' (object with required params for the approach: top_down needs industry_total/segment_pct/share_pct; bottom_up needs customer_count/arpu/serviceable_pct/target_pct), 'ranges' (object with at least one param key, each having low_pct and high_pct). Optional per-param: confidence (sourced|derived|agent_estimate) triggers auto-widening of ranges."
+    },
+    "CHECKLIST": {
+      "schema": "",
+      "validates_via": "inline_dict_check",
+      "required_fields_minus_metadata": ["items"],
+      "notes": "market-sizing/checklist.py requires 'items' (array of all 22 canonical IDs: structural_tam_gt_sam_gt_som, structural_definitions_correct, tam_matches_product_scope, source_segments_match, som_share_defensible, som_backed_by_gtm, som_consistent_with_projections, data_current, sources_reputable, figures_triangulated, unsupported_figures_flagged, validated_used_precisely, assumptions_categorized, both_approaches_used, approaches_reconciled, growth_dynamics_considered, market_properly_segmented, competitive_landscape_acknowledged, sam_expansion_path_noted, assumptions_explicit, formulas_shown, sources_cited). Each item requires id, status (pass|fail|not_applicable). Optional: notes (string). No evidence field required (unlike other skills)."
+    }
+  }
+}

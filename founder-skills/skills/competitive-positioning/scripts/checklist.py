@@ -206,7 +206,63 @@ def validate_and_score(
     applicable = total - na_count
     score_pct = round(((pass_count + 0.5 * warn_count) / applicable) * 100, 1) if applicable > 0 else 0.0
 
+    # Overall status thresholds — match SKILL.md "## Scoring" section and
+    # deck-review/checklist.py:267-273 for cross-skill parity.
+    if score_pct >= 85:
+        overall_status = "strong"
+    elif score_pct >= 70:
+        overall_status = "solid"
+    elif score_pct >= 50:
+        overall_status = "needs_work"
+    else:
+        overall_status = "major_revision"
+
+    # Build failed/warned items arrays (flattened with id/category/criterion/status/evidence/principle).
+    # `criterion` mirrors the human-readable label; `principle` is left empty
+    # because competitive-positioning checklist items don't carry a separate
+    # principle field — agents fill this in narratively if needed.
+    failed_items: list[dict[str, Any]] = []
+    warned_items: list[dict[str, Any]] = []
+    for entry in enriched:
+        if entry["status"] == "fail":
+            failed_items.append(
+                {
+                    "id": entry["id"],
+                    "category": entry["category"],
+                    "criterion": entry["label"],
+                    "status": entry["status"],
+                    "evidence": entry["evidence"],
+                    "principle": "",
+                }
+            )
+        elif entry["status"] == "warn":
+            warned_items.append(
+                {
+                    "id": entry["id"],
+                    "category": entry["category"],
+                    "criterion": entry["label"],
+                    "status": entry["status"],
+                    "evidence": entry["evidence"],
+                    "principle": "",
+                }
+            )
+
+    summary: dict[str, Any] = {
+        "score_pct": score_pct,
+        "overall_status": overall_status,
+        "total": total,
+        "pass": pass_count,
+        "fail": fail_count,
+        "warn": warn_count,
+        "not_applicable": na_count,
+        "failed_items": failed_items,
+        "warned_items": warned_items,
+    }
+
     return {
+        # New unified summary block (parity with deck-review/financial-model-review).
+        "summary": summary,
+        # Legacy flat fields — keep for backward compatibility with pre-v0.4.2 consumers.
         "items": enriched,
         "score_pct": score_pct,
         "pass_count": pass_count,

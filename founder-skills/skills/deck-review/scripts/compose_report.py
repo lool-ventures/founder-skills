@@ -21,8 +21,33 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
+import uuid
+from difflib import SequenceMatcher
 from typing import Any, TypeGuard
+
+
+def _ratio(a: str, b: str) -> float:
+    return SequenceMatcher(None, a, b).ratio()
+
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _artifact_writer import load_schema  # noqa: E402
+from _schema_validator import validate as _schema_validate  # noqa: E402
+
+_SCHEMA_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "references",
+    "schemas",
+)
+
+_ARTIFACT_TO_SCHEMA = {
+    "deck_inventory.json": "deck_inventory.schema.json",
+    "stage_profile.json": "stage_profile.schema.json",
+    "slide_reviews.json": "slide_reviews.schema.json",
+    "checklist.json": "checklist.schema.json",
+}
 
 # Canonical warning severity map.
 # High severity = agent must fix before presenting report.
@@ -35,6 +60,8 @@ WARNING_SEVERITY: dict[str, str] = {
     "CORRUPT_ARTIFACT": "high",
     "MISSING_ARTIFACT": "high",
     "STALE_ARTIFACT": "high",
+    "SCHEMA_VIOLATION": "high",
+    "MISSING_METADATA": "high",
     "CHECKLIST_FAILURES_CRITICAL": "high",
     # Medium — quality concerns worth surfacing
     "STAGE_MISMATCH": "medium",
@@ -47,6 +74,9 @@ WARNING_SEVERITY: dict[str, str] = {
     "STAGE_OUT_OF_SCOPE": "low",
     "UNSUPPORTED_CHECKLIST_CRITIQUE": "high",
     "CHECKLIST_VALIDATION_FAILED": "high",
+    "NAME_DRIFT": "medium",
+    # v0.4.2 Mitigation 2 — informational only (uuid is per-run, won't collide)
+    "MARKER_COLLISION": "low",
 }
 
 ACCEPTIBLE_SEVERITIES = {"medium"}
@@ -56,6 +86,8 @@ WARNING_LABELS: dict[str, str] = {
     "CORRUPT_ARTIFACT": "Corrupt Artifact",
     "MISSING_ARTIFACT": "Missing Artifact",
     "STALE_ARTIFACT": "Stale Artifact",
+    "SCHEMA_VIOLATION": "Schema Violation",
+    "MISSING_METADATA": "Missing Metadata",
     "CHECKLIST_FAILURES_CRITICAL": "Checklist Failures (Critical)",
     "STAGE_MISMATCH": "Stage Mismatch",
     "SLIDE_COUNT_EXTREME": "Slide Count",
@@ -66,6 +98,8 @@ WARNING_LABELS: dict[str, str] = {
     "STAGE_OUT_OF_SCOPE": "Stage Out of Scope",
     "UNSUPPORTED_CHECKLIST_CRITIQUE": "Unsupported Checklist Critique",
     "CHECKLIST_VALIDATION_FAILED": "Checklist Validation Failed",
+    "NAME_DRIFT": "Company Name Drift",
+    "MARKER_COLLISION": "Marker Collision",
 }
 
 
@@ -159,6 +193,32 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             warnings.append(_warn("CORRUPT_ARTIFACT", f"Artifact has invalid JSON: {name}"))
         elif data is None:
             warnings.append(_warn("MISSING_ARTIFACT", f"Required artifact missing: {name}"))
+
+    # 1b. SCHEMA_VIOLATION — required artifact violates JSON schema
+    for name in REQUIRED_ARTIFACTS:
+        data = artifacts.get(name)
+        if not _usable(data):
+            continue
+        schema_file = _ARTIFACT_TO_SCHEMA.get(name)
+        if not schema_file:
+            continue
+        try:
+            schema = load_schema(os.path.join(_SCHEMA_DIR, schema_file))
+        except (OSError, json.JSONDecodeError) as e:
+            warnings.append(_warn("SCHEMA_VIOLATION", f"Could not load schema for {name}: {e}"))
+            continue
+        errs = _schema_validate(data, schema)
+        if errs:
+            warnings.append(_warn("SCHEMA_VIOLATION", f"{name}: {'; '.join(errs[:3])}"))
+
+    # 1c. MISSING_METADATA — required artifact lacks metadata.run_id
+    for name in REQUIRED_ARTIFACTS:
+        data = artifacts.get(name)
+        if not _usable(data):
+            continue
+        meta = _as_dict(data.get("metadata"))
+        if not isinstance(meta.get("run_id"), str) or not meta.get("run_id"):
+            warnings.append(_warn("MISSING_METADATA", f"{name} has no metadata.run_id"))
 
     # 2. STALE_ARTIFACT — run_id mismatch across artifacts
     run_ids: dict[str, str] = {}
@@ -332,6 +392,35 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                     f"Checklist validation status is '{val_status}' — checklist data may be unreliable",
                 )
             )
+
+    # 11. NAME_DRIFT — variants of company_name appear in slide content
+    if _usable(inventory):
+        canonical = (inventory.get("company_name") or "").strip()
+        if canonical and len(canonical) >= 3:
+            canonical_lower = canonical.lower()
+            seen_variants: set[str] = set()
+            for slide in _as_list(inventory.get("slides")):
+                for field in ("headline", "content_summary"):
+                    text = str(slide.get(field, ""))
+                    for token in re.findall(r"\b[A-Za-z][A-Za-z0-9]{2,}\b", text):
+                        if token == canonical:
+                            continue
+                        tl = token.lower()
+                        if tl == canonical_lower:
+                            # Same letters, different case — flag
+                            seen_variants.add(token)
+                            continue
+                        # Edit-distance check: same length ±1, ratio ≥ 0.80
+                        if abs(len(token) - len(canonical)) <= 1 and _ratio(tl, canonical_lower) >= 0.80:
+                            seen_variants.add(token)
+            if seen_variants:
+                variants_str = ", ".join(sorted(seen_variants))
+                warnings.append(
+                    _warn(
+                        "NAME_DRIFT",
+                        f"Company name '{canonical}' appears as variants in deck content: {variants_str}",
+                    )
+                )
 
     return warnings
 
@@ -622,7 +711,44 @@ def _section_full_checklist(checklist: dict[str, Any] | None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def compose(dir_path: str) -> dict[str, Any]:
+def _emit_coaching_payload(
+    inventory: dict[str, Any],
+    stage_profile: dict[str, Any],
+    checklist: dict[str, Any],
+    validation_warnings: list[dict[str, str]],
+    review_dir: str,
+    report_path: str,
+    insertion_marker: str,
+) -> dict[str, Any]:
+    """Build the v0.4.2 coaching_payload for deck-review (schema_version v0.4.2-deck-review).
+
+    Read from existing artifacts; do not fabricate fields.
+    """
+    summary = _as_dict(checklist.get("summary"))
+    return {
+        "schema_version": "v0.4.2-deck-review",
+        "summary": {
+            "score_pct": summary.get("score_pct"),
+            "overall_status": summary.get("overall_status"),
+            "total": summary.get("total"),
+            "pass": summary.get("pass"),
+            "fail": summary.get("fail"),
+            "warn": summary.get("warn"),
+            "not_applicable": summary.get("not_applicable"),
+        },
+        "failed_items": summary.get("failed_items", []),
+        "warned_items": summary.get("warned_items", []),
+        "high_severity_warnings": [w["code"] for w in validation_warnings if w.get("severity") == "high"],
+        "stage": stage_profile.get("detected_stage") or inventory.get("claimed_stage"),
+        "is_ai_company": stage_profile.get("is_ai_company", False),
+        "company_name": inventory.get("company_name"),
+        "review_dir": review_dir,
+        "report_path": report_path,
+        "insertion_marker": insertion_marker,
+    }
+
+
+def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     """Main composition: load artifacts, validate, assemble report."""
     all_names = REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS
     artifacts: dict[str, dict[str, Any] | None] = {}
@@ -689,8 +815,28 @@ def compose(dir_path: str) -> dict[str, Any]:
     ]
 
     report_markdown = "\n".join(sections)
+
+    # v0.4.2 Mitigation 2: per-run uuid marker for Context B's Edit
+    marker = f"<!-- COACHING_INSERTION_POINT_{uuid.uuid4().hex[:8]} -->"
+
+    # Pre-scan: check assembled body BEFORE appending the marker (otherwise we
+    # always find our own emission). Agent post-Edit verification uses the
+    # EXACT uuid (per-run), so substring collisions with body content are
+    # informational only — but worth flagging so authors can sanitize.
+    if "<!-- COACHING_INSERTION_POINT_" in report_markdown:
+        warnings.append(
+            _warn(
+                "MARKER_COLLISION",
+                (
+                    "Body content contains marker substring; agent post-Edit verification "
+                    "uses the EXACT uuid (per-run) so this is informational only — "
+                    "body sanitization recommended."
+                ),
+            )
+        )
+
     report_markdown += (
-        "\n\n---\n"
+        f"\n\n{marker}\n\n---\n"
         "*Generated by [founder skills](https://github.com/lool-ventures/founder-skills)"
         " by [lool ventures](https://lool.vc)"
         " — Deck Review Agent*\n"
@@ -709,6 +855,19 @@ def compose(dir_path: str) -> dict[str, Any]:
     else:
         print("No warnings.", file=sys.stderr)
 
+    # v0.4.2 Mitigation 2: structured coaching payload for Context B agent.
+    # Use the same uuid marker generated above as the single source of truth.
+    resolved_report_path = report_path or os.path.join(os.path.abspath(dir_path), "report.md")
+    coaching_payload = _emit_coaching_payload(
+        inventory=_as_dict(inventory),
+        stage_profile=_as_dict(stage_profile),
+        checklist=_as_dict(checklist_data),
+        validation_warnings=warnings,
+        review_dir=os.path.abspath(dir_path),
+        report_path=resolved_report_path,
+        insertion_marker=marker,
+    )
+
     result = {
         "report_markdown": report_markdown,
         "validation": {
@@ -717,6 +876,7 @@ def compose(dir_path: str) -> dict[str, Any]:
             "artifacts_found": artifacts_found,
             "artifacts_missing": artifacts_missing,
         },
+        "coaching_payload": coaching_payload,
     }
 
     return result
@@ -728,6 +888,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
     p.add_argument("--strict", action="store_true", help="Exit 1 if any warnings (CI mode)")
+    p.add_argument(
+        "--write-md",
+        help="Also write the report markdown to this path (in addition to JSON output via -o)",
+    )
     return p.parse_args()
 
 
@@ -738,7 +902,25 @@ def main() -> None:
         print(f"Error: directory not found: {args.dir}", file=sys.stderr)
         sys.exit(1)
 
-    result = compose(args.dir)
+    report_path = os.path.abspath(args.write_md) if args.write_md else None
+    result = compose(args.dir, report_path=report_path)
+
+    if args.write_md:
+        report_markdown = result.get("report_markdown", "")
+        md_path = os.path.abspath(args.write_md)
+        parent = os.path.dirname(md_path)
+        if parent:
+            try:
+                os.makedirs(parent, exist_ok=True)
+            except OSError as e:
+                print(f"Error: cannot create directory for --write-md: {e}", file=sys.stderr)
+                sys.exit(2)
+        try:
+            with open(md_path, "w", encoding="utf-8") as f:
+                f.write(report_markdown if report_markdown.endswith("\n") else report_markdown + "\n")
+        except OSError as e:
+            print(f"Error: cannot write --write-md file: {e}", file=sys.stderr)
+            sys.exit(2)
 
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"
@@ -748,6 +930,24 @@ def main() -> None:
         args.output,
         summary={"validation": v["status"], "warnings": len(v["warnings"])},
     )
+
+    # Post-write on-disk verification: confirm declared output files exist and are non-empty.
+    if args.output:
+        abs_out = os.path.abspath(args.output)
+        if not os.path.isfile(abs_out) or os.path.getsize(abs_out) == 0:
+            print(
+                f"Error: output file missing or empty after write: {abs_out}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+    if args.write_md:
+        abs_md = os.path.abspath(args.write_md)
+        if not os.path.isfile(abs_md) or os.path.getsize(abs_md) == 0:
+            print(
+                f"Error: --write-md file missing or empty after write: {abs_md}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
 
     if args.strict:
         blocking = [w for w in result["validation"]["warnings"] if w["severity"] in ("high", "medium")]

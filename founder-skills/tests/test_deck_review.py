@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 from typing import Any
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -299,6 +300,7 @@ def _make_artifact_dir(artifacts: dict[str, dict]) -> str:
 
 
 _VALID_INVENTORY = {
+    "metadata": {"run_id": "run-test"},
     "company_name": "TestCo",
     "review_date": "2026-02-20",
     "input_format": "pdf",
@@ -317,6 +319,7 @@ _VALID_INVENTORY = {
 }
 
 _VALID_PROFILE = {
+    "metadata": {"run_id": "run-test"},
     "detected_stage": "seed",
     "confidence": "high",
     "evidence": ["Claims $2M ARR", "Raising $4M"],
@@ -332,6 +335,7 @@ _VALID_PROFILE = {
 }
 
 _VALID_REVIEWS = {
+    "metadata": {"run_id": "run-test"},
     "reviews": [
         {
             "slide_number": 1,
@@ -347,6 +351,7 @@ _VALID_REVIEWS = {
 }
 
 _VALID_CHECKLIST = {
+    "metadata": {"run_id": "run-test"},
     "items": [
         {"id": cid, "category": "Test", "label": "Test", "status": "pass", "evidence": "test", "notes": None}
         for cid in _CHECKLIST_IDS
@@ -700,6 +705,8 @@ def test_compose_severity_map_complete() -> None:
         "CORRUPT_ARTIFACT",
         "MISSING_ARTIFACT",
         "STALE_ARTIFACT",
+        "SCHEMA_VIOLATION",
+        "MISSING_METADATA",
         "CHECKLIST_FAILURES_CRITICAL",
         "STAGE_MISMATCH",
         "SLIDE_COUNT_EXTREME",
@@ -710,6 +717,8 @@ def test_compose_severity_map_complete() -> None:
         "CHECKLIST_VALIDATION_FAILED",
         "AI_CRITERIA_ON_NON_AI",
         "AI_CRITERIA_MISSING",
+        "NAME_DRIFT",
+        "MARKER_COLLISION",
     ]
     assert len(sev_map) == len(expected), f"expected {len(expected)} codes, got {len(sev_map)}"
     for code in expected:
@@ -1074,3 +1083,667 @@ def test_compose_slide_framing() -> None:
     assert data is not None
     md = data["report_markdown"]
     assert "agent" in md.lower()
+
+
+def test_checklist_output_includes_metadata_run_id(tmp_path: Path) -> None:
+    """checklist.py output includes metadata.run_id when --run-id is provided."""
+    items = [{"id": id_, "status": "pass", "evidence": "x", "notes": "y"} for id_ in _CHECKLIST_IDS]
+    out = str(tmp_path / "checklist.json")
+    rc, _, err = run_script(
+        "checklist.py",
+        ["--run-id", "20260503T120000Z", "-o", out],
+        stdin_data=json.dumps({"items": items}),
+    )
+    assert rc == 0, err
+    with open(out) as f:
+        checklist = json.load(f)
+    assert checklist["metadata"]["run_id"] == "20260503T120000Z"
+    assert len(checklist["items"]) == 35
+
+
+def test_compose_emits_schema_violation_for_malformed_checklist(tmp_path: Path) -> None:
+    """A checklist.json that's section-keyed (issue #2 shape) must trigger SCHEMA_VIOLATION."""
+    review_dir = tmp_path / "deck-review-acme"
+    review_dir.mkdir()
+    # Write valid inventory, profile, reviews
+    (review_dir / "deck_inventory.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "company_name": "Acme",
+                "review_date": "2026-05-03",
+                "input_format": "pdf",
+                "total_slides": 1,
+                "slides": [{"number": 1, "headline": "h", "content_summary": "s"}],
+            }
+        )
+    )
+    (review_dir / "stage_profile.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "detected_stage": "seed",
+                "confidence": "high",
+                "evidence": [],
+                "is_ai_company": False,
+                "expected_framework": [],
+                "stage_benchmarks": {"round_size_range": "x", "expected_traction": "y", "runway_expectation": "z"},
+                "reference_file_read": [],
+            }
+        )
+    )
+    (review_dir / "slide_reviews.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "reviews": [],
+                "missing_slides": [],
+                "overall_narrative_assessment": "x",
+            }
+        )
+    )
+    # Malformed checklist — section-keyed, exactly the shape from issue #2
+    (review_dir / "checklist.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "narrative_section": {"items": []},
+                "summary": {
+                    "total": 35,
+                    "pass": 30,
+                    "fail": 5,
+                    "warn": 0,
+                    "not_applicable": 0,
+                    "score_pct": 85.7,
+                    "overall_status": "strong",
+                },
+            }
+        )
+    )
+
+    rc, out, stderr = run_script(
+        "compose_report.py",
+        ["--dir", str(review_dir), "--pretty"],
+    )
+    assert out is not None, stderr
+    warnings = out["validation"]["warnings"]
+    codes = [w["code"] for w in warnings]
+    assert "SCHEMA_VIOLATION" in codes
+    schema_warning = next(w for w in warnings if w["code"] == "SCHEMA_VIOLATION")
+    assert "checklist.json" in schema_warning["message"]
+    assert schema_warning["severity"] == "high"
+
+
+def test_compose_emits_missing_metadata_for_artifact_without_run_id(tmp_path: Path) -> None:
+    review_dir = tmp_path / "deck-review-acme"
+    review_dir.mkdir()
+    # Inventory with NO metadata block (issue #1 shape)
+    (review_dir / "deck_inventory.json").write_text(
+        json.dumps(
+            {
+                "company_name": "Acme",
+                "review_date": "2026-05-03",
+                "input_format": "pdf",
+                "total_slides": 1,
+                "slides": [{"number": 1, "headline": "h", "content_summary": "s"}],
+            }
+        )
+    )
+    # All others have metadata
+    (review_dir / "stage_profile.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "detected_stage": "seed",
+                "confidence": "high",
+                "evidence": [],
+                "is_ai_company": False,
+                "expected_framework": [],
+                "stage_benchmarks": {"round_size_range": "x", "expected_traction": "y", "runway_expectation": "z"},
+                "reference_file_read": [],
+            }
+        )
+    )
+    (review_dir / "slide_reviews.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "reviews": [],
+                "missing_slides": [],
+                "overall_narrative_assessment": "x",
+            }
+        )
+    )
+    items = [{"id": id_, "category": "x", "label": "x", "status": "pass"} for id_ in _CHECKLIST_IDS]
+    (review_dir / "checklist.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "items": items,
+                "summary": {
+                    "total": 35,
+                    "pass": 35,
+                    "fail": 0,
+                    "warn": 0,
+                    "not_applicable": 0,
+                    "score_pct": 100.0,
+                    "overall_status": "strong",
+                },
+            }
+        )
+    )
+
+    rc, out, _ = run_script("compose_report.py", ["--dir", str(review_dir), "--pretty"])
+    assert out is not None
+    codes = [w["code"] for w in out["validation"]["warnings"]]
+    assert "MISSING_METADATA" in codes
+
+
+def test_compose_writes_report_md_directly(tmp_path: Path) -> None:
+    """compose --write-md emits report.md alongside report.json with the same markdown."""
+    review_dir = tmp_path / "deck-review-acme"
+    review_dir.mkdir()
+    items = [{"id": id_, "category": "x", "label": "x", "status": "pass"} for id_ in _CHECKLIST_IDS]
+    (review_dir / "deck_inventory.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "company_name": "Acme",
+                "review_date": "2026-05-03",
+                "input_format": "pdf",
+                "total_slides": 1,
+                "slides": [{"number": 1, "headline": "h", "content_summary": "s"}],
+            }
+        )
+    )
+    (review_dir / "stage_profile.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "detected_stage": "seed",
+                "confidence": "high",
+                "evidence": [],
+                "is_ai_company": False,
+                "expected_framework": [],
+                "stage_benchmarks": {"round_size_range": "x", "expected_traction": "y", "runway_expectation": "z"},
+                "reference_file_read": [],
+            }
+        )
+    )
+    (review_dir / "slide_reviews.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "reviews": [],
+                "missing_slides": [],
+                "overall_narrative_assessment": "x",
+            }
+        )
+    )
+    (review_dir / "checklist.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "items": items,
+                "summary": {
+                    "total": 35,
+                    "pass": 35,
+                    "fail": 0,
+                    "warn": 0,
+                    "not_applicable": 0,
+                    "score_pct": 100.0,
+                    "overall_status": "strong",
+                },
+            }
+        )
+    )
+    json_path = str(review_dir / "report.json")
+    md_path = str(review_dir / "report.md")
+    rc, _, err = run_script(
+        "compose_report.py",
+        ["--dir", str(review_dir), "-o", json_path, "--write-md", md_path],
+    )
+    assert rc == 0, err
+    with open(json_path) as f:
+        composed = json.load(f)
+    with open(md_path) as f:
+        md_text = f.read()
+    # The two must be byte-identical (modulo trailing newline)
+    assert composed["report_markdown"].rstrip("\n") == md_text.rstrip("\n")
+    # And also a valid round-trip JSON (folds in the v1 Task 11 self-check)
+    with open(json_path) as f:
+        json.load(f)
+
+
+def test_compose_emits_name_drift_when_report_contains_close_variant(tmp_path: Path) -> None:
+    """NAME_DRIFT fires when slide content has variants of company_name.
+
+    Fixture uses placeholder names ('Acmecorp' canonical, 'ACMECORP' case-variant in
+    headline, 'Acmacorp' near-miss spelling in content_summary) — never use real
+    founder names from prior reviews in committed test fixtures.
+    """
+    review_dir = tmp_path / "deck-review-acmecorp"
+    review_dir.mkdir()
+    items = [{"id": id_, "category": "x", "label": "x", "status": "pass"} for id_ in _CHECKLIST_IDS]
+    (review_dir / "deck_inventory.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "company_name": "Acmecorp",
+                "review_date": "2026-05-03",
+                "input_format": "pdf",
+                "total_slides": 1,
+                "slides": [
+                    {
+                        "number": 1,
+                        "headline": "ACMECORP: Cloud platform for SMBs",
+                        "content_summary": "Acmacorp provides accounting tools.",
+                    }
+                ],
+            }
+        )
+    )
+    (review_dir / "stage_profile.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "detected_stage": "seed",
+                "confidence": "high",
+                "evidence": [],
+                "is_ai_company": False,
+                "expected_framework": [],
+                "stage_benchmarks": {"round_size_range": "x", "expected_traction": "y", "runway_expectation": "z"},
+                "reference_file_read": [],
+            }
+        )
+    )
+    (review_dir / "slide_reviews.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "reviews": [],
+                "missing_slides": [],
+                "overall_narrative_assessment": "x",
+            }
+        )
+    )
+    (review_dir / "checklist.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "items": items,
+                "summary": {
+                    "total": 35,
+                    "pass": 35,
+                    "fail": 0,
+                    "warn": 0,
+                    "not_applicable": 0,
+                    "score_pct": 100.0,
+                    "overall_status": "strong",
+                },
+            }
+        )
+    )
+    rc, out, _ = run_script("compose_report.py", ["--dir", str(review_dir), "--pretty"])
+    assert out is not None
+    codes = [w["code"] for w in out["validation"]["warnings"]]
+    assert "NAME_DRIFT" in codes
+
+
+# === v0.4.1 Phase 3 Task 7: compose post-write verification ===
+
+
+def _make_full_review_dir(review_dir: Path) -> None:
+    """Populate review_dir with all 4 valid artifacts needed for compose."""
+    items = [{"id": id_, "category": "x", "label": "x", "status": "pass"} for id_ in _CHECKLIST_IDS]
+    (review_dir / "deck_inventory.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "company_name": "Acme",
+                "review_date": "2026-05-03",
+                "input_format": "pdf",
+                "total_slides": 1,
+                "slides": [{"number": 1, "headline": "h", "content_summary": "s"}],
+            }
+        )
+    )
+    (review_dir / "stage_profile.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "detected_stage": "seed",
+                "confidence": "high",
+                "evidence": [],
+                "is_ai_company": False,
+                "expected_framework": [],
+                "stage_benchmarks": {
+                    "round_size_range": "x",
+                    "expected_traction": "y",
+                    "runway_expectation": "z",
+                },
+                "reference_file_read": [],
+            }
+        )
+    )
+    (review_dir / "slide_reviews.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "reviews": [],
+                "missing_slides": [],
+                "overall_narrative_assessment": "x",
+            }
+        )
+    )
+    (review_dir / "checklist.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "items": items,
+                "summary": {
+                    "total": 35,
+                    "pass": 35,
+                    "fail": 0,
+                    "warn": 0,
+                    "not_applicable": 0,
+                    "score_pct": 100.0,
+                    "overall_status": "strong",
+                },
+            }
+        )
+    )
+
+
+def test_compose_verifies_outputs_exist_after_write(tmp_path: Path) -> None:
+    """After successful compose, both report.json and report.md must exist on disk."""
+    review_dir = tmp_path / "deck-review-acme"
+    review_dir.mkdir()
+    _make_full_review_dir(review_dir)
+    json_path = str(review_dir / "report.json")
+    md_path = str(review_dir / "report.md")
+    rc, _, err = run_script(
+        "compose_report.py",
+        ["--dir", str(review_dir), "-o", json_path, "--write-md", md_path],
+    )
+    assert rc == 0, err
+    assert os.path.isfile(json_path)
+    assert os.path.isfile(md_path)
+    assert os.path.getsize(json_path) > 0
+    assert os.path.getsize(md_path) > 0
+
+
+def test_compose_exits_nonzero_if_write_md_path_unwritable(tmp_path: Path) -> None:
+    """Compose must exit nonzero if --write-md target dir doesn't exist and can't be created."""
+    review_dir = tmp_path / "deck-review-acme"
+    review_dir.mkdir()
+    _make_full_review_dir(review_dir)
+    # Point --write-md at a path inside a read-only parent
+    ro_parent = tmp_path / "readonly"
+    ro_parent.mkdir(mode=0o555)
+    bad_md_path = str(ro_parent / "no-write" / "report.md")
+    json_path = str(review_dir / "report.json")
+    rc, _, err = run_script(
+        "compose_report.py",
+        ["--dir", str(review_dir), "-o", json_path, "--write-md", bad_md_path],
+    )
+    assert rc != 0, "compose should exit nonzero when --write-md target is unwritable"
+    # Cleanup: restore writable mode so tmp_path can be deleted
+    os.chmod(ro_parent, 0o755)
+
+
+# === v0.4.1 Phase 3 Task 7: tolerant JSON extraction ===
+
+
+def test_extract_dispatch_json_raw_object() -> None:
+    import sys
+
+    sys.path.insert(0, os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "deck-review", "scripts"))
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    assert extract_dispatch_json('{"a": 1, "b": 2}') == {"a": 1, "b": 2}
+
+
+def test_extract_dispatch_json_fenced() -> None:
+    import sys
+
+    sys.path.insert(0, os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "deck-review", "scripts"))
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    assert extract_dispatch_json('```json\n{"a": 1}\n```') == {"a": 1}
+
+
+def test_extract_dispatch_json_nested() -> None:
+    """Critical regression test: must not truncate on inner }."""
+    import sys
+
+    sys.path.insert(0, os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "deck-review", "scripts"))
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    text = '```json\n{"a": {"b": 1}, "c": 2}\n```'
+    assert extract_dispatch_json(text) == {"a": {"b": 1}, "c": 2}
+
+
+def test_extract_dispatch_json_embedded_in_prose() -> None:
+    import sys
+
+    sys.path.insert(0, os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "deck-review", "scripts"))
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    text = 'Here is the result:\n{"a": 1, "b": 2}\nLet me know if anything is wrong.'
+    assert extract_dispatch_json(text) == {"a": 1, "b": 2}
+
+
+def test_extract_dispatch_json_raises_when_no_json() -> None:
+    import sys
+
+    import pytest
+
+    sys.path.insert(0, os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "deck-review", "scripts"))
+    from _dispatch_json import extract_dispatch_json  # type: ignore[import-not-found]
+
+    with pytest.raises(ValueError):
+        extract_dispatch_json("Just some prose with no JSON object anywhere.")
+
+
+# -- v0.4.2 Mitigation 2: coaching_payload + uuid insertion marker --
+
+
+def _make_v042_artifact_dir(
+    inventory_overrides: dict | None = None,
+    profile_overrides: dict | None = None,
+    reviews_overrides: dict | None = None,
+    checklist_overrides: dict | None = None,
+) -> str:
+    """Build a complete artifact dir with valid run_ids, applying optional overrides."""
+    inventory = {**_VALID_INVENTORY, **(inventory_overrides or {})}
+    profile = {**_VALID_PROFILE, **(profile_overrides or {})}
+    reviews = {**_VALID_REVIEWS, **(reviews_overrides or {})}
+    checklist = {**_VALID_CHECKLIST, **(checklist_overrides or {})}
+    return _make_artifact_dir(
+        {
+            "deck_inventory.json": inventory,
+            "stage_profile.json": profile,
+            "slide_reviews.json": reviews,
+            "checklist.json": checklist,
+        }
+    )
+
+
+def test_compose_emits_coaching_payload() -> None:
+    """compose emits a coaching_payload block with all v0.4.2 fields."""
+    import re
+
+    d = _make_v042_artifact_dir()
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    assert "coaching_payload" in data, "report.json missing coaching_payload block"
+
+    payload = data["coaching_payload"]
+    assert payload["schema_version"] == "v0.4.2-deck-review"
+
+    # All expected top-level keys present
+    for key in (
+        "schema_version",
+        "summary",
+        "failed_items",
+        "warned_items",
+        "high_severity_warnings",
+        "stage",
+        "is_ai_company",
+        "company_name",
+        "review_dir",
+        "report_path",
+        "insertion_marker",
+    ):
+        assert key in payload, f"coaching_payload missing key: {key}"
+
+    # Summary mirrors checklist counts
+    s = payload["summary"]
+    for sk in ("score_pct", "overall_status", "total", "pass", "fail", "warn", "not_applicable"):
+        assert sk in s, f"coaching_payload.summary missing {sk}"
+
+    # Stage / company / ai surfaced from artifacts
+    assert payload["stage"] == "seed"
+    assert payload["is_ai_company"] is False
+    assert payload["company_name"] == "TestCo"
+
+    # Insertion marker matches uuid format
+    assert re.fullmatch(r"<!-- COACHING_INSERTION_POINT_[0-9a-f]{8} -->", payload["insertion_marker"]), (
+        f"unexpected marker shape: {payload['insertion_marker']}"
+    )
+
+    # Backward-compat: existing top-level keys still present
+    assert "report_markdown" in data
+    assert "validation" in data
+
+
+def test_compose_inserts_uuid_marker() -> None:
+    """report.md contains exactly one uuid marker matching coaching_payload.insertion_marker."""
+    import re
+
+    d = _make_v042_artifact_dir()
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+
+    md = data["report_markdown"]
+    matches = re.findall(r"<!-- COACHING_INSERTION_POINT_[0-9a-f]{8} -->", md)
+    assert len(matches) == 1, f"expected exactly one marker, found {len(matches)}: {matches}"
+    assert matches[0] == data["coaching_payload"]["insertion_marker"], (
+        "marker in report.md must equal coaching_payload.insertion_marker"
+    )
+
+
+def test_compose_warns_on_marker_collision() -> None:
+    """Body content containing the marker substring triggers MARKER_COLLISION (non-fatal)."""
+    # Adversarial: an evidence string that contains the literal marker substring.
+    adversarial_items = [
+        {"id": cid, "category": "Test", "label": "Test", "status": "pass", "evidence": "test", "notes": None}
+        for cid in _CHECKLIST_IDS
+    ]
+    # Inject marker substring into one fail item's evidence (which is rendered in report.md)
+    adversarial_items[0] = {
+        "id": _CHECKLIST_IDS[0],
+        "category": "Narrative Flow",
+        "label": "Test fail",
+        "status": "fail",
+        "evidence": "Sneaky body content with <!-- COACHING_INSERTION_POINT_aaaaaaaa --> embedded",
+        "notes": "Watch out",
+    }
+    checklist_overrides = {
+        "items": adversarial_items,
+        "summary": {
+            "total": 35,
+            "pass": 34,
+            "fail": 1,
+            "warn": 0,
+            "not_applicable": 0,
+            "score_pct": 97.1,
+            "overall_status": "strong",
+            "by_category": {},
+            "failed_items": [
+                {
+                    "id": _CHECKLIST_IDS[0],
+                    "category": "Narrative Flow",
+                    "label": "Test fail",
+                    "evidence": "Sneaky body content with <!-- COACHING_INSERTION_POINT_aaaaaaaa --> embedded",
+                    "notes": "Watch out",
+                }
+            ],
+            "warned_items": [],
+        },
+    }
+
+    d = _make_v042_artifact_dir(checklist_overrides=checklist_overrides)
+    rc, data, err = _run_compose(d)
+    # Compose still succeeds (warning, not error)
+    assert rc == 0, err
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "MARKER_COLLISION" in codes, f"expected MARKER_COLLISION in warnings, got: {codes}"
+
+
+def test_payload_arrays_match_summary_counts() -> None:
+    """coaching_payload.failed_items length matches summary.fail; warned_items matches summary.warn."""
+    items = [
+        {"id": cid, "category": "Test", "label": "Test", "status": "pass", "evidence": "test", "notes": None}
+        for cid in _CHECKLIST_IDS
+    ]
+    # 2 fails, 1 warn
+    items[0] = {
+        "id": _CHECKLIST_IDS[0],
+        "category": "Narrative Flow",
+        "label": "L0",
+        "status": "fail",
+        "evidence": "e",
+        "notes": "n",
+    }
+    items[1] = {
+        "id": _CHECKLIST_IDS[1],
+        "category": "Narrative Flow",
+        "label": "L1",
+        "status": "fail",
+        "evidence": "e",
+        "notes": "n",
+    }
+    items[2] = {
+        "id": _CHECKLIST_IDS[2],
+        "category": "Narrative Flow",
+        "label": "L2",
+        "status": "warn",
+        "evidence": "e",
+        "notes": "n",
+    }
+
+    failed_items = [
+        {"id": _CHECKLIST_IDS[0], "category": "Narrative Flow", "label": "L0", "evidence": "e", "notes": "n"},
+        {"id": _CHECKLIST_IDS[1], "category": "Narrative Flow", "label": "L1", "evidence": "e", "notes": "n"},
+    ]
+    warned_items = [
+        {"id": _CHECKLIST_IDS[2], "category": "Narrative Flow", "label": "L2", "evidence": "e", "notes": "n"},
+    ]
+    checklist_overrides = {
+        "items": items,
+        "summary": {
+            "total": 35,
+            "pass": 32,
+            "fail": 2,
+            "warn": 1,
+            "not_applicable": 0,
+            "score_pct": 91.4,
+            "overall_status": "strong",
+            "by_category": {},
+            "failed_items": failed_items,
+            "warned_items": warned_items,
+        },
+    }
+
+    d = _make_v042_artifact_dir(checklist_overrides=checklist_overrides)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    payload = data["coaching_payload"]
+    assert len(payload["failed_items"]) == payload["summary"]["fail"] == 2
+    assert len(payload["warned_items"]) == payload["summary"]["warn"] == 1
