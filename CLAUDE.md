@@ -198,6 +198,23 @@ Cowork caches plugin files per-session. To hot-patch files for testing without r
 
 4. **Start a new Cowork session** — already-running sessions have already loaded skill bodies into context.
 
+### Verifying the Marketplace Clone Actually Advanced
+
+Cowork's "Refresh" can succeed without the local clone's git HEAD advancing — `CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE` and the SSH↔HTTPS fallback both absorb `git pull` failures silently while still bumping `lastUpdated`.
+
+**The full safe dev loop is:**
+
+1. `./scripts/sync-test-repo.sh` — push your changes to the test repo.
+2. **In the Cowork UI**, click Refresh on the marketplace.
+3. **In your terminal**, run `./scripts/verify-cowork-clone.sh lool-founder-skills main`.
+4. If exit 1, run the printed `git fetch && git reset --hard` command, then re-Refresh in Cowork.
+5. Click Update on the plugin in Cowork.
+6. Open a new Cowork task to pick up the new content.
+
+The verify script is **intentionally manual** — Cowork's Refresh is async and user-triggered, so wiring the verify call into `sync-test-repo.sh` would just check pre-refresh state. Run it after step 2.
+
+**Always run this before debugging "why isn't my new SKILL.md being picked up" — half the time the answer is the clone never moved.** The script also cross-checks `installed_plugins.json` `gitCommitSha` against clone HEAD and warns when the install snapshot is staler than the marketplace catalog (i.e. you ran Refresh but not Update).
+
 ## Removing / Refreshing a Plugin in Claude Code / Cowork
 
 There is no UI to remove a marketplace. Edit config files directly.
