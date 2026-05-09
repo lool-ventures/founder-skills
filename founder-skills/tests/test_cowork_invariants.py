@@ -16,7 +16,10 @@ from cowork_async_subagent_filter import apply_filter
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "founder-skills" / "agents"
 
-AGENT_FILES = sorted(AGENTS_DIR.glob("*.md"))
+# Underscore-prefixed agents are probes/experiments and intentionally
+# exempt from the no-dangerous-tools invariant — they may declare tools
+# precisely to test the platform's behavior on those tools.
+AGENT_FILES = sorted(p for p in AGENTS_DIR.glob("*.md") if not p.stem.startswith("_"))
 
 
 def _parse_frontmatter(path: Path) -> dict[str, Any]:
