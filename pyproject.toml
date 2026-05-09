@@ -33,3 +33,4 @@ explicit_package_bases = true
 [tool.pytest.ini_options]
 testpaths = ["founder-skills/tests"]
 python_files = "test_*.py"
+pythonpath = ["founder-skills/tests"]
