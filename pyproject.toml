@@ -34,3 +34,6 @@ explicit_package_bases = true
 testpaths = ["founder-skills/tests"]
 python_files = "test_*.py"
 pythonpath = ["founder-skills/tests"]
+markers = [
+    "e2e: end-to-end tests that invoke real LLMs (requires ANTHROPIC_API_KEY; cost ~$2-5/run, calibrate empirically before pinning)",
+]
