@@ -137,3 +137,101 @@ def test_skill_md_does_not_depend_on_session_start_hook(skill_md: Path) -> None:
         f"directly instead, or add `<!-- skill-quality-ci: hook-mention-ok -->` "
         f"if this is an intentional reference.\n" + "\n".join(f"  line {ln}: {txt!r}" for ln, txt in hits)
     )
+
+
+# Sub-agent-affirmative cue patterns (regex). Each pattern matches an
+# instruction telling the agent TO dispatch a sub-agent — not negations.
+# Match is case-insensitive. The negation check is *prefix-only* (only the
+# part of the line BEFORE the cue match) so "Dispatch X. Do not Y." correctly
+# treats the dispatch as affirmative (the "Do not" applies to Y, not X).
+#
+# Design notes (rev 5):
+# - The bare `task` alternative was DROPPED from the dispatch cues — it
+#   matched "Dispatch the Task tool" (Task as object, not subject) which is
+#   not the v0.4.0 pattern.
+# - The `via Task tool` cue requires a `dispatch(...)` anchor in the same
+#   line BEFORE it — otherwise documentary mentions like "the harness uses
+#   Task tool internally" fire false positives.
+_SUBAGENT_AFFIRMATIVE_CUES = (
+    # "Dispatch a sub-agent", "Dispatch the deck-review sub-agent", etc.
+    # Note: `.+?\s+agent` matches "Dispatch the X agent" generically.
+    re.compile(r"\bdispatch\s+(a|the)\s+(sub-?agent|.+?\s+agent)\b", re.IGNORECASE),
+    re.compile(r"\bspawn\s+(a|the)\s+sub-?agent\b", re.IGNORECASE),
+    # "Dispatch X via the Task tool" — require dispatch verb in line prefix.
+    re.compile(
+        r"\bdispatch(?:ed|ing|es)?\b[^\n]*?\bvia\s+(?:the\s+)?`?Task`?\s+tool\b",
+        re.IGNORECASE,
+    ),
+)
+
+# Negation tokens. Checked only in the line PREFIX before the cue match,
+# not anywhere on the line — this distinguishes "Do not dispatch X" (negates
+# the dispatch) from "Dispatch X. Do not Y." (does NOT negate the dispatch).
+_NEGATION_TOKEN = re.compile(
+    r"\b(do\s*not|don't|never|must\s+not|skip(?:\s+the)?|without|instead\s+of)\b",
+    re.IGNORECASE,
+)
+
+# v0.4.0 footgun pattern: bash inside a sub-agent prompt template that
+# the sub-agent is supposed to execute. Heuristic: a bash block that
+# appears INSIDE a window suspiciously close to a sub-agent dispatch
+# instruction. The legitimate v0.4.1 pattern (main thread runs bash to
+# extract a payload, then dispatches) is silenced via suppression marker.
+_WINDOW_LINES = 10
+
+
+@pytest.mark.parametrize("skill_md", SKILL_MD_FILES, ids=lambda p: p.parent.name)
+def test_skill_md_subagent_blocks_have_no_bash(skill_md: Path) -> None:
+    """Heuristic: a sub-agent-affirmative cue followed within 10 lines by a
+    fenced ```bash block is the v0.4.0 failure pattern.
+
+    Negation handling: a "do NOT" / "skip" / "without" / "instead of" token
+    appearing in the line PREFIX before the cue match negates the cue. A
+    negation token appearing AFTER the cue is irrelevant ("Dispatch X. Do
+    not also do Y." is still an affirmative dispatch).
+
+    Suppression: add `<!-- skill-quality-ci: bash-after-subagent-ok -->`
+    ANYWHERE between the cue line (inclusive) and the bash fence
+    (exclusive). The full window between cue and bash is scanned.
+
+    Note on adjacent cues: a single marker placed between two cues that
+    share a downstream bash block silences findings for BOTH cues.
+    """
+    lines = skill_md.read_text().splitlines()
+    suppress_marker = "<!-- skill-quality-ci: bash-after-subagent-ok -->"
+    issues: list[tuple[int, str]] = []
+    for i, line in enumerate(lines):
+        # Find the first cue match anywhere in the line
+        cue_match = None
+        for pattern in _SUBAGENT_AFFIRMATIVE_CUES:
+            m = pattern.search(line)
+            if m:
+                cue_match = m
+                break
+        if cue_match is None:
+            continue
+        # Negation check: only the line prefix BEFORE the cue match counts.
+        prefix = line[: cue_match.start()]
+        if _NEGATION_TOKEN.search(prefix):
+            continue
+        # Look ahead _WINDOW_LINES for ```bash
+        window = lines[i + 1 : i + 1 + _WINDOW_LINES]
+        for j, w in enumerate(window):
+            if not w.strip().startswith("```bash"):
+                continue
+            # Suppression marker may appear ANYWHERE between the cue line
+            # (inclusive) and the bash fence (exclusive). Scan that range.
+            suppression_range = [lines[i], *window[:j]]
+            if any(suppress_marker in s for s in suppression_range):
+                break
+            issues.append((i + 1, line.strip()[:80]))
+            break
+    assert not issues, (
+        f"{skill_md.relative_to(REPO_ROOT)}: sub-agent dispatch cue followed"
+        f" by ```bash within {_WINDOW_LINES} lines (v0.4.0 failure pattern):\n"
+        + "\n".join(f"  line {ln}: {txt}" for ln, txt in issues)
+        + "\n\nIf this is a legitimate payload-extraction-then-dispatch "
+        "pattern (main thread extracts, then dispatches), add "
+        "`<!-- skill-quality-ci: bash-after-subagent-ok -->` anywhere "
+        "between the cue line and the bash block."
+    )
