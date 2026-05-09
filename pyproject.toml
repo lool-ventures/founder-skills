@@ -1,6 +1,6 @@
 [project]
 name = "founder-skills"
-version = "0.4.2"
+version = "0.4.4"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 dependencies = ["openpyxl"]
