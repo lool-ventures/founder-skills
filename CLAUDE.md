@@ -141,6 +141,22 @@ uv run pytest founder-skills/tests/ -v  # verbose
 
 - **SessionStart** (`founder-skills/scripts/session-setup.sh`): Persists `CLAUDE_PLUGIN_ROOT` into `CLAUDE_ENV_FILE` so scripts can locate plugin files at runtime.
 
+## SKILL.md Conventions
+
+Verified against the Claude Code v2.1.120 skill runtime contract and Desktop v1.6259.1 architecture:
+
+- **Env vars in skill bodies:** Use `${CLAUDE_PLUGIN_ROOT}` (braced form) — the plugin content expander substitutes it at load time. Bare `$CLAUDE_PLUGIN_ROOT` only resolves at Bash subprocess time and depends on `CLAUDE_ENV_FILE` being sourced; the gist flags this as unconfirmed for skill subprocesses. The braced form is the contract.
+- **Frontmatter keys** must come from the documented set: `name`, `description`, `when_to_use`, `allowed-tools`, `argument-hint`, `arguments`, `context`, `agent`, `model`, `effort`, `user-invocable`, `disable-model-invocation`, `paths`, `hooks`, `shell`, `created_by`. (`version` is parsed but tagged "[Undocumented] Informational only" in gist 1 — don't rely on it.) Custom keys are silently dropped — put human-readable metadata in a `## Skill Metadata` body section instead. **Avoid undocumented nested structures** (e.g. don't add a custom `metadata: {…}` block). The documented fields that *do* take structured values (`shell.interpreter`, `hooks.PreToolUse`, `paths` list, `arguments` list) are fine — they're explicitly specified.
+- **Two parsers, two discovery outcomes (important):**
+  - The **CLI runtime** (when invoking a skill) reads the full documented set above via a YAML parser.
+  - **Desktop's skill discovery scanner** is **regex-based**, supports `>` and `|` block scalars, and only recognises **`name`, `description`, `argument-hint`, `user-invocable`**. Per gist 2 §"Skill discovery logic", this scanner gates *whether the skill is discovered at all* in Desktop/Cowork — not just what the UI displays. A SKILL.md whose frontmatter the regex parser can't navigate may fail to register entirely.
+  - **`when_to_use` is invisible to Desktop** — only the CLI runtime reads it. So mirror the key trigger phrases into `description` (which Desktop *does* read) for users browsing the Settings UI to find your skill.
+  - Undocumented nested YAML (e.g. a custom `metadata: {…}` block) can confuse the regex parser — even though the keys would be dropped semantically, the parser still has to walk past them and may misparse adjacent fields. Stick to the documented set; if you need structured config, use one of the documented structured fields.
+- **`description` + `when_to_use` budget:** combined length per skill ≤ 1,536 chars. Across all skills, keep the sum ≤ 6,000 chars (8,000 is the absolute fallback floor; below 20 chars/skill, the entire listing collapses to name-only). The total-listing-budget regression test enforces this.
+- **No shell substitution `` !`cmd` `` or fenced `` ```! `` blocks.** Heavy work belongs in scripts the model runs via Bash tool calls — see existing `Phase 0` setup in any SKILL.md.
+- **Regression test:** `founder-skills/tests/test_skill_contract.py` enforces all of the above. Run before opening a PR that touches a SKILL.md.
+- **Pre-publish validation:** Run `claude plugin validate founder-skills` to validate manifests against the CLI's schemas (requires CLI v2.1.131+). CI does this automatically on every PR.
+
 ## Installing the Plugin in Claude Cowork
 
 Customize → "+" on the "Personal Plugins" list → Browse Plugins → Personal → +
