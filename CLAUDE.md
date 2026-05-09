@@ -165,6 +165,26 @@ Then add the marketplace repo (`lool-ventures/founder-skills`) and install the `
 
 **Start a new Cowork session** after installing — already-running sessions won't pick up the plugin.
 
+## Local CLI Testing with `--plugin-dir`
+
+For iterating on plugin code in the standalone Claude Code CLI (host CLI, not Cowork), bypass the marketplace machinery entirely. From the repo root:
+
+    claude --plugin-dir "$PWD/founder-skills"
+
+This loads our plugin for the session only:
+- No marketplace clone
+- No `installed_plugins.json` entry
+- No enabled-state in settings
+- No interaction with Desktop's "Update available" badge or refresh flow
+- Gone the moment the session exits
+
+**Use for:** rapid local iteration on SKILL.md / agents / scripts when you don't want to reinstall after every change.
+
+**Caveats:**
+- Host CLI only. Cowork uses a VM-pinned binary at `~/Library/Application Support/Claude/claude-code-vm/<version>/claude` (Linux ARM64 ELF) and has no equivalent flag exposed through Desktop.
+- Managed-policy block lists still apply — a blocked plugin name fails to load.
+- Repeatable for multi-plugin testing: `--plugin-dir A --plugin-dir B`.
+
 ## Updating Plugin Files in Cowork Without Reinstalling
 
 Cowork caches plugin files per-session. To hot-patch files for testing without reinstalling:
