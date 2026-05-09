@@ -11,10 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - `scripts/verify-cowork-clone.sh` — superseded by [`claude-plugin-doctor`](https://github.com/yaniv-golan/claude-plugin-doctor) (`cpd`), which diagnoses drift across all six cache layers instead of just the marketplace clone HEAD. Install with `npm install -g claude-plugin-doctor`.
 
-### Changed
-
-- CLAUDE.md "Verifying the Marketplace Clone Actually Advanced" subsection rewritten to use `cpd refresh <marketplace>` and `cpd check <plugin>@<marketplace>` instead of the removed in-tree script.
-
 ## [0.4.3] - 2026-05-09
 
 ### Highlights
