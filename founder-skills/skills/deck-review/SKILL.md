@@ -7,17 +7,20 @@ when_to_use: >
   review, scoring, feedback, or critique of the deck. Do not auto-invoke on
   general fundraising or pitch questions; use ONLY when there is actual
   deck content to review.
-compatibility: Requires Python 3.10+ and uv for script execution.
-metadata:
-  author: lool-ventures
-  version: "0.4.2"
-exports:
-  - "checklist.json -> financial-model-review, ic-sim, fundraise-readiness"
+user-invocable: true
 ---
 
 # Deck Review Skill
 
 Help startup founders strengthen their pitch decks before sending them to investors. Produce a structured, scored review with specific, actionable recommendations grounded in current best practices from Sequoia, DocSend, YC, a16z, and Carta data. The tone is founder-first: a candid coaching session, not a VC evaluation.
+
+## Skill Metadata
+
+- **Author:** lool-ventures
+- **Version:** managed in `founder-skills/.claude-plugin/plugin.json`
+- **Compatibility:** Python 3.10+ and `uv` for script execution.
+- **Exports:**
+  - `checklist.json` → `financial-model-review`, `ic-sim`, `fundraise-readiness`
 
 ## Skill Execution Model (READ FIRST)
 

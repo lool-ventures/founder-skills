@@ -7,22 +7,25 @@ when_to_use: >
   review, validation, runway analysis, or unit-economics scoring.
   Do not auto-invoke on general questions about financial models or
   fundraising metrics.
-compatibility: Requires Python 3.10+ and uv for script execution. openpyxl required for Excel parsing.
-metadata:
-  author: lool-ventures
-  version: "0.4.2"
-imports:
-  - "market-sizing:sizing.json (optional — validate revenue-to-SOM consistency)"
-  - "deck-review:checklist.json (optional — cross-check model-to-deck number alignment)"
-exports:
-  - "report.json -> ic-sim, fundraise-readiness, dd-readiness"
-  - "unit_economics.json -> metrics-benchmarker, ic-sim"
-  - "runway.json -> fundraise-readiness"
+user-invocable: true
 ---
 
 # Financial Model Review Skill
 
 Help startup founders understand how investors will evaluate their financial model — validating structure, unit economics, runway, and metrics against stage-appropriate standards. Produce a thorough review with actionable improvements. The tone is founder-first: a rigorous but supportive coaching session.
+
+## Skill Metadata
+
+- **Author:** lool-ventures
+- **Version:** managed in `founder-skills/.claude-plugin/plugin.json`
+- **Compatibility:** Python 3.10+ and `uv` for script execution. `openpyxl` required for Excel parsing.
+- **Imports (optional):**
+  - `market-sizing:sizing.json` — validate revenue-to-SOM consistency
+  - `deck-review:checklist.json` — cross-check model-to-deck number alignment
+- **Exports:**
+  - `report.json` → `ic-sim`, `fundraise-readiness`, `dd-readiness`
+  - `unit_economics.json` → `metrics-benchmarker`, `ic-sim`
+  - `runway.json` → `fundraise-readiness`
 
 ## Skill Execution Model (READ FIRST)
 

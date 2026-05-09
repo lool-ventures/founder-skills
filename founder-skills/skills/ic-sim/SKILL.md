@@ -7,20 +7,23 @@ when_to_use: >
   provided enough context (a deck, a description of the company,
   or a specific fund). Do not auto-invoke on general fundraising
   questions.
-compatibility: Requires Python 3.10+ and uv for script execution.
-metadata:
-  author: lool-ventures
-  version: "0.4.2"
-imports:
-  - "market-sizing:sizing.json (recommended — fund alignment and market validation)"
-  - "deck-review:checklist.json (recommended — deck quality assessment)"
-exports:
-  - "report.json -> fundraise-readiness, dd-readiness"
+user-invocable: true
 ---
 
 # IC Simulation Skill
 
 Help startup founders prepare for the conversation that happens behind closed doors — the one where VC partners debate whether to invest. Produce a realistic IC simulation with three distinct partner perspectives, scored across 28 dimensions, with specific coaching on what to prepare. The tone is founder-first: a coaching tool for preparation, not a judgment.
+
+## Skill Metadata
+
+- **Author:** lool-ventures
+- **Version:** managed in `founder-skills/.claude-plugin/plugin.json`
+- **Compatibility:** Python 3.10+ and `uv` for script execution.
+- **Imports (recommended):**
+  - `market-sizing:sizing.json` — fund alignment and market validation
+  - `deck-review:checklist.json` — deck quality assessment
+- **Exports:**
+  - `report.json` → `fundraise-readiness`, `dd-readiness`
 
 ## Skill Execution Model (READ FIRST)
 

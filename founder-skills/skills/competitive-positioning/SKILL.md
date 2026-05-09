@@ -6,21 +6,24 @@ when_to_use: >
   moat analysis, or positioning evaluation AND has provided enough
   context (a deck, a list of competitors, or a clearly named startup).
   Do not auto-invoke on general questions about competition or strategy.
-compatibility: Requires Python 3.10+ and uv for script execution.
-metadata:
-  author: lool-ventures
-  version: "0.4.2"
-imports:
-  - "deck-review:checklist.json (optional — competition slide claims for cross-validation)"
-  - "market-sizing:sizing.json (optional — validate market claims in positioning)"
-exports:
-  - "landscape.json -> deck-review, fundraise-readiness"
-  - "report.json -> ic-sim, fundraise-readiness, cross-document-consistency"
+user-invocable: true
 ---
 
 # Competitive Positioning Skill
 
 Help startup founders see their competitive landscape clearly — who the real competitors are, where they're differentiated, how defensible that differentiation is, and how to present it to investors. Produce a competitive analysis with positioning maps, moat scorecards, and an investor-ready narrative. The tone is founder-first: a coaching tool for preparation, not a judgment.
+
+## Skill Metadata
+
+- **Author:** lool-ventures
+- **Version:** managed in `founder-skills/.claude-plugin/plugin.json`
+- **Compatibility:** Python 3.10+ and `uv` for script execution.
+- **Imports (optional):**
+  - `deck-review:checklist.json` — competition slide claims for cross-validation
+  - `market-sizing:sizing.json` — validate market claims in positioning
+- **Exports:**
+  - `landscape.json` → `deck-review`, `fundraise-readiness`
+  - `report.json` → `ic-sim`, `fundraise-readiness`, `cross-document-consistency`
 
 ## Skill Execution Model (READ FIRST)
 

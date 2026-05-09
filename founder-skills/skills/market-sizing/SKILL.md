@@ -6,19 +6,22 @@ when_to_use: >
   market claims, AND has provided enough context (a product/service
   description, a market segment, or a deck with TAM/SAM/SOM claims).
   Do not auto-invoke on general fundraising or strategy questions.
-compatibility: Requires Python 3.10+ and uv for script execution.
-metadata:
-  author: lool-ventures
-  version: "0.4.2"
-exports:
-  - "sizing.json -> financial-model-review, ic-sim, fundraise-readiness"
-  - "sensitivity.json -> financial-model-review"
-  - "checklist.json -> ic-sim"
+user-invocable: true
 ---
 
 # Market Sizing Skill
 
 Help startup founders build credible, defensible TAM/SAM/SOM analysis — the kind that earns investor trust rather than raising eyebrows. Produce a structured, validated market sizing with external sources, sensitivity testing, and a self-check against common pitfalls. The tone is founder-first: a rigorous but supportive coaching session.
+
+## Skill Metadata
+
+- **Author:** lool-ventures
+- **Version:** managed in `founder-skills/.claude-plugin/plugin.json`
+- **Compatibility:** Python 3.10+ and `uv` for script execution.
+- **Exports:**
+  - `sizing.json` → `financial-model-review`, `ic-sim`, `fundraise-readiness`
+  - `sensitivity.json` → `financial-model-review`
+  - `checklist.json` → `ic-sim`
 
 ## Skill Execution Model (READ FIRST)
 
