@@ -90,9 +90,9 @@ Keep the founder informed with brief, plain-language updates at each step. Never
 ### Step 0: Path Setup
 
 ```bash
-SCRIPTS="$CLAUDE_PLUGIN_ROOT/skills/deck-review/scripts"
-REFS="$CLAUDE_PLUGIN_ROOT/skills/deck-review/references"
-SHARED_SCRIPTS="$CLAUDE_PLUGIN_ROOT/scripts"
+SCRIPTS="${CLAUDE_PLUGIN_ROOT}/skills/deck-review/scripts"
+REFS="${CLAUDE_PLUGIN_ROOT}/skills/deck-review/references"
+SHARED_SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
 ARTIFACTS_ROOT="${ARTIFACTS_ROOT:-$(pwd)/artifacts}"
 mkdir -p "$ARTIFACTS_ROOT"
 

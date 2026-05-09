@@ -103,9 +103,9 @@ Keep the founder informed with brief, plain-language updates at each step. Never
 **Every Bash tool call runs in a fresh shell — variables do not persist.** Prefix every Bash call that uses these paths with the variable block below, or substitute absolute paths directly:
 
 ```bash
-SCRIPTS="$CLAUDE_PLUGIN_ROOT/skills/ic-sim/scripts"
-REFS="$CLAUDE_PLUGIN_ROOT/skills/ic-sim/references"
-SHARED_SCRIPTS="$CLAUDE_PLUGIN_ROOT/scripts"
+SCRIPTS="${CLAUDE_PLUGIN_ROOT}/skills/ic-sim/scripts"
+REFS="${CLAUDE_PLUGIN_ROOT}/skills/ic-sim/references"
+SHARED_SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
 if ls "$(pwd)"/mnt/*/ >/dev/null 2>&1; then
   ARTIFACTS_ROOT="$(ls -d "$(pwd)"/mnt/*/ | head -1)artifacts"
 elif ls "$(pwd)"/sessions/*/mnt/*/ >/dev/null 2>&1; then
