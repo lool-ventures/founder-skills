@@ -6,7 +6,7 @@ requires-python = ">=3.10"
 dependencies = ["openpyxl"]
 
 [project.optional-dependencies]
-dev = ["ruff", "mypy", "pytest", "types-openpyxl"]
+dev = ["ruff", "mypy", "pytest", "pyyaml", "types-openpyxl", "types-PyYAML"]
 
 [tool.ruff]
 target-version = "py310"
