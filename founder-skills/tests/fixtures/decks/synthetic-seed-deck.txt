@@ -1,0 +1,24 @@
+SLIDE 1: TITLE
+Acmecorp — AI-native developer tools for indie SaaS founders
+
+SLIDE 2: PROBLEM
+Indie SaaS founders waste 20+ hours/week on developer tooling integration.
+[no quantitative TAM data shown — deliberate weakness]
+
+SLIDE 3: SOLUTION
+Acmecorp wraps GitHub, Linear, Stripe, and Vercel into one CLI.
+
+SLIDE 4: TRACTION
+$8K MRR, 24 paying customers, 18% MoM growth (last 4 months).
+
+SLIDE 5: TEAM
+Two founders, ex-Stripe (eng) and ex-Notion (product).
+[no advisor list — deliberate weakness]
+
+SLIDE 6: ASK
+Raising $1.2M seed at $8M post.
+
+[Note: 6 slides. Strong on traction + team. Weak on TAM, advisors, GTM,
+competition, financial projections. Expected deck-review score: 40-55%
+(major_revision per checklist thresholds).
+This is a synthetic fixture — Acmecorp is fictional. No real founder data.]

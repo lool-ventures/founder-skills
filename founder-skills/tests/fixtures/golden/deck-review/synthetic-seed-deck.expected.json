@@ -1,0 +1,16 @@
+{
+  "fixture_version": 1,
+  "skill": "deck-review",
+  "input": "synthetic-seed-deck.txt",
+  "assertions": {
+    "report_json_exists": true,
+    "report_md_exists": true,
+    "all_artifacts_have_run_id": true,
+    "schema_validation_passes": true,
+    "coaching_payload_present": true,
+    "score_pct_range": [30, 60],
+    "overall_status_in": ["needs_work", "major_revision"],
+    "expected_failed_categories_min_count": 3,
+    "no_high_severity_warnings_other_than": ["CHECKLIST_FAILURES_CRITICAL"]
+  }
+}
