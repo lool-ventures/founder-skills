@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Skill-quality CI** — new GitHub Actions workflow `.github/workflows/skill-quality.yml` runs multiple layers of defense, ordered by speed and cost:
+  1. **Contract tests** (per-PR): SKILL.md frontmatter invariants enforced via YAML parse (`user-invocable: true` present, `disable-model-invocation` absent, braced `${CLAUDE_PLUGIN_ROOT}`); per-agent persistence-tool-name compatibility against Cowork's sub-agent tool registry (the v0.3.1 invariant); sub-agent-cue-followed-by-bash-block regression detector (the v0.4.0 failure pattern); SKILL.md does-not-depend-on-SessionStart-hook invariant (gist 2026-05-10: plugin hooks don't fire in Cowork).
+  2. **Compose invariants** (per-PR): every skill's `compose_report.py` emits a structured `coaching_payload` block; `STALE_ARTIFACT` warning surfaces on mismatched `metadata.run_id` across artifacts. Compose invocations are dispatched via a registry (`compose_invocations.py`) so per-skill CLI variation doesn't leak into test bodies.
+  3. **End-to-end smoke** (per-PR, internal only): `deck-review` runs against a synthetic seed-stage fixture deck via `claude-agent-sdk` (plugin loaded via `plugins=[{"type": "local", "path": ".../founder-skills"}]`, `CLAUDE_PLUGIN_ROOT` passed via `env=`, model invokes the skill via the `Skill` tool). Asserts artifact existence, schema validity, `score_pct` in expected range, `run_id` parity, `coaching_payload` shape.
+- `founder-skills/tests/cowork_async_subagent_filter.py` — tool-name compatibility check against Cowork's sub-agent tool registry. Mechanism: the desktop-side scope exclusion removes 5 tool names (`Bash`, `NotebookEdit`, `REPL`, `JavaScript`, `WebFetch`) from the registry BEFORE the CLI's filter runs; Bash is replaced by `mcp__workspace__bash` (deferred MCP tier). Names that DO resolve in sub-agent contexts (Read/Edit/Glob/Grep/WebSearch/etc.) are listed in the helper's `COWORK_ASYNC_SUBAGENT_ALLOWLIST` constant. Explicitly NOT a Cowork environment simulator (does not model PTY, bridge transcripts, env strip, hooks, classifier pipeline, etc.) — see file header for the boundary.
+- Synthetic deck fixture (`founder-skills/tests/fixtures/decks/synthetic-seed-deck.txt`) and golden expected-output file (`founder-skills/tests/fixtures/golden/deck-review/synthetic-seed-deck.expected.json`) for the deck-review e2e smoke. Deck-review compose-invariant fixture set (`founder-skills/tests/fixtures/deck-review/`) — synthetic Acmecorp seed-stage data, no real founder data per MEMORY.
+- `claude-agent-sdk==0.1.80` added to dev dependencies (pinned per Task 8 — pre-1.0 SDK with API churn).
+- `pythonpath = ["founder-skills/tests"]` added to `[tool.pytest.ini_options]` so test files can import sibling helper modules (`cowork_async_subagent_filter`, `compose_invocations`) by bare name.
+
+### Changed
+
+- `pyproject.toml` `version` bumped from `0.4.2` to `0.4.4` to match `plugin.json`. Earlier drift between the two files is fixed.
+- Existing `ci.yml` test job scoped to `-m "not e2e"` to prevent the deck-review e2e smoke from running twice per PR (once here, once in `skill-quality.yml`).
+- `deck-review`, `financial-model-review`, `ic-sim`, and `competitive-positioning` SKILL.md files: added `<!-- skill-quality-ci: bash-after-subagent-ok -->` suppression markers above the legitimate Context-B `coaching_payload` extraction blocks. The Task 4 heuristic now correctly identifies these as main-thread payload extraction (not v0.4.0 failure pattern).
+
+### Notes
+
+- The workflow has no nightly cron; Phase D (full-suite e2e for the other 4 skills) is incremental follow-up work and a cron will be added when the body exists.
+- Per-PR e2e cost target: $2-5 per PR (calibrate empirically before pinning). Set a monthly spend cap on the dedicated `ANTHROPIC_API_KEY_CI` key based on observed cost × expected PR volume × 1.5 safety margin.
+- **Open gaps requiring user action before merge:**
+  1. **Manual SDK verification (Task 9 Step 1):** the e2e smoke pattern (`plugins=` + `setting_sources=[]` + `skills="all"` + `env={**os.environ, ...}`) needs one manual run with `ANTHROPIC_API_KEY` set to confirm the SDK actually loads the deck-review skill and the test passes against a real LLM dispatch. Without this, the e2e test is a structurally-valid skeleton but not load-bearing.
+  2. **Cowork Skill-tool probe (Task 4.5):** `docs/internal/cowork-skill-tool-probe-2026-05-09.md` (gitignored) documents the probe agent body and the manual Cowork dispatch needed to empirically verify that the literal `Skill` name resolves in Cowork sub-agent contexts. Until run, the helper's inclusion of `Skill` in `COWORK_ASYNC_SUBAGENT_ALLOWLIST` is documentation-driven, not empirically confirmed.
+  3. **GitHub Actions secret (`ANTHROPIC_API_KEY_CI`):** must be configured in repo settings before the `e2e-smoke` job runs successfully on internal PRs.
+
 ## [0.4.4] - 2026-05-09
 
 ### Removed
