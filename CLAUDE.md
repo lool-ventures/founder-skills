@@ -220,20 +220,26 @@ Cowork caches plugin files per-session. To hot-patch files for testing without r
 
 ### Verifying the Marketplace Clone Actually Advanced
 
-Cowork's "Refresh" can succeed without the local clone's git HEAD advancing — `CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE` and the SSH↔HTTPS fallback both absorb `git pull` failures silently while still bumping `lastUpdated`.
+Cowork's "Refresh" can succeed without the local clone's git HEAD advancing — `CLAUDE_CODE_PLUGIN_KEEP_MARKETPLACE_ON_FAILURE` and the SSH↔HTTPS fallback both absorb `git pull` failures silently while still bumping `lastUpdated`. The same trap exists for the standalone Claude Code CLI's marketplace cache.
+
+Use [`claude-plugin-doctor`](https://github.com/yaniv-golan/claude-plugin-doctor) (`cpd`) — it diagnoses drift across all six cache layers of the Claude Code / Claude Desktop plugin system, not just the marketplace clone.
+
+```bash
+npm install -g claude-plugin-doctor
+```
 
 **The full safe dev loop is:**
 
 1. `./scripts/sync-test-repo.sh` — push your changes to the test repo.
 2. **In the Cowork UI**, click Refresh on the marketplace.
-3. **In your terminal**, run `./scripts/verify-cowork-clone.sh lool-founder-skills main`.
-4. If exit 1, run the printed `git fetch && git reset --hard` command, then re-Refresh in Cowork.
-5. Click Update on the plugin in Cowork.
+3. **In your terminal**, run `cpd refresh lool-founder-skills` to confirm the clone advanced and surface any other drift.
+4. If the clone is stale, run `cpd refresh lool-founder-skills --force-fetch -y` — bypasses the broken refresh path with a direct `git fetch && git reset --hard`.
+5. Click Update on the plugin in Cowork (or use `cpd refresh lool-founder-skills --auto-update`).
 6. Open a new Cowork task to pick up the new content.
 
-The verify script is **intentionally manual** — Cowork's Refresh is async and user-triggered, so wiring the verify call into `sync-test-repo.sh` would just check pre-refresh state. Run it after step 2.
+Run `cpd refresh` after clicking Refresh in step 2 — Cowork's Refresh is async and user-triggered, so it can't be wired into `sync-test-repo.sh` automatically.
 
-**Always run this before debugging "why isn't my new SKILL.md being picked up" — half the time the answer is the clone never moved.** The script also cross-checks `installed_plugins.json` `gitCommitSha` against clone HEAD and warns when the install snapshot is staler than the marketplace catalog (i.e. you ran Refresh but not Update).
+**Always run `cpd check founder-skills@lool-founder-skills` before debugging "why isn't my new SKILL.md being picked up"** — it produces a single-plugin drift report across all six cache layers (marketplace clone, install snapshot, enabled state, RPM, session mounts, content-hash sync). Half the time the answer is the clone never moved; the other half it's a different cache layer.
 
 ## Removing / Refreshing a Plugin in Claude Code / Cowork
 
