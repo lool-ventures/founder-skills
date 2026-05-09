@@ -1,0 +1,15 @@
+{
+  "metadata": {"run_id": "fixture-deck-review-001"},
+  "detected_stage": "seed",
+  "confidence": "high",
+  "evidence": ["Claims $400K ARR", "Raising $4M seed at $20M post"],
+  "is_ai_company": false,
+  "ai_evidence": "Mentions AI-powered features but not AI-first product",
+  "expected_framework": ["purpose_traction", "problem", "solution", "market", "traction", "business_model", "competition", "gtm", "team", "financials", "ask"],
+  "stage_benchmarks": {
+    "round_size_range": "$2M-$6M",
+    "expected_traction": "$300K-$500K ARR",
+    "runway_expectation": "18-24 months"
+  },
+  "reference_file_read": ["deck-best-practices.md"]
+}

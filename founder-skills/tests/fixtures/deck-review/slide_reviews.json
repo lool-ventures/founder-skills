@@ -1,0 +1,95 @@
+{
+  "metadata": {"run_id": "fixture-deck-review-001"},
+  "reviews": [
+    {
+      "slide_number": 1,
+      "maps_to": "purpose_traction",
+      "strengths": ["Clear one-liner with target customer"],
+      "weaknesses": [],
+      "recommendations": [],
+      "best_practice_refs": ["Sequoia: single declarative sentence"]
+    },
+    {
+      "slide_number": 2,
+      "maps_to": "problem",
+      "strengths": ["Quantified pain point (20+ hrs/wk)", "Customer quotes ground the problem"],
+      "weaknesses": [],
+      "recommendations": [],
+      "best_practice_refs": []
+    },
+    {
+      "slide_number": 3,
+      "maps_to": "solution",
+      "strengths": ["Workflow walkthrough"],
+      "weaknesses": [],
+      "recommendations": [],
+      "best_practice_refs": []
+    },
+    {
+      "slide_number": 4,
+      "maps_to": "market",
+      "strengths": ["Bottom-up sizing with cited sources"],
+      "weaknesses": [],
+      "recommendations": [],
+      "best_practice_refs": []
+    },
+    {
+      "slide_number": 5,
+      "maps_to": "traction",
+      "strengths": ["MRR + growth rate clear", "Logo strip provides social proof"],
+      "weaknesses": [],
+      "recommendations": [],
+      "best_practice_refs": []
+    },
+    {
+      "slide_number": 6,
+      "maps_to": "business_model",
+      "strengths": ["Pricing tiers explicit", "Unit economics shown"],
+      "weaknesses": [],
+      "recommendations": [],
+      "best_practice_refs": []
+    },
+    {
+      "slide_number": 7,
+      "maps_to": "competition",
+      "strengths": ["Honest comparison; doesn't dodge incumbents"],
+      "weaknesses": [],
+      "recommendations": [],
+      "best_practice_refs": []
+    },
+    {
+      "slide_number": 8,
+      "maps_to": "gtm",
+      "strengths": ["Channel strategy with early proof points"],
+      "weaknesses": [],
+      "recommendations": [],
+      "best_practice_refs": []
+    },
+    {
+      "slide_number": 9,
+      "maps_to": "team",
+      "strengths": ["Ex-Intuit/Stripe/PwC depth"],
+      "weaknesses": [],
+      "recommendations": [],
+      "best_practice_refs": []
+    },
+    {
+      "slide_number": 10,
+      "maps_to": "financials",
+      "strengths": ["Path to $5M ARR in 18mo"],
+      "weaknesses": [],
+      "recommendations": [],
+      "best_practice_refs": []
+    },
+    {
+      "slide_number": 11,
+      "maps_to": "ask",
+      "strengths": ["Use of funds + milestones tied to ask"],
+      "weaknesses": [],
+      "recommendations": [],
+      "best_practice_refs": []
+    }
+  ],
+  "missing_slides": [],
+  "overall_narrative_assessment": "Strong narrative arc; problem → solution → traction → ask flows cleanly."
+}

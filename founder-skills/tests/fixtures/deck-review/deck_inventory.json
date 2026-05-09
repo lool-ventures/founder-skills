@@ -1,0 +1,89 @@
+{
+  "metadata": {"run_id": "fixture-deck-review-001"},
+  "company_name": "Acmecorp",
+  "review_date": "2026-05-10",
+  "input_format": "pdf",
+  "input_quality": "good",
+  "total_slides": 11,
+  "claimed_stage": "seed",
+  "claimed_raise": "$4M",
+  "slides": [
+    {
+      "number": 1,
+      "headline": "Acmecorp -- Cloud Accounting for SMBs",
+      "content_summary": "Company intro, value proposition, team",
+      "visuals": "Logo, tagline",
+      "word_count_estimate": 15
+    },
+    {
+      "number": 2,
+      "headline": "Problem: SMBs spend 20+ hours/week on accounting busywork",
+      "content_summary": "Pain points enumerated with quotes",
+      "visuals": "Customer quotes, time-spend chart",
+      "word_count_estimate": 50
+    },
+    {
+      "number": 3,
+      "headline": "Solution: AI-powered automated bookkeeping",
+      "content_summary": "Workflow walkthrough",
+      "visuals": "Product screenshots",
+      "word_count_estimate": 60
+    },
+    {
+      "number": 4,
+      "headline": "Market: $50B SMB accounting market, 30M businesses",
+      "content_summary": "TAM/SAM/SOM bottom-up sizing",
+      "visuals": "Funnel chart",
+      "word_count_estimate": 45
+    },
+    {
+      "number": 5,
+      "headline": "Traction: $400K ARR, 300 customers, 18% MoM growth",
+      "content_summary": "Logo strip + growth chart",
+      "visuals": "Customer logos, MRR chart",
+      "word_count_estimate": 30
+    },
+    {
+      "number": 6,
+      "headline": "Business Model: $99/mo subscription with usage tiers",
+      "content_summary": "Pricing structure + unit economics",
+      "visuals": "Pricing table, LTV/CAC chart",
+      "word_count_estimate": 40
+    },
+    {
+      "number": 7,
+      "headline": "Competition: vs QuickBooks, Xero, FreshBooks",
+      "content_summary": "Honest comparison matrix",
+      "visuals": "Competitive matrix",
+      "word_count_estimate": 50
+    },
+    {
+      "number": 8,
+      "headline": "GTM: Inbound + accountant partnerships",
+      "content_summary": "Channel strategy + early proof",
+      "visuals": "Funnel + partner logos",
+      "word_count_estimate": 40
+    },
+    {
+      "number": 9,
+      "headline": "Team: Ex-Intuit eng, ex-Stripe sales, ex-PwC accountant",
+      "content_summary": "Bios, advisors, headcount plan",
+      "visuals": "Headshots, org chart",
+      "word_count_estimate": 60
+    },
+    {
+      "number": 10,
+      "headline": "Financials: Path to $5M ARR in 18 months",
+      "content_summary": "Burn, runway, projections",
+      "visuals": "Hockey stick chart",
+      "word_count_estimate": 35
+    },
+    {
+      "number": 11,
+      "headline": "Ask: Raising $4M seed at $20M post",
+      "content_summary": "Use of funds, milestones, contact",
+      "visuals": "Allocation pie chart",
+      "word_count_estimate": 40
+    }
+  ]
+}

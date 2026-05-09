@@ -1,0 +1,314 @@
+{
+  "metadata": {
+    "run_id": "fixture-deck-review-001"
+  },
+  "items": [
+    {
+      "id": "purpose_clear",
+      "category": "Narrative Flow",
+      "label": "Purpose Clear",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "headlines_carry_story",
+      "category": "Narrative Flow",
+      "label": "Headlines Carry Story",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "narrative_arc_present",
+      "category": "Narrative Flow",
+      "label": "Narrative Arc Present",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "strongest_proof_early",
+      "category": "Narrative Flow",
+      "label": "Strongest Proof Early",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "story_stands_alone",
+      "category": "Narrative Flow",
+      "label": "Story Stands Alone",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "problem_quantified",
+      "category": "Slide Content",
+      "label": "Problem Quantified",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "solution_shows_workflow",
+      "category": "Slide Content",
+      "label": "Solution Shows Workflow",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "why_now_has_catalyst",
+      "category": "Slide Content",
+      "label": "Why Now Has Catalyst",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "market_bottom_up",
+      "category": "Slide Content",
+      "label": "Market Bottom Up",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "competition_honest",
+      "category": "Slide Content",
+      "label": "Competition Honest",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "business_model_clear",
+      "category": "Slide Content",
+      "label": "Business Model Clear",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "gtm_has_proof",
+      "category": "Slide Content",
+      "label": "Gtm Has Proof",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "team_has_depth",
+      "category": "Slide Content",
+      "label": "Team Has Depth",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "stage_appropriate_structure",
+      "category": "Stage Fit",
+      "label": "Stage Appropriate Structure",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "stage_appropriate_traction",
+      "category": "Stage Fit",
+      "label": "Stage Appropriate Traction",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "stage_appropriate_financials",
+      "category": "Stage Fit",
+      "label": "Stage Appropriate Financials",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "ask_ties_to_milestones",
+      "category": "Stage Fit",
+      "label": "Ask Ties To Milestones",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "round_size_realistic",
+      "category": "Stage Fit",
+      "label": "Round Size Realistic",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "one_idea_per_slide",
+      "category": "Design & Readability",
+      "label": "One Idea Per Slide",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "minimal_text",
+      "category": "Design & Readability",
+      "label": "Minimal Text",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "slide_count_appropriate",
+      "category": "Design & Readability",
+      "label": "Slide Count Appropriate",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "consistent_design",
+      "category": "Design & Readability",
+      "label": "Consistent Design",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "mobile_readable",
+      "category": "Design & Readability",
+      "label": "Mobile Readable",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "no_vague_purpose",
+      "category": "Common Mistakes",
+      "label": "No Vague Purpose",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "no_nice_to_have_problem",
+      "category": "Common Mistakes",
+      "label": "No Nice To Have Problem",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "no_hype_without_proof",
+      "category": "Common Mistakes",
+      "label": "No Hype Without Proof",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "no_features_over_outcomes",
+      "category": "Common Mistakes",
+      "label": "No Features Over Outcomes",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "no_dodged_competition",
+      "category": "Common Mistakes",
+      "label": "No Dodged Competition",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "ai_retention_rebased",
+      "category": "AI Company",
+      "label": "Ai Retention Rebased",
+      "status": "not_applicable",
+      "evidence": "Not an AI company"
+    },
+    {
+      "id": "ai_cost_to_serve_shown",
+      "category": "AI Company",
+      "label": "Ai Cost To Serve Shown",
+      "status": "not_applicable",
+      "evidence": "Not an AI company"
+    },
+    {
+      "id": "ai_defensibility_beyond_model",
+      "category": "AI Company",
+      "label": "Ai Defensibility Beyond Model",
+      "status": "not_applicable",
+      "evidence": "Not an AI company"
+    },
+    {
+      "id": "ai_responsible_controls",
+      "category": "AI Company",
+      "label": "Ai Responsible Controls",
+      "status": "not_applicable",
+      "evidence": "Not an AI company"
+    },
+    {
+      "id": "numbers_consistent",
+      "category": "Diligence Readiness",
+      "label": "Numbers Consistent",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "data_room_ready",
+      "category": "Diligence Readiness",
+      "label": "Data Room Ready",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    },
+    {
+      "id": "contact_info_present",
+      "category": "Diligence Readiness",
+      "label": "Contact Info Present",
+      "status": "pass",
+      "evidence": "Synthetic fixture data"
+    }
+  ],
+  "summary": {
+    "total": 35,
+    "pass": 31,
+    "fail": 0,
+    "warn": 0,
+    "not_applicable": 4,
+    "score_pct": 100.0,
+    "overall_status": "strong",
+    "by_category": {
+      "Narrative Flow": {
+        "total": 5,
+        "pass": 5,
+        "fail": 0,
+        "warn": 0,
+        "not_applicable": 0
+      },
+      "Slide Content": {
+        "total": 8,
+        "pass": 8,
+        "fail": 0,
+        "warn": 0,
+        "not_applicable": 0
+      },
+      "Stage Fit": {
+        "total": 5,
+        "pass": 5,
+        "fail": 0,
+        "warn": 0,
+        "not_applicable": 0
+      },
+      "Design & Readability": {
+        "total": 5,
+        "pass": 5,
+        "fail": 0,
+        "warn": 0,
+        "not_applicable": 0
+      },
+      "Common Mistakes": {
+        "total": 5,
+        "pass": 5,
+        "fail": 0,
+        "warn": 0,
+        "not_applicable": 0
+      },
+      "AI Company": {
+        "total": 4,
+        "pass": 0,
+        "fail": 0,
+        "warn": 0,
+        "not_applicable": 4
+      },
+      "Diligence Readiness": {
+        "total": 3,
+        "pass": 3,
+        "fail": 0,
+        "warn": 0,
+        "not_applicable": 0
+      }
+    },
+    "failed_items": [],
+    "warned_items": []
+  }
+}
