@@ -28,6 +28,7 @@ jobs:
       - run: uv run mypy founder-skills/skills/deck-review/scripts/
       - run: uv run mypy founder-skills/skills/ic-sim/scripts/
       - run: uv run mypy founder-skills/skills/financial-model-review/scripts/
+      - run: uv run mypy founder-skills/skills/competitive-positioning/scripts/
       - run: uv run mypy founder-skills/tests/
 
   test:
@@ -41,3 +42,24 @@ jobs:
       - run: uv python install ${{ matrix.python-version }}
       - run: uv sync --extra dev --python ${{ matrix.python-version }}
       - run: uv run pytest founder-skills/tests/ -v
+
+  validate:
+    runs-on: ubuntu-latest
+    name: Validate plugin & marketplace manifests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Claude Code CLI (pinned exact)
+        # claude plugin validate was introduced in CLI v2.1.131. We pin to
+        # an exact version (not ^ or ~) so CI is deterministic — bump
+        # intentionally via PR rather than accepting silent npm-side drift.
+        run: npm install -g "@anthropic-ai/claude-code@2.1.138"
+      - name: Print CLI version (traceability)
+        run: claude --version
+      - name: Validate plugin manifest
+        run: claude plugin validate founder-skills
+      - name: Validate marketplace manifest
+        run: claude plugin validate .
