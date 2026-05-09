@@ -4,7 +4,6 @@ __pycache__/
 dist/
 *.plugin
 WARP.md
-CLAUDE.md
 docs/internal/
 .mypy_cache/
 .pytest_cache/
