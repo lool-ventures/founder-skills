@@ -1,0 +1,54 @@
+name: Skill Quality
+
+# No `schedule:` trigger until Phase D body exists. A cron firing a no-op job
+# would create green checkmarks for nothing — that's slow corruption of what
+# CI green means. Add the schedule when the nightly job actually validates
+# something.
+
+on:
+  pull_request:
+    paths:
+      - "founder-skills/**"
+      - ".github/workflows/skill-quality.yml"
+      - "pyproject.toml"
+  workflow_dispatch: {}
+
+jobs:
+  contract-tests:
+    name: Contract + Cowork-invariant tests (free, fast)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv sync --extra dev
+      # `-m "not e2e"` is defensive: today none of these tests carry the e2e
+      # marker, but it prevents accidental marker drift from making this job
+      # slow + paid in the future.
+      - run: |
+          uv run pytest \
+            founder-skills/tests/test_cowork_async_subagent_filter.py \
+            founder-skills/tests/test_cowork_invariants.py \
+            founder-skills/tests/test_skill_orchestration.py \
+            founder-skills/tests/test_compose_invariants.py \
+            -v -m "not e2e"
+
+  e2e-smoke:
+    name: deck-review end-to-end smoke (real LLM, ~$2-5)
+    runs-on: ubuntu-latest
+    # Skip for forks (no secret available). Internal PRs only.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: contract-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv sync --extra dev
+      - run: |
+          uv run pytest \
+            founder-skills/tests/test_e2e_deck_review.py \
+            -v -m e2e --tb=short
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY_CI }}
