@@ -183,6 +183,41 @@ Verified against the Claude Code v2.1.120 skill runtime contract and Desktop v1.
 - **Regression test:** `founder-skills/tests/test_skill_contract.py` enforces all of the above. Run before opening a PR that touches a SKILL.md.
 - **Pre-publish validation:** Run `claude plugin validate founder-skills` to validate manifests against the CLI's schemas (requires CLI v2.1.131+). CI does this automatically on every PR.
 
+## Release Process
+
+Tag-push triggers `deck-review-e2e-smoke` in `.github/workflows/skill-quality.yml`. The workflow's preflight step fails fast if the tag does not match both `pyproject.toml` and `founder-skills/.claude-plugin/plugin.json` versions — version-bump errors are caught before the paid SDK call (~5 sec, no cost). Per-PR e2e is off by default; opt in via manual dispatch for architectural-surface PRs (list below).
+
+### Release ordering
+
+1. Bump versions in `pyproject.toml` and `founder-skills/.claude-plugin/plugin.json` (must match)
+2. Update `CHANGELOG.md`
+3. `git commit -m "release: vX.Y.Z"`
+4. `git push`
+5. `git tag vX.Y.Z && git push --tags`
+6. **Wait for `deck-review-e2e-smoke` green** in the GitHub Actions UI
+   - Tag failure: `git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z`, fix, retag — no user impact yet (sync hasn't happened)
+   - LLM-variance flake: re-run the job from the Actions UI (free retry, same SHA)
+7. **Only after green:** `./scripts/sync-test-repo.sh`
+
+`sync-test-repo.sh` is the actual user-facing distribution event; the tag itself is just a marker. Syncing before green = users pull a broken release.
+
+**Already-distributed retag pitfall:** if `sync-test-repo.sh` ran before you noticed the bug, **bump to the next patch version instead of retagging** — Cowork caches by `plugin.json#version`, so retagging the same version will not refresh user caches (`cpd refresh ... --force-fetch -y` is the manual recovery, not always coordinatable across users).
+
+### When to manually dispatch e2e on a PR
+
+Per-PR e2e is off by default. Manually dispatch (`gh workflow run skill-quality.yml --ref <pr-branch>`) when the PR touches architectural surface that contract tests don't fully cover:
+
+- `founder-skills/skills/*/SKILL.md` (frontmatter or trigger phrases)
+- `founder-skills/agents/*.md` (tool declarations, model, frontmatter)
+- `founder-skills/.claude-plugin/plugin.json`
+- `founder-skills/scripts/session-setup.sh` (mutates `CLAUDE_ENV_FILE`; downstream skills depend on it)
+- `founder-skills/skills/*/scripts/compose_report.py` (the `coaching_payload` contract — structurally checked by `test_compose_invariants.py`, but only e2e exercises end-to-end)
+- `founder-skills/tests/test_e2e_deck_review.py` (the SDK invocation itself)
+- `founder-skills/tests/cowork_async_subagent_filter.py` and `compose_invocations.py` (CI-helper meta — if these break, contract tests pass vacuously)
+- `pyproject.toml` `dependencies` list or `[project.optional-dependencies]` block (any runtime dep can shift SDK behavior)
+
+Other PRs (skill-internal scripts, fixtures, docs, contract tests): contract tests are sufficient — skip the $10.
+
 ## Installing the Plugin in Claude Cowork
 
 Customize → "+" on the "Personal Plugins" list → Browse Plugins → Personal → +
