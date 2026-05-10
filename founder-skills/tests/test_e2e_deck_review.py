@@ -1,12 +1,24 @@
 """End-to-end smoke: drive deck-review against the synthetic fixture deck.
 
-Costs ~$2-5 per run (calibrate empirically — see Task 9 Step 4 in the plan).
-Skipped if no API key.
+Cost: $2-5 per run on ANTHROPIC_API_KEY (calibrate empirically — see Task 9
+Step 4 in the plan). Free at usage time on a Claude Pro/Max subscription
+(but consumes per-5-hour message cap; see CHANGELOG notes for ToS caveats
+on automated subscription use).
+
+Auth precedence (the SDK shells out to `claude` CLI which picks the first
+available):
+  1. ANTHROPIC_API_KEY env var
+  2. CLAUDE_CODE_OAUTH_TOKEN env var (long-lived subscription token from
+     `claude setup-token`)
+  3. Local subscription auth via `~/.claude/.credentials.json` (after
+     `claude /login`)
+
+This test skips only when NONE of the three are available.
 
 NOTE: as of v0.4.4 + claude-agent-sdk==0.1.80, the SDK invocation pattern
 below is documented but has NOT been empirically verified end-to-end. The
-test author should run Task 9 Step 1 (manual SDK verification with API key)
-before treating this test as load-bearing CI signal. See the plan at
+test author should run Task 9 Step 1 (manual SDK verification) before
+treating this test as load-bearing CI signal. See the plan at
 docs/plans/2026-05-09-skill-quality-ci.md Task 9.
 """
 
@@ -26,10 +38,30 @@ DECK_FIXTURE = FIXTURES / "decks" / "synthetic-seed-deck.txt"
 GOLDEN = FIXTURES / "golden" / "deck-review" / "synthetic-seed-deck.expected.json"
 
 
+def _has_claude_auth() -> bool:
+    """True if any of the SDK's three auth paths is available.
+
+    Order of preference inside the SDK matches:
+      1. ANTHROPIC_API_KEY env var (per-token API billing)
+      2. CLAUDE_CODE_OAUTH_TOKEN env var (subscription, long-lived token)
+      3. ~/.claude/.credentials.json (subscription, after `claude /login`)
+    """
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return True
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        return True
+    creds = Path.home() / ".claude" / ".credentials.json"
+    return creds.is_file()
+
+
 @pytest.mark.e2e
 @pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY"),
-    reason="ANTHROPIC_API_KEY required for end-to-end smoke",
+    not _has_claude_auth(),
+    reason=(
+        "End-to-end smoke needs Claude auth: set ANTHROPIC_API_KEY, "
+        "CLAUDE_CODE_OAUTH_TOKEN, or run `claude /login` (subscription) "
+        "to populate ~/.claude/.credentials.json"
+    ),
 )
 def test_deck_review_smoke(tmp_path: Path) -> None:
     """Run deck-review against the synthetic fixture; assert structural signals."""

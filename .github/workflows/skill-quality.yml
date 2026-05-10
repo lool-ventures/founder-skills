@@ -35,7 +35,7 @@ jobs:
             -v -m "not e2e"
 
   e2e-smoke:
-    name: deck-review end-to-end smoke (real LLM, ~$2-5)
+    name: deck-review end-to-end smoke (real LLM)
     runs-on: ubuntu-latest
     # Skip for forks (no secret available). Internal PRs only.
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
@@ -46,9 +46,19 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --extra dev
+      # Auth: pass BOTH possible secrets through; the SDK / `claude` CLI
+      # picks whichever is set. Configure ONE of them in repo settings:
+      #   - ANTHROPIC_API_KEY_CI       — per-token API billing (~$2-5/run)
+      #   - CLAUDE_CODE_OAUTH_TOKEN_CI — subscription auth (flat monthly,
+      #                                  but uses per-5-hour message cap;
+      #                                  check Anthropic ToS for automated
+      #                                  use at scale before relying on it)
+      # Generate the OAuth token locally with `claude setup-token`, then
+      # store the value as a repo secret.
       - run: |
           uv run pytest \
             founder-skills/tests/test_e2e_deck_review.py \
             -v -m e2e --tb=short
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY_CI }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_CI }}
