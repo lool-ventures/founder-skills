@@ -135,7 +135,11 @@ def test_explicit_slug_filters_exactly() -> None:
             artifacts_root=root,
         )
         assert rc == 0
-        assert "acme-corp" in stdout and "v2" not in stdout
+        # Match against the rejected directory name explicitly. Bare "v2" is
+        # fragile: tempfile.TemporaryDirectory random suffixes can contain
+        # "v2" by chance (e.g. "rfa0v21h" → "v2" matches the random suffix,
+        # not the rejected market-sizing-acme-corp-v2 directory).
+        assert "acme-corp" in stdout and "acme-corp-v2" not in stdout
 
 
 def test_no_slug_different_dirs_is_ambiguous() -> None:

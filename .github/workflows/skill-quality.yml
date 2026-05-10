@@ -1,0 +1,122 @@
+name: Skill Quality
+
+# Triggers:
+# - pull_request: contract-tests only (free, fast). e2e is excluded by the
+#   per-job `if:` to avoid unbounded $5-15/push cost while iterating on a PR.
+# - push: tags ['v*']: every release tag runs deck-review-e2e-smoke.
+#   Tag failure = delete tag, fix, retag (no user impact yet, since
+#   sync-test-repo.sh is the actual distribution event — see CLAUDE.md
+#   "Release Process" for the required ordering).
+# - workflow_dispatch: manual on-demand. Use for pre-release validation on
+#   a branch tip (`gh workflow run skill-quality.yml --ref <branch>`) or to
+#   opt in for architectural-surface PRs (see CLAUDE.md for the trigger list).
+#
+# No `schedule:` trigger until Phase D body exists. A cron firing a no-op
+# job would create green checkmarks for nothing — slow corruption of what
+# CI green means.
+
+on:
+  pull_request:
+    paths:
+      - "founder-skills/**"
+      - ".github/workflows/skill-quality.yml"
+      - "pyproject.toml"
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+jobs:
+  contract-tests:
+    name: Contract + Cowork-invariant tests (free, fast)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          # Repo uses pyproject.toml (no uv.lock); the default
+          # `**/uv.lock` glob errors out on cache setup if no match.
+          cache-dependency-glob: "**/pyproject.toml"
+      - run: uv sync --extra dev
+      # `-m "not e2e"` is defensive: today none of these tests carry the e2e
+      # marker, but it prevents accidental marker drift from making this job
+      # slow + paid in the future.
+      - run: |
+          uv run pytest \
+            founder-skills/tests/test_cowork_async_subagent_filter.py \
+            founder-skills/tests/test_cowork_invariants.py \
+            founder-skills/tests/test_skill_orchestration.py \
+            founder-skills/tests/test_compose_invariants.py \
+            -v -m "not e2e"
+
+  deck-review-e2e-smoke:
+    name: deck-review end-to-end smoke (real LLM)
+    runs-on: ubuntu-latest
+    # Run on tag push and manual dispatch only. Per-PR is the wrong cadence
+    # for a $5-15 / 12-15min job — opt in via `workflow_dispatch` from the
+    # Actions UI when a PR touches architectural surface (see CLAUDE.md).
+    # `pull_request` is excluded entirely by this guard, which also makes
+    # forks structurally safe (they cannot push tags to upstream and lack
+    # write access to dispatch this workflow).
+    if: github.event_name != 'pull_request'
+    needs: contract-tests
+    # Tag-push: never cancel in-flight authoritative tag run if a quick
+    # re-tag follows. workflow_dispatch on the same ref will queue the
+    # second invocation behind the first ($20 worst case for double-fire,
+    # accepted vs. the disaster of cancelling the authoritative run).
+    concurrency:
+      group: deck-review-e2e-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      # Preflight: on tag push, fail in <5s if the tag does not match
+      # both plugin.json and pyproject.toml versions. Catches forgot-bump
+      # and pyproject/plugin.json drift before the paid SDK call. This is
+      # the version-bump enforcement that release.sh would have provided
+      # if we'd added one — but in CI it survives rebase / cross-machine /
+      # human-skipping the script.
+      - name: Verify tag matches plugin.json + pyproject.toml versions
+        if: github.event_name == 'push'
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          PJ=$(jq -r '.version' founder-skills/.claude-plugin/plugin.json)
+          PY=$(grep -E '^version = ' pyproject.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "Tag:                   $TAG"
+          echo "plugin.json version:   $PJ"
+          echo "pyproject.toml version: $PY"
+          if [ "$TAG" != "$PJ" ] || [ "$TAG" != "$PY" ]; then
+            echo "::error::Tag $TAG does not match plugin.json ($PJ) or pyproject.toml ($PY). Bump both manifests, recommit, delete the tag, and retag."
+            exit 1
+          fi
+
+      - name: Step summary
+        run: |
+          echo "### deck-review end-to-end smoke" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Exercises the deck-review skill end-to-end against a synthetic seed-stage fixture via the Claude Agent SDK." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Coverage scope:** 1 of 5 skills. The remaining 4 (market-sizing, ic-sim, financial-model-review, competitive-positioning) are covered by the free contract + Cowork-invariant tests in the per-PR job, not by end-to-end SDK exercise." >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/pyproject.toml"
+      - run: uv sync --extra dev
+      # Auth: pass BOTH possible secrets through; the SDK / `claude` CLI
+      # picks whichever is set. Configure ONE of them in repo settings:
+      #   - ANTHROPIC_API_KEY_CI       — per-token API billing (~$2-5/run)
+      #   - CLAUDE_CODE_OAUTH_TOKEN_CI — subscription auth (flat monthly,
+      #                                  but uses per-5-hour message cap;
+      #                                  check Anthropic ToS for automated
+      #                                  use at scale before relying on it)
+      # Generate the OAuth token locally with `claude setup-token`, then
+      # store the value as a repo secret.
+      - run: |
+          uv run pytest \
+            founder-skills/tests/test_e2e_deck_review.py \
+            -v -m e2e --tb=short
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY_CI }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_CI }}

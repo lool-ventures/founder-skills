@@ -1,0 +1,24 @@
+{
+  "fixture_version": 2,
+  "skill": "deck-review",
+  "input": "synthetic-seed-deck.txt",
+  "assertions": {
+    "report_json_exists": true,
+    "report_md_exists": true,
+    "all_artifacts_have_run_id": true,
+    "schema_validation_passes": true,
+    "coaching_payload_present": true,
+    "score_pct_range": [5, 50],
+    "overall_status_in": ["needs_work", "major_revision"],
+    "expected_failed_categories_min_count": 3,
+    "no_high_severity_warnings_other_than": ["CHECKLIST_FAILURES_CRITICAL"]
+  },
+  "_calibration_notes": [
+    "First real run 2026-05-10: LLM scored 15.2%, status major_revision.",
+    "The deck is deliberately a 6-slide stub that only covers 5 of 35 checklist items;",
+    "the remaining ~30 items are missing or unsupported — most fail or are skipped.",
+    "5-50% range absorbs reasonable LLM variance on this stub. Below 5% suggests the",
+    "model misread the deck entirely; above 50% suggests our 'weak deck' isn't perceived",
+    "as weak (signal we care about: deck-review correctly identifies a weak deck)."
+  ]
+}

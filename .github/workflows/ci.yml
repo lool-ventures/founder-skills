@@ -41,7 +41,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv python install ${{ matrix.python-version }}
       - run: uv sync --extra dev --python ${{ matrix.python-version }}
-      - run: uv run pytest founder-skills/tests/ -v
+      - run: uv run pytest founder-skills/tests/ -v -m "not e2e"
 
   validate:
     runs-on: ubuntu-latest

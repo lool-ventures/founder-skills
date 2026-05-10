@@ -433,6 +433,7 @@ python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --strict --pretty \
 
 **Mitigation 2 protocol (v0.4.2):** the main thread reads the structured `coaching_payload` from `report.json` and inlines it into the dispatch prompt. The sub-agent does NOT Read full `report.md` — it consumes `coaching_payload` directly, performs Grep idempotency, Edits via the per-run uuid `insertion_marker`, and Grep-verifies all artifacts. See the competitive-positioning agent body's "Context B — Post-compose coaching dispatch (POST_COMPOSE_COACHING)" section for the full procedure.
 
+<!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash
 COACHING_PAYLOAD="$(python3 -c '
 import json, sys

@@ -1,12 +1,12 @@
 [project]
 name = "founder-skills"
-version = "0.4.2"
+version = "0.4.5"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 dependencies = ["openpyxl"]
 
 [project.optional-dependencies]
-dev = ["ruff", "mypy", "pytest", "pyyaml", "types-openpyxl", "types-PyYAML"]
+dev = ["ruff", "mypy", "pytest", "pyyaml", "types-openpyxl", "types-PyYAML", "claude-agent-sdk==0.1.80"]
 
 [tool.ruff]
 target-version = "py310"
@@ -33,3 +33,7 @@ explicit_package_bases = true
 [tool.pytest.ini_options]
 testpaths = ["founder-skills/tests"]
 python_files = "test_*.py"
+pythonpath = ["founder-skills/tests"]
+markers = [
+    "e2e: end-to-end tests that invoke real LLMs (any of ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN / local `claude /login`; ~5-20 min wall time per run; ~$5-15 on API; subscription rate limits change — check Anthropic policy before using subscription for CI)",
+]
