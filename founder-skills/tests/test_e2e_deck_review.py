@@ -307,16 +307,28 @@ def test_deck_review_smoke(tmp_path: Path) -> None:
         assert "coaching_payload" in report
         assert "summary" in report["coaching_payload"]
 
-    # 3. score_pct in expected range (LLM variation tolerated by range)
-    summary = report.get("summary", {})
+    # 3. score_pct in expected range (LLM variation tolerated by range).
+    # Per v0.4.2 producer schema parity, summary lives at
+    # `coaching_payload.summary`, NOT at top-level `report["summary"]`.
+    # All 5 skills' compose scripts emit the summary under coaching_payload.
+    summary = report.get("coaching_payload", {}).get("summary", {})
     score = summary.get("score_pct")
     if a.get("score_pct_range"):
         lo, hi = a["score_pct_range"]
-        assert score is not None and lo <= score <= hi, f"score_pct {score} outside expected range [{lo}, {hi}]"
+        assert score is not None and lo <= score <= hi, (
+            f"score_pct {score} outside expected range [{lo}, {hi}].\n"
+            f"  coaching_payload.summary keys: {sorted(summary.keys())}\n"
+            f"  report.json top-level keys:    {sorted(report.keys())}\n"
+            f"  review_dir for inspection:     {review_dir}"
+        )
 
     # 4. overall_status in expected set
     if a.get("overall_status_in"):
-        assert summary.get("overall_status") in a["overall_status_in"]
+        assert summary.get("overall_status") in a["overall_status_in"], (
+            f"overall_status {summary.get('overall_status')!r} not in {a['overall_status_in']}.\n"
+            f"  coaching_payload.summary keys: {sorted(summary.keys())}\n"
+            f"  review_dir for inspection:     {review_dir}"
+        )
 
     # 5. run_id parity across artifacts
     if a.get("all_artifacts_have_run_id"):
