@@ -11,18 +11,11 @@ calibrating across more runs.
   - On `ANTHROPIC_API_KEY`: ~$5-15 per run (revise upward from earlier
     $2-5 projection based on the realistic dispatch count). Set the
     `ANTHROPIC_API_KEY_CI` monthly spend cap accordingly.
-  - On Claude Pro subscription: ~50+ messages per run consumed against
-    the per-5-hour cap (~45 on Pro). **One e2e run can blow the entire
-    Pro cap for that 5-hour window** — meaning interactive Claude Code
-    use during that window will be rate-limited. Pro is NOT viable for
-    per-PR CI; it's viable only for occasional manual local runs.
-  - On Claude Max (~225 messages per 5-hour window): ~3-4 runs per
-    window before rate-limiting. Workable for moderate PR volume but
-    will rate-limit on bursty days.
-  - **For sustained CI use, prefer `ANTHROPIC_API_KEY` (per-token
-    billing with a spend cap) over subscription auth.** The subscription
-    paths are documented for local-dev convenience; they are not the
-    recommended CI auth.
+  - On a Claude subscription: a single run consumes a meaningful share
+    of the per-window message budget. Subscription rate limits and
+    automated-use terms change — check Anthropic's current policy
+    before relying on subscription auth for sustained CI. For local-dev
+    runs it's fine; for per-PR CI, the API path is the durable choice.
 
 **Run with `-s` to see live progress** (which auth was detected, each SDK
 message as it arrives, tool calls, etc.). Without `-s`, pytest captures

@@ -35,5 +35,5 @@ testpaths = ["founder-skills/tests"]
 python_files = "test_*.py"
 pythonpath = ["founder-skills/tests"]
 markers = [
-    "e2e: end-to-end tests that invoke real LLMs (any of ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN / local `claude /login`; ~5-20 min wall time per run; ~$5-15 on API; ~50+ messages against subscription per-5-hour cap — Pro NOT viable for per-PR CI, Max workable but bursty)",
+    "e2e: end-to-end tests that invoke real LLMs (any of ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN / local `claude /login`; ~5-20 min wall time per run; ~$5-15 on API; subscription rate limits change — check Anthropic policy before using subscription for CI)",
 ]
