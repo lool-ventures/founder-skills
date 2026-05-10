@@ -28,6 +28,15 @@
 - `founder-skills/agents/competitive-positioning.md` — Competitive positioning agent definition
 - `founder-skills/tests/test_competitive_positioning.py` — Competitive positioning regression tests
 - `founder-skills/tests/test_visualize_competitive_positioning.py` — Competitive positioning HTML visualization tests
+- `founder-skills/tests/cowork_async_subagent_filter.py` — Cowork sub-agent tool-name compatibility helper (skill-quality CI; v0.4.0-regression detector)
+- `founder-skills/tests/compose_invocations.py` — Per-skill compose-script invocation registry (skill-quality CI)
+- `founder-skills/tests/test_cowork_async_subagent_filter.py` — Helper unit tests
+- `founder-skills/tests/test_cowork_invariants.py` — Per-agent persistence + dangerous-tool declaration invariants
+- `founder-skills/tests/test_skill_orchestration.py` — Per-SKILL.md frontmatter + sub-agent-cue-then-bash regression detector
+- `founder-skills/tests/test_compose_invariants.py` — `coaching_payload` shape + `STALE_ARTIFACT` regression
+- `founder-skills/tests/test_e2e_deck_review.py` — End-to-end smoke; LLM-driven; carries `e2e` marker
+- `founder-skills/tests/fixtures/` — Synthetic test inputs (deck-review compose-invariant fixtures + synthetic deck for e2e + golden expected file)
+- `.github/workflows/skill-quality.yml` — Skill-quality CI (contract tests per-PR, e2e smoke on internal PRs only)
 - `artifacts/` — Persistent working directory for skill run artifacts (gitignored, created at runtime)
 
 ## Plugin Structure
@@ -129,9 +138,26 @@ uv run mypy founder-skills/tests/
 ## Running Tests
 
 ```bash
-uv run pytest                        # all tests
-uv run pytest founder-skills/tests/ -v  # verbose
+uv run pytest                                       # all tests (e2e auto-skips without auth)
+uv run pytest founder-skills/tests/ -v              # verbose
+uv run pytest founder-skills/tests/ -v -m "not e2e" # explicitly skip the LLM-driven e2e (free, fast)
 ```
+
+The deck-review e2e smoke (`tests/test_e2e_deck_review.py`) drives the SDK against a synthetic fixture. Auth options (any one):
+
+- `ANTHROPIC_API_KEY` env var (per-token API; ~$2-5/run)
+- `CLAUDE_CODE_OAUTH_TOKEN` env var (subscription, long-lived token from `claude setup-token`)
+- Local subscription auth: `claude /login` populates the macOS Keychain entry `Claude Code-credentials` (or `~/.claude/.credentials.json` on Linux/Windows)
+
+For live progress during the 60-180s e2e run, add `-s`:
+
+```bash
+uv run pytest founder-skills/tests/test_e2e_deck_review.py -v -m e2e --tb=short -s
+```
+
+Without `-s` the run looks silent (pytest captures stdout); with `-s` you see auth-detected, prompt, and per-message tool calls (`Bash`, `Read`, `Skill`, `Task`, etc.) as the SDK stream arrives.
+
+The `e2e` marker keeps these tests out of the default per-PR `ci.yml` run; they execute only in the dedicated `skill-quality.yml` workflow.
 
 ## Internal Docs
 

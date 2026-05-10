@@ -32,7 +32,13 @@ uv sync --extra dev
    uv run mypy founder-skills/skills/financial-model-review/scripts/
    uv run mypy founder-skills/skills/competitive-positioning/scripts/
    uv run mypy founder-skills/tests/
-   uv run pytest                                               # tests
+   uv run pytest                                               # tests (e2e auto-skips without auth)
+   ```
+
+   The deck-review e2e smoke (`tests/test_e2e_deck_review.py`) is gated by the `e2e` marker and skips unless one of these is set: `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, or local `claude /login` auth (macOS Keychain or `~/.claude/.credentials.json`). To explicitly skip it for a faster run:
+
+   ```bash
+   uv run pytest -m "not e2e"
    ```
 
 3. **Open a PR** against `main`. The PR template will guide you through the checklist.
