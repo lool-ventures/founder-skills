@@ -35,6 +35,9 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
+          # Repo uses pyproject.toml (no uv.lock); the default
+          # `**/uv.lock` glob errors out on cache setup if no match.
+          cache-dependency-glob: "**/pyproject.toml"
       - run: uv sync --extra dev
       # `-m "not e2e"` is defensive: today none of these tests carry the e2e
       # marker, but it prevents accidental marker drift from making this job
@@ -99,6 +102,7 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
+          cache-dependency-glob: "**/pyproject.toml"
       - run: uv sync --extra dev
       # Auth: pass BOTH possible secrets through; the SDK / `claude` CLI
       # picks whichever is set. Configure ONE of them in repo settings:
