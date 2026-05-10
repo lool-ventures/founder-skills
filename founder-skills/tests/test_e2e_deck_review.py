@@ -5,6 +5,13 @@ Step 4 in the plan). Free at usage time on a Claude Pro/Max subscription
 (but consumes per-5-hour message cap; see CHANGELOG notes for ToS caveats
 on automated subscription use).
 
+**Run with `-s` to see live progress** (which auth was detected, each SDK
+message as it arrives, tool calls, etc.). Without `-s`, pytest captures
+stdout and the test looks silent for the 60-180s the SDK takes — but the
+captured output is still printed if the test fails. Recommended invocation:
+
+    uv run pytest founder-skills/tests/test_e2e_deck_review.py -v -m e2e --tb=short -s
+
 Auth precedence (the SDK shells out to `claude` CLI which picks the first
 available):
   1. ANTHROPIC_API_KEY env var
@@ -38,6 +45,99 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / "founder-skills" / "tests" / "fixtures"
 DECK_FIXTURE = FIXTURES / "decks" / "synthetic-seed-deck.txt"
 GOLDEN = FIXTURES / "golden" / "deck-review" / "synthetic-seed-deck.expected.json"
+
+
+def _detect_auth_kind() -> str:
+    """Return a human-readable label for which auth path is active.
+
+    Used purely for progress reporting — does not affect SDK behavior.
+    """
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "ANTHROPIC_API_KEY env var (per-token API)"
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        return "CLAUDE_CODE_OAUTH_TOKEN env var (subscription, long-lived token)"
+    if sys.platform == "darwin":
+        try:
+            r = subprocess.run(
+                ["security", "find-generic-password", "-s", "Claude Code-credentials"],
+                capture_output=True,
+                timeout=5,
+            )
+            if r.returncode == 0:
+                return "macOS Keychain entry 'Claude Code-credentials' (subscription, after `claude /login`)"
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+    if (Path.home() / ".claude" / ".credentials.json").is_file():
+        return "~/.claude/.credentials.json (subscription, after `claude /login`)"
+    return "(none — test should have skipped)"
+
+
+def _summarize_sdk_message(msg: object) -> str:
+    """One-line summary of an SDK message for live progress output.
+
+    Defensively walks attributes so it works across SDK message-class
+    variations. Falls back to truncated str(msg) if nothing matches.
+    """
+    type_name = type(msg).__name__
+    # Common shapes: AssistantMessage / UserMessage have `content` (list of
+    # content blocks). ResultMessage has `result`/`subtype`. SystemMessage
+    # has `subtype`/`data`. ToolUseBlock has `name`/`input`. ToolResultBlock
+    # has `tool_use_id`/`content`.
+    content = getattr(msg, "content", None)
+    if isinstance(content, list) and content:
+        # Summarize each block in the message
+        block_summaries: list[str] = []
+        for block in content:
+            block_type = type(block).__name__
+            if block_type == "TextBlock":
+                text = getattr(block, "text", "")
+                snippet = text.strip().replace("\n", " ")[:100]
+                block_summaries.append(f"text: {snippet}{'...' if len(text) > 100 else ''}")
+            elif block_type == "ThinkingBlock":
+                text = getattr(block, "thinking", "")
+                snippet = text.strip().replace("\n", " ")[:80]
+                block_summaries.append(f"thinking: {snippet}{'...' if len(text) > 80 else ''}")
+            elif block_type == "ToolUseBlock":
+                tool_name = getattr(block, "name", "?")
+                tool_input = getattr(block, "input", {})
+                # Extract useful per-tool field
+                if tool_name == "Bash":
+                    cmd = (tool_input or {}).get("command", "")[:80]
+                    block_summaries.append(f"→ Bash: {cmd}{'...' if len(cmd) >= 80 else ''}")
+                elif tool_name == "Read":
+                    path = (tool_input or {}).get("file_path", "")
+                    block_summaries.append(f"→ Read: {path}")
+                elif tool_name == "Write":
+                    path = (tool_input or {}).get("file_path", "")
+                    block_summaries.append(f"→ Write: {path}")
+                elif tool_name == "Edit":
+                    path = (tool_input or {}).get("file_path", "")
+                    block_summaries.append(f"→ Edit: {path}")
+                elif tool_name == "Task":
+                    desc = (tool_input or {}).get("description", "")[:60]
+                    sub = (tool_input or {}).get("subagent_type", "?")
+                    block_summaries.append(f"→ Task[{sub}]: {desc}")
+                elif tool_name == "Skill":
+                    skill_name = (tool_input or {}).get("name", "?")
+                    block_summaries.append(f"→ Skill: {skill_name}")
+                else:
+                    block_summaries.append(f"→ {tool_name}")
+            elif block_type == "ToolResultBlock":
+                tool_id = getattr(block, "tool_use_id", "?")[:8]
+                is_err = getattr(block, "is_error", False)
+                marker = "✗" if is_err else "✓"
+                # Tool results can be long — just note success/error
+                block_summaries.append(f"← {marker} result for {tool_id}")
+            else:
+                block_summaries.append(f"[{block_type}]")
+        return f"{type_name}: " + " | ".join(block_summaries)
+    # Fallback: dig for common scalar fields
+    subtype = getattr(msg, "subtype", None)
+    if subtype:
+        result = getattr(msg, "result", None) or getattr(msg, "data", None)
+        result_snippet = str(result)[:100] if result else ""
+        return f"{type_name}({subtype}){f': {result_snippet}' if result_snippet else ''}"
+    return f"{type_name}: {str(msg)[:120]}"
 
 
 def _has_claude_auth() -> bool:
@@ -141,9 +241,22 @@ def test_deck_review_smoke(tmp_path: Path) -> None:
     # Capture the SDK message stream so failure diagnostics can include it.
     captured_messages: list[str] = []
 
+    # Live progress preamble — visible with `pytest -s`. Without `-s`,
+    # pytest captures stdout silently but reprints it on failure.
+    print(f"\n[e2e] Auth detected: {_detect_auth_kind()}", flush=True)
+    print(f"[e2e] Plugin path:   {plugin_path}", flush=True)
+    print(f"[e2e] Workdir:       {workdir}", flush=True)
+    print(f"[e2e] Deck fixture:  {deck_dst.name}", flush=True)
+    print(f"[e2e] Prompt:        {prompt[:140]}{'...' if len(prompt) > 140 else ''}", flush=True)
+    print("[e2e] --- starting SDK query (60-180s typical) ---", flush=True)
+
     async def run() -> None:
+        msg_count = 0
         async for msg in query(prompt=prompt, options=options):
+            msg_count += 1
             captured_messages.append(str(msg))
+            print(f"[e2e #{msg_count:03d}] {_summarize_sdk_message(msg)}", flush=True)
+        print(f"[e2e] --- SDK loop complete ({msg_count} messages) ---", flush=True)
 
     asyncio.run(run())
 
