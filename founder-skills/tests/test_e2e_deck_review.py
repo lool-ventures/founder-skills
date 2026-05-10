@@ -1,13 +1,32 @@
 """End-to-end smoke: drive deck-review against the synthetic fixture deck.
 
-Cost: $2-5 per run on ANTHROPIC_API_KEY (calibrate empirically — see Task 9
-Step 4 in the plan). Free at usage time on a Claude Pro/Max subscription
-(but consumes per-5-hour message cap; see CHANGELOG notes for ToS caveats
-on automated subscription use).
+**Wall time: ~15 minutes** (one full Phase A → checklist → compose → coaching
+chain with sequential `Task` dispatches; each dispatch is 30-90s and the
+chain has 5-7 of them). Earlier docstring revisions cited 60-180s — that
+was a guess; first real run measured 928s (15:28). Realistic range: 5-20
+min depending on LLM dispatch decisions. Update this docstring after
+calibrating across more runs.
+
+**Cost** (calibrate empirically before pinning):
+  - On `ANTHROPIC_API_KEY`: ~$5-15 per run (revise upward from earlier
+    $2-5 projection based on the realistic dispatch count). Set the
+    `ANTHROPIC_API_KEY_CI` monthly spend cap accordingly.
+  - On Claude Pro subscription: ~50+ messages per run consumed against
+    the per-5-hour cap (~45 on Pro). **One e2e run can blow the entire
+    Pro cap for that 5-hour window** — meaning interactive Claude Code
+    use during that window will be rate-limited. Pro is NOT viable for
+    per-PR CI; it's viable only for occasional manual local runs.
+  - On Claude Max (~225 messages per 5-hour window): ~3-4 runs per
+    window before rate-limiting. Workable for moderate PR volume but
+    will rate-limit on bursty days.
+  - **For sustained CI use, prefer `ANTHROPIC_API_KEY` (per-token
+    billing with a spend cap) over subscription auth.** The subscription
+    paths are documented for local-dev convenience; they are not the
+    recommended CI auth.
 
 **Run with `-s` to see live progress** (which auth was detected, each SDK
 message as it arrives, tool calls, etc.). Without `-s`, pytest captures
-stdout and the test looks silent for the 60-180s the SDK takes — but the
+stdout and the test looks silent for the 5-20 min the SDK takes — but the
 captured output is still printed if the test fails. Recommended invocation:
 
     uv run pytest founder-skills/tests/test_e2e_deck_review.py -v -m e2e --tb=short -s

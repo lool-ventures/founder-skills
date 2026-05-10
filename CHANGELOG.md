@@ -27,11 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Notes
 
 - The workflow has no nightly cron; Phase D (full-suite e2e for the other 4 skills) is incremental follow-up work and a cron will be added when the body exists.
-- **e2e auth: two paths supported.** The smoke test accepts any of:
-  1. `ANTHROPIC_API_KEY` (per-token API billing — target $2-5 per PR run; calibrate empirically and set a monthly spend cap on the dedicated `ANTHROPIC_API_KEY_CI` secret based on observed cost × expected PR volume × 1.5 safety margin)
-  2. `CLAUDE_CODE_OAUTH_TOKEN` (Claude Pro/Max subscription via long-lived token from `claude setup-token`; set as `CLAUDE_CODE_OAUTH_TOKEN_CI` repo secret. Subscription is flat monthly — but **check Anthropic's ToS for automated/programmatic use at scale before relying on it for CI**, and watch the per-5-hour message cap (Pro: ~45/window, Max: ~225/window) — a single deck-review e2e run can consume 10-30 messages of the cap)
-  3. Local `~/.claude/.credentials.json` (after `claude /login`, for local dev runs only — not applicable in CI)
-- The workflow env-injects BOTH `ANTHROPIC_API_KEY_CI` and `CLAUDE_CODE_OAUTH_TOKEN_CI` if set; the SDK / `claude` CLI picks whichever it finds. Configure exactly one in repo secrets.
+- **e2e wall time + cost (calibrated against first real run, 2026-05-10):**
+  - **Wall time: ~15 minutes per run** (measured: 928s / 15:28). Earlier `60-180s` projection was a guess; revised on first measurement. Realistic range: 5-20 min depending on LLM dispatch decisions. The chain is sequential `Task` dispatches (Phase A → checklist → compose → coaching), each 30-90s.
+  - **Cost on `ANTHROPIC_API_KEY`: ~$5-15 per run** (revised upward from the earlier $2-5 projection based on the realistic dispatch count). Set the `ANTHROPIC_API_KEY_CI` monthly spend cap based on observed cost × expected PR volume × 1.5 safety margin.
+  - **Cost on Claude Pro subscription:** ~50+ messages consumed per run against the per-5-hour cap (~45 on Pro). **One e2e run can blow the entire Pro cap for that 5-hour window** — interactive Claude Code use during that window is rate-limited. Pro is **NOT viable for per-PR CI**; only viable for occasional manual local runs.
+  - **Cost on Claude Max subscription:** ~3-4 runs per 5-hour window (~225 message cap). Workable for moderate PR volume but rate-limits on bursty days.
+  - **Recommended for sustained CI:** `ANTHROPIC_API_KEY` (per-token billing with spend cap). Subscription paths are documented for local-dev convenience; they are not the recommended CI auth.
+- **e2e auth: three paths supported.** The smoke test accepts any of:
+  1. `ANTHROPIC_API_KEY` env var (per-token API billing; recommended for CI)
+  2. `CLAUDE_CODE_OAUTH_TOKEN` env var (subscription via long-lived token from `claude setup-token`; set as `CLAUDE_CODE_OAUTH_TOKEN_CI` repo secret. **Check Anthropic's ToS for automated/programmatic use at scale before relying on it for CI.**)
+  3. Local subscription auth: macOS Keychain entry `Claude Code-credentials` (after `claude /login`) or `~/.claude/.credentials.json` on Linux/Windows — for local dev runs only; not applicable in CI.
+- The workflow env-injects BOTH `ANTHROPIC_API_KEY_CI` and `CLAUDE_CODE_OAUTH_TOKEN_CI` if set; the SDK / `claude` CLI picks whichever it finds. Configure exactly one in repo secrets (recommend `ANTHROPIC_API_KEY_CI`).
 - **End-to-end verification:** PENDING — replace with `verified against the synthetic deck-review fixture on YYYY-MM-DD; CI green on PR #N` after running Task 12 Steps 2-3 with `ANTHROPIC_API_KEY` set + a draft PR pushed. (Per plan Task 11 Step 1 convention; the line lives in the changelog as a non-deniable record once verification runs.)
 - **Open gaps requiring user action before merge:**
   1. **Manual SDK verification (Task 9 Step 1):** the e2e smoke pattern (`plugins=` + `setting_sources=[]` + `skills="all"` + `env={**os.environ, ...}`) needs one manual run with `ANTHROPIC_API_KEY` set to confirm the SDK actually loads the deck-review skill and the test passes against a real LLM dispatch. Without this, the e2e test is a structurally-valid skeleton but not load-bearing.
