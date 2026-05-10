@@ -28,6 +28,8 @@ import asyncio
 import json
 import os
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -39,17 +41,39 @@ GOLDEN = FIXTURES / "golden" / "deck-review" / "synthetic-seed-deck.expected.jso
 
 
 def _has_claude_auth() -> bool:
-    """True if any of the SDK's three auth paths is available.
+    """True if any of the SDK's auth paths is available.
 
     Order of preference inside the SDK matches:
       1. ANTHROPIC_API_KEY env var (per-token API billing)
-      2. CLAUDE_CODE_OAUTH_TOKEN env var (subscription, long-lived token)
-      3. ~/.claude/.credentials.json (subscription, after `claude /login`)
+      2. CLAUDE_CODE_OAUTH_TOKEN env var (subscription, long-lived token
+         from `claude setup-token`)
+      3. Local subscription auth (after `claude /login`):
+         - macOS:        Keychain entry under service "Claude Code-credentials"
+                         (queried via `security find-generic-password`; this
+                         only checks attribute existence — no decryption, no
+                         keychain unlock prompt)
+         - Linux/Win:    ~/.claude/.credentials.json
     """
     if os.environ.get("ANTHROPIC_API_KEY"):
         return True
     if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
         return True
+    if sys.platform == "darwin":
+        # macOS: Claude Code stores subscription tokens in the login Keychain
+        # under service "Claude Code-credentials". `security find-generic-password`
+        # exits 0 if the entry exists, non-zero otherwise — no decryption, no
+        # interactive prompt.
+        try:
+            result = subprocess.run(
+                ["security", "find-generic-password", "-s", "Claude Code-credentials"],
+                capture_output=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+    # Linux / Windows / fallback: check the credentials JSON file
     creds = Path.home() / ".claude" / ".credentials.json"
     return creds.is_file()
 
