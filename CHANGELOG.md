@@ -27,20 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Notes
 
 - The workflow has no nightly cron; Phase D (full-suite e2e for the other 4 skills) is incremental follow-up work and a cron will be added when the body exists.
-- **e2e wall time + cost (calibrated against first real run, 2026-05-10):**
-  - **Wall time: ~15 minutes per run** (measured: 928s / 15:28). Earlier `60-180s` projection was a guess; revised on first measurement. Realistic range: 5-20 min depending on LLM dispatch decisions. The chain is sequential `Task` dispatches (Phase A → checklist → compose → coaching), each 30-90s.
-  - **Cost on `ANTHROPIC_API_KEY`: ~$5-15 per run** (revised upward from the earlier $2-5 projection based on the realistic dispatch count). Set the `ANTHROPIC_API_KEY_CI` monthly spend cap based on observed cost × expected PR volume × 1.5 safety margin.
-  - **Cost on a Claude subscription:** a single run consumes a meaningful share of the per-window message budget. Subscription rate limits and automated-use terms change over time — check Anthropic's current policy before relying on subscription auth for sustained CI. For local-dev runs it's fine; for per-PR CI, `ANTHROPIC_API_KEY` is the durable choice.
+- **e2e wall time:** Realistic range: 5-20 min per run depending on LLM dispatch decisions (measured 15:28 on first real run; chain is sequential `Task` dispatches Phase A → checklist → compose → coaching, each 30-90s).
 - **e2e auth: three paths supported.** The smoke test accepts any of:
   1. `ANTHROPIC_API_KEY` env var (per-token API billing; recommended for sustained CI)
   2. `CLAUDE_CODE_OAUTH_TOKEN` env var (subscription via long-lived token from `claude setup-token`; set as `CLAUDE_CODE_OAUTH_TOKEN_CI` repo secret if you choose this path)
   3. Local subscription auth: macOS Keychain entry `Claude Code-credentials` (after `claude /login`) or `~/.claude/.credentials.json` on Linux/Windows — for local dev runs only; not applicable in CI.
 - The workflow env-injects BOTH `ANTHROPIC_API_KEY_CI` and `CLAUDE_CODE_OAUTH_TOKEN_CI` if set; the SDK / `claude` CLI picks whichever it finds. Configure exactly one in repo secrets.
-- **End-to-end verification:** PENDING — replace with `verified against the synthetic deck-review fixture on YYYY-MM-DD; CI green on PR #N` after running Task 12 Steps 2-3 with `ANTHROPIC_API_KEY` set + a draft PR pushed. (Per plan Task 11 Step 1 convention; the line lives in the changelog as a non-deniable record once verification runs.)
+- **End-to-end verification:** PENDING — replace with `verified against the synthetic deck-review fixture on YYYY-MM-DD; CI green on PR #N` after running Task 12 Steps 2-3 (one local e2e run with auth set + draft PR pushed with CI green). Per plan Task 11 Step 1 convention; the line lives in the changelog as a non-deniable record once verification runs.
 - **Open gaps requiring user action before merge:**
   1. **Manual SDK verification (Task 9 Step 1):** the e2e smoke pattern (`plugins=` + `setting_sources=[]` + `skills="all"` + `env={**os.environ, ...}`) needs one manual run with `ANTHROPIC_API_KEY` set to confirm the SDK actually loads the deck-review skill and the test passes against a real LLM dispatch. Without this, the e2e test is a structurally-valid skeleton but not load-bearing.
   2. **Cowork Skill-tool probe (Task 4.5):** `docs/internal/cowork-skill-tool-probe-2026-05-09.md` (gitignored) documents the probe agent body and the manual Cowork dispatch needed to empirically verify that the literal `Skill` name resolves in Cowork sub-agent contexts. Until run, the helper's inclusion of `Skill` in `COWORK_ASYNC_SUBAGENT_ALLOWLIST` is documentation-driven, not empirically confirmed.
-  3. **GitHub Actions secret:** configure ONE of `ANTHROPIC_API_KEY_CI` or `CLAUDE_CODE_OAUTH_TOKEN_CI` in repo settings before the `e2e-smoke` job runs successfully on internal PRs. See the "e2e auth: two paths supported" note above for trade-offs.
+  3. **GitHub Actions secret:** configure ONE of `ANTHROPIC_API_KEY_CI` or `CLAUDE_CODE_OAUTH_TOKEN_CI` in repo settings before the `e2e-smoke` job runs successfully on internal PRs. See the "e2e auth: three paths supported" note above for trade-offs.
 
 ## [0.4.4] - 2026-05-09
 
