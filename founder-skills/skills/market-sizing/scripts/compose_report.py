@@ -50,6 +50,7 @@ WARNING_SEVERITY: dict[str, str] = {
     "REFUTED_MISSING_REASON": "medium",
     "DECK_CLAIM_MISMATCH": "low",
     "PROVENANCE_UNRESOLVED": "low",
+    "EXISTING_CLAIMS_SHAPE": "medium",
     # v0.4.2 Mitigation 2 — informational only (uuid is per-run, won't collide)
     "MARKER_COLLISION": "low",
 }
@@ -110,6 +111,7 @@ WARNING_LABELS: dict[str, str] = {
     "REFUTED_MISSING_REASON": "Refuted Claim Missing Reason",
     "DECK_CLAIM_MISMATCH": "Deck Claim Mismatch",
     "PROVENANCE_UNRESOLVED": "Provenance Unresolved",
+    "EXISTING_CLAIMS_SHAPE": "Existing Claims Shape",
     "MARKER_COLLISION": "Marker Collision",
 }
 
@@ -551,7 +553,65 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 )
             )
 
+    # 17. EXISTING_CLAIMS_SHAPE — non-canonical keys silently bypass reconciliation
+    # at compose_report.py:282 (_compute_provenance) and the DECK_CLAIM_MISMATCH check above.
+    inputs_art = artifacts.get("inputs.json")
+    if _usable(inputs_art):
+        raw = inputs_art.get("existing_claims")
+        if isinstance(raw, dict):
+            canonical = {"tam", "sam", "som"}
+            unexpected = sorted(k for k in raw if k not in canonical)
+            if unexpected:
+                warnings.append(
+                    _warn(
+                        "EXISTING_CLAIMS_SHAPE",
+                        f"inputs.existing_claims contains non-canonical keys: "
+                        f"{', '.join(unexpected)}. Expected only lowercase "
+                        f"'tam', 'sam', 'som' (flat). Non-canonical keys are "
+                        f"silently ignored by reconciliation. For deck claims "
+                        f"that don't fit the flat shape (regional sub-SAMs, "
+                        f"time-anchored figures, alternative TAM frames), use "
+                        f"the adjacent 'existing_claims_detail' field — it is "
+                        f"rendered narratively in the report.",
+                    )
+                )
+        elif raw is not None and raw != {}:
+            warnings.append(
+                _warn(
+                    "EXISTING_CLAIMS_SHAPE",
+                    f"inputs.existing_claims must be a dict of {{tam, sam, som}}; got {type(raw).__name__}.",
+                )
+            )
+
     return warnings
+
+
+def _section_deck_claims_narrative(inputs: dict[str, Any] | None) -> str:
+    """Render existing_claims_detail as a narrative sub-section.
+
+    Captures deck claims that don't fit the canonical {tam, sam, som} flat shape
+    (regional sub-SAMs, time-anchored figures, alternative TAM frames). Rendered
+    as-is; does NOT participate in deck-vs-computed reconciliation.
+    """
+    if inputs is None or _is_stub(inputs):
+        return ""
+    detail = inputs.get("existing_claims_detail")
+    if not detail:  # None, empty dict, empty list, empty string, etc.
+        return ""
+    lines = ["## Deck Claims (Narrative)\n"]
+    lines.append(
+        "*The deck stated additional figures that don't fit the canonical "
+        "TAM/SAM/SOM shape. These are captured for context but are not "
+        "reconciled against the computed sizing.*\n"
+    )
+    if isinstance(detail, dict):
+        for key, val in detail.items():
+            lines.append(f"- **{_md_safe(str(key))}:** {_md_safe(str(val))}")
+    else:
+        lines.append("```")
+        lines.append(_md_safe(str(detail)))
+        lines.append("```")
+    return "\n".join(lines) + "\n"
 
 
 def _section_title_provenance(inputs: dict[str, Any] | None) -> str:
@@ -1072,6 +1132,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         _section_methodology(methodology),
         _section_definitions(),
         _section_sizing_table(sizing, provenance_data),
+        _section_deck_claims_narrative(inputs),
         _section_assumptions(validation_data),
         _section_validation(validation_data),
         _section_sensitivity(sensitivity),

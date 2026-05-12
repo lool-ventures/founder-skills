@@ -708,7 +708,7 @@ def test_compose_strict_mode() -> None:
 
 
 def test_compose_severity_map_complete() -> None:
-    """WARNING_SEVERITY contains all 19 codes with correct severities."""
+    """WARNING_SEVERITY contains all 20 codes with correct severities."""
     # Import WARNING_SEVERITY and ACCEPTIBLE_SEVERITIES by running a small Python snippet
     snippet = (
         f"import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath('{MARKET_SIZING_DIR}'))); "
@@ -747,9 +747,10 @@ def test_compose_severity_map_complete() -> None:
         "REFUTED_MISSING_REASON",
         "DECK_CLAIM_MISMATCH",
         "PROVENANCE_UNRESOLVED",
+        "EXISTING_CLAIMS_SHAPE",
         "MARKER_COLLISION",
     ]
-    assert len(sev_map) == 19, f"expected 19 codes, got {len(sev_map)}"
+    assert len(sev_map) == 20, f"expected 20 codes, got {len(sev_map)}"
     for code in expected_codes:
         assert code in sev_map, f"{code} missing from severity map"
     # All values are "high", "medium", or "low"
@@ -761,6 +762,7 @@ def test_compose_severity_map_complete() -> None:
     assert sev_map.get("MISSING_OPTIONAL_ARTIFACT") == "low"
     assert sev_map.get("DECK_CLAIM_MISMATCH") == "low"
     assert sev_map.get("PROVENANCE_UNRESOLVED") == "low"
+    assert sev_map.get("EXISTING_CLAIMS_SHAPE") == "medium"
     assert sev_map.get("MARKER_COLLISION") == "low"
     # Safety constraint: all high-severity codes must NOT be in ACCEPTIBLE_SEVERITIES
     high_codes = [c for c, s in sev_map.items() if s == "high"]
@@ -2811,3 +2813,235 @@ def test_payload_warned_items_always_empty() -> None:
     assert payload["warned_items"] == [], (
         "coached_payload.warned_items must always be [] for market-sizing (no warn status)"
     )
+
+
+# ---------------------------------------------------------------------------
+# EXISTING_CLAIMS_SHAPE — non-canonical keys silently bypass reconciliation
+# ---------------------------------------------------------------------------
+
+
+def _make_basic_arts(inputs_overrides: dict[str, Any]) -> dict[str, Any]:
+    """Build a minimal valid artifact set with custom inputs overrides."""
+    import copy
+
+    inputs = copy.deepcopy(_VALID_INPUTS)
+    inputs.update(inputs_overrides)
+    return {
+        "inputs.json": inputs,
+        "methodology.json": _VALID_METHODOLOGY,
+        "validation.json": _VALID_VALIDATION,
+        "sizing.json": _VALID_SIZING,
+        "checklist.json": _VALID_CHECKLIST,
+        "sensitivity.json": _VALID_SENSITIVITY,
+    }
+
+
+def test_existing_claims_shape_warns_on_non_canonical_keys() -> None:
+    """Non-canonical keys → EXISTING_CLAIMS_SHAPE warning that lists them."""
+    arts = _make_basic_arts({"existing_claims": {"SAM_Israel_only": 16800000}})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    matching = [w for w in data["validation"]["warnings"] if w["code"] == "EXISTING_CLAIMS_SHAPE"]
+    assert len(matching) == 1
+    assert "SAM_Israel_only" in matching[0]["message"]
+    assert matching[0]["severity"] == "medium"
+
+
+def test_existing_claims_shape_warns_on_uppercase_canonical() -> None:
+    """Uppercase canonical (TAM) is non-canonical (case-sensitive) → warn."""
+    arts = _make_basic_arts({"existing_claims": {"TAM": 12000000000}})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "EXISTING_CLAIMS_SHAPE" in codes
+
+
+def test_existing_claims_shape_warns_on_mixed_canonical_and_custom() -> None:
+    """Mixed canonical + custom → warn lists only the custom key."""
+    arts = _make_basic_arts({"existing_claims": {"tam": 1e9, "SAM_Israel_only": 2e6}})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    matching = [w for w in data["validation"]["warnings"] if w["code"] == "EXISTING_CLAIMS_SHAPE"]
+    assert len(matching) == 1
+    assert "SAM_Israel_only" in matching[0]["message"]
+    assert "tam" not in matching[0]["message"].split(": ", 1)[1].split(".")[0]
+
+
+def test_existing_claims_shape_no_warn_on_canonical() -> None:
+    """All-canonical keys with values → no warning."""
+    arts = _make_basic_arts({"existing_claims": {"tam": 1e9, "sam": 8e8, "som": 2e7}})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "EXISTING_CLAIMS_SHAPE" not in codes
+
+
+def test_existing_claims_shape_no_warn_on_null_canonical_template() -> None:
+    """All-canonical-null (the new heredoc template) → no warning.
+
+    Locks the PR B happy path: agents using the canonical template must
+    not trip EXISTING_CLAIMS_SHAPE.
+    """
+    arts = _make_basic_arts({"existing_claims": {"tam": None, "sam": None, "som": None}})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "EXISTING_CLAIMS_SHAPE" not in codes
+
+
+def test_existing_claims_shape_no_warn_on_empty_dict() -> None:
+    """Empty dict (legacy template) → no warning (backward compat)."""
+    arts = _make_basic_arts({"existing_claims": {}})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "EXISTING_CLAIMS_SHAPE" not in codes
+
+
+def test_existing_claims_shape_no_warn_on_field_absent() -> None:
+    """Field absent from inputs → no warning."""
+    # _VALID_INPUTS has no existing_claims field by default
+    arts = _make_basic_arts({})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "EXISTING_CLAIMS_SHAPE" not in codes
+
+
+def test_existing_claims_shape_no_warn_on_null_field() -> None:
+    """existing_claims: null → no warning (treated as absent via _as_dict)."""
+    arts = _make_basic_arts({"existing_claims": None})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "EXISTING_CLAIMS_SHAPE" not in codes
+
+
+def test_existing_claims_shape_warns_on_list_type() -> None:
+    """existing_claims as a list → warn with type message."""
+    arts = _make_basic_arts({"existing_claims": ["TAM is $12B"]})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    matching = [w for w in data["validation"]["warnings"] if w["code"] == "EXISTING_CLAIMS_SHAPE"]
+    assert len(matching) == 1
+    assert "list" in matching[0]["message"]
+
+
+def test_existing_claims_shape_warns_on_string_type() -> None:
+    """existing_claims as a string → warn with type message."""
+    arts = _make_basic_arts({"existing_claims": "TAM is $12B"})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    matching = [w for w in data["validation"]["warnings"] if w["code"] == "EXISTING_CLAIMS_SHAPE"]
+    assert len(matching) == 1
+    assert "str" in matching[0]["message"]
+
+
+# ---------------------------------------------------------------------------
+# _compute_provenance — canonical-key contract (TRIPWIRE)
+# ---------------------------------------------------------------------------
+
+
+def test_compute_provenance_populates_deck_claim_on_canonical_keys() -> None:
+    """Canonical lowercase keys → deck_claim populated, delta computed."""
+    arts = _make_basic_arts({"existing_claims": {"tam": 50000000000, "sam": 5000000000, "som": 100000000}})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    prov = data.get("provenance", {})
+    # top_down sam is 6_000_000_000 (from _VALID_SIZING); deck claim 5e9.
+    td_sam = prov["top_down"]["sam"]
+    assert td_sam["deck_claim"] == 5000000000
+    assert td_sam["delta_vs_deck_pct"] is not None
+
+
+def test_compute_provenance_returns_none_deck_claim_on_non_canonical_keys() -> None:
+    """Non-canonical keys → deck_claim is None.
+
+    Documents the CONTRACTED division of labor between two signals:
+    - EXISTING_CLAIMS_SHAPE warning is the shape signal — surfaces
+      non-canonical keys to the agent.
+    - _compute_provenance is the numerical signal — stays neutral on shape
+      errors and reports None when it cannot compute a comparison.
+
+    TRIPWIRE: if a future change adds case-insensitive matching or auto-
+    coercion of uppercase keys, this test will fail — forcing a conscious
+    decision about whether to drop the warning or keep both safeguards.
+    """
+    arts = _make_basic_arts({"existing_claims": {"SAM_Israel_only": 16800000}})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    prov = data.get("provenance", {})
+    for approach in ("top_down", "bottom_up"):
+        for metric in ("tam", "sam", "som"):
+            assert prov[approach][metric]["deck_claim"] is None
+            assert prov[approach][metric]["delta_vs_deck_pct"] is None
+
+
+# ---------------------------------------------------------------------------
+# existing_claims_detail — narrative renderer
+# ---------------------------------------------------------------------------
+
+
+def test_deck_claims_narrative_rendered_when_detail_present() -> None:
+    """Populated existing_claims_detail dict → narrative sub-section appears."""
+    arts = _make_basic_arts(
+        {
+            "existing_claims": {"tam": None, "sam": None, "som": None},
+            "existing_claims_detail": {
+                "regional_sam_north_america": 4500000000,
+                "som_year_3_target": 350000000,
+            },
+        }
+    )
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    assert "## Deck Claims (Narrative)" in md
+    assert "regional_sam_north_america" in md
+    assert "som_year_3_target" in md
+
+
+def test_deck_claims_narrative_omitted_when_detail_null() -> None:
+    """existing_claims_detail: null → section absent."""
+    arts = _make_basic_arts({"existing_claims_detail": None})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    assert "## Deck Claims (Narrative)" not in data["report_markdown"]
+
+
+def test_deck_claims_narrative_omitted_when_detail_empty() -> None:
+    """existing_claims_detail: {} → section absent."""
+    arts = _make_basic_arts({"existing_claims_detail": {}})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    assert "## Deck Claims (Narrative)" not in data["report_markdown"]

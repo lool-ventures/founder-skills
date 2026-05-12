@@ -15,7 +15,8 @@ JSON schemas for all analysis artifacts deposited during the market sizing workf
 | `target_customer` | string | yes | Who they sell to |
 | `geography` | string | yes | Where they operate |
 | `pricing_model` | string | yes | How they charge |
-| `existing_claims` | object | no | Any TAM/SAM/SOM figures from the pitch deck |
+| `existing_claims` | object | no | Deck's TAM/SAM/SOM figures. Must be a flat object with lowercase keys `tam`, `sam`, `som` (use `null` when the deck does not state a figure). Non-canonical keys are silently ignored by reconciliation and trigger `EXISTING_CLAIMS_SHAPE`. |
+| `existing_claims_detail` | object \| null | no | Narrative-only deck claims that don't fit the canonical `{tam, sam, som}` shape (regional sub-SAMs, time-anchored figures, alternative TAM frames). Rendered as a "Deck Claims (Narrative)" sub-section in the report; **not** validated, **not** reconciled. |
 | `stated_metrics` | object | no | Revenue, customer count, growth rates from materials |
 
 **Example:**
@@ -29,6 +30,10 @@ JSON schemas for all analysis artifacts deposited during the market sizing workf
   "geography": "North America",
   "pricing_model": "Monthly SaaS subscription, $50-200/month",
   "existing_claims": {"tam": 50000000000, "sam": 8000000000, "som": 200000000},
+  "existing_claims_detail": {
+    "regional_sam_north_america": 4500000000,
+    "som_year_3_target": 350000000
+  },
   "stated_metrics": {"arr": 2000000, "customers": 500, "yoy_growth_pct": 150}
 }
 ```

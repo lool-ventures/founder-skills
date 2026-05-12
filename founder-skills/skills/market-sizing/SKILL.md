@@ -162,6 +162,10 @@ python3 "$SHARED_SCRIPTS/founder_context.py" init \
 
 Extract all market-relevant data. If the deck includes explicit TAM/SAM/SOM claims, record them in `inputs.json` under `existing_claims`.
 
+`existing_claims` must be a flat object with lowercase keys `tam`, `sam`, `som`. Use `null` for any figure the deck does not state. Custom keys (e.g., `SAM_Israel_only`) are silently ignored by reconciliation and will trigger an `EXISTING_CLAIMS_SHAPE` warning.
+
+If the deck states figures that don't fit the flat shape — regional sub-SAMs, time-anchored SOM projections, alternative TAM frames — put them in the optional `existing_claims_detail` field (any structure). This field does NOT participate in deck-vs-computed reconciliation, but it is rendered as a "Deck Claims (Narrative)" sub-section in the report.
+
 Write `inputs.json`:
 ```bash
 cat <<'INPUTS_EOF' > "$ANALYSIS_DIR/inputs.json"
@@ -175,7 +179,8 @@ cat <<'INPUTS_EOF' > "$ANALYSIS_DIR/inputs.json"
   "target_segments": ["..."],
   "pricing_model": "...",
   "revenue_model": "...",
-  "existing_claims": {},
+  "existing_claims": {"tam": null, "sam": null, "som": null},
+  "existing_claims_detail": null,
   "materials_provided": ["..."],
   "metadata": {"run_id": "<RUN_ID>"}
 }
