@@ -190,6 +190,10 @@ keys (do not refetch from disk):
 - `confidence` (high/medium/low)
 - `tam`, `sam`, `som` — USD values from sizing.json
 - `company_name`
+- `deck_coverage` — `null` when no canonical deck figure was stated; otherwise
+  `{deck_reviewed: true, stated: [...], missing: [...]}` listing which of
+  `tam`/`sam`/`som` the deck stated vs left null. Use this to frame coaching
+  about figures the deck omitted — see "Composing commentary" below.
 - `review_dir`, `report_path`
 - `insertion_marker` — the EXACT per-run uuid-bearing string compose
   emitted into `report.md` (e.g.
@@ -240,6 +244,23 @@ The commentary should answer:
   better external data would most strengthen credibility)?
 - Any positioning or framing suggestions not captured in the structured
   sections.
+
+**Deck-coverage framing (`deck_coverage` field).** If `deck_coverage` is
+present and `deck_coverage.missing` is non-empty, frame the relevant
+coaching as: "your deck stated {stated} but should also show {missing}."
+Do **not** frame this as understatement — the deck simply omitted figures;
+that is semantically distinct from `DECK_CLAIM_MISMATCH`, which fires only
+when stated figures diverge from computed values.
+
+If `EXISTING_CLAIMS_SHAPE` appears in `high_severity_warnings` *or* the
+medium-severity warnings the founder will see, do **not** trust
+`deck_coverage = null` as "deck wasn't reviewed" — the agent may have
+captured deck claims in non-canonical keys that the reconciler ignored.
+In that case, frame the coaching around the warning: "your inputs used
+non-canonical keys for deck claims; flatten to `{tam, sam, som}` so the
+comparison can run." The deck's nuanced figures may also be captured in
+`existing_claims_detail` — point the founder at the "Deck Claims
+(Narrative)" section of the report for context.
 
 Do NOT Read the full `report.md` — the structured payload is sufficient.
 

@@ -3045,3 +3045,82 @@ def test_deck_claims_narrative_omitted_when_detail_empty() -> None:
     assert rc == 0
     assert data is not None
     assert "## Deck Claims (Narrative)" not in data["report_markdown"]
+
+
+# ---------------------------------------------------------------------------
+# coaching_payload.deck_coverage — additive in v0.4.2-market-sizing
+# ---------------------------------------------------------------------------
+
+
+def test_coaching_payload_deck_coverage_partial() -> None:
+    """One canonical figure stated → stated/missing populated correctly."""
+    arts = _make_basic_arts({"existing_claims": {"tam": 12000000000, "sam": None, "som": None}})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    cov = data["coaching_payload"]["deck_coverage"]
+    assert cov == {"deck_reviewed": True, "stated": ["tam"], "missing": ["sam", "som"]}
+
+
+def test_coaching_payload_deck_coverage_full() -> None:
+    """All three canonical figures stated → missing is empty list."""
+    arts = _make_basic_arts({"existing_claims": {"tam": 1e10, "sam": 5e9, "som": 1e8}})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    cov = data["coaching_payload"]["deck_coverage"]
+    assert cov is not None
+    assert cov["deck_reviewed"] is True
+    assert cov["stated"] == ["tam", "sam", "som"]
+    assert cov["missing"] == []
+
+
+def test_coaching_payload_deck_coverage_none_when_all_null() -> None:
+    """Canonical-null template (no figures actually stated) → deck_coverage is None."""
+    arts = _make_basic_arts({"existing_claims": {"tam": None, "sam": None, "som": None}})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    assert data["coaching_payload"]["deck_coverage"] is None
+
+
+def test_coaching_payload_deck_coverage_none_when_empty_dict() -> None:
+    """Legacy empty-dict template → deck_coverage is None (backward compat)."""
+    arts = _make_basic_arts({"existing_claims": {}})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    assert data["coaching_payload"]["deck_coverage"] is None
+
+
+def test_coaching_payload_deck_coverage_none_when_field_absent() -> None:
+    """existing_claims field absent entirely → deck_coverage is None."""
+    arts = _make_basic_arts({})  # _VALID_INPUTS has no existing_claims
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    assert data["coaching_payload"]["deck_coverage"] is None
+
+
+def test_coaching_payload_deck_coverage_none_when_only_non_canonical() -> None:
+    """Only non-canonical keys (no canonical figure stated) → deck_coverage is None.
+
+    Documents the contracted interaction with EXISTING_CLAIMS_SHAPE:
+    the warning surfaces the shape error; deck_coverage stays neutral.
+    Coaching must branch on the warning's presence (per SKILL.md).
+    """
+    arts = _make_basic_arts({"existing_claims": {"SAM_Israel_only": 16800000}})
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    assert data["coaching_payload"]["deck_coverage"] is None
+    # And the warning is present — confirming the interaction the coaching
+    # template branches on.
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "EXISTING_CLAIMS_SHAPE" in codes

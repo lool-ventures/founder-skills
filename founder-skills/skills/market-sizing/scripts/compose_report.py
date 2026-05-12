@@ -1040,6 +1040,23 @@ def _emit_coaching_payload(
     so warned_items is always an explicit empty list for cross-skill schema consistency.
     """
     summary = _as_dict(checklist.get("summary"))
+
+    # Compute deck_coverage from inputs.existing_claims (canonical keys only).
+    # Non-canonical keys do NOT count here — EXISTING_CLAIMS_SHAPE warning is
+    # the dedicated shape signal. Only meaningful when the agent populated at
+    # least one canonical figure (proves the deck was reviewed and at least one
+    # TAM/SAM/SOM was stated).
+    existing_claims = _as_dict(inputs.get("existing_claims"))
+    canonical = ("tam", "sam", "som")
+    any_stated = any(existing_claims.get(m) is not None for m in canonical)
+    deck_coverage: dict[str, Any] | None = None
+    if any_stated:
+        deck_coverage = {
+            "deck_reviewed": True,
+            "stated": [m for m in canonical if existing_claims.get(m) is not None],
+            "missing": [m for m in canonical if existing_claims.get(m) is None],
+        }
+
     return {
         "schema_version": "v0.4.2-market-sizing",
         "summary": {
@@ -1055,6 +1072,7 @@ def _emit_coaching_payload(
         "high_severity_warnings": [w["code"] for w in validation_warnings if w.get("severity") == "high"],
         "company_name": inputs.get("company_name"),
         "methodology": methodology.get("approach_chosen"),
+        "deck_coverage": deck_coverage,  # nullable; additive in v0.4.2-market-sizing
         "review_dir": review_dir,
         "report_path": report_path,
         "insertion_marker": insertion_marker,

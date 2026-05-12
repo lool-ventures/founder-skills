@@ -515,6 +515,16 @@ Read `methodology.json` for `methodology`. Read `checklist.json` for
 `report_markdown`). Do NOT pass `warned_items` from a `warn` status —
 market-sizing checklist has no `warn` status, so `warned_items` is always `[]`.
 
+The compose script also emits `coaching_payload.deck_coverage` directly in
+`report.json` — copy this field verbatim into the dispatch prompt (it is
+`null` when the founder's `existing_claims` had no canonical figures stated;
+otherwise `{"deck_reviewed": true, "stated": [...], "missing": [...]}`).
+**Coaching framing for `deck_coverage`:** when `missing` is non-empty, frame
+as "deck stated {stated} but should also show {missing}" — NOT understatement.
+If the warnings list contains `EXISTING_CLAIMS_SHAPE`, do not trust
+`deck_coverage = null` as "deck wasn't reviewed"; frame the coaching around
+the warning and the "Deck Claims (Narrative)" section instead.
+
 **Dispatch prompt template:**
 
 ```
@@ -545,6 +555,7 @@ coaching_payload:
   "sam": <sam value from sizing.json>,
   "som": <som value from sizing.json>,
   "company_name": "<from inputs.json>",
+  "deck_coverage": <null OR {"deck_reviewed": true, "stated": [<canonical keys with values>], "missing": [<canonical keys with null>]} — copy verbatim from coaching_payload emitted by compose_report.py>,
   "review_dir": "<ANALYSIS_DIR absolute path>",
   "report_path": "<ANALYSIS_DIR>/report.md",
   "insertion_marker": "<EXACT marker string from report.json, e.g. <!-- COACHING_INSERTION_POINT_a1b2c3d4 -->"
