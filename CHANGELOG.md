@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.6] - 2026-05-13
+
+### Fixed
+
+- **`market-sizing`: non-canonical `existing_claims` keys silently bypassed deck-vs-computed reconciliation.** When a deck stated TAM/SAM/SOM figures under non-canonical keys (e.g., `SAM_Israel_only`, `TAM_global`), both the `DECK_CLAIM_MISMATCH` warning and the report's provenance section's `deck_claim` / `delta_vs_deck_pct` columns silently returned `None` — `compose_report.py` and `visualize.py` look up `tam`/`sam`/`som` by exact lowercase name via `dict.get()`. The skill produced a complete report with no signal that comparison had been short-circuited, allowing downstream framing to treat a missing deck figure as a wrong deck figure.
+
+### Added
+
+- **`EXISTING_CLAIMS_SHAPE` warning** (medium severity, code #17 in `compose_report.py validate_artifacts()`) surfaces non-canonical keys or non-dict types in `inputs.existing_claims`. Acceptable via `accepted_warnings`; does not block the report.
+- **`existing_claims_detail` field** in `inputs.json` — escape hatch for deck claims that don't fit the canonical `{tam, sam, som}` flat shape (regional sub-SAMs, time-anchored figures, alternative TAM frames). Documented in `artifact-schemas.md`; rendered as a new "Deck Claims (Narrative)" sub-section in the report (between sizing-table and assumptions). Does NOT participate in reconciliation.
+- **`deck_coverage` field** in `coaching_payload` — nullable structured signal indicating which canonical figures the deck stated vs left null. Shape: `null` when no canonical figure was stated, otherwise `{"deck_reviewed": true, "stated": [...], "missing": [...]}`. Additive in `v0.4.2-market-sizing` (schema_version unchanged — three literal pins would break for zero consumer benefit).
+- **Coaching framing guidance** in `agents/market-sizing.md` and `SKILL.md`: when `deck_coverage.missing` is non-empty, frame as "deck should also show {missing}" — explicitly NOT "understatement." When `EXISTING_CLAIMS_SHAPE` is present, do not trust `deck_coverage = null` as "deck wasn't reviewed"; branch coaching around the warning and the new narrative section instead.
+- 21 new regression tests in `tests/test_market_sizing.py`: 10 `EXISTING_CLAIMS_SHAPE` cases (incl. non-dict types, uppercase canonical, canonical-null happy path), 2 `_compute_provenance` lock-in tests with tripwire docstrings documenting the contracted division of labor (warning = shape signal; provenance = numerical signal, stays neutral on shape errors), 3 narrative renderer cases, 6 `deck_coverage` cases.
+
+### Changed
+
+- `SKILL.md` heredoc template for `inputs.json` writes `"existing_claims": {"tam": null, "sam": null, "som": null}` + `"existing_claims_detail": null` (was `"existing_claims": {}`). Backward-compatible: empty-dict legacy templates continue to pass without warning.
+- `WARNING_SEVERITY` totality test updated 19 → 20 codes.
+
 ## [0.4.5] - 2026-05-10
 
 ### Added
