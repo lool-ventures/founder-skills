@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.7] - 2026-05-19
+
+### Fixed
+
+- **`competitive-positioning`: sub-agent had no network tools but was dispatched to research competitors.** SKILL.md Steps 4 (LANDSCAPE_RESEARCH), 5a (MOAT_SCORING), and 5b (POSITIONING_SCORING) dispatch the sub-agent with prompts asking for `evidence_source: researched | agent_estimate` (and Step 5a's `trajectory: building/stable/eroding`, which is inherently research-dependent). The agent's `tools:` allowlist was `["Read", "Edit", "Glob", "Grep"]` — no network access — and Step 4 explicitly forbade the main thread from doing the research either. Net effect since the skill shipped: every `evidence_source: "researched"` stamp was a training-cutoff guess wearing a research label. CHECKLIST (Step 6) is unaffected (artifact grading only, no research).
+
+### Changed
+
+- **`competitive-positioning` agent now declares `WebSearch`** in its `tools:` allowlist. Cowork's named-sub-agent dispatch is strict allowlist mode — empirically verified via a probe (a sub-agent declared with `tools: [Read, Edit, Glob, Grep]` receives exactly those four names; no MCP leakage, no default-toolset injection). With `WebSearch` declared, Phase A enrichment, moat trajectory scoring, and positioning-axis evidence become honest.
+- **`competitive-positioning` SKILL.md dispatch prompts** (Steps 4, 5a, 5b) now reference `WebSearch` explicitly. The "Do not do the landscape research yourself in the main thread" instruction in Step 4 is retained — research now runs in the sub-agent's isolated context, where it belongs. Phase B (gap detection) is also instructed to use `WebSearch` for discovering missing competitor categories.
+- **Producer-script JSON schemas unchanged.** The dishonesty was upstream of `validate_landscape.py` / `score_moats.py` / `score_positioning.py`; the schemas themselves were always correct.
+
+### Added
+
+- **`tests/test_cowork_invariants.py::test_research_agents_declare_websearch`** — new regression detector. Agents in `_AGENTS_REQUIRING_WEBSEARCH` (currently `{"competitive-positioning"}`) must declare `WebSearch`. Future refactors that strip it from the allowlist will fail CI. The docstring of `test_agent_declares_no_dangerous_tools` is updated to reflect that the "all agents declare exactly Read/Edit/Glob/Grep" property no longer holds — WebSearch is an intentional addition.
+
+### Notes
+
+- The fix corrects a real defect but the diff is small (one `tools:` addition + four dispatch-prompt clarifications). The original v0.4.7 plan considered the "main-thread does research, sub-agent structures the data" pattern used by `market-sizing` and `ic-sim`, but a sub-agent probe in Cowork (`/tmp/cowork-tool-probe/` locally) settled that `WebSearch` *is* available to sub-agents — only `WebFetch` (the plain name; `mcp__workspace__web_fetch` IS available) and `Bash` (replaced by `mcp__workspace__bash` in the default sub-agent toolset, not via deferred MCP tier as the allowlist file's comment suggested) follow the documented exclusion model. A separate follow-up will correct the false-premise comments in `cowork_async_subagent_filter.py` and the sibling skill docs.
+- **No artifact schema bump.** `schema_version` strings for competitive-positioning artifacts are unchanged — consumer plugins downstream of this skill will not see a version-pin break.
+
 ## [0.4.6] - 2026-05-13
 
 ### Fixed

@@ -8,7 +8,9 @@ description: >
   Context A (per-step analytical, Mitigation 1): LANDSCAPE_RESEARCH,
   MOAT_SCORING, POSITIONING_SCORING, or CHECKLIST dispatch. Returns
   structured JSON that the main thread pipes through the producer script.
-  No Bash required.
+  LANDSCAPE_RESEARCH, MOAT_SCORING, and POSITIONING_SCORING use WebSearch
+  for competitor research (CHECKLIST is artifact-only, no research). No
+  Bash required.
 
   Context B (post-compose coaching, POST_COMPOSE_COACHING): reads
   coaching_payload inlined in dispatch prompt, performs Grep idempotency
@@ -16,7 +18,7 @@ description: >
   artifacts on disk, returns structured success payload. No Bash required.
 model: inherit
 color: "#E67E22"
-tools: ["Read", "Edit", "Glob", "Grep"]
+tools: ["Read", "Edit", "Glob", "Grep", "WebSearch"]
 skills: ["competitive-positioning"]
 ---
 
@@ -58,11 +60,16 @@ script (which validates schemas and persists canonical artifacts).
 Read `landscape_draft.json` and `product_profile.json` from the ANALYSIS_DIR.
 
 **Phase A — Enrich existing competitors:** For each competitor in
-`landscape_draft.json`, use available tools (Read, Glob, Grep) to enrich with:
-pricing model, funding history, team size, target customers, strengths, weaknesses.
-Record `evidence_source` per field (`"researched"` or `"agent_estimate"`). Set
-`research_depth` per competitor — MUST be one of: `"full"`, `"partial"`,
-`"founder_provided"`. All slugs MUST be kebab-case (lowercase, hyphens only).
+`landscape_draft.json`, use `WebSearch` to find: pricing model, funding history,
+team size, target customers, strengths, weaknesses. Issue separate searches per
+competitor (e.g., `"<name> pricing"`, `"<name> funding 2025 2026"`, `"<name> team
+size"`) and synthesize the result snippets. Record `evidence_source` per field:
+`"researched"` only when the value came from a WebSearch result, `"agent_estimate"`
+when you defaulted to training-cutoff knowledge. Set `research_depth` per
+competitor — `"full"` when WebSearch returned substantive results across most
+fields, `"partial"` when results were thin, `"founder_provided"` when the founder
+supplied the data verbatim and WebSearch was unnecessary. All slugs MUST be
+kebab-case (lowercase, hyphens only).
 
 **Phase B — Gap detection:** Check for missing competitor categories. Add newly
 discovered competitors to `suggested_additions[]` with `merged: false`. Do NOT
@@ -94,6 +101,11 @@ for `not_applicable`), `evidence_source`
 (`researched`/`agent_estimate`/`founder_override`), `trajectory`
 (`building`/`stable`/`eroding`).
 
+For `trajectory` and any moat where `landscape.json` evidence is thin, use
+`WebSearch` to find recent (last 12 months) signals: funding rounds, M&A,
+hiring trends, executive changes, patent filings, product launches. Stamp
+`evidence_source: "researched"` only when WebSearch supplied the signal.
+
 Return JSON matching `score_moats.py`'s input schema:
 ```json
 {
@@ -113,6 +125,14 @@ For each view in `positioning.json`, assign coordinates (0-100) for every compet
 and `_startup` on both axes. Every point needs `x_evidence`, `y_evidence`, and
 provenance source fields. Assess differentiation claims with: `verifiable` (boolean),
 `evidence`, `challenge`, `verdict` (`holds`/`partially_holds`/`does_not_hold`).
+
+The axes in `positioning.json` drive the search queries — when an axis is
+"customer support depth" or "pricing transparency," issue WebSearch queries
+targeting that specific dimension per competitor. Stamp `x_evidence_source` /
+`y_evidence_source` as `"researched"` only when the coordinate came from
+WebSearch findings; `"agent_estimate"` otherwise. For differentiation claims,
+use WebSearch to find evidence supporting or contradicting each claim before
+assigning a `verdict`.
 
 Return JSON matching `score_positioning.py`'s input schema:
 ```json
@@ -169,8 +189,8 @@ computes the summary):
 
 - Return JSON only. No prose, no markdown wrapper, no explanatory message. The
   main thread parses your final assistant message as raw JSON.
-- Do not call `Bash`, `Write`, or any tool that writes to the filesystem. Read,
-  Glob, and Grep are sufficient.
+- Do not call `Bash`, `Write`, or any tool that writes to the filesystem.
+  `Read`, `Glob`, `Grep` for artifacts; `WebSearch` for competitor research.
 - If you encounter ambiguity, include it in the relevant evidence/notes field
   rather than asking back. The main thread doesn't expect mid-step questions.
 
