@@ -95,8 +95,12 @@ def test_agent_declares_no_dangerous_tools(agent_path: Path) -> None:
     register the name, don't declare it." See
     cowork-architecture-and-v0.4.x-learning.md.
 
-    All 5 v0.4.4 agents declare exactly Read/Edit/Glob/Grep — none of these
-    are in the dangerous set. This test exists to keep that property.
+    Through v0.4.6 all 5 agents declared exactly Read/Edit/Glob/Grep — none
+    of these are in the dangerous set. v0.4.7 added WebSearch to the
+    competitive-positioning agent's allowlist (WebSearch resolves in
+    Cowork's sub-agent registry; see probe results in v0.4.7 release notes).
+    Other additions to non-dangerous declared tool sets are OK; additions of
+    names in _DANGEROUS_IF_DECLARED are what this test catches.
     """
     fm = _parse_frontmatter(agent_path)
     declared = set(fm.get("tools", []))
@@ -108,4 +112,44 @@ def test_agent_declares_no_dangerous_tools(agent_path: Path) -> None:
         f"aren't exposed to sub-agents). Either remove from `tools:` "
         f"or document why the agent will never run as a Cowork sub-agent. "
         f"See cowork-architecture-and-v0.4.x-learning.md."
+    )
+
+
+# Agents whose SKILL.md dispatch prompts instruct them to research
+# competitors, markets, etc. via WebSearch. These MUST declare WebSearch in
+# their tools allowlist — Cowork's named-sub-agent dispatch is strict
+# allowlist mode (empirically verified v0.4.7: a sub-agent declared with
+# tools: [Read, Edit, Glob, Grep] receives EXACTLY those four names, no MCP
+# leakage, no default-toolset injection). Undeclared = unavailable.
+#
+# Adding/removing an agent here is intentional — call it out in CHANGELOG.
+_AGENTS_REQUIRING_WEBSEARCH: frozenset[str] = frozenset(
+    {
+        "competitive-positioning",
+    }
+)
+
+
+@pytest.mark.parametrize("agent_stem", sorted(_AGENTS_REQUIRING_WEBSEARCH), ids=lambda s: s)
+def test_research_agents_declare_websearch(agent_stem: str) -> None:
+    """v0.4.7 regression detector: agents whose dispatch prompts reference
+    WebSearch must declare it. Without the declaration, the sub-agent's
+    Phase-A enrichment / moat trajectory / positioning evidence steps
+    silently degrade to training-cutoff guesses stamped as `researched`.
+    See v0.4.7 release notes and the named-agent probe in
+    /tmp/cowork-tool-probe/.
+    """
+    agent_path = AGENTS_DIR / f"{agent_stem}.md"
+    assert agent_path.exists(), (
+        f"agent {agent_stem} not found at {agent_path} — update _AGENTS_REQUIRING_WEBSEARCH or rename the agent file"
+    )
+    fm = _parse_frontmatter(agent_path)
+    declared = set(fm.get("tools", []))
+    assert "WebSearch" in declared, (
+        f"{agent_stem}.md SKILL.md dispatch prompts reference WebSearch "
+        f"for competitor/market research, but the agent's `tools:` "
+        f"declaration is {sorted(declared)} — WebSearch missing. Cowork's "
+        f"named-sub-agent dispatch is strict allowlist mode; undeclared "
+        f"tools don't bind. Add 'WebSearch' to the tools list or remove "
+        f"the WebSearch references from the dispatch prompts."
     )
