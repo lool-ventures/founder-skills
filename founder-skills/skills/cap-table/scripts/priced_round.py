@@ -377,17 +377,29 @@ def _estimate_contraction(history: list[float]) -> float | None:
 def _aitken_projection(history: list[float]) -> float | None:
     """Aitken Δ² projection of the fixed point from the last 3 PPS values.
 
-    p* ≈ p_{n-2} - (Δp_n)² / Δ²p_n  where  Δ²p_n = p_n - 2 p_{n-1} + p_{n-2}
+    Per the Shanks transformation anchored at p_{n-2}:
+        p* ≈ p_{n-2} - (Δp_{n-2})² / Δ²p_{n-2}
+    where:
+        Δp_{n-2}  = p_{n-1} - p_{n-2}        (first forward difference)
+        Δ²p_{n-2} = p_n - 2 p_{n-1} + p_{n-2} (second forward difference)
 
-    Returns None if catastrophic cancellation (Δ² near zero).
+    Returns None if catastrophic cancellation (Δ² near zero — near a 2-cycle).
+
+    Sprint 1 reviewer caught the v1 numerator bug: the original code used
+    `(p_n - p_{n-2})²` which overshoots by a factor of ~(1+r)² where r is the
+    convergence rate. The 20× fallback fence masked the divergence on most
+    realistic inputs but would have slowed convergence rather than
+    accelerated it. The correct numerator is the first forward difference
+    squared, NOT the two-step span.
     """
     if len(history) < 3:
         return None
     p_nm2, p_nm1, p_n = history[-3], history[-2], history[-1]
+    delta = p_nm1 - p_nm2
     delta_squared = p_n - 2 * p_nm1 + p_nm2
     if abs(delta_squared) < 1e-15:
         return None
-    return p_nm2 - (p_n - p_nm2) ** 2 / delta_squared
+    return p_nm2 - (delta * delta) / delta_squared
 
 
 # ============================================================================
@@ -637,6 +649,11 @@ def solve_priced_round(
             per_note = {}
 
         # === Stage 3: size_round (Pool + NewMoney) ===
+        # NewMoneyAdjuster: this iteration's INPUT PPS basis. The orchestrator's
+        # post-loop block (~line 760) overwrites with the CONVERGED PPS basis.
+        # The inner write feeds total_fd_estimate's bookkeeping for the NEXT
+        # iter's SAFE math; the outer post-loop write drives the final output.
+        # Both are correct in their context.
         new_money_shares = new_money / price if price > 0 else 0.0
         pool_topup_shares = 0.0
         if target_pool_percent and target_pool_percent > 0:
@@ -742,6 +759,10 @@ def solve_priced_round(
         note_shares = 0.0
         per_note = {}
 
+    # Post-loop NewMoneyAdjuster write: CONVERGED PPS basis. Overwrites the
+    # last iter's input-PPS-basis value from line 657. This is the value that
+    # flows into shares_breakdown and aggregate_ownership_by_class. See the
+    # comment block at line 657 for the convention rationale.
     new_money_shares = new_money / price if price > 0 else 0.0
     pool_topup_shares = 0.0
     if target_pool_percent and target_pool_percent > 0:
