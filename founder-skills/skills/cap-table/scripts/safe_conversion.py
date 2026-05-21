@@ -38,7 +38,7 @@ import sys
 from typing import Any
 
 # Rule pack version this script targets. Bumped when math semantics change.
-RULE_PACK_VERSION = "0.3.0"
+RULE_PACK_VERSION = "0.3.1"
 
 # Typed error codes (mirror design doc §5.1)
 E_SAFE_REQUIRES_CONVERSION_EVENT = "E_SAFE_REQUIRES_CONVERSION_EVENT"
@@ -109,6 +109,27 @@ def convert_safe_cap_implied(
     }
 
 
+# Form classification for denominator routing.
+# Post-money forms: each SAFE locks `purchase / cap` of POST-money FD. The
+# operational denominator passed via `company_capitalization` is the converged
+# post-money FD (including new money). See rule `safe.post_money_cap_conversion`
+# v0.3.0 clarification.
+POST_MONEY_FORMS: set[str] = {
+    "yc_postmoney_cap",
+    "yc_postmoney_discount",
+    "yc_uncapped_mfn",
+    "cap_plus_discount",
+}
+# Pre-money (legacy, pre-Oct-2018) forms: cap_price = cap / pre_money_FD where
+# pre_money_FD is the PRE-FINANCING fully-diluted snapshot (constant, NOT the
+# iterating post-money FD). These SAFEs dilute alongside founders when new money
+# and pool refresh land — they do NOT have the locked-% property of post-money.
+PRE_MONEY_FORMS: set[str] = {
+    "yc_premoney_cap_only",
+    "pre_money_cap_and_discount_legacy",
+}
+
+
 def convert_safe_priced_round(
     *,
     purchase_amount: float,
@@ -118,15 +139,23 @@ def convert_safe_priced_round(
     company_capitalization: int | float,
     equity_financing_price: float | None,
     conversion_price_override: float | None = None,
+    pre_money_valuation_cap: float | None = None,
+    pre_money_fd: float | None = None,
 ) -> dict[str, Any]:
     """Post-financing output set (requires a real conversion event).
 
     Branches:
         * conversion_price_override → branch = "conversion_price_override"
-        * yc_postmoney_cap → cap branch (uses cap synthetic price)
+        * yc_postmoney_cap → cap branch (post-money denominator)
         * cap_plus_discount → min(cap_price, discount_price)
         * yc_postmoney_discount → discount branch only
         * yc_uncapped_mfn → REJECTED (caller must resolve MFN trigger first)
+        * yc_premoney_cap_only → cap branch (pre-money denominator)
+        * pre_money_cap_and_discount_legacy → min(cap_price[pre-money], discount_price)
+
+    Denominator routing: post-money forms use `company_capitalization`
+    (= converged post-money FD); pre-money forms use `pre_money_fd`
+    (= pre-financing FD constant). See `POST_MONEY_FORMS` / `PRE_MONEY_FORMS`.
 
     Caller is responsible for resolving MFN cherry-pick BEFORE calling this
     function (yc_uncapped_mfn with a trigger should be re-presented as if
@@ -190,15 +219,39 @@ def convert_safe_priced_round(
 
     candidate_prices: list[tuple[str, float]] = []
 
-    # Cap candidate (rules: safe.post_money_cap_conversion)
-    if post_money_valuation_cap is not None and post_money_valuation_cap > 0:
-        if company_capitalization is None or company_capitalization <= 0:
+    # Cap candidate — route denominator on form.
+    # Post-money forms use the iterating post-money FD as denominator
+    # (`company_capitalization`); pre-money forms use the constant pre-financing
+    # FD (`pre_money_fd`). This is the load-bearing distinction between the two
+    # SAFE families.
+    cap_value: float | None = None
+    cap_denom: float | None = None
+    cap_provenance_rule_id: str = "safe.post_money_cap_conversion"
+
+    if form in POST_MONEY_FORMS and post_money_valuation_cap is not None and post_money_valuation_cap > 0:
+        cap_value = post_money_valuation_cap
+        cap_denom = company_capitalization
+        cap_provenance_rule_id = "safe.post_money_cap_conversion"
+    elif form in PRE_MONEY_FORMS and pre_money_valuation_cap is not None and pre_money_valuation_cap > 0:
+        cap_value = pre_money_valuation_cap
+        cap_denom = pre_money_fd
+        # Pre-money SAFE math is the LEGACY YC SAFE conversion (pre-Oct-2018).
+        # The rule pack rule `safe.pre_money_cap_conversion` (added in v0.3.0)
+        # documents this branch.
+        cap_provenance_rule_id = "safe.pre_money_cap_conversion"
+
+    if cap_value is not None:
+        if cap_denom is None or cap_denom <= 0:
             return {
                 "branch": "rejected",
                 "error": E_SAFE_CAP_MISSING_DENOMINATOR,
-                "reason": "cap branch requires non-zero company_capitalization",
+                "reason": (
+                    f"cap branch requires non-zero denominator "
+                    f"({'pre_money_fd' if form in PRE_MONEY_FORMS else 'company_capitalization'}); "
+                    f"got {cap_denom!r}"
+                ),
             }
-        cap_price = post_money_valuation_cap / company_capitalization
+        cap_price = cap_value / cap_denom
         candidate_prices.append(("cap_price", cap_price))
 
     # Discount candidate (rule: safe.discount_rate_semantics)
@@ -227,7 +280,7 @@ def convert_safe_priced_round(
             {
                 "output_field": "cap_price",
                 "source_type": "rule",
-                "rule_id": "safe.post_money_cap_conversion",
+                "rule_id": cap_provenance_rule_id,
                 "rule_pack_version": RULE_PACK_VERSION,
                 "source_ref": None,
             }
@@ -246,7 +299,7 @@ def convert_safe_priced_round(
         {
             "output_field": "conversion_price",
             "source_type": "rule",
-            "rule_id": "safe.post_money_cap_conversion",
+            "rule_id": cap_provenance_rule_id,
             "rule_pack_version": RULE_PACK_VERSION,
             "source_ref": None,
         }
@@ -255,7 +308,7 @@ def convert_safe_priced_round(
         {
             "output_field": "conversion_shares",
             "source_type": "rule",
-            "rule_id": "safe.post_money_cap_conversion",
+            "rule_id": cap_provenance_rule_id,
             "rule_pack_version": RULE_PACK_VERSION,
             "source_ref": None,
         }

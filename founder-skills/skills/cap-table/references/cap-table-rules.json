@@ -1,8 +1,8 @@
 {
   "metadata": {
-    "version": "0.3.0",
+    "version": "0.3.1",
     "generated_date": "2026-05-21",
-    "purpose": "Verified source-backed rule pack for a future cap-table, dilution, SAFE, convertible note, option pool, anti-dilution, Israel/Delaware, and founder benchmark skill. v0.3.0: clarified `safe.post_money_cap_conversion` denominator semantics. For YC post-money SAFEs, the ownership identity `safe_ownership = purchase / post_money_cap` is the load-bearing rule (per `safe.stacked_post_money_caps` and YC-PMSAFE-PRIMER worked examples). The downstream restatement `safe_price = cap / company_capitalization` must use a denominator that satisfies this identity \u2014 which is the FULL post-money fully-diluted snapshot INCLUDING new-money shares, not the pre-financing snapshot. Producers that pass pre-financing FD as `company_capitalization` produce the pre-money YC SAFE formula and under-allocate SAFE shares (math bug fixed in cap-table priced_round.py at this version). Earlier v0.2.x history below. v0.2.2: added NVCA-CERT-OF-INC and COOLEY-DOWN-ROUND as proper source IDs for the BBWA rule (formerly the rule cited NVCA Model Cert in prose without a corresponding source_id; the formula text is in the Cooley down-round article, not the glossary). v0.2.1 history: reverted BBWA B-divisor to CP1; replaced WSGR Q1 figures with verified FY2025 medians; softened ICNL Ordinance caveat. v0.2.0 history: TaxAdviser QSBS URL fix; ICNL Companies Law canonical PDF; WSGR direct URL; qualified-financing benchmark rewrite; Section 102 double-trigger split; option-pool source list cleaned; YC primer co-cites added. v0.2.3: appended verbatim BBWA formula text + 2022-01-24 last-reviewed date from Cooley GO down-round article into the COOLEY-DOWN-ROUND source notes; tightened COOLEY-ANTI-DILUTION notes to flag it as the concept-level glossary corroborator (formula text lives on COOLEY-DOWN-ROUND). v0.2.4: swapped NVCA-CERT-OF-INC URL from the index landing page to the direct downloadable .docx; verified \u00a74.4.4 contains the verbatim CP1-based BBWA formula text by extracting the document XML. v0.2.5: schema documents counsel_review semantics (reliance boundary, not confidence score) and adds optional script_allowed_outputs / script_disallowed_outputs enums; markdown gains a Counsel Review Semantics section. v0.2.6: schema adds optional `date_window.near_edge_days_before_start` and `date_window.near_edge_days_before_end` override fields per cap-table skill design (rev3); rule defaults remain 30/90 days; no rules in v0.2.6 use the overrides yet, but the schema permits them.",
+    "purpose": "Verified source-backed rule pack for a future cap-table, dilution, SAFE, convertible note, option pool, anti-dilution, Israel/Delaware, and founder benchmark skill. v0.3.1: added `safe.pre_money_cap_conversion` rule for legacy YC pre-money SAFE forms (yc_premoney_cap_only, pre_money_cap_and_discount_legacy). Post-J audit surfaced that the math producer applied the post-money formula universally; pre-money SAFEs must use pre-financing FD as denominator (cap_price = cap / pre_money_FD). The new rule documents the formula + the multi-SAFE denominator ambiguity (pre-existing snapshot vs as-converted interpretation; v0.1 uses pre-existing). Math producers' `RULE_PACK_VERSION` constants bumped 0.3.0 → 0.3.1. v0.3.0: clarified `safe.post_money_cap_conversion` denominator semantics. For YC post-money SAFEs, the ownership identity `safe_ownership = purchase / post_money_cap` is the load-bearing rule (per `safe.stacked_post_money_caps` and YC-PMSAFE-PRIMER worked examples). The downstream restatement `safe_price = cap / company_capitalization` must use a denominator that satisfies this identity \u2014 which is the FULL post-money fully-diluted snapshot INCLUDING new-money shares, not the pre-financing snapshot. Producers that pass pre-financing FD as `company_capitalization` produce the pre-money YC SAFE formula and under-allocate SAFE shares (math bug fixed in cap-table priced_round.py at this version). Earlier v0.2.x history below. v0.2.2: added NVCA-CERT-OF-INC and COOLEY-DOWN-ROUND as proper source IDs for the BBWA rule (formerly the rule cited NVCA Model Cert in prose without a corresponding source_id; the formula text is in the Cooley down-round article, not the glossary). v0.2.1 history: reverted BBWA B-divisor to CP1; replaced WSGR Q1 figures with verified FY2025 medians; softened ICNL Ordinance caveat. v0.2.0 history: TaxAdviser QSBS URL fix; ICNL Companies Law canonical PDF; WSGR direct URL; qualified-financing benchmark rewrite; Section 102 double-trigger split; option-pool source list cleaned; YC primer co-cites added. v0.2.3: appended verbatim BBWA formula text + 2022-01-24 last-reviewed date from Cooley GO down-round article into the COOLEY-DOWN-ROUND source notes; tightened COOLEY-ANTI-DILUTION notes to flag it as the concept-level glossary corroborator (formula text lives on COOLEY-DOWN-ROUND). v0.2.4: swapped NVCA-CERT-OF-INC URL from the index landing page to the direct downloadable .docx; verified \u00a74.4.4 contains the verbatim CP1-based BBWA formula text by extracting the document XML. v0.2.5: schema documents counsel_review semantics (reliance boundary, not confidence score) and adds optional script_allowed_outputs / script_disallowed_outputs enums; markdown gains a Counsel Review Semantics section. v0.2.6: schema adds optional `date_window.near_edge_days_before_start` and `date_window.near_edge_days_before_end` override fields per cap-table skill design (rev3); rule defaults remain 30/90 days; no rules in v0.2.6 use the overrides yet, but the schema permits them.",
     "source_policy": "Rules cite original quotable legal documents, issuer documents, official agency pages, law-firm publications, and benchmark datasets. AI research notes and intermediate consolidated files are excluded from final references."
   },
   "source_bibliography": [
@@ -474,6 +474,91 @@
         ],
         "warnings": [
           "Warn when user-entered discount exceeds 1.0 but appears intended as a percentage, such as 20 instead of 0.8."
+        ]
+      },
+      {
+        "rule_id": "safe.pre_money_cap_conversion",
+        "domain": "safe",
+        "behavior_target": "script_formula",
+        "title": "Pre-money (legacy) SAFE cap conversion",
+        "summary": "For a YC pre-money SAFE (legacy form, used by YC pre-Oct-2018) with a valuation cap, the conversion price equals the pre-money valuation cap divided by the PRE-FINANCING fully-diluted snapshot. Unlike post-money SAFEs, the SAFE's percentage of post-money is NOT fixed at purchase/cap; the SAFE dilutes alongside founders when new money and any pool refresh land.",
+        "implementation_action": "hardcode",
+        "confidence": "high",
+        "source_ids": [
+          "YC-SAFE-DOCUMENTS"
+        ],
+        "source_basis": "primary",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use for YC pre-money SAFE valuation-cap forms (yc_premoney_cap_only and pre_money_cap_and_discount_legacy). These SAFEs were the YC default from May 2014 to October 2018; they continue to appear on cap tables of older companies.",
+        "inputs": [
+          {
+            "name": "purchase_amount",
+            "type": "money",
+            "description": "Cash invested under the SAFE.",
+            "required": true
+          },
+          {
+            "name": "pre_money_valuation_cap",
+            "type": "money",
+            "description": "Pre-money valuation cap in the legacy SAFE.",
+            "required": true
+          },
+          {
+            "name": "pre_money_fully_diluted_shares",
+            "type": "decimal",
+            "description": "Pre-financing fully-diluted snapshot: founders + issued preferred (as-converted) + outstanding options + unissued option pool, BEFORE the SAFE itself converts and BEFORE new money and any pool refresh.",
+            "required": true
+          },
+          {
+            "name": "discount_multiplier",
+            "type": "decimal",
+            "description": "Discount multiplier when the SAFE includes a discount branch, such as 0.8 for a 20 percent discount. Required for pre_money_cap_and_discount_legacy.",
+            "required": false
+          },
+          {
+            "name": "equity_financing_price",
+            "type": "money",
+            "description": "Cash price per share paid by new money investors in the equity financing. Required for the discount candidate.",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "safe_price",
+            "type": "money",
+            "description": "Pre-money valuation cap divided by pre-financing fully-diluted shares.",
+            "required": true
+          },
+          {
+            "name": "conversion_price",
+            "type": "money",
+            "description": "Lowest valid conversion price under the document's cap (or cap-and-discount) branch.",
+            "required": true
+          },
+          {
+            "name": "safe_shares",
+            "type": "decimal",
+            "description": "Purchase amount divided by conversion price, before document-defined share rounding.",
+            "required": true
+          }
+        ],
+        "formula": [
+          "safe_price = pre_money_valuation_cap / pre_money_fully_diluted_shares",
+          "discount_price = equity_financing_price * discount_multiplier",
+          "conversion_price = min(valid_price_candidates)",
+          "safe_shares = purchase_amount / conversion_price"
+        ],
+        "rounding_policy": "Keep internal calculations at decimal precision. Apply only the SAFE document's fractional-share or cash-in-lieu rule at issuance.",
+        "parameterization_points": [
+          "pre_money_fully_diluted_shares definition (whether multiple converting SAFEs are included on an as-converted basis is document-specific; v0.1 uses pre-existing snapshot interpretation)",
+          "conversion branch priority",
+          "discount multiplier presence"
+        ],
+        "warnings": [
+          "Do not reuse post-money SAFE denominator logic for a pre-money SAFE. Post-money SAFEs lock `purchase/cap` of post-money FD; pre-money SAFEs lock `purchase/cap` of PRE-money FD and dilute downstream from new money / pool refresh.",
+          "Multi-SAFE pre-money scenarios with simultaneous conversion have a known ambiguity in the YC primer: each SAFE's denominator may or may not include the OTHER converting SAFEs on an as-converted basis. v0.1 uses the pre-existing-snapshot interpretation (each SAFE prices off the same pre-financing FD). Counsel may need to confirm against the actual SAFE document language for scenarios with 2+ pre-money SAFEs.",
+          "Pre-money SAFEs are friendlier to founders, less friendly to early investors than post-money SAFEs (which is why YC changed the default in October 2018). Confirm form classification when extracting from documents pre-dating that switch."
         ]
       },
       {

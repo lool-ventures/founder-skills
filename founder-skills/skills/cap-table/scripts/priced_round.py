@@ -49,7 +49,7 @@ from safe_conversion import (  # noqa: E402
     detect_mfn_cycles,
 )
 
-RULE_PACK_VERSION = "0.3.0"
+RULE_PACK_VERSION = "0.3.1"
 
 
 def _resolve_mfn_elections(safes: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -107,11 +107,17 @@ def _safe_shares_at_price(
     safes: list[dict[str, Any]],
     *,
     company_capitalization: float,
+    pre_money_fd: float,
     equity_financing_price: float,
 ) -> tuple[float, dict[str, dict[str, Any]]]:
     """Sum SAFE shares at a given (candidate) equity_financing_price.
 
     Returns (total_shares, per_safe_results) for the solver to iterate.
+
+    Passes BOTH `company_capitalization` (post-money FD, iterates each round)
+    AND `pre_money_fd` (pre-financing FD, constant). The math producer routes
+    on form to pick the right denominator: post-money forms use
+    company_capitalization; pre-money (legacy) forms use pre_money_fd.
     """
     total = 0.0
     per_safe: dict[str, dict[str, Any]] = {}
@@ -120,8 +126,10 @@ def _safe_shares_at_price(
             purchase_amount=s["purchase_amount"],
             form=s["form"],
             post_money_valuation_cap=s.get("post_money_valuation_cap"),
+            pre_money_valuation_cap=s.get("pre_money_valuation_cap"),
             discount_multiplier=s.get("discount_multiplier"),
             company_capitalization=company_capitalization,
+            pre_money_fd=pre_money_fd,
             equity_financing_price=equity_financing_price,
             conversion_price_override=s.get("conversion_price_override"),
         )
@@ -247,10 +255,14 @@ def solve_priced_round(
 
     for i in range(max_iterations):
         iterations = i + 1
-        # SAFE conversion at current price using the latest total-FD estimate
-        # as company_capitalization (the YC post-money SAFE denominator).
+        # SAFE conversion at current price. Post-money forms use the
+        # latest total-FD estimate as denominator; pre-money (legacy) forms
+        # use the constant pre-financing FD. The math producer routes on form.
         safe_shares, per_safe = _safe_shares_at_price(
-            safes, company_capitalization=total_fd_estimate, equity_financing_price=price
+            safes,
+            company_capitalization=total_fd_estimate,
+            pre_money_fd=pre_fd,
+            equity_financing_price=price,
         )
         # Note conversion at current price
         if notes:
@@ -319,11 +331,14 @@ def solve_priced_round(
         )
 
     # Final pass at converged price to capture per-safe/per-note results.
-    # Use the converged total_fd_estimate as company_capitalization (post-money
-    # FD including new money) so that per-SAFE shares lock at purchase/cap of
-    # post-money — NOT the pre-money formula `cap / pre_fd`.
+    # Form-dispatched: post-money SAFEs use total_fd_estimate (post-money FD
+    # including new money); pre-money (legacy) SAFEs use pre_fd (pre-financing
+    # snapshot, constant).
     safe_shares, per_safe = _safe_shares_at_price(
-        safes, company_capitalization=total_fd_estimate, equity_financing_price=price
+        safes,
+        company_capitalization=total_fd_estimate,
+        pre_money_fd=pre_fd,
+        equity_financing_price=price,
     )
     if notes and conversion_event_date:
         note_shares, per_note = _note_shares_at_price(

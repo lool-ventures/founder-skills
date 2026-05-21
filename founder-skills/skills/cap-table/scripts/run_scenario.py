@@ -124,7 +124,7 @@ def run_safe_conversion_scenario(
                     "output_field": "cap_implied_outputs",
                     "source_type": "rule",
                     "rule_id": "safe.post_money_cap_conversion",
-                    "rule_pack_version": "0.3.0",
+                    "rule_pack_version": "0.3.1",
                     "source_ref": None,
                 }
             ],

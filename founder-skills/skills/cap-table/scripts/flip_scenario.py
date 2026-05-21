@@ -159,7 +159,7 @@ def flip_share_for_share(
                 "output_field": "flip_exchange_ratio",
                 "source_type": "rule",
                 "rule_id": "delaware_flip.share_exchange_mechanics",
-                "rule_pack_version": "0.3.0",
+                "rule_pack_version": "0.3.1",
                 "source_ref": None,
             },
         ],

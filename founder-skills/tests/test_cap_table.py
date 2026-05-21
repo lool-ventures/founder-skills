@@ -1119,7 +1119,7 @@ class TestStackedPostMoneySAFEsGolden:
         assert sentinel["schema_version"] == "v0.1.0-cap-table-fast-assess"
         assert sentinel["mode"] == "fast_assess"
         assert sentinel["produces_canonical_artifacts"] is False
-        assert sentinel["rule_pack_version"] == "0.3.0"
+        assert sentinel["rule_pack_version"] == "0.3.1"
         # inputs_fingerprint structurally valid
         fp = sentinel["inputs_fingerprint"]
         assert "sha256" in fp and len(fp["sha256"]) == 64
@@ -1187,6 +1187,205 @@ class TestStackedPostMoneySAFEsGolden:
         assert math.isclose(agg_reported, agg_from_detail, abs_tol=1e-6), (
             f"aggregate safe_pct {agg_reported} does not equal sum of per-safe {agg_from_detail}"
         )
+
+
+class TestLegacyPreMoneySAFEs:
+    """Golden-value regression for YC PRE-MONEY (legacy, pre-Oct-2018) SAFE math.
+
+    Two distinct YC SAFE forms exist:
+    - **Post-money** (current): each SAFE locks `purchase / cap` of POST-money FD.
+      Covered by TestStackedPostMoneySAFEsGolden.
+    - **Pre-money** (legacy): SAFE shares = `purchase / (cap / pre_money_FD)` =
+      `purchase × pre_money_FD / cap`. The SAFE's % of post-money is NOT fixed;
+      pre-money SAFEs dilute alongside founders when new money + pool refresh land.
+
+    Commit #4 (post-J audit): the J fix corrected post-money math but broke
+    pre-money — convert_safe_priced_round was applying a single denominator
+    (the iterating post-money FD) to ALL forms. Fix: route on `form` to use
+    pre_money_fd for pre-money forms; keep company_capitalization (post-money FD)
+    for post-money forms.
+
+    Golden values derived from independent first-principles triangulation by an
+    opus subagent against the YC pre-money SAFE primer. Scenario chosen so
+    fractions resolve to exact integers:
+    - 10M founders common + 1M unallocated pool → pre_money_FD = 11M
+    - SAFE: $500k purchase, $5M pre-money cap, no discount
+    - Series A: $5M new money at $5M pre (post-money $10M), no pool refresh
+    """
+
+    EVAL_PREMONEY_INPUTS = {
+        "company_name": "TestCo",
+        "analysis_date": "2026-05-21",
+        "mode": "standard",
+        "jurisdiction": {
+            "structure": "delaware",
+            "incorporated_date": "2024-06-01",
+            "iia_grants_history": {"has_grants": False, "grant_details": []},
+        },
+        "founders": [
+            {"name": "Founder", "founder_id": "founder_1", "common_shares": 10_000_000},
+        ],
+        "preferred_series": [],
+        "option_pool": {
+            "plan_type": "nso",
+            "authorized": 1_000_000,
+            "issued": 0,
+            "unallocated": 1_000_000,
+        },
+        "common_batches": [],
+        "metadata": {"run_id": "test"},
+    }
+
+    EVAL_PREMONEY_SAFE = {
+        "id": "safe_pre_1",
+        "investor_name": "Angel L (legacy)",
+        "purchase_amount": 500_000,
+        "post_money_valuation_cap": None,
+        "pre_money_valuation_cap": 5_000_000,  # legacy SAFE uses pre-money cap
+        "discount_multiplier": None,
+        "mfn_provision": None,
+        "pro_rata_side_letter": None,
+        "issuance_date": "2017-09-01",  # pre-Oct-2018; legacy form era
+        "form": "yc_premoney_cap_only",
+        "conversion_price_override": None,
+        "source_document": None,
+        "extraction_confidence": "high",
+    }
+
+    def _instruments(self, safes: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "safes": safes,
+            "notes": [],
+            "warrants": [],
+            "option_grants": [],
+            "metadata": {"run_id": "test"},
+        }
+
+    def test_legacy_premoney_cap_only_uses_pre_fd_denominator(self) -> None:
+        """Single-SAFE pre-money scenario; golden answer locked by triangulation.
+
+        Expected (per first-principles derivation):
+        - safe_price = $5M / 11M = $5/11 ≈ $0.4545
+        - safe_shares = $500k × 11M / $5M = 1,100,000 (exact integer)
+        - PPS = $5M / 12.1M = $50/121 ≈ $0.4132
+        - new_money_shares = 12,100,000 (exact integer)
+        - total_post_money_FD = 24,200,000
+        - founders_pct = 10/24.2 ≈ 41.32%
+        - safe_pct = 1.1/24.2 ≈ 4.55% (NOT 10% — pre-money SAFE dilutes)
+        - new_money_pct = 50% (by construction)
+        """
+        cs = cap_state_mod.build_cap_state(self.EVAL_PREMONEY_INPUTS, self._instruments([self.EVAL_PREMONEY_SAFE]))
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=[self.EVAL_PREMONEY_SAFE],
+            notes=[],
+            pre_money=5_000_000,
+            new_money=5_000_000,
+            target_pool_percent=None,  # no pool refresh
+            target_basis="post_money",
+        )
+        assert r["completeness"] == "full", f"blockers: {r.get('blockers')}"
+
+        # PPS = $50/121 ≈ $0.4132
+        assert math.isclose(r["equity_financing_price"], 50 / 121, rel_tol=1e-4), (
+            f"PPS: got {r['equity_financing_price']:.6f}, expected {50 / 121:.6f}"
+        )
+        # Total post-money FD = 24.2M
+        assert math.isclose(r["post_round_fully_diluted_shares"], 24_200_000, rel_tol=1e-4)
+
+        # safe_pct ≈ 4.55%, NOT 10% (would be 10% under post-money form)
+        agg = r["aggregate_ownership_by_class"]
+        assert math.isclose(agg["safe_pct"], 1.1 / 24.2, abs_tol=1e-4), (
+            f"safe_pct: got {agg['safe_pct']:.6f}, expected {1.1 / 24.2:.6f} (4.55%, not 10%)"
+        )
+        # Founders ≈ 41.32%, NOT the post-money-SAFE value of ~36.36%
+        assert math.isclose(agg["founders_pct"], 10 / 24.2, abs_tol=1e-4)
+        # New money 50% (holds in both forms)
+        assert math.isclose(agg["new_money_pct"], 0.50, abs_tol=1e-4)
+
+    def test_legacy_premoney_safe_pct_differs_from_post_money_safe_pct(self) -> None:
+        """Smoke test: pre-money SAFE math MUST produce different ownership than
+        post-money SAFE math under identical inputs. If the solver collapses both
+        forms to the same formula (the regression we're guarding against), this
+        fails. safe_pct=10% would be the post-money answer; pre-money is ~4.55%.
+        """
+        cs = cap_state_mod.build_cap_state(self.EVAL_PREMONEY_INPUTS, self._instruments([self.EVAL_PREMONEY_SAFE]))
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=[self.EVAL_PREMONEY_SAFE],
+            notes=[],
+            pre_money=5_000_000,
+            new_money=5_000_000,
+            target_pool_percent=None,
+            target_basis="post_money",
+        )
+        agg = r["aggregate_ownership_by_class"]
+        # The post-money YC SAFE identity `safe_pct = purchase/cap = 10%` MUST NOT
+        # hold for a pre-money SAFE. If it does, the solver routed the wrong form.
+        assert agg["safe_pct"] < 0.08, (
+            f"safe_pct {agg['safe_pct']:.4f} is too close to the post-money value "
+            f"0.10; pre-money SAFE should dilute to ~0.0455. Form dispatch likely broken."
+        )
+
+    def test_mixed_legacy_premoney_and_post_money_safes(self) -> None:
+        """Mixed-form scenario: one post-money SAFE + one pre-money SAFE in the
+        same priced round. Solver must route each form to its own denominator.
+
+        Expected (algebra in the plan doc):
+        - safe_A (post-money $500k @ $5M cap): locks 10% of post-money FD
+        - safe_B (pre-money $500k @ $5M cap): locks 1.1M shares (constant)
+        - new investor: locks 50% of post-money FD (= new_money / post_money)
+        - founders 10M + pool 1M + safe_B 1.1M = 12.1M = 40% of total
+        - total post-money FD = 12.1M / 0.40 = 30.25M
+        - safe_A_shares = 0.10 × 30.25M = 3,025,000
+        - new_money_shares = 0.50 × 30.25M = 15,125,000
+        - PPS = $5M / 15.125M ≈ $0.3306
+        """
+        safe_a_post = {
+            "id": "safe_a",
+            "investor_name": "Angel A (post-money)",
+            "purchase_amount": 500_000,
+            "post_money_valuation_cap": 5_000_000,
+            "pre_money_valuation_cap": None,
+            "discount_multiplier": None,
+            "mfn_provision": None,
+            "pro_rata_side_letter": None,
+            "issuance_date": "2021-01-01",
+            "form": "yc_postmoney_cap",
+            "conversion_price_override": None,
+            "source_document": None,
+            "extraction_confidence": "high",
+        }
+        safe_b_pre = self.EVAL_PREMONEY_SAFE  # the legacy one, id="safe_pre_1"
+        cs = cap_state_mod.build_cap_state(self.EVAL_PREMONEY_INPUTS, self._instruments([safe_a_post, safe_b_pre]))
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=[safe_a_post, safe_b_pre],
+            notes=[],
+            pre_money=5_000_000,
+            new_money=5_000_000,
+            target_pool_percent=None,
+            target_basis="post_money",
+        )
+        assert r["completeness"] == "full", f"blockers: {r.get('blockers')}"
+
+        # Total post-money FD = 30.25M
+        assert math.isclose(r["post_round_fully_diluted_shares"], 30_250_000, rel_tol=1e-3), (
+            f"total_fd: got {r['post_round_fully_diluted_shares']}, expected 30,250,000"
+        )
+
+        # safe_A (post-money) shares = 3.025M
+        assert math.isclose(r["per_safe"]["safe_a"]["conversion_shares"], 3_025_000, rel_tol=1e-3)
+        # safe_B (pre-money) shares = 1.1M (constant)
+        assert math.isclose(r["per_safe"]["safe_pre_1"]["conversion_shares"], 1_100_000, rel_tol=1e-3)
+
+        agg = r["aggregate_ownership_by_class"]
+        # Combined safe_pct = (3.025 + 1.1) / 30.25 = 13.64%
+        assert math.isclose(agg["safe_pct"], 4.125 / 30.25, abs_tol=1e-4)
+        # Founders 10M / 30.25M ≈ 33.06%
+        assert math.isclose(agg["founders_pct"], 10 / 30.25, abs_tol=1e-4)
+        # New money 50% (still holds — pre/post split sets this)
+        assert math.isclose(agg["new_money_pct"], 0.50, abs_tol=1e-3)
 
 
 # ===========================================================================
