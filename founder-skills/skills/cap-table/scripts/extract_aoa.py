@@ -106,14 +106,20 @@ def validate_aoa_extraction(extraction: dict[str, Any]) -> list[str]:
         if not isinstance(series, dict):
             errors.append(f"{ctx} must be an object")
             continue
-        # Per-series required fields (AoA-extractable subset; `shares` and
-        # `series_id` are intentionally null/absent at extraction time)
+        # Per-series required fields (AoA-extractable subset).
+        # Intentionally NOT in required_at_extract:
+        #   - `shares` and `series_id`: assigned at ingest (cap table / Carta)
+        #   - `issuance_date`: per the real-doc calibration of 5 Israeli AoAs,
+        #     restatement AoAs commonly amend prior series WITHOUT reciting
+        #     the original SPA issuance date. Forcing the extractor to assert
+        #     a date it cannot find produces low-confidence placeholders.
+        #     Treat `issuance_date` as a downstream-merged field (from the
+        #     SPA / Carta cap-table data), not an AoA-derivable field.
         required_at_extract = [
             "series_name",
             "original_issue_price",
             "original_conversion_price",
             "current_conversion_price",
-            "issuance_date",
         ]
         for r in required_at_extract:
             if series.get(r) is None:
