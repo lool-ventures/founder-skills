@@ -781,6 +781,275 @@ class TestPricedRound:
         assert r["completeness"] == "structural_only"
 
 
+class TestStackedPostMoneySAFEsGolden:
+    """Golden-value regression for YC post-money cap SAFE math.
+
+    Locks the canonical answer for the eval-2 scenario:
+    - Founder 10M common; unallocated pool 1M; pre-FD 11M
+    - SAFE 1: $500k @ $10M post-money cap
+    - SAFE 2: $1M @ $15M post-money cap
+    - SAFE 3: $500k uncapped MFN electing SAFE 1's $10M cap
+    - Series A: $5M @ $20M pre, 10% post-money pool (founders absorb)
+
+    Golden values derived from first-principles YC post-money math
+    (rule pack `safe.stacked_post_money_caps` lines 527-530), independently
+    triangulated by three reviewers + an independent opus subagent.
+
+    Each post-money SAFE locks `purchase / post_money_cap` of post-money FD.
+    The implementation MUST NOT use `cap_price = cap / pre_fd` (the pre-money
+    primer formula) on post-money form SAFEs.
+    """
+
+    EVAL2_INPUTS = {
+        "company_name": "TestCo",
+        "analysis_date": "2026-05-21",
+        "mode": "standard",
+        "jurisdiction": {
+            "structure": "delaware",
+            "incorporated_date": "2024-06-01",
+            "iia_grants_history": {"has_grants": False, "grant_details": []},
+        },
+        "founders": [
+            {"name": "Founder", "founder_id": "founder_1", "common_shares": 10_000_000},
+        ],
+        "preferred_series": [],
+        "option_pool": {
+            "plan_type": "nso",
+            "authorized": 1_000_000,
+            "issued": 0,
+            "unallocated": 1_000_000,
+        },
+        "common_batches": [],
+        "metadata": {"run_id": "test"},
+    }
+
+    EVAL2_SAFES = [
+        {
+            "id": "safe_1",
+            "investor_name": "Angel A",
+            "purchase_amount": 500_000,
+            "post_money_valuation_cap": 10_000_000,
+            "discount_multiplier": None,
+            "mfn_provision": None,
+            "pro_rata_side_letter": None,
+            "issuance_date": "2025-01-01",
+            "form": "yc_postmoney_cap",
+            "conversion_price_override": None,
+            "source_document": None,
+            "extraction_confidence": "high",
+        },
+        {
+            "id": "safe_2",
+            "investor_name": "Angel B",
+            "purchase_amount": 1_000_000,
+            "post_money_valuation_cap": 15_000_000,
+            "discount_multiplier": None,
+            "mfn_provision": None,
+            "pro_rata_side_letter": None,
+            "issuance_date": "2025-02-01",
+            "form": "yc_postmoney_cap",
+            "conversion_price_override": None,
+            "source_document": None,
+            "extraction_confidence": "high",
+        },
+        # safe_3 is "MFN-elected against safe_1's $10M cap" — modeled as a
+        # pre-resolved $10M-cap post-money SAFE so J's regression isolates the
+        # math-formula bug. Phase N (MFN auto-bind) has separate test coverage
+        # for the auto-resolution path from uncapped MFN → elected SAFE's cap.
+        {
+            "id": "safe_3",
+            "investor_name": "Angel C",
+            "purchase_amount": 500_000,
+            "post_money_valuation_cap": 10_000_000,
+            "discount_multiplier": None,
+            "mfn_provision": None,
+            "pro_rata_side_letter": None,
+            "issuance_date": "2025-03-01",
+            "form": "yc_postmoney_cap",
+            "conversion_price_override": None,
+            "source_document": None,
+            "extraction_confidence": "high",
+        },
+    ]
+
+    def _instruments(self) -> dict[str, Any]:
+        return {
+            "safes": self.EVAL2_SAFES,
+            "notes": [],
+            "warrants": [],
+            "option_grants": [],
+            "metadata": {"run_id": "test"},
+        }
+
+    def test_per_safe_ownership_is_purchase_over_cap(self) -> None:
+        """Per-SAFE ownership formula for YC post-money cap SAFEs.
+
+        Each SAFE: `safe_ownership_i = purchase_amount_i / post_money_cap_i`.
+        Not `purchase / cap_price`, not `purchase × pre_fd / cap`.
+        """
+        # safe_1: $500k / $10M = 5%
+        assert math.isclose(500_000 / 10_000_000, 0.05, rel_tol=1e-9)
+        # safe_2: $1M / $15M = 6.6667%
+        assert math.isclose(1_000_000 / 15_000_000, 1 / 15, rel_tol=1e-9)
+        # safe_3 (MFN→$10M): $500k / $10M = 5%
+        assert math.isclose(500_000 / 10_000_000, 0.05, rel_tol=1e-9)
+        # Aggregate: 1/6
+        agg = 500_000 / 10_000_000 + 1_000_000 / 15_000_000 + 500_000 / 10_000_000
+        assert math.isclose(agg, 1 / 6, rel_tol=1e-9)
+
+    def test_eval2_golden_solver_iterative(self) -> None:
+        """Full eval-2 scenario through the iterative solver.
+
+        Golden values from independent first-principles derivation:
+        - aggregate_safe_pct = 1/6 ≈ 16.6667%
+        - founder_pct = 8/15 ≈ 53.3333%
+        - PPS = 4/3 ≈ $1.3333
+        - total post-money FD = 18,750,000 shares
+        """
+        cs = cap_state_mod.build_cap_state(self.EVAL2_INPUTS, self._instruments())
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=self.EVAL2_SAFES,
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+        )
+
+        assert r["completeness"] == "full", f"blockers: {r.get('blockers')}"
+        assert r["converged"] is True
+
+        agg = r["aggregate_ownership_by_class"]
+        # Aggregate SAFE ownership: 1/6
+        assert math.isclose(agg["safe_pct"], 1 / 6, abs_tol=1e-4), (
+            f"safe_pct: got {agg['safe_pct']:.6f}, expected {1 / 6:.6f}"
+        )
+        # Founder ownership post-financing: 8/15
+        assert math.isclose(agg["founders_pct"], 8 / 15, abs_tol=1e-4), (
+            f"founders_pct: got {agg['founders_pct']:.6f}, expected {8 / 15:.6f}"
+        )
+        # New money: 20% of post-money
+        assert math.isclose(agg["new_money_pct"], 0.20, abs_tol=1e-4)
+        # Pool: 10% of post-money
+        assert math.isclose(agg["option_pool_pct"], 0.10, abs_tol=1e-4)
+
+        # PPS = 4/3
+        assert math.isclose(r["equity_financing_price"], 4 / 3, rel_tol=1e-4), (
+            f"PPS: got {r['equity_financing_price']:.6f}, expected {4 / 3:.6f}"
+        )
+
+        # Total post-money FD shares = 18,750,000
+        total_fd = r["post_round_fully_diluted_shares"]
+        assert math.isclose(total_fd, 18_750_000, rel_tol=1e-4), f"post_round_fd: got {total_fd}, expected 18_750_000"
+
+    def test_eval2_per_safe_share_counts(self) -> None:
+        """Each SAFE's resolved share count matches the ownership formula."""
+        cs = cap_state_mod.build_cap_state(self.EVAL2_INPUTS, self._instruments())
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=self.EVAL2_SAFES,
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+        )
+        per_safe = r["per_safe"]
+        # safe_1: 5% × 18.75M = 937,500
+        assert math.isclose(per_safe["safe_1"]["conversion_shares"], 937_500, rel_tol=1e-3)
+        # safe_2: (1/15) × 18.75M = 1,250,000
+        assert math.isclose(per_safe["safe_2"]["conversion_shares"], 1_250_000, rel_tol=1e-3)
+        # safe_3: 5% × 18.75M = 937,500
+        assert math.isclose(per_safe["safe_3"]["conversion_shares"], 937_500, rel_tol=1e-3)
+
+    def test_eval2_new_investor_and_pool_shares(self) -> None:
+        cs = cap_state_mod.build_cap_state(self.EVAL2_INPUTS, self._instruments())
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=self.EVAL2_SAFES,
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+        )
+        # New investor: 20% × 18.75M = 3,750,000
+        assert math.isclose(r["shares_breakdown"]["new_money"], 3_750_000, rel_tol=1e-3)
+        # Pool top-up brings unallocated pool to 1,875,000 (10% × 18.75M)
+        # Existing 1M pool + top-up = 1,875,000; gross top-up = 875,000
+        assert math.isclose(r["shares_breakdown"]["pool_topup"], 875_000, rel_tol=1e-3)
+
+    def test_eval2_closed_form_path_matches_iterative(self) -> None:
+        """Closed-form path (all yc_postmoney_cap, no discount, no notes) must
+        land at the same answer as the iterative solver. Reviewer 2's call-out:
+        the closed-form branch at priced_round.py:121 is the silent twin of the
+        iterative bug; both must produce correct math.
+        """
+        # SAFE 3 has MFN-electing safe_1's cap; effectively yc_postmoney_cap from
+        # the solver's perspective once MFN resolution runs.
+        cs = cap_state_mod.build_cap_state(self.EVAL2_INPUTS, self._instruments())
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=self.EVAL2_SAFES,
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+        )
+        # Whichever path the solver chose, the answer must match the golden.
+        agg = r["aggregate_ownership_by_class"]
+        assert math.isclose(agg["safe_pct"], 1 / 6, abs_tol=1e-4)
+        assert math.isclose(agg["founders_pct"], 8 / 15, abs_tol=1e-4)
+        assert math.isclose(r["equity_financing_price"], 4 / 3, rel_tol=1e-4)
+
+    def test_eval2_ownership_sum_to_one(self) -> None:
+        """Cross-check assertion: all ownership classes sum to 100%."""
+        cs = cap_state_mod.build_cap_state(self.EVAL2_INPUTS, self._instruments())
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=self.EVAL2_SAFES,
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+        )
+        agg = r["aggregate_ownership_by_class"]
+        total = (
+            agg["safe_pct"]
+            + agg["founders_pct"]
+            + agg["new_money_pct"]
+            + agg["option_pool_pct"]
+            + agg.get("preferred_pct", 0.0)
+            + agg.get("note_pct", 0.0)
+        )
+        assert math.isclose(total, 1.0, abs_tol=1e-4), f"ownerships sum to {total}, not 1.0"
+
+    def test_eval2_aggregate_safe_pct_equals_sum_of_per_safe(self) -> None:
+        """J8 cross-check: aggregate_ownership_by_class.safe_pct must equal
+        Σ per-safe ownership. Catches drift between aggregate and detail.
+        """
+        cs = cap_state_mod.build_cap_state(self.EVAL2_INPUTS, self._instruments())
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=self.EVAL2_SAFES,
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+        )
+        total_fd = r["post_round_fully_diluted_shares"]
+        sum_per_safe_shares = sum(s["conversion_shares"] for s in r["per_safe"].values())
+        agg_from_detail = sum_per_safe_shares / total_fd
+        agg_reported = r["aggregate_ownership_by_class"]["safe_pct"]
+        assert math.isclose(agg_reported, agg_from_detail, abs_tol=1e-6), (
+            f"aggregate safe_pct {agg_reported} does not equal sum of per-safe {agg_from_detail}"
+        )
+
+
 # ===========================================================================
 # rule_audit.py (two-phase)
 # ===========================================================================

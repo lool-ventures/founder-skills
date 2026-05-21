@@ -27,7 +27,7 @@ import json
 import sys
 from typing import Any
 
-RULE_PACK_VERSION = "0.2.8"
+RULE_PACK_VERSION = "0.3.0"
 
 
 def bbwa_new_conversion_price(

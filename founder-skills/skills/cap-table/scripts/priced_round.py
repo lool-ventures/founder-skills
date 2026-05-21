@@ -5,17 +5,28 @@
 # ///
 """Priced-round math: resolves coupled SAFE/note conversion + new money + pool top-up.
 
-Per design doc §9 Step 5 + Codex rev5: priced rounds have circular
-dependencies (option-pool top-up needs new_money_shares; new_money_shares
-depends on equity_financing_price; price depends on post-SAFE FD which
-depends on SAFE conversion which depends on price). Solver attempts
-**algebraic resolution first** (closed-form for cap-only post-money SAFEs
-per YC primer Example 1); falls back to **iterative fixed-point** when
-discount-only SAFEs or coupled inputs make the system non-linear.
+Per design doc §9 Step 5: priced rounds have circular dependencies (option-pool
+top-up needs new_money_shares; new_money_shares depends on
+equity_financing_price; price depends on post-SAFE FD which depends on SAFE
+conversion which depends on price). Solver attempts algebraic resolution first
+(closed-form for cap-only post-money SAFEs per YC primer Example 1); falls back
+to iterative fixed-point when discount-only SAFEs or coupled inputs make the
+system non-linear.
 
-Per Gotcha #1: `company_capitalization` for SAFE math is the pre-financing
-snapshot — it does NOT include new-money or new pool top-up. The solver
-uses cap_state.as_converted_totals.fully_diluted_shares directly.
+YC post-money SAFE denominator (`company_capitalization`): per rule
+`safe.post_money_cap_conversion` (rule pack v0.3.0+), the denominator passed to
+the per-SAFE conversion formula is the FULL post-money fully-diluted snapshot
+INCLUDING new-money shares. This is the denominator that makes the YC primer's
+load-bearing identity `safe_ownership = purchase / cap` hold for post-money
+SAFEs (`safe_shares = purchase / (cap / company_cap) = purchase × company_cap
+/ cap = ownership × company_cap`). The solver iterates `company_capitalization`
+toward the converged post-money FD.
+
+Implementation history: pre-v0.3.0, `company_capitalization` was the
+pre-financing snapshot (`cap_state.as_converted_totals.fully_diluted_shares`),
+which applied the pre-money YC SAFE formula to post-money instruments and
+under-allocated SAFE shares by `1 - new_money_pct`. Golden-test coverage in
+`TestStackedPostMoneySAFEsGolden` locks the correct behavior.
 """
 
 from __future__ import annotations
@@ -38,7 +49,7 @@ from safe_conversion import (  # noqa: E402
     detect_mfn_cycles,
 )
 
-RULE_PACK_VERSION = "0.2.8"
+RULE_PACK_VERSION = "0.3.0"
 
 
 def _safe_shares_at_price(
@@ -164,12 +175,24 @@ def solve_priced_round(
     converged = False
     iterations = 0
     history: list[float] = [price]
+    # Initial estimate of post-money FD (used as company_capitalization for the
+    # YC post-money SAFE formula). Refined each iteration.
+    #
+    # The YC post-money SAFE math requires `safe_price = cap / total_post_money_FD`
+    # so that `safe_shares = purchase / safe_price = purchase × total_FD / cap`,
+    # i.e., each SAFE locks `purchase/cap` of post-money_FD (per rule
+    # `safe.stacked_post_money_caps` and the YC primer's worked examples). Using
+    # `company_capitalization=pre_fd` (the pre-financing snapshot) would apply
+    # the pre-money YC SAFE formula to post-money instruments — a math error
+    # that under-allocates SAFE shares and over-states founder ownership.
+    total_fd_estimate = pre_fd
 
     for i in range(max_iterations):
         iterations = i + 1
-        # SAFE conversion at current price
+        # SAFE conversion at current price using the latest total-FD estimate
+        # as company_capitalization (the YC post-money SAFE denominator).
         safe_shares, per_safe = _safe_shares_at_price(
-            safes, company_capitalization=pre_fd, equity_financing_price=price
+            safes, company_capitalization=total_fd_estimate, equity_financing_price=price
         )
         # Note conversion at current price
         if notes:
@@ -200,11 +223,22 @@ def solve_priced_round(
             )
             pool_topup_shares = float(topup_result["required_pool_topup_shares"])
 
-        # New denominator for next-iteration price
+        # New denominator for next-iteration price.
+        # `denom` is the pre-new-money fully-diluted snapshot (post-SAFE,
+        # post-pool-topup) — pre_money / denom = price-per-share that new
+        # money pays.
         denom = pre_fd + safe_shares + note_shares + pool_topup_shares
         if denom <= 0:
             break
         new_price = pre_money / denom
+
+        # Update total-FD estimate for the NEXT iteration's SAFE math. The YC
+        # post-money formula's `company_capitalization` denominator is the FULL
+        # post-money_FD INCLUDING the new-money shares (so that per-SAFE
+        # ownership = purchase/cap of post-money_FD, per the YC primer worked
+        # examples). new_money_shares = pre_money / new_price × (new_money/pre_money) = new_money / new_price.
+        new_money_shares_for_fd = new_money / new_price if new_price > 0 else 0.0
+        total_fd_estimate = denom + new_money_shares_for_fd
 
         rel_change = abs(new_price - price) / max(price, 1e-12)
         history.append(new_price)
@@ -226,8 +260,13 @@ def solve_priced_round(
             }
         )
 
-    # Final pass at converged price to capture per-safe/per-note results
-    safe_shares, per_safe = _safe_shares_at_price(safes, company_capitalization=pre_fd, equity_financing_price=price)
+    # Final pass at converged price to capture per-safe/per-note results.
+    # Use the converged total_fd_estimate as company_capitalization (post-money
+    # FD including new money) so that per-SAFE shares lock at purchase/cap of
+    # post-money — NOT the pre-money formula `cap / pre_fd`.
+    safe_shares, per_safe = _safe_shares_at_price(
+        safes, company_capitalization=total_fd_estimate, equity_financing_price=price
+    )
     if notes and conversion_event_date:
         note_shares, per_note = _note_shares_at_price(
             notes,
