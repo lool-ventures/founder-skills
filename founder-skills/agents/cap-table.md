@@ -195,64 +195,7 @@ strike-price methodology, vesting standard. Do NOT extract individual
 grant data from the plan document (grants live in
 `instruments.option_grants[]` populated from a separate source).
 
-For an **Articles of Association (AOA)**: extract per-preferred-series
-structural terms that cap_state.py uses to build the pre-financing snapshot.
-Target fields per series: `series_name`, `original_issue_price` (OIP),
-`original_conversion_price` (OCP — equals OIP at issuance unless already
-adjusted), `liquidation_preference_multiple`, `liquidation_preference_type`
-(non_participating / participating / participating_capped), `participation_cap`
-(if capped), `anti_dilution_type` (broad_based_weighted_average /
-narrow_based_weighted_average / full_ratchet / none), and `authorized_shares`.
-Also extract `jurisdiction.structure` (israeli / delaware) and
-`section_102_plan_reference` (bool — is §102 plan referenced in the AOA?).
-
-**Corpus-derived guidance (from 5 real Israeli AOAs):**
-
-1. **OIP is in the Definitions section, not in tables.** Israeli AOA format:
-   `"[Series Name] Original Issue Price" means ... US$ X.XXX` — literal dollar
-   sign followed by a space then the value. Each series gets its own definition.
-   Multi-series AOAs may cross-reference an SPA or Schedule for the OIP; if no
-   inline value found, mark confidence `absent` and set `ambiguities`.
-
-2. **NIS 0.01 = par value, NOT the OIP.** Every Israeli company is required to
-   assign a nominal value (typically NIS 0.01) to shares under Israeli Companies
-   Law. This appears dozens of times per document. Filter it out — real OIPs
-   are almost always USD-denominated and > $0.10.
-
-3. **Liquidation preference multiples are typically IMPLICIT (1x)** in Israeli
-   AOAs. The document says "an amount equal to the Original Issue Price plus X%
-   per annum compounded annually" — there is no "1x" stated. Treat absence of an
-   explicit multiple as 1x. If you see "2x" or "3x" explicitly, it IS stated.
-
-4. **"Fully participating" is the Israeli standard for participating preferred.**
-   All 5 corpus AOAs were fully participating. Non-participating or capped
-   participating is rare and will be explicitly stated.
-
-5. **Anti-dilution in Israeli AOAs uses the phrase "Adjustment of Conversion
-   Price"** rather than "anti-dilution". The formula uses a weighted-average
-   denominator — treat this as `broad_based_weighted_average`. Full ratchet
-   language would say "the lowest price per share" — very rare.
-
-6. **Series naming: two conventions coexist in Israeli AOAs.**
-   - `"Preferred [Letter]"` — e.g. "Preferred A", "Preferred Seed"
-   - `"Series [Letter] Preferred"` — e.g. "Series A Preferred", "Series Seed Preferred"
-   These refer to the same series; normalize when matching terms across the doc.
-   Sub-series use `"Series [Letter]-[n] Preferred"` (e.g. "Series Seed-1", "Series
-   Seed-2") — these ARE separate series with separate OIPs and separate stacks.
-
-7. **Registration rights may be absent in early-stage Israeli AOAs** — this is
-   normal, not a document gap. Israeli companies often handle reg rights via a
-   separate Investor Rights Agreement (IRA), not the AOA.
-
-8. **Israeli law markers to detect** — presence of any two signals `jurisdiction.structure = "israeli"`:
-
-   - *Current top-tier firms*: Meitar, Herzog (HFN), Goldfarb Gross Seligman, Arnon Tadmor-Levy, FISCHER/FBC, Naschitz Brandes Amir, Shibolet, APM/Amit Pollak Matalon, EBN/Erdinast Ben Nathan, Gornitzky, Barnea Jaffa Lande, Pearl Cohen, H-F & Co., FWMK, Raz Dlugin, S. Horowitz
-   - *Historical/legacy names (common in older AOAs)*: GKH / Gross Kleinhendler Hodak (→ Goldfarb Gross Seligman 2023), Yigal Arnon (→ Arnon Tadmor-Levy 2022), Tadmor Levy, Meitar Liquornik Geva Leshem, FBC / Fischer Behar Chen, HFN
-   - *Statutory*: "Israeli Companies Law", "Companies Law 1999", "Section 102", "§102", "NIS", "New Israeli Shekel", "Tel Aviv"
-
-**Return shape for AOA extraction** — populate `fields.preferred_series[]`:
-
----
+**Articles of Association (AoA) extraction is deferred to v0.2** — see commit #7 in the post-J audit sweep. v0.1 routes AoA-only documents to the conversational fallback: the dispatching agent asks targeted `AskUserQuestion`s to populate `inputs.json.preferred_series[]` directly.
 
 **Corpus-derived guidance (from real signed convertible instruments — CLAs, US promissory notes, convertible securities):**
 
@@ -334,31 +277,6 @@ Also extract `jurisdiction.structure` (israeli / delaware) and
 
 14. **Multi-tranche term sheets** (First Tranche + Second Tranche conditioned on metrics) — extract the total Investment Amount AND each tranche's conditions; surface tranche schedule as a structured field, not just the aggregate.
 
-```json
-{
-  "instrument_type": "articles_of_association",
-  "fields": {
-    "jurisdiction": {"structure": "israeli | delaware", "governing_law": "<country>"},
-    "section_102_plan_reference": true,
-    "preferred_series": [
-      {
-        "series_name": "Series Seed",
-        "authorized_shares": null,
-        "original_issue_price": {"currency": "USD", "value": 1.175},
-        "original_conversion_price": {"currency": "USD", "value": 1.175},
-        "liquidation_preference_multiple": 1.0,
-        "liquidation_preference_type": "participating",
-        "participation_cap": null,
-        "anti_dilution_type": "broad_based_weighted_average",
-        "interest_rate_on_preference": 0.06
-      }
-    ]
-  },
-  "confidence": { ... },
-  "ambiguities": [ ... ]
-}
-```
-
 **Per-field confidence (anti-hallucination):**
 
 For every extracted field, return an entry in the parallel `confidence`
@@ -373,7 +291,7 @@ fields trigger user confirmation before commit.
 
 ```json
 {
-  "instrument_type": "safe | convertible_note | convertible_loan_agreement | convertible_security | term_sheet | spa | option_plan | articles_of_association",
+  "instrument_type": "safe | convertible_note | term_sheet | option_plan | warrant | non_instrument",
   "fields": { ... extracted fields per the schemas above ... },
   "confidence": {
     "<field_name>": {
@@ -387,6 +305,12 @@ fields trigger user confirmation before commit.
   ]
 }
 ```
+
+**Enum mapping (when the document is a closely-related instrument type):**
+- Israeli convertible loan agreement (CLA) / convertible bridge financing / convertible investment agreement → `convertible_note` (mathematically identical; Israeli statutory ITA Section 3(j) interest is handled via `interest_rate_type`)
+- Convertible security (YC's pre-SAFE form, used by GS-Cap Table etc.) → `convertible_note` with `interest_rate_type=none` and `maturity_date=null`
+- Share Purchase Agreement (SPA) → `term_sheet` (definitive purchase agreement carries the same cap-table-relevant fields as a term sheet for v0.1)
+- Articles of Association (AoA) — separate dispatch sub-context `ARTICLES_OF_ASSOCIATION_EXTRACTION` (v0.2 work; not exposed in v0.1)
 
 #### Sub-context: `SPREADSHEET_STRUCTURE_DETECTION`
 
@@ -469,6 +393,16 @@ founder-coaching layer using the Mitigation 2 protocol: structured
 `coaching_payload` (inlined in your dispatch prompt) + Grep idempotency +
 Edit via uuid marker + Grep verification. **You MUST NOT Read the full
 `report.md`.**
+
+**Inline alternative.** The main thread is permitted to execute this same
+procedure inline (without dispatching a fresh sub-agent) — see
+`SKILL.md` Step 11 "Inline alternative." The procedure below applies in
+either case. The privacy boundary (no investor / founder names in coaching
+commentary) is enforced at compose time by
+`_assert_coaching_payload_privacy_clean()` in `compose_report.py`, which
+fires regardless of which dispatch path is taken. Dispatch is preferred
+for context isolation, but inline is acceptable and the outputs are
+identical.
 
 The dispatch prompt contains a `coaching_payload` JSON object with these
 keys (do not refetch from disk — design doc §11 is the authoritative
@@ -564,11 +498,20 @@ citations to use. Do NOT Read the full `report.md` — the structured
 payload is sufficient.
 
 **Privacy boundary:** the `coaching_payload` is intentionally scrubbed of
-investor names, founder names, and document text — it carries
-percentages, counts, scenario labels, and rule_ids only. Refer to
-"the lead SAFE investor", "the term sheet on the table", "your seed
-preferred series" abstractly. If you need a specific name, the payload
+investor names AND founder names — it carries percentages, counts,
+scenario labels, and rule_ids only. (Document text is not structurally
+in the payload by construction — it never enters via the
+`build_coaching_payload()` path.) Refer to "the lead SAFE investor",
+"the term sheet on the table", "your seed preferred series",
+"the founders" abstractly. If you need a specific name, the payload
 doesn't have it on purpose — write around it.
+
+The compose-side assertion `_assert_coaching_payload_privacy_clean()`
+enforces this invariant at write time, with carve-outs for legitimate
+overlap (founder name equals company name; founder later participated
+as an investor in a SAFE round). The assertion fires regardless of
+whether Context B runs via fresh-sub-agent dispatch or inline (so
+inline alternative is safe — see Section intro).
 
 #### 3. edit_via_marker — single Edit call
 
@@ -628,19 +571,24 @@ quoted, e.g.:
 ```json
 {
   "status": "complete",
-  "review_dir": "<absolute path>",
-  "report_path": "<absolute path to report.md>",
-  "scenarios_modeled": "<number from coaching_payload.scenarios_modeled>",
-  "counsel_review_count": "<from coaching_payload.counsel_review_count>",
+  "review_dir": "<absolute path string>",
+  "report_path": "<absolute path string>",
+  "scenarios_modeled": <integer>,
+  "counsel_review_count": <integer>,
   "completeness_breakdown": {
-    "full": "<count of scenarios with completeness=full>",
-    "structural_only": "<count>",
-    "repay_only": "<count>",
-    "mixed": "<count>"
+    "full": <integer>,
+    "structural_only": <integer>,
+    "repay_only": <integer>,
+    "mixed": <integer>
   },
-  "high_severity_warnings": ["<from coaching_payload.high_severity_warnings>"]
+  "high_severity_warnings": [<list of strings from coaching_payload.high_severity_warnings>]
 }
 ```
+
+**Type-literal note (M4 fix from post-J audit):** integer-typed fields are
+JSON integers (no surrounding quotes), not stringified numbers. The
+`scenarios_modeled` value is `3`, not `"3"`. Strings (paths, status,
+descriptions) remain quoted.
 
 Never return `{status: "complete"}` if any verification step failed.
 

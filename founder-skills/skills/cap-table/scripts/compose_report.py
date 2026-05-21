@@ -369,43 +369,83 @@ def build_coaching_payload(
     else:
         payload["flip_specifics"] = None
 
-    _assert_coaching_payload_privacy_clean(payload, instruments=instruments)
+    _assert_coaching_payload_privacy_clean(payload, instruments=instruments, inputs=inputs)
     return payload
 
 
-def _assert_coaching_payload_privacy_clean(payload: dict[str, Any], *, instruments: dict[str, Any]) -> None:
+def _assert_coaching_payload_privacy_clean(
+    payload: dict[str, Any],
+    *,
+    instruments: dict[str, Any],
+    inputs: dict[str, Any] | None = None,
+) -> None:
     """Defense-in-depth privacy assertion.
 
-    The Context B coaching dispatch contract relies on `coaching_payload` being
-    scrubbed of investor names, founder names, and document text (see
-    `agents/cap-table.md` "Privacy boundary"). The dispatch isolates Context A
-    from Context B; this assertion ensures the privacy holds even if a future
-    consumer (or the inline-dispatch path) reads the payload without the
-    fresh-sub-agent boundary. If a new key gets added that accidentally pulls in
-    raw extracted strings, this fires.
+    The Context B coaching dispatch contract requires `coaching_payload` to
+    refer to investors and founders abstractly (no concrete names). Per
+    `agents/cap-table.md` "Privacy boundary" (v0.3.1: narrowed from "investor
+    names AND founder names AND document text" to just "investor names AND
+    founder names" — document text isn't structurally in the payload).
 
-    The check is structural: collect every string value in `payload`, assert
-    none contain investor_name strings from `instruments.json`. Investor names
-    are the highest-risk leak surface (they enter via document extraction and
-    must not surface in the founder-facing coaching commentary as concrete
-    names — the dispatch contract says refer to them abstractly).
+    This assertion walks every string in `payload` and rejects matches against:
+
+    1. **Investor names** from `instruments.safes[].investor_name` and
+       `instruments.notes[].investor_name` — the primary leak surface
+       (extracted from source documents; must not surface in coaching).
+    2. **Founder names** from `inputs.founders[].name` — added in v0.3.1
+       (commit #9 of post-J audit) so the contract matches the agent body's
+       privacy promise.
+
+    Carve-outs (matches that are NOT leaks):
+
+    - **Company-name overlap.** `inputs.company_name` is intentionally in the
+      payload (it's the engagement identity). If a founder's name happens to
+      equal or substring the company name (e.g., founder "Acme" at "Acme Corp"),
+      the assertion would falsely fire. Skip founder names that case-insensitively
+      overlap with `company_name`.
+    - **Founder-becomes-investor.** Common in Israeli market: a founder later
+      participates as an investor in their own company's SAFE / note round. The
+      name then legitimately appears in BOTH `inputs.founders[]` AND
+      `instruments.safes[].investor_name`. Skip names that appear in both
+      lists — they're investors per the contract, but the assertion fires only
+      on the investor side (which still gets refer-abstractly treatment).
+    - **Length threshold (>8 chars)** filters short / common substrings
+      ("SAFE", "Inc", "Capital", "LLC", "Corp") that frequently appear inside
+      legitimate generic text.
+
+    Match uses word-boundary regex (`\\b{name}\\b`) so substring collisions
+    inside legitimate template prose ("capitalization", "Cap Capital") don't
+    false-fire. `re.escape` protects against names with regex metacharacters.
     """
     import re as _re
 
-    investor_names = {
+    raw_investor_names = {
         s.get("investor_name", "")
         for s in instruments.get("safes", []) + instruments.get("notes", [])
         if s.get("investor_name")
     }
-    # M9: raised length threshold from >2 to >8 to eliminate false positives on
-    # short / common substrings ("SAFE", "Inc", "Capital", "LLC", "Corp") that
-    # frequently appear inside legitimate generic text (e.g.,
-    # branch_summary="cap_plus_discount"; completeness="cap_implied_only";
-    # target_basis="post_money"). Real-world investor names like "a16z" or
-    # "Sequoia Capital Operations" are longer than 8 chars; founder family
-    # names like "Cohen" (5 chars) are NOT investor names so don't apply here.
-    investor_names = {n for n in investor_names if n and len(n) > 8}
-    if not investor_names:
+    raw_founder_names: set[str] = set()
+    company_name = ""
+    if inputs:
+        company_name = inputs.get("company_name", "")
+        raw_founder_names = {f.get("name", "") for f in inputs.get("founders", []) if f.get("name")}
+
+    # Founder-becomes-investor carve-out: a name in BOTH founders and investors
+    # is treated as an investor for the purpose of this check (subject to the
+    # investor-side checks below). It's not a separate "founder name leak".
+    founder_names = raw_founder_names - raw_investor_names
+
+    # Company-name carve-out: a founder name that overlaps with the company
+    # name is intentional (e.g., "Acme" founder at "Acme Corp"). Skip those.
+    if company_name:
+        cn_lower = company_name.lower()
+        founder_names = {n for n in founder_names if n.lower() not in cn_lower and cn_lower not in n.lower()}
+
+    # Length threshold filters short/common substrings.
+    investor_names = {n for n in raw_investor_names if n and len(n) > 8}
+    founder_names = {n for n in founder_names if n and len(n) > 8}
+
+    if not investor_names and not founder_names:
         return
 
     def _walk(obj: Any) -> list[str]:
@@ -421,22 +461,19 @@ def _assert_coaching_payload_privacy_clean(payload: dict[str, Any], *, instrumen
         return out
 
     all_strings = _walk(payload)
-    leaks: list[tuple[str, str]] = []
-    # M9: word-boundary regex match instead of bare substring `in` check.
-    # An investor named "Sequoia Capital" must NOT match "capitalization" or
-    # "Cap Capital" appearing inside template prose. \b is the standard
-    # word-boundary; re.escape protects against names containing regex
-    # metacharacters (rare but possible: "A&B Capital", "T+H Partners").
-    for name in investor_names:
-        pat = _re.compile(r"\b" + _re.escape(name) + r"\b")
-        for s in all_strings:
-            if pat.search(s):
-                leaks.append((name, s[:120]))
+    leaks: list[tuple[str, str, str]] = []  # (name_kind, name, sample)
+    for kind, names in (("investor", investor_names), ("founder", founder_names)):
+        for name in names:
+            pat = _re.compile(r"\b" + _re.escape(name) + r"\b")
+            for s in all_strings:
+                if pat.search(s):
+                    leaks.append((kind, name, s[:120]))
     if leaks:
+        kind, name, sample = leaks[0]
         raise AssertionError(
-            f"coaching_payload privacy-scrub violation: {len(leaks)} investor name leak(s). "
-            f"First leak: investor_name={leaks[0][0]!r} found in payload string: {leaks[0][1]!r}. "
-            f"Context B dispatch contract requires investor names to be scrubbed; "
+            f"coaching_payload privacy-scrub violation: {len(leaks)} {kind} name leak(s). "
+            f"First leak: {kind}_name={name!r} found in payload string: {sample!r}. "
+            f"Context B dispatch contract requires investor + founder names to be scrubbed; "
             f"see agents/cap-table.md 'Privacy boundary'."
         )
 

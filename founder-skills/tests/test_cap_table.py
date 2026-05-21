@@ -2492,6 +2492,64 @@ class TestPrivacyAssertion:
         # word boundaries — should pass.
         compose_report._assert_coaching_payload_privacy_clean(payload, instruments=instruments)
 
+    def test_assertion_catches_founder_name_leak(self) -> None:
+        """H6: founder names from inputs.founders[].name must also fire the
+        assertion. The agent body promises both investor + founder scrubbing.
+        """
+        import compose_report  # type: ignore[import-not-found]
+
+        payload = {
+            "scenario_digest": [{"scenario_drivers": ["Alexander Hamilton-Jones diluted to 22%"]}],
+        }
+        instruments = self._instruments_with_investor("Sequoia Capital Operations")
+        inputs = {
+            "company_name": "TestCo",
+            "founders": [{"name": "Alexander Hamilton-Jones", "common_shares": 10_000_000}],
+        }
+        with pytest.raises(AssertionError, match="founder name leak"):
+            compose_report._assert_coaching_payload_privacy_clean(payload, instruments=instruments, inputs=inputs)
+
+    def test_assertion_company_name_carve_out(self) -> None:
+        """H6 carve-out: a founder whose name overlaps with the company name
+        (founder 'Acme Holdings Founder Trust' at 'Acme Holdings') must NOT
+        trigger the assertion. The company_name is intentionally in the
+        payload as engagement identity.
+        """
+        import compose_report  # type: ignore[import-not-found]
+
+        payload = {
+            "company_name": "Acme Holdings",
+            "scenario_digest": [{"label": "Series A at Acme Holdings"}],
+        }
+        instruments = self._instruments_with_investor("Sequoia Capital Operations")
+        inputs = {
+            "company_name": "Acme Holdings",
+            "founders": [{"name": "Acme Holdings Founder Trust", "common_shares": 10_000_000}],
+        }
+        # Founder name contains the company name → carve out, no leak.
+        compose_report._assert_coaching_payload_privacy_clean(payload, instruments=instruments, inputs=inputs)
+
+    def test_assertion_founder_becomes_investor_carve_out(self) -> None:
+        """H6 carve-out: a founder who also appears as an investor in the
+        SAFE list (common in Israeli market) is treated as an investor for
+        the purpose of this check. The check still fires on investor-side
+        leaks (if name appears in payload), but the founder-side check
+        is suppressed to avoid double-counting.
+        """
+        import compose_report  # type: ignore[import-not-found]
+
+        founder_investor_name = "Alice Mendelssohn-Rothschild"
+        payload = {
+            "scenario_digest": [{"scenario_drivers": ["Series A pre-money $20M"]}],
+        }
+        instruments = self._instruments_with_investor(founder_investor_name)
+        inputs = {
+            "company_name": "TestCo",
+            "founders": [{"name": founder_investor_name, "common_shares": 10_000_000}],
+        }
+        # Name in both lists; payload doesn't leak it → should pass.
+        compose_report._assert_coaching_payload_privacy_clean(payload, instruments=instruments, inputs=inputs)
+
 
 class TestEvidenceVerifierIntegration:
     """extract_instrument.py --verify --source-doc integration.
