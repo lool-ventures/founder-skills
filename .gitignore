@@ -12,6 +12,7 @@ docs/internal/
 uv.lock
 .worktrees/
 artifacts/
+cap-table-workspace/
 docs/plans/
 test-feedback-plugin/
 scripts/sync-test-repo.sh
