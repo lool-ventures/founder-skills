@@ -1,6 +1,6 @@
 ---
 name: cap-table
-description: "Models cap-table mechanics for pre-seed through Series A — SAFE / convertible-note conversion, priced-round dilution, option-pool top-ups, anti-dilution, and Israeli ↔ Delaware flips. Produces founder-facing scenarios with rule-pack-cited math and a counsel-handoff packet."
+description: "Models cap-table mechanics for founders modeling dilution before signing. Use when a founder shares a SAFE, convertible note, term sheet, option plan, Carta or Pulley export, or describes their cap-table — and asks to convert SAFEs/notes at a priced round, model option-pool top-ups, run anti-dilution, or evaluate an Israeli ↔ Delaware flip. Produces rule-pack-cited math, a founder-facing report, an interactive scenario explorer, and a counsel-handoff packet."
 when_to_use: >
   Use ONLY when the user has cap-table content (a signed or draft SAFE / note,
   a term sheet, a Carta or Pulley export, a freeform spreadsheet cap-table, or
@@ -15,8 +15,6 @@ user-invocable: true
 # Cap-Table Skill
 
 Model cap-table mechanics for founders so they understand what their term sheets, SAFEs, and convertible notes actually do to their ownership — before they sign. Produce rule-pack-cited math for SAFE conversion, convertible-note conversion, priced-round dilution, option-pool top-ups, anti-dilution, and Israeli ↔ Delaware flips. Every counsel-review item links back to a primary source (YC SAFE primer, NVCA model docs, Israeli Companies Law / Income Tax Ordinance, etc.). Tone is founder-first: a candid coach who's read the documents you can't be expected to read.
-
-> **Phase 1 status note:** This SKILL.md is a Phase-1 scaffold derived from the design doc at `docs/internal/2026-05-18-cap-table-skill-design.md` (rev17). Frontmatter, execution model, and Gotchas are complete and stable. Workflow step bash blocks are skeletal pointers pending the scripts in `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts/` (none of which exist yet). Implementers: read the design doc as the contract; this file is the runtime entry point.
 
 ## Skill Metadata
 
@@ -63,15 +61,13 @@ This skill runs **inline in the main thread** (not as a sub-agent). The main thr
 Each lane produces normalized `instruments.json` and/or `cap_state.json` plus an `extraction_audit.json` trail. The main thread picks the lane from the founder's input type.
 
 - **Lane 1 — Single instrument (PDF / DOCX).** Typical: 5–15 page SAFE, term sheet, convertible note, or option plan. Main thread reads via the Read tool (native PDF support, up to 20 pages per call; longer docs use `pages` parameter). Dispatches Context A `INSTRUMENT_EXTRACTION` with document content inlined; pipes returned JSON through `extract_instrument.py`. User confirmation via `AskUserQuestion` before math runs.
-- **Lane 2 — Carta / Pulley export (CSV / XLSX).** Typical: multi-sheet XLSX (Securities, Convertibles, Stakeholders). `extract_cap_table.py` detects format from sheet-name + column-header fingerprint; maps known columns → canonical schema. User confirms ambiguous mappings. **Phase 1 prerequisite:** verify exact Carta and Pulley column conventions (see Phase 1 open questions).
+- **Lane 2 — Carta / Pulley export (CSV / XLSX).** Typical: multi-sheet XLSX (Securities, Convertibles, Stakeholders). `extract_cap_table.py` detects format from sheet-name + column-header fingerprint; maps known columns → canonical schema. User confirms ambiguous mappings. See `references/carta-pulley-mapping.md` for the per-vendor column-mapping table.
 - **Lane 3 — Freeform spreadsheet (founder's Excel).** Arbitrary structure. `extract_cap_table.py --mode=freeform` extracts cells + sheet structure. Dispatches Context A `SPREADSHEET_STRUCTURE_DETECTION` to identify cell semantics. Validation gate enforces per-field confidence before commit.
 - **Lane 4 — Structured JSON paste / conversational.** Founder pastes pre-built JSON or describes their cap-table in chat. Direct heredoc into `inputs.json` / `instruments.json`; still flows through `extract_cap_table.py --mode=validate` for schema enforcement.
 
 ## Available Scripts
 
-> **Phase 1 status:** None of these scripts exist yet. The list is the file-plan contract — implementers create them in Phase 1 per the design doc §13. Cross-reference design doc §5 (scenario types), §6 (rule-pack consumption), §9 (pipeline), and §11 (artifact schemas) for each script's behavior contract.
-
-All scripts will live at `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts/`:
+All scripts live at `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts/`:
 
 - **`extract_instrument.py`** — Validates Lane-1 sub-agent output against the per-instrument schema; anti-hallucination gate (per-field confidence; "did you find this verbatim in the document").
 - **`extract_cap_table.py`** — Lane-2/3/4 cap-table extraction; modes: `carta`, `pulley`, `freeform`, `validate`. Emits `cap_state.json` + `instruments.json` + `extraction_audit.json`.
@@ -86,10 +82,9 @@ All scripts will live at `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts/`:
 - **`flip_scenario.py`** — Israeli ↔ Delaware flip mechanics (v0.1: share-for-share 1:1 only — see Gotcha #7).
 - **`counsel_packet.py`** — Extracts counsel-review items from `rule_audit.json` into a standalone counsel-handoff packet.
 - **`compose_report.py`** — Assembles all artifacts into `report.md` + `report.json` (with embedded `coaching_payload` block). Cross-artifact validation; emits per-uuid coaching insertion marker.
-- **`flip_compose.py`** — Only in flip-focused mode: generates `flip_impact.md`.
 - **`visualize.py`** — Generates `report.html` (self-contained, vendored Chart.js + inline SVG).
-- **`explore.py`** — Generates `explorer.html` (polished interactive scenario tool; demo/video-friendly; ~2000 lines).
-- **`_dispatch_json.py`** — Copy-pasted from existing skills; tolerant JSON extraction for Context A returns.
+- **`explore.py`** — Generates `explorer.html` (polished interactive scenario tool; demo/video-friendly).
+- **`_dispatch_json.py`** — Tolerant JSON extraction for Context A returns.
 
 Also available from `${CLAUDE_PLUGIN_ROOT}/scripts/` (shared):
 
@@ -105,8 +100,8 @@ Read as needed from `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/references/`:
 - **`cap-table-reference.md`** — Domain primer: SAFE mechanics, note mechanics, anti-dilution formulas, §102/3(i)/85A/104H/103K, IIA royalty mechanics, BBWA formula, counsel-review semantics. **Read before implementing any math producer.**
 - **`cap-table-rules.json`** (v0.2.8+) — The executable reference layer; 44 rules across 9 domains with formulas, inputs, outputs, source citations, date_window semantics, behavior_target (`script_formula` / `validation_rule` / `warning_rule` / `counsel_review_flag` / `benchmark` / `source_note`). Every math producer loads this at start.
 - **`cap-table-rules.schema.json`** — JSON Schema for the rule pack (Draft 2020-12). The schema description on `counsel_review` is the authoritative definition of "reliance boundary, not confidence score" (see Gotcha #9).
-- **`artifact-schemas.md`** — Phase 1 deliverable: JSON Schemas for every artifact (`inputs.json`, `instruments.json`, `cap_state.json`, `scenarios.json`, `rule_audit.json`, `counsel_packet.json`, `report.json`). Replaces the `{...}` placeholders in design doc §11.
-- **`carta-pulley-mapping.md`** — Phase 1 deliverable: per-vendor column-mapping table for Lane 2 extraction. Until this exists, Lane 2 falls back to Lane 3.
+- **`schemas/`** — JSON Schemas (Draft 2020-12) for every artifact: `inputs.schema.json`, `instruments.schema.json`, `cap_state.schema.json`, `scenarios.schema.json`, `rule_audit.schema.json`, `counsel_packet.schema.json`. Each producer script validates against the matching schema.
+- **`carta-pulley-mapping.md`** — Per-vendor column-mapping table for Lane 2 extraction.
 
 ## Artifact Pipeline
 
@@ -128,7 +123,6 @@ Every cap-table engagement deposits structured JSON artifacts into a working dir
 | 12 | `report.html` | `visualize.py` |
 | 13 | `explorer.html` | `explore.py` |
 | 14 | `## Coaching Commentary` appended to `report.md` | Context B sub-agent (POST_COMPOSE_COACHING) |
-| 15 (flip-focused only) | `flip_impact.md` | `flip_compose.py --write-md` |
 
 **Rules:**
 - Deposit each artifact before proceeding to the next step.
@@ -226,126 +220,18 @@ python3 "$SCRIPTS/extract_cap_table.py" --mode=validate --dir "$REVIEW_DIR"
 
 ### Step 3: Ingest Instruments → `instruments.json`
 
-Route by input format:
+Route by input format. Each lane has a dedicated dispatch + validation protocol — read the matching lane reference before executing.
 
-#### Lane 1: PDF / DOCX (single instrument)
+| Input format | Lane | Reference |
+|---|---|---|
+| Single PDF / DOCX (SAFE, term sheet, note, option plan) | 1 | [`references/lanes/lane-1-pdf-docx.md`](references/lanes/lane-1-pdf-docx.md) |
+| Carta / Pulley multi-sheet XLSX export | 2 | [`references/lanes/lane-2-carta-pulley.md`](references/lanes/lane-2-carta-pulley.md) |
+| Freeform founder spreadsheet (arbitrary structure) | 3 | [`references/lanes/lane-3-freeform.md`](references/lanes/lane-3-freeform.md) |
+| Structured JSON paste or conversational reconstruction | 4 | [`references/lanes/lane-4-structured.md`](references/lanes/lane-4-structured.md) |
 
-Main thread `Read`s the document (Anthropic PDF reader, up to 20 pages per call). Then dispatch Context A `INSTRUMENT_EXTRACTION` via the `Task` tool:
+**Verification stack** (Lane 1 and any other lane that piped through `extract_instrument.py`): forward `evidence_verifier.py` → `invariant_checker.py` → `cross_checker.py` → optional `backward_verifier.py`. All default-on; see the Lane 1 reference for the receipt schema, `attention_needed_fields` semantics, and when to run backward verification.
 
-**Dispatch prompt template:**
-
-```
-CONTEXT: INSTRUMENT_EXTRACTION
-REVIEW_DIR: <absolute path to REVIEW_DIR>
-RUN_ID: <RUN_ID>
-
-You are the cap-table agent dispatched in Context A (INSTRUMENT_EXTRACTION).
-The main thread has provided the document content below. Extract the
-structured terms per your agent body's Context A specification.
-
-Document content:
-<paste the document text — for PDFs, this is what the Read tool returned>
-
-Return JSON only — exactly the {instrument_type, fields, confidence, ambiguities}
-shape. Do not write artifacts to disk. Do not invoke producer scripts.
-```
-
-**After the sub-agent returns:** apply the tolerant JSON extraction protocol to obtain the structured JSON. Then pipe through `extract_instrument.py` which validates, runs evidence verification + invariant checks against the source doc, and appends to `instruments.json`:
-
-```bash
-cat <<'EXTRACT_EOF' | python3 "$SCRIPTS/extract_instrument.py" \
-  --instruments "$REVIEW_DIR/instruments.json" --run-id "$RUN_ID" --pretty \
-  --source-doc "$DOC_PATH"
-<JSON extracted from sub-agent reply>
-EXTRACT_EOF
-```
-
-`--source-doc <path>` is the only verification flag you need to pass. **Evidence verification, evidence-verification blocking, and invariant checking are all default ON.** Use `--no-verify` / `--no-verify-blocking` / `--no-invariants` to opt out of any of them (rare — typically only for tests or for documents the user explicitly marks as unverifiable).
-
-- **Evidence verification**: checks each extracted value against the source document and rejects extractions where claimed values don't appear in the source — the canonical hallucination pattern. Calibrated against the private eval set at 3.6% FPR / 100% TPR on verifiable docs.
-- **Invariant checking**: per-field real-world bounds (purchase_amount ≤ $50M for SAFEs, discount_multiplier ∈ [0.5, 1.0], etc.) plus cross-field math invariants (options_granted ≤ total_authorized; SAFE pre/post caps mutually exclusive). Hard math impossibilities block; soft bounds warn-only.
-
-If `extract_instrument.py` exits non-zero:
-- **Validation errors** (`errors` in stderr): show via `AskUserQuestion` and re-extract.
-- **Evidence verification rejection** (`rejection` block in receipt with `failed_fields`): the verifier found values that don't appear in the source doc. Re-dispatch the sub-agent with the `retry_hint` text from the rejection, asking it to re-check those specific fields against the document. If the same field fails verification on a second pass, treat as `low-confidence` and present to the founder via `AskUserQuestion` for confirmation.
-- **Invariant hard violation** (`invariant_check.n_hard_violations > 0`, stderr mentions `invariant_checker`): a math impossibility was detected (e.g., both pre_money_valuation_cap and post_money_valuation_cap set on the same SAFE). Show the violation reasons to the founder and re-extract.
-
-**`attention_needed_fields` in the receipt** is the union of (a) low-confidence fields, (b) fields that triggered soft invariant warnings (out-of-range values), and (c) fields the evidence verifier marked unverifiable. The dispatching agent should escalate these via `AskUserQuestion` AND, for high-stakes extractions, dispatch backward verification on this exact field subset (see "Optional: backward verification" below). This is the lightweight hook for selective backward-verification dispatch — no need to backward-verify every field, just the ones already flagged for attention.
-
-If the source document is image-only or DocuSign-overlay (verifier returns `overall_status: "unverifiable_doc"` or `verifier_blind_demoted`), verification cannot run — surface this to the founder and ask for explicit confirmation of the extracted values before commit.
-
-If the extraction surfaced ambiguities or low-confidence fields, present them via `AskUserQuestion` for confirmation before proceeding.
-
-##### Optional: backward verification (WARN-mode)
-
-After forward verification passes, you may optionally run backward verification — an independent re-extraction by a fresh sub-agent that catches semantic-confusion errors (right value in source but wrong field, e.g. "Purchase Amount" vs "Aggregate Purchase Amount of all Safes"; pre-money vs post-money form classification). This is separate from forward verification, which catches outright hallucinations.
-
-```bash
-# Phase 1: emit per-field re-extraction prompts
-python3 "$SCRIPTS/backward_verifier.py" --phase=prompt \
-  --extraction "$EXTRACTION_JSON" --source-doc "$DOC_PATH" > /tmp/bv_prompts.json
-
-# Phase 2: for each prompt, spawn an independent Task sub-agent.
-# Collect their {field, value, evidence_quote} responses into /tmp/bv_responses.json
-# (wrap as {"responses": [...]}).
-
-# Phase 3: score responses against the original extraction
-cat /tmp/bv_responses.json | python3 "$SCRIPTS/backward_verifier.py" --phase=score \
-  --extraction "$EXTRACTION_JSON" -o /tmp/bv_report.json --pretty
-```
-
-Backward verification is **informational (WARN-mode)** by default — disagreements between original and re-extracted values surface in the report but do NOT block. Present disagreements to the founder via `AskUserQuestion`. Calibration against the canonical eval set found ~7% disagreement rate, dominated by genuinely ambiguous form-classification cases (pre-money vs post-money) — too noisy for auto-rejection but valuable as a confirmation prompt.
-
-Recommended trigger: run backward verification on **high-stakes extractions** (priced rounds, $1M+ investments, or when forward verification was marginal — high `fuzzy_ratio` / many `unverifiable` fields).
-
-#### Lane 2: Carta / Pulley XLSX export
-
-```bash
-python3 "$SCRIPTS/extract_cap_table.py" --mode=carta --xlsx "$XLSX_PATH" \
-  -o "$REVIEW_DIR/extraction_audit.json" --pretty
-```
-
-If the vendor mapping is not yet populated in `references/carta-pulley-mapping.md`, the script will route to Lane 3 (freeform).
-
-#### Lane 3: Freeform spreadsheet
-
-The Python helper extracts the cell grid, then dispatch Context A `SPREADSHEET_STRUCTURE_DETECTION`:
-
-**Dispatch prompt template:**
-
-```
-CONTEXT: SPREADSHEET_STRUCTURE_DETECTION
-REVIEW_DIR: <absolute path>
-RUN_ID: <RUN_ID>
-
-You are the cap-table agent dispatched in Context A (SPREADSHEET_STRUCTURE_DETECTION).
-Sheet structure + cell grid:
-
-<paste the sheet data — sheet name, dimensions, cell values per row>
-
-Return JSON only — the {blocks: [{block_type, sheet, cell_range,
-column_role_map, confidence, evidence, ambiguities}]} shape.
-Do not write artifacts.
-```
-
-**After the sub-agent returns:** validate via `extract_cap_table.py --mode=freeform`:
-
-```bash
-cat <<'FREEFORM_EOF' | python3 "$SCRIPTS/extract_cap_table.py" \
-  --mode=freeform -o "$REVIEW_DIR/extraction_audit.json" --pretty
-<JSON extracted from sub-agent reply>
-FREEFORM_EOF
-```
-
-Present low_confidence_blocks + ambiguities to the founder via `AskUserQuestion`. Once confirmed, write the founder-confirmed `instruments.json` directly via heredoc (Phase 1 follow-up: automate the cell-map → JSON conversion).
-
-#### Lane 4: Structured JSON paste / conversational
-
-Either (a) the founder pasted JSON — write directly to `$REVIEW_DIR/instruments.json` via heredoc, OR (b) the founder described their cap-table conversationally — main thread asks targeted `AskUserQuestion`s to build the structure, then heredocs the result. Validate with:
-
-```bash
-python3 "$SCRIPTS/extract_cap_table.py" --mode=validate --dir "$REVIEW_DIR"
-```
+After Step 3 completes, `instruments.json` is committed and the run proceeds to Step 4.
 
 ### Step 4: Compute Cap State → `cap_state.json`
 
@@ -506,17 +392,6 @@ Stop after returning JSON. Do not narrate.
 
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol to obtain the success/blocked payload. If `status == "blocked"`, stop and report the reason. If `status == "complete"`, present `report_path` to the founder.
 
-### Step 11.5 (flip-focused mode only): Generate `flip_impact.md`
-
-```bash
-if [ "$MODE" = "flip_focused" ]; then
-  python3 "$SCRIPTS/flip_compose.py" --dir "$REVIEW_DIR" --run-id "$RUN_ID" \
-    --write-md "$REVIEW_DIR/flip_impact.md"
-fi
-```
-
-(Note: `flip_compose.py` is a Phase 1 follow-up — for v0.1, the flip scenario data is rendered as a section in `report.md` per the standard pipeline.)
-
 ### Step 12: Deliver Artifacts
 
 Copy human-readable deliverables to workspace root with company-slug prefix:
@@ -527,11 +402,11 @@ cp "$REVIEW_DIR/report.md"     "${SLUG_TITLE}_Cap_Table.md"
 cp "$REVIEW_DIR/report.html"   "${SLUG_TITLE}_Cap_Table.html"
 cp "$REVIEW_DIR/explorer.html" "${SLUG_TITLE}_Cap_Table_Explorer.html"
 cp "$REVIEW_DIR/counsel_packet.md" "${SLUG_TITLE}_Counsel_Packet.md"
-[ "$MODE" = "flip_focused" ] && [ -f "$REVIEW_DIR/flip_impact.md" ] && \
-  cp "$REVIEW_DIR/flip_impact.md" "${SLUG_TITLE}_Flip_Impact.md"
 
 rm -rf "$REVIEW_DIR/.staging" 2>/dev/null || true
 ```
+
+In flip-focused mode, the flip-impact narrative is rendered as a dedicated section inside `report.md` by the standard compose pipeline — no separate file.
 
 The structured-artifact set (inputs.json, instruments.json, cap_state.json, scenarios.json, rule_audit.json, counsel_packet.json, report.json) stays inside `$REVIEW_DIR` for cross-skill consumption and archival.
 
@@ -583,7 +458,7 @@ A `yc_postmoney_cap` or `cap_plus_discount` SAFE standalone (no priced round) CA
 
 ### 11. Carta and Pulley export column conventions differ
 
-Both ship multi-sheet XLSX exports, but the sheet names, column ordering, and convertible-instrument representations are NOT interchangeable. Phase 1 verification produces an explicit per-vendor column-mapping table in `references/carta-pulley-mapping.md`; until that table exists, the freeform-spreadsheet lane (Lane 3) is the fallback. Don't assume "it looks like Carta" — check the sheet name fingerprint.
+Both ship multi-sheet XLSX exports, but the sheet names, column ordering, and convertible-instrument representations are NOT interchangeable. `references/carta-pulley-mapping.md` carries the per-vendor column-mapping table; Lane 2 detects the vendor from the sheet-name fingerprint and routes accordingly. If the fingerprint doesn't match, fall back to Lane 3 (freeform). Don't assume "it looks like Carta" — verify the fingerprint.
 
 ## Main-Thread Return
 
@@ -592,17 +467,7 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 - The path to `{Company}_Cap_Table.md` in the workspace root — the primary narrative deliverable.
 - The path to `{Company}_Cap_Table_Explorer.html` — the polished interactive scenario tool.
 - The path to `{Company}_Counsel_Packet.md` — the counsel-handoff packet.
-- (Flip-focused mode only) The path to `{Company}_Flip_Impact.md`.
 - The structured success payload from the Context B sub-agent (Step 11): `{status, review_dir, report_path, scenarios_modeled, counsel_review_count, completeness_breakdown}`.
 
 **Do NOT inline `report_markdown` in the assistant message.** The founder reads the file via the path. (Same rationale as deck-review #13: avoids ~25 KB round-trip through the parent context.)
-
-## Phase 1 Open Verifications
-
-These are explicitly deferred to Phase 1 implementation (not unresolved design questions):
-
-1. **Carta + Pulley export column conventions** — produce `references/carta-pulley-mapping.md`. Until done, Lane 2 falls back to Lane 3 (freeform).
-2. **§102 plan-type canonical naming** — pick `section_102_cg` / `section_102_oi` / `section_3i` consistently across `instruments.option_grants[].plan_type`, `cap_state.option_pool.plan_type`, and `inputs.json`. Design doc §14 flags this.
-3. **`applies_when` predicate model** — Codex round 16 P3 / round 17 prior gap. Decide: (a) add structured `applies_when_match` field to the rule pack v0.3, or (b) keep prose `applies_when` strings and implement per-rule matchers in `rule_audit.py`. Recommendation: (b) for v0.1 (fewer moving parts; rule pack stays stable). Either way, `applies_when_matched: bool` in the gating block needs a deterministic computation path.
-4. **JSON Schema files for every artifact** — replace `{...}` placeholders in design doc §11 with actual `.schema.json` files referenced from `references/artifact-schemas.md`. Phase 1 schema-fileification step.
 5. **`COACHING_SKILLS` registry wiring** — add `"cap-table"` to `tests/test_compose_invariants.py::COACHING_SKILLS`; add entries to `compose_invocations.py` (`_COMPOSE_FLAGS`, `_RUN_ID_MUTATION_TARGET`); populate fixtures at `founder-skills/tests/fixtures/cap-table/`. Without this, the cross-skill `coaching_payload` contract is not mechanically enforced for cap-table.

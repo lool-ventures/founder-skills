@@ -1521,7 +1521,7 @@ class TestPreBaselinePatches:
 
 
 class TestEvidenceVerifierIntegration:
-    """Sprint 2b: extract_instrument.py --verify --source-doc integration.
+    """extract_instrument.py --verify --source-doc integration.
 
     Tests the wiring of evidence_verifier into the extraction validator.
     Verification is INFORMATIONAL by default; --verify-blocking flips to gating.
@@ -1659,7 +1659,7 @@ class TestEvidenceVerifierIntegration:
         self, basic_instruments_path: Any, safe_doc_text: Any
     ) -> None:
         """A SAFE with a hallucinated cap (cap=$99M when doc says $20M) is caught
-        by value_in_doc check. Sprint 2b: informational — receipt records the
+        by value_in_doc check. earlier work: informational — receipt records the
         failure but extraction still exits 0."""
         extraction = {
             "instrument_type": "safe",
@@ -1706,7 +1706,7 @@ class TestEvidenceVerifierIntegration:
     def test_verify_blocking_exits_nonzero_on_hallucination(
         self, basic_instruments_path: Any, safe_doc_text: Any
     ) -> None:
-        """Sprint 2c preview: --verify-blocking exits 1 on value_in_doc failures."""
+        """earlier work preview: --verify-blocking exits 1 on value_in_doc failures."""
         extraction = {
             "instrument_type": "safe",
             "fields": {
@@ -2582,9 +2582,7 @@ class TestPipelineE2E:
             assert "report_markdown" in rpt
             assert "coaching_payload" in rpt
             cp = rpt["coaching_payload"]
-            # Sprint 6c bumped schema_version → v0.5.0-cap-table (v0.4.2 still
-            # accepted on input for backward compat per compose_report COMPAT_VERSIONS)
-            assert cp["schema_version"] in ("v0.4.2-cap-table", "v0.5.0-cap-table")
+            assert cp["schema_version"] == "v0.5.0-cap-table"
             assert cp["company_name"] == "Acmecorp"
             assert cp["scenarios_modeled"] == 2
             # Per rev15: nullable founder_impact present for full scenarios, null for structural_only

@@ -112,17 +112,17 @@ Rule-pack-driven cap-table math. Every math producer cites a `rule_id` from `cap
 - **`rule_audit.py`** — Two-phase (`--phase=pre_math` / `--phase=post_math`); scope-aware apply contract (`legal_tax_applicability` / `benchmark_freshness` / `not_applicable`); 5 mutually exclusive statuses + 2 near-edge overlays
 - **`run_scenario.py`** — Top-level scenario orchestrator (routes by `scenario.type`)
 - **`counsel_packet.py`** — Counsel-handoff packet (json + md); standalone deliverable
-- **`compose_report.py`** — Assembles report.md + report.json (with embedded `coaching_payload` block, schema_version `v0.5.0-cap-table` as of Sprint 6c; v0.4.2 still accepted on input via `COMPAT_VERSIONS`)
+- **`compose_report.py`** — Assembles report.md + report.json (with embedded `coaching_payload` block, schema_version `v0.5.0-cap-table`)
 - **`visualize.py`** — Self-contained `report.html` (inline SVG donut, no CDN)
 - **`explore.py`** — Self-contained `explorer.html` (vanilla JS interactive scenario picker)
-- **`extract_instrument.py`** — Lane-1 anti-hallucination validator (sub-agent does extraction; this validates returned JSON, normalizes `discount_multiplier` per Gotcha #3). Sprint 2b added `--verify` / `--verify-blocking` / `--source-doc` flags for evidence-verification wiring; Sprint 2c added ~30-field synthesized skip list.
+- **`extract_instrument.py`** — Lane-1 anti-hallucination validator (sub-agent does extraction; this validates returned JSON, normalizes `discount_multiplier` per Gotcha #3). Supports `--verify` / `--verify-blocking` / `--invariants` / `--cross-check` / `--source-doc` flags, all default-on; uses `--no-<flag>` to opt out. Skips evidence checks on a ~30-field synthesized-fields list (form, jurisdiction, derived counts, etc.).
 - **`extract_cap_table.py`** — Lane-2/3/4 (validate mode + Carta/Pulley stub + freeform Context-A output validator)
-- **`evidence_verifier.py`** — Sprint 2 forward verifier. Three-layer check (quote_in_doc / value_in_quote / value_in_doc) catching HALLUCINATIONS. 3.6% FPR / 100% TPR.
-- **`backward_verifier.py`** — Sprint 3 backward verifier (two-phase `--phase=prompt`/`--phase=score` CLI). Catches SEMANTIC CONFUSION via fresh-sub-agent re-extraction. WARN-mode default.
-- **`invariant_checker.py`** — Sprint 4 real-world-bounds checker. Per-field ranges + cross-field math invariants. 0% FPR / 63% TPR.
-- **`cross_checker.py`** — Sprint 5d demote-only confidence modulator when multiple extractors disagree.
-- **`_normalize.py`** — Sprint 5b shared text-normalization primitives (normalize_text, compact_form, numeric_tokens, date_tokens).
-- **`extractors/`** — Sprint 5c scaffolding module: `FieldExtraction`, `SourceSpan`, `ExtractionContext`, `ExtractorProtocol` types for span-preserving extraction.
+- **`evidence_verifier.py`** — Forward verifier. Three-layer check (quote_in_doc / value_in_quote / value_in_doc) catching HALLUCINATIONS. 3.6% FPR / 100% TPR on the private eval set.
+- **`backward_verifier.py`** — Backward verifier (two-phase `--phase=prompt`/`--phase=score` CLI). Catches SEMANTIC CONFUSION via fresh-sub-agent re-extraction. WARN-mode default.
+- **`invariant_checker.py`** — Real-world-bounds checker. Per-field ranges + cross-field math invariants. 0% FPR / 63% TPR.
+- **`cross_checker.py`** — Demote-only confidence modulator when multiple extractors disagree.
+- **`_normalize.py`** — Shared text-normalization primitives (normalize_text, compact_form, numeric_tokens, date_tokens).
+- **`extractors/`** — Span-preserving extraction module: `FieldExtraction`, `SourceSpan`, `ExtractionContext`, `ExtractorProtocol` types + 5 SAFE backstop extractors (`extractors/safe/`).
 
 ## Competitive Positioning Scripts
 

@@ -1,4 +1,4 @@
-"""Unit tests for invariant_checker.py — Sprint 4a."""
+"""Unit tests for invariant_checker.py"""
 
 from __future__ import annotations
 

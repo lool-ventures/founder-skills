@@ -1,4 +1,4 @@
-"""Unit tests for the extractors/ types module — Sprint 5c."""
+"""Unit tests for the extractors/ types module"""
 
 from __future__ import annotations
 

@@ -1,0 +1,48 @@
+{
+  "skill_name": "cap-table",
+  "_note": "Functional eval prompts for the cap-table skill. Each entry pairs a realistic founder-style prompt with the expected behavior. Use with skill-creator-plus' eval-runner (paid SDK runs). Assertions block left for the workspace to populate when an eval iteration runs.",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I just got a YC post-money cap SAFE from a16z (file attached). The cap is $20M and there's no discount. Can you walk me through what my ownership looks like if this converts at our next round?",
+      "expected_output": "Skill engages Lane 1 (PDF extraction via INSTRUMENT_EXTRACTION sub-agent), forward-verifies extracted values against the source doc, runs cap-implied ownership math, and produces a report with cap_implied_ownership + safe_price. Founder is asked to confirm any low-confidence fields. No post-financing table fabricated (Gotcha #10: cap-implied only).",
+      "files": ["fixtures/safe_post_money_cap_a16z.pdf"],
+      "use_case": "Lane 1 + standalone cap SAFE; cap-implied output only"
+    },
+    {
+      "id": 2,
+      "prompt": "We have three SAFEs outstanding: $500k at a $10M cap, $1M at a $15M cap, and $500k uncapped MFN. Planning to raise $5M at a $20M pre-money Series A with a 10% post-money pool refresh. How does my founder ownership shake out?",
+      "expected_output": "Skill runs a priced_round scenario coupling all three SAFEs + pool top-up + new money. Resolves MFN chain. Reports founders' pre-financing % → post-financing %, breaking out the dilution by source (SAFE conversion / new money / pool refresh). Comparison with and without the pool top-up is helpful.",
+      "files": [],
+      "use_case": "Lane 4 conversational; priced_round with stacked SAFEs + pool + MFN"
+    },
+    {
+      "id": 3,
+      "prompt": "Term sheet says 10% pool refresh on a pre-money basis. We're raising $4M at $16M pre. I'm one of two founders, each at 35%, with 10% already in the pool and 20% in early SAFEs. How much does the pool refresh cost me personally?",
+      "expected_output": "Skill runs a priced_round scenario, isolates the pool top-up impact via target_basis='pre_money' (founders absorb), reports the founder-specific delta in percentage points attributable to the refresh (vs. counterfactual with no refresh or post-money refresh). Honest framing: 'this is the hidden Series A tax.'",
+      "files": [],
+      "use_case": "Option-pool refresh analysis; target_basis comparison"
+    },
+    {
+      "id": 4,
+      "prompt": "My convertible note ($500k, 4% interest, $8M cap, 20% discount, maturity 2026-09-30) matures in 6 weeks and we haven't raised. What are my options? The default treatment in the doc is 'convert at cap'.",
+      "expected_output": "Skill runs a note_conversion scenario, enumerates all 7 branches (cap_conversion, discount_only, maturity_repay, maturity_extend, maturity_convert, threshold_not_met, override) with which are currently reachable. Surfaces the maturity_default_treatment='convert_at_cap' branch as the path of least resistance. Counsel-review items flagged for any branch requiring investor consent or amendment.",
+      "files": [],
+      "use_case": "Note maturity scenario; full 7-branch enumeration"
+    },
+    {
+      "id": 5,
+      "prompt": "We're Israeli (Ltd), have IIA grants from 2023, ~30 holders. US investor wants us to flip to Delaware before the Series A. How bad is this and what do I need counsel for?",
+      "expected_output": "Skill confirms mode=flip_focused via AskUserQuestion, runs flip_scenario (1:1 share-for-share only per Gotcha #7), and produces flip_specifics showing IIA implications (notice/consent required), §102 trustee considerations, holder count to remap, and counsel_review items. Honest about v0.1 scope limit (not modeling exchange ratios other than 1:1).",
+      "files": [],
+      "use_case": "Flip scenario; IIA + §102; counsel handoff"
+    },
+    {
+      "id": 6,
+      "prompt": "Here's my cap-table spreadsheet (attached). It's not Carta or anything fancy — I built it in Excel. Can you sanity-check it and tell me what we have?",
+      "expected_output": "Skill engages Lane 3 (freeform): extracts cell grid, dispatches SPREADSHEET_STRUCTURE_DETECTION sub-agent to identify blocks (founders / preferred / pool / SAFEs / notes). Low-confidence blocks surfaced for founder confirmation via AskUserQuestion. Once confirmed, instruments.json is committed and cap_state.json is computed. Honest reporting on which blocks were ambiguous.",
+      "files": ["fixtures/freeform_cap_table.xlsx"],
+      "use_case": "Lane 3 freeform spreadsheet; human-in-the-loop block confirmation"
+    }
+  ]
+}

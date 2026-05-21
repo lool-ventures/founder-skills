@@ -1,4 +1,4 @@
-"""Unit tests for evidence_verifier.py — Sprint 2a."""
+"""Unit tests for evidence_verifier.py"""
 
 from __future__ import annotations
 
@@ -236,7 +236,7 @@ class TestVerifyExtractionEndToEnd:
 
 
 class TestNonCanonicalEnumFixture:
-    """Sprint 2a doesn't enforce enum constraints (that's Sprint 1.7's job
+    """Doesn't enforce enum constraints (that's earlier work's job
     via extract_instrument.py's validate_safe), but the fixture should still
     be loadable and the canonical/non_canonical distinction should be clear."""
 

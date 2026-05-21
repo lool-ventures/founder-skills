@@ -1,4 +1,4 @@
-"""Sprint 6a — sanity tests for the structurally-mutated synthetic eval fixtures.
+"""earlier work — sanity tests for the structurally-mutated synthetic eval fixtures.
 
 These tests verify the fixtures are loadable, paired correctly, and reach
 the verification pipeline cleanly. They do NOT spawn LLM sub-agents

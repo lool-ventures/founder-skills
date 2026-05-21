@@ -1,6 +1,6 @@
 {
   "fixture_id": "cap_table_eval_hallucination_template_blank",
-  "description": "Regression target for Sprint 2's evidence_verifier.py. Captures the archetypal template-blank-fill hallucination: a model fills a blank placeholder in a draft term sheet with a plausible default value (e.g., 45 days) instead of recognizing the absence. Anonymized from a real audit case (Sprint 1.7).",
+  "description": "Regression target for the evidence_verifier. Captures the archetypal template-blank-fill hallucination: a model fills a blank placeholder in a draft term sheet with a plausible default value (e.g., 45 days) instead of recognizing the absence. Anonymized from a real audit case.",
   "failure_class": "template_blank_fill",
   "instrument_type": "term_sheet",
   "field": "exclusivity_days",
@@ -34,6 +34,6 @@
     "original_company": "<redacted from public fixture>",
     "replacement": "AcmeCorp",
     "fixture_created_at": "2026-05-20",
-    "audit_ref": "Sprint 1.7 / AUDIT_FINDINGS.md"
+    "audit_ref": "eval-set audit"
   }
 }

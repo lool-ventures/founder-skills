@@ -1,4 +1,4 @@
-"""Unit tests for cross_checker.py — Sprint 5d."""
+"""Unit tests for cross_checker.py"""
 
 from __future__ import annotations
 

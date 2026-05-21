@@ -1,4 +1,4 @@
-"""Sprint 6b — eval-harness regression tests with EVAL_DATA_PATH override.
+"""Eval-harness regression tests with EVAL_DATA_PATH override.
 
 The harness can run against either:
   - The public synthetic fixtures (default; CI-safe, always available)
@@ -145,7 +145,7 @@ class TestPrivateHarness:
             doc_text = _load_doc_text(src)
             report = verify_extraction(label, doc_text)
             for r in report.per_field:
-                # Skip synthesized fields per Sprint 2c calibration
+                # Skip synthesized fields per calibration
                 if r.field_name in {
                     "form",
                     "instrument_subtype",

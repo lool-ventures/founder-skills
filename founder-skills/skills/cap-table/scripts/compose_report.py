@@ -14,15 +14,12 @@ Per the cross-skill invariant tested in tests/test_compose_invariants.py:
 report.json must contain `report_markdown` AND `coaching_payload` as
 top-level keys.
 
-Schema version: `v0.5.0-cap-table`. v0.5.0 adds the evidence-verification
-+ invariant-check fields to the per-instrument shape. Backward-compatible
-read: consumers reading v0.4.2 inputs MUST treat the new fields
-(evidence_verification, backward_verification, invariant_checks) as
-optional and fall back to v0.4.2 semantics when absent. The compat window
-accepts both versions on input; emits v0.5.0 on output.
+Schema version: `v0.5.0-cap-table`. Includes the per-instrument
+verification-output fields (evidence_verification, backward_verification,
+invariant_checks).
 
-Per Codex rev17 P2-8: math_provenance uses source_type + (rule_id +
-rule_pack_version | source_ref) — see scenarios.json schema.
+math_provenance uses source_type + (rule_id + rule_pack_version |
+source_ref) — see scenarios.json schema.
 """
 
 from __future__ import annotations
@@ -35,8 +32,6 @@ import uuid
 from typing import Any
 
 SCHEMA_VERSION = "v0.5.0-cap-table"
-SCHEMA_VERSION_COMPAT_FLOOR = "v0.4.2-cap-table"  # accepts inputs at this version too
-COMPAT_VERSIONS = (SCHEMA_VERSION_COMPAT_FLOOR, SCHEMA_VERSION)
 
 # Required canonical artifacts per design §3.6
 REQUIRED_ARTIFACTS = [

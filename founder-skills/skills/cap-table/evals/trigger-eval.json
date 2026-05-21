@@ -1,0 +1,23 @@
+[
+  {"query": "got a SAFE from a16z today, can you walk me through the dilution?", "should_trigger": true, "_note": "typical SAFE-modeling prompt"},
+  {"query": "here's my carta export — what does the pre-money look like?", "should_trigger": true, "_note": "Lane 2 trigger"},
+  {"query": "we have 4 SAFEs outstanding totaling $2.3M, planning to raise a $4M seed at $12M pre — how much do we give up?", "should_trigger": true, "_note": "Lane 4 conversational, priced-round"},
+  {"query": "our 2022 KIRA matures in 6 weeks and we haven't raised — what happens to the investor?", "should_trigger": true, "_note": "note maturity"},
+  {"query": "thinking about flipping our Israeli holdco to Delaware before raising the A. We have IIA money. Is this a nightmare?", "should_trigger": true, "_note": "flip scenario"},
+  {"query": "I keep hearing about 'post-money cap' vs 'pre-money cap' on safes — got one of each in my docs, want to model what happens at series a", "should_trigger": true, "_note": "SAFE form discrimination + modeling"},
+  {"query": "the term sheet says 10% pool refresh on a pre-money basis. how bad is that for me?", "should_trigger": true, "_note": "pool target_basis analysis"},
+  {"query": "we have a 1x non-participating preferred with broad-based weighted average anti-dilution. our next round might be a down round — what triggers?", "should_trigger": true, "_note": "anti-dilution"},
+  {"query": "I'm a solo founder with $1M in SAFEs. Pretty sure I'm going to get crushed at Series A. Can you show me the damage?", "should_trigger": true, "_note": "informal but clearly cap-table modeling"},
+  {"query": "uploading my pulley export — can you check the math on convertibles?", "should_trigger": true, "_note": "Pulley export, Lane 2"},
+
+  {"query": "how much should we raise for our seed?", "should_trigger": false, "_note": "fundraising strategy, not cap-table modeling (excluded in when_to_use)"},
+  {"query": "what's a SAFE?", "should_trigger": false, "_note": "term-glossary question (excluded in when_to_use)"},
+  {"query": "review my financial model — burn rate looks high and I want to make sure my projections are tight", "should_trigger": false, "_note": "financial-model-review territory"},
+  {"query": "build me a pitch deck for our seed round, focusing on the market story", "should_trigger": false, "_note": "deck creation, wrong domain"},
+  {"query": "are these IC partners going to bite at our $20M pre? what would they push back on?", "should_trigger": false, "_note": "ic-sim territory"},
+  {"query": "how big is the european fintech market for SMB payments?", "should_trigger": false, "_note": "market sizing, different skill"},
+  {"query": "who are our main competitors in cybersecurity for the SMB segment? and what's our moat?", "should_trigger": false, "_note": "competitive positioning, different skill"},
+  {"query": "can you draft a YC SAFE for me to send to my angels? cap should be 10M and there's no discount", "should_trigger": false, "_note": "document drafting, not analysis"},
+  {"query": "what's the typical 409A discount founders apply to common stock for ISO pricing?", "should_trigger": false, "_note": "finance trivia, no cap-table content present"},
+  {"query": "should I incorporate in Delaware C-corp or in Israel as a Ltd from day one?", "should_trigger": false, "_note": "incorporation strategy without cap-table content"}
+]

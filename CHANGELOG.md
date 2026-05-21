@@ -5,90 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — cap-table verification stack
-
-The cap-table skill has not yet been released to users; this entry is
-forward-looking. All work applies on top of 0.4.7.
-
-### Changed (follow-through, default-on flip)
-
-- **`cap-table` `extract_instrument.py` defaults shifted**: `--verify`,
-  `--verify-blocking`, `--invariants`, and `--cross-check` are now **default ON**
-  (use `--no-<flag>` to opt out). The Lane-1 SKILL.md dispatch simplifies to
-  `extract_instrument.py --source-doc <path>` — verification, invariants, and
-  cross-check all run automatically. Error clearly when `--source-doc` is
-  missing under default-on verify.
-- **`attention_needed_fields[]` array added to the receipt**: union of
-  low-confidence fields, soft invariant warnings, unverifiable evidence fields,
-  and cross-check disagreements. The dispatching agent escalates these via
-  `AskUserQuestion` and (optionally) backward verification.
-
-### Added (deterministic backstops + cross-check wiring)
-
-- **5 SAFE backstop extractors** under
-  `founder-skills/skills/cap-table/scripts/extractors/safe/`:
-  `purchase_amount`, `discount_multiplier`, `valuation_cap`, `issuance_date`,
-  `investor_name`. Regex-based; `confidence="medium"` by default;
-  span-preserved. Calibrated against the 21-SAFE corpus at 95–100% agreement
-  on matched fields, 38–52% per-field match rate.
-- **`discount_multiplier` ambiguity-signal mode** (`tiered`,
-  `conditional`, `multi_value`): refuses to decide the multiplier-vs-rate
-  semantic when the source has multiple discount percentages or
-  conditional language like "lower of 20% or...". cross_checker treats
-  ambiguity-tagged results as non-disagreement.
-- **`valuation_cap` hybrid-terminology mode**: when a SAFE uses bare
-  "Valuation Cap" as the defined term but the Safe Price / Liquidity Price
-  formulas reference "Post-Money Valuation Cap", the extractor emits a
-  post-money result with the bare-term value and a hybrid-terminology
-  ambiguity note.
-- **`extract_instrument.py --cross-check` flag**: runs registered backstop
-  extractors against the source doc and pipes results through `cross_checker`
-  alongside the sub-agent's extraction. Surfaces demotions in the receipt's
-  `cross_check.per_field` block. Informational — never blocks.
-- **`extract_instrument.py --invariants` flag**: runs `invariant_checker`
-  against the extracted fields. Hard math violations (e.g., both pre/post-money
-  caps set on a SAFE) exit 1; soft bounds violations warn-only and surface
-  via `attention_needed_fields`.
-
-### Internal
-
-- **Sprint 1.8 audit**: re-examined 3 Unlimited Robotics SAFEs flagged by
-  backward verifier as possibly mis-classified. Verdict: labels are correct;
-  the docs use bare "Valuation Cap" as defined term but have post-money
-  structural signals in the price formulas. Backward verifier's flag was a
-  soft positive (worth surfacing for human review) but not a wrong label.
-  See `_archive/sprint_1_8_uro_audit.md` for the structural-signal table.
-- **`docs/internal/eval/` reorganization**: per-sprint markdown files
-  consolidated into `EVAL_PLAYBOOK.md`; historical detail preserved under
-  `_archive/`. The playbook is the single canonical reference for measurement
-  procedures, calibration thresholds, and known-FP patterns.
-- **Re-baseline** (Sprint 7): re-scored Sprint 1d's saved extractions against
-  the canonical labels. Numbers unchanged (54.9% scored / ~83% overlap-only),
-  confirming the Sprint 1.8 audit didn't shift ground truth.
-
-## [Unreleased] — cap-table earlier work
+## [Unreleased]
 
 ### Added
 
-- **`cap-table` evidence verifier** (`evidence_verifier.py`, Sprint 2). Three-layer check per field: quote_in_doc (diagnostic), value_in_quote (diagnostic), and the canonical hallucination gate value_in_doc. Calibrated against a 69-doc private eval set at 3.6% FPR / 100% TPR on verifiable docs. Handles 8 PDF extraction-artifact patterns (CID-encoded fonts, image-only PDFs, space-stripping, hyphenation across line breaks, footnote markers, DocuSign overlays, non-Latin scripts, XLSX cell-reference quotes).
-- **`cap-table` backward verifier** (`backward_verifier.py`, Sprint 3). Two-phase CLI (`--phase=prompt` → `--phase=score`) that catches semantic-confusion errors (right value, wrong field) via fresh-sub-agent re-extraction. Ships as WARN-mode per Sprint 3b calibration.
-- **`cap-table` invariant checker** (`invariant_checker.py`, Sprint 4). Per-field real-world bounds + cross-field math invariants. 0% FPR against canonical labels, 63% TPR on ×1000 unit-error perturbations.
-- **`cap-table` cross-checker** (`cross_checker.py`, Sprint 5). Demote-only confidence modulation when multiple extractors disagree.
-- **`cap-table` extractors module scaffolding** (`extractors/`, Sprint 5c). `FieldExtraction` + `SourceSpan` + `ExtractionContext` + `ExtractorProtocol` types for span-preserving extraction.
-- **`cap-table` shared `_normalize.py`** (Sprint 5b) — text-normalization primitives extracted from evidence_verifier for reuse.
-- **`cap-table` public CI fixtures** (`tests/fixtures/cap-table-eval/`, Sprint 6a). 6 anonymized source/label pairs covering template-blank hallucination, canonical SAFE forms, pre-money legacy form, Gotcha #3 multiplier/rate trap, ITA Section 3(j) statutory rate.
-- **`cap-table` eval harness** (`tests/test_eval_harness.py`, Sprint 6b) with `EVAL_DATA_PATH` env-var override. Public fixtures run in CI; private 69-doc corpus regression runs locally with the env var.
+- **New skill: `cap-table`.** Extracts structured terms from cap-table source documents (SAFEs, convertible notes, term sheets, articles of association, Carta/Pulley XLSX exports), runs them through a layered math pipeline (cap state → SAFE/note conversions → option-pool top-up → anti-dilution → priced-round solver → flip scenarios), and produces a counsel-handoff packet + human-readable report. Designed for founders preparing for priced rounds, secondary sales, or jurisdiction flips.
 
-### Changed
+  Three extraction lanes share a common validator (`extract_instrument.py` / `extract_cap_table.py`):
 
-- **`cap-table` `extract_instrument.py`** gains pre-money SAFE form support (`yc_premoney_cap_only`, `pre_money_cap_and_discount_legacy`), `interest_rate_type` enum (`fixed_numeric` / `fixed_numeric_simple` / `statutory_ita_section_3j` / `none`), `warrant`/`non_instrument` doc-type classifications, evidence-verification wiring (`--verify`, `--verify-blocking`, `--source-doc`), and an expanded ~30-field synthesized-fields skip list (Sprint 1.5 + 2b + 2c).
-- **`cap-table` SKILL.md Lane-1 dispatch** now invokes `extract_instrument.py --verify --verify-blocking --source-doc <path>` by default. Documents the optional backward-verification flow (warn-mode) and the rejection contract (`failed_fields` + `retry_hint`).
-- **`cap-table` `compose_report.py` schema_version** bumped to `v0.5.0-cap-table` (Sprint 6c). Backward-compatible read: v0.4.2 inputs still accepted via `COMPAT_VERSIONS`.
+  - **Lane 1** — Unstructured instruments (PDF/DOCX SAFEs, convertibles, term sheets). Sub-agent extracts; the validator enforces form-dependent required-field gates, normalizes the discount-rate multiplier-vs-rate trap, and routes warrants / non-instruments to clean classification rather than forcing them into a SAFE shape.
+  - **Lane 2** — Carta XLSX exports. Verified against real Carta exports across multiple companies; sheet-name fingerprint, Convertible Ledger parsing, discount normalization, and cancelled-record skipping.
+  - **Lane 3** — Freeform spreadsheets. Sub-agent identifies cell semantics; validator gates per-field confidence.
 
-### Internal
+  A four-layer verification stack runs by default on every Lane-1 extraction (`extract_instrument.py --source-doc <path>` — verification flags all default-on; use `--no-<flag>` to opt out):
 
-- **Private 69-doc eval set** (gitignored under `docs/internal/eval/`) with canonical labels, forward/backward verifier baselines, per-field perturbation harness. Baseline extractor accuracy: ~89% SAFE / ~80% convertible / ~92% term-sheet on overlap-only fields.
-- **Sprint 1.7 audit**: 1 confirmed template-blank hallucination + 17 non-canonical enum strings, all corrected. Anonymized regression fixtures shipped.
+  - **Forward verification** (`evidence_verifier.py`) — three-layer check (`quote_in_doc` / `value_in_quote` / `value_in_doc`) catches the hallucination class where the model fabricates a value not present in the source. Calibrated against a private eval set at 3.6% FPR / 100% TPR on verifiable docs. Handles 8 PDF extraction-artifact patterns: CID-encoded fonts, image-only PDFs, space-stripping, hyphenation across line breaks, footnote markers, DocuSign overlays, non-Latin scripts, XLSX cell-reference quotes.
+  - **Invariant checking** (`invariant_checker.py`) — per-field real-world bounds (SAFE `purchase_amount` ≤ $50M; `discount_multiplier ∈ [0.5, 1.0]`; note `annual_interest_rate ≤ 20%`; etc.) plus cross-field math invariants (`options_granted ≤ total_authorized`; SAFE pre/post-money caps mutually exclusive; term-sheet `pre + investment ≈ post` within 2%). Hard math impossibilities block; soft bounds warn-only. 0% FPR against canonical labels; 63% TPR on ×1000 unit-error perturbations.
+  - **Deterministic backstop extractors** for SAFEs (`extractors/safe/`): regex-based `purchase_amount`, `discount_multiplier`, `valuation_cap`, `issuance_date`, `investor_name`. Span-preserved via the `FieldExtraction` / `SourceSpan` types in `extractors/types.py`. `discount_multiplier` refuses to decide the multiplier-vs-rate semantic when tiered or conditional clauses are present (emits ambiguity signals instead). `valuation_cap` handles hybrid-terminology SAFEs where the defined term is bare "Valuation Cap" but the Safe Price / Liquidity Price formulas reference "Post-Money Valuation Cap".
+  - **Cross-check** (`cross_checker.py`) — pipes sub-agent extractions and deterministic backstops through a demote-only confidence modulator. Agreement never bumps; disagreement demotes one level (`high → medium → low → absent`). Ambiguity-tagged backstop results treated as non-disagreement. Informational — never blocks.
+
+  Optional fifth layer dispatched by the SKILL.md when warranted:
+
+  - **Backward verification** (`backward_verifier.py`) — two-phase CLI (`--phase=prompt` → `--phase=score`) that catches semantic-confusion errors (right value, wrong field; e.g., extracting cap from a referenced prior SAFE instead of the current one) via fresh-sub-agent re-extraction. WARN-mode by default; ~7% disagreement rate against canonical labels makes it valuable as a confirmation prompt for high-stakes fields but too noisy for auto-rejection.
+
+  The receipt surfaces an `attention_needed_fields[]` array (union of low-confidence fields, soft invariant warnings, unverifiable evidence fields, and cross-check disagreements) that the dispatching agent uses to scope `AskUserQuestion` escalation and optional backward verification.
+
+  Math producers cite a `rule_id` from `cap-table-rules.json`. The two-phase `rule_audit.py` writes a gating block before math runs and composes watchlist + counsel items after. Counsel-handoff packet is a standalone deliverable; the compose-report stage assembles `report.md` + `report.json` with an embedded `coaching_payload` block (schema `v0.5.0-cap-table`).
+
+  Self-contained HTML output: `visualize.py` produces a report dashboard with inline SVG charts (no CDN); `explore.py` produces an interactive scenario picker (vanilla JS).
+
+  Six anonymized synthetic source/label pairs ship as public CI fixtures under `founder-skills/tests/fixtures/cap-table-eval/`, covering the template-blank hallucination archetype, canonical SAFE forms, legacy YC pre-money form, the multiplier-vs-rate discount trap, and the ITA Section 3(j) statutory-interest case. The `test_eval_harness.py` fixture runs these in CI; an `EVAL_DATA_PATH` env-var override enables an additional regression pass against a private 69-doc corpus locally.
 
 ## [0.4.7] - 2026-05-19
 

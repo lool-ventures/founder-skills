@@ -465,7 +465,7 @@ For each identified block, return:
 The main thread has run `compose_report.py --write-md` and produced
 `${REVIEW_DIR}/report.md` + `${REVIEW_DIR}/report.json`. You are
 dispatched (dispatch_type: `POST_COMPOSE_COACHING`) to add the
-founder-coaching layer using the v0.4.2 Mitigation 2 protocol: structured
+founder-coaching layer using the Mitigation 2 protocol: structured
 `coaching_payload` (inlined in your dispatch prompt) + Grep idempotency +
 Edit via uuid marker + Grep verification. **You MUST NOT Read the full
 `report.md`.**

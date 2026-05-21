@@ -196,7 +196,7 @@ Carta's own integrity warnings (e.g. exercise dates before grant dates). Row 5 h
 - **Discount stored as percent-as-fraction (Gotcha #3)**: Carta's `Conversion Discount: 0.2` means 20% discount → multiplier 0.80. Always run through `_normalize_discount`.
 - **Cancelled/converted records**: any non-null `Canceled Date` or `Converted Date` means the security is historical; skip when building current state.
 - **Carta URL slug ≠ company display name**: companies can rebrand without updating their Carta URL slug, so the slug in the filename may differ from the display name shown in the workbook's row 2 banner. Always pull the company name from row 2 banner, not the filename.
-- **Filename pattern**: Carta downloads are named `{slug}_YYYY-MM-DD_{sheet_list}.xlsx` (e.g. `clipcall-inc_2026-05-18_summary_cap_intermediate_cap_detailed_cap.xlsx`). Filename pattern alone is NOT enough to confirm Carta format — must inspect sheets.
+- **Filename pattern**: Carta downloads are named `{slug}_YYYY-MM-DD_{sheet_list}.xlsx` (e.g. `acmecorp-inc_2026-05-18_summary_cap_intermediate_cap_detailed_cap.xlsx`). Filename pattern alone is NOT enough to confirm Carta format — must inspect sheets.
 - **Maturity Date null for SAFEs**: SAFEs have no maturity; we substitute `9999-12-31` sentinel so the schema accepts it.
 - **`Quantity Issued: 0` rows**: appear when a stock class is authorized but has not yet been issued; skip in the per-class ledger pass.
 - **As-converted-to-common columns marked `1.1`**: e.g. `Series Seed-1 Preferred (PS1)` and `Series Seed-1 Preferred (PS1) 1.1` — the latter is the as-converted count. Use OCP / current_conversion_price to verify; AD adjustments are reflected here.

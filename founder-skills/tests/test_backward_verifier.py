@@ -1,4 +1,4 @@
-"""Unit tests for backward_verifier.py — Sprint 3a."""
+"""Unit tests for backward_verifier.py"""
 
 from __future__ import annotations
 
