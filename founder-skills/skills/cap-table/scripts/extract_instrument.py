@@ -142,7 +142,54 @@ def validate_safe(fields: dict[str, Any]) -> list[str]:
     return errors
 
 
-def validate_note(fields: dict[str, Any]) -> list[str]:
+# Per-subtype required-field gates for the convertible_note family.
+# Routing is done in _cli via the instrument_type enum; the subtype value is
+# stored on the canonical convertible_note shape (added in commit #6 post-J
+# audit) and surfaced as provenance to downstream consumers. Reflects real
+# convertible eval data at ~/private-corpus/convertible/ (Acmecorp CLA, Foxtrotcorp
+# convertible_security, Golfcorp bridge).
+CONVERTIBLE_SUBTYPE_GATES: dict[str, dict[str, Any]] = {
+    # Standard YC / NVCA convertible note (Series Seed Note, US promissory).
+    # All canonical fields apply. This is the default when no subtype is set.
+    "convertible_note": {
+        "always_required": [
+            "principal",
+            "day_count_basis",
+            "issuance_date",
+            "maturity_date",
+            "maturity_default_treatment",
+        ],
+        "may_be_null": [],
+    },
+    # Israeli convertible loan agreement (CLA / CIA). Mathematically identical
+    # to the canonical convertible_note: principal + interest + maturity + QF
+    # conversion. The naming differs (GKH templates: "Investment Amount" /
+    # "Investors" instead of "Principal Amount" / "Lenders") but the math is
+    # the same. Israeli CLAs commonly carry ITA Section 3(j) statutory interest
+    # (interest_rate_type="statutory_ita_section_3j"; annual_interest_rate=null).
+    "convertible_loan_agreement": {
+        "always_required": [
+            "principal",
+            "day_count_basis",
+            "issuance_date",
+            "maturity_date",
+            "maturity_default_treatment",
+        ],
+        "may_be_null": [],
+    },
+    # YC convertible_security (pre-SAFE form, used by GS-Cap Table etc.) is
+    # SAFE-equivalent: no interest, no maturity date, conversion-on-QF only.
+    # The doc has: principal (Purchase Amount), valuation_cap or discount,
+    # qualified_financing_threshold (QF definition). Maturity-related fields
+    # may be null.
+    "convertible_security": {
+        "always_required": ["principal", "issuance_date"],
+        "may_be_null": ["maturity_date", "maturity_default_treatment", "day_count_basis", "annual_interest_rate"],
+    },
+}
+
+
+def validate_note(fields: dict[str, Any], *, subtype: str | None = None) -> list[str]:
     errors = []
     # interest_rate_type drives whether annual_interest_rate must be numeric.
     # Default to fixed_numeric for backward compatibility with extractions that
@@ -150,23 +197,21 @@ def validate_note(fields: dict[str, Any]) -> list[str]:
     rate_type = fields.get("interest_rate_type", "fixed_numeric")
     if rate_type not in INTEREST_RATE_TYPES_ALL:
         errors.append(f"interest_rate_type must be one of {sorted(INTEREST_RATE_TYPES_ALL)}; got {rate_type!r}")
-    # Fields always required regardless of interest type
-    always_required = [
-        "principal",
-        "day_count_basis",
-        "issuance_date",
-        "maturity_date",
-        "maturity_default_treatment",
-    ]
-    for r in always_required:
+    # Required-field gate routed by subtype (post-J audit commit #6).
+    # convertible_security (SAFE-equivalent) waives maturity-related fields.
+    gate_key = subtype if subtype in CONVERTIBLE_SUBTYPE_GATES else "convertible_note"
+    gate = CONVERTIBLE_SUBTYPE_GATES[gate_key]
+    for r in gate["always_required"]:
         if fields.get(r) is None:
-            errors.append(f"required field {r} is missing")
-    # annual_interest_rate is conditionally required.
-    # Statutory and none-interest instruments may have null rate:
-    #   - Israeli CLAs referencing ITA Section 3(j) (statutory rate set by tax authority)
-    #   - SAFE-equivalent convertible securities (no interest provision at all)
+            errors.append(f"required field {r} is missing (subtype={gate_key!r})")
+    # annual_interest_rate is conditionally required, also routed by subtype:
+    #   - fixed_numeric / fixed_numeric_simple: numeric rate required
+    #     (EXCEPT when subtype waives it, e.g., convertible_security with rate_type=none)
+    #   - statutory_ita_section_3j: rate is null (Israeli ITA sets annually)
+    #   - none: SAFE-equivalent — no interest provision
+    annual_interest_rate_waived = "annual_interest_rate" in gate.get("may_be_null", [])
     if rate_type in INTEREST_RATE_TYPES_REQUIRING_NUMERIC:
-        if fields.get("annual_interest_rate") is None:
+        if fields.get("annual_interest_rate") is None and not annual_interest_rate_waived:
             errors.append(f"annual_interest_rate is required when interest_rate_type={rate_type!r}")
     elif rate_type in INTEREST_RATE_TYPES_ALLOWING_NULL and fields.get("annual_interest_rate") is not None:
         # Statutory or none — value MUST be null; if numeric was extracted, drop it
@@ -361,6 +406,11 @@ def main() -> int:
     valid_itypes = {
         "safe",
         "convertible_note",
+        # Convertible-note family (commit #6 post-J audit): real-world docs
+        # come in three flavors that share the same math but differ in document
+        # naming convention + which fields may be null.
+        "convertible_loan_agreement",  # Israeli CLA / CIA — GKH/Herzog/Meitar templates
+        "convertible_security",  # YC pre-SAFE convertible security — SAFE-equivalent
         "term_sheet",
         "option_plan",
         # warrant + non_instrument let misfiled docs (e.g., a warrant that
@@ -374,6 +424,26 @@ def main() -> int:
         sys.stderr.write(f"extract_instrument.py: unknown instrument_type: {itype}\n")
         return 1
 
+    # Normalize the instrument_type → canonical `convertible_note` for
+    # downstream artifact storage, preserving the original as `subtype` for
+    # provenance. instruments.json schema accepts {safe, convertible_note,
+    # term_sheet, option_plan, warrant, non_instrument} — the new subtype
+    # field is a parallel provenance marker. Math producers
+    # (note_conversion.py) consume the canonical convertible_note shape
+    # regardless of subtype.
+    convertible_family = {"convertible_loan_agreement", "convertible_security"}
+    subtype: str | None = None
+    if itype in convertible_family:
+        subtype = itype
+        itype = "convertible_note"
+        # For convertible_security (SAFE-equivalent): set sensible defaults
+        # if extraction left fields null/unset.
+        if subtype == "convertible_security":
+            if fields.get("interest_rate_type") is None:
+                fields["interest_rate_type"] = "none"
+            if fields.get("annual_interest_rate") is None:
+                fields["annual_interest_rate"] = None  # explicit null
+
     # Normalize discount if needed (Gotcha #3)
     warnings: list[str] = []
     if "discount_multiplier" in fields and itype in {"safe", "convertible_note"}:
@@ -386,7 +456,7 @@ def main() -> int:
     if itype == "safe":
         errors = validate_safe(fields)
     elif itype == "convertible_note":
-        errors = validate_note(fields)
+        errors = validate_note(fields, subtype=subtype)
     elif itype in {"warrant", "non_instrument"}:
         errors = validate_non_extractable(fields)
     else:
@@ -436,6 +506,12 @@ def main() -> int:
         instruments["safes"].append(fields)
     elif itype == "convertible_note":
         fields.setdefault("id", f"note_{len(instruments['notes']) + 1:03d}")
+        # Record subtype for provenance (commit #6 post-J audit). Math producers
+        # consume the canonical convertible_note shape; subtype is informational
+        # for counsel-review framing ("Israeli CLA terms..." vs "convertible
+        # security (SAFE-equivalent)...").
+        if subtype:
+            fields["subtype"] = subtype
         instruments["notes"].append(fields)
     elif itype == "warrant":
         fields.setdefault("id", f"warrant_{len(instruments['warrants']) + 1:03d}")

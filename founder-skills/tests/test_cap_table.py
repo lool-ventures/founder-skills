@@ -2389,6 +2389,159 @@ class TestPreBaselinePatches:
         errs = validate_non_extractable({})
         assert errs == [], errs
 
+    # ------------------------------------------------------------------
+    # Convertible aliases (commit #6 post-J audit)
+    # ------------------------------------------------------------------
+
+    def test_validate_note_subtype_cla_uses_standard_gate(self) -> None:
+        """Israeli CLA (convertible_loan_agreement subtype) is mathematically
+        identical to a standard convertible_note — same required fields."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_instrument import validate_note  # type: ignore[import-not-found]
+
+        errs = validate_note(
+            {
+                "principal": 1_500_000,
+                "interest_rate_type": "statutory_ita_section_3j",
+                "annual_interest_rate": None,
+                "day_count_basis": 365,
+                "issuance_date": "2019-03-03",
+                "maturity_date": "2021-03-03",
+                "maturity_default_treatment": "convert_at_cap",
+            },
+            subtype="convertible_loan_agreement",
+        )
+        assert errs == [], f"CLA subtype should validate as standard note; got: {errs}"
+
+    def test_validate_note_subtype_convertible_security_waives_maturity(self) -> None:
+        """YC convertible_security (SAFE-equivalent) has no maturity / no interest.
+        Subtype gate waives maturity_date, maturity_default_treatment,
+        day_count_basis, and annual_interest_rate."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_instrument import validate_note  # type: ignore[import-not-found]
+
+        errs = validate_note(
+            {
+                "principal": 1_000_000,
+                "interest_rate_type": "none",
+                "annual_interest_rate": None,
+                "day_count_basis": None,
+                "issuance_date": "2019-08-01",
+                "maturity_date": None,
+                "maturity_default_treatment": None,
+            },
+            subtype="convertible_security",
+        )
+        assert errs == [], f"convertible_security should pass with null maturity/interest; got: {errs}"
+
+    def test_validate_note_subtype_unknown_falls_back_to_standard_gate(self) -> None:
+        """An unknown subtype value falls back to the standard convertible_note
+        gate (all canonical fields required)."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_instrument import validate_note  # type: ignore[import-not-found]
+
+        # Missing maturity_date — should fail with subtype=None (the standard
+        # convertible_note gate requires it).
+        errs = validate_note(
+            {
+                "principal": 1_000_000,
+                "interest_rate_type": "fixed_numeric",
+                "annual_interest_rate": 0.05,
+                "day_count_basis": 365,
+                "issuance_date": "2019-12-13",
+                "maturity_date": None,
+                "maturity_default_treatment": None,
+            },
+            subtype=None,
+        )
+        assert any("maturity_date" in e for e in errs), f"standard note gate must require maturity_date; got: {errs}"
+
+    def test_cli_routes_convertible_loan_agreement_to_notes_with_subtype(self) -> None:
+        """End-to-end CLI: instrument_type='convertible_loan_agreement' input
+        must (a) validate via the note gate, (b) land in instruments.notes[],
+        and (c) carry subtype='convertible_loan_agreement' for provenance."""
+        cla_extraction = {
+            "instrument_type": "convertible_loan_agreement",
+            "fields": {
+                "investor_name": "Acmecorp Investors Trustee Ltd.",
+                "principal": 7_000_000,
+                "interest_rate_type": "statutory_ita_section_3j",
+                "annual_interest_rate": None,
+                "day_count_basis": 365,
+                "interest_converts_to_shares": True,
+                "issuance_date": "2019-03-03",
+                "valuation_cap": 50_000_000,
+                "discount_multiplier": 0.80,
+                "qualified_financing_threshold": 5_000_000,
+                "maturity_date": "2021-03-03",
+                "maturity_default_treatment": "convert_at_cap",
+                "extraction_confidence": "high",
+            },
+            "confidence": {},
+            "ambiguities": [],
+        }
+        with tempfile.TemporaryDirectory() as d:
+            instr_path = os.path.join(d, "instruments.json")
+            with open(instr_path, "w") as f:
+                json.dump(
+                    {"safes": [], "notes": [], "warrants": [], "option_grants": [], "metadata": {"run_id": "test"}}, f
+                )
+            rc, _, e = _run(
+                "extract_instrument.py",
+                ["--instruments", instr_path, "--run-id", "test", "--no-verify", "--no-invariants"],
+                stdin_data=json.dumps(cla_extraction),
+            )
+            assert rc == 0, f"CLA extraction failed: rc={rc}, stderr={e}"
+            with open(instr_path) as f:
+                instruments = json.load(f)
+            assert len(instruments["notes"]) == 1
+            note = instruments["notes"][0]
+            assert note["subtype"] == "convertible_loan_agreement"
+            assert note["principal"] == 7_000_000
+
+    def test_cli_routes_convertible_security_with_null_maturity(self) -> None:
+        """End-to-end CLI: convertible_security input lands in instruments.notes[]
+        with subtype tag and null maturity fields. Validates the SAFE-equivalent
+        path against a synthetic Foxtrotcorp-style convertible_security shape."""
+        cs_extraction = {
+            "instrument_type": "convertible_security",
+            "fields": {
+                "investor_name": "Acmecorp Holdings",  # synthetic; real doc was Foxtrotcorp
+                "principal": 250_000,
+                "interest_rate_type": "none",
+                "annual_interest_rate": None,
+                "interest_converts_to_shares": True,
+                "issuance_date": "2019-08-01",
+                "valuation_cap": 15_000_000,
+                "discount_multiplier": None,
+                "qualified_financing_threshold": 1_000_000,
+                "maturity_date": None,
+                "maturity_default_treatment": None,
+                "extraction_confidence": "high",
+            },
+            "confidence": {},
+            "ambiguities": [],
+        }
+        with tempfile.TemporaryDirectory() as d:
+            instr_path = os.path.join(d, "instruments.json")
+            with open(instr_path, "w") as f:
+                json.dump(
+                    {"safes": [], "notes": [], "warrants": [], "option_grants": [], "metadata": {"run_id": "test"}}, f
+                )
+            rc, _, e = _run(
+                "extract_instrument.py",
+                ["--instruments", instr_path, "--run-id", "test", "--no-verify", "--no-invariants"],
+                stdin_data=json.dumps(cs_extraction),
+            )
+            assert rc == 0, f"convertible_security extraction failed: rc={rc}, stderr={e}"
+            with open(instr_path) as f:
+                instruments = json.load(f)
+            assert len(instruments["notes"]) == 1
+            note = instruments["notes"][0]
+            assert note["subtype"] == "convertible_security"
+            assert note["maturity_date"] is None
+            assert note["interest_rate_type"] == "none"
+
 
 class TestPrivacyAssertion:
     """Tests for compose_report._assert_coaching_payload_privacy_clean().

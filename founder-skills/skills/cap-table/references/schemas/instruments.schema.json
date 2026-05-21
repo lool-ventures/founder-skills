@@ -47,14 +47,14 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "investor_name", "principal", "interest_rate_type", "day_count_basis", "issuance_date", "maturity_date", "maturity_default_treatment", "extraction_confidence"],
+        "required": ["id", "investor_name", "principal", "interest_rate_type", "issuance_date", "extraction_confidence"],
         "properties": {
           "id": {"type": "string"},
           "investor_name": {"type": "string"},
           "principal": {"type": "number"},
           "annual_interest_rate": {"type": ["number", "null"]},
           "interest_rate_type": {"enum": ["fixed_numeric", "fixed_numeric_simple", "statutory_ita_section_3j", "none"]},
-          "day_count_basis": {"type": "integer"},
+          "day_count_basis": {"type": ["integer", "null"]},
           "compounding_periods_per_year": {"type": ["integer", "null"]},
           "interest_converts_to_shares": {"type": "boolean"},
           "issuance_date": {"type": "string"},
@@ -63,13 +63,14 @@
           "discount_multiplier": {"type": ["number", "null"]},
           "capitalization_denominator": {"type": ["number", "null"]},
           "capitalization_denominator_policy": {"type": ["string", "null"]},
-          "qualified_financing_threshold": {"type": "number"},
-          "maturity_date": {"type": "string"},
-          "maturity_default_treatment": {"enum": ["convert_at_cap", "repay", "extend", "counsel_review"]},
+          "qualified_financing_threshold": {"type": ["number", "null"]},
+          "maturity_date": {"type": ["string", "null"]},
+          "maturity_default_treatment": {"type": ["string", "null"], "enum": ["convert_at_cap", "repay", "extend", "counsel_review", null]},
           "maturity_conversion_price_override": {"type": ["number", "null"]},
           "non_qualified_financing_treatment": {"type": ["string", "null"], "enum": ["convert_anyway", "do_not_convert", "negotiate", null]},
           "source_document": {"type": ["string", "null"]},
-          "extraction_confidence": {"enum": ["high", "medium", "low"]}
+          "extraction_confidence": {"enum": ["high", "medium", "low"]},
+          "subtype": {"type": ["string", "null"], "enum": ["convertible_note", "convertible_loan_agreement", "convertible_security", null], "description": "Document-origin provenance marker (commit #6 post-J audit). Math producers consume the canonical convertible_note shape regardless of subtype; subtype informs counsel-review framing (Israeli CLA / YC convertible_security / standard note). When null, the document is the standard convertible_note shape with all canonical fields populated."}
         }
       }
     },

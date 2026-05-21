@@ -291,7 +291,7 @@ fields trigger user confirmation before commit.
 
 ```json
 {
-  "instrument_type": "safe | convertible_note | term_sheet | option_plan | warrant | non_instrument",
+  "instrument_type": "safe | convertible_note | convertible_loan_agreement | convertible_security | term_sheet | option_plan | warrant | non_instrument",
   "fields": { ... extracted fields per the schemas above ... },
   "confidence": {
     "<field_name>": {
@@ -306,11 +306,12 @@ fields trigger user confirmation before commit.
 }
 ```
 
-**Enum mapping (when the document is a closely-related instrument type):**
-- Israeli convertible loan agreement (CLA) / convertible bridge financing / convertible investment agreement → `convertible_note` (mathematically identical; Israeli statutory ITA Section 3(j) interest is handled via `interest_rate_type`)
-- Convertible security (YC's pre-SAFE form, used by GS-Cap Table etc.) → `convertible_note` with `interest_rate_type=none` and `maturity_date=null`
-- Share Purchase Agreement (SPA) → `term_sheet` (definitive purchase agreement carries the same cap-table-relevant fields as a term sheet for v0.1)
-- Articles of Association (AoA) — separate dispatch sub-context `ARTICLES_OF_ASSOCIATION_EXTRACTION` (v0.2 work; not exposed in v0.1)
+**Enum mapping:**
+- **Israeli convertible loan agreement / CIA**: return `convertible_loan_agreement`. Validator stores as `instrument_type=convertible_note` with `subtype=convertible_loan_agreement` for provenance. Israeli statutory ITA Section 3(j) interest: set `interest_rate_type="statutory_ita_section_3j"` and `annual_interest_rate=null` (rate is set annually by the Israeli Tax Authority — do NOT fabricate a numeric value).
+- **YC convertible security (pre-SAFE form, e.g. GS-Cap Table)**: return `convertible_security`. Validator stores as `convertible_note` with `subtype=convertible_security`. Required-field gate waives maturity_date, maturity_default_treatment, day_count_basis, and annual_interest_rate (SAFE-equivalents have no maturity / no interest). Set `interest_rate_type="none"`.
+- **Convertible bridge financing / convertible investment agreement**: return `convertible_note` (standard) with the bridge-specific fields populated.
+- **Share Purchase Agreement (SPA)**: return `term_sheet` (definitive purchase agreement carries the same cap-table-relevant fields as a term sheet for v0.1). v0.2 may add a dedicated SPA validator if eval data demands it.
+- **Articles of Association (AoA)**: dispatched via the dedicated `ARTICLES_OF_ASSOCIATION_EXTRACTION` sub-context (commit #7 post-J audit) — see that section.
 
 #### Sub-context: `SPREADSHEET_STRUCTURE_DETECTION`
 
