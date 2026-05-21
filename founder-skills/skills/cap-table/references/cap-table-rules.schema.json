@@ -83,6 +83,9 @@
         },
         "founder_benchmarks": {
           "$ref": "#/$defs/ruleList"
+        },
+        "israeli_aoa": {
+          "$ref": "#/$defs/ruleList"
         }
       }
     }
@@ -170,7 +173,8 @@
             "israeli_ltd",
             "delaware_cross_border",
             "delaware_flip",
-            "founder_benchmarks"
+            "founder_benchmarks",
+            "israeli_aoa"
           ]
         },
         "behavior_target": {

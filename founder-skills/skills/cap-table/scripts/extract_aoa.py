@@ -56,7 +56,7 @@ _SCHEMA_DIR = os.path.join(
     "schemas",
 )
 
-RULE_PACK_VERSION = "0.3.2"
+RULE_PACK_VERSION = "0.4.0"
 
 VALID_LIQ_PREF_TYPES = {"non_participating", "participating", "participating_capped"}
 VALID_ANTI_DILUTION = {

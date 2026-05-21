@@ -56,10 +56,43 @@
                   "plain_language": {"type": "string"}
                 }
               },
-              "aggregate_ownership_by_class": {"type": ["object", "null"]},
+              "aggregate_ownership_by_class": {
+                "type": ["object", "null"],
+                "description": "v0.4.0+ adds optional `founders_pct_pre_anti_dilution`, `preferred_pct_pre_anti_dilution`, `anti_dilution_delta_pct_points` fields when AD fires on the scenario."
+              },
               "aggregate_cash_repayment": {"type": ["number", "null"]},
               "per_note": {"type": ["object", "null"]},
-              "per_safe": {"type": ["object", "null"]}
+              "per_safe": {"type": ["object", "null"]},
+              "anti_dilution_breakdown": {
+                "type": "array",
+                "description": "v0.4.0+ optional. Per-AD-protected-series breakdown emitted by AntiDilutionAdjuster. Present only when AD fired on at least one series.",
+                "items": {
+                  "type": "object",
+                  "required": ["series_id", "protection_type", "ccp_before", "ccp_after", "rule_id"],
+                  "properties": {
+                    "series_id": {"type": "string"},
+                    "protection_type": {"enum": ["broad_based_weighted_average", "narrow_based_weighted_average", "full_ratchet"]},
+                    "ad_trigger_basis": {"enum": ["original_issue_price", "current_conversion_price"]},
+                    "ad_a_denominator_basis": {"enum": ["nvca_broad", "nvca_narrow"]},
+                    "trigger_price": {"type": "number"},
+                    "new_pps": {"type": "number"},
+                    "ccp_before": {"type": "number"},
+                    "ccp_after": {"type": "number"},
+                    "ccp_unfloored": {"type": "number"},
+                    "floor_applied": {"type": "boolean"},
+                    "A": {"type": "number"},
+                    "B": {"type": ["number", "null"]},
+                    "C": {"type": ["number", "null"]},
+                    "rule_id": {"type": "string"},
+                    "rule_pack_version": {"type": "string"}
+                  }
+                }
+              },
+              "ccp_mutations": {
+                "type": "object",
+                "description": "v0.4.0+ optional. Map series_id -> CCP-after-this-scenario. Used by cap_state_after_round.json builder.",
+                "additionalProperties": {"type": "number"}
+              }
             }
           }
         }

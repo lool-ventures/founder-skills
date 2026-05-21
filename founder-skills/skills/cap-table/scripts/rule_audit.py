@@ -366,6 +366,97 @@ _RULE_MATCHERS: dict[str, Any] = {
     "anti_dilution.full_ratchet": lambda i, inst, cs: any(
         s.get("anti_dilution_protection") == "full_ratchet" for s in (cs.get("preferred_series") or [])
     ),
+    # v0.4.0 coupled-solver AD variants — apply only when respective protection is present
+    "anti_dilution.broad_based_weighted_average_coupled": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection") == "broad_based_weighted_average" for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.narrow_based_weighted_average_coupled": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection") == "narrow_based_weighted_average" for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.full_ratchet_coupled": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection") == "full_ratchet" for s in (cs.get("preferred_series") or [])
+    ),
+    # v0.4.0 trigger-basis rules — apply when any AD-protected series uses the respective basis
+    "anti_dilution.trigger_basis_original_issue_price": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection", "none") != "none"
+        and s.get("ad_trigger_basis", "original_issue_price") == "original_issue_price"
+        for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.trigger_basis_current_conversion_price": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection", "none") != "none" and s.get("ad_trigger_basis") == "current_conversion_price"
+        for s in (cs.get("preferred_series") or [])
+    ),
+    # v0.4.0 A-denominator-basis rules — apply when respective basis is in use
+    "anti_dilution.a_denominator_nvca_broad": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection") in {"broad_based_weighted_average", "narrow_based_weighted_average"}
+        and s.get("ad_a_denominator_basis", "nvca_broad") == "nvca_broad"
+        for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.a_denominator_nvca_narrow": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection") in {"broad_based_weighted_average", "narrow_based_weighted_average"}
+        and s.get("ad_a_denominator_basis") == "nvca_narrow"
+        for s in (cs.get("preferred_series") or [])
+    ),
+    # v0.4.0 CP2 floor configuration rule — applies when any series has a floor configured
+    "anti_dilution.cp2_floor_applicable": lambda i, inst, cs: any(
+        s.get("ad_cp2_floor") is not None for s in (cs.get("preferred_series") or [])
+    ),
+    # v0.4.0 carve-out source notes — applies when any AD-protected series exists
+    # (the carve-outs ARE the consideration-set definition, so they're relevant whenever AD runs)
+    "anti_dilution.carve_out_preferred_self_conversion": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.carve_out_outstanding_convertibles": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.carve_out_pool_grants": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.carve_out_recapitalization": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.carve_out_ma_consideration": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.carve_out_lessor_lender_strategic": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.carve_out_acquisition_jv": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.carve_out_public_offering": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.carve_out_safe_note_conversion": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.carve_out_reflexive_catch_all": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
+    ),
+    # v0.4.0 runtime events — default-True via the dispatch table's fallback would surface them
+    # always; instead scope to AD presence so they don't pollute no-AD engagements.
+    "anti_dilution.cp2_floor_applied": lambda i, inst, cs: any(
+        s.get("ad_cp2_floor") is not None for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.stale_ccp_detected": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.solver_diverged": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.solver_oscillating_damped": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.solver_aitken_acceleration_applied": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
+    ),
+    "anti_dilution.solver_aitken_fallback_engaged": lambda i, inst, cs: any(
+        s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
+    ),
+    # v0.4.0 P2P detection — text-pattern flag from extract_aoa; safer to default-True (the
+    # rule_audit phase doesn't have access to the AoA text patterns, so applicability is
+    # determined upstream by whether the extraction flagged P2P).
+    "anti_dilution.pay_to_play_provision_detected": _matcher_always,
     # Israeli equity-tax rules (apply only to Israel-context engagements
     # with option grants — the rule pack is about §102/§3(i) plan-design)
     "israel_equity_tax.section_102_capital_gains": lambda i, inst, cs: _structure_includes_israel(i),

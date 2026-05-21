@@ -602,10 +602,43 @@ def render_report_markdown(
         # Math outputs (when full/mixed)
         if completeness in {"full", "mixed"} and co.get("aggregate_ownership_by_class"):
             agg = co["aggregate_ownership_by_class"]
+            # v0.4.0: when AD fires, show three-way headline (pre-AD baseline /
+            # coupled with-AD / delta) so founders understand the AD impact.
+            ad_breakdown = co.get("anti_dilution_breakdown") or []
+            if ad_breakdown:
+                pre_ad_founder = agg.get("founders_pct_pre_anti_dilution")
+                post_ad_founder = agg.get("founders_pct")
+                ad_delta = agg.get("anti_dilution_delta_pct_points")
+                if pre_ad_founder is not None and post_ad_founder is not None:
+                    lines.append("**Founder ownership (anti-dilution-aware):**")
+                    lines.append(
+                        f"- Pre-AD baseline: {_percent(pre_ad_founder)} (what your % would be if AD had not triggered)"
+                    )
+                    lines.append(f"- Post-AD (coupled equilibrium): **{_percent(post_ad_founder)}** ← headline")
+                    if ad_delta is not None:
+                        sign = "-" if ad_delta < 0 else "+"
+                        lines.append(
+                            f"- AD impact: **{sign}{abs(ad_delta):.2f} pp** of additional dilution from anti-dilution adjustment"
+                        )
+                    lines.append("")
             lines.append("**Post-round ownership:**")
             for k, v in agg.items():
                 lines.append(f"- {k.replace('_', ' ')}: {_percent(v)}")
             lines.append("")
+            # v0.4.0: per-series AD breakdown
+            if ad_breakdown:
+                lines.append("**Anti-dilution adjustments (per series):**")
+                for bd in ad_breakdown:
+                    sid = bd.get("series_id", "?")
+                    ptype = bd.get("protection_type", "?")
+                    ccp_before = bd.get("ccp_before", 0)
+                    ccp_after = bd.get("ccp_after", 0)
+                    floor_note = " (floor clamped)" if bd.get("floor_applied") else ""
+                    lines.append(
+                        f"- {sid} ({ptype.replace('_', ' ')}): CCP ${ccp_before:.4f} → ${ccp_after:.4f}{floor_note} "
+                        f"(rule: `{bd.get('rule_id')}`)"
+                    )
+                lines.append("")
             if co.get("equity_financing_price"):
                 lines.append(f"**Equity financing price:** ${co['equity_financing_price']:.4f}/share")
                 lines.append("")

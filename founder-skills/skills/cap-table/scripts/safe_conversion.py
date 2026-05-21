@@ -38,7 +38,7 @@ import sys
 from typing import Any
 
 # Rule pack version this script targets. Bumped when math semantics change.
-RULE_PACK_VERSION = "0.3.2"
+RULE_PACK_VERSION = "0.4.0"
 
 # Typed error codes (mirror design doc §5.1)
 E_SAFE_REQUIRES_CONVERSION_EVENT = "E_SAFE_REQUIRES_CONVERSION_EVENT"

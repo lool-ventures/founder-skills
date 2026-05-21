@@ -144,6 +144,30 @@ def render_report_html(
             details = render_legend(agg)
             fi = co.get("founder_impact", {}) or {}
             impact_line = _esc(fi.get("plain_language", ""))
+            # v0.4.0: render AD breakdown when present
+            ad_bd = co.get("anti_dilution_breakdown") or []
+            if ad_bd:
+                pre_ad = agg.get("founders_pct_pre_anti_dilution")
+                delta = agg.get("anti_dilution_delta_pct_points")
+                ad_summary_parts = []
+                if pre_ad is not None:
+                    ad_summary_parts.append(f"<strong>Pre-AD baseline:</strong> {_pct(pre_ad)}")
+                if delta is not None:
+                    sign = "−" if delta < 0 else "+"
+                    ad_summary_parts.append(f"<strong>AD impact:</strong> {sign}{abs(delta):.2f} pp")
+                details += (
+                    '<p style="margin-top:8px;font-size:13px;color:#374151;">' + " | ".join(ad_summary_parts) + "</p>"
+                )
+                # Per-series AD rows
+                series_rows = []
+                for bd in ad_bd:
+                    sid = _esc(bd.get("series_id", "?"))
+                    ptype = _esc(bd.get("protection_type", "?").replace("_", " "))
+                    cb = bd.get("ccp_before", 0)
+                    ca = bd.get("ccp_after", 0)
+                    floor_note = " <em>(floor clamped)</em>" if bd.get("floor_applied") else ""
+                    series_rows.append(f"<li>{sid} ({ptype}): CCP ${cb:.4f} → ${ca:.4f}{floor_note}</li>")
+                details += '<ul style="font-size:12px;color:#4b5563;margin-top:6px;">' + "".join(series_rows) + "</ul>"
         else:
             donut = '<div style="width:180px;height:180px;display:flex;align-items:center;justify-content:center;background:#f3f4f6;border-radius:50%;font-size:12px;color:#6b7280;">Pending</div>'
             details = "<em>No resolved ownership yet — see blockers.</em>"

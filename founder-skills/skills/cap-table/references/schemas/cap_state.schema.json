@@ -51,9 +51,31 @@
           "liquidation_preference_type": {"enum": ["non_participating", "participating", "participating_capped"]},
           "participation_cap_multiple": {"type": ["number", "null"]},
           "anti_dilution_protection": {"enum": ["none", "broad_based_weighted_average", "narrow_based_weighted_average", "full_ratchet"]},
+          "ad_trigger_basis": {"enum": ["original_issue_price", "current_conversion_price"], "description": "v0.4.0+ optional. Which conversion-price reference triggers AD. NVCA-default is OIP; some custom charters use CCP."},
+          "ad_a_denominator_basis": {"enum": ["nvca_broad", "nvca_narrow"], "description": "v0.4.0+ optional. Which A denominator scope to apply. nvca_broad includes options; nvca_narrow excludes them. Default per protection enum."},
+          "ad_cp2_floor": {"type": ["number", "null"], "description": "v0.4.0+ optional. CP2 floor per charter; null = no floor. Solver clamps CP2 at this value and emits W_CP2_FLOOR_APPLIED warning."},
+          "ad_carve_outs": {"enum": ["nvca_default"], "description": "v0.4.0+ optional. Only `nvca_default` accepted in v0.4.0. Custom per-carve-out lists deferred to v0.5.0."},
           "dividend_rate_percent": {"type": ["number", "null"]},
           "dividend_cumulative": {"type": "boolean"},
           "pro_rata_rights": {"type": "boolean"}
+        }
+      }
+    },
+    "cap_table_history": {
+      "type": "array",
+      "description": "v0.4.0+ optional. Audit trail of prior AD events on this cap table. Read by AntiDilutionAdjuster's stale-CCP guard: if a series has CCP == OCP but history shows a prior anti_dilution_applied event for that series_id, the solver emits W_STALE_CCP_SUSPECTED.",
+      "items": {
+        "type": "object",
+        "required": ["event_type", "series_id"],
+        "properties": {
+          "event_type": {"enum": ["anti_dilution_applied"]},
+          "round_id": {"type": "string"},
+          "applied_at": {"type": "string"},
+          "series_id": {"type": "string"},
+          "previous_ccp": {"type": "number"},
+          "new_ccp": {"type": "number"},
+          "rule_id": {"type": "string"},
+          "rule_pack_version": {"type": "string"}
         }
       }
     },

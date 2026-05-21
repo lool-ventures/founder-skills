@@ -49,7 +49,7 @@ from cap_state import build_cap_state  # noqa: E402
 from priced_round import solve_priced_round  # noqa: E402
 
 SCHEMA_VERSION = "v0.1.0-cap-table-fast-assess"
-RULE_PACK_VERSION = "0.3.2"
+RULE_PACK_VERSION = "0.4.0"
 
 
 def _fingerprint(prompt: str, attached_docs: list[str]) -> dict[str, Any]:

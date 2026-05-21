@@ -1271,7 +1271,7 @@ class TestStackedPostMoneySAFEsGolden:
         assert sentinel["schema_version"] == "v0.1.0-cap-table-fast-assess"
         assert sentinel["mode"] == "fast_assess"
         assert sentinel["produces_canonical_artifacts"] is False
-        assert sentinel["rule_pack_version"] == "0.3.2"
+        assert sentinel["rule_pack_version"] == "0.4.0"
         # inputs_fingerprint structurally valid
         fp = sentinel["inputs_fingerprint"]
         assert "sha256" in fp and len(fp["sha256"]) == 64
