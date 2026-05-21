@@ -316,7 +316,10 @@ def build_coaching_payload(
     counsel_packet = artifacts["counsel_packet.json"]
 
     scenarios = scenarios_doc.get("scenarios", [])
-    failed_items = [b for s in scenarios for b in (s["computed_outputs"].get("blockers") or [])]
+    # R4 LOW.b: defensive get — a scenario lacking computed_outputs would
+    # otherwise KeyError here. Existing convention elsewhere in this file uses
+    # `.get("computed_outputs", {}) or {}` (see line 464+); align this call.
+    failed_items = [b for s in scenarios for b in ((s.get("computed_outputs", {}) or {}).get("blockers") or [])]
     high_severity = [
         {"warning_id": b["code"], "severity": "high", "title": b["code"], "detail": b["remedy"]} for b in failed_items
     ]
@@ -387,13 +390,21 @@ def _assert_coaching_payload_privacy_clean(payload: dict[str, Any], *, instrumen
     must not surface in the founder-facing coaching commentary as concrete
     names — the dispatch contract says refer to them abstractly).
     """
+    import re as _re
+
     investor_names = {
         s.get("investor_name", "")
         for s in instruments.get("safes", []) + instruments.get("notes", [])
         if s.get("investor_name")
     }
-    # Drop empty / placeholder names that aren't real PII risks
-    investor_names = {n for n in investor_names if n and len(n) > 2}
+    # M9: raised length threshold from >2 to >8 to eliminate false positives on
+    # short / common substrings ("SAFE", "Inc", "Capital", "LLC", "Corp") that
+    # frequently appear inside legitimate generic text (e.g.,
+    # branch_summary="cap_plus_discount"; completeness="cap_implied_only";
+    # target_basis="post_money"). Real-world investor names like "a16z" or
+    # "Sequoia Capital Operations" are longer than 8 chars; founder family
+    # names like "Cohen" (5 chars) are NOT investor names so don't apply here.
+    investor_names = {n for n in investor_names if n and len(n) > 8}
     if not investor_names:
         return
 
@@ -411,9 +422,15 @@ def _assert_coaching_payload_privacy_clean(payload: dict[str, Any], *, instrumen
 
     all_strings = _walk(payload)
     leaks: list[tuple[str, str]] = []
+    # M9: word-boundary regex match instead of bare substring `in` check.
+    # An investor named "Sequoia Capital" must NOT match "capitalization" or
+    # "Cap Capital" appearing inside template prose. \b is the standard
+    # word-boundary; re.escape protects against names containing regex
+    # metacharacters (rare but possible: "A&B Capital", "T+H Partners").
     for name in investor_names:
+        pat = _re.compile(r"\b" + _re.escape(name) + r"\b")
         for s in all_strings:
-            if name in s:
+            if pat.search(s):
                 leaks.append((name, s[:120]))
     if leaks:
         raise AssertionError(

@@ -640,6 +640,90 @@ class TestOptionPool:
                 target_basis="pre_money",
             )
 
+    def test_pre_money_target_already_met_emits_clarifying_question(self) -> None:
+        """Phase M+S: when existing pool already meets target under literal
+        pre_money basis but post_money interpretation would require a top-up,
+        emit a warning + clarifying_question for the dispatching agent to
+        escalate via AskUserQuestion.
+        """
+        # Existing pool 2M = 18.18% of 11M pre-FD; target 10% pre_money is
+        # already met (returns 0 top-up). But post_money basis would compute
+        # a real top-up: solve (2M + x) / (11M + 5M + x) = 0.10 → x = -400k,
+        # so post-money is ALSO 0 here. Need a scenario where post-money > 0.
+        # Set existing pool to 800k = 7.27% (below 10% pre_money target).
+        # Pre_money calc: (800k + x)/(11M + x) = 0.10 → x = 333,333.
+        # That's NOT a no-op — bad example.
+        # Use: existing 1.5M = 13.64% (above 10% pre); pre_money no-op.
+        # Post-money: (1.5M + x)/(11M + 5M + x) = 0.10 → x = 55,556.
+        r = option_pool.required_topup(
+            pre_topup_fully_diluted_shares=11_000_000,
+            existing_unallocated_pool=1_500_000,
+            target_pool_percent=0.10,
+            new_money_shares=5_000_000,
+            target_basis="pre_money",
+        )
+        assert r["required_pool_topup_shares"] == 0  # literal pre_money no-op
+        assert "warnings" in r
+        assert any(w["code"] == "pool_target_already_met_check_intent" for w in r["warnings"])
+        assert "clarifying_question" in r
+        cq = r["clarifying_question"]
+        assert cq["context"]["literal_pre_money_top_up"] == 0
+        assert cq["context"]["industry_norm_post_money_top_up"] > 0  # M8 gate ensures this
+
+    def test_post_money_basis_does_not_fire_clarifying_question(self) -> None:
+        """Phase M+S negative case: target_basis='post_money' never triggers
+        the warning regardless of whether the existing pool exceeds target.
+        """
+        r = option_pool.required_topup(
+            pre_topup_fully_diluted_shares=11_000_000,
+            existing_unallocated_pool=1_500_000,
+            target_pool_percent=0.10,
+            new_money_shares=5_000_000,
+            target_basis="post_money",
+        )
+        assert "warnings" not in r or not any(
+            w.get("code") == "pool_target_already_met_check_intent" for w in r.get("warnings", [])
+        )
+        assert "clarifying_question" not in r or r.get("clarifying_question") is None
+
+    def test_pre_money_no_op_both_interpretations_suppresses_warning(self) -> None:
+        """M8: when BOTH literal pre-money AND industry-norm post-money
+        produce 0 top-up (existing pool legitimately oversized), the
+        clarifying_question is noise — the M8 gate must suppress it.
+        """
+        # Existing pool 3M = ~27% of 11M; way above 10% target under any reading.
+        # Pre_money: (3M + x)/(11M + x) = 0.10 → x = -888,889 → 0.
+        # Post_money: (3M + x)/(11M + 5M + x) = 0.10 → x = -1,555,556 → 0.
+        r = option_pool.required_topup(
+            pre_topup_fully_diluted_shares=11_000_000,
+            existing_unallocated_pool=3_000_000,
+            target_pool_percent=0.10,
+            new_money_shares=5_000_000,
+            target_basis="pre_money",
+        )
+        assert r["required_pool_topup_shares"] == 0
+        # M8 gate: post_money_required is also 0, so NO warning + NO question
+        assert "warnings" not in r or not r.get("warnings", [])
+        assert "clarifying_question" not in r or r.get("clarifying_question") is None
+
+    def test_pre_fd_zero_does_not_crash(self) -> None:
+        """M7: option_pool is a public library function. A library caller
+        passing pre_fd=0 (degenerate but legal) must not ZeroDivisionError in
+        the warning's existing_pct_of_pre_fd format string.
+        """
+        # pre_fd=0 means no pre-financing FD; target 10% pre_money with 0
+        # existing pool computes x = (0.1 * 0 - 0) / 0.9 = 0 → no top-up needed.
+        # M8 gate suppresses the warning here too (post_money_required also 0).
+        # The key is: no crash.
+        r = option_pool.required_topup(
+            pre_topup_fully_diluted_shares=0,
+            existing_unallocated_pool=0,
+            target_pool_percent=0.10,
+            new_money_shares=None,
+            target_basis="pre_money",
+        )
+        assert r["required_pool_topup_shares"] == 0  # no crash
+
 
 # ===========================================================================
 # anti_dilution.py
@@ -1165,6 +1249,185 @@ class TestStackedPostMoneySAFEsGolden:
             schema = json.load(f)
         # Will raise jsonschema.ValidationError if invalid
         jsonschema.validate(instance=sentinel, schema=schema)
+
+    def test_mfn_chain_resolves_transitively(self) -> None:
+        """H9: A elects B elects C, where C has a resolved cap. The resolver
+        must iterate to a fixed point so A inherits transitively (via B's
+        resolution against C). Single-hop resolver would leave A unresolved
+        because B is still 'yc_uncapped_mfn' on the first pass.
+        """
+        # Chain: safe_a → safe_b → safe_c (safe_c has resolved cap)
+        chain_safes = [
+            {
+                "id": "safe_a",
+                "investor_name": "Angel Chain A",
+                "purchase_amount": 500_000,
+                "post_money_valuation_cap": None,
+                "pre_money_valuation_cap": None,
+                "discount_multiplier": None,
+                "mfn_provision": {
+                    "present": True,
+                    "elected_against_safe_id": "safe_b",
+                    "elected": True,
+                    "cherry_pick_attempted": False,
+                    "notes": None,
+                },
+                "pro_rata_side_letter": None,
+                "issuance_date": "2025-03-01",
+                "form": "yc_uncapped_mfn",
+                "conversion_price_override": None,
+                "source_document": None,
+                "extraction_confidence": "high",
+            },
+            {
+                "id": "safe_b",
+                "investor_name": "Angel Chain B",
+                "purchase_amount": 500_000,
+                "post_money_valuation_cap": None,
+                "pre_money_valuation_cap": None,
+                "discount_multiplier": None,
+                "mfn_provision": {
+                    "present": True,
+                    "elected_against_safe_id": "safe_c",
+                    "elected": True,
+                    "cherry_pick_attempted": False,
+                    "notes": None,
+                },
+                "pro_rata_side_letter": None,
+                "issuance_date": "2025-03-01",
+                "form": "yc_uncapped_mfn",
+                "conversion_price_override": None,
+                "source_document": None,
+                "extraction_confidence": "high",
+            },
+            {
+                "id": "safe_c",
+                "investor_name": "Angel Chain C (anchor)",
+                "purchase_amount": 500_000,
+                "post_money_valuation_cap": 10_000_000,
+                "pre_money_valuation_cap": None,
+                "discount_multiplier": None,
+                "mfn_provision": None,
+                "pro_rata_side_letter": None,
+                "issuance_date": "2025-03-01",
+                "form": "yc_postmoney_cap",
+                "conversion_price_override": None,
+                "source_document": None,
+                "extraction_confidence": "high",
+            },
+        ]
+        cs = cap_state_mod.build_cap_state(self.EVAL2_INPUTS, {**self._instruments(), "safes": chain_safes})
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=chain_safes,
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+        )
+        assert r["completeness"] == "full", f"chain didn't resolve: {r.get('blockers')}"
+        # All three SAFEs should have resolved to safe_c's $10M cap; each owns
+        # 5% of post-money (purchase/cap = 500k/10M). Aggregate = 15%.
+        agg = r["aggregate_ownership_by_class"]
+        assert math.isclose(agg["safe_pct"], 0.15, abs_tol=1e-4), (
+            f"chain didn't propagate: aggregate safe_pct {agg['safe_pct']} ≠ 0.15"
+        )
+
+    def test_mfn_elected_against_missing_sibling_fails_cleanly(self) -> None:
+        """H9 edge case: MFN points to a sibling that doesn't exist in the
+        safes list. Resolver must leave the SAFE unresolved (no crash); the
+        downstream rejection path then produces E_SAFE_REQUIRES_CONVERSION_EVENT.
+        """
+        orphan_safes = [
+            {
+                "id": "safe_orphan",
+                "investor_name": "Angel Orphan",
+                "purchase_amount": 500_000,
+                "post_money_valuation_cap": None,
+                "pre_money_valuation_cap": None,
+                "discount_multiplier": None,
+                "mfn_provision": {
+                    "present": True,
+                    "elected_against_safe_id": "safe_does_not_exist",
+                    "elected": True,
+                    "cherry_pick_attempted": False,
+                    "notes": None,
+                },
+                "pro_rata_side_letter": None,
+                "issuance_date": "2025-03-01",
+                "form": "yc_uncapped_mfn",
+                "conversion_price_override": None,
+                "source_document": None,
+                "extraction_confidence": "high",
+            },
+        ]
+        cs = cap_state_mod.build_cap_state(self.EVAL2_INPUTS, {**self._instruments(), "safes": orphan_safes})
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=orphan_safes,
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+        )
+        # Should produce a blocker, not crash, not silently pass through.
+        assert r["completeness"] == "structural_only"
+        assert (
+            any(
+                b.get("code") in {"E_SAFE_REQUIRES_CONVERSION_EVENT", "E_SAFE_CIRCULAR_MFN"}
+                for b in r.get("blockers", [])
+            )
+            or "safe_orphan" in r["per_safe"]
+            and r["per_safe"]["safe_orphan"]["branch"] == "rejected"
+        )
+
+    def test_mfn_inheritance_provenance_propagated_to_per_safe_result(self) -> None:
+        """M5: per_safe[safe_id]['_mfn_inherited_from'] must be set when the
+        SAFE was MFN-resolved. Lets downstream counsel-review reporting phrase
+        'Investor X's MFN-inherited terms from Investor Y'.
+        """
+        eval2_with_mfn = [
+            self.EVAL2_SAFES[0],
+            self.EVAL2_SAFES[1],
+            {
+                "id": "safe_3_mfn",
+                "investor_name": "Angel C MFN",
+                "purchase_amount": 500_000,
+                "post_money_valuation_cap": None,
+                "pre_money_valuation_cap": None,
+                "discount_multiplier": None,
+                "mfn_provision": {
+                    "present": True,
+                    "elected_against_safe_id": "safe_1",
+                    "elected": True,
+                    "cherry_pick_attempted": False,
+                    "notes": None,
+                },
+                "pro_rata_side_letter": None,
+                "issuance_date": "2025-03-01",
+                "form": "yc_uncapped_mfn",
+                "conversion_price_override": None,
+                "source_document": None,
+                "extraction_confidence": "high",
+            },
+        ]
+        cs = cap_state_mod.build_cap_state(self.EVAL2_INPUTS, {**self._instruments(), "safes": eval2_with_mfn})
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=eval2_with_mfn,
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+        )
+        per_safe_3 = r["per_safe"]["safe_3_mfn"]
+        # Provenance must be propagated from shadow record to per_safe result
+        assert per_safe_3.get("_mfn_inherited_from") == "safe_1", (
+            f"MFN inheritance provenance lost: {per_safe_3.get('_mfn_inherited_from')} != 'safe_1'"
+        )
 
     def test_eval2_aggregate_safe_pct_equals_sum_of_per_safe(self) -> None:
         """J8 cross-check: aggregate_ownership_by_class.safe_pct must equal
@@ -2125,6 +2388,109 @@ class TestPreBaselinePatches:
 
         errs = validate_non_extractable({})
         assert errs == [], errs
+
+
+class TestPrivacyAssertion:
+    """Tests for compose_report._assert_coaching_payload_privacy_clean().
+
+    M9 word-boundary + length-threshold defense-in-depth: ensures the
+    assertion catches genuine investor-name leaks while NOT firing on
+    legitimate generic text that happens to contain investor-name substrings.
+    """
+
+    @staticmethod
+    def _instruments_with_investor(name: str) -> dict[str, Any]:
+        return {
+            "safes": [
+                {
+                    "id": "s1",
+                    "investor_name": name,
+                    "purchase_amount": 500_000,
+                    "post_money_valuation_cap": 10_000_000,
+                    "discount_multiplier": None,
+                    "mfn_provision": None,
+                    "pro_rata_side_letter": None,
+                    "issuance_date": "2025-01-01",
+                    "form": "yc_postmoney_cap",
+                    "conversion_price_override": None,
+                    "source_document": None,
+                    "extraction_confidence": "high",
+                }
+            ],
+            "notes": [],
+            "warrants": [],
+            "option_grants": [],
+            "metadata": {"run_id": "test"},
+        }
+
+    def test_assertion_catches_word_boundary_leak(self) -> None:
+        """Positive case: investor name appears as a whole word in the payload."""
+        import compose_report  # type: ignore[import-not-found]
+
+        payload = {
+            "company_name": "TestCo",
+            "scenario_digest": [{"scenario_drivers": ["Sequoia Capital Operations LLC participated in the round"]}],
+        }
+        instruments = self._instruments_with_investor("Sequoia Capital Operations LLC")
+        with pytest.raises(AssertionError, match="privacy-scrub violation"):
+            compose_report._assert_coaching_payload_privacy_clean(payload, instruments=instruments)
+
+    def test_assertion_passes_on_clean_payload(self) -> None:
+        """Negative case: legitimate payload with no investor names passes."""
+        import compose_report  # type: ignore[import-not-found]
+
+        payload = {
+            "company_name": "TestCo",
+            "scenario_digest": [
+                {
+                    "scenario_drivers": [
+                        "Series A at $20M pre-money",
+                        "Pool top-up to 10% post-money",
+                    ]
+                }
+            ],
+        }
+        instruments = self._instruments_with_investor("Sequoia Capital Operations LLC")
+        # Should not raise
+        compose_report._assert_coaching_payload_privacy_clean(payload, instruments=instruments)
+
+    def test_assertion_does_not_false_fire_on_short_substring(self) -> None:
+        """M9: short / common investor-name substrings ('SAFE', 'Inc', 'LLC',
+        'Capital') must NOT trigger false positives on generic template prose.
+        Length threshold >8 chars filters these out.
+        """
+        import compose_report  # type: ignore[import-not-found]
+
+        payload = {
+            "scenario_digest": [
+                {"branch_summary": "cap_plus_discount + new money", "completeness": "full"},
+                {"scenario_drivers": ["Pool top-up to 10% post-money basis"]},
+            ],
+            "headline_inputs": {"target_basis": "post_money"},
+        }
+        # Real-world short fund names that would falsely fire under the v1 bare
+        # substring check (n>2): "SAFE" inside "yc_postmoney_cap_plus_discount",
+        # "Inc" inside "Pool top-up to 10%" — wait, "Inc" doesn't appear here.
+        # The key M9 test: a short fund name doesn't cause false positives on
+        # standard template strings.
+        for short_name in ["SAFE Fund", "Capital", "Inc Co", "LLC Co"]:
+            instruments = self._instruments_with_investor(short_name)
+            compose_report._assert_coaching_payload_privacy_clean(payload, instruments=instruments)
+
+    def test_assertion_word_boundary_prevents_substring_false_positive(self) -> None:
+        """M9: even a long investor name should match only as a whole word.
+        'AcmeCorp Partners' must NOT match 'AcmeCorp Partnership' (different
+        word). With bare substring `in`, this would fire spuriously.
+        """
+        import compose_report  # type: ignore[import-not-found]
+
+        payload = {
+            "scenario_digest": [{"scenario_drivers": ["AcmeCorp Partnership terms reviewed"]}],
+        }
+        instruments = self._instruments_with_investor("AcmeCorp Partners")
+        # 'AcmeCorp Partners' is NOT a substring of 'AcmeCorp Partnership' at
+        # word boundaries — should pass.
+        compose_report._assert_coaching_payload_privacy_clean(payload, instruments=instruments)
 
 
 class TestEvidenceVerifierIntegration:

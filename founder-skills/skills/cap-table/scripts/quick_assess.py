@@ -136,10 +136,16 @@ def quick_assess(
                 f"{int(target_pool_percent * 100) if target_pool_percent else 0}% pool "
                 f"+ new money"
             ),
+            # R4 LOW.c: drivers expose dilution magnitudes as POSITIVE
+            # percentages (the founder's loss attributable to each source).
+            # Previously emitted as negative impact_pct which the markdown
+            # renderer un-negated, leaving negative values in the sentinel JSON
+            # — confusing for external consumers. Now both internal and external
+            # representations agree: impact_pct is the dilution magnitude.
             "drivers": [
-                {"type": "safe_conversion", "impact_pct": -agg["safe_pct"]},
-                {"type": "pool_refresh", "impact_pct": -agg["option_pool_pct"]},
-                {"type": "new_money", "impact_pct": -agg["new_money_pct"]},
+                {"type": "safe_conversion", "impact_pct": agg["safe_pct"]},
+                {"type": "pool_refresh", "impact_pct": agg["option_pool_pct"]},
+                {"type": "new_money", "impact_pct": agg["new_money_pct"]},
             ],
         }
         drivers = headline["drivers"]
@@ -209,7 +215,7 @@ def quick_assess(
         md_lines.append("")
         md_lines.append("Dilution by source (post-money percentage):")
         for d in drivers:
-            md_lines.append(f"- {d['type'].replace('_', ' ').title()}: {_percent(-d['impact_pct'])}")
+            md_lines.append(f"- {d['type'].replace('_', ' ').title()}: {_percent(d['impact_pct'])}")
     else:
         md_lines.append(f"_Solver could not produce a full answer ({completeness})._")
         for b in solver_result.get("blockers", []):

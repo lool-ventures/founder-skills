@@ -94,13 +94,21 @@ def required_topup(
         nm = float(new_money_shares or 0)
         post_money_x = (target * (pre_fd + nm) - existing) / (1 - target)
         post_money_required = max(0, int(round(post_money_x)))
+    else:
+        post_money_required = 0
+    # M8 gate: only fire the warning + clarifying_question when post-money
+    # interpretation produces a NONZERO top-up. If both interpretations yield 0
+    # top-up, the pool is legitimately oversized and there's no real ambiguity.
+    # M7 guard: pre_fd may be 0 for library callers; protect the warning message.
+    if target_basis in {"pre_money", "custom"} and required == 0 and target > 0 and post_money_required > 0:
+        existing_pct_of_pre_fd = (existing / pre_fd) if pre_fd > 0 else 0.0
         warnings.append(
             {
                 "code": "pool_target_already_met_check_intent",
                 "severity": "high",
                 "message": (
                     f"Under literal target_basis={target_basis!r}, the existing pool "
-                    f"({existing:,.0f} shares = {existing / pre_fd:.1%} of pre-FD) already "
+                    f"({existing:,.0f} shares = {existing_pct_of_pre_fd:.1%} of pre-FD) already "
                     f"meets or exceeds the target of {target:.1%}, so the script computed 0 top-up. "
                     f"Series A term-sheet practice for 'X% pool refresh' usually means "
                     f"X% post-close unallocated (post_money basis). Under that reading, "

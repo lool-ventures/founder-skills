@@ -61,45 +61,54 @@ def _resolve_mfn_elections(safes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     require `conversion_price_override` on every MFN-electing SAFE — needless
     friction for the canonical case.
 
-    For each `yc_uncapped_mfn` SAFE with a valid `elected_against_safe_id`
-    pointing to a sibling that has a resolved cap, returns a shadow record
-    with form rewritten to match the elected sibling's form (cap-only,
-    cap+discount, or discount-only) and the cap/discount inherited.
+    Multi-hop resolution: A→B→C chains are resolved transitively by iterating
+    to a fixed point. Each pass resolves any `yc_uncapped_mfn` whose election
+    target now has a resolved (non-uncapped-MFN) form; iteration continues
+    until no further resolutions happen. Bounded by `len(safes)` iterations
+    since each pass either resolves at least one SAFE or terminates.
 
-    Truly uncapped MFNs (no election, or elected against another uncapped MFN
-    with no anchor) are left unchanged — the rejection / Gotcha #4 cycle guard
-    still fires correctly for those.
+    Truly unresolvable cases (election to a missing sibling, all-uncapped
+    cycles) are left unchanged — `detect_mfn_cycles` and the rejection path
+    in `convert_safe_priced_round` handle them per Gotcha #4.
 
-    The original instrument records are NOT mutated — this returns a new list.
+    The `_mfn_inherited_from` field records the immediate election anchor
+    (not the transitive root), so a 3-hop chain A→B→C resolves to: A inherits
+    B's resolved form (which itself inherited C's). Downstream reporting can
+    trace the chain by walking each SAFE's `_mfn_inherited_from`.
+
+    The original instrument records are NOT mutated — this returns a new list
+    of shadow records.
     """
-    by_id = {s["id"]: s for s in safes}
-    out: list[dict[str, Any]] = []
-    for s in safes:
-        if s.get("form") != "yc_uncapped_mfn":
-            out.append(s)
-            continue
-        mfn = s.get("mfn_provision") or {}
-        elected_id = mfn.get("elected_against_safe_id")
-        if not elected_id or elected_id not in by_id:
-            # No election, or election points to a missing sibling — leave as-is
-            # (existing rejection / cycle guard logic handles this)
-            out.append(s)
-            continue
-        anchor = by_id[elected_id]
-        if anchor.get("form") == "yc_uncapped_mfn":
-            # Election against another uncapped MFN — chain is unresolvable
-            # unless the chain terminates at a capped SAFE (which detect_mfn_cycles
-            # already handles). Leave as-is for the cycle guard to handle.
-            out.append(s)
-            continue
-        # Anchor has a resolved form; inherit cap, discount, and form.
-        shadow = dict(s)
-        shadow["form"] = anchor["form"]
-        shadow["post_money_valuation_cap"] = anchor.get("post_money_valuation_cap")
-        shadow["discount_multiplier"] = anchor.get("discount_multiplier")
-        # Mark provenance so downstream reporting can show "inherited from safe_X"
-        shadow["_mfn_inherited_from"] = elected_id
-        out.append(shadow)
+    out: list[dict[str, Any]] = [dict(s) for s in safes]
+    max_iterations = len(out) + 1  # safety bound; can never need more than N hops
+    for _ in range(max_iterations):
+        by_id = {s["id"]: s for s in out}
+        changed = False
+        for i, s in enumerate(out):
+            if s.get("form") != "yc_uncapped_mfn":
+                continue
+            mfn = s.get("mfn_provision") or {}
+            elected_id = mfn.get("elected_against_safe_id")
+            if not elected_id or elected_id not in by_id:
+                continue
+            anchor = by_id[elected_id]
+            if anchor.get("form") == "yc_uncapped_mfn":
+                # Anchor not yet resolved (chain not terminated at a capped
+                # SAFE on this pass). Wait for next iteration; if cycle, the
+                # cycle guard catches it.
+                continue
+            # Anchor has a resolved form (cap-only, cap+discount, discount-only,
+            # or one of the pre-money legacy forms). Inherit form + cap + discount.
+            shadow = dict(s)
+            shadow["form"] = anchor["form"]
+            shadow["post_money_valuation_cap"] = anchor.get("post_money_valuation_cap")
+            shadow["pre_money_valuation_cap"] = anchor.get("pre_money_valuation_cap")
+            shadow["discount_multiplier"] = anchor.get("discount_multiplier")
+            shadow["_mfn_inherited_from"] = elected_id
+            out[i] = shadow
+            changed = True
+        if not changed:
+            break
     return out
 
 
@@ -133,6 +142,11 @@ def _safe_shares_at_price(
             equity_financing_price=equity_financing_price,
             conversion_price_override=s.get("conversion_price_override"),
         )
+        # Propagate MFN inheritance provenance from shadow record to result
+        # (M5 — without this, downstream reporting can't phrase "Investor X's
+        # MFN-inherited terms from Investor Y").
+        if s.get("_mfn_inherited_from"):
+            r["_mfn_inherited_from"] = s["_mfn_inherited_from"]
         per_safe[s["id"]] = r
         if r.get("branch") != "rejected":
             total += r.get("conversion_shares", 0.0)
@@ -180,17 +194,21 @@ def solve_priced_round(
     per-SAFE / per-note conversion, pool top-up, post-round cap table, and
     math provenance.
 
-    Algorithm: fixed-point iteration. Starting estimate uses the cap-only
-    closed-form (pre_money / pre_FD). Each iteration:
-      1. Compute SAFE conversion shares at current price estimate.
+    Algorithm: fixed-point iteration. Starting estimate uses
+    `pre_money / pre_FD`. Each iteration:
+      1. Compute SAFE conversion shares at current price estimate (post-money
+         FD estimate passed as `company_capitalization` for post-money forms;
+         constant `pre_money_fd` passed for pre-money legacy forms).
       2. Compute note conversion shares at current price estimate.
       3. Compute pool top-up at current FD estimate.
-      4. Recompute equity_financing_price = pre_money / (pre_FD + SAFE + note + pool_topup)
-      5. Check convergence; loop.
+      4. Recompute equity_financing_price = pre_money / (pre_FD + SAFE + note + pool_topup).
+      5. Update total_fd_estimate (add new_money_shares).
+      6. Check convergence; loop.
 
-    Closed-form path (skipped iteration when applicable): all SAFEs are
-    `yc_postmoney_cap` AND no discount AND no notes — the cap-implied price
-    is the answer (per YC primer Example 1).
+    Convergence is typically 3-7 iterations for realistic cap tables
+    (milliseconds wall-clock). No closed-form short-circuit; the iterative
+    solver is fast enough that the maintenance cost of a parallel symbolic
+    path is not worth the speedup.
     """
     blockers: list[dict[str, Any]] = []
 
@@ -241,6 +259,10 @@ def solve_priced_round(
     converged = False
     iterations = 0
     history: list[float] = [price]
+    # Defensive init: if max_iterations=0 (degenerate input), rel_change is
+    # referenced in the non-convergence blocker message below and would
+    # NameError without this. (R4 LOW.a — Reviewer 4's audit finding.)
+    rel_change = float("inf")
     # Initial estimate of post-money FD (used as company_capitalization for the
     # YC post-money SAFE formula). Refined each iteration.
     #
