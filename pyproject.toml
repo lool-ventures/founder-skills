@@ -3,7 +3,10 @@ name = "founder-skills"
 version = "0.4.7"
 license = "Apache-2.0"
 requires-python = ">=3.10"
-dependencies = ["openpyxl"]
+dependencies = [
+    "openpyxl",
+    "python-docx>=1.2.0",
+]
 
 [project.optional-dependencies]
 dev = ["ruff", "mypy", "pytest", "pyyaml", "types-openpyxl", "types-PyYAML", "claude-agent-sdk==0.1.80"]
@@ -11,6 +14,9 @@ dev = ["ruff", "mypy", "pytest", "pyyaml", "types-openpyxl", "types-PyYAML", "cl
 [tool.ruff]
 target-version = "py310"
 line-length = 120
+# docs/internal/ is gitignored; eval-set scripts embed long HTML/JS templates
+# we don't want to lint. Excluding the whole tree.
+extend-exclude = ["docs/internal/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
@@ -18,6 +24,13 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 [tool.ruff.lint.per-file-ignores]
 # HTML template embeds long JS lines inside raw string; line length not fixable
 "founder-skills/skills/financial-model-review/scripts/review_inputs.py" = ["E501"]
+# HTML/JS templates inline long lines we can't usefully wrap
+"founder-skills/skills/cap-table/scripts/explore.py" = ["E501"]
+"founder-skills/skills/cap-table/scripts/visualize.py" = ["E501"]
+"founder-skills/skills/cap-table/scripts/compose_report.py" = ["E501"]
+"founder-skills/skills/cap-table/scripts/flip_scenario.py" = ["E501"]
+"founder-skills/skills/cap-table/scripts/priced_round.py" = ["E501"]
+"founder-skills/skills/cap-table/scripts/rule_audit.py" = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"

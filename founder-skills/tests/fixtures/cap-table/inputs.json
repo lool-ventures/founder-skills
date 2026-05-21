@@ -1,0 +1,28 @@
+{
+  "company_name": "Foobar",
+  "analysis_date": "2026-05-19",
+  "mode": "standard",
+  "founders": [
+    {
+      "name": "Alice",
+      "founder_id": "alice",
+      "common_shares": 5000000
+    },
+    {
+      "name": "Bob",
+      "founder_id": "bob",
+      "common_shares": 5000000
+    }
+  ],
+  "preferred_series": [],
+  "option_pool": {
+    "plan_type": "nso",
+    "authorized": 1000000,
+    "issued": 0,
+    "unallocated": 1000000
+  },
+  "common_batches": [],
+  "metadata": {
+    "run_id": "fixture-run"
+  }
+}

@@ -33,6 +33,7 @@ SKILLS_DIR = REPO_ROOT / "founder-skills" / "skills"
 #   - founder-skills/tests/fixtures/<skill>/   (the fixture set)
 COACHING_SKILLS = [
     "deck-review",
+    "cap-table",
     # "market-sizing",            # add when fixtures populated
     # "ic-sim",                   # add when fixtures populated
     # "financial-model-review",   # add when fixtures populated

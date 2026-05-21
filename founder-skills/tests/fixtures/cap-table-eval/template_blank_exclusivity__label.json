@@ -1,0 +1,18 @@
+{
+  "id": "template_blank_exclusivity",
+  "scenario": "template_blank_exclusivity",
+  "doc_type": "term_sheet",
+  "instrument_type": "term_sheet",
+  "fields": {
+    "company_name": "ACMECORP INC.",
+    "round_series": "Series A",
+    "pre_money_valuation": 20000000,
+    "post_money_valuation": 25000000,
+    "investment_amount": 5000000,
+    "lead_investor_name": "Foobar Ventures LP",
+    "liq_pref_multiple": 1.0,
+    "exclusivity_days": null
+  },
+  "expected_violations": [],
+  "key_assertion": "exclusivity_days must be null — doc has a template blank, not 45 (template-blank archetype)"
+}

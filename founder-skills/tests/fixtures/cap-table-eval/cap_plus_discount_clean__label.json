@@ -1,0 +1,16 @@
+{
+  "id": "cap_plus_discount_clean",
+  "scenario": "cap_plus_discount_clean",
+  "doc_type": "safe",
+  "instrument_type": "safe",
+  "fields": {
+    "form": "cap_plus_discount",
+    "purchase_amount": 500000,
+    "post_money_valuation_cap": 20000000,
+    "pre_money_valuation_cap": null,
+    "discount_multiplier": 0.80,
+    "issuance_date": "2024-01-15",
+    "investor_name": "Foobar Capital LLC"
+  },
+  "key_assertion": "form must be 'cap_plus_discount' (canonical enum); post-money cap is $20M; discount multiplier is 0.80 per Gotcha #3"
+}

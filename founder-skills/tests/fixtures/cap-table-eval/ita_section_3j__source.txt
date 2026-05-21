@@ -1,0 +1,25 @@
+CONVERTIBLE LOAN AGREEMENT
+
+This Convertible Loan Agreement is entered into as of December 1, 2023
+by and between ACMECORP LTD., an Israeli company (the "Company"), and
+Foobar Israel Fund LP (the "Lender").
+
+1. PRINCIPAL. The Lender agrees to lend the Company a principal amount
+of US $200,000 (the "Principal Amount").
+
+2. INTEREST. The Principal Amount shall bear interest at the rate
+prescribed by Section 3(j) of the Israeli Income Tax Regulations, as
+published by the Israeli Tax Authority from time to time. No fixed
+numeric interest rate shall be applied; the statutory rate shall govern.
+
+3. MATURITY. The Maturity Date shall be December 1, 2025 (24 months
+from the date hereof).
+
+4. CONVERSION. Upon a Qualified Financing (defined as an equity round of
+at least $1,000,000), the Principal Amount plus accrued interest shall
+convert into shares at a Valuation Cap of $8,000,000, with a Discounted
+Price equal to 80% of the per-share price of the Qualified Financing
+(i.e., a 20% effective discount).
+
+5. GOVERNING LAW. This Agreement shall be governed by the laws of the
+State of Israel.

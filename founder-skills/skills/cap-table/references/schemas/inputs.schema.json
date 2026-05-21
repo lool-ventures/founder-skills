@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "cap-table inputs.json",
+  "type": "object",
+  "required": ["company_name", "analysis_date", "mode", "metadata"],
+  "properties": {
+    "company_name": {"type": "string"},
+    "analysis_date": {"type": "string"},
+    "mode": {"enum": ["standard", "flip_focused"]},
+    "jurisdiction": {
+      "type": "object",
+      "properties": {
+        "structure": {"enum": ["delaware", "israeli", "delaware_with_israeli_sub", "mid_flip"]},
+        "incorporated_date": {"type": "string"},
+        "iia_grants_history": {
+          "type": "object",
+          "properties": {
+            "has_grants": {"type": "boolean"},
+            "grant_details": {"type": "array"}
+          }
+        }
+      }
+    },
+    "event_dates": {
+      "type": "object",
+      "properties": {
+        "restructuring_effective_date": {"type": ["string", "null"]},
+        "restructuring_approval_date": {"type": ["string", "null"]},
+        "filing_date": {"type": ["string", "null"]},
+        "tax_position_date": {"type": ["string", "null"]},
+        "flip_closing_date": {"type": ["string", "null"]},
+        "benchmark_reference_date": {"type": ["string", "null"]}
+      }
+    },
+    "engagement_questions": {"type": "array", "items": {"type": "string"}},
+    "metadata": {
+      "type": "object",
+      "required": ["run_id"],
+      "properties": {"run_id": {"type": "string"}}
+    }
+  }
+}

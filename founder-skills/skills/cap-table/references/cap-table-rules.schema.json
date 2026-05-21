@@ -1,0 +1,380 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://founderskills.local/schemas/cap-table-rules.schema.json",
+  "title": "Cap Table Rules Reference Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "metadata",
+    "source_bibliography",
+    "domains"
+  ],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "generated_date",
+        "purpose",
+        "source_policy"
+      ],
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "generated_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "source_policy": {
+          "type": "string"
+        }
+      }
+    },
+    "source_bibliography": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "domains": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "safe",
+        "convertible_notes",
+        "option_pool",
+        "anti_dilution",
+        "israel_equity_tax",
+        "israeli_ltd",
+        "delaware_cross_border",
+        "delaware_flip",
+        "founder_benchmarks"
+      ],
+      "properties": {
+        "safe": {
+          "$ref": "#/$defs/ruleList"
+        },
+        "convertible_notes": {
+          "$ref": "#/$defs/ruleList"
+        },
+        "option_pool": {
+          "$ref": "#/$defs/ruleList"
+        },
+        "anti_dilution": {
+          "$ref": "#/$defs/ruleList"
+        },
+        "israel_equity_tax": {
+          "$ref": "#/$defs/ruleList"
+        },
+        "israeli_ltd": {
+          "$ref": "#/$defs/ruleList"
+        },
+        "delaware_cross_border": {
+          "$ref": "#/$defs/ruleList"
+        },
+        "delaware_flip": {
+          "$ref": "#/$defs/ruleList"
+        },
+        "founder_benchmarks": {
+          "$ref": "#/$defs/ruleList"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "title",
+        "publisher",
+        "url",
+        "source_type",
+        "accessed_date"
+      ],
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "pattern": "^[A-Z0-9][A-Z0-9-]+$"
+        },
+        "title": {
+          "type": "string"
+        },
+        "publisher": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "source_type": {
+          "enum": [
+            "primary",
+            "near_primary",
+            "strong_secondary",
+            "secondary",
+            "benchmark_dataset"
+          ]
+        },
+        "publication_date": {
+          "type": "string"
+        },
+        "accessed_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "ruleList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/rule"
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_id",
+        "domain",
+        "behavior_target",
+        "title",
+        "summary",
+        "implementation_action",
+        "confidence",
+        "source_ids",
+        "source_basis",
+        "counsel_review"
+      ],
+      "properties": {
+        "rule_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+\\.[a-z0-9_]+$"
+        },
+        "domain": {
+          "enum": [
+            "safe",
+            "convertible_notes",
+            "option_pool",
+            "anti_dilution",
+            "israel_equity_tax",
+            "israeli_ltd",
+            "delaware_cross_border",
+            "delaware_flip",
+            "founder_benchmarks"
+          ]
+        },
+        "behavior_target": {
+          "enum": [
+            "script_formula",
+            "validation_rule",
+            "warning_rule",
+            "benchmark",
+            "source_note",
+            "counsel_review_flag"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "implementation_action": {
+          "enum": [
+            "hardcode",
+            "parameterize",
+            "warn",
+            "counsel_review",
+            "benchmark_only"
+          ]
+        },
+        "confidence": {
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "source_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z0-9][A-Z0-9-]+$"
+          },
+          "uniqueItems": true
+        },
+        "source_basis": {
+          "enum": [
+            "primary",
+            "near_primary",
+            "strong_secondary",
+            "secondary",
+            "benchmark_dataset",
+            "mixed"
+          ]
+        },
+        "counsel_review": {
+          "type": "boolean",
+          "description": "Reliance boundary, NOT a confidence score. counsel_review=true means a script using this rule must not present it as a legal or tax conclusion; allowed uses are checklist items, warnings, prompts for missing facts, do-not-conclude gates, and handoff notes for counsel. counsel_review=false means the rule is safe for deterministic script behavior given user-provided document terms (e.g., SAFE math, BBWA formula). A rule can be well-sourced AND still require counsel_review=true because application depends on jurisdiction, current law, facts, documents, tax status, or regulatory approval."
+        },
+        "script_allowed_outputs": {
+          "type": "array",
+          "description": "Optional. Enumerates what a script may emit when applying this rule. Most useful when counsel_review=true; sets the reliance boundary explicitly.",
+          "items": {
+            "enum": [
+              "flag_issue",
+              "ask_for_documents",
+              "show_source_note",
+              "recommend_counsel_review",
+              "compute_numerical_result",
+              "render_warning",
+              "render_benchmark_comparison"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "script_disallowed_outputs": {
+          "type": "array",
+          "description": "Optional. Enumerates outputs a script must NOT emit when applying this rule. Use for counsel_review=true rules and for date-sensitive rules outside their applicability window.",
+          "items": {
+            "enum": [
+              "legal_conclusion",
+              "tax_classification",
+              "eligibility_determination",
+              "binding_filing_instruction",
+              "rate_or_percentage_quotation_without_source_date"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "jurisdiction": {
+          "type": "string"
+        },
+        "applies_when": {
+          "type": "string"
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/namedField"
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/namedField"
+          }
+        },
+        "formula": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rounding_policy": {
+          "type": "string"
+        },
+        "parameterization_points": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "date_window": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "start": {
+              "type": "string",
+              "format": "date"
+            },
+            "end": {
+              "type": "string",
+              "format": "date"
+            },
+            "event_date_field": {
+              "type": "string"
+            },
+            "near_edge_days_before_start": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Optional override for the per-rule 'near_edge' threshold before the window's start date. Default: 30 days. Used by rule_audit.py to surface upcoming regime changes (e.g., a regulatory rule that takes effect on a known future date)."
+            },
+            "near_edge_days_before_end": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Optional override for the per-rule 'near_edge' threshold before the window's end date. Default: 90 days. Used by rule_audit.py to flag rules approaching expiry (e.g., temporary regulatory guidance with a known sunset date)."
+            },
+            "notes": {
+              "type": "string"
+            }
+          }
+        },
+        "benchmark": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "namedField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "type",
+        "description"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "type": {
+          "enum": [
+            "money",
+            "decimal",
+            "integer",
+            "boolean",
+            "date",
+            "enum",
+            "string",
+            "array",
+            "object"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "allowed_values": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

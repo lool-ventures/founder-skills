@@ -28,6 +28,9 @@
 - `founder-skills/agents/competitive-positioning.md` — Competitive positioning agent definition
 - `founder-skills/tests/test_competitive_positioning.py` — Competitive positioning regression tests
 - `founder-skills/tests/test_visualize_competitive_positioning.py` — Competitive positioning HTML visualization tests
+- `founder-skills/skills/cap-table/` — Cap-table skill (SAFE / note conversion, priced rounds, anti-dilution, Israeli ↔ Delaware flips)
+- `founder-skills/agents/cap-table.md` — Cap-table agent definition (Context A extraction + Context B coaching)
+- `founder-skills/tests/test_cap_table.py` — Cap-table regression tests (math producers + 11-gotcha regression suite)
 - `founder-skills/tests/cowork_async_subagent_filter.py` — Cowork sub-agent tool-name compatibility helper (skill-quality CI; v0.4.0-regression detector)
 - `founder-skills/tests/compose_invocations.py` — Per-skill compose-script invocation registry (skill-quality CI)
 - `founder-skills/tests/test_cowork_async_subagent_filter.py` — Helper unit tests
@@ -95,6 +98,32 @@
 - **`apply_corrections.py`** — Processes founder's downloaded corrections file: coerces, normalizes, merges overrides, writes corrected_inputs.json + extraction_corrections.json
 - **`verify_review.py`** — Review completeness gate: checks artifact existence, content quality (evidence, critical fields, metrics), and cross-artifact consistency; exit 0 = publishable, exit 1 = gaps
 
+## Cap Table Scripts
+
+Rule-pack-driven cap-table math. Every math producer cites a `rule_id` from `cap-table-rules.json` (v0.2.8+). The pipeline is two-phase per design §9 Step 4.5 / Step 6: `rule_audit.py --phase=pre_math` writes the gating block math producers consume; `--phase=post_math` composes watchlist + counsel items after math runs.
+
+- **`cap_state.py`** — Aggregates inputs + instruments into `cap_state.json` with `as_converted_totals` (the pre-financing snapshot the YC SAFE `company_capitalization` denominator binds to per Gotcha #1)
+- **`safe_conversion.py`** — YC post-money SAFE math; all 5 forms; cap-implied + post-financing output sets; MFN cycle detection (Gotcha #4)
+- **`note_conversion.py`** — Convertible-note math with full 7-branch enum (cap_conversion / discount_only / maturity_* / threshold_not_met) + override branch
+- **`option_pool.py`** — Option-pool top-up math; `target_basis` enum with all 4 rule-pack values
+- **`anti_dilution.py`** — BBWA (with CP1 divisor per Gotcha #2) + full ratchet
+- **`priced_round.py`** — Solver/orchestrator: fixed-point iteration for coupled SAFE + note + pool + new_money + AD systems
+- **`flip_scenario.py`** — Israeli ↔ Delaware flip (v0.1: 1:1 share-for-share only per Gotcha #7)
+- **`rule_audit.py`** — Two-phase (`--phase=pre_math` / `--phase=post_math`); scope-aware apply contract (`legal_tax_applicability` / `benchmark_freshness` / `not_applicable`); 5 mutually exclusive statuses + 2 near-edge overlays
+- **`run_scenario.py`** — Top-level scenario orchestrator (routes by `scenario.type`)
+- **`counsel_packet.py`** — Counsel-handoff packet (json + md); standalone deliverable
+- **`compose_report.py`** — Assembles report.md + report.json (with embedded `coaching_payload` block, schema_version `v0.5.0-cap-table` as of Sprint 6c; v0.4.2 still accepted on input via `COMPAT_VERSIONS`)
+- **`visualize.py`** — Self-contained `report.html` (inline SVG donut, no CDN)
+- **`explore.py`** — Self-contained `explorer.html` (vanilla JS interactive scenario picker)
+- **`extract_instrument.py`** — Lane-1 anti-hallucination validator (sub-agent does extraction; this validates returned JSON, normalizes `discount_multiplier` per Gotcha #3). Sprint 2b added `--verify` / `--verify-blocking` / `--source-doc` flags for evidence-verification wiring; Sprint 2c added ~30-field synthesized skip list.
+- **`extract_cap_table.py`** — Lane-2/3/4 (validate mode + Carta/Pulley stub + freeform Context-A output validator)
+- **`evidence_verifier.py`** — Sprint 2 forward verifier. Three-layer check (quote_in_doc / value_in_quote / value_in_doc) catching HALLUCINATIONS. 3.6% FPR / 100% TPR.
+- **`backward_verifier.py`** — Sprint 3 backward verifier (two-phase `--phase=prompt`/`--phase=score` CLI). Catches SEMANTIC CONFUSION via fresh-sub-agent re-extraction. WARN-mode default.
+- **`invariant_checker.py`** — Sprint 4 real-world-bounds checker. Per-field ranges + cross-field math invariants. 0% FPR / 63% TPR.
+- **`cross_checker.py`** — Sprint 5d demote-only confidence modulator when multiple extractors disagree.
+- **`_normalize.py`** — Sprint 5b shared text-normalization primitives (normalize_text, compact_form, numeric_tokens, date_tokens).
+- **`extractors/`** — Sprint 5c scaffolding module: `FieldExtraction`, `SourceSpan`, `ExtractionContext`, `ExtractorProtocol` types for span-preserving extraction.
+
 ## Competitive Positioning Scripts
 
 - **`validate_landscape.py`** — Validates competitor list structure, checks slug uniqueness, preserves provenance
@@ -132,6 +161,7 @@ uv run mypy founder-skills/skills/deck-review/scripts/
 uv run mypy founder-skills/skills/ic-sim/scripts/
 uv run mypy founder-skills/skills/financial-model-review/scripts/
 uv run mypy founder-skills/skills/competitive-positioning/scripts/
+uv run mypy founder-skills/skills/cap-table/scripts/
 uv run mypy founder-skills/tests/
 ```
 

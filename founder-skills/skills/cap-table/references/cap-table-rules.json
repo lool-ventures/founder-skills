@@ -1,0 +1,1795 @@
+{
+  "metadata": {
+    "version": "0.2.8",
+    "generated_date": "2026-05-19",
+    "purpose": "Verified source-backed rule pack for a future cap-table, dilution, SAFE, convertible note, option pool, anti-dilution, Israel/Delaware, and founder benchmark skill. v0.2.2: added NVCA-CERT-OF-INC and COOLEY-DOWN-ROUND as proper source IDs for the BBWA rule (formerly the rule cited NVCA Model Cert in prose without a corresponding source_id; the formula text is in the Cooley down-round article, not the glossary). v0.2.1 history: reverted BBWA B-divisor to CP1; replaced WSGR Q1 figures with verified FY2025 medians; softened ICNL Ordinance caveat. v0.2.0 history: TaxAdviser QSBS URL fix; ICNL Companies Law canonical PDF; WSGR direct URL; qualified-financing benchmark rewrite; Section 102 double-trigger split; option-pool source list cleaned; YC primer co-cites added. v0.2.3: appended verbatim BBWA formula text + 2022-01-24 last-reviewed date from Cooley GO down-round article into the COOLEY-DOWN-ROUND source notes; tightened COOLEY-ANTI-DILUTION notes to flag it as the concept-level glossary corroborator (formula text lives on COOLEY-DOWN-ROUND). v0.2.4: swapped NVCA-CERT-OF-INC URL from the index landing page to the direct downloadable .docx; verified \u00a74.4.4 contains the verbatim CP1-based BBWA formula text by extracting the document XML. v0.2.5: schema documents counsel_review semantics (reliance boundary, not confidence score) and adds optional script_allowed_outputs / script_disallowed_outputs enums; markdown gains a Counsel Review Semantics section. v0.2.6: schema adds optional `date_window.near_edge_days_before_start` and `date_window.near_edge_days_before_end` override fields per cap-table skill design (rev3); rule defaults remain 30/90 days; no rules in v0.2.6 use the overrides yet, but the schema permits them.",
+    "source_policy": "Rules cite original quotable legal documents, issuer documents, official agency pages, law-firm publications, and benchmark datasets. AI research notes and intermediate consolidated files are excluded from final references."
+  },
+  "source_bibliography": [
+    {
+      "source_id": "YC-PMSAFE-PRIMER",
+      "title": "Primer for post-money safe v1.1",
+      "publisher": "Y Combinator",
+      "url": "https://www.ycombinator.com/assets/ycdc/Primer%20for%20post-money%20safe%20v1.1-2af8129e12effd9638eeab383b7309142c8f415e5cdb0bc210d573f779177a1c.pdf",
+      "source_type": "primary",
+      "publication_date": "2022",
+      "accessed_date": "2026-05-18",
+      "notes": "Primary YC explanatory source for post-money SAFE ownership math and examples."
+    },
+    {
+      "source_id": "YC-SAFE-DOCUMENTS",
+      "title": "SAFE Financing Documents",
+      "publisher": "Y Combinator",
+      "url": "https://www.ycombinator.com/documents",
+      "source_type": "primary",
+      "accessed_date": "2026-05-18",
+      "notes": "Primary source for current YC SAFE forms, including post-money valuation cap, discount, MFN, and pro rata side letter forms."
+    },
+    {
+      "source_id": "YC-STANDARD-DEAL",
+      "title": "Y Combinator Standard Deal",
+      "publisher": "Y Combinator",
+      "url": "https://www.ycombinator.com/deal",
+      "source_type": "primary",
+      "accessed_date": "2026-05-18",
+      "notes": "Primary current YC standard-deal page. It states YC invests $125k on a post-money SAFE and $375k on an uncapped SAFE with an MFN provision."
+    },
+    {
+      "source_id": "COOLEY-NOTE-PPS",
+      "title": "Calculating Share Price With Outstanding Convertible Notes or Safes",
+      "publisher": "Cooley GO",
+      "url": "https://www.cooleygo.com/calculating-share-price-outstanding-convertible-notes-or-safes/",
+      "source_type": "strong_secondary",
+      "accessed_date": "2026-05-18",
+      "notes": "Practical guide to pre-money share price when notes or SAFEs convert in a preferred round."
+    },
+    {
+      "source_id": "COOLEY-OPTION-POOL",
+      "title": "Negotiating the Option Pool",
+      "publisher": "Cooley GO",
+      "url": "https://www.cooleygo.com/negotiating-option-pool/",
+      "source_type": "strong_secondary",
+      "accessed_date": "2026-05-18",
+      "notes": "Practical guide to pre-money option pool treatment and founder dilution."
+    },
+    {
+      "source_id": "COOLEY-CONVERTIBLE-DEBT",
+      "title": "Convertible Debt",
+      "publisher": "Cooley GO",
+      "url": "https://www.cooleygo.com/convertible-debt/",
+      "source_type": "strong_secondary",
+      "accessed_date": "2026-05-18",
+      "notes": "Practical guide to note discounts, caps, interest, maturity, and qualified financing terms."
+    },
+    {
+      "source_id": "COOLEY-ANTI-DILUTION",
+      "title": "Broad-Based Weighted Average Anti-Dilution Protection",
+      "publisher": "Cooley GO",
+      "url": "https://www.cooleygo.com/glossary/broad-based-weighted-average-anti-dilution-protection/",
+      "source_type": "strong_secondary",
+      "accessed_date": "2026-05-18",
+      "notes": "Cooley GO's glossary entry for BBWA. Concept-level corroborator; the full verbatim formula text lives in the COOLEY-DOWN-ROUND article rather than this glossary page."
+    },
+    {
+      "source_id": "COOLEY-DOWN-ROUND",
+      "title": "What You Need to Know About Down Round Financings",
+      "publisher": "Cooley GO",
+      "url": "https://www.cooleygo.com/down-round-financings/",
+      "source_type": "strong_secondary",
+      "accessed_date": "2026-05-18",
+      "notes": "Cooley GO's down-round article contains the full BBWA formula text in the \"Broad-Based Weighted Average Formula Footnote\" section: CP2 = CP1 * (A + B) / (A + C), with B defined as \"the number of shares of common stock that would have been issued if such additional shares had been issued at a price per share equal to CP1 (determined by dividing the aggregate consideration received by the company in respect of such issuance by CP1).\" Verified verbatim 2026-05-18. Last reviewed on Cooley GO: 2022-01-24.",
+      "publication_date": "2022-01-24"
+    },
+    {
+      "source_id": "NVCA-CERT-OF-INC",
+      "title": "Model Certificate of Incorporation",
+      "publisher": "National Venture Capital Association",
+      "url": "https://nvca.org/wp-content/uploads/2019/06/NVCA-Model-Document-Certificate-of-Incorporation.docx",
+      "source_type": "near_primary",
+      "accessed_date": "2026-05-18",
+      "notes": "Direct downloadable .docx of the NVCA Model Certificate of Incorporation (2019 revision; NVCA refreshed its Series A doc set in Oct 2025 but this 2019/06 URL currently still serves a valid model document). Subsection 4.4.4 defines the BBWA conversion-price adjustment formula. Verified verbatim 2026-05-18: the section contains the language \"per share equal to CP 1 (determined by dividing the aggregate consideration received by the Corporation in respect of such issue by CP 1)\" \u2014 confirming B's divisor is CP1. Landing page: https://nvca.org/model-legal-documents/.",
+      "publication_date": "2019-06"
+    },
+    {
+      "source_id": "FENWICK-CONVERTIBLE-NOTE",
+      "title": "Convertible Note Seed-Stage Startup Template",
+      "publisher": "Fenwick",
+      "url": "https://assets.fenwick.com/legacy/FenwickDocuments/Convertible-Note-Seed-Stage-Startup.pdf",
+      "source_type": "near_primary",
+      "accessed_date": "2026-05-18",
+      "notes": "Law-firm template source for document-specific note conversion denominator conventions."
+    },
+    {
+      "source_id": "NVCA-CONVERTIBLE-NOTE",
+      "title": "Note Purchase Agreement and Convertible Note",
+      "publisher": "National Venture Capital Association",
+      "url": "https://nvca.org/wp-content/uploads/2024/02/Note-Purchase-Agreement-and-Convertible-Note.pdf",
+      "source_type": "near_primary",
+      "publication_date": "2024-02",
+      "accessed_date": "2026-05-18",
+      "notes": "Model legal document source for convertible note definitions and conversion mechanics."
+    },
+    {
+      "source_id": "WSGR-ER-FY2025",
+      "title": "The Entrepreneurs Report: Full Year 2025",
+      "publisher": "Wilson Sonsini",
+      "url": "https://www.wsgr.com/en/insights/the-entrepreneurs-report-full-year-2025.html",
+      "source_type": "benchmark_dataset",
+      "publication_date": "2026-02",
+      "accessed_date": "2026-05-18",
+      "notes": "Benchmark dataset for US seed/post-seed note terms. Source-of-truth for conversion-trigger prevalence, maturity ranges, interest-rate distributions, and qualified-financing thresholds. Companion quarterly PDFs at https://www.wsgr.com/a/web/oFpGWcMXTLsUML5oSHyxfm/entrepreneurs-report-q2-2025.pdf and https://ecvc.wsgr.com/a/web/vgnKwoeAkUKT6MTc96jYem/entrepreneurs-report-q1-2025.pdf."
+    },
+    {
+      "source_id": "ITA-SAFE-2025-MASLAW",
+      "title": "Israeli Tax Authority Issues New Guidelines on SAFE",
+      "publisher": "Maslaw",
+      "url": "https://www.maslaw.co.il/wp-content/uploads/2025/02/Israeli-Tax-Authority-Issues-New-Guidelines-on-SAFE.pdf",
+      "source_type": "strong_secondary",
+      "publication_date": "2025-02",
+      "accessed_date": "2026-05-18",
+      "notes": "English law-firm summary of the January 2025 ITA SAFE guidance. Use counsel review before implementation."
+    },
+    {
+      "source_id": "PEARLCOHEN-SAFE-2025",
+      "title": "SAFE 2025: Summary of Key Changes from SAFE 2023",
+      "publisher": "Pearl Cohen",
+      "url": "https://www.pearlcohen.com/key-tax-updates-safe-2025-summary-key-changes-from-safe-2023/",
+      "source_type": "strong_secondary",
+      "publication_date": "2025",
+      "accessed_date": "2026-05-18",
+      "notes": "Secondary law-firm source summarizing the 2025 ITA SAFE guidance updates."
+    },
+    {
+      "source_id": "IIA-ROYALTIES-IP",
+      "title": "Royalties and Intellectual Property",
+      "publisher": "Israel Innovation Authority",
+      "url": "https://innovationisrael.org.il/en/royalties-intellectual-property/",
+      "source_type": "primary",
+      "accessed_date": "2026-05-18",
+      "notes": "Official Israel Innovation Authority source for royalties, IP transfer, licensing, and manufacturing outside Israel."
+    },
+    {
+      "source_id": "ISRAEL-COMPANIES-LAW",
+      "title": "Companies Law, 5759-1999",
+      "publisher": "International Center for Not-for-Profit Law library",
+      "url": "https://www.icnl.org/wp-content/uploads/Israel_CompaniesLaw.pdf",
+      "source_type": "near_primary",
+      "accessed_date": "2026-05-18",
+      "notes": "English translation of Israeli Companies Law (canonical ICNL PDF). Hebrew official text (Nevo / Knesset Sefer HaChukkim) controls."
+    },
+    {
+      "source_id": "ICNL-ISRAEL-ORDINANCE",
+      "title": "Income Tax Ordinance, New Version, 1961 (unofficial English reference)",
+      "publisher": "International Center for Not-for-Profit Law library",
+      "url": "https://www.icnl.org/wp-content/uploads/Israel_Ordinance.pdf",
+      "source_type": "near_primary",
+      "accessed_date": "2026-05-18",
+      "notes": "Unofficial English translation of the Income Tax Ordinance. PDF title and contents confirmed by independent reviewer. The Hebrew official text (Nevo / Knesset Sefer HaChukkim) and current ITA circulars control; cross-check Section 102 / 3(i) / 3(j) substance against the Hebrew text before implementation."
+    },
+    {
+      "source_id": "PEARLCOHEN-102-PITFALLS",
+      "title": "Section 102 Options: The Unwritten Rules and Pitfalls to Look For",
+      "publisher": "Pearl Cohen",
+      "url": "https://www.pearlcohen.com/section-102-options-the-unwritten-rules-and-pitfalls-to-look-for/",
+      "source_type": "strong_secondary",
+      "accessed_date": "2026-05-18",
+      "notes": "Practical law-firm guidance on Israeli Section 102 plan design and operational pitfalls."
+    },
+    {
+      "source_id": "SHIBOLET-102-DOUBLE-TRIGGER",
+      "title": "Double Trigger Acceleration Upon Exit or IPO",
+      "publisher": "Shibolet",
+      "url": "https://www.shibolet.com/en/double-trigger-acceleration-upon-exit-or-ipo/",
+      "source_type": "strong_secondary",
+      "accessed_date": "2026-05-18",
+      "notes": "Law-firm guidance on Section 102 double-trigger acceleration risk."
+    },
+    {
+      "source_id": "BARNEA-REGISTRAR-ONLINE",
+      "title": "Compulsory Online Reporting to the Israeli Registrar of Companies",
+      "publisher": "Barnea Jaffa Lande",
+      "url": "https://barlaw.co.il/practice_areas/corporate/client_updates/compulsory-online-reporting-to-the-israeli-registrar-of-companies/",
+      "source_type": "strong_secondary",
+      "publication_date": "2024",
+      "accessed_date": "2026-05-18",
+      "notes": "Law-firm update on Israel Registrar of Companies online-only reporting."
+    },
+    {
+      "source_id": "KPMG-RD-CENTER-2025",
+      "title": "Israel: Final guidance for local R&D centers related to IP valuations",
+      "publisher": "KPMG",
+      "url": "https://kpmg.com/us/en/taxnewsflash/news/2025/11/israel-final-guidance-local-r-and-d-centers-ip-valuations.html",
+      "source_type": "strong_secondary",
+      "publication_date": "2025-11",
+      "accessed_date": "2026-05-18",
+      "notes": "Secondary tax update on Israeli guidance for multinational R&D centers and IP valuation."
+    },
+    {
+      "source_id": "ARNONTL-RESTRUCTURING-2025",
+      "title": "Significant Tax Reliefs in Corporate Restructuring",
+      "publisher": "Arnon, Tadmor-Levy",
+      "url": "https://arnontl.com/news/significant-tax-reliefs-in-corporate-restructuring-amendment-to-the-israeli-income-tax-ordinance/",
+      "source_type": "strong_secondary",
+      "publication_date": "2025",
+      "accessed_date": "2026-05-18",
+      "notes": "Secondary law-firm update on the May 2025 Israeli restructuring amendments."
+    },
+    {
+      "source_id": "TAXADVISER-QSBS-OBBBA",
+      "title": "Revisiting Sec. 1202: Strategic planning after the 2025 OBBBA expansion",
+      "publisher": "The Tax Adviser",
+      "url": "https://www.thetaxadviser.com/issues/2025/dec/revisiting-sec-1202-strategic-planning-after-the-2025-obbba-expansion/",
+      "source_type": "strong_secondary",
+      "publication_date": "2025-12",
+      "accessed_date": "2026-05-18",
+      "notes": "Tax-journal analysis of OBBBA QSBS amendments. Covers July 4, 2025 effective date, tiered 3/4/5-year holding exclusions (50/75/100 percent), $50M to $75M gross-asset cap, and $10M to $15M per-issuer exclusion cap. Use counsel review before implementation."
+    },
+    {
+      "source_id": "STRIPE-ATLAS-EQUITY",
+      "title": "Startup equity guide",
+      "publisher": "Stripe Atlas",
+      "url": "https://stripe.com/guides/atlas/equity",
+      "source_type": "strong_secondary",
+      "accessed_date": "2026-05-18",
+      "notes": "Practical startup equity source for Delaware startup authorization and option pool examples."
+    },
+    {
+      "source_id": "CLERKY-INCORPORATION",
+      "title": "Certificate of Incorporation Contents",
+      "publisher": "Clerky",
+      "url": "https://handbooks.clerky.com/startup-incorporation/certificate-of-incorporation-contents",
+      "source_type": "strong_secondary",
+      "accessed_date": "2026-05-18",
+      "notes": "Practical formation source for authorized share and par-value conventions."
+    },
+    {
+      "source_id": "CARTA-FOUNDER-2026",
+      "title": "How much ownership do founders have at startup IPO?",
+      "publisher": "Carta",
+      "url": "https://carta.com/uk/en/data/founder-ownership-2026/",
+      "source_type": "benchmark_dataset",
+      "publication_date": "2026",
+      "accessed_date": "2026-05-18",
+      "notes": "Founder ownership benchmark dataset through IPO and by stage."
+    },
+    {
+      "source_id": "CARTA-FOUNDER-2025",
+      "title": "How much ownership do founders have at startup IPO?",
+      "publisher": "Carta",
+      "url": "https://carta.com/data/founder-ownership/",
+      "source_type": "benchmark_dataset",
+      "publication_date": "2025",
+      "accessed_date": "2026-05-18",
+      "notes": "Earlier founder ownership benchmark dataset used for trend comparison."
+    },
+    {
+      "source_id": "F2-ISRAEL-2024",
+      "title": "Israel's early-stage investors on 2024 takeaways and expectations for 2025",
+      "publisher": "F2 Venture Capital",
+      "url": "https://www.f2vc.com/insights/israels-early-stage-investors-on-2024-takeaways-expectations-for-2025",
+      "source_type": "benchmark_dataset",
+      "publication_date": "2025",
+      "accessed_date": "2026-05-18",
+      "notes": "Israel venture benchmark source for pre-seed and seed sentiment and round-size context."
+    },
+    {
+      "source_id": "FUSION-ISRAEL-PRESEED-2025",
+      "title": "Fusion Pre-Seed Report 2025",
+      "publisher": "Fusion VC",
+      "url": "https://blog.fusion-vc.com/p/fusion-pre-seed-report-2025",
+      "source_type": "benchmark_dataset",
+      "publication_date": "2025",
+      "accessed_date": "2026-05-18",
+      "notes": "Israel pre-seed benchmark source."
+    }
+  ],
+  "domains": {
+    "safe": [
+      {
+        "rule_id": "safe.post_money_cap_conversion",
+        "domain": "safe",
+        "behavior_target": "script_formula",
+        "title": "Post-money SAFE cap conversion",
+        "summary": "For a post-money SAFE with a valuation cap, the cap-implied ownership equals the SAFE purchase amount divided by the post-money valuation cap; conversion shares are purchase amount divided by the applicable conversion price.",
+        "implementation_action": "hardcode",
+        "confidence": "high",
+        "source_ids": [
+          "YC-PMSAFE-PRIMER",
+          "YC-SAFE-DOCUMENTS"
+        ],
+        "source_basis": "primary",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use for YC post-money SAFE valuation-cap forms, subject to the document's Company Capitalization definition and conversion branch.",
+        "inputs": [
+          {
+            "name": "purchase_amount",
+            "type": "money",
+            "description": "Cash invested under the SAFE.",
+            "required": true
+          },
+          {
+            "name": "post_money_valuation_cap",
+            "type": "money",
+            "description": "Post-money valuation cap in the SAFE.",
+            "required": true
+          },
+          {
+            "name": "company_capitalization",
+            "type": "decimal",
+            "description": "Document-defined fully diluted capitalization denominator.",
+            "required": true
+          },
+          {
+            "name": "equity_financing_price",
+            "type": "money",
+            "description": "Cash price per share paid by new money investors in the equity financing.",
+            "required": false
+          },
+          {
+            "name": "discount_multiplier",
+            "type": "decimal",
+            "description": "Discount multiplier when the SAFE includes a discount branch, such as 0.8 for a 20 percent discount.",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "cap_implied_ownership",
+            "type": "decimal",
+            "description": "Purchase amount divided by post-money valuation cap.",
+            "required": true
+          },
+          {
+            "name": "safe_price",
+            "type": "money",
+            "description": "Post-money valuation cap divided by Company Capitalization.",
+            "required": true
+          },
+          {
+            "name": "conversion_price",
+            "type": "money",
+            "description": "Lowest valid conversion price under the document's cap, discount, or other conversion branch.",
+            "required": true
+          },
+          {
+            "name": "safe_shares",
+            "type": "decimal",
+            "description": "Purchase amount divided by conversion price before document-defined share rounding.",
+            "required": true
+          }
+        ],
+        "formula": [
+          "cap_implied_ownership = purchase_amount / post_money_valuation_cap",
+          "safe_price = post_money_valuation_cap / company_capitalization",
+          "discount_price = equity_financing_price * discount_multiplier",
+          "conversion_price = min(valid_price_candidates)",
+          "safe_shares = purchase_amount / conversion_price"
+        ],
+        "rounding_policy": "Keep internal calculations at decimal precision. Apply only the SAFE document's fractional-share or cash-in-lieu rule at issuance.",
+        "parameterization_points": [
+          "company_capitalization definition",
+          "conversion branch priority",
+          "discount multiplier presence",
+          "fractional-share handling",
+          "security class issued on conversion"
+        ],
+        "warnings": [
+          "Do not reuse pre-money SAFE denominator logic for a post-money SAFE."
+        ]
+      },
+      {
+        "rule_id": "safe.company_capitalization_yc_post_money",
+        "domain": "safe",
+        "behavior_target": "validation_rule",
+        "title": "YC post-money SAFE Company Capitalization denominator",
+        "summary": "YC post-money SAFE conversion math depends on the document-defined Company Capitalization denominator, including existing shares, promised options, available option pool, and converting securities, while excluding new-money financing shares and most new pool increases.",
+        "implementation_action": "hardcode",
+        "confidence": "high",
+        "source_ids": [
+          "YC-SAFE-DOCUMENTS",
+          "YC-PMSAFE-PRIMER"
+        ],
+        "source_basis": "primary",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use when the selected form is the YC post-money SAFE or a derivative using the same Company Capitalization definition.",
+        "inputs": [
+          {
+            "name": "pre_financing_common_equivalents",
+            "type": "decimal",
+            "description": "All common and preferred stock on an as-converted basis before the financing.",
+            "required": true
+          },
+          {
+            "name": "promised_options",
+            "type": "decimal",
+            "description": "Shares promised under options or similar rights.",
+            "required": true
+          },
+          {
+            "name": "unissued_option_pool",
+            "type": "decimal",
+            "description": "Shares available for future grant under the stock plan before the financing.",
+            "required": true
+          },
+          {
+            "name": "converting_securities",
+            "type": "decimal",
+            "description": "Shares issuable on conversion of all SAFEs and other convertible securities, before new-money preferred shares.",
+            "required": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "company_capitalization",
+            "type": "decimal",
+            "description": "Document-defined denominator used for safe price.",
+            "required": true
+          }
+        ],
+        "warnings": [
+          "Flag any model that includes the new-money financing shares in this denominator.",
+          "Flag any model that includes a new post-financing pool increase unless the SAFE's promised-options overflow rule applies."
+        ]
+      },
+      {
+        "rule_id": "safe.discount_rate_semantics",
+        "domain": "safe",
+        "behavior_target": "validation_rule",
+        "title": "SAFE discount multiplier semantics",
+        "summary": "YC SAFE forms express discount math through a Discount Rate multiplier defined in the SAFE template's Definitions section, so a 20 percent discount is modeled as 80 percent of the priced-round price, not as 20 percent of it.",
+        "implementation_action": "hardcode",
+        "confidence": "high",
+        "source_ids": [
+          "YC-SAFE-DOCUMENTS",
+          "YC-PMSAFE-PRIMER"
+        ],
+        "source_basis": "primary",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use for SAFE documents using the YC-style Discount Rate definition.",
+        "inputs": [
+          {
+            "name": "priced_round_price",
+            "type": "money",
+            "description": "Price paid by new-money investors in the equity financing.",
+            "required": true
+          },
+          {
+            "name": "discount_multiplier",
+            "type": "decimal",
+            "description": "Document-defined multiplier, such as 0.8.",
+            "required": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "discount_price",
+            "type": "money",
+            "description": "Priced-round price multiplied by the discount multiplier.",
+            "required": true
+          }
+        ],
+        "warnings": [
+          "Warn when user-entered discount exceeds 1.0 but appears intended as a percentage, such as 20 instead of 0.8."
+        ]
+      },
+      {
+        "rule_id": "safe.stacked_post_money_caps",
+        "domain": "safe",
+        "behavior_target": "script_formula",
+        "title": "Stacked post-money SAFE ownership",
+        "summary": "Multiple post-money SAFEs each reserve a fixed post-conversion ownership percentage before the next equity round; the total SAFE ownership is the sum of purchase amount divided by post-money cap for each SAFE, subject to feasibility checks.",
+        "implementation_action": "hardcode",
+        "confidence": "high",
+        "source_ids": [
+          "YC-PMSAFE-PRIMER"
+        ],
+        "source_basis": "primary",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use when multiple post-money valuation-cap SAFEs convert in the same equity financing.",
+        "inputs": [
+          {
+            "name": "pre_safe_fully_diluted_shares",
+            "type": "decimal",
+            "description": "Fully diluted shares before SAFE conversion and before new-money financing shares.",
+            "required": true
+          },
+          {
+            "name": "safes",
+            "type": "array",
+            "description": "SAFE entries with purchase amount and post-money valuation cap.",
+            "required": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "safe_ownership_percentages",
+            "type": "array",
+            "description": "Ownership percentage for each SAFE.",
+            "required": true
+          },
+          {
+            "name": "aggregate_safe_ownership",
+            "type": "decimal",
+            "description": "Sum of SAFE ownership percentages.",
+            "required": true
+          },
+          {
+            "name": "post_safe_pre_money_shares",
+            "type": "decimal",
+            "description": "Implied shares after SAFE conversion and before new-money financing shares.",
+            "required": true
+          }
+        ],
+        "formula": [
+          "safe_ownership_i = safe_i.purchase_amount / safe_i.post_money_valuation_cap",
+          "aggregate_safe_ownership = sum(safe_ownership_i)",
+          "post_safe_pre_money_shares = pre_safe_fully_diluted_shares / (1 - aggregate_safe_ownership)"
+        ],
+        "rounding_policy": "Calculate ownership and implied shares at high precision; apply document-defined share rounding after each SAFE's share issuance calculation.",
+        "parameterization_points": [
+          "whether all SAFEs use post-money caps",
+          "treatment of uncapped or discount-only SAFEs",
+          "sequencing when documents differ"
+        ],
+        "warnings": [
+          "Block or escalate when aggregate SAFE ownership is greater than or equal to 100 percent.",
+          "Warn when stacked post-money SAFEs leave implausibly low founder or employee ownership."
+        ]
+      },
+      {
+        "rule_id": "safe.mfn_package_only",
+        "domain": "safe",
+        "behavior_target": "validation_rule",
+        "title": "MFN election is document-specific and package-based",
+        "summary": "YC MFN SAFE terms are elected by accepting the later instrument package as a whole, rather than selectively cherry-picking individual favorable terms.",
+        "implementation_action": "parameterize",
+        "confidence": "high",
+        "source_ids": [
+          "YC-SAFE-DOCUMENTS",
+          "YC-STANDARD-DEAL"
+        ],
+        "source_basis": "primary",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use for YC MFN SAFE forms and YC standard-deal MFN analysis.",
+        "warnings": [
+          "Do not model MFN as automatic cherry-picking unless the actual signed document says so.",
+          "Prompt for the signed document text when a user says an MFN SAFE converts automatically."
+        ]
+      },
+      {
+        "rule_id": "safe.pro_rata_rights_side_letter",
+        "domain": "safe",
+        "behavior_target": "validation_rule",
+        "title": "Pro rata rights are separate and capped by document",
+        "summary": "YC pro rata rights are granted through a separate side letter, not automatically by every SAFE; ownership and future purchase rights are capped by the applicable side-letter terms.",
+        "implementation_action": "parameterize",
+        "confidence": "high",
+        "source_ids": [
+          "YC-SAFE-DOCUMENTS"
+        ],
+        "source_basis": "primary",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use when modeling post-financing ownership after investor pro rata participation.",
+        "warnings": [
+          "Do not assume pro rata rights exist from a SAFE alone.",
+          "Prompt for whether the pro rata side letter was signed and whether it applies only to a Major Investor."
+        ]
+      },
+      {
+        "rule_id": "safe.liquidity_dissolution_priority",
+        "domain": "safe",
+        "behavior_target": "warning_rule",
+        "title": "SAFE liquidity and dissolution priority",
+        "summary": "SAFE treatment in liquidity and dissolution events is a separate document-defined branch (post-money SAFE Sections 1(c) and 1(d)) and should not be collapsed into equity-round conversion math. Liquidity: greater of purchase amount or as-converted proceeds. Dissolution: return of purchase amount.",
+        "implementation_action": "warn",
+        "confidence": "high",
+        "source_ids": [
+          "YC-SAFE-DOCUMENTS",
+          "YC-PMSAFE-PRIMER"
+        ],
+        "source_basis": "primary",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use when a scenario includes sale, IPO, dissolution, or shutdown before an equity financing.",
+        "warnings": [
+          "Warn that liquidity/dissolution outcomes require document branch analysis and may differ from financing conversion math."
+        ]
+      },
+      {
+        "rule_id": "safe.israeli_2025_safe_harbor",
+        "domain": "safe",
+        "behavior_target": "counsel_review_flag",
+        "title": "Israel 2025 SAFE temporary guidance",
+        "summary": "English law-firm summaries report that the January 2025 ITA SAFE guidance applies to qualifying Israeli-company SAFEs during 2025-2026 and uses quantitative conditions such as investment caps, ownership limits, minimum discounts, and conversion timing constraints.",
+        "implementation_action": "counsel_review",
+        "confidence": "medium",
+        "source_ids": [
+          "ITA-SAFE-2025-MASLAW",
+          "PEARLCOHEN-SAFE-2025"
+        ],
+        "source_basis": "strong_secondary",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use only as a preliminary checklist for Israeli-company SAFEs; require Israeli tax counsel before tax classification, reporting, or withholding conclusions.",
+        "date_window": {
+          "start": "2025-01-01",
+          "end": "2026-12-31",
+          "event_date_field": "safe_investment_date",
+          "notes": "Temporary ITA guidance period as summarized by law firms."
+        },
+        "warnings": [
+          "Counsel review required before treating a SAFE as equity-like for Israeli tax purposes.",
+          "Flag non-Israeli issuer, debt-like terms, interest, repayment rights, side payments, or investor control rights."
+        ],
+        "notes": "Rule should be implemented as a checklist with source-specific thresholds, not as an automatic tax classification."
+      },
+      {
+        "rule_id": "safe.israeli_safe_facts_circumstances",
+        "domain": "safe",
+        "behavior_target": "counsel_review_flag",
+        "title": "Non-qualifying Israeli SAFE facts-and-circumstances review",
+        "summary": "If a SAFE does not satisfy the reported 2025 ITA guidance conditions, the instrument remains facts-and-circumstances dependent and may be treated as debt, equity, or another instrument for tax purposes.",
+        "implementation_action": "counsel_review",
+        "confidence": "medium",
+        "source_ids": [
+          "ITA-SAFE-2025-MASLAW",
+          "PEARLCOHEN-SAFE-2025"
+        ],
+        "source_basis": "strong_secondary",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use when any reported Israeli SAFE safe-harbor condition is missing, unclear, or breached.",
+        "date_window": {
+          "start": "2025-01-01",
+          "end": "2026-12-31",
+          "event_date_field": "safe_investment_date",
+          "notes": "Temporary guidance period; check for later ITA updates."
+        },
+        "warnings": [
+          "Escalate to Israeli tax counsel before modeling tax, withholding, or financial-statement treatment."
+        ]
+      }
+    ],
+    "convertible_notes": [
+      {
+        "rule_id": "convertible_notes.accrued_interest",
+        "domain": "convertible_notes",
+        "behavior_target": "script_formula",
+        "title": "Convertible note accrued interest",
+        "summary": "Convertible note conversion usually uses principal plus accrued interest unless the signed note says otherwise; interest can be simple or compounding depending on the document.",
+        "implementation_action": "parameterize",
+        "confidence": "high",
+        "source_ids": [
+          "COOLEY-CONVERTIBLE-DEBT",
+          "NVCA-CONVERTIBLE-NOTE",
+          "FENWICK-CONVERTIBLE-NOTE"
+        ],
+        "source_basis": "mixed",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use when a convertible note balance is converted, repaid, or modeled at maturity.",
+        "inputs": [
+          {
+            "name": "principal",
+            "type": "money",
+            "description": "Original principal amount.",
+            "required": true
+          },
+          {
+            "name": "annual_interest_rate",
+            "type": "decimal",
+            "description": "Annual interest rate as a decimal.",
+            "required": true
+          },
+          {
+            "name": "days_elapsed",
+            "type": "integer",
+            "description": "Days from issuance or last interest event to conversion or repayment.",
+            "required": true
+          },
+          {
+            "name": "day_count_basis",
+            "type": "integer",
+            "description": "Document-defined day count basis, usually 365 or 360.",
+            "required": true
+          },
+          {
+            "name": "compounding_periods_per_year",
+            "type": "integer",
+            "description": "Compounding periods per year; zero or null means simple interest.",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "accrued_interest",
+            "type": "money",
+            "description": "Interest accrued through conversion or repayment date.",
+            "required": true
+          },
+          {
+            "name": "conversion_balance",
+            "type": "money",
+            "description": "Principal plus accrued interest if the document converts interest.",
+            "required": true
+          }
+        ],
+        "formula": [
+          "simple_interest = principal * annual_interest_rate * days_elapsed / day_count_basis",
+          "compound_balance = principal * (1 + annual_interest_rate / compounding_periods_per_year) ^ (compounding_periods_per_year * days_elapsed / day_count_basis)",
+          "accrued_interest = simple_interest or compound_balance - principal, based on note terms",
+          "conversion_balance = principal + accrued_interest when interest converts"
+        ],
+        "rounding_policy": "Calculate money to at least cents internally; apply document-specific rounding only at payment or share issuance.",
+        "parameterization_points": [
+          "simple versus compound interest",
+          "day count basis",
+          "whether interest converts into shares",
+          "conversion date",
+          "maturity default treatment"
+        ]
+      },
+      {
+        "rule_id": "convertible_notes.cap_discount_conversion",
+        "domain": "convertible_notes",
+        "behavior_target": "script_formula",
+        "title": "Convertible note cap and discount conversion",
+        "summary": "Convertible notes commonly convert principal plus eligible accrued interest at the lower of a valuation-cap price and a discount price, subject to the signed note's definitions.",
+        "implementation_action": "parameterize",
+        "confidence": "high",
+        "source_ids": [
+          "COOLEY-CONVERTIBLE-DEBT",
+          "NVCA-CONVERTIBLE-NOTE",
+          "FENWICK-CONVERTIBLE-NOTE"
+        ],
+        "source_basis": "mixed",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use when a note converts via valuation cap, discount, or both. The rule supports three sub-paths: (a) cap-only — `valuation_cap` and `capitalization_denominator` non-null, `discount_multiplier` null; (b) discount-only — `valuation_cap` and `capitalization_denominator` null, `discount_multiplier` non-null; (c) cap-and-discount — all three non-null, conversion_price = min(cap_price, discount_price). Allowed null inputs reflect which sub-path is active; per-input `required` flags are sub-path-dependent.",
+        "inputs": [
+          {
+            "name": "conversion_balance",
+            "type": "money",
+            "description": "Principal plus any eligible accrued interest.",
+            "required": true
+          },
+          {
+            "name": "valuation_cap",
+            "type": "money",
+            "description": "Note valuation cap.",
+            "required": false
+          },
+          {
+            "name": "capitalization_denominator",
+            "type": "decimal",
+            "description": "Document-defined denominator for cap price. Required when valuation_cap is non-null (the cap branch needs both to compute cap_price = valuation_cap / capitalization_denominator). Allowed null in the discount-only path (where valuation_cap is also null and only the discount branch fires).",
+            "required": false
+          },
+          {
+            "name": "qualified_financing_price",
+            "type": "money",
+            "description": "Price per share in the qualified financing. Required when the rule is invoked in the priced-round or direct-price branch; allowed null only in the maturity convert_at_cap branch (where cap_price alone is the conversion price and discount_price is not computed).",
+            "required": false
+          },
+          {
+            "name": "discount_multiplier",
+            "type": "decimal",
+            "description": "Discount multiplier, such as 0.8 for a 20 percent discount.",
+            "required": false
+          }
+        ],
+        "outputs": [
+          {
+            "name": "cap_price",
+            "type": "money",
+            "description": "Valuation cap divided by document-defined capitalization denominator.",
+            "required": false
+          },
+          {
+            "name": "discount_price",
+            "type": "money",
+            "description": "Qualified financing price multiplied by discount multiplier.",
+            "required": false
+          },
+          {
+            "name": "conversion_price",
+            "type": "money",
+            "description": "Lowest valid conversion price under the signed note.",
+            "required": true
+          },
+          {
+            "name": "conversion_shares",
+            "type": "decimal",
+            "description": "Conversion balance divided by conversion price.",
+            "required": true
+          }
+        ],
+        "formula": [
+          "cap_price = valuation_cap / capitalization_denominator",
+          "discount_price = qualified_financing_price * discount_multiplier",
+          "conversion_price = min(valid_price_candidates)",
+          "conversion_shares = conversion_balance / conversion_price"
+        ],
+        "rounding_policy": "Keep conversion price and share calculations at high precision; apply the note's fractional-share rule at issuance.",
+        "parameterization_points": [
+          "eligible interest",
+          "cap denominator definition",
+          "discount multiplier",
+          "qualified financing definition",
+          "security issued on conversion",
+          "fractional-share handling"
+        ]
+      },
+      {
+        "rule_id": "convertible_notes.note_denominator_template",
+        "domain": "convertible_notes",
+        "behavior_target": "validation_rule",
+        "title": "Convertible note cap denominator is template-specific",
+        "summary": "Convertible note cap-price denominators vary by template and signed document; some exclude the converting note and unallocated pool, while others include different equity plan components.",
+        "implementation_action": "parameterize",
+        "confidence": "high",
+        "source_ids": [
+          "FENWICK-CONVERTIBLE-NOTE",
+          "NVCA-CONVERTIBLE-NOTE",
+          "COOLEY-NOTE-PPS"
+        ],
+        "source_basis": "mixed",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use whenever a note cap price is calculated.",
+        "warnings": [
+          "Do not assume the note itself is included in its own cap denominator.",
+          "Prompt for signed note definitions when cap denominator treatment is unknown."
+        ],
+        "notes": "Rule scripts should support multiple named denominator policies rather than a single universal convention."
+      },
+      {
+        "rule_id": "convertible_notes.qualified_financing_threshold",
+        "domain": "convertible_notes",
+        "behavior_target": "validation_rule",
+        "title": "Qualified financing threshold and automatic conversion",
+        "summary": "A convertible note's automatic conversion trigger is document-defined and tied to a qualified financing dollar floor. Standard US templates differ on the default (Fenwick seed: $1,000,000; NVCA Toptal: $2,000,000); WSGR FY2025 benchmark data shows observed median thresholds running materially higher than template defaults and trending up year over year.",
+        "implementation_action": "parameterize",
+        "confidence": "high",
+        "source_ids": [
+          "COOLEY-CONVERTIBLE-DEBT",
+          "WSGR-ER-FY2025",
+          "NVCA-CONVERTIBLE-NOTE",
+          "FENWICK-CONVERTIBLE-NOTE"
+        ],
+        "source_basis": "mixed",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use when a financing round may trigger automatic note conversion.",
+        "date_window": {
+          "start": "2025-01-01",
+          "end": "2026-12-31",
+          "event_date_field": "benchmark_reference_date",
+          "notes": "WSGR Entrepreneurs Report benchmarks reflect deals closing in 2025. Refresh annually."
+        },
+        "benchmark": {
+          "dataset": "Wilson Sonsini Entrepreneurs Report Full-Year 2025 (Q4 2025 cumulative)",
+          "observations": [
+            "Auto-conversion on qualified financing is near-universal across reporting cells in the Convertible Notes deal-terms appendix.",
+            "WSGR FY2025 median dollar thresholds for a qualified financing in convertible notes: $10,000,000 (pre-Seed) and $15,000,000 (post-Seed).",
+            "Historical trend (WSGR appendix footnote 3, p.18): 2021 = $4M/$10M; 2022 = $7M/$10M; 2023 = $5M/$10M; 2024 = $5M/$10M; 2025 = $10M/$15M.",
+            "Standard template defaults remain: Fenwick seed-stage form $1,000,000; NVCA Toptal model $2,000,000."
+          ],
+          "benchmark_only": true,
+          "notes": "Template defaults and observed market medians diverge by an order of magnitude. Use template default as a starting parameter; check the signed note for the actual trigger; observed medians refresh annually."
+        },
+        "warnings": [
+          "Warn when a model automatically converts notes without checking the note's qualified financing threshold.",
+          "Do not hardcode any single dollar figure as a legal trigger; the signed note's definition controls.",
+          "Benchmark medians refresh annually. The FY 2025 median doubled vs 2024 for pre-Seed ($5M to $10M) and rose 50 percent for post-Seed ($10M to $15M); do not treat the FY 2025 figures as durable into future years without refresh."
+        ]
+      },
+      {
+        "rule_id": "convertible_notes.israeli_cla_deemed_interest",
+        "domain": "convertible_notes",
+        "behavior_target": "counsel_review_flag",
+        "title": "Israeli convertible loan agreement tax treatment",
+        "summary": "Israeli convertible loan agreements can raise deemed-interest, withholding, and classification issues under Israeli tax rules; 3(i), 3(j), or other regimes may apply depending on holder and instrument facts.",
+        "implementation_action": "counsel_review",
+        "confidence": "medium",
+        "source_ids": [
+          "ICNL-ISRAEL-ORDINANCE"
+        ],
+        "source_basis": "near_primary",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use when an Israeli company or Israeli holder has a convertible loan or note.",
+        "warnings": [
+          "Escalate to Israeli tax counsel for interest accrual, withholding, and holder-specific classification.",
+          "Do not treat Israeli convertible loans as equivalent to US SAFEs."
+        ]
+      }
+    ],
+    "option_pool": [
+      {
+        "rule_id": "option_pool.pre_money_topup",
+        "domain": "option_pool",
+        "behavior_target": "script_formula",
+        "title": "Pre-money option pool top-up",
+        "summary": "When investors require a target option pool included in the pre-money valuation, the top-up dilutes pre-financing holders because the pool increase is added before pricing new-money shares.",
+        "implementation_action": "parameterize",
+        "confidence": "high",
+        "source_ids": [
+          "COOLEY-OPTION-POOL"
+        ],
+        "source_basis": "strong_secondary",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use when the term sheet requires a post-closing pool target to be reflected in pre-money capitalization.",
+        "inputs": [
+          {
+            "name": "pre_topup_fully_diluted_shares",
+            "type": "decimal",
+            "description": "Fully diluted shares before the pool increase and new-money shares.",
+            "required": true
+          },
+          {
+            "name": "existing_unallocated_pool",
+            "type": "decimal",
+            "description": "Unallocated shares already in the equity incentive pool.",
+            "required": true
+          },
+          {
+            "name": "target_pool_percent",
+            "type": "decimal",
+            "description": "Target pool percentage after the financing or before the financing, depending on the term sheet.",
+            "required": true
+          },
+          {
+            "name": "new_money_shares",
+            "type": "decimal",
+            "description": "Shares issued to new-money investors if the target is post-closing.",
+            "required": false
+          },
+          {
+            "name": "target_basis",
+            "type": "enum",
+            "description": "Denominator basis for target pool.",
+            "required": true,
+            "allowed_values": [
+              "pre_money",
+              "post_money",
+              "post_money_excluding_converting_securities",
+              "custom"
+            ]
+          }
+        ],
+        "outputs": [
+          {
+            "name": "required_pool_topup_shares",
+            "type": "decimal",
+            "description": "Additional option pool shares required.",
+            "required": true
+          },
+          {
+            "name": "post_topup_pool_percent",
+            "type": "decimal",
+            "description": "Resulting pool percentage on the selected denominator.",
+            "required": true
+          }
+        ],
+        "formula": [
+          "required_pool_topup_shares = max(0, solved_x)",
+          "For post-money target: (existing_unallocated_pool + x) / (pre_topup_fully_diluted_shares + x + new_money_shares) = target_pool_percent",
+          "For pre-money target: (existing_unallocated_pool + x) / (pre_topup_fully_diluted_shares + x) = target_pool_percent"
+        ],
+        "rounding_policy": "Solve using decimal precision; round pool share authorization to whole shares using corporate-document requirements.",
+        "parameterization_points": [
+          "target denominator basis",
+          "whether promised grants count against the target",
+          "whether converting securities count in the denominator",
+          "authorized versus reserved versus available pool distinction"
+        ],
+        "warnings": [
+          "Warn when a term sheet labels the pool as post-closing but shifts the economics into pre-money pricing."
+        ]
+      },
+      {
+        "rule_id": "option_pool.post_money_topup",
+        "domain": "option_pool",
+        "behavior_target": "script_formula",
+        "title": "Post-money option pool increase",
+        "summary": "If an option pool increase is economically post-money, dilution is shared by all post-financing holders according to the selected denominator rather than solely by pre-financing holders.",
+        "implementation_action": "parameterize",
+        "confidence": "medium",
+        "source_ids": [
+          "COOLEY-OPTION-POOL"
+        ],
+        "source_basis": "strong_secondary",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use when transaction documents explicitly make the pool increase post-money or after pricing.",
+        "inputs": [
+          {
+            "name": "post_financing_shares_before_topup",
+            "type": "decimal",
+            "description": "Shares outstanding after the financing but before the pool top-up.",
+            "required": true
+          },
+          {
+            "name": "existing_unallocated_pool",
+            "type": "decimal",
+            "description": "Unallocated pool before top-up.",
+            "required": true
+          },
+          {
+            "name": "target_pool_percent",
+            "type": "decimal",
+            "description": "Target pool percentage after top-up.",
+            "required": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "required_pool_topup_shares",
+            "type": "decimal",
+            "description": "Additional shares required in the pool.",
+            "required": true
+          }
+        ],
+        "formula": [
+          "required_pool_topup_shares = max(0, solved_x)",
+          "(existing_unallocated_pool + x) / (post_financing_shares_before_topup + x) = target_pool_percent"
+        ],
+        "rounding_policy": "Solve using decimal precision; round to whole shares under corporate-document requirements.",
+        "parameterization_points": [
+          "post-money denominator definition",
+          "treatment of promised grants",
+          "timing of board and stockholder approvals"
+        ]
+      },
+      {
+        "rule_id": "option_pool.target_basis",
+        "domain": "option_pool",
+        "behavior_target": "validation_rule",
+        "title": "Option pool target basis must be explicit",
+        "summary": "Option pool percentages are not meaningful unless the numerator and denominator are stated, including whether the target uses total reserved, unallocated only, promised grants, converting securities, and new-money shares.",
+        "implementation_action": "parameterize",
+        "confidence": "high",
+        "source_ids": [
+          "COOLEY-OPTION-POOL",
+          "COOLEY-NOTE-PPS"
+        ],
+        "source_basis": "strong_secondary",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use whenever user enters an option pool percentage.",
+        "warnings": [
+          "Prompt for total-reserved versus unallocated-pool target.",
+          "Warn when promised but ungranted hires are excluded from a pre-money pool target."
+        ]
+      },
+      {
+        "rule_id": "option_pool.us_market_benchmarks",
+        "domain": "option_pool",
+        "behavior_target": "benchmark",
+        "title": "US option pool market benchmarks",
+        "summary": "US venture-stage option pools are market benchmarks, not legal rules; common planning ranges around seed and Series A should be configurable and surfaced as context only.",
+        "implementation_action": "benchmark_only",
+        "confidence": "medium",
+        "source_ids": [
+          "COOLEY-OPTION-POOL",
+          "STRIPE-ATLAS-EQUITY",
+          "CLERKY-INCORPORATION"
+        ],
+        "source_basis": "strong_secondary",
+        "counsel_review": false,
+        "jurisdiction": "US startup market",
+        "benchmark": {
+          "typical_seed_pool_range_percent": [
+            10,
+            15
+          ],
+          "typical_series_a_pool_range_percent": [
+            10,
+            20
+          ],
+          "benchmark_only": true
+        },
+        "warnings": [
+          "Do not mark a pool size as wrong solely because it sits outside the benchmark range."
+        ]
+      }
+    ],
+    "anti_dilution": [
+      {
+        "rule_id": "anti_dilution.broad_based_weighted_average",
+        "domain": "anti_dilution",
+        "behavior_target": "script_formula",
+        "title": "Broad-based weighted-average anti-dilution",
+        "summary": "Broad-based weighted-average anti-dilution adjusts a preferred conversion price by multiplying the prior conversion price (CP1) by (A + B) divided by (A + C). The formula and B's divisor (CP1 itself) appear verbatim in NVCA Model Certificate of Incorporation Subsection 4.4.4 and Cooley GO's down-round article. The series' Original Issue Price (OIP) enters separately as the trigger threshold and any conversion-price floor, not as the divisor in B.",
+        "implementation_action": "hardcode",
+        "confidence": "high",
+        "source_ids": [
+          "COOLEY-DOWN-ROUND",
+          "NVCA-CERT-OF-INC",
+          "COOLEY-ANTI-DILUTION"
+        ],
+        "source_basis": "mixed",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use when preferred stock includes broad-based weighted-average anti-dilution protection and a down round occurs.",
+        "inputs": [
+          {
+            "name": "old_conversion_price",
+            "type": "money",
+            "description": "Preferred stock conversion price (CP1) in effect immediately before the dilutive issuance.",
+            "required": true
+          },
+          {
+            "name": "original_issue_price",
+            "type": "money",
+            "description": "Original issue price (OIP) of the protected preferred series; used as the trigger threshold and as any conversion-price floor. Not used as the divisor in B.",
+            "required": false
+          },
+          {
+            "name": "a_outstanding_shares",
+            "type": "decimal",
+            "description": "Document-defined outstanding shares before the dilutive issuance; for broad-based, typically includes common, preferred as-converted, options, warrants, and convertibles.",
+            "required": true
+          },
+          {
+            "name": "consideration_received",
+            "type": "money",
+            "description": "Total consideration received in the dilutive issuance.",
+            "required": true
+          },
+          {
+            "name": "new_shares_issued",
+            "type": "decimal",
+            "description": "Actual shares issued in the dilutive issuance.",
+            "required": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "b_deemed_shares",
+            "type": "decimal",
+            "description": "Consideration received divided by the prior conversion price CP1.",
+            "required": true
+          },
+          {
+            "name": "new_conversion_price",
+            "type": "money",
+            "description": "Adjusted conversion price (CP2) after weighted-average protection.",
+            "required": true
+          }
+        ],
+        "formula": [
+          "b_deemed_shares = consideration_received / old_conversion_price",
+          "new_conversion_price = old_conversion_price * (a_outstanding_shares + b_deemed_shares) / (a_outstanding_shares + new_shares_issued)"
+        ],
+        "rounding_policy": "Use document-defined rounding for conversion price and conversion ratio; keep internal calculations at high precision.",
+        "parameterization_points": [
+          "A denominator definition",
+          "excluded issuances",
+          "treatment of options, warrants, and convertible securities",
+          "rounding of conversion price",
+          "series-by-series versus class-wide application",
+          "trigger-threshold floor (typically OIP, sometimes CP1) defined by the charter"
+        ],
+        "warnings": [
+          "Do not assume all issuances trigger anti-dilution; check excluded-issuance provisions.",
+          "Stacked anti-dilution: chained ratchets feed each round's new CP back in as the next round's CP1. Do not substitute OIP for CP1 in B; that would over-credit the holder by re-counting dilution already absorbed by a prior ratchet."
+        ],
+        "notes": "Formula text and B-divisor (CP1) verified verbatim against Cooley GO down-round article (Last reviewed 2022-01-24) and NVCA Model Certificate of Incorporation Subsection 4.4.4. Both sources agree: B = consideration_received / CP1, where CP1 is the conversion price in effect immediately prior to the dilutive issuance."
+      },
+      {
+        "rule_id": "anti_dilution.narrow_based_denominator",
+        "domain": "anti_dilution",
+        "behavior_target": "validation_rule",
+        "title": "Narrow-based weighted-average denominator is document-defined",
+        "summary": "Narrow-based weighted-average formulas use a narrower share denominator than broad-based formulas; the exact denominator must come from the charter or financing documents.",
+        "implementation_action": "parameterize",
+        "confidence": "medium",
+        "source_ids": [
+          "COOLEY-ANTI-DILUTION"
+        ],
+        "source_basis": "strong_secondary",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use when documents say narrow-based weighted average or define a custom anti-dilution denominator.",
+        "warnings": [
+          "Prompt for the anti-dilution provision text when the denominator is not explicit."
+        ]
+      },
+      {
+        "rule_id": "anti_dilution.full_ratchet",
+        "domain": "anti_dilution",
+        "behavior_target": "warning_rule",
+        "title": "Full-ratchet anti-dilution",
+        "summary": "Full-ratchet anti-dilution resets the protected preferred conversion price to the lower new-issuance price, which is economically more punitive than weighted-average protection.",
+        "implementation_action": "warn",
+        "confidence": "medium",
+        "source_ids": [
+          "COOLEY-ANTI-DILUTION"
+        ],
+        "source_basis": "strong_secondary",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; document-specific",
+        "applies_when": "Use when preferred stock documents include full-ratchet protection.",
+        "inputs": [
+          {
+            "name": "new_issuance_price",
+            "type": "money",
+            "description": "Price per share in the dilutive issuance.",
+            "required": true
+          }
+        ],
+        "outputs": [
+          {
+            "name": "new_conversion_price",
+            "type": "money",
+            "description": "New conversion price under full ratchet.",
+            "required": true
+          }
+        ],
+        "formula": [
+          "new_conversion_price = new_issuance_price"
+        ],
+        "rounding_policy": "Use document-defined conversion-price precision and rounding.",
+        "parameterization_points": [
+          "excluded issuances",
+          "series coverage",
+          "minimum-price mechanics"
+        ],
+        "warnings": [
+          "Flag full-ratchet protection as a high-impact investor-protection term."
+        ]
+      }
+    ],
+    "israel_equity_tax": [
+      {
+        "rule_id": "israel_equity_tax.section_102_capital_gains",
+        "domain": "israel_equity_tax",
+        "behavior_target": "counsel_review_flag",
+        "title": "Section 102 capital-gains track checklist",
+        "summary": "Israeli Section 102 capital-gains treatment depends on trustee deposit, timing, employee status, approved plan mechanics, and holding-period requirements; secondary guidance should be used only as a checklist.",
+        "implementation_action": "counsel_review",
+        "confidence": "medium",
+        "source_ids": [
+          "ICNL-ISRAEL-ORDINANCE",
+          "PEARLCOHEN-102-PITFALLS"
+        ],
+        "source_basis": "mixed",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use when modeling options, RSUs, or shares issued to Israeli employees, officers, or directors.",
+        "date_window": {
+          "event_date_field": "grant_date",
+          "notes": "Track plan filing, grant deposit, and required holding-period dates from the actual plan, trustee confirmations, and current ITA guidance."
+        },
+        "warnings": [
+          "Require counsel review before concluding capital-gains treatment.",
+          "Flag missing trustee deposit date, missing plan approval, or sale before required holding period."
+        ]
+      },
+      {
+        "rule_id": "israel_equity_tax.section_102_plan_design",
+        "domain": "israel_equity_tax",
+        "behavior_target": "counsel_review_flag",
+        "title": "Section 102 plan-design pitfalls",
+        "summary": "Plan terms such as share class, voting rights, cash settlement, exit-only rights, repurchase arrangements, and transaction-adjacent grants can affect Israeli tax analysis. Section 102 trustee track is administratively limited to ordinary voting shares; preferred or non-voting shares typically require an ITA pre-ruling.",
+        "implementation_action": "counsel_review",
+        "confidence": "medium",
+        "source_ids": [
+          "PEARLCOHEN-102-PITFALLS"
+        ],
+        "source_basis": "strong_secondary",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use when checking Israeli equity plans or transaction-related option acceleration.",
+        "date_window": {
+          "event_date_field": "grant_date",
+          "notes": "Check current ITA guidance and circulars as of the grant, acceleration, exit, or IPO date. Pearl Cohen flags a roughly 90-day-before-LOI cutoff that the ITA uses to disqualify transaction-adjacent grants."
+        },
+        "warnings": [
+          "Escalate cash-settled rights, exit-only economics, repricing/modification of outstanding grants, transaction-adjacent grants near a signed LOI, and non-ordinary-voting-share grants to Israeli tax counsel.",
+          "Do not characterize double-trigger acceleration as inherently disqualifying without checking the current ITA position; see rule israel_equity_tax.section_102_double_trigger."
+        ]
+      },
+      {
+        "rule_id": "israel_equity_tax.section_102_double_trigger",
+        "domain": "israel_equity_tax",
+        "behavior_target": "counsel_review_flag",
+        "title": "Section 102 double-trigger acceleration treatment",
+        "summary": "Israeli law-firm guidance reports that under ITA Position Paper 01/2025, double-trigger acceleration of Section 102 awards on exit or IPO is not treated as a violation of Section 102. The resulting tax characterization on exit still depends on facts (cash vs equity consideration, post-closing share price movement).",
+        "implementation_action": "counsel_review",
+        "confidence": "low",
+        "source_ids": [
+          "SHIBOLET-102-DOUBLE-TRIGGER",
+          "PEARLCOHEN-102-PITFALLS"
+        ],
+        "source_basis": "strong_secondary",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use when an Israeli equity plan or grant includes single- or double-trigger acceleration on change of control or IPO.",
+        "date_window": {
+          "start": "2025-01-01",
+          "event_date_field": "transaction_event_date",
+          "notes": "ITA Position Paper 01/2025 is the current secondary-source-reported position; verify against current ITA materials at deal time."
+        },
+        "warnings": [
+          "Treat acceleration tax characterization as facts-and-circumstances; do not assert capital-gains versus ordinary-income treatment from cap-table data alone.",
+          "Pearl Cohen pre-2025 guidance treated double-trigger as severance-like and disqualifying; Shibolet reports the 2025 ITA position relaxed this. Confirm the current position with Israeli tax counsel."
+        ]
+      },
+      {
+        "rule_id": "israel_equity_tax.section_3i_nonemployee",
+        "domain": "israel_equity_tax",
+        "behavior_target": "counsel_review_flag",
+        "title": "Section 3(i) nonemployee equity",
+        "summary": "Israeli equity or option grants to consultants, service providers, controlling shareholders, or other non-Section 102 recipients may fall outside Section 102 and require separate tax treatment.",
+        "implementation_action": "counsel_review",
+        "confidence": "medium",
+        "source_ids": [
+          "ICNL-ISRAEL-ORDINANCE",
+          "PEARLCOHEN-102-PITFALLS"
+        ],
+        "source_basis": "mixed",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use when recipient is not an eligible employee, officer, or director under Section 102, or may be a controlling shareholder.",
+        "date_window": {
+          "event_date_field": "grant_date",
+          "notes": "Check recipient status and applicable law at grant and exercise/sale dates."
+        },
+        "warnings": [
+          "Do not apply Section 102 capital-gains assumptions to consultants or controlling shareholders without legal review."
+        ]
+      }
+    ],
+    "israeli_ltd": [
+      {
+        "rule_id": "israeli_ltd.share_register",
+        "domain": "israeli_ltd",
+        "behavior_target": "validation_rule",
+        "title": "Israeli private company share register",
+        "summary": "An Israeli private company must maintain a shareholder register and the cap-table model should separate internal share-register truth from reportable filings.",
+        "implementation_action": "hardcode",
+        "confidence": "medium",
+        "source_ids": [
+          "ISRAEL-COMPANIES-LAW"
+        ],
+        "source_basis": "near_primary",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use for Israeli private limited companies.",
+        "warnings": [
+          "Require counsel or corporate secretary review before treating the model as a statutory register."
+        ]
+      },
+      {
+        "rule_id": "israeli_ltd.registrar_online_reporting",
+        "domain": "israeli_ltd",
+        "behavior_target": "warning_rule",
+        "title": "Israeli Registrar online reporting",
+        "summary": "Law-firm guidance reports that from June 27, 2024, most filings with the Israeli Registrar of Companies must be submitted online; the cap-table skill should flag filing workflow rather than attempt filings.",
+        "implementation_action": "warn",
+        "confidence": "medium",
+        "source_ids": [
+          "BARNEA-REGISTRAR-ONLINE"
+        ],
+        "source_basis": "strong_secondary",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use when Israeli share issuances, transfers, director changes, or annual-report workflows are discussed.",
+        "date_window": {
+          "start": "2024-06-27",
+          "event_date_field": "filing_date",
+          "notes": "Use current Registrar rules and Hebrew official materials before operational filing guidance."
+        },
+        "warnings": [
+          "Flag that filings are outside the cap-table calculator and require authorized Israeli corporate filing workflow."
+        ]
+      },
+      {
+        "rule_id": "israeli_ltd.iia_royalties_ip",
+        "domain": "israeli_ltd",
+        "behavior_target": "counsel_review_flag",
+        "title": "Israel Innovation Authority royalties and IP restrictions",
+        "summary": "IIA grants can create royalty obligations and restrictions or approvals for IP transfer, licensing, and manufacturing outside Israel.",
+        "implementation_action": "counsel_review",
+        "confidence": "high",
+        "source_ids": [
+          "IIA-ROYALTIES-IP"
+        ],
+        "source_basis": "primary",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use when an Israeli company received IIA support or has technology developed with IIA funding.",
+        "warnings": [
+          "Escalate any investment, acquisition, flip, IP transfer, license, or manufacturing move involving IIA-funded technology.",
+          "Do not model IIA exposure as simple cap-table dilution."
+        ]
+      },
+      {
+        "rule_id": "israeli_ltd.preferred_governance_checklist",
+        "domain": "israeli_ltd",
+        "behavior_target": "source_note",
+        "title": "Israeli preferred-share governance is document-specific",
+        "summary": "Israeli investment rounds may include preferred-share, veto, board, protective-provision, and founder-restriction terms; the cap-table skill should capture these as term-sheet flags rather than universal formulas.",
+        "implementation_action": "counsel_review",
+        "confidence": "medium",
+        "source_ids": [
+          "ISRAEL-COMPANIES-LAW"
+        ],
+        "source_basis": "near_primary",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use when Israeli preferred shares, board rights, veto rights, liquidation preferences, or founder restrictions are modeled.",
+        "warnings": [
+          "Prompt for articles, shareholder agreement, and investment agreement before modeling governance economics."
+        ]
+      }
+    ],
+    "delaware_cross_border": [
+      {
+        "rule_id": "delaware_cross_border.structure_note",
+        "domain": "delaware_cross_border",
+        "behavior_target": "source_note",
+        "title": "Delaware parent with Israeli subsidiary is a common cross-border structure",
+        "summary": "A Delaware parent with an Israeli operating or R&D subsidiary is common for US venture-backed Israeli-linked startups, but structure choice is tax, IP, investor, and employment dependent.",
+        "implementation_action": "counsel_review",
+        "confidence": "medium",
+        "source_ids": [
+          "KPMG-RD-CENTER-2025",
+          "TAXADVISER-QSBS-OBBBA"
+        ],
+        "source_basis": "strong_secondary",
+        "counsel_review": true,
+        "jurisdiction": "US/Israel cross-border",
+        "applies_when": "Use when founders ask whether to model a Delaware parent, Israeli parent, or flip.",
+        "warnings": [
+          "Escalate structure choice to US and Israeli tax counsel before implementing equity, IP, or payroll assumptions."
+        ]
+      },
+      {
+        "rule_id": "delaware_cross_border.section_102_parent_shares",
+        "domain": "delaware_cross_border",
+        "behavior_target": "counsel_review_flag",
+        "title": "Section 102 treatment for foreign parent shares",
+        "summary": "Israeli Section 102 treatment can involve foreign-parent shares, trustee mechanics, sub-plan design, and eligibility conditions; scripts should flag missing trustee and plan facts.",
+        "implementation_action": "counsel_review",
+        "confidence": "medium",
+        "source_ids": [
+          "ICNL-ISRAEL-ORDINANCE",
+          "PEARLCOHEN-102-PITFALLS"
+        ],
+        "source_basis": "mixed",
+        "counsel_review": true,
+        "jurisdiction": "US/Israel cross-border",
+        "applies_when": "Use when Israeli employees receive Delaware-parent options or shares.",
+        "date_window": {
+          "event_date_field": "grant_date",
+          "notes": "Check Section 102 plan, trustee approval, and current ITA practice as of grant and sale dates."
+        },
+        "warnings": [
+          "Do not assume Delaware-parent grants are Section 102 compliant without local sub-plan and trustee confirmation."
+        ]
+      },
+      {
+        "rule_id": "delaware_cross_border.transfer_pricing_ip",
+        "domain": "delaware_cross_border",
+        "behavior_target": "counsel_review_flag",
+        "title": "Cross-border IP and transfer pricing",
+        "summary": "Israeli R&D center and IP ownership choices can affect transfer-pricing, valuation, and exit tax outcomes; recent Israeli guidance makes this date-sensitive.",
+        "implementation_action": "counsel_review",
+        "confidence": "medium",
+        "source_ids": [
+          "KPMG-RD-CENTER-2025"
+        ],
+        "source_basis": "strong_secondary",
+        "counsel_review": true,
+        "jurisdiction": "US/Israel cross-border",
+        "applies_when": "Use when modeling IP ownership, R&D subsidiary economics, cost-plus arrangements, or related-party services.",
+        "date_window": {
+          "start": "2025-11-01",
+          "event_date_field": "tax_position_date",
+          "notes": "Approximate publication month for reported final guidance; verify current ITA text before implementation."
+        },
+        "warnings": [
+          "Escalate IP migration, cost-plus rates, and related-party agreements to cross-border tax counsel."
+        ]
+      },
+      {
+        "rule_id": "delaware_cross_border.delaware_formation_defaults",
+        "domain": "delaware_cross_border",
+        "behavior_target": "validation_rule",
+        "title": "Delaware formation share defaults are configurable",
+        "summary": "Common startup formation defaults such as 10 million authorized shares and low par value are market conventions, not immutable legal requirements.",
+        "implementation_action": "parameterize",
+        "confidence": "medium",
+        "source_ids": [
+          "STRIPE-ATLAS-EQUITY",
+          "CLERKY-INCORPORATION"
+        ],
+        "source_basis": "strong_secondary",
+        "counsel_review": false,
+        "jurisdiction": "Delaware",
+        "applies_when": "Use when creating initial founder cap table assumptions for a Delaware C corporation.",
+        "benchmark": {
+          "common_authorized_shares": 10000000,
+          "common_par_value": 1e-05,
+          "benchmark_only": true
+        },
+        "warnings": [
+          "Do not treat formation defaults as required; prompt for actual charter values."
+        ]
+      },
+      {
+        "rule_id": "delaware_cross_border.qsbs_date_sensitive",
+        "domain": "delaware_cross_border",
+        "behavior_target": "counsel_review_flag",
+        "title": "QSBS rules are date-sensitive",
+        "summary": "US QSBS eligibility and exclusion amounts are date-sensitive and changed for stock issued after July 4, 2025 under OBBBA; cap-table scripts should flag issue date and tax counsel review.",
+        "implementation_action": "counsel_review",
+        "confidence": "medium",
+        "source_ids": [
+          "TAXADVISER-QSBS-OBBBA"
+        ],
+        "source_basis": "strong_secondary",
+        "counsel_review": true,
+        "jurisdiction": "United States",
+        "applies_when": "Use when US C corporation shares may be QSBS or founder/investor tax outcomes depend on QSBS.",
+        "date_window": {
+          "start": "2025-07-05",
+          "event_date_field": "stock_issue_date",
+          "notes": "OBBBA §70431 applies to stock acquired AFTER July 4, 2025 (the enactment date). The schema treats `start` as inclusive (event_date >= start), so the first in-window day is 2025-07-05. Verify current Code and guidance before applying."
+        },
+        "warnings": [
+          "Do not provide QSBS eligibility conclusion from cap-table data alone.",
+          "Prompt for issue date, gross assets, active business, entity type, redemptions, and holder facts."
+        ]
+      }
+    ],
+    "delaware_flip": [
+      {
+        "rule_id": "delaware_flip.share_exchange_mechanics",
+        "domain": "delaware_flip",
+        "behavior_target": "validation_rule",
+        "title": "Flip mechanics require holder-by-holder mapping",
+        "summary": "A Delaware flip usually requires mapping Israeli company holders into Delaware parent securities through share exchange or contribution mechanics, preserving economic rights only if the legal steps and consents support it.",
+        "implementation_action": "counsel_review",
+        "confidence": "medium",
+        "source_ids": [
+          "ARNONTL-RESTRUCTURING-2025",
+          "ICNL-ISRAEL-ORDINANCE"
+        ],
+        "source_basis": "mixed",
+        "counsel_review": true,
+        "jurisdiction": "US/Israel cross-border",
+        "applies_when": "Use when modeling a flip from Israeli parent to Delaware parent.",
+        "warnings": [
+          "Do not assume 1:1 exchange preserves all tax, option, liquidation, and consent consequences.",
+          "Prompt for articles, option plan, SAFE/note consents, IIA history, and tax ruling path."
+        ]
+      },
+      {
+        "rule_id": "delaware_flip.ruling_path",
+        "domain": "delaware_flip",
+        "behavior_target": "counsel_review_flag",
+        "title": "Israeli flip ruling path is not one-size-fits-all",
+        "summary": "Israeli restructuring relief can involve different ruling or statutory paths depending on whether the acquirer is public or private and on the transaction facts.",
+        "implementation_action": "counsel_review",
+        "confidence": "medium",
+        "source_ids": [
+          "ARNONTL-RESTRUCTURING-2025",
+          "ICNL-ISRAEL-ORDINANCE"
+        ],
+        "source_basis": "mixed",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use when estimating flip timing, tax deferral, or closing conditions.",
+        "date_window": {
+          "event_date_field": "restructuring_approval_date",
+          "notes": "Apply law and ITA practice as of the proposed restructuring date."
+        },
+        "warnings": [
+          "Do not hardcode Section 104H as the only flip path.",
+          "Require Israeli tax counsel to select public-company, private-company, or alternate restructuring treatment."
+        ]
+      },
+      {
+        "rule_id": "delaware_flip.part_e2_repeal",
+        "domain": "delaware_flip",
+        "behavior_target": "counsel_review_flag",
+        "title": "May 2025 Israeli restructuring changes",
+        "summary": "Secondary law-firm guidance reports that May 2025 Israeli restructuring amendments repealed restrictive Part E2 requirements, including certain holding-period and rights-continuity constraints.",
+        "implementation_action": "counsel_review",
+        "confidence": "medium",
+        "source_ids": [
+          "ARNONTL-RESTRUCTURING-2025"
+        ],
+        "source_basis": "strong_secondary",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use when comparing pre- and post-May-2025 flip or restructuring assumptions.",
+        "date_window": {
+          "start": "2025-05-01",
+          "event_date_field": "restructuring_effective_date",
+          "notes": "Effective month based on secondary law-firm summary; verify official legislation before implementation."
+        },
+        "warnings": [
+          "Do not apply old 25 percent/2-year continuity assumptions to post-amendment transactions without checking current law."
+        ]
+      },
+      {
+        "rule_id": "delaware_flip.options_convertibles",
+        "domain": "delaware_flip",
+        "behavior_target": "counsel_review_flag",
+        "title": "Options, SAFEs, and notes in a flip",
+        "summary": "Options, SAFEs, and convertible notes require separate treatment in a flip, including trustee approvals, 102 continuity, holder consents, assignment, novation, and conversion-price preservation.",
+        "implementation_action": "counsel_review",
+        "confidence": "medium",
+        "source_ids": [
+          "PEARLCOHEN-102-PITFALLS",
+          "YC-SAFE-DOCUMENTS",
+          "COOLEY-CONVERTIBLE-DEBT"
+        ],
+        "source_basis": "mixed",
+        "counsel_review": true,
+        "jurisdiction": "US/Israel cross-border",
+        "applies_when": "Use when a flip includes outstanding options, RSUs, SAFEs, convertible notes, or warrants.",
+        "date_window": {
+          "event_date_field": "flip_closing_date",
+          "notes": "Check instrument terms and tax approvals as of closing."
+        },
+        "warnings": [
+          "Prompt for each instrument's assignment, amendment, and change-of-control provisions.",
+          "Escalate Israeli Section 102 continuity and trustee approvals."
+        ]
+      },
+      {
+        "rule_id": "delaware_flip.iia_not_automatic_transfer",
+        "domain": "delaware_flip",
+        "behavior_target": "counsel_review_flag",
+        "title": "IIA-funded IP cannot be assumed transferable in a flip",
+        "summary": "IIA-funded technology may require approval or trigger repayment or licensing constraints before IP transfer, ownership migration, or manufacturing changes connected to a flip.",
+        "implementation_action": "counsel_review",
+        "confidence": "high",
+        "source_ids": [
+          "IIA-ROYALTIES-IP"
+        ],
+        "source_basis": "primary",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use when an Israeli company with IIA-funded technology flips or reorganizes.",
+        "warnings": [
+          "Flag IIA funding as a closing-condition and economics issue, not a cap-table-only detail."
+        ]
+      },
+      {
+        "rule_id": "delaware_flip.timeline_cost",
+        "domain": "delaware_flip",
+        "behavior_target": "benchmark",
+        "title": "Flip timeline and cost are path-conditioned",
+        "summary": "Flip timing and cost depend on tax ruling path, consents, IIA history, instruments, holder mix, and counsel workflow; benchmarks should be low-confidence prompts, not script outputs.",
+        "implementation_action": "benchmark_only",
+        "confidence": "low",
+        "source_ids": [
+          "ARNONTL-RESTRUCTURING-2025",
+          "KPMG-RD-CENTER-2025"
+        ],
+        "source_basis": "strong_secondary",
+        "counsel_review": true,
+        "jurisdiction": "US/Israel cross-border",
+        "applies_when": "Use only to explain why a flip estimate cannot be derived from cap-table math alone.",
+        "benchmark": {
+          "benchmark_only": true,
+          "notes": "Use project-specific counsel estimates rather than generic public numbers."
+        },
+        "warnings": [
+          "Do not output a fixed flip cost or timeline without user-provided counsel estimate."
+        ]
+      }
+    ],
+    "founder_benchmarks": [
+      {
+        "rule_id": "founder_benchmarks.carta_stage_medians",
+        "domain": "founder_benchmarks",
+        "behavior_target": "benchmark",
+        "title": "Founder ownership stage medians",
+        "summary": "Carta founder-ownership datasets provide stage and IPO benchmarks for founder ownership, but they are observational benchmarks rather than fairness rules.",
+        "implementation_action": "benchmark_only",
+        "confidence": "medium",
+        "source_ids": [
+          "CARTA-FOUNDER-2026",
+          "CARTA-FOUNDER-2025"
+        ],
+        "source_basis": "benchmark_dataset",
+        "counsel_review": false,
+        "jurisdiction": "US venture-backed startups",
+        "applies_when": "Use when comparing a founder's projected ownership to market benchmarks.",
+        "benchmark": {
+          "dataset": "Carta founder ownership data",
+          "benchmark_only": true,
+          "use": "Percentile or median comparison, never pass/fail scoring."
+        },
+        "warnings": [
+          "Do not treat a benchmark median as the correct ownership target.",
+          "Segment by stage, funding history, founder role, and company path when possible."
+        ]
+      },
+      {
+        "rule_id": "founder_benchmarks.no_hard_redlines",
+        "domain": "founder_benchmarks",
+        "behavior_target": "warning_rule",
+        "title": "No universal founder-ownership redlines",
+        "summary": "Founder ownership concerns are context-dependent; the skill should use configurable warnings and benchmark comparisons rather than universal claims such as a hard minimum after seed.",
+        "implementation_action": "warn",
+        "confidence": "high",
+        "source_ids": [
+          "CARTA-FOUNDER-2026",
+          "CARTA-FOUNDER-2025",
+          "WSGR-ER-FY2025"
+        ],
+        "source_basis": "mixed",
+        "counsel_review": false,
+        "jurisdiction": "US venture-backed startups",
+        "applies_when": "Use when evaluating dilution, stacked SAFEs, option-pool refreshes, or founder equity splits.",
+        "warnings": [
+          "Warn on severe dilution using user-configurable thresholds and benchmark context.",
+          "Avoid categorical advice that a founder must retain a specific percentage."
+        ]
+      },
+      {
+        "rule_id": "founder_benchmarks.israel_preseed_context",
+        "domain": "founder_benchmarks",
+        "behavior_target": "benchmark",
+        "title": "Israel pre-seed and seed context",
+        "summary": "Israel early-stage funding benchmarks should be kept separate from US benchmark datasets and treated as context for scenario ranges rather than cap-table rules.",
+        "implementation_action": "benchmark_only",
+        "confidence": "medium",
+        "source_ids": [
+          "F2-ISRAEL-2024",
+          "FUSION-ISRAEL-PRESEED-2025"
+        ],
+        "source_basis": "benchmark_dataset",
+        "counsel_review": false,
+        "jurisdiction": "Israel startup market",
+        "applies_when": "Use when modeling Israeli pre-seed or seed scenarios.",
+        "benchmark": {
+          "benchmark_only": true,
+          "use": "Scenario context by market and year; not a legal or valuation rule."
+        },
+        "warnings": [
+          "Do not mix Israel pre-seed benchmarks with US Carta founder-ownership medians without labeling the source market."
+        ]
+      },
+      {
+        "rule_id": "founder_benchmarks.stacked_safe_warning",
+        "domain": "founder_benchmarks",
+        "behavior_target": "warning_rule",
+        "title": "Stacked SAFE dilution warning",
+        "summary": "Stacked SAFEs, pool top-ups, note conversions, and priced-round dilution can combine into unexpectedly large founder dilution; warnings should be based on scenario deltas and benchmark context.",
+        "implementation_action": "warn",
+        "confidence": "high",
+        "source_ids": [
+          "YC-PMSAFE-PRIMER",
+          "COOLEY-OPTION-POOL",
+          "CARTA-FOUNDER-2026"
+        ],
+        "source_basis": "mixed",
+        "counsel_review": false,
+        "jurisdiction": "US and Israel startup market; economics only",
+        "applies_when": "Use after running SAFE, note, option-pool, and financing conversion calculations.",
+        "warnings": [
+          "Warn when founder ownership declines sharply between pre-financing and post-financing scenarios.",
+          "Show the drivers of dilution separately: SAFEs, notes, option pool, new-money shares, and anti-dilution."
+        ]
+      }
+    ]
+  }
+}

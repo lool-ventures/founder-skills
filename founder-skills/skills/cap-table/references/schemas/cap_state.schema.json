@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "cap-table cap_state.json",
+  "type": "object",
+  "required": ["as_of_date", "currency", "founders", "preferred_series", "option_pool", "as_converted_totals", "metadata"],
+  "properties": {
+    "as_of_date": {"type": "string"},
+    "currency": {"type": "string"},
+    "founders": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "founder_id", "common_shares"],
+        "properties": {
+          "name": {"type": "string"},
+          "founder_id": {"type": "string"},
+          "common_shares": {"type": "integer"},
+          "vesting": {"type": ["object", "null"]}
+        }
+      }
+    },
+    "common_batches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["batch_id", "holder_id", "shares", "issuance_date"],
+        "properties": {
+          "batch_id": {"type": "string"},
+          "holder_id": {"type": "string"},
+          "shares": {"type": "integer"},
+          "issuance_date": {"type": "string"},
+          "consideration": {"type": ["number", "null"]},
+          "purpose": {"enum": ["founder_issuance", "restricted_stock_purchase", "exercise", "conversion", "other"]}
+        }
+      }
+    },
+    "preferred_series": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["series_id", "series_name", "shares", "original_issue_price", "original_conversion_price", "current_conversion_price", "issuance_date"],
+        "properties": {
+          "series_id": {"type": "string"},
+          "series_name": {"type": "string"},
+          "shares": {"type": "integer"},
+          "original_issue_price": {"type": "number"},
+          "original_conversion_price": {"type": "number"},
+          "current_conversion_price": {"type": "number"},
+          "issuance_date": {"type": "string"},
+          "liquidation_preference_multiple": {"type": "number"},
+          "liquidation_preference_type": {"enum": ["non_participating", "participating", "participating_capped"]},
+          "participation_cap_multiple": {"type": ["number", "null"]},
+          "anti_dilution_protection": {"enum": ["none", "broad_based_weighted_average", "narrow_based_weighted_average", "full_ratchet"]},
+          "dividend_rate_percent": {"type": ["number", "null"]},
+          "dividend_cumulative": {"type": "boolean"},
+          "pro_rata_rights": {"type": "boolean"}
+        }
+      }
+    },
+    "option_pool": {
+      "type": "object",
+      "required": ["plan_type", "authorized", "issued_and_outstanding", "available_for_grant"],
+      "properties": {
+        "plan_type": {"enum": ["iso", "nso", "section_102_cg", "section_102_oi", "section_3i", "mixed"]},
+        "authorized": {"type": "integer"},
+        "issued_and_outstanding": {"type": "integer"},
+        "exercised_and_outstanding": {"type": "integer"},
+        "available_for_grant": {"type": "integer"},
+        "expired_or_forfeited": {"type": "integer"}
+      }
+    },
+    "outstanding_options": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["grant_id", "shares_vested_to_date", "shares_exercised", "shares_outstanding_unvested"],
+        "properties": {
+          "grant_id": {"type": "string"},
+          "holder_id": {"type": "string"},
+          "shares_vested_to_date": {"type": "integer"},
+          "shares_exercised": {"type": "integer"},
+          "shares_outstanding_unvested": {"type": "integer"}
+        }
+      }
+    },
+    "outstanding_safes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["safe_id", "purchase_amount", "issuance_date"],
+        "properties": {
+          "safe_id": {"type": "string"},
+          "purchase_amount": {"type": "number"},
+          "issuance_date": {"type": "string"}
+        }
+      }
+    },
+    "outstanding_notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["note_id", "principal", "issuance_date"],
+        "properties": {
+          "note_id": {"type": "string"},
+          "principal": {"type": "number"},
+          "issuance_date": {"type": "string"}
+        }
+      }
+    },
+    "outstanding_warrants": {"type": "array"},
+    "as_converted_totals": {
+      "type": "object",
+      "required": ["common_shares", "preferred_shares_as_converted", "options_outstanding", "options_available", "fully_diluted_shares"],
+      "properties": {
+        "common_shares": {"type": "integer"},
+        "preferred_shares_as_converted": {"type": "integer"},
+        "options_outstanding": {"type": "integer"},
+        "options_available": {"type": "integer"},
+        "fully_diluted_shares": {"type": "integer"}
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["run_id"],
+      "properties": {
+        "run_id": {"type": "string"},
+        "produced_by": {"type": "string"},
+        "source_inputs": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

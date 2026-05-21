@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "cap-table scenarios.json",
+  "type": "object",
+  "required": ["scenarios", "metadata"],
+  "properties": {
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["scenario_id", "label", "type", "parameters", "computed_outputs"],
+        "properties": {
+          "scenario_id": {"type": "string"},
+          "label": {"type": "string"},
+          "type": {"enum": ["safe_conversion", "note_conversion", "priced_round", "flip"]},
+          "parameters": {"type": "object"},
+          "computed_outputs": {
+            "type": "object",
+            "required": ["completeness", "math_provenance", "blockers"],
+            "properties": {
+              "completeness": {"enum": ["full", "structural_only", "repay_only", "mixed"]},
+              "cap_implied_only": {"type": "boolean"},
+              "math_provenance": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["output_field", "source_type"],
+                  "properties": {
+                    "output_field": {"type": "string"},
+                    "source_type": {"enum": ["rule", "counsel_supplied_override", "solver_intermediate"]},
+                    "rule_id": {"type": ["string", "null"]},
+                    "rule_pack_version": {"type": ["string", "null"]},
+                    "source_ref": {"type": ["string", "null"]}
+                  }
+                }
+              },
+              "blockers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["code", "remedy"],
+                  "properties": {
+                    "code": {"type": "string"},
+                    "instance_id": {"type": ["string", "null"]},
+                    "remedy": {"type": "string"}
+                  }
+                }
+              },
+              "post_round_cap_table": {"type": "array"},
+              "founder_impact": {
+                "type": ["object", "null"],
+                "properties": {
+                  "before_pct": {"type": "number"},
+                  "after_pct": {"type": "number"},
+                  "delta_pp": {"type": "number"},
+                  "plain_language": {"type": "string"}
+                }
+              },
+              "aggregate_ownership_by_class": {"type": ["object", "null"]},
+              "aggregate_cash_repayment": {"type": ["number", "null"]},
+              "per_note": {"type": ["object", "null"]},
+              "per_safe": {"type": ["object", "null"]}
+            }
+          }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["run_id"],
+      "properties": {"run_id": {"type": "string"}}
+    }
+  }
+}

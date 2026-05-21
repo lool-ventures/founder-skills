@@ -1,0 +1,39 @@
+{
+  "fixture_id": "cap_table_eval_hallucination_template_blank",
+  "description": "Regression target for Sprint 2's evidence_verifier.py. Captures the archetypal template-blank-fill hallucination: a model fills a blank placeholder in a draft term sheet with a plausible default value (e.g., 45 days) instead of recognizing the absence. Anonymized from a real audit case (Sprint 1.7).",
+  "failure_class": "template_blank_fill",
+  "instrument_type": "term_sheet",
+  "field": "exclusivity_days",
+  "source_excerpt": "During a period of  days following the date hereof, the Company shall not, without the consent of AcmeCorp Ventures, directly or indirectly take any action to solicit, initiate, encourage or assist the submission of any proposal regarding a sale of any of the equity securities of the Company.",
+  "source_excerpt_note": "The literal text contains TWO spaces between 'of' and 'days' — no number is present. This is a draft template awaiting completion.",
+  "hallucinated_extraction": {
+    "value": 45,
+    "evidence_quote": "During a period of 45 days following the date hereof, the Company shall not, without the consent of AcmeCorp Ventures, directly or indirectly...",
+    "confidence": "high",
+    "ambiguity": null,
+    "_note": "The evidence_quote here CONTAINS the value '45 days' that is NOT present in the source. This is the canonical signal for verifier rejection: value-token check ('45 days' in quote) passes, but doc-substring check ('45 days' in source) fails."
+  },
+  "canonical_extraction": {
+    "value": null,
+    "evidence_quote": "During a period of  days following the date hereof, the Company shall not, without the consent of AcmeCorp Ventures",
+    "confidence": "high",
+    "ambiguity": "Number is blank in template (literal text reads 'During a period of  days' with a double space where the number should appear). Template is unexecuted; founder will fill in the period later."
+  },
+  "sprint_2_assertions": {
+    "evidence_quote_substring_check": {
+      "expected_on_hallucinated": "FAIL — hallucinated evidence_quote does not exist as substring in source_excerpt",
+      "expected_on_canonical": "PASS — canonical evidence_quote (with double space) IS a substring of source_excerpt"
+    },
+    "value_token_check": {
+      "rule": "If field.value is not None, str(value) must appear as a token in evidence_quote near the relevant keyword.",
+      "expected_on_hallucinated": "BLOCK — value=45 paired with quote NOT in source",
+      "expected_on_canonical": "PASS — value=None requires no token check"
+    }
+  },
+  "anonymization": {
+    "original_company": "<redacted from public fixture>",
+    "replacement": "AcmeCorp",
+    "fixture_created_at": "2026-05-20",
+    "audit_ref": "Sprint 1.7 / AUDIT_FINDINGS.md"
+  }
+}

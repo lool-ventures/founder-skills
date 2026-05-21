@@ -585,9 +585,11 @@ def test_market_sizing_context_b_return_payload_keys_match_v0_4_1() -> None:
     )
 
 
-def test_all_5_skills_have_disable_flag_removed() -> None:
-    """Sanity check that the v0.4.1 inline-skill pivot landed in all 5
-    SKILL.md frontmatters (disable-model-invocation: true must be absent)."""
+def test_all_skills_have_disable_flag_removed() -> None:
+    """Sanity check that the v0.4.1 inline-skill pivot landed in every
+    SKILL.md frontmatter (disable-model-invocation: true must be absent).
+    Currently 6 skills (deck-review, market-sizing, ic-sim,
+    financial-model-review, competitive-positioning, cap-table)."""
     skills_dir = REPO_ROOT / "skills"
     checked = 0
     for skill_dir in sorted(skills_dir.iterdir()):
@@ -605,4 +607,8 @@ def test_all_5_skills_have_disable_flag_removed() -> None:
         )
         checked += 1
 
-    assert checked == 5, f"Expected 5 SKILL.md files, found {checked}. Add the missing skill or update this assertion."
+    assert checked == 6, (
+        f"Expected 6 SKILL.md files (deck-review, market-sizing, ic-sim, "
+        f"financial-model-review, competitive-positioning, cap-table); found "
+        f"{checked}. Add the missing skill or update this assertion."
+    )

@@ -43,13 +43,22 @@ def _run_compose_subprocess(skill: str, work_dir: Path, extra_args: list[str]) -
     """Run compose; return CompletedProcess. Does NOT raise on non-zero exit.
 
     `REPORT_JSON_OUT` placeholders in extra_args are replaced with
-    `<work_dir>/report.json` so each skill's compose writes its JSON output
-    where the test harness expects to find it.
+    `<work_dir>/report.json`. `REPORT_MD_OUT` is replaced with
+    `<work_dir>/report.md` for skills (like cap-table) whose compose
+    requires both.
     """
     scripts = REPO_ROOT / "founder-skills" / "skills" / skill / "scripts"
     compose = scripts / "compose_report.py"
     report_out = str(work_dir / "report.json")
-    resolved_args = [report_out if a == "REPORT_JSON_OUT" else a for a in extra_args]
+    report_md_out = str(work_dir / "report.md")
+    resolved_args = []
+    for a in extra_args:
+        if a == "REPORT_JSON_OUT":
+            resolved_args.append(report_out)
+        elif a == "REPORT_MD_OUT":
+            resolved_args.append(report_md_out)
+        else:
+            resolved_args.append(a)
     cmd = [sys.executable, str(compose), "--dir", str(work_dir), *resolved_args]
     return subprocess.run(cmd, capture_output=True, text=True)
 
@@ -60,6 +69,9 @@ def _run_compose_subprocess(skill: str, work_dir: Path, extra_args: list[str]) -
 # (deck-review compose writes to stdout by default; -o redirects.)
 _COMPOSE_FLAGS: dict[str, list[str]] = {
     "deck-review": ["-o", "REPORT_JSON_OUT"],  # REPORT_JSON_OUT replaced at call time
+    # cap-table also requires --write-md; the harness substitutes REPORT_JSON_OUT
+    # but also needs a markdown sibling path. We pass an explicit md path.
+    "cap-table": ["-o", "REPORT_JSON_OUT", "--write-md", "REPORT_MD_OUT", "--run-id", "test-run"],
     # "market-sizing": [...],            # confirm before adding
     # "ic-sim": [...],                   # confirm before adding
     # "financial-model-review": [...],   # confirm before adding
@@ -79,6 +91,7 @@ _COMPOSE_FLAGS: dict[str, list[str]] = {
 # is arbitrary among the inputs; any non-output works.
 _RUN_ID_MUTATION_TARGET: dict[str, str] = {
     "deck-review": "deck_inventory.json",
+    "cap-table": "inputs.json",
     # "market-sizing": "inputs.json",            # confirm before adding
     # "ic-sim": "startup_profile.json",          # confirm before adding
     # "financial-model-review": "inputs.json",   # confirm before adding

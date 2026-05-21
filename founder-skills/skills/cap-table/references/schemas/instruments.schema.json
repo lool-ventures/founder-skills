@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "cap-table instruments.json",
+  "type": "object",
+  "required": ["safes", "notes", "warrants", "option_grants", "metadata"],
+  "properties": {
+    "safes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "investor_name", "purchase_amount", "issuance_date", "form", "extraction_confidence"],
+        "properties": {
+          "id": {"type": "string"},
+          "investor_name": {"type": "string"},
+          "purchase_amount": {"type": "number"},
+          "post_money_valuation_cap": {"type": ["number", "null"]},
+          "pre_money_valuation_cap": {"type": ["number", "null"]},
+          "discount_multiplier": {"type": ["number", "null"]},
+          "mfn_provision": {
+            "type": ["object", "null"],
+            "properties": {
+              "present": {"type": "boolean"},
+              "elected": {"type": "boolean"},
+              "elected_against_safe_id": {"type": ["string", "null"]},
+              "cherry_pick_attempted": {"type": "boolean"},
+              "notes": {"type": ["string", "null"]}
+            }
+          },
+          "pro_rata_side_letter": {
+            "type": ["object", "null"],
+            "properties": {
+              "present": {"type": "boolean"},
+              "investor_scope": {"enum": ["this_investor_only", "major_investor_class", "all_safes", "other"]},
+              "exercise_cap_percent": {"type": ["number", "null"]},
+              "notes": {"type": ["string", "null"]}
+            }
+          },
+          "issuance_date": {"type": "string"},
+          "form": {"enum": ["yc_postmoney_cap", "yc_postmoney_discount", "yc_uncapped_mfn", "cap_plus_discount", "yc_premoney_cap_only", "pre_money_cap_and_discount_legacy", "other"]},
+          "conversion_price_override": {"type": ["number", "null"]},
+          "source_document": {"type": ["string", "null"]},
+          "extraction_confidence": {"enum": ["high", "medium", "low"]}
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "investor_name", "principal", "interest_rate_type", "day_count_basis", "issuance_date", "maturity_date", "maturity_default_treatment", "extraction_confidence"],
+        "properties": {
+          "id": {"type": "string"},
+          "investor_name": {"type": "string"},
+          "principal": {"type": "number"},
+          "annual_interest_rate": {"type": ["number", "null"]},
+          "interest_rate_type": {"enum": ["fixed_numeric", "fixed_numeric_simple", "statutory_ita_section_3j", "none"]},
+          "day_count_basis": {"type": "integer"},
+          "compounding_periods_per_year": {"type": ["integer", "null"]},
+          "interest_converts_to_shares": {"type": "boolean"},
+          "issuance_date": {"type": "string"},
+          "last_interest_event_date": {"type": ["string", "null"]},
+          "valuation_cap": {"type": ["number", "null"]},
+          "discount_multiplier": {"type": ["number", "null"]},
+          "capitalization_denominator": {"type": ["number", "null"]},
+          "capitalization_denominator_policy": {"type": ["string", "null"]},
+          "qualified_financing_threshold": {"type": "number"},
+          "maturity_date": {"type": "string"},
+          "maturity_default_treatment": {"enum": ["convert_at_cap", "repay", "extend", "counsel_review"]},
+          "maturity_conversion_price_override": {"type": ["number", "null"]},
+          "non_qualified_financing_treatment": {"type": ["string", "null"], "enum": ["convert_anyway", "do_not_convert", "negotiate", null]},
+          "source_document": {"type": ["string", "null"]},
+          "extraction_confidence": {"enum": ["high", "medium", "low"]}
+        }
+      }
+    },
+    "warrants": {"type": "array"},
+    "option_grants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "holder_id", "grant_date", "shares_granted", "strike_price", "plan_type"],
+        "properties": {
+          "id": {"type": "string"},
+          "holder_id": {"type": "string"},
+          "grant_date": {"type": "string"},
+          "shares_granted": {"type": "integer"},
+          "strike_price": {"type": "number"},
+          "plan_type": {"enum": ["iso", "nso", "section_102_cg", "section_102_oi", "section_3i"]},
+          "section_102_trustee_deposit_date": {"type": ["string", "null"]},
+          "vesting": {"type": ["object", "null"]},
+          "source_document": {"type": ["string", "null"]},
+          "extraction_confidence": {"enum": ["high", "medium", "low"]}
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["run_id"],
+      "properties": {"run_id": {"type": "string"}}
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "id": "ita_section_3j",
+  "scenario": "ita_section_3j",
+  "doc_type": "convertible_note",
+  "instrument_type": "convertible_note",
+  "fields": {
+    "instrument_subtype": "convertible_loan_agreement",
+    "principal": 200000,
+    "annual_interest_rate": null,
+    "interest_rate_type": "statutory_ita_section_3j",
+    "issuance_date": "2023-12-01",
+    "maturity_date": "2025-12-01",
+    "valuation_cap": 8000000,
+    "discount_multiplier": 0.80,
+    "qualified_financing_threshold": 1000000,
+    "investor_name": "Foobar Israel Fund LP"
+  },
+  "key_assertion": "Israeli CLA with Section 3(j) reference → annual_interest_rate=null, interest_rate_type=statutory_ita_section_3j (must NOT fabricate a numeric rate)"
+}

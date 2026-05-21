@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "cap-table rule_audit.json",
+  "type": "object",
+  "required": ["gating", "applied_rules", "counsel_review_items", "date_sensitive_watchlist", "metadata"],
+  "properties": {
+    "gating": {
+      "type": "object",
+      "description": "Per-rule, per-instance gating entries (rev15 schema)"
+    },
+    "applied_rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rule_id", "applied_to", "result"],
+        "properties": {
+          "rule_id": {"type": "string"},
+          "applied_to": {"type": "string"},
+          "result": {"enum": ["computed", "flagged", "skipped"]}
+        }
+      }
+    },
+    "counsel_review_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rule_id", "domain", "title", "source_ids"],
+        "properties": {
+          "rule_id": {"type": "string"},
+          "domain": {"type": "string"},
+          "title": {"type": "string"},
+          "applies_when": {"type": "string"},
+          "founder_question": {"type": "string"},
+          "counsel_question": {"type": "string"},
+          "documents_needed": {"type": "array", "items": {"type": "string"}},
+          "source_ids": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "date_sensitive_watchlist": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rule_id", "title", "scope"],
+        "properties": {
+          "rule_id": {"type": "string"},
+          "title": {"type": "string"},
+          "scope": {"enum": ["legal_tax_applicability", "benchmark_freshness"]},
+          "event_date_field": {"type": ["string", "null"]},
+          "instance_type": {"enum": ["safe", "option_grant", "stock_batch", "preferred_series", "scenario", "engagement", "global"]},
+          "instance_id": {"type": ["string", "null"]},
+          "instance_json_pointer": {"type": ["string", "null"]},
+          "current_status": {
+            "type": ["string", "null"],
+            "enum": ["in_window", "pre_effective", "expired", "date_tracking_only", "missing_event_date", null]
+          },
+          "freshness_status": {
+            "type": ["string", "null"],
+            "enum": ["fresh", "stale", "unknown", null]
+          },
+          "near_end_flag": {"type": "boolean"},
+          "near_start_flag": {"type": "boolean"},
+          "event_date_value": {"type": ["string", "null"]},
+          "action_required": {"type": "string"}
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["run_id"],
+      "properties": {"run_id": {"type": "string"}}
+    }
+  }
+}

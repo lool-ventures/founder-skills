@@ -1,0 +1,53 @@
+{
+  "as_of_date": "2026-05-19",
+  "currency": "USD",
+  "founders": [
+    {
+      "name": "Alice",
+      "founder_id": "alice",
+      "common_shares": 5000000,
+      "vesting": null
+    },
+    {
+      "name": "Bob",
+      "founder_id": "bob",
+      "common_shares": 5000000,
+      "vesting": null
+    }
+  ],
+  "common_batches": [],
+  "preferred_series": [],
+  "option_pool": {
+    "plan_type": "nso",
+    "authorized": 1000000,
+    "issued_and_outstanding": 0,
+    "exercised_and_outstanding": 0,
+    "available_for_grant": 1000000,
+    "expired_or_forfeited": 0
+  },
+  "outstanding_options": [],
+  "outstanding_safes": [
+    {
+      "safe_id": "safe_001",
+      "purchase_amount": 250000,
+      "issuance_date": "2025-01-01"
+    }
+  ],
+  "outstanding_notes": [],
+  "outstanding_warrants": [],
+  "as_converted_totals": {
+    "common_shares": 10000000,
+    "preferred_shares_as_converted": 0,
+    "options_outstanding": 0,
+    "options_available": 1000000,
+    "fully_diluted_shares": 11000000
+  },
+  "metadata": {
+    "produced_by": "cap_state.py",
+    "source_inputs": [
+      "inputs.json",
+      "instruments.json"
+    ],
+    "run_id": "fixture-run"
+  }
+}

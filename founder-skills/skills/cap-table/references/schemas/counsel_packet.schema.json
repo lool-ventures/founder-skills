@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "cap-table counsel_packet.json",
+  "type": "object",
+  "required": ["company_name", "engagement_summary", "items", "metadata"],
+  "properties": {
+    "company_name": {"type": "string"},
+    "engagement_summary": {"type": "string"},
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["domain", "title", "rule_id", "source_ids"],
+        "properties": {
+          "domain": {"type": "string"},
+          "title": {"type": "string"},
+          "rule_id": {"type": "string"},
+          "founder_question": {"type": "string"},
+          "counsel_question": {"type": "string"},
+          "documents_needed": {"type": "array", "items": {"type": "string"}},
+          "source_ids": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["run_id"],
+      "properties": {"run_id": {"type": "string"}}
+    }
+  }
+}

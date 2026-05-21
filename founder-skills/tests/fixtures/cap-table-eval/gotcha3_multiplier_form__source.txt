@@ -1,0 +1,11 @@
+SAFE - ACMECORP INC.
+
+For the Purchase Amount of $100,000, the Company hereby issues to
+Foobar VC LLC (the "Investor") the right to certain shares as of
+March 15, 2024.
+
+The "Post-Money Valuation Cap" is $12,000,000.
+The "Discount Rate" is 80% (i.e., 20% discount).
+
+Standard YC SAFE provisions for conversion, equity financing,
+dissolution, liquidity, and standard provisions apply.

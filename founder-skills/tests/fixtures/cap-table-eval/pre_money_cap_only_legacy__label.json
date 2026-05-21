@@ -1,0 +1,16 @@
+{
+  "id": "pre_money_cap_only_legacy",
+  "scenario": "pre_money_cap_only_legacy",
+  "doc_type": "safe",
+  "instrument_type": "safe",
+  "fields": {
+    "form": "yc_premoney_cap_only",
+    "purchase_amount": 250000,
+    "post_money_valuation_cap": null,
+    "pre_money_valuation_cap": 10000000,
+    "discount_multiplier": null,
+    "issuance_date": "2020-06-17",
+    "investor_name": "Foobar Holdings LLC"
+  },
+  "key_assertion": "Three structural pre-money signals (bare 'Valuation Cap', 'Safe Capital Stock' vocab, Company Capitalization INCLUDES future option pool grants) → form=yc_premoney_cap_only"
+}

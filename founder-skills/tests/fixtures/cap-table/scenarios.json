@@ -1,0 +1,27 @@
+{
+  "scenarios": [
+    {
+      "scenario_id": "base",
+      "label": "Cap-implied baseline",
+      "type": "safe_conversion",
+      "parameters": {},
+      "computed_outputs": {
+        "completeness": "structural_only",
+        "cap_implied_only": true,
+        "blockers": [],
+        "math_provenance": [],
+        "per_safe": {
+          "safe_001": {
+            "branch": "cap_implied",
+            "cap_implied_ownership": 0.05,
+            "safe_price": 0.4545,
+            "cap_implied_shares": 550000
+          }
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "run_id": "fixture-run"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "safes": [
+    {
+      "id": "safe_001",
+      "investor_name": "Angel A",
+      "purchase_amount": 250000,
+      "post_money_valuation_cap": 5000000,
+      "discount_multiplier": null,
+      "mfn_provision": null,
+      "pro_rata_side_letter": null,
+      "issuance_date": "2025-01-01",
+      "form": "yc_postmoney_cap",
+      "conversion_price_override": null,
+      "source_document": null,
+      "extraction_confidence": "high"
+    }
+  ],
+  "notes": [],
+  "warrants": [],
+  "option_grants": [],
+  "metadata": {
+    "run_id": "fixture-run"
+  }
+}

@@ -1,0 +1,608 @@
+---
+name: cap-table
+description: "Models cap-table mechanics for pre-seed through Series A — SAFE / convertible-note conversion, priced-round dilution, option-pool top-ups, anti-dilution, and Israeli ↔ Delaware flips. Produces founder-facing scenarios with rule-pack-cited math and a counsel-handoff packet."
+when_to_use: >
+  Use ONLY when the user has cap-table content (a signed or draft SAFE / note,
+  a term sheet, a Carta or Pulley export, a freeform spreadsheet cap-table, or
+  a structured description of holders + outstanding instruments) AND has asked
+  to model conversion math, project dilution, run a priced round, or evaluate
+  a Delaware flip. Do not auto-invoke on general fundraising questions ("how
+  much should I raise?"), term-glossary questions ("what is a SAFE?"), or for
+  financial-model review (use `financial-model-review` skill instead).
+user-invocable: true
+---
+
+# Cap-Table Skill
+
+Model cap-table mechanics for founders so they understand what their term sheets, SAFEs, and convertible notes actually do to their ownership — before they sign. Produce rule-pack-cited math for SAFE conversion, convertible-note conversion, priced-round dilution, option-pool top-ups, anti-dilution, and Israeli ↔ Delaware flips. Every counsel-review item links back to a primary source (YC SAFE primer, NVCA model docs, Israeli Companies Law / Income Tax Ordinance, etc.). Tone is founder-first: a candid coach who's read the documents you can't be expected to read.
+
+> **Phase 1 status note:** This SKILL.md is a Phase-1 scaffold derived from the design doc at `docs/internal/2026-05-18-cap-table-skill-design.md` (rev17). Frontmatter, execution model, and Gotchas are complete and stable. Workflow step bash blocks are skeletal pointers pending the scripts in `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts/` (none of which exist yet). Implementers: read the design doc as the contract; this file is the runtime entry point.
+
+## Skill Metadata
+
+- **Author:** lool-ventures
+- **Version:** managed in `founder-skills/.claude-plugin/plugin.json`
+- **Compatibility:** Python 3.10+ and `uv` for script execution.
+- **Rule pack:** consumes `cap-table-rules.json` (v0.2.8+) at script runtime.
+- **Exports:**
+  - `inputs.json` + `scenarios.json` → `financial-model-review` (cross-validates revenue/dilution scenarios)
+  - `cap_state.json` → `ic-sim` (IC partners ask about dilution exposure)
+  - `counsel_packet.json` → `fundraise-readiness` (overall readiness scorecard)
+  - `report.json` → `fundraise-readiness`, future `cross-document-consistency` skill
+- **Imports:**
+  - `market-sizing:sizing.json` — sanity-check that the planned raise + cap is consistent with modeled SAM/SOM
+  - `financial-model-review:report.json` — current revenue scale + runway, to gate scenario plausibility
+
+## Skill Execution Model (READ FIRST)
+
+This skill runs **inline in the main thread** (not as a sub-agent). The main thread has full tool access including Bash, and is responsible for orchestrating the full pipeline: running producer scripts, persisting artifacts, and dispatching the cap-table sub-agent at specific moments.
+
+**Two dispatch contexts for the sub-agent:**
+
+- **Context A — Per-step analytical dispatch (Mitigation 1):** Used ONLY for document-extraction lanes. Cap-table math is fully deterministic and rule-driven, so Context A is reserved for tasks that genuinely need semantic extraction from natural-language documents:
+  - `INSTRUMENT_EXTRACTION` — extract terms from a PDF/DOCX SAFE, note, term sheet, or option plan
+  - `SPREADSHEET_STRUCTURE_DETECTION` — identify which cells encode founders / preferred / options / convertibles in a freeform spreadsheet that doesn't match known Carta/Pulley schemas
+
+  The sub-agent returns structured JSON. The main thread pipes the JSON through the validation producer (`extract_instrument.py` / `extract_cap_table.py`), which enforces the anti-hallucination gate. The sub-agent does NOT write artifacts directly.
+
+- **Context B — Post-compose coaching dispatch (POST_COMPOSE_COACHING):** After `compose_report.py` writes `report.md` + `report.json`, the sub-agent is dispatched with the structured `coaching_payload` inlined. It performs Grep idempotency, edits `report.md` at the per-run uuid marker to add `## Coaching Commentary`, Grep-verifies all canonical artifacts share the same `run_id`, and returns a success/blocked payload.
+
+**Why this model:** In Cowork, sub-agents have a restricted tool allowlist (no Bash). By keeping orchestration in the main thread and dispatching sub-agents only for analytical or post-compose tasks that use only Read/Edit/Glob/Grep, the pipeline works correctly in both Claude Code (CLI) and Cowork.
+
+**Tolerant JSON extraction protocol (Context A):** After dispatching the sub-agent, capture its final assistant message. The sub-agent should return raw JSON, but may wrap it in ` ```json ... ``` ` fences or add a prose preamble. Extract JSON tolerantly:
+
+1. If the message is wrapped in a ` ```json ... ``` ` (or plain ` ``` ... ``` `) fence, strip the fence first.
+2. Try to parse the stripped text directly as JSON.
+3. If that fails, walk through the text looking for the first `{` character and try `json.JSONDecoder().raw_decode(text[i:])` — this is brace-aware and handles nested objects correctly (unlike regex, which truncates on the first `}`).
+4. If extraction fails entirely, re-prompt the sub-agent with: "Your previous reply could not be parsed as JSON. Return ONLY the JSON object — no markdown fences, no prose preamble."
+
+> See `founder-skills/references/skill-execution-model.md` for the full inline-skill execution model (3 dispatch contexts, Mitigation 1+2, producer contract, Cowork quirks, per-symptom triage).
+
+## Input Formats — Four Lanes
+
+Each lane produces normalized `instruments.json` and/or `cap_state.json` plus an `extraction_audit.json` trail. The main thread picks the lane from the founder's input type.
+
+- **Lane 1 — Single instrument (PDF / DOCX).** Typical: 5–15 page SAFE, term sheet, convertible note, or option plan. Main thread reads via the Read tool (native PDF support, up to 20 pages per call; longer docs use `pages` parameter). Dispatches Context A `INSTRUMENT_EXTRACTION` with document content inlined; pipes returned JSON through `extract_instrument.py`. User confirmation via `AskUserQuestion` before math runs.
+- **Lane 2 — Carta / Pulley export (CSV / XLSX).** Typical: multi-sheet XLSX (Securities, Convertibles, Stakeholders). `extract_cap_table.py` detects format from sheet-name + column-header fingerprint; maps known columns → canonical schema. User confirms ambiguous mappings. **Phase 1 prerequisite:** verify exact Carta and Pulley column conventions (see Phase 1 open questions).
+- **Lane 3 — Freeform spreadsheet (founder's Excel).** Arbitrary structure. `extract_cap_table.py --mode=freeform` extracts cells + sheet structure. Dispatches Context A `SPREADSHEET_STRUCTURE_DETECTION` to identify cell semantics. Validation gate enforces per-field confidence before commit.
+- **Lane 4 — Structured JSON paste / conversational.** Founder pastes pre-built JSON or describes their cap-table in chat. Direct heredoc into `inputs.json` / `instruments.json`; still flows through `extract_cap_table.py --mode=validate` for schema enforcement.
+
+## Available Scripts
+
+> **Phase 1 status:** None of these scripts exist yet. The list is the file-plan contract — implementers create them in Phase 1 per the design doc §13. Cross-reference design doc §5 (scenario types), §6 (rule-pack consumption), §9 (pipeline), and §11 (artifact schemas) for each script's behavior contract.
+
+All scripts will live at `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts/`:
+
+- **`extract_instrument.py`** — Validates Lane-1 sub-agent output against the per-instrument schema; anti-hallucination gate (per-field confidence; "did you find this verbatim in the document").
+- **`extract_cap_table.py`** — Lane-2/3/4 cap-table extraction; modes: `carta`, `pulley`, `freeform`, `validate`. Emits `cap_state.json` + `instruments.json` + `extraction_audit.json`.
+- **`cap_state.py`** — Reads `inputs.json` + `instruments.json`; computes as-converted totals; writes `cap_state.json`. Validates per the §11 schema. **Note:** the YC Company Capitalization denominator scoping (Gotcha #1) is enforced here — `as_converted_totals.*` is the pre-financing snapshot.
+- **`rule_audit.py`** — Two-phase: `--phase=pre_math` writes the gating block (per-rule, per-instance status + scope + overlays) BEFORE math runs; `--phase=post_math` composes watchlist + counsel-review items AFTER math. Math producers consume the gating block.
+- **`run_scenario.py`** — Solver / orchestrator (NOT a fixed chain). Builds a dependency graph; classifies independent vs coupled computations; algebraic resolution first, fixed-point iteration as fallback for non-linear systems (discount-only SAFEs). Convergence threshold + max iterations are parameterized.
+- **`safe_conversion.py`** — SAFE conversion math (cap-only, cap-plus-discount, discount-only, uncapped-MFN). Binds rule-pack inputs per the §5.1 binding table (see design doc).
+- **`note_conversion.py`** — Convertible-note conversion math (cap, discount, both, repay, extend, counsel-review, override branches). Binds rule-pack inputs per the §5.2 binding table.
+- **`priced_round.py`** — Priced-round math (pre-money, new-money, pool top-up, anti-dilution). Coupled with SAFE/note conversion via the solver.
+- **`option_pool.py`** — Option-pool top-up math (rule pack `option_pool.pre_money_topup`). Uses `target_basis` denominator.
+- **`anti_dilution.py`** — BBWA / full-ratchet anti-dilution (Gotcha #2 enforced here).
+- **`flip_scenario.py`** — Israeli ↔ Delaware flip mechanics (v0.1: share-for-share 1:1 only — see Gotcha #7).
+- **`counsel_packet.py`** — Extracts counsel-review items from `rule_audit.json` into a standalone counsel-handoff packet.
+- **`compose_report.py`** — Assembles all artifacts into `report.md` + `report.json` (with embedded `coaching_payload` block). Cross-artifact validation; emits per-uuid coaching insertion marker.
+- **`flip_compose.py`** — Only in flip-focused mode: generates `flip_impact.md`.
+- **`visualize.py`** — Generates `report.html` (self-contained, vendored Chart.js + inline SVG).
+- **`explore.py`** — Generates `explorer.html` (polished interactive scenario tool; demo/video-friendly; ~2000 lines).
+- **`_dispatch_json.py`** — Copy-pasted from existing skills; tolerant JSON extraction for Context A returns.
+
+Also available from `${CLAUDE_PLUGIN_ROOT}/scripts/` (shared):
+
+- **`founder_context.py`** — Per-company context management (init/read/merge/validate)
+- **`find_artifact.py`** — Resolves artifact paths by skill name, artifact filename, optional company slug
+
+Run with: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts/<script>.py --pretty [args]`
+
+## Available References
+
+Read as needed from `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/references/`:
+
+- **`cap-table-reference.md`** — Domain primer: SAFE mechanics, note mechanics, anti-dilution formulas, §102/3(i)/85A/104H/103K, IIA royalty mechanics, BBWA formula, counsel-review semantics. **Read before implementing any math producer.**
+- **`cap-table-rules.json`** (v0.2.8+) — The executable reference layer; 44 rules across 9 domains with formulas, inputs, outputs, source citations, date_window semantics, behavior_target (`script_formula` / `validation_rule` / `warning_rule` / `counsel_review_flag` / `benchmark` / `source_note`). Every math producer loads this at start.
+- **`cap-table-rules.schema.json`** — JSON Schema for the rule pack (Draft 2020-12). The schema description on `counsel_review` is the authoritative definition of "reliance boundary, not confidence score" (see Gotcha #9).
+- **`artifact-schemas.md`** — Phase 1 deliverable: JSON Schemas for every artifact (`inputs.json`, `instruments.json`, `cap_state.json`, `scenarios.json`, `rule_audit.json`, `counsel_packet.json`, `report.json`). Replaces the `{...}` placeholders in design doc §11.
+- **`carta-pulley-mapping.md`** — Phase 1 deliverable: per-vendor column-mapping table for Lane 2 extraction. Until this exists, Lane 2 falls back to Lane 3.
+
+## Artifact Pipeline
+
+Every cap-table engagement deposits structured JSON artifacts into a working directory. The final step assembles them into a report and validates consistency. This is not optional.
+
+| Step | Artifact | Producer |
+|------|----------|----------|
+| 1 | founder context | `founder_context.py` read/init |
+| 2 | `inputs.json` | Agent heredoc or `extract_*.py` (Lane 4 / Lanes 1–3) |
+| 3 | `instruments.json` | `extract_instrument.py` (Lane 1) or `extract_cap_table.py` (Lane 2/3/4) |
+| 4 | `cap_state.json` | `cap_state.py` |
+| 5 | `extraction_audit.json` | `extract_*.py` trail |
+| 6 | `rule_audit.json` (gating block) | `rule_audit.py --phase=pre_math` |
+| 7 | `scenarios.json` | `run_scenario.py` (solver; consumes gating block from Step 6) |
+| 8 | `rule_audit.json` (watchlist + counsel items) | `rule_audit.py --phase=post_math` |
+| 9 | `counsel_packet.json` + `counsel_packet.md` | `counsel_packet.py` |
+| 10 | `comparisons.json` (when ≥2 scenarios) | `compose_report.py` |
+| 11 | `report.md` + `report.json` (with `coaching_payload` block) | `compose_report.py --write-md` |
+| 12 | `report.html` | `visualize.py` |
+| 13 | `explorer.html` | `explore.py` |
+| 14 | `## Coaching Commentary` appended to `report.md` | Context B sub-agent (POST_COMPOSE_COACHING) |
+| 15 (flip-focused only) | `flip_impact.md` | `flip_compose.py --write-md` |
+
+**Rules:**
+- Deposit each artifact before proceeding to the next step.
+- Math producers consume `rule_audit.json.gating[R][I]` for rule-applicability decisions — NOT the rule pack directly. The two-phase split is what makes this work.
+- For producer-script artifacts, the agent supplies JSON on stdin where applicable; the script schema-validates against `references/schemas/<artifact>.schema.json`. Never write artifacts directly via `Write` or `Edit` — always pipe through the producer script so `metadata.run_id` is injected and schemas are enforced.
+- `compose_report.py` enforces that all required artifacts share the same `run_id` and emits `STALE_ARTIFACT` warnings on mismatch.
+
+Keep the founder informed with brief, plain-language updates at each step. Never mention file names, scripts, or JSON. After each major step (extraction, scenarios, counsel), share a one-sentence finding before moving on.
+
+## Workflow
+
+### Step 0: Path Setup
+
+```bash
+SCRIPTS="${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts"
+REFS="${CLAUDE_PLUGIN_ROOT}/skills/cap-table/references"
+SHARED_SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
+ARTIFACTS_ROOT="${ARTIFACTS_ROOT:-$(pwd)/artifacts}"
+mkdir -p "$ARTIFACTS_ROOT"
+
+# Per-run identifier — used by every producer's --run-id. Stays constant
+# across the whole engagement (compose enforces parity).
+RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
+```
+
+If `CLAUDE_PLUGIN_ROOT` is empty, fall back: `Glob` for `**/founder-skills/skills/cap-table/scripts/cap_state.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`.
+
+After Step 1 (when the company slug is known), derive `REVIEW_DIR`:
+
+```bash
+REVIEW_DIR="${REVIEW_DIR:-$ARTIFACTS_ROOT/cap-table-$SLUG}"
+mkdir -p "$REVIEW_DIR"
+mkdir -p "$REVIEW_DIR/.staging"   # for ad-hoc sub-agent JSON staging
+```
+
+### Step 1: Read or Create Founder Context
+
+```bash
+python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_ROOT" --pretty
+```
+
+**Exit 0 (found):** Use the company slug and pre-filled fields. Proceed to Step 2.
+
+**Exit 1 (not found):** This is normal for a first run — do not treat it as an error. Use `AskUserQuestion` (NOT plain chat) to ask for company name, stage, sector, and geography. Provide at least 2 options. Then create:
+
+```bash
+python3 "$SHARED_SCRIPTS/founder_context.py" init \
+  --company-name "Acme Corp" --stage seed --sector "B2B SaaS" \
+  --geography "US" --artifacts-root "$ARTIFACTS_ROOT" \
+  --run-id "$RUN_ID"
+```
+
+**Exit 2 (multiple):** Present the list, ask which company, re-read with `--slug`.
+
+### Step 2: Confirm Engagement Mode + Jurisdiction → `inputs.json`
+
+Ask the founder via `AskUserQuestion` (NOT plain chat):
+
+1. **Mode:** "Is this a flip-focused engagement (Israeli → Delaware), or a standard cap-table modeling engagement?" Options: `standard | flip_focused`.
+2. **Jurisdiction structure:** Options: `delaware | israeli | delaware_with_israeli_sub | mid_flip`.
+3. **IIA grant history (Israel-context only):** "Has the Israeli entity received any IIA / OCS grants?" Options: `yes | no | not_sure`.
+
+Then build `inputs.json` via heredoc (the schema validates):
+
+```bash
+cat <<INPUTS_EOF > "$REVIEW_DIR/inputs.json"
+{
+  "company_name": "Acme Corp",
+  "analysis_date": "$(date -u +%Y-%m-%d)",
+  "mode": "standard",
+  "jurisdiction": {
+    "structure": "delaware",
+    "incorporated_date": "2024-06-01",
+    "iia_grants_history": {"has_grants": false, "grant_details": []}
+  },
+  "event_dates": {
+    "restructuring_effective_date": null,
+    "restructuring_approval_date": null,
+    "filing_date": null,
+    "tax_position_date": null,
+    "flip_closing_date": null,
+    "benchmark_reference_date": null
+  },
+  "engagement_questions": [],
+  "metadata": {"run_id": "$RUN_ID"}
+}
+INPUTS_EOF
+```
+
+Validate immediately:
+
+```bash
+python3 "$SCRIPTS/extract_cap_table.py" --mode=validate --dir "$REVIEW_DIR"
+```
+
+### Step 3: Ingest Instruments → `instruments.json`
+
+Route by input format:
+
+#### Lane 1: PDF / DOCX (single instrument)
+
+Main thread `Read`s the document (Anthropic PDF reader, up to 20 pages per call). Then dispatch Context A `INSTRUMENT_EXTRACTION` via the `Task` tool:
+
+**Dispatch prompt template:**
+
+```
+CONTEXT: INSTRUMENT_EXTRACTION
+REVIEW_DIR: <absolute path to REVIEW_DIR>
+RUN_ID: <RUN_ID>
+
+You are the cap-table agent dispatched in Context A (INSTRUMENT_EXTRACTION).
+The main thread has provided the document content below. Extract the
+structured terms per your agent body's Context A specification.
+
+Document content:
+<paste the document text — for PDFs, this is what the Read tool returned>
+
+Return JSON only — exactly the {instrument_type, fields, confidence, ambiguities}
+shape. Do not write artifacts to disk. Do not invoke producer scripts.
+```
+
+**After the sub-agent returns:** apply the tolerant JSON extraction protocol to obtain the structured JSON. Then pipe through `extract_instrument.py` which validates, runs evidence verification + invariant checks against the source doc, and appends to `instruments.json`:
+
+```bash
+cat <<'EXTRACT_EOF' | python3 "$SCRIPTS/extract_instrument.py" \
+  --instruments "$REVIEW_DIR/instruments.json" --run-id "$RUN_ID" --pretty \
+  --source-doc "$DOC_PATH"
+<JSON extracted from sub-agent reply>
+EXTRACT_EOF
+```
+
+`--source-doc <path>` is the only verification flag you need to pass. **Evidence verification, evidence-verification blocking, and invariant checking are all default ON.** Use `--no-verify` / `--no-verify-blocking` / `--no-invariants` to opt out of any of them (rare — typically only for tests or for documents the user explicitly marks as unverifiable).
+
+- **Evidence verification**: checks each extracted value against the source document and rejects extractions where claimed values don't appear in the source — the canonical hallucination pattern. Calibrated against the private eval set at 3.6% FPR / 100% TPR on verifiable docs.
+- **Invariant checking**: per-field real-world bounds (purchase_amount ≤ $50M for SAFEs, discount_multiplier ∈ [0.5, 1.0], etc.) plus cross-field math invariants (options_granted ≤ total_authorized; SAFE pre/post caps mutually exclusive). Hard math impossibilities block; soft bounds warn-only.
+
+If `extract_instrument.py` exits non-zero:
+- **Validation errors** (`errors` in stderr): show via `AskUserQuestion` and re-extract.
+- **Evidence verification rejection** (`rejection` block in receipt with `failed_fields`): the verifier found values that don't appear in the source doc. Re-dispatch the sub-agent with the `retry_hint` text from the rejection, asking it to re-check those specific fields against the document. If the same field fails verification on a second pass, treat as `low-confidence` and present to the founder via `AskUserQuestion` for confirmation.
+- **Invariant hard violation** (`invariant_check.n_hard_violations > 0`, stderr mentions `invariant_checker`): a math impossibility was detected (e.g., both pre_money_valuation_cap and post_money_valuation_cap set on the same SAFE). Show the violation reasons to the founder and re-extract.
+
+**`attention_needed_fields` in the receipt** is the union of (a) low-confidence fields, (b) fields that triggered soft invariant warnings (out-of-range values), and (c) fields the evidence verifier marked unverifiable. The dispatching agent should escalate these via `AskUserQuestion` AND, for high-stakes extractions, dispatch backward verification on this exact field subset (see "Optional: backward verification" below). This is the lightweight hook for selective backward-verification dispatch — no need to backward-verify every field, just the ones already flagged for attention.
+
+If the source document is image-only or DocuSign-overlay (verifier returns `overall_status: "unverifiable_doc"` or `verifier_blind_demoted`), verification cannot run — surface this to the founder and ask for explicit confirmation of the extracted values before commit.
+
+If the extraction surfaced ambiguities or low-confidence fields, present them via `AskUserQuestion` for confirmation before proceeding.
+
+##### Optional: backward verification (WARN-mode)
+
+After forward verification passes, you may optionally run backward verification — an independent re-extraction by a fresh sub-agent that catches semantic-confusion errors (right value in source but wrong field, e.g. "Purchase Amount" vs "Aggregate Purchase Amount of all Safes"; pre-money vs post-money form classification). This is separate from forward verification, which catches outright hallucinations.
+
+```bash
+# Phase 1: emit per-field re-extraction prompts
+python3 "$SCRIPTS/backward_verifier.py" --phase=prompt \
+  --extraction "$EXTRACTION_JSON" --source-doc "$DOC_PATH" > /tmp/bv_prompts.json
+
+# Phase 2: for each prompt, spawn an independent Task sub-agent.
+# Collect their {field, value, evidence_quote} responses into /tmp/bv_responses.json
+# (wrap as {"responses": [...]}).
+
+# Phase 3: score responses against the original extraction
+cat /tmp/bv_responses.json | python3 "$SCRIPTS/backward_verifier.py" --phase=score \
+  --extraction "$EXTRACTION_JSON" -o /tmp/bv_report.json --pretty
+```
+
+Backward verification is **informational (WARN-mode)** by default — disagreements between original and re-extracted values surface in the report but do NOT block. Present disagreements to the founder via `AskUserQuestion`. Calibration against the canonical eval set found ~7% disagreement rate, dominated by genuinely ambiguous form-classification cases (pre-money vs post-money) — too noisy for auto-rejection but valuable as a confirmation prompt.
+
+Recommended trigger: run backward verification on **high-stakes extractions** (priced rounds, $1M+ investments, or when forward verification was marginal — high `fuzzy_ratio` / many `unverifiable` fields).
+
+#### Lane 2: Carta / Pulley XLSX export
+
+```bash
+python3 "$SCRIPTS/extract_cap_table.py" --mode=carta --xlsx "$XLSX_PATH" \
+  -o "$REVIEW_DIR/extraction_audit.json" --pretty
+```
+
+If the vendor mapping is not yet populated in `references/carta-pulley-mapping.md`, the script will route to Lane 3 (freeform).
+
+#### Lane 3: Freeform spreadsheet
+
+The Python helper extracts the cell grid, then dispatch Context A `SPREADSHEET_STRUCTURE_DETECTION`:
+
+**Dispatch prompt template:**
+
+```
+CONTEXT: SPREADSHEET_STRUCTURE_DETECTION
+REVIEW_DIR: <absolute path>
+RUN_ID: <RUN_ID>
+
+You are the cap-table agent dispatched in Context A (SPREADSHEET_STRUCTURE_DETECTION).
+Sheet structure + cell grid:
+
+<paste the sheet data — sheet name, dimensions, cell values per row>
+
+Return JSON only — the {blocks: [{block_type, sheet, cell_range,
+column_role_map, confidence, evidence, ambiguities}]} shape.
+Do not write artifacts.
+```
+
+**After the sub-agent returns:** validate via `extract_cap_table.py --mode=freeform`:
+
+```bash
+cat <<'FREEFORM_EOF' | python3 "$SCRIPTS/extract_cap_table.py" \
+  --mode=freeform -o "$REVIEW_DIR/extraction_audit.json" --pretty
+<JSON extracted from sub-agent reply>
+FREEFORM_EOF
+```
+
+Present low_confidence_blocks + ambiguities to the founder via `AskUserQuestion`. Once confirmed, write the founder-confirmed `instruments.json` directly via heredoc (Phase 1 follow-up: automate the cell-map → JSON conversion).
+
+#### Lane 4: Structured JSON paste / conversational
+
+Either (a) the founder pasted JSON — write directly to `$REVIEW_DIR/instruments.json` via heredoc, OR (b) the founder described their cap-table conversationally — main thread asks targeted `AskUserQuestion`s to build the structure, then heredocs the result. Validate with:
+
+```bash
+python3 "$SCRIPTS/extract_cap_table.py" --mode=validate --dir "$REVIEW_DIR"
+```
+
+### Step 4: Compute Cap State → `cap_state.json`
+
+```bash
+python3 "$SCRIPTS/cap_state.py" \
+  --inputs "$REVIEW_DIR/inputs.json" \
+  --instruments "$REVIEW_DIR/instruments.json" \
+  --run-id "$RUN_ID" \
+  -o "$REVIEW_DIR/cap_state.json" --pretty
+```
+
+The script computes the pre-financing `as_converted_totals` (Gotcha #1 enforced structurally) and validates against `references/schemas/cap_state.schema.json`.
+
+### Step 4.5: Pre-Math Rule Audit → `rule_audit.json` (gating block)
+
+```bash
+python3 "$SCRIPTS/rule_audit.py" --phase=pre_math \
+  --inputs "$REVIEW_DIR/inputs.json" \
+  --instruments "$REVIEW_DIR/instruments.json" \
+  --cap-state "$REVIEW_DIR/cap_state.json" \
+  --run-id "$RUN_ID" \
+  -o "$REVIEW_DIR/rule_audit.json" --pretty
+```
+
+Math producers in Step 5 consume `rule_audit.json.gating[R][I]` — they do NOT re-evaluate rule applicability. This is the only place status is computed.
+
+### Step 5: Determine Scenarios + Run Math → `scenarios.json`
+
+Ask the founder via `AskUserQuestion` which scenarios to model (1–4 in v0.1). Common patterns:
+
+- **Standalone SAFE conversion** (cap-implied math; no priced round): `{type: "safe_conversion", parameters: {}}`
+- **Series A priced round**: `{type: "priced_round", parameters: {pre_money, new_money, target_pool_percent, target_basis}}`
+- **Convertible note conversion at financing**: `{type: "note_conversion", parameters: {transaction_event_date, priced_round_new_money, qualified_financing_price}}`
+- **Israeli ↔ Delaware flip** (only when mode=flip_focused or explicitly requested): `{type: "flip", parameters: {iia_grants_in_history, section_102_grants_outstanding}}`
+
+Write the scenario-request list to a temp file:
+
+```bash
+cat <<SCENARIOS_EOF > "$REVIEW_DIR/scenario_requests.json"
+[
+  {"scenario_id": "base", "label": "Base case", "type": "safe_conversion", "parameters": {}},
+  {"scenario_id": "series_a", "label": "Series A at \$20M pre / \$5M raise",
+   "type": "priced_round",
+   "parameters": {"pre_money": 20000000, "new_money": 5000000,
+                  "target_pool_percent": 0.10, "target_basis": "pre_money"}}
+]
+SCENARIOS_EOF
+```
+
+Then run all scenarios:
+
+```bash
+python3 "$SCRIPTS/run_scenario.py" \
+  --inputs "$REVIEW_DIR/inputs.json" \
+  --instruments "$REVIEW_DIR/instruments.json" \
+  --cap-state "$REVIEW_DIR/cap_state.json" \
+  --scenarios-input "$REVIEW_DIR/scenario_requests.json" \
+  --run-id "$RUN_ID" \
+  -o "$REVIEW_DIR/scenarios.json" --pretty
+```
+
+`run_scenario.py` dispatches to the right math producer per scenario type and consumes the gating block from Step 4.5. After this completes, share a one-sentence finding per scenario with the founder (e.g., "Series A drops your stake from 87% to 64%; the 10% pool top-up costs you ~3pp").
+
+### Step 6: Post-Math Rule Audit → `rule_audit.json` (watchlist + counsel items)
+
+```bash
+python3 "$SCRIPTS/rule_audit.py" --phase=post_math \
+  --run-id "$RUN_ID" \
+  -o "$REVIEW_DIR/rule_audit.json" --pretty
+```
+
+The gating block from Step 4.5 is preserved verbatim; this phase adds watchlist + counsel items.
+
+### Step 7: Counsel Packet → `counsel_packet.json` + `counsel_packet.md`
+
+```bash
+python3 "$SCRIPTS/counsel_packet.py" \
+  --rule-audit "$REVIEW_DIR/rule_audit.json" \
+  --inputs "$REVIEW_DIR/inputs.json" \
+  --scenarios "$REVIEW_DIR/scenarios.json" \
+  --run-id "$RUN_ID" \
+  -o "$REVIEW_DIR/counsel_packet.json" \
+  --write-md "$REVIEW_DIR/counsel_packet.md" --pretty
+```
+
+### Step 8: Compose Report → `report.md` + `report.json`
+
+```bash
+python3 "$SCRIPTS/compose_report.py" \
+  --dir "$REVIEW_DIR" --run-id "$RUN_ID" \
+  -o "$REVIEW_DIR/report.json" \
+  --write-md "$REVIEW_DIR/report.md" --pretty
+```
+
+`compose_report.py` validates run_id parity (emits `STALE_ARTIFACT` warning on mismatch) and writes the per-run uuid `insertion_marker` Context B will use in Step 11.
+
+**Post-write verification:** `compose_report.py` exits non-zero (code 2) if the output files don't exist or are empty. If compose exits non-zero, stop and report the exact stderr — do not proceed to Step 9.
+
+### Step 9: Generate `report.html`
+
+```bash
+python3 "$SCRIPTS/visualize.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.html"
+```
+
+### Step 10: Generate `explorer.html`
+
+```bash
+python3 "$SCRIPTS/explore.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/explorer.html"
+```
+
+### Step 11: Post-Compose Coaching Commentary (Context B dispatch — POST_COMPOSE_COACHING)
+
+**Dispatch the cap-table sub-agent in Context B.** Dispatch via the `Task` tool after `compose_report.py` has successfully written both `report.json` and `report.md`.
+
+**Mitigation 2 protocol:** the main thread reads the structured `coaching_payload` from `report.json` and inlines it into the dispatch prompt. The sub-agent does NOT Read full `report.md` — it consumes `coaching_payload` directly.
+
+<!-- skill-quality-ci: bash-after-subagent-ok -->
+```bash
+COACHING_PAYLOAD="$(python3 -c '
+import json, sys
+data = json.load(open(sys.argv[1]))
+print(json.dumps(data["coaching_payload"], indent=2))
+' "$REVIEW_DIR/report.json")"
+```
+
+**Dispatch prompt template:**
+
+```
+CONTEXT: POST_COMPOSE_COACHING
+
+You are dispatched to add coaching commentary to a cap-table report.
+
+The compose_report.py script has finished. The structured `coaching_payload`
+from report.json is:
+
+<paste $COACHING_PAYLOAD JSON here verbatim>
+
+Follow your agent body's Context B procedure (POST_COMPOSE_COACHING):
+
+1. grep_idempotency_check — Grep "## Coaching Commentary" (output_mode:count)
+   and Grep the EXACT coaching_payload.insertion_marker (output_mode:count)
+   on coaching_payload.report_path. Apply the 6-state decision matrix.
+2. Compose commentary from the inlined coaching_payload (scenario_digest,
+   ownership_range_across_scenarios, top_dilution_drivers,
+   counsel_review_summary, date_sensitive_summary, flip_specifics).
+   Do NOT Read the full report.md.
+3. edit_via_marker — single Edit on coaching_payload.report_path:
+     old_string = coaching_payload.insertion_marker  (EXACT uuid string)
+     new_string = "## Coaching Commentary\n\n<your commentary>"
+4. self_verify_artifacts_via_grep_run_id — Grep run_id from each producer
+   artifact (inputs, instruments, cap_state, scenarios, rule_audit,
+   counsel_packet). All 6 must match. Re-Grep the marker (must be 0)
+   and the "## Coaching Commentary" header (must be 1) on report.md.
+5. Return the success payload (per agent body Context B step 5).
+
+Stop after returning JSON. Do not narrate.
+```
+
+**After the sub-agent returns:** apply the tolerant JSON extraction protocol to obtain the success/blocked payload. If `status == "blocked"`, stop and report the reason. If `status == "complete"`, present `report_path` to the founder.
+
+### Step 11.5 (flip-focused mode only): Generate `flip_impact.md`
+
+```bash
+if [ "$MODE" = "flip_focused" ]; then
+  python3 "$SCRIPTS/flip_compose.py" --dir "$REVIEW_DIR" --run-id "$RUN_ID" \
+    --write-md "$REVIEW_DIR/flip_impact.md"
+fi
+```
+
+(Note: `flip_compose.py` is a Phase 1 follow-up — for v0.1, the flip scenario data is rendered as a section in `report.md` per the standard pipeline.)
+
+### Step 12: Deliver Artifacts
+
+Copy human-readable deliverables to workspace root with company-slug prefix:
+
+```bash
+SLUG_TITLE="$(echo $SLUG | sed 's/-/_/g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2)} 1')"
+cp "$REVIEW_DIR/report.md"     "${SLUG_TITLE}_Cap_Table.md"
+cp "$REVIEW_DIR/report.html"   "${SLUG_TITLE}_Cap_Table.html"
+cp "$REVIEW_DIR/explorer.html" "${SLUG_TITLE}_Cap_Table_Explorer.html"
+cp "$REVIEW_DIR/counsel_packet.md" "${SLUG_TITLE}_Counsel_Packet.md"
+[ "$MODE" = "flip_focused" ] && [ -f "$REVIEW_DIR/flip_impact.md" ] && \
+  cp "$REVIEW_DIR/flip_impact.md" "${SLUG_TITLE}_Flip_Impact.md"
+
+rm -rf "$REVIEW_DIR/.staging" 2>/dev/null || true
+```
+
+The structured-artifact set (inputs.json, instruments.json, cap_state.json, scenarios.json, rule_audit.json, counsel_packet.json, report.json) stays inside `$REVIEW_DIR` for cross-skill consumption and archival.
+
+## Gotchas
+
+These are the cap-table-specific correctness traps. Each is a real source of math or legal-conclusion error in shipped cap-table tools. Read before implementing the corresponding script.
+
+### 1. YC Company Capitalization denominator excludes new-money + new-pool
+
+`safe.post_money_cap_conversion` needs `company_capitalization` as its denominator. The shipped rule (`safe.company_capitalization_yc_post_money`) defines it as `pre_financing_common_equivalents + promised_options + unissued_option_pool + converting_securities` — **specifically excluding new-money financing shares and most post-financing pool increases.** The rule pack flags any model that includes either as a hard warning.
+
+Always bind from `cap_state.as_converted_totals.*` (the pre-financing snapshot) — never re-derive from a post-money figure. See design doc §5.1 binding table.
+
+### 2. BBWA anti-dilution divisor uses CP1, not Original Issue Price
+
+The Broad-Based Weighted Average formula: `CP2 = CP1 × (A + B) / (A + C)` where `B = consideration_received / CP1` (the current conversion price), **not** `consideration / original_issue_price`. Cooley GO and NVCA Model Cert §4.4.4 both use CP1; using OIP under-protects investors and mis-models down rounds.
+
+### 3. `discount_multiplier` is the multiplier, not the percent
+
+`0.80` means "convert at 80% of the priced-round price" (a 20% discount). `20` would mean "convert at 2,000% of the priced-round price." The field is named `_multiplier` (not `_rate` or `_percent`) to make this unambiguous; the rule `safe.discount_rate_semantics` enforces the semantic. Document extraction must convert any percent value to the multiplier form before writing to `instruments.json`.
+
+### 4. MFN cherry-pick chains can be circular
+
+When SAFE A's `mfn_provision.elected_against_safe_id` points to SAFE B, the founder is asking to inherit B's terms. If B is also `yc_uncapped_mfn` pointing back at A (or at another uncapped-MFN SAFE in a chain), there's no anchor price and the system has no real-valued solution. `run_scenario.py` detects this with a circular-reference guard and raises `E_SAFE_REQUIRES_CONVERSION_EVENT` for both with a "circular MFN reference" note. Don't try to resolve by picking one — fail loudly.
+
+### 5. `maturity_conversion_price_override` ONLY applies to `convert_at_cap`
+
+The override exists specifically to unblock the case where a note has `maturity_default_treatment = convert_at_cap` but `valuation_cap` is null (e.g., document-defined non-cap conversion). Pairing the override with `repay` / `extend` / `counsel_review` is a contract violation (`E_NOTE_OVERRIDE_BRANCH_MISMATCH`) — those treatments don't produce a conversion price, so an override price has nothing to override.
+
+### 6. §102 trustee deposit date is NOT the same as grant_date
+
+Section 102(b) capital-gains route requires that options be **held in trust** for 24 months from the **trustee deposit date**, which is typically a few days to weeks AFTER the grant date. Confusing the two silently breaks every §102 holding-period assertion. The `instruments.option_grants[]` schema carries `grant_date` AND `section_102_trustee_deposit_date` as separate fields for this reason.
+
+### 7. The Israeli → Delaware flip is share-for-share ONLY in v0.1
+
+Real flips often involve share exchange ratios other than 1:1, partial roll-forward of SAFEs/CLAs, and adjustment for option-plan continuity. v0.1 models only the 1:1 share-for-share case; anything else exits with "flip ratio modeling deferred to v0.2 — counsel-review required." SAFE/CLA conversion + pricing run as a SEPARATE priced-round scenario before or after the flip, not as part of the flip math. Don't try to collapse them.
+
+### 8. QSBS post-OBBBA start date is 2025-07-05, not 2025-07-04
+
+Public Law 119-21 §70431 applies to stock acquired **after** July 4, 2025 (the enactment date). With the rule pack's inclusive `>= start` semantics, the first in-window day is **2025-07-05**. The off-by-one is the difference between "QSBS gain exclusion applies" and "doesn't" for stock issued on July 4 itself. Verify before applying to any issuance date in early July 2025.
+
+### 9. `counsel_review: true` is a reliance boundary, NOT a confidence score
+
+A rule can be `confidence: high` AND `counsel_review: true` simultaneously. `counsel_review` tells the script what it may *conclude* (flag / ask / handoff — never legal conclusion / tax classification / eligibility determination); `confidence` tells the script how strong the underlying sourcing is. Don't downgrade a well-sourced rule to medium just because it's flagged for counsel review. The schema description on `cap-table-rules.schema.json` and the "Counsel Review Semantics" section of `cap-table-reference.md` are the authoritative definitions.
+
+### 10. Standalone cap SAFEs produce cap-implied output ONLY — not a post-financing table
+
+A `yc_postmoney_cap` or `cap_plus_discount` SAFE standalone (no priced round) CAN produce `cap_implied_ownership`, `safe_price`, and cap-implied shares — these are deterministic from the cap and `company_capitalization` alone. It CANNOT produce a post-financing ownership table or Founder Impact Lens, because those describe dilution from new money + pool top-up that hasn't happened. Scenarios in this state get `completeness = structural_only` with `cap_implied_only` sub-flag. Render "Cap-implied ownership (pre-financing)" — never fabricate post-financing rows.
+
+### 11. Carta and Pulley export column conventions differ
+
+Both ship multi-sheet XLSX exports, but the sheet names, column ordering, and convertible-instrument representations are NOT interchangeable. Phase 1 verification produces an explicit per-vendor column-mapping table in `references/carta-pulley-mapping.md`; until that table exists, the freeform-spreadsheet lane (Lane 3) is the fallback. Don't assume "it looks like Carta" — check the sheet name fingerprint.
+
+## Main-Thread Return
+
+This skill runs inline in the main thread (not as a sub-agent). The final outcome the main thread delivers to the founder is:
+
+- The path to `{Company}_Cap_Table.md` in the workspace root — the primary narrative deliverable.
+- The path to `{Company}_Cap_Table_Explorer.html` — the polished interactive scenario tool.
+- The path to `{Company}_Counsel_Packet.md` — the counsel-handoff packet.
+- (Flip-focused mode only) The path to `{Company}_Flip_Impact.md`.
+- The structured success payload from the Context B sub-agent (Step 11): `{status, review_dir, report_path, scenarios_modeled, counsel_review_count, completeness_breakdown}`.
+
+**Do NOT inline `report_markdown` in the assistant message.** The founder reads the file via the path. (Same rationale as deck-review #13: avoids ~25 KB round-trip through the parent context.)
+
+## Phase 1 Open Verifications
+
+These are explicitly deferred to Phase 1 implementation (not unresolved design questions):
+
+1. **Carta + Pulley export column conventions** — produce `references/carta-pulley-mapping.md`. Until done, Lane 2 falls back to Lane 3 (freeform).
+2. **§102 plan-type canonical naming** — pick `section_102_cg` / `section_102_oi` / `section_3i` consistently across `instruments.option_grants[].plan_type`, `cap_state.option_pool.plan_type`, and `inputs.json`. Design doc §14 flags this.
+3. **`applies_when` predicate model** — Codex round 16 P3 / round 17 prior gap. Decide: (a) add structured `applies_when_match` field to the rule pack v0.3, or (b) keep prose `applies_when` strings and implement per-rule matchers in `rule_audit.py`. Recommendation: (b) for v0.1 (fewer moving parts; rule pack stays stable). Either way, `applies_when_matched: bool` in the gating block needs a deterministic computation path.
+4. **JSON Schema files for every artifact** — replace `{...}` placeholders in design doc §11 with actual `.schema.json` files referenced from `references/artifact-schemas.md`. Phase 1 schema-fileification step.
+5. **`COACHING_SKILLS` registry wiring** — add `"cap-table"` to `tests/test_compose_invariants.py::COACHING_SKILLS`; add entries to `compose_invocations.py` (`_COMPOSE_FLAGS`, `_RUN_ID_MUTATION_TARGET`); populate fixtures at `founder-skills/tests/fixtures/cap-table/`. Without this, the cross-skill `coaching_payload` contract is not mechanically enforced for cap-table.

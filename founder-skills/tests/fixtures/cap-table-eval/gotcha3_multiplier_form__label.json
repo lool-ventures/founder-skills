@@ -1,0 +1,15 @@
+{
+  "id": "gotcha3_multiplier_form",
+  "scenario": "gotcha3_multiplier_form",
+  "doc_type": "safe",
+  "instrument_type": "safe",
+  "fields": {
+    "form": "cap_plus_discount",
+    "purchase_amount": 100000,
+    "post_money_valuation_cap": 12000000,
+    "discount_multiplier": 0.80,
+    "issuance_date": "2024-03-15",
+    "investor_name": "Foobar VC LLC"
+  },
+  "key_assertion": "Gotcha #3 multiplier-form: 'Discount Rate is 80%' with X>=50 means investor pays 80% → multiplier=0.80, NOT 0.20"
+}

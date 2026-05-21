@@ -1,0 +1,54 @@
+{
+  "fixture_id": "cap_table_eval_enum_invention",
+  "description": "Regression target for canonical-enum validation in extract_instrument.py. Captures the failure mode where a model produces a descriptively-correct but non-canonical SAFE form enum string. Anonymized from a real audit case (Sprint 1.7, one of 17 such cases).",
+  "failure_class": "non_canonical_enum",
+  "instrument_type": "safe",
+  "field": "form",
+  "source_excerpt": "The \"Discount Rate\" is 80%. The \"Post-Money Valuation Cap\" is US$ 20,000,000.",
+  "non_canonical_extraction": {
+    "value": "post_money_cap_and_discount",
+    "evidence_quote": "The \"Discount Rate\" is 80%. The \"Post-Money Valuation Cap\" is US$ 20,000,000.",
+    "confidence": "high",
+    "_note": "Value is descriptively correct — the document IS a post-money SAFE with both a cap and a discount. But the enum string is not in the canonical SAFE_FORM_GATES set in extract_instrument.py."
+  },
+  "canonical_extraction": {
+    "value": "cap_plus_discount",
+    "evidence_quote": "The \"Discount Rate\" is 80%. The \"Post-Money Valuation Cap\" is US$ 20,000,000.",
+    "confidence": "high"
+  },
+  "canonical_enum_values": [
+    "yc_postmoney_cap",
+    "yc_postmoney_discount",
+    "yc_uncapped_mfn",
+    "cap_plus_discount",
+    "yc_premoney_cap_only",
+    "pre_money_cap_and_discount_legacy",
+    "other"
+  ],
+  "remap_table": {
+    "post_money_cap_only": "yc_postmoney_cap",
+    "post_money_cap_and_discount": "cap_plus_discount",
+    "post_money_valuation_cap_and_discount": "cap_plus_discount",
+    "discount_only": "yc_postmoney_discount",
+    "pre_money_cap_only": "yc_premoney_cap_only",
+    "pre_money_cap_and_discount": "pre_money_cap_and_discount_legacy",
+    "pre_money_cap_with_discount": "pre_money_cap_and_discount_legacy"
+  },
+  "sprint_2_assertions": {
+    "schema_enum_validation": {
+      "rule": "extract_instrument.py must reject any SAFE label whose form.value is not in canonical_enum_values. The extractor should either auto-remap (per remap_table) and emit a warning, or hard-reject and re-prompt.",
+      "expected_on_non_canonical": "FAIL or REMAP",
+      "expected_on_canonical": "PASS"
+    },
+    "field_consistency_check": {
+      "rule": "For form='cap_plus_discount': post_money_valuation_cap AND discount_multiplier must both be non-null; pre_money_valuation_cap must be null.",
+      "expected_on_both_extractions_with_fields_populated": "PASS (the enum string differs but the underlying data matches the canonical form's gates)"
+    }
+  },
+  "anonymization": {
+    "original_company": "<redacted from public fixture>",
+    "replacement": "Foobar",
+    "fixture_created_at": "2026-05-20",
+    "audit_ref": "Sprint 1.7 / AUDIT_FINDINGS.md"
+  }
+}

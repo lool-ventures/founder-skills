@@ -18,7 +18,12 @@
     "market-sizing",
     "financial-model",
     "investment-committee",
-    "competitive-positioning"
+    "competitive-positioning",
+    "cap-table",
+    "safe",
+    "convertible-note",
+    "dilution",
+    "delaware-flip"
   ],
   "hooks": {
     "SessionStart": [
