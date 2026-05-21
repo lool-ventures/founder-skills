@@ -1203,7 +1203,7 @@ class TestStackedPostMoneySAFEsGolden:
         assert sentinel["schema_version"] == "v0.1.0-cap-table-fast-assess"
         assert sentinel["mode"] == "fast_assess"
         assert sentinel["produces_canonical_artifacts"] is False
-        assert sentinel["rule_pack_version"] == "0.3.1"
+        assert sentinel["rule_pack_version"] == "0.3.2"
         # inputs_fingerprint structurally valid
         fp = sentinel["inputs_fingerprint"]
         assert "sha256" in fp and len(fp["sha256"]) == 64
@@ -2541,6 +2541,245 @@ class TestPreBaselinePatches:
             assert note["subtype"] == "convertible_security"
             assert note["maturity_date"] is None
             assert note["interest_rate_type"] == "none"
+
+
+class TestAoAExtraction:
+    """Tests for extract_aoa.py — AoA (Articles of Association) extraction
+    validator + counsel-review item detection + merge-into-inputs flow.
+
+    Commit #7 post-J audit. Synthetic fixtures based on the 5 real Israeli
+    AoAs at ~/private-corpus/aoa/ (Deltacorp 2024, Bravocorp Series A 2022,
+    Charliecorp Seed-2 2016, Acmecorp 2012, generic 2015). Real AoAs are NOT
+    included as fixtures (per the redaction rule — no real founder/company
+    names in committed artifacts).
+    """
+
+    @staticmethod
+    def _valid_aoa_extraction() -> dict[str, Any]:
+        """Synthetic AoA extraction shape — single preferred series, Israeli."""
+        return {
+            "extraction_type": "articles_of_association",
+            "fields": {
+                "company_name": "Acmecorp Ltd.",
+                "jurisdiction_structure": "israeli",
+                "section_102_plan_reference": True,
+                "drag_along_threshold_pct": 0.75,
+                "preferred_series": [
+                    {
+                        "series_name": "Series Seed",
+                        "shares": None,
+                        "original_issue_price": 1.175,
+                        "original_conversion_price": 1.175,
+                        "current_conversion_price": 1.175,
+                        "issuance_date": "2018-03-15",
+                        "liquidation_preference_multiple": 1.0,
+                        "liquidation_preference_type": "participating",
+                        "participation_cap_multiple": None,
+                        "anti_dilution_protection": "broad_based_weighted_average",
+                        "dividend_rate_percent": 0.08,
+                        "dividend_cumulative": True,
+                        "pro_rata_rights": True,
+                    }
+                ],
+            },
+            "confidence": {},
+            "ambiguities": [],
+        }
+
+    def test_valid_aoa_extraction_passes(self) -> None:
+        """Canonical valid AoA extraction — no validation errors."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_aoa import validate_aoa_extraction  # type: ignore[import-not-found]
+
+        errs = validate_aoa_extraction(self._valid_aoa_extraction())
+        assert errs == [], errs
+
+    def test_extraction_type_mismatch_rejected(self) -> None:
+        """extraction_type must be 'articles_of_association' — anything else fails."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_aoa import validate_aoa_extraction  # type: ignore[import-not-found]
+
+        ext = self._valid_aoa_extraction()
+        ext["extraction_type"] = "instrument_extraction"
+        errs = validate_aoa_extraction(ext)
+        assert any("extraction_type" in e for e in errs)
+
+    def test_missing_oip_rejected(self) -> None:
+        """A preferred series without original_issue_price fails validation."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_aoa import validate_aoa_extraction  # type: ignore[import-not-found]
+
+        ext = self._valid_aoa_extraction()
+        ext["fields"]["preferred_series"][0]["original_issue_price"] = None
+        errs = validate_aoa_extraction(ext)
+        assert any("original_issue_price" in e for e in errs)
+
+    def test_participating_capped_requires_cap_multiple(self) -> None:
+        """liquidation_preference_type='participating_capped' requires
+        participation_cap_multiple to be non-null."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_aoa import validate_aoa_extraction  # type: ignore[import-not-found]
+
+        ext = self._valid_aoa_extraction()
+        ext["fields"]["preferred_series"][0]["liquidation_preference_type"] = "participating_capped"
+        ext["fields"]["preferred_series"][0]["participation_cap_multiple"] = None
+        errs = validate_aoa_extraction(ext)
+        assert any("participation_cap_multiple" in e for e in errs)
+
+    def test_invalid_anti_dilution_enum_rejected(self) -> None:
+        """anti_dilution_protection must be one of the canonical enum values."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_aoa import validate_aoa_extraction  # type: ignore[import-not-found]
+
+        ext = self._valid_aoa_extraction()
+        ext["fields"]["preferred_series"][0]["anti_dilution_protection"] = "magic_ratchet"
+        errs = validate_aoa_extraction(ext)
+        assert any("anti_dilution_protection" in e for e in errs)
+
+    def test_liquidation_pref_below_1x_rejected(self) -> None:
+        """liquidation_preference_multiple must be ≥ 1.0 (Israeli + US convention)."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_aoa import validate_aoa_extraction  # type: ignore[import-not-found]
+
+        ext = self._valid_aoa_extraction()
+        ext["fields"]["preferred_series"][0]["liquidation_preference_multiple"] = 0.5
+        errs = validate_aoa_extraction(ext)
+        assert any("liquidation_preference_multiple" in e for e in errs)
+
+    def test_counsel_items_drag_along_below_75(self) -> None:
+        """Israeli AoA with drag-along < 75% surfaces counsel-review item."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_aoa import detect_counsel_review_items  # type: ignore[import-not-found]
+
+        fields = self._valid_aoa_extraction()["fields"]
+        fields["drag_along_threshold_pct"] = 0.65
+        items = detect_counsel_review_items(fields)
+        assert any(it["rule_id"] == "israeli_aoa.drag_along_threshold_below_75_percent" for it in items)
+
+    def test_counsel_items_section_102_absent(self) -> None:
+        """Israeli AoA without §102 plan reference flags counsel review."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_aoa import detect_counsel_review_items  # type: ignore[import-not-found]
+
+        fields = self._valid_aoa_extraction()["fields"]
+        fields["section_102_plan_reference"] = False
+        items = detect_counsel_review_items(fields)
+        assert any(it["rule_id"] == "israeli_aoa.section_102_plan_absent" for it in items)
+
+    def test_counsel_items_above_1x_liquidation_pref(self) -> None:
+        """Above-1x liquidation preference triggers counsel review."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_aoa import detect_counsel_review_items  # type: ignore[import-not-found]
+
+        fields = self._valid_aoa_extraction()["fields"]
+        fields["preferred_series"][0]["liquidation_preference_multiple"] = 2.0
+        items = detect_counsel_review_items(fields)
+        assert any(it["rule_id"] == "israeli_aoa.liquidation_preference_above_1x" for it in items)
+
+    def test_counsel_items_full_ratchet_anti_dilution(self) -> None:
+        """Full-ratchet anti-dilution triggers counsel review."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_aoa import detect_counsel_review_items  # type: ignore[import-not-found]
+
+        fields = self._valid_aoa_extraction()["fields"]
+        fields["preferred_series"][0]["anti_dilution_protection"] = "full_ratchet"
+        items = detect_counsel_review_items(fields)
+        assert any(it["rule_id"] == "israeli_aoa.full_ratchet_anti_dilution" for it in items)
+
+    def test_counsel_items_clean_aoa_returns_empty(self) -> None:
+        """A clean AoA (drag-along ≥ 75%, §102 present, 1x non-participating,
+        BBWA anti-dilution) produces no counsel-review items."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_aoa import detect_counsel_review_items  # type: ignore[import-not-found]
+
+        fields = self._valid_aoa_extraction()["fields"]
+        fields["preferred_series"][0]["liquidation_preference_multiple"] = 1.0
+        fields["preferred_series"][0]["liquidation_preference_type"] = "non_participating"
+        fields["preferred_series"][0]["anti_dilution_protection"] = "broad_based_weighted_average"
+        items = detect_counsel_review_items(fields)
+        assert items == [], f"clean AoA should produce no counsel items; got: {items}"
+
+    def test_merge_into_inputs_appends_new_series(self) -> None:
+        """AoA-extracted preferred_series is appended to inputs.preferred_series[]
+        with extraction_provenance stamp."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_aoa import merge_into_inputs  # type: ignore[import-not-found]
+
+        with tempfile.TemporaryDirectory() as d:
+            inputs_path = os.path.join(d, "inputs.json")
+            with open(inputs_path, "w") as f:
+                json.dump(
+                    {
+                        "company_name": "Acmecorp Ltd.",
+                        "analysis_date": "2026-05-21",
+                        "mode": "standard",
+                        "preferred_series": [],
+                        "metadata": {"run_id": "test"},
+                    },
+                    f,
+                )
+
+            new_series = self._valid_aoa_extraction()["fields"]["preferred_series"]
+            result = merge_into_inputs(inputs_path, new_series, source_doc="/path/to/aoa.pdf")
+            assert result["status"] == "merged"
+            assert result["added_count"] == 1
+            with open(inputs_path) as f:
+                inputs = json.load(f)
+            assert len(inputs["preferred_series"]) == 1
+            merged = inputs["preferred_series"][0]
+            assert merged["series_name"] == "Series Seed"
+            assert merged["extraction_provenance"]["source_doc"] == "/path/to/aoa.pdf"
+
+    def test_merge_into_inputs_conflict_on_duplicate_series_name(self) -> None:
+        """Attempting to merge a series with an already-present series_name
+        returns status='conflict' (caller must resolve)."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_aoa import merge_into_inputs  # type: ignore[import-not-found]
+
+        with tempfile.TemporaryDirectory() as d:
+            inputs_path = os.path.join(d, "inputs.json")
+            with open(inputs_path, "w") as f:
+                json.dump(
+                    {
+                        "company_name": "Acmecorp Ltd.",
+                        "preferred_series": [{"series_name": "Series Seed", "shares": 1_000_000}],
+                        "metadata": {"run_id": "test"},
+                    },
+                    f,
+                )
+            new_series = self._valid_aoa_extraction()["fields"]["preferred_series"]
+            result = merge_into_inputs(inputs_path, new_series, source_doc="/path/to/aoa.pdf")
+            assert result["status"] == "conflict"
+            assert "Series Seed" in result["conflicts"]
+
+    def test_cli_end_to_end_validates_and_merges(self) -> None:
+        """End-to-end: pipe AoA extraction JSON through extract_aoa.py CLI,
+        verify it validates + merges + returns counsel items."""
+        with tempfile.TemporaryDirectory() as d:
+            inputs_path = os.path.join(d, "inputs.json")
+            with open(inputs_path, "w") as f:
+                json.dump(
+                    {
+                        "company_name": "Acmecorp Ltd.",
+                        "analysis_date": "2026-05-21",
+                        "mode": "standard",
+                        "preferred_series": [],
+                        "metadata": {"run_id": "test"},
+                    },
+                    f,
+                )
+            extraction = self._valid_aoa_extraction()
+            rc, out, err = _run(
+                "extract_aoa.py",
+                ["--run-id", "test", "--inputs", inputs_path, "--source-doc", "/path/aoa.pdf", "--pretty"],
+                stdin_data=json.dumps(extraction),
+            )
+            assert rc == 0, f"extract_aoa.py failed: rc={rc}, stderr={err}"
+            receipt = json.loads(out)
+            assert receipt["status"] == "validated"
+            assert receipt["preferred_series_count"] == 1
+            assert "merge" in receipt
+            assert receipt["merge"]["status"] == "merged"
 
 
 class TestPrivacyAssertion:

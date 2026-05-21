@@ -25,7 +25,7 @@ import json
 import sys
 from typing import Any
 
-RULE_PACK_VERSION = "0.3.1"
+RULE_PACK_VERSION = "0.3.2"
 
 
 def required_topup(

@@ -49,7 +49,7 @@ from safe_conversion import (  # noqa: E402
     detect_mfn_cycles,
 )
 
-RULE_PACK_VERSION = "0.3.1"
+RULE_PACK_VERSION = "0.3.2"
 
 
 def _resolve_mfn_elections(safes: list[dict[str, Any]]) -> list[dict[str, Any]]:

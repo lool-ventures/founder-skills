@@ -6,11 +6,12 @@ description: >
   anti-dilution, and Israeli ↔ Delaware flips. Dispatched by SKILL.md in one
   of two contexts:
 
-  Context A (per-step extraction, Mitigation 1): INSTRUMENT_EXTRACTION or
-  SPREADSHEET_STRUCTURE_DETECTION dispatch. Extract structured terms from a
-  PDF/DOCX document or identify cell semantics in a freeform spreadsheet.
-  Returns structured JSON the main thread pipes through the extraction
-  producer. No Bash required.
+  Context A (per-step extraction, Mitigation 1): one of three sub-contexts —
+  INSTRUMENT_EXTRACTION (SAFE / convertible note / term sheet / option plan /
+  warrant), SPREADSHEET_STRUCTURE_DETECTION (freeform Excel cap-table cells),
+  or ARTICLES_OF_ASSOCIATION_EXTRACTION (preferred-series terms from an AoA).
+  Returns structured JSON the main thread pipes through the matching
+  validator. No Bash required.
 
   Context B (post-compose coaching): consumes the structured coaching_payload
   inlined in the dispatch prompt, performs Grep idempotency, appends
@@ -365,7 +366,141 @@ For each identified block, return:
 }
 ```
 
-**Hard rules in Context A (both sub-contexts):**
+#### Sub-context: `ARTICLES_OF_ASSOCIATION_EXTRACTION`
+
+The main thread has provided an Articles of Association (AoA) document (Israeli Ltd or Delaware C-corp foundational governance doc). Your job: extract the per-preferred-series structural terms that `cap_state.py` uses to build the pre-financing snapshot.
+
+This sub-context exists specifically for AoA documents. CLAs and convertible securities use `INSTRUMENT_EXTRACTION` (with `instrument_type=convertible_loan_agreement` or `convertible_security`); AoAs do NOT go through that path — they have a fundamentally different structure (define preferred-series TERMS, not investment INSTRUMENTS).
+
+**Inputs you'll receive:**
+
+- The full AoA document text (PDF / DOCX read via the Read tool, max 20 pages per call)
+- The founder's stated `jurisdiction.structure` (israeli / delaware)
+- The founder's stated `company_name` (for cross-referencing)
+
+**Target fields per preferred series** (schema-canonical names from `cap_state.schema.json`):
+
+- `series_name` (string, required) — e.g. "Series Seed", "Series A", "Series Seed-1"
+- `original_issue_price` (number, required) — OIP. Israeli AoAs put this in the Definitions section: `"[Series Name] Original Issue Price" means ... US$ X.XXX`
+- `original_conversion_price` (number, required) — typically equals OIP at issuance; may differ if already adjusted
+- `current_conversion_price` (number, required) — may differ from OCP if anti-dilution events occurred post-issuance
+- `liquidation_preference_multiple` (number) — typically 1.0 implicit in Israeli AoAs; explicit 2x/3x if stated
+- `liquidation_preference_type` (enum) — one of `non_participating | participating | participating_capped`
+- `participation_cap_multiple` (number | null) — only when `participating_capped`
+- `anti_dilution_protection` (enum) — one of `none | broad_based_weighted_average | narrow_based_weighted_average | full_ratchet`. Israeli AoAs use "Adjustment of Conversion Price" phrasing for BBWA.
+- `dividend_rate_percent` (number | null)
+- `dividend_cumulative` (boolean)
+- `pro_rata_rights` (boolean)
+- `issuance_date` (string) — from AoA filing/effective date
+
+**Fields NOT extracted from AoA** (must come from cap-table / founder input):
+
+- `series_id` — assigned at ingest time
+- `shares` — actual outstanding count is on the cap table, not in the AoA (return as null; ingest helper merges)
+- `extraction_provenance.source_doc` / `extracted_at` — populated by the validator, not the sub-agent
+
+**Corpus-derived guidance (5 real Israeli AoAs: Deltacorp 2024, Bravocorp 2022, Charliecorp 2016, Acmecorp 2012, generic 2015):**
+
+1. **OIP is in the Definitions section, not in tables.** Israeli AoA format:
+   `"[Series Name] Original Issue Price" means ... US$ X.XXX` — literal dollar
+   sign followed by a space then the value. Each series gets its own definition.
+   Multi-series AoAs may cross-reference an SPA or Schedule for the OIP; if no
+   inline value found, return `extraction_confidence: "absent"` with an
+   ambiguity flag.
+
+2. **NIS 0.01 = par value, NOT the OIP.** Every Israeli company assigns a nominal
+   value (typically NIS 0.01) to shares under Israeli Companies Law. This appears
+   dozens of times per document. Filter it out — real OIPs are almost always
+   USD-denominated and > $0.10.
+
+3. **Liquidation preference multiples are typically IMPLICIT (1.0)** in Israeli
+   AoAs. The document says "an amount equal to the Original Issue Price plus X%
+   per annum compounded annually" — there is no "1x" stated. Treat absence of an
+   explicit multiple as `1.0`. If you see "2x" or "3x" explicitly, it IS stated.
+
+4. **"Fully participating" is the Israeli standard for participating preferred.**
+   All 5 corpus AoAs were fully participating (uncapped). `participating_capped`
+   is rare and will be explicitly stated as "subject to a cap of X times the
+   Original Issue Price."
+
+5. **Anti-dilution in Israeli AoAs uses "Adjustment of Conversion Price"** rather
+   than "anti-dilution". The formula uses a weighted-average denominator — treat
+   this as `broad_based_weighted_average`. Full ratchet language would say "the
+   lowest price per share" — very rare in Israeli AoAs.
+
+6. **Series naming: two conventions coexist.**
+   - `"Preferred [Letter]"` — e.g. "Preferred A", "Preferred Seed"
+   - `"Series [Letter] Preferred"` — e.g. "Series A Preferred", "Series Seed Preferred"
+   These refer to the same series; normalize when matching terms across the doc.
+   Sub-series use `"Series [Letter]-[n] Preferred"` (e.g. "Series Seed-1", "Series
+   Seed-2") — these ARE separate series with separate OIPs and separate stacks.
+
+7. **Dividend phrasing.** Israeli AoAs often state "X% per annum compounded
+   annually" — this is `dividend_rate_percent: X/100` (e.g. 8% → 0.08).
+   `dividend_cumulative: true` if "shall accrue" / "accumulate" / "shall continue
+   to accrue whether or not declared"; `false` if "as and when declared by the
+   Board."
+
+8. **Israeli law markers to detect** for `jurisdiction.structure = "israeli"`
+   (any two of these signals):
+   - Statutory: "Israeli Companies Law", "Companies Law 1999", "Section 102",
+     "§102", "NIS", "New Israeli Shekel", "Tel Aviv"
+   - Counsel firms (current): Meitar, Herzog (HFN), Goldfarb Gross Seligman,
+     Arnon Tadmor-Levy, FISCHER/FBC, Naschitz Brandes Amir, Shibolet,
+     APM/Amit Pollak Matalon, Gornitzky, Pearl Cohen
+   - Counsel firms (legacy, in older AoAs): GKH / Gross Kleinhendler Hodak,
+     Yigal Arnon, Meitar Liquornik Geva Leshem
+
+**Additional metadata fields** (populated alongside the preferred_series block):
+
+- `jurisdiction_structure`: `"israeli"` | `"delaware"` (detected from doc)
+- `section_102_plan_reference`: boolean — does the AoA reference §102 plan?
+- `drag_along_threshold_pct`: number (e.g., 0.66 for "two-thirds") — Israeli AoAs commonly require 75%; sub-75% may trigger counsel review.
+
+**Return shape (for `ARTICLES_OF_ASSOCIATION_EXTRACTION`):**
+
+```json
+{
+  "extraction_type": "articles_of_association",
+  "fields": {
+    "company_name": "<from AoA header or recitals>",
+    "jurisdiction_structure": "israeli | delaware",
+    "section_102_plan_reference": true,
+    "drag_along_threshold_pct": 0.75,
+    "preferred_series": [
+      {
+        "series_name": "Series Seed",
+        "shares": null,
+        "original_issue_price": 1.175,
+        "original_conversion_price": 1.175,
+        "current_conversion_price": 1.175,
+        "issuance_date": "2015-09-01",
+        "liquidation_preference_multiple": 1.0,
+        "liquidation_preference_type": "participating",
+        "participation_cap_multiple": null,
+        "anti_dilution_protection": "broad_based_weighted_average",
+        "dividend_rate_percent": 0.08,
+        "dividend_cumulative": true,
+        "pro_rata_rights": true
+      }
+    ]
+  },
+  "confidence": {
+    "<field_name>": {
+      "level": "high | medium | low | absent",
+      "evidence_quote": "<verbatim fragment from AoA, max 200 chars>",
+      "document_location": "<page N, section X, paragraph Y>"
+    }
+  },
+  "ambiguities": [
+    {"field": "<name>", "description": "<what's unclear>", "options": ["<interpretation 1>", "<...>"]}
+  ]
+}
+```
+
+The validator (`extract_instrument.py --aoa-mode`) validates per-series + per-field confidence + evidence quotes, then the ingest helper (`merge_aoa_to_inputs.py`) merges into `inputs.json.preferred_series[]`. The `shares` field is left null by extraction and merged in from cap-table data (founder input or Carta export) at ingest time.
+
+**Hard rules in Context A (all three sub-contexts):**
 
 - Return JSON only. No prose, no markdown wrapper, no explanatory message.
   The main thread parses your final assistant message as raw JSON.

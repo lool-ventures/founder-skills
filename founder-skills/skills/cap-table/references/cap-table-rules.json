@@ -1,8 +1,8 @@
 {
   "metadata": {
-    "version": "0.3.1",
+    "version": "0.3.2",
     "generated_date": "2026-05-21",
-    "purpose": "Verified source-backed rule pack for a future cap-table, dilution, SAFE, convertible note, option pool, anti-dilution, Israel/Delaware, and founder benchmark skill. v0.3.1: added `safe.pre_money_cap_conversion` rule for legacy YC pre-money SAFE forms (yc_premoney_cap_only, pre_money_cap_and_discount_legacy). Post-J audit surfaced that the math producer applied the post-money formula universally; pre-money SAFEs must use pre-financing FD as denominator (cap_price = cap / pre_money_FD). The new rule documents the formula + the multi-SAFE denominator ambiguity (pre-existing snapshot vs as-converted interpretation; v0.1 uses pre-existing). Math producers' `RULE_PACK_VERSION` constants bumped 0.3.0 → 0.3.1. v0.3.0: clarified `safe.post_money_cap_conversion` denominator semantics. For YC post-money SAFEs, the ownership identity `safe_ownership = purchase / post_money_cap` is the load-bearing rule (per `safe.stacked_post_money_caps` and YC-PMSAFE-PRIMER worked examples). The downstream restatement `safe_price = cap / company_capitalization` must use a denominator that satisfies this identity \u2014 which is the FULL post-money fully-diluted snapshot INCLUDING new-money shares, not the pre-financing snapshot. Producers that pass pre-financing FD as `company_capitalization` produce the pre-money YC SAFE formula and under-allocate SAFE shares (math bug fixed in cap-table priced_round.py at this version). Earlier v0.2.x history below. v0.2.2: added NVCA-CERT-OF-INC and COOLEY-DOWN-ROUND as proper source IDs for the BBWA rule (formerly the rule cited NVCA Model Cert in prose without a corresponding source_id; the formula text is in the Cooley down-round article, not the glossary). v0.2.1 history: reverted BBWA B-divisor to CP1; replaced WSGR Q1 figures with verified FY2025 medians; softened ICNL Ordinance caveat. v0.2.0 history: TaxAdviser QSBS URL fix; ICNL Companies Law canonical PDF; WSGR direct URL; qualified-financing benchmark rewrite; Section 102 double-trigger split; option-pool source list cleaned; YC primer co-cites added. v0.2.3: appended verbatim BBWA formula text + 2022-01-24 last-reviewed date from Cooley GO down-round article into the COOLEY-DOWN-ROUND source notes; tightened COOLEY-ANTI-DILUTION notes to flag it as the concept-level glossary corroborator (formula text lives on COOLEY-DOWN-ROUND). v0.2.4: swapped NVCA-CERT-OF-INC URL from the index landing page to the direct downloadable .docx; verified \u00a74.4.4 contains the verbatim CP1-based BBWA formula text by extracting the document XML. v0.2.5: schema documents counsel_review semantics (reliance boundary, not confidence score) and adds optional script_allowed_outputs / script_disallowed_outputs enums; markdown gains a Counsel Review Semantics section. v0.2.6: schema adds optional `date_window.near_edge_days_before_start` and `date_window.near_edge_days_before_end` override fields per cap-table skill design (rev3); rule defaults remain 30/90 days; no rules in v0.2.6 use the overrides yet, but the schema permits them.",
+    "purpose": "Verified source-backed rule pack for a future cap-table, dilution, SAFE, convertible note, option pool, anti-dilution, Israel/Delaware, and founder benchmark skill. v0.3.2: added Israeli AoA counsel-review domain (israeli_aoa.*) with 4 rules for drag-along threshold below 75%, §102 plan absent, liquidation preference above 1x, and full-ratchet anti-dilution. Consumed by extract_aoa.py's detect_counsel_review_items() at extraction time. v0.3.1: added `safe.pre_money_cap_conversion` rule for legacy YC pre-money SAFE forms (yc_premoney_cap_only, pre_money_cap_and_discount_legacy). Post-J audit surfaced that the math producer applied the post-money formula universally; pre-money SAFEs must use pre-financing FD as denominator (cap_price = cap / pre_money_FD). The new rule documents the formula + the multi-SAFE denominator ambiguity (pre-existing snapshot vs as-converted interpretation; v0.1 uses pre-existing). Math producers' `RULE_PACK_VERSION` constants bumped 0.3.0 → 0.3.1. v0.3.0: clarified `safe.post_money_cap_conversion` denominator semantics. For YC post-money SAFEs, the ownership identity `safe_ownership = purchase / post_money_cap` is the load-bearing rule (per `safe.stacked_post_money_caps` and YC-PMSAFE-PRIMER worked examples). The downstream restatement `safe_price = cap / company_capitalization` must use a denominator that satisfies this identity \u2014 which is the FULL post-money fully-diluted snapshot INCLUDING new-money shares, not the pre-financing snapshot. Producers that pass pre-financing FD as `company_capitalization` produce the pre-money YC SAFE formula and under-allocate SAFE shares (math bug fixed in cap-table priced_round.py at this version). Earlier v0.2.x history below. v0.2.2: added NVCA-CERT-OF-INC and COOLEY-DOWN-ROUND as proper source IDs for the BBWA rule (formerly the rule cited NVCA Model Cert in prose without a corresponding source_id; the formula text is in the Cooley down-round article, not the glossary). v0.2.1 history: reverted BBWA B-divisor to CP1; replaced WSGR Q1 figures with verified FY2025 medians; softened ICNL Ordinance caveat. v0.2.0 history: TaxAdviser QSBS URL fix; ICNL Companies Law canonical PDF; WSGR direct URL; qualified-financing benchmark rewrite; Section 102 double-trigger split; option-pool source list cleaned; YC primer co-cites added. v0.2.3: appended verbatim BBWA formula text + 2022-01-24 last-reviewed date from Cooley GO down-round article into the COOLEY-DOWN-ROUND source notes; tightened COOLEY-ANTI-DILUTION notes to flag it as the concept-level glossary corroborator (formula text lives on COOLEY-DOWN-ROUND). v0.2.4: swapped NVCA-CERT-OF-INC URL from the index landing page to the direct downloadable .docx; verified \u00a74.4.4 contains the verbatim CP1-based BBWA formula text by extracting the document XML. v0.2.5: schema documents counsel_review semantics (reliance boundary, not confidence score) and adds optional script_allowed_outputs / script_disallowed_outputs enums; markdown gains a Counsel Review Semantics section. v0.2.6: schema adds optional `date_window.near_edge_days_before_start` and `date_window.near_edge_days_before_end` override fields per cap-table skill design (rev3); rule defaults remain 30/90 days; no rules in v0.2.6 use the overrides yet, but the schema permits them.",
     "source_policy": "Rules cite original quotable legal documents, issuer documents, official agency pages, law-firm publications, and benchmark datasets. AI research notes and intermediate consolidated files are excluded from final references."
   },
   "source_bibliography": [
@@ -1517,6 +1517,90 @@
         "applies_when": "Use when Israeli preferred shares, board rights, veto rights, liquidation preferences, or founder restrictions are modeled.",
         "warnings": [
           "Prompt for articles, shareholder agreement, and investment agreement before modeling governance economics."
+        ]
+      }
+    ],
+    "israeli_aoa": [
+      {
+        "rule_id": "israeli_aoa.drag_along_threshold_below_75_percent",
+        "domain": "israeli_aoa",
+        "behavior_target": "counsel_review_flag",
+        "title": "Drag-along threshold below 75% in Israeli AoA",
+        "summary": "Israeli Companies Law jurisprudence has flagged drag-along provisions with thresholds below 75% in fiduciary-duty disputes. Sub-75% drag-along thresholds in Israeli AoAs warrant counsel review before relying on the right.",
+        "implementation_action": "hardcode",
+        "confidence": "medium",
+        "source_ids": [
+          "ICNL-COMPANIES-LAW"
+        ],
+        "source_basis": "primary",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use when an Israeli AoA defines a drag-along right with a threshold strictly less than 75% (i.e., < 0.75 of issued share capital + relevant class consents). Detected via the extract_aoa.py validator from the AoA's drag-along provision.",
+        "warnings": [
+          "75% is the Israeli market norm; sub-75% thresholds may be unenforceable in fiduciary-duty disputes per Israeli Companies Law §341.",
+          "Confirm drag-along structure with Israeli counsel before signing or relying on the provision."
+        ]
+      },
+      {
+        "rule_id": "israeli_aoa.section_102_plan_absent",
+        "domain": "israeli_aoa",
+        "behavior_target": "counsel_review_flag",
+        "title": "§102 plan absent from Israeli AoA",
+        "summary": "Israeli AoAs that do not reference a §102 option plan signal a gap if the company intends to grant equity to Israeli employees. §102 capital-gains-track plans must be (a) in place and (b) filed with the Israel Tax Authority 30 days before the first grant.",
+        "implementation_action": "hardcode",
+        "confidence": "high",
+        "source_ids": [
+          "ICNL-ORDINANCE-SECTION-102"
+        ],
+        "source_basis": "primary",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use when an Israeli AoA is extracted and the section_102_plan_reference flag is false. Detected by extract_aoa.py.",
+        "warnings": [
+          "Filing §102 with the ITA 30 days before the first grant is mandatory for capital-gains-track treatment; missing this deadline forces ordinary-income classification.",
+          "If the company has already granted options without a §102 plan in place, those grants likely fall under §3(i) (ordinary income) — confirm with Israeli tax counsel."
+        ]
+      },
+      {
+        "rule_id": "israeli_aoa.liquidation_preference_above_1x",
+        "domain": "israeli_aoa",
+        "behavior_target": "counsel_review_flag",
+        "title": "Liquidation preference above 1x in Israeli AoA",
+        "summary": "Liquidation preference multiples above 1.0x are above market standard for Israeli AoAs and typically signal later-stage / bridge financing terms or downside-protection negotiations. Counsel + founder context required to assess fairness.",
+        "implementation_action": "hardcode",
+        "confidence": "medium",
+        "source_ids": [
+          "ICNL-COMPANIES-LAW"
+        ],
+        "source_basis": "primary",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use when a preferred-series block extracted from an Israeli AoA has liquidation_preference_multiple > 1.0. Detected by extract_aoa.py.",
+        "warnings": [
+          "Above-1x liquidation preferences materially shift exit waterfall in favor of preferred holders — confirm with founder + counsel that the terms reflect actual negotiated downside protection (not boilerplate error).",
+          "Israeli courts have not consistently upheld above-2x preferences in fiduciary-duty challenges; document the commercial rationale at the time of issuance."
+        ]
+      },
+      {
+        "rule_id": "israeli_aoa.full_ratchet_anti_dilution",
+        "domain": "israeli_aoa",
+        "behavior_target": "counsel_review_flag",
+        "title": "Full-ratchet anti-dilution in Israeli AoA",
+        "summary": "Full-ratchet anti-dilution is rare and aggressive — most Israeli AoAs use broad-based weighted average. Full ratchet substantially penalizes founders in any down round (any lower-price issuance resets the preferred conversion price to that lower price). Confirm intent.",
+        "implementation_action": "hardcode",
+        "confidence": "high",
+        "source_ids": [
+          "COOLEY-DOWN-ROUND",
+          "ICNL-COMPANIES-LAW"
+        ],
+        "source_basis": "primary",
+        "counsel_review": true,
+        "jurisdiction": "Israel",
+        "applies_when": "Use when a preferred-series block extracted from an Israeli AoA has anti_dilution_protection='full_ratchet'. Detected by extract_aoa.py.",
+        "warnings": [
+          "Broad-based weighted average is the market norm in Israel; full ratchet is a red flag for founder dilution exposure.",
+          "Cooley GO reports < 5% of US Series A AoAs use full ratchet; even rarer in Israel. Confirm with counsel that this was negotiated, not boilerplate error.",
+          "Full ratchet stacks with low cap multiples in a recapitalization scenario — model the worst-case down-round impact before approving."
         ]
       }
     ],
