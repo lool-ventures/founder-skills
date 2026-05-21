@@ -339,7 +339,18 @@ def filter_verifier_report(report_dict: dict[str, Any]) -> dict[str, Any]:
 
 
 def confirm_required(confidence: dict[str, Any]) -> list[str]:
-    """Return field names with low confidence that need user confirmation."""
+    """Return field names with low confidence that need user confirmation.
+
+    Sub-agents occasionally return `confidence` as a bare string (e.g.,
+    `"confidence": "medium"`) instead of the per-field map. Surface this with a
+    clear error message rather than crashing on `.items()`.
+    """
+    if not isinstance(confidence, dict):
+        raise ValueError(
+            f"`confidence` must be a per-field map like "
+            f"{{'purchase_amount': {{'level': 'high', 'evidence_quote': '...'}} , ...}}; "
+            f"got {type(confidence).__name__}. See lane-1 reference 'Sub-agent response shape' section."
+        )
     low = []
     for fname, ent in confidence.items():
         level = ent.get("level") if isinstance(ent, dict) else ent

@@ -196,7 +196,7 @@ Ask the founder via `AskUserQuestion` (NOT plain chat):
 2. **Jurisdiction structure:** Options: `delaware | israeli | delaware_with_israeli_sub | mid_flip`.
 3. **IIA grant history (Israel-context only):** "Has the Israeli entity received any IIA / OCS grants?" Options: `yes | no | not_sure`.
 
-Then build `inputs.json` via heredoc (the schema validates):
+Then build `inputs.json` via heredoc. The skeleton below is the **minimal** shape (no founders, no pool, no preferred) — useful only for flip-focused engagements that read existing artifacts. **For any engagement where someone owns shares, also include `founders[]` and `option_pool` blocks.** See [`references/inputs-skeleton.md`](references/inputs-skeleton.md) for the full common-case shape, the validator-strictness gotcha (unknown keys are silently dropped), and the plan_type / OIP-OCP-CCP field meanings.
 
 ```bash
 cat <<INPUTS_EOF > "$REVIEW_DIR/inputs.json"
@@ -217,11 +217,22 @@ cat <<INPUTS_EOF > "$REVIEW_DIR/inputs.json"
     "flip_closing_date": null,
     "benchmark_reference_date": null
   },
+  "founders": [
+    {"name": "Founder A", "founder_id": "founder_a", "common_shares": 10000000}
+  ],
+  "option_pool": {
+    "plan_type": "iso",
+    "authorized": 1500000,
+    "issued": 0,
+    "unallocated": 1500000
+  },
   "engagement_questions": [],
   "metadata": {"run_id": "$RUN_ID"}
 }
 INPUTS_EOF
 ```
+
+**`founders[]` and `option_pool` are required for any engagement with shares.** The schema marks them optional, but `cap_state.py` produces an empty pre-financing snapshot if either is missing — with no warning. Read `references/inputs-skeleton.md` if your scenario has preferred series, `common_batches`, or non-standard option-plan jurisdictions.
 
 Validate immediately:
 

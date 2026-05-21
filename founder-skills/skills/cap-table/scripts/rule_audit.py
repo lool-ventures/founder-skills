@@ -9,8 +9,11 @@ Per design doc §9 Step 4.5 / Step 6:
   * --phase=pre_math: walks the rule pack against inputs + instruments +
     cap_state + each scenario's params; emits the **gating block** for
     every rule. Math producers read this to decide rule applicability.
-  * --phase=post_math: re-reads the gating block + scenarios.json; composes
-    watchlist + counsel-review items. Math is unchanged by this phase.
+  * --phase=post_math: re-reads the gating block from the existing
+    rule_audit.json at --output; composes watchlist + counsel-review items.
+    Math is unchanged by this phase. Only --run-id and --output are required;
+    --inputs/--instruments/--cap-state/--scenarios are NOT consumed by
+    post_math (the gating block from pre_math contains everything needed).
 
 Per rev17 P1-1 (scope-aware apply contract):
   * scope=not_applicable → apply on applies_when_matched.

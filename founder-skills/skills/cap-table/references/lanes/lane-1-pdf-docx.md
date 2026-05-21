@@ -28,6 +28,47 @@ shape. Do not write artifacts to disk. Do not invoke producer scripts.
 
 After the sub-agent returns, apply the [tolerant JSON extraction protocol](../../SKILL.md#skill-execution-model-read-first) to obtain the structured JSON.
 
+### Sub-agent response shape (load-bearing — `extract_instrument.py` won't accept other shapes)
+
+```json
+{
+  "instrument_type": "convertible_security",
+  "fields": {
+    "purchase_amount": 500000,
+    "form": "yc_postmoney_cap",
+    "post_money_valuation_cap": 10000000,
+    "discount_multiplier": null,
+    "issuance_date": "2024-01-15"
+  },
+  "confidence": {
+    "purchase_amount": {
+      "level": "high",
+      "evidence_quote": "the Investor will pay the Company $500,000 (the \"Purchase Amount\")",
+      "document_location": "page 1, second paragraph"
+    },
+    "post_money_valuation_cap": {
+      "level": "high",
+      "evidence_quote": "the Post-Money Valuation Cap is $10,000,000",
+      "document_location": "page 1, Definitions"
+    },
+    "issuance_date": {
+      "level": "high",
+      "evidence_quote": "Date: January 15, 2024",
+      "document_location": "page 1, top"
+    }
+  },
+  "ambiguities": []
+}
+```
+
+Notes the dispatcher MUST honor:
+
+- **`instrument_type` is the routing key for subtype gates.** Per `extract_instrument.py:434`, accepted subtype values are `convertible_loan_agreement`, `convertible_security`, and the canonical `convertible_note`. To route a YC-style convertible_security through the relaxed gate (waives `day_count_basis` / `maturity_date` / `maturity_default_treatment` / `annual_interest_rate`), set `instrument_type: "convertible_security"`. Setting `instrument_type: "convertible_note"` and putting `subtype: "convertible_security"` inside `fields` does NOT work — the strict gate fires and validation fails on missing convertible_note fields.
+- **`confidence` is keyed by `fields` field name**, and each value is a `{level, evidence_quote, document_location?}` object. A bare string like `"confidence": "medium"` is rejected (`extract_instrument.py` will exit non-zero with a clear error rather than crashing on `.items()`). The `level` enum is `high | medium | low`.
+- **`evidence_quote` lives inside each `confidence` entry**, NOT as a top-level `evidence` block, NOT as a per-field key inside `fields`. The forward evidence verifier (`evidence_verifier.py`) reads `confidence[fname].evidence_quote` for its three-layer check (`quote_in_doc` / `value_in_quote` / `value_in_doc`).
+- **Synthesized fields** (computed/classified rather than extracted — e.g., `id`, derived counts, `extraction_confidence`, the `subtype` stamp itself) do NOT need an `evidence_quote`. The verifier has a built-in skip list (~30 fields) and produces `skipped_synthesized` rather than `fail`.
+- **Form-template / unexecuted-counterpart documents** (Word/PDF templates with blank investor name, amount, date) should NOT have placeholder values fabricated. Set the appropriate field to `null` AND add an `ambiguities` entry of the form `{"field": "purchase_amount", "reason": "form template — investor amount blank in source"}`. The main thread will surface to the founder via `AskUserQuestion` rather than pushing fabricated data through the verifier.
+
 ## Pipe through `extract_instrument.py`
 
 The validation script enforces schema, runs evidence verification + invariant checks against the source doc, and appends to `instruments.json`:
