@@ -100,6 +100,16 @@ def render_donut(
 def render_legend(breakdown: dict[str, float]) -> str:
     items = []
     for cat, frac in breakdown.items():
+        # v0.4.8: skip the new pre-AD / delta-pp fields here — they're rendered
+        # separately by the scenario-card AD block (in render_report_html).
+        # `_pct(frac)` multiplies by 100, which would double-encode the
+        # already-in-pp anti_dilution_delta_pct_points field.
+        if cat in {
+            "founders_pct_pre_anti_dilution",
+            "preferred_pct_pre_anti_dilution",
+            "anti_dilution_delta_pct_points",
+        }:
+            continue
         color = PALETTE.get(cat, PALETTE["neutral"])
         items.append(
             f'<li style="display:flex;align-items:center;gap:6px;font-size:12px;">'

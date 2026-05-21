@@ -167,6 +167,16 @@ def build_cap_state(
             "liquidation_preference_type": s.get("liquidation_preference_type", "non_participating"),
             "participation_cap_multiple": s.get("participation_cap_multiple"),
             "anti_dilution_protection": s.get("anti_dilution_protection", "none"),
+            # v0.4.8: per-series AD knobs. Default to NVCA-default semantics so
+            # downstream priced_round.py sees the right contract; the input
+            # may omit these fields and they'll be filled in here.
+            "ad_trigger_basis": s.get("ad_trigger_basis", "original_issue_price"),
+            "ad_a_denominator_basis": s.get(
+                "ad_a_denominator_basis",
+                "nvca_broad" if s.get("anti_dilution_protection") == "broad_based_weighted_average" else "nvca_narrow",
+            ),
+            "ad_cp2_floor": s.get("ad_cp2_floor"),
+            "ad_carve_outs": s.get("ad_carve_outs", "nvca_default"),
             "dividend_rate_percent": s.get("dividend_rate_percent"),
             "dividend_cumulative": bool(s.get("dividend_cumulative", False)),
             "pro_rata_rights": bool(s.get("pro_rata_rights", False)),
@@ -188,6 +198,10 @@ def build_cap_state(
         "founders": canonical_founders,
         "common_batches": common_batches,
         "preferred_series": canonical_preferred,
+        # v0.4.8: cap_table_history carries prior anti_dilution_applied events.
+        # Read by priced_round.py's stale-CCP guard. Optional in inputs; defaults
+        # to an empty list. cap_state_after_round.py writes new events here.
+        **({"cap_table_history": inputs["cap_table_history"]} if "cap_table_history" in inputs else {}),
         "option_pool": canonical_option_pool,
         "outstanding_options": _build_outstanding_options(instruments.get("option_grants", []) or []),
         "outstanding_safes": _build_outstanding_safes(instruments.get("safes", []) or []),

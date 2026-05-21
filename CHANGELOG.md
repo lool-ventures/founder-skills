@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-05-22
+
+### Fixed — Three integration-layer bugs in v0.4.8 surfaced by an end-to-end test batch
+
+Five `claude --plugin-dir` tests against the v0.4.8 release surfaced three real bugs in the producer chain that the in-process goldens didn't catch (because the goldens call `solve_priced_round` directly, bypassing the surrounding `cap_state.build_cap_state` canonicalization and the `rule_audit` / `visualize` / `compose_report` rendering). Math correctness is unaffected — these are integration-layer fixes.
+
+- **`cap_state.py` field-drop (critical):** `canonical_preferred` was a hand-rolled allowlist of 14 fields per series. The v0.4.8 per-series knobs (`ad_trigger_basis`, `ad_a_denominator_basis`, `ad_cp2_floor`, `ad_carve_outs`) plus the top-level `cap_table_history` array all silently dropped from `inputs.json` → `cap_state.json`. The solver reads them from `cap_state`, so they never reached the math. The Test-4 CP2-floor scenario surfaced this: an `ad_cp2_floor` of $0.50 set in inputs.json produced a final CCP of $0.117 (the un-floored BBWA value) instead of the clamped $0.50. Fix: added the 4 v0.4.8 fields to the canonical preferred-series shape with NVCA defaults (`original_issue_price` trigger, `nvca_broad`/`nvca_narrow` per protection, `null` floor, `nvca_default` carve-outs), and added an opt-in `cap_table_history` passthrough on the cap-state dict. `inputs.schema.json` now declares `cap_table_history` as an optional top-level field.
+
+- **`rule_audit.py --phase=post_math` false-positive counsel items (high):** `build_counsel_review_items` surfaced every `counsel_review: true` rule whose static `_RULE_MATCHERS` gate matched, regardless of whether the runtime event (solver warning, AoA detection) actually occurred. For any scenario with AD-protected preferred series, `anti_dilution.stale_ccp_detected` and `anti_dilution.pay_to_play_provision_detected` ALWAYS fired — even when no `W_STALE_CCP_SUSPECTED` warning was emitted and no P2P text pattern was detected. The result: counsel packets falsely asserted facts (e.g., "your AoA contains a pay-to-play clause") that could mislead a counsel reader. Fix: added `_runtime_event_predicate(rule_id, scenarios_data, inputs)` that gates 7 runtime-event rules on the actual event having fired (`stale_ccp_detected`, `cp2_floor_applied`, `solver_diverged`, `solver_oscillating_damped`, `solver_aitken_acceleration_applied`, `solver_aitken_fallback_engaged`, `pay_to_play_provision_detected`). `_phase_post_math` now reads `--scenarios` and `--inputs` (both optional; missing inputs default to None and the predicate returns None → static gating wins, preserving backwards compat).
+
+- **`visualize.py` + `compose_report.py` double-encode `anti_dilution_delta_pct_points` (medium):** Both renderers looped over `aggregate_ownership_by_class.items()` and piped each value through `_pct()` / `_percent()`, which multiplies by 100. The v0.4.8 `anti_dilution_delta_pct_points` field is already in percentage points (not a fraction), so a `-2.57` value rendered as `-256.6%` in the HTML legend. The Markdown report's three-way narrative block at the top correctly rendered `-2.57 pp`, but the legacy "Post-round ownership" list below also rendered the same value as a percentage. Fix: both renderers now skip the three v0.4.8 AD-meta fields (`founders_pct_pre_anti_dilution`, `preferred_pct_pre_anti_dilution`, `anti_dilution_delta_pct_points`), which are exclusively rendered by the dedicated three-way AD narrative block.
+
+16 new regression tests lock all three fixes (`test_v48_hotfix_regressions.py`). Test count: **1,533 passed** (was 1,517).
+
 ## [0.4.8] - 2026-05-21
 
 ### Added — Coupled anti-dilution in the cap-table priced-round solver

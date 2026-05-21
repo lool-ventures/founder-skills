@@ -108,6 +108,24 @@
         "unallocated": {"type": "integer", "minimum": 0}
       }
     },
+    "cap_table_history": {
+      "type": "array",
+      "description": "v0.4.8+ optional. Prior anti_dilution_applied events; passed through cap_state.py to feed priced_round.py's stale-CCP guard.",
+      "items": {
+        "type": "object",
+        "required": ["event_type", "series_id"],
+        "properties": {
+          "event_type": {"enum": ["anti_dilution_applied"]},
+          "round_id": {"type": "string"},
+          "applied_at": {"type": "string"},
+          "series_id": {"type": "string"},
+          "previous_ccp": {"type": "number"},
+          "new_ccp": {"type": "number"},
+          "rule_id": {"type": "string"},
+          "rule_pack_version": {"type": "string"}
+        }
+      }
+    },
     "engagement_questions": {"type": "array", "items": {"type": "string"}},
     "metadata": {
       "type": "object",

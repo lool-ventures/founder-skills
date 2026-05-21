@@ -622,7 +622,18 @@ def render_report_markdown(
                         )
                     lines.append("")
             lines.append("**Post-round ownership:**")
+            # v0.4.8: skip the AD comparison fields here — they're rendered in
+            # the three-way headline block above, and the delta field is in
+            # percentage points (not a fraction), so _percent() would
+            # double-encode it as "−256.6%" instead of "-2.57 pp".
+            _ad_meta_fields = {
+                "founders_pct_pre_anti_dilution",
+                "preferred_pct_pre_anti_dilution",
+                "anti_dilution_delta_pct_points",
+            }
             for k, v in agg.items():
+                if k in _ad_meta_fields:
+                    continue
                 lines.append(f"- {k.replace('_', ' ')}: {_percent(v)}")
             lines.append("")
             # v0.4.0: per-series AD breakdown

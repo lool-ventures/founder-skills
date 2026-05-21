@@ -753,11 +753,95 @@ def _action_for_status(entry: dict[str, Any], rule: dict[str, Any]) -> str:
     return "Review status."
 
 
+def _runtime_event_predicate(
+    rule_id: str,
+    scenarios_data: dict[str, Any] | None,
+    inputs: dict[str, Any] | None,
+) -> bool | None:
+    """v0.4.8: gate solver-event counsel rules on the actual runtime event.
+
+    Static gating (`applies_when_matched` from `_RULE_MATCHERS`) is intentionally
+    permissive — it scopes to "AD-protected series present." But for runtime-event
+    rules (solver warning fired, AoA P2P pattern detected, CP2 floor clamped),
+    the rule should only surface as a counsel item when the event ACTUALLY
+    occurred. Returns:
+      * True  → surface the counsel item (event fired)
+      * False → suppress (event did not fire — would have been a false positive)
+      * None  → not a runtime-event rule; use static gating
+    """
+    if scenarios_data is None and inputs is None:
+        return None  # no runtime context; defer to static gating
+
+    scenarios = (scenarios_data or {}).get("scenarios", []) or []
+
+    def _any_warning(code: str) -> bool:
+        for s in scenarios:
+            co = s.get("computed_outputs", {}) or {}
+            for w in co.get("warnings", []) or []:
+                if w.get("code") == code:
+                    return True
+        return False
+
+    def _any_blocker(code: str) -> bool:
+        for s in scenarios:
+            co = s.get("computed_outputs", {}) or {}
+            for b in co.get("blockers", []) or []:
+                if b.get("code") == code:
+                    return True
+        return False
+
+    def _any_diag(flag: str) -> bool:
+        for s in scenarios:
+            co = s.get("computed_outputs", {}) or {}
+            diag = co.get("convergence_diagnostics", {}) or {}
+            if diag.get(flag):
+                return True
+        return False
+
+    if rule_id == "anti_dilution.stale_ccp_detected":
+        return _any_warning("W_STALE_CCP_SUSPECTED")
+    if rule_id == "anti_dilution.cp2_floor_applied":
+        return _any_warning("W_CP2_FLOOR_APPLIED")
+    if rule_id == "anti_dilution.solver_diverged":
+        return _any_blocker("E_SOLVER_DID_NOT_CONVERGE") or _any_blocker("E_SOLVER_LIKELY_DIVERGENT")
+    if rule_id == "anti_dilution.solver_oscillating_damped":
+        return _any_diag("damping_engaged")
+    if rule_id == "anti_dilution.solver_aitken_acceleration_applied":
+        return _any_diag("aitken_engaged")
+    if rule_id == "anti_dilution.solver_aitken_fallback_engaged":
+        return _any_diag("aitken_fallback_engaged")
+    if rule_id == "anti_dilution.pay_to_play_provision_detected":
+        # P2P is detected by extract_aoa.detect_pay_to_play() and surfaced as a
+        # `pay_to_play_present` flag on the AoA-derived input (or as a top-level
+        # `aoa_findings.pay_to_play_detected` in inputs.json after merge_into_inputs).
+        if not inputs:
+            return False
+        # Check top-level flag, common-batches metadata, or any preferred-series flag
+        if inputs.get("pay_to_play_detected") is True:
+            return True
+        for s in inputs.get("preferred_series", []) or []:
+            if s.get("pay_to_play_present") is True:
+                return True
+        findings = inputs.get("aoa_findings") or {}
+        return findings.get("pay_to_play_detected") is True
+    return None  # not a runtime-event rule
+
+
 def build_counsel_review_items(
     gating: dict[str, dict[str, dict[str, Any]]],
     rules: dict[str, Any],
+    scenarios_data: dict[str, Any] | None = None,
+    inputs: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Extract counsel_review_items from rules where counsel_review=true."""
+    """Extract counsel_review_items from rules where counsel_review=true.
+
+    v0.4.8: runtime-event rules (solver warnings, AoA detections) are gated on
+    the actual event having occurred — see _runtime_event_predicate. Without
+    this, every AD-domain counsel-review rule fires whenever the engagement
+    has AD-protected preferred series, which produces false positives like
+    `stale_ccp_detected` and `pay_to_play_provision_detected` in scenarios
+    where the underlying event never happened.
+    """
     rule_lookup = {r["rule_id"]: r for domain in rules.get("domains", {}).values() for r in domain}
     items = []
     seen_rules = set()
@@ -765,16 +849,18 @@ def build_counsel_review_items(
         rule = rule_lookup.get(rule_id)
         if not rule or not rule.get("counsel_review"):
             continue
-        # Counsel-review surfaces whenever the rule applies to the engagement
-        # AND status is not definitively out-of-scope (pre_effective / expired).
-        # missing_event_date IS surfaced — the founder needs to be prompted to
-        # provide the date. in_window / date_tracking_only / not_date_sensitive
-        # all surface as well.
+        # Static gating: rule's _RULE_MATCHERS predicate matched AND status is
+        # not definitively out-of-scope.
         any_applicable = any(
             e.get("applies_when_matched") and e.get("status") not in {"pre_effective", "expired"}
             for e in instances.values()
         )
         if not any_applicable:
+            continue
+        # v0.4.8 runtime gating: for solver-event / AoA-detection rules, also
+        # require the underlying event to have actually occurred.
+        runtime_gate = _runtime_event_predicate(rule_id, scenarios_data, inputs)
+        if runtime_gate is False:
             continue
         if rule_id in seen_rules:
             continue
@@ -897,10 +983,23 @@ def _phase_post_math(args: argparse.Namespace) -> int:
         )
         return 1
 
+    # v0.4.8: optionally load scenarios.json + inputs.json to gate runtime-event
+    # counsel rules (stale_ccp_detected, pay_to_play_provision_detected, etc.)
+    # on the actual event having fired. Without these reads, every AD-domain
+    # counsel-review rule surfaces whenever AD-protected preferred is present.
+    scenarios_data: dict[str, Any] | None = None
+    if args.scenarios and os.path.exists(args.scenarios):
+        with open(args.scenarios, encoding="utf-8") as f:
+            scenarios_data = json.load(f)
+    inputs_data: dict[str, Any] | None = None
+    if args.inputs and os.path.exists(args.inputs):
+        with open(args.inputs, encoding="utf-8") as f:
+            inputs_data = json.load(f)
+
     audit_data = {
         "gating": gating,  # preserved verbatim
-        "applied_rules": build_applied_rules(gating),
-        "counsel_review_items": build_counsel_review_items(gating, rules),
+        "applied_rules": build_applied_rules(gating, scenarios_data),
+        "counsel_review_items": build_counsel_review_items(gating, rules, scenarios_data, inputs_data),
         "date_sensitive_watchlist": build_watchlist(gating, rules),
     }
     schema = load_schema(os.path.join(_SCHEMA_DIR, "rule_audit.schema.json"))
