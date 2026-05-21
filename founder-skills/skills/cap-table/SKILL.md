@@ -392,6 +392,8 @@ Stop after returning JSON. Do not narrate.
 
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol to obtain the success/blocked payload. If `status == "blocked"`, stop and report the reason. If `status == "complete"`, present `report_path` to the founder.
 
+**Inline alternative (permitted but discouraged).** The Context B procedure above can also be executed by the main thread directly: read `coaching_payload` from `report.json`, compose commentary, run the same Grep idempotency check, and use Edit on the `insertion_marker`. This is functionally equivalent for outputs but **bypasses the fresh-sub-agent isolation** that protects Context A's verifier loop from Context B reasoning. Prefer the dispatched path. The privacy boundary (no investor names, no document text in coaching commentary) is enforced at compose time by `_assert_coaching_payload_privacy_clean()` in `compose_report.py` — that check runs regardless of dispatch path, so the privacy invariant holds even when inline is used.
+
 ### Step 12: Deliver Artifacts
 
 Copy human-readable deliverables to workspace root with company-slug prefix:

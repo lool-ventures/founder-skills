@@ -366,7 +366,62 @@ def build_coaching_payload(
     else:
         payload["flip_specifics"] = None
 
+    _assert_coaching_payload_privacy_clean(payload, instruments=instruments)
     return payload
+
+
+def _assert_coaching_payload_privacy_clean(payload: dict[str, Any], *, instruments: dict[str, Any]) -> None:
+    """Defense-in-depth privacy assertion.
+
+    The Context B coaching dispatch contract relies on `coaching_payload` being
+    scrubbed of investor names, founder names, and document text (see
+    `agents/cap-table.md` "Privacy boundary"). The dispatch isolates Context A
+    from Context B; this assertion ensures the privacy holds even if a future
+    consumer (or the inline-dispatch path) reads the payload without the
+    fresh-sub-agent boundary. If a new key gets added that accidentally pulls in
+    raw extracted strings, this fires.
+
+    The check is structural: collect every string value in `payload`, assert
+    none contain investor_name strings from `instruments.json`. Investor names
+    are the highest-risk leak surface (they enter via document extraction and
+    must not surface in the founder-facing coaching commentary as concrete
+    names — the dispatch contract says refer to them abstractly).
+    """
+    investor_names = {
+        s.get("investor_name", "")
+        for s in instruments.get("safes", []) + instruments.get("notes", [])
+        if s.get("investor_name")
+    }
+    # Drop empty / placeholder names that aren't real PII risks
+    investor_names = {n for n in investor_names if n and len(n) > 2}
+    if not investor_names:
+        return
+
+    def _walk(obj: Any) -> list[str]:
+        out: list[str] = []
+        if isinstance(obj, str):
+            out.append(obj)
+        elif isinstance(obj, dict):
+            for v in obj.values():
+                out.extend(_walk(v))
+        elif isinstance(obj, list):
+            for item in obj:
+                out.extend(_walk(item))
+        return out
+
+    all_strings = _walk(payload)
+    leaks: list[tuple[str, str]] = []
+    for name in investor_names:
+        for s in all_strings:
+            if name in s:
+                leaks.append((name, s[:120]))
+    if leaks:
+        raise AssertionError(
+            f"coaching_payload privacy-scrub violation: {len(leaks)} investor name leak(s). "
+            f"First leak: investor_name={leaks[0][0]!r} found in payload string: {leaks[0][1]!r}. "
+            f"Context B dispatch contract requires investor names to be scrubbed; "
+            f"see agents/cap-table.md 'Privacy boundary'."
+        )
 
 
 def render_report_markdown(
