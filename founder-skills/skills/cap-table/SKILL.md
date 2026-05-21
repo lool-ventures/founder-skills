@@ -1,9 +1,9 @@
 ---
 name: cap-table
-description: "Models cap-table mechanics for founders modeling dilution before signing. Use when a founder shares a SAFE, convertible note, term sheet, option plan, Carta or Pulley export, or describes their cap-table — and asks to convert SAFEs/notes at a priced round, model option-pool top-ups, run anti-dilution, or evaluate an Israeli ↔ Delaware flip. Produces rule-pack-cited math, a founder-facing report, an interactive scenario explorer, and a counsel-handoff packet."
+description: "Models cap-table mechanics for founders modeling dilution before signing. Use when a founder shares a SAFE, convertible note, term sheet, option plan, Carta XLSX export, or describes their cap-table — and asks to convert SAFEs/notes at a priced round, model option-pool top-ups, run anti-dilution, or evaluate an Israeli ↔ Delaware flip. Produces rule-pack-cited math, a founder-facing report, an interactive scenario explorer, and a counsel-handoff packet."
 when_to_use: >
   Use ONLY when the user has cap-table content (a signed or draft SAFE / note,
-  a term sheet, a Carta or Pulley export, a freeform spreadsheet cap-table, or
+  a term sheet, a Carta XLSX export, a freeform spreadsheet cap-table, or
   a structured description of holders + outstanding instruments) AND has asked
   to model conversion math, project dilution, run a priced round, or evaluate
   a Delaware flip. Do not auto-invoke on general fundraising questions ("how
@@ -21,12 +21,15 @@ Model cap-table mechanics for founders so they understand what their term sheets
 - **Author:** lool-ventures
 - **Version:** managed in `founder-skills/.claude-plugin/plugin.json`
 - **Compatibility:** Python 3.10+ and `uv` for script execution.
-- **Rule pack:** consumes `cap-table-rules.json` (v0.2.8+) at script runtime.
-- **Exports:**
+- **Rule pack:** consumes `cap-table-rules.json` (v0.3.0+) at script runtime.
+- **Exports (full pipeline, in `cap-table-{slug}/`):**
   - `inputs.json` + `scenarios.json` → `financial-model-review` (cross-validates revenue/dilution scenarios)
   - `cap_state.json` → `ic-sim` (IC partners ask about dilution exposure)
   - `counsel_packet.json` → `fundraise-readiness` (overall readiness scorecard)
   - `report.json` → `fundraise-readiness`, future `cross-document-consistency` skill
+- **Exports (fast-assess mode, in `cap-table-{slug}-fastassess/`):**
+  - `fast_assess_only.json` — sentinel marking that fast-assess ran (no canonical artifacts). See [`references/sentinel-schema.md`](references/sentinel-schema.md). Future cross-skill consumers MUST check for this sentinel before treating a missing canonical artifact as "cap-table never ran."
+  - `report_fast_assess.md` — founder-facing markdown deliverable
 - **Imports:**
   - `market-sizing:sizing.json` — sanity-check that the planned raise + cap is consistent with modeled SAM/SOM
   - `financial-model-review:report.json` — current revenue scale + runway, to gate scenario plausibility
@@ -39,7 +42,7 @@ This skill runs **inline in the main thread** (not as a sub-agent). The main thr
 
 - **Context A — Per-step analytical dispatch (Mitigation 1):** Used ONLY for document-extraction lanes. Cap-table math is fully deterministic and rule-driven, so Context A is reserved for tasks that genuinely need semantic extraction from natural-language documents:
   - `INSTRUMENT_EXTRACTION` — extract terms from a PDF/DOCX SAFE, note, term sheet, or option plan
-  - `SPREADSHEET_STRUCTURE_DETECTION` — identify which cells encode founders / preferred / options / convertibles in a freeform spreadsheet that doesn't match known Carta/Pulley schemas
+  - `SPREADSHEET_STRUCTURE_DETECTION` — identify which cells encode founders / preferred / options / convertibles in a freeform spreadsheet that doesn't match the Carta schema
 
   The sub-agent returns structured JSON. The main thread pipes the JSON through the validation producer (`extract_instrument.py` / `extract_cap_table.py`), which enforces the anti-hallucination gate. The sub-agent does NOT write artifacts directly.
 
@@ -61,7 +64,7 @@ This skill runs **inline in the main thread** (not as a sub-agent). The main thr
 Each lane produces normalized `instruments.json` and/or `cap_state.json` plus an `extraction_audit.json` trail. The main thread picks the lane from the founder's input type.
 
 - **Lane 1 — Single instrument (PDF / DOCX).** Typical: 5–15 page SAFE, term sheet, convertible note, or option plan. Main thread reads via the Read tool (native PDF support, up to 20 pages per call; longer docs use `pages` parameter). Dispatches Context A `INSTRUMENT_EXTRACTION` with document content inlined; pipes returned JSON through `extract_instrument.py`. User confirmation via `AskUserQuestion` before math runs.
-- **Lane 2 — Carta / Pulley export (CSV / XLSX).** Typical: multi-sheet XLSX (Securities, Convertibles, Stakeholders). `extract_cap_table.py` detects format from sheet-name + column-header fingerprint; maps known columns → canonical schema. User confirms ambiguous mappings. See `references/carta-pulley-mapping.md` for the per-vendor column-mapping table.
+- **Lane 2 — Carta XLSX export.** Typical: multi-sheet XLSX (Securities, Convertibles, Stakeholders). `extract_cap_table.py --mode=carta` reads the sheet-name fingerprint and maps known columns → canonical schema. User confirms ambiguous mappings. See `references/carta-pulley-mapping.md` for the column-mapping table. Pulley is not yet supported end-to-end (`--mode=pulley` is a stub that returns a structured blocker pointing to `--mode=freeform`); restore when a real Pulley XLSX is available to verify against.
 - **Lane 3 — Freeform spreadsheet (founder's Excel).** Arbitrary structure. `extract_cap_table.py --mode=freeform` extracts cells + sheet structure. Dispatches Context A `SPREADSHEET_STRUCTURE_DETECTION` to identify cell semantics. Validation gate enforces per-field confidence before commit.
 - **Lane 4 — Structured JSON paste / conversational.** Founder pastes pre-built JSON or describes their cap-table in chat. Direct heredoc into `inputs.json` / `instruments.json`; still flows through `extract_cap_table.py --mode=validate` for schema enforcement.
 
@@ -150,13 +153,20 @@ RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 
 If `CLAUDE_PLUGIN_ROOT` is empty, fall back: `Glob` for `**/founder-skills/skills/cap-table/scripts/cap_state.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`.
 
-After Step 1 (when the company slug is known), derive `REVIEW_DIR`:
+After Step 1 (when the company slug is known), derive `REVIEW_DIR`. Two modes:
+
+- **Full pipeline** (default — when the founder shared a document, asked for the full review, counsel packet, or interactive explorer, OR when there's no existing full review for this slug): `REVIEW_DIR="$ARTIFACTS_ROOT/cap-table-$SLUG"`.
+- **Fast-assess mode** (Phase O — short directional answer to a conversational question, no document attached, no explicit "full review" request): `REVIEW_DIR="$ARTIFACTS_ROOT/cap-table-$SLUG-fastassess"`. Run `quick_assess.py` (Step 5-fast) instead of Steps 2–11. Total wall-clock under 60 seconds.
 
 ```bash
-REVIEW_DIR="${REVIEW_DIR:-$ARTIFACTS_ROOT/cap-table-$SLUG}"
+# Choose ONE based on the routing decision above.
+REVIEW_DIR="${REVIEW_DIR:-$ARTIFACTS_ROOT/cap-table-$SLUG}"          # full pipeline
+# REVIEW_DIR="${REVIEW_DIR:-$ARTIFACTS_ROOT/cap-table-$SLUG-fastassess}"  # fast-assess
 mkdir -p "$REVIEW_DIR"
 mkdir -p "$REVIEW_DIR/.staging"   # for ad-hoc sub-agent JSON staging
 ```
+
+**Routing heuristics.** Default to **fast-assess** for first-touch when the founder has not attached a document AND has not asked for "the full review", "counsel packet", "report", "explorer", or "deep dive". Otherwise default to **full pipeline**. If an existing `cap-table-$SLUG/report.json` is present (full review already on disk), ask via `AskUserQuestion` whether the founder wants to use the existing full review or start a fresh fast-assess.
 
 ### Step 1: Read or Create Founder Context
 
@@ -225,7 +235,7 @@ Route by input format. Each lane has a dedicated dispatch + validation protocol 
 | Input format | Lane | Reference |
 |---|---|---|
 | Single PDF / DOCX (SAFE, term sheet, note, option plan) | 1 | [`references/lanes/lane-1-pdf-docx.md`](references/lanes/lane-1-pdf-docx.md) |
-| Carta / Pulley multi-sheet XLSX export | 2 | [`references/lanes/lane-2-carta-pulley.md`](references/lanes/lane-2-carta-pulley.md) |
+| Carta multi-sheet XLSX export (Pulley not yet end-to-end) | 2 | [`references/lanes/lane-2-carta-pulley.md`](references/lanes/lane-2-carta-pulley.md) |
 | Freeform founder spreadsheet (arbitrary structure) | 3 | [`references/lanes/lane-3-freeform.md`](references/lanes/lane-3-freeform.md) |
 | Structured JSON paste or conversational reconstruction | 4 | [`references/lanes/lane-4-structured.md`](references/lanes/lane-4-structured.md) |
 
@@ -257,6 +267,28 @@ python3 "$SCRIPTS/rule_audit.py" --phase=pre_math \
 ```
 
 Math producers in Step 5 consume `rule_audit.json.gating[R][I]` — they do NOT re-evaluate rule applicability. This is the only place status is computed.
+
+### Step 5-fast (FAST-ASSESS MODE ONLY): Run `quick_assess.py` and exit
+
+When the routing decision in Step 0 picked fast-assess, skip Steps 2–11 entirely. Run:
+
+```bash
+python3 "$SCRIPTS/quick_assess.py" \
+  --inputs "$REVIEW_DIR/inputs.json" \
+  --safes "$REVIEW_DIR/safes.json" \
+  --pre-money 20000000 --new-money 5000000 \
+  --target-pool-percent 0.10 --target-basis post_money \
+  --review-dir "$REVIEW_DIR" \
+  --founder-prompt "<the founder's raw prompt>" \
+  --pretty
+```
+
+Inputs are built from the founder's conversational description via targeted `AskUserQuestion` calls (Lane 4 only — fast-assess does NOT invoke Lane-1/2/3 extractors). The script writes:
+
+- `${REVIEW_DIR}/fast_assess_only.json` — sentinel for downstream consumers
+- `${REVIEW_DIR}/report_fast_assess.md` — 1-page founder-facing markdown
+
+Total wall-clock: under 60 seconds. Then jump to **Step 12: Deliver Artifacts** with the fast-assess deliverable. Offer the founder a follow-up: "I gave you the directional answer — want the full review with counsel packet and interactive explorer?"
 
 ### Step 5: Determine Scenarios + Run Math → `scenarios.json`
 

@@ -511,7 +511,20 @@ def render_report_markdown(
         lines.append("")
         co = s["computed_outputs"]
         completeness = co.get("completeness", "structural_only")
-        lines.append(f"**Completeness:** `{completeness}`")
+        completeness_human = {
+            "full": "full — share-producing math ran end-to-end",
+            "mixed": "mixed — some scenarios produced share outputs, others didn't",
+            "structural_only": (
+                "structural_only — schema and rule-applicability checks passed, but no "
+                "share-producing math ran (e.g. flip mode in v0.1 is share-for-share-only; "
+                "legal/tax math requires counsel)"
+            ),
+            "repay_only": "repay_only — note matured with repay treatment; no shares issued",
+            "cap_implied_only": "cap_implied_only — pre-financing cap-implied snapshot, no priced round",
+        }.get(completeness, completeness)
+        lines.append(
+            f"**Completeness:** `{completeness}` — {completeness_human.split(' — ', 1)[1] if ' — ' in completeness_human else completeness_human}"
+        )
         if co.get("cap_implied_only"):
             lines.append("**Sub-flag:** `cap_implied_only` — pre-financing snapshot only")
         lines.append("")
@@ -603,20 +616,46 @@ def render_report_markdown(
                     lines.append(f"  - {it['counsel_question']}")
             lines.append("")
 
-    # 6. Date-Sensitive Watchlist
+    # 6. Date-Sensitive Watchlist (split into active vs for-reference)
     if rule_audit.get("date_sensitive_watchlist"):
-        lines.append("## Date-Sensitive Watchlist")
-        lines.append("")
-        lines.append("| Rule | Scope | Status | Date | Action |")
-        lines.append("|---|---|---|---|---|")
+        active_items: list[dict[str, Any]] = []
+        annotation_items: list[dict[str, Any]] = []
         for w in rule_audit["date_sensitive_watchlist"]:
-            status_or_fresh = w.get("current_status") or w.get("freshness_status") or "—"
-            date_val = w.get("event_date_value") or "—"
+            # `applies_when_matched=true` means the rule's own predicate said
+            # it applies to this engagement (e.g., Israeli rules in an
+            # Israel-context engagement, IIA rules when grants are present).
+            # `false` means the rule is structurally inapplicable here —
+            # surface as a for-reference annotation, not an action item, so
+            # founders don't panic over 50 items that don't apply.
+            if w.get("applies_when_matched", True):
+                active_items.append(w)
+            else:
+                annotation_items.append(w)
+
+        if active_items:
+            lines.append("## Date-Sensitive Watchlist")
+            lines.append("")
+            lines.append(f"_{len(active_items)} active item(s) — rules whose predicates match this engagement._")
+            lines.append("")
+            lines.append("| Rule | Scope | Status | Date | Action |")
+            lines.append("|---|---|---|---|---|")
+            for w in active_items:
+                status_or_fresh = w.get("current_status") or w.get("freshness_status") or "—"
+                date_val = w.get("event_date_value") or "—"
+                lines.append(
+                    f"| `{w['rule_id']}` | {w['scope']} | {status_or_fresh} | {date_val} | "
+                    f"{w.get('action_required', '')[:60]} |"
+                )
+            lines.append("")
+        if annotation_items:
+            lines.append("### For-Reference Annotations")
+            lines.append("")
             lines.append(
-                f"| `{w['rule_id']}` | {w['scope']} | {status_or_fresh} | {date_val} | "
-                f"{w.get('action_required', '')[:60]} |"
+                f"_{len(annotation_items)} item(s) — rules that don't apply to this engagement "
+                f"in its current state (different jurisdiction, no grants, etc.) but are tracked "
+                f"in case the engagement evolves. No action needed today._"
             )
-        lines.append("")
+            lines.append("")
 
     # 7. Sources Cited (dedup across counsel + scenarios)
     sources_used = set()

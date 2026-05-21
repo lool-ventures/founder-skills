@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lool.vc/founderskills/cap-table/schemas/fast_assess_only.schema.json",
+  "title": "Cap-Table Fast-Assess Sentinel",
+  "description": "Marker file written by quick_assess.py to indicate that the cap-table skill ran in fast-assess mode (1-page directional answer only; no canonical JSON artifacts produced). Cross-skill consumers reading a {company_slug}-fastassess REVIEW_DIR should check for this file before treating a missing report.json as 'never ran'.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "mode",
+    "run_id",
+    "company_name",
+    "company_slug",
+    "created_at",
+    "rule_pack_version",
+    "inputs_fingerprint",
+    "produces_canonical_artifacts",
+    "fast_assess_report_path",
+    "headline_data",
+    "rerun_hint"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "v0.1.0-cap-table-fast-assess",
+      "description": "Sentinel schema version. Distinct from the main cap-table report schema (v0.5.0-cap-table)."
+    },
+    "mode": {
+      "type": "string",
+      "const": "fast_assess"
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Run identifier (ISO-8601 timestamp with separators stripped). Unique per fast-assess invocation."
+    },
+    "company_name": {
+      "type": "string"
+    },
+    "company_slug": {
+      "type": "string",
+      "description": "Kebab-case slug derived from company_name. The REVIEW_DIR is conventionally `cap-table-{company_slug}-fastassess/`."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "rule_pack_version": {
+      "type": "string",
+      "description": "Version of cap-table-rules.json the math producers cited. Lets consumers detect rule-pack drift since sentinel was written."
+    },
+    "inputs_fingerprint": {
+      "type": "object",
+      "required": ["sha256", "components"],
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "components": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Ordered list of input components the hash was computed over. Lets consumers determine 'inputs changed since fast-assess ran' and trigger a re-run."
+        }
+      },
+      "additionalProperties": false
+    },
+    "fast_assess_report_path": {
+      "type": "string",
+      "description": "Absolute path to the founder-facing markdown report (`report_fast_assess.md`)."
+    },
+    "produces_canonical_artifacts": {
+      "type": "boolean",
+      "const": false,
+      "description": "Always false in fast-assess mode. Marker that no inputs.json / instruments.json / cap_state.json / scenarios.json / rule_audit.json / counsel_packet.json / report.json was produced."
+    },
+    "note": {
+      "type": "string",
+      "description": "Human-readable explanation of the fast-assess contract."
+    },
+    "headline_data": {
+      "type": "object",
+      "description": "Denormalized headline output for lightweight consumers (e.g., ic-sim asking about dilution exposure). Mirrors coaching_payload field names where applicable so consumers can reuse parsers.",
+      "properties": {
+        "scenarios_summarized": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "founder_impact": {
+          "type": "object",
+          "properties": {
+            "ownership_post_financing_pct": {"type": "number"},
+            "pps_priced_round": {"type": "number"}
+          }
+        },
+        "branch_summary": {"type": "string"},
+        "drivers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {"type": "string"},
+              "impact_pct": {"type": "number"}
+            }
+          }
+        }
+      }
+    },
+    "rerun_hint": {
+      "type": "string",
+      "description": "Human-readable instruction for getting full artifacts."
+    }
+  },
+  "additionalProperties": false
+}

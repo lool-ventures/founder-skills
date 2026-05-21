@@ -52,6 +52,57 @@ from safe_conversion import (  # noqa: E402
 RULE_PACK_VERSION = "0.3.0"
 
 
+def _resolve_mfn_elections(safes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pre-resolve MFN-electing SAFEs against their elected siblings.
+
+    Per the YC MFN provision, a SAFE that has `mfn_provision.elected_against_safe_id`
+    pointing to a sibling SAFE with a resolved cap (and possibly discount)
+    inherits that sibling's terms. Without auto-binding, the solver would
+    require `conversion_price_override` on every MFN-electing SAFE — needless
+    friction for the canonical case.
+
+    For each `yc_uncapped_mfn` SAFE with a valid `elected_against_safe_id`
+    pointing to a sibling that has a resolved cap, returns a shadow record
+    with form rewritten to match the elected sibling's form (cap-only,
+    cap+discount, or discount-only) and the cap/discount inherited.
+
+    Truly uncapped MFNs (no election, or elected against another uncapped MFN
+    with no anchor) are left unchanged — the rejection / Gotcha #4 cycle guard
+    still fires correctly for those.
+
+    The original instrument records are NOT mutated — this returns a new list.
+    """
+    by_id = {s["id"]: s for s in safes}
+    out: list[dict[str, Any]] = []
+    for s in safes:
+        if s.get("form") != "yc_uncapped_mfn":
+            out.append(s)
+            continue
+        mfn = s.get("mfn_provision") or {}
+        elected_id = mfn.get("elected_against_safe_id")
+        if not elected_id or elected_id not in by_id:
+            # No election, or election points to a missing sibling — leave as-is
+            # (existing rejection / cycle guard logic handles this)
+            out.append(s)
+            continue
+        anchor = by_id[elected_id]
+        if anchor.get("form") == "yc_uncapped_mfn":
+            # Election against another uncapped MFN — chain is unresolvable
+            # unless the chain terminates at a capped SAFE (which detect_mfn_cycles
+            # already handles). Leave as-is for the cycle guard to handle.
+            out.append(s)
+            continue
+        # Anchor has a resolved form; inherit cap, discount, and form.
+        shadow = dict(s)
+        shadow["form"] = anchor["form"]
+        shadow["post_money_valuation_cap"] = anchor.get("post_money_valuation_cap")
+        shadow["discount_multiplier"] = anchor.get("discount_multiplier")
+        # Mark provenance so downstream reporting can show "inherited from safe_X"
+        shadow["_mfn_inherited_from"] = elected_id
+        out.append(shadow)
+    return out
+
+
 def _safe_shares_at_price(
     safes: list[dict[str, Any]],
     *,
@@ -134,6 +185,13 @@ def solve_priced_round(
     is the answer (per YC primer Example 1).
     """
     blockers: list[dict[str, Any]] = []
+
+    # Pre-resolve MFN-electing SAFEs against their elected siblings before the
+    # solver runs. The resolver produces shadow records with inherited form +
+    # cap + discount; the original list is unchanged. Truly uncapped MFNs
+    # (no election or unresolvable chain) flow through untouched and hit the
+    # cycle guard / rejection paths below.
+    safes = _resolve_mfn_elections(safes)
 
     # Check for circular MFN before anything else
     cycles = detect_mfn_cycles(safes)

@@ -1027,6 +1027,145 @@ class TestStackedPostMoneySAFEsGolden:
         )
         assert math.isclose(total, 1.0, abs_tol=1e-4), f"ownerships sum to {total}, not 1.0"
 
+    def test_uncapped_mfn_auto_binds_to_elected_safes_terms(self) -> None:
+        """Phase N: uncapped MFN with `elected_against_safe_id` set should
+        auto-resolve to the elected sibling's terms — no override required.
+
+        Eval-2 transcript noted that the solver previously REQUIRED a
+        `conversion_price_override` even when MFN was clearly electing
+        safe_1's cap. With Phase N auto-bind, the resolver pre-inherits the
+        elected sibling's form/cap/discount before the solver runs.
+        """
+        eval2_safes_with_real_mfn = [
+            self.EVAL2_SAFES[0],
+            self.EVAL2_SAFES[1],
+            # safe_3 is uncapped MFN electing safe_1; should auto-bind
+            {
+                "id": "safe_3",
+                "investor_name": "Angel C",
+                "purchase_amount": 500_000,
+                "post_money_valuation_cap": None,
+                "discount_multiplier": None,
+                "mfn_provision": {
+                    "present": True,
+                    "elected_against_safe_id": "safe_1",
+                    "elected": True,
+                    "cherry_pick_attempted": False,
+                    "notes": None,
+                },
+                "pro_rata_side_letter": None,
+                "issuance_date": "2025-03-01",
+                "form": "yc_uncapped_mfn",
+                "conversion_price_override": None,
+                "source_document": None,
+                "extraction_confidence": "high",
+            },
+        ]
+        instruments = {
+            "safes": eval2_safes_with_real_mfn,
+            "notes": [],
+            "warrants": [],
+            "option_grants": [],
+            "metadata": {"run_id": "test"},
+        }
+        cs = cap_state_mod.build_cap_state(self.EVAL2_INPUTS, instruments)
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=eval2_safes_with_real_mfn,
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+        )
+        # Auto-bind must produce the same answer as the pre-resolved test
+        assert r["completeness"] == "full", f"blockers: {r.get('blockers')}"
+        agg = r["aggregate_ownership_by_class"]
+        assert math.isclose(agg["safe_pct"], 1 / 6, abs_tol=1e-4), (
+            f"MFN auto-bind: aggregate safe_pct {agg['safe_pct']} ≠ expected 1/6"
+        )
+        assert math.isclose(agg["founders_pct"], 8 / 15, abs_tol=1e-4)
+
+    def test_fast_assess_writes_sentinel_and_markdown(self) -> None:
+        """Phase O: quick_assess.py produces fast_assess_only.json + report.md.
+
+        Verifies:
+        - sentinel JSON conforms to v0.1.0-cap-table-fast-assess schema
+        - sentinel uses the corrected math from Phase J (founder 53.33% on
+          the canonical eval-2 scenario)
+        - report_fast_assess.md exists and contains the founder ownership
+        - no canonical artifacts are produced (no inputs.json, cap_state.json,
+          report.json, etc.)
+        """
+        import quick_assess as qa  # type: ignore[import-not-found]
+
+        sentinel = qa.quick_assess(
+            company_name="TestCo",
+            inputs=self.EVAL2_INPUTS,
+            safes=[
+                self.EVAL2_SAFES[0],
+                self.EVAL2_SAFES[1],
+                self.EVAL2_SAFES[2],
+            ],
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+            founder_prompt="three SAFEs + $5M Series A",
+            attached_docs=[],
+        )
+        # Sentinel schema
+        assert sentinel["schema_version"] == "v0.1.0-cap-table-fast-assess"
+        assert sentinel["mode"] == "fast_assess"
+        assert sentinel["produces_canonical_artifacts"] is False
+        assert sentinel["rule_pack_version"] == "0.3.0"
+        # inputs_fingerprint structurally valid
+        fp = sentinel["inputs_fingerprint"]
+        assert "sha256" in fp and len(fp["sha256"]) == 64
+        # headline_data uses corrected math from Phase J
+        hd = sentinel["headline_data"]
+        fi = hd["founder_impact"]
+        assert math.isclose(fi["ownership_post_financing_pct"], 8 / 15, abs_tol=1e-4)
+        assert math.isclose(fi["pps_priced_round"], 4 / 3, rel_tol=1e-4)
+        # report_md is delivered for the CLI to extract
+        report_md = sentinel.pop("_report_md")
+        assert "53.33%" in report_md  # founder ownership rendered
+
+    def test_fast_assess_sentinel_validates_against_schema(self) -> None:
+        """Phase O: sentinel JSON validates against fast_assess_only.schema.json."""
+        try:
+            import jsonschema
+        except ImportError:
+            pytest.skip("jsonschema not installed")
+
+        import quick_assess as qa  # type: ignore[import-not-found]
+
+        sentinel = qa.quick_assess(
+            company_name="TestCo",
+            inputs=self.EVAL2_INPUTS,
+            safes=[self.EVAL2_SAFES[0]],
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+        )
+        sentinel.pop("_report_md", None)
+        # Add the path field that the CLI normally sets
+        sentinel["fast_assess_report_path"] = "/tmp/test_report.md"
+
+        schema_path = os.path.join(
+            os.path.dirname(SCRIPTS),
+            "references",
+            "schemas",
+            "fast_assess_only.schema.json",
+        )
+        with open(schema_path) as f:
+            schema = json.load(f)
+        # Will raise jsonschema.ValidationError if invalid
+        jsonschema.validate(instance=sentinel, schema=schema)
+
     def test_eval2_aggregate_safe_pct_equals_sum_of_per_safe(self) -> None:
         """J8 cross-check: aggregate_ownership_by_class.safe_pct must equal
         Σ per-safe ownership. Catches drift between aggregate and detail.

@@ -81,7 +81,54 @@ def required_topup(
         denom = pre_fd + required + float(new_money_shares or 0)
     realized = (existing + required) / denom if denom > 0 else 0.0
 
-    return {
+    # Phase M+S: when the founder-supplied target_basis would silently no-op
+    # (existing pool already meets target under literal pre_money basis math)
+    # but industry norm for "X% pool refresh" usually means post-close
+    # unallocated (post_money basis), surface this as a clarifying question
+    # the dispatching agent escalates via AskUserQuestion. Otherwise founders
+    # see "0 top-up needed" and think the refresh has no cost — incorrect.
+    warnings: list[dict[str, Any]] = []
+    clarifying_question: dict[str, Any] | None = None
+    if target_basis in {"pre_money", "custom"} and required == 0 and target > 0:
+        # Compute what the post_money interpretation would give for comparison
+        nm = float(new_money_shares or 0)
+        post_money_x = (target * (pre_fd + nm) - existing) / (1 - target)
+        post_money_required = max(0, int(round(post_money_x)))
+        warnings.append(
+            {
+                "code": "pool_target_already_met_check_intent",
+                "severity": "high",
+                "message": (
+                    f"Under literal target_basis={target_basis!r}, the existing pool "
+                    f"({existing:,.0f} shares = {existing / pre_fd:.1%} of pre-FD) already "
+                    f"meets or exceeds the target of {target:.1%}, so the script computed 0 top-up. "
+                    f"Series A term-sheet practice for 'X% pool refresh' usually means "
+                    f"X% post-close unallocated (post_money basis). Under that reading, "
+                    f"top-up would be {post_money_required:,d} shares. Confirm founder intent."
+                ),
+            }
+        )
+        clarifying_question = {
+            "question": (
+                "You asked for a 10% pool refresh on a pre-money basis. Under the literal "
+                "reading, the existing pool already meets that target so the refresh is "
+                'a no-op. Series A term sheets usually mean "10% post-close unallocated" — '
+                "which would require a real top-up. Which interpretation matches your term sheet?"
+            ),
+            "options": [
+                "Literal pre-money basis (no top-up needed — keep existing pool)",
+                f"Industry norm: post-close unallocated ({post_money_required:,d} share top-up)",
+            ],
+            "context": {
+                "target_pool_percent": target,
+                "literal_pre_money_top_up": 0,
+                "industry_norm_post_money_top_up": post_money_required,
+                "existing_unallocated_pool": int(existing),
+                "pre_topup_fully_diluted_shares": int(pre_fd),
+            },
+        }
+
+    result: dict[str, Any] = {
         "required_pool_topup_shares": required,
         "post_topup_pool_percent": realized,
         "target_basis": target_basis,
@@ -95,6 +142,11 @@ def required_topup(
             }
         ],
     }
+    if warnings:
+        result["warnings"] = warnings
+    if clarifying_question:
+        result["clarifying_question"] = clarifying_question
+    return result
 
 
 def _cli() -> int:

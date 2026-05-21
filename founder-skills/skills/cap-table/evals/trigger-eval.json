@@ -8,7 +8,7 @@
   {"query": "the term sheet says 10% pool refresh on a pre-money basis. how bad is that for me?", "should_trigger": true, "_note": "pool target_basis analysis"},
   {"query": "we have a 1x non-participating preferred with broad-based weighted average anti-dilution. our next round might be a down round — what triggers?", "should_trigger": true, "_note": "anti-dilution"},
   {"query": "I'm a solo founder with $1M in SAFEs. Pretty sure I'm going to get crushed at Series A. Can you show me the damage?", "should_trigger": true, "_note": "informal but clearly cap-table modeling"},
-  {"query": "uploading my pulley export — can you check the math on convertibles?", "should_trigger": true, "_note": "Pulley export, Lane 2"},
+  {"query": "got our Carta XLSX export here — can you sanity-check the post-money cap table after the seed round closes?", "should_trigger": true, "_note": "Carta export, Lane 2 (replaced earlier Pulley query — Pulley not yet supported end-to-end)"},
 
   {"query": "how much should we raise for our seed?", "should_trigger": false, "_note": "fundraising strategy, not cap-table modeling (excluded in when_to_use)"},
   {"query": "what's a SAFE?", "should_trigger": false, "_note": "term-glossary question (excluded in when_to_use)"},
