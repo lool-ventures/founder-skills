@@ -318,7 +318,12 @@ def test_golden_8_preexisting_ad_adjusted_ccp():
 
     assert result["converged"]
     assert abs(result["equity_financing_price"] - 0.343625) < 1e-5
-    assert abs(result["ccp_mutations"]["series_seed"] - 0.563265) < 1e-5
+    # CP2 closed-form is 0.563322; spike returns 0.563265 (Δ=5.7e-5) due to
+    # per-iteration int(round) on preferred_as_converted (production semantic:
+    # cap tables can't hold fractional preferred shares). 1e-4 tolerance
+    # encompasses both values. Sprint 1 will inherit this int-rounding from
+    # cap_state.py:_compute_as_converted_totals.
+    assert abs(result["ccp_mutations"]["series_seed"] - 0.563265) < 1e-4
     assert abs(result["founder_pct"] - 0.343625) < 1e-5
     assert abs(result["founder_pct_pre_anti_dilution"] - 0.370370) < 1e-5
     # Stale-CCP guard does NOT fire (history records the prior CCP change)

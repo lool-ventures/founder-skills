@@ -343,16 +343,19 @@ def solve_coupled_priced_round(
         # Stage 3: size_round — pool top-up + new money
         pool_topup_shares = 0.0
         if target_pool_percent and target_pool_percent > 0:
-            # Simplified pool math for Sprint 0; matches option_pool.required_topup
-            # semantics for target_basis="pre_money" (denom is pre-new-money FD).
-            pre_topup_fd = adj_pre_fd + safe_shares_total + note_shares_total
-            existing_pool = options_available
-            new_money_shares_est = new_money / pps if pps > 0 else 0.0
-            if target_basis == "pre_money":
-                target_pool = target_pool_percent * (pre_topup_fd + new_money_shares_est)
-            else:
-                target_pool = target_pool_percent * (pre_topup_fd + new_money_shares_est)
-            pool_topup_shares = max(0.0, target_pool - existing_pool - options_outstanding)
+            # Sprint 0 spike does NOT implement pool top-up math. The Sprint 1
+            # PoolTopUpAdjuster will wrap option_pool.required_topup with the
+            # correct (target × pre_fd − existing) / (1 − target) formula. The
+            # spike's previous simplification had three bugs (pre_money vs
+            # post_money branches identical, missing /(1-target) factor, wrong
+            # existing baseline). Sprint-0 Goldens 1-3, 6-13, 16, 17 don't
+            # exercise this parameter. Fail loud rather than silently produce
+            # wrong numbers.
+            raise NotImplementedError(
+                "target_pool_percent > 0 is Sprint 1 scope (PoolTopUpAdjuster "
+                "wraps option_pool.required_topup). The Sprint 0 spike does "
+                "not implement pool top-up math."
+            )
 
         denom = adj_pre_fd + safe_shares_total + note_shares_total + pool_topup_shares
         if denom <= 0:
