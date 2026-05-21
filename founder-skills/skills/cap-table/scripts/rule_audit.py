@@ -376,6 +376,22 @@ _RULE_MATCHERS: dict[str, Any] = {
     "israeli_ltd.preferred_governance_checklist": lambda i, inst, cs: (
         _structure_includes_israel(i) and _has_preferred(cs)
     ),
+    # Israeli AoA rules (commit #7 post-J audit) — apply ONLY when:
+    #   (a) jurisdiction structure includes Israel, AND
+    #   (b) a preferred series is in cap_state (i.e., AoA terms have actually
+    #       been extracted / the engagement is modeling preferred-stock economics).
+    # Without (b), the engagement has no AoA-derived terms and these rules
+    # would be noise (e.g., firing "drag-along below 75%" when there's no AoA).
+    # Real-doc test surfaced this as a false-positive class — see the
+    # post-test bugfix commit (May 2026).
+    "israeli_aoa.drag_along_threshold_below_75_percent": lambda i, inst, cs: (
+        _structure_includes_israel(i) and _has_preferred(cs)
+    ),
+    "israeli_aoa.section_102_plan_absent": lambda i, inst, cs: _structure_includes_israel(i) and _has_preferred(cs),
+    "israeli_aoa.liquidation_preference_above_1x": lambda i, inst, cs: (
+        _structure_includes_israel(i) and _has_preferred(cs)
+    ),
+    "israeli_aoa.full_ratchet_anti_dilution": lambda i, inst, cs: _structure_includes_israel(i) and _has_preferred(cs),
     # Delaware cross-border — apply when ANY of: Delaware engagement,
     # cross-border structure, or flip mode
     "delaware_cross_border.structure_note": lambda i, inst, cs: _is_cross_border(i) or _structure_includes_israel(i),

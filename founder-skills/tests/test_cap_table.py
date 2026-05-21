@@ -1665,6 +1665,59 @@ class TestRuleAudit:
         rule = {"rule_id": "r1", "domain": "safe"}  # no date_window
         assert rule_audit._classify_scope(rule) == "not_applicable"
 
+    def test_israeli_aoa_rules_do_not_fire_on_delaware_no_preferred(self) -> None:
+        """Real-doc test surfaced this: israeli_aoa.* rules were firing on a
+        Delaware C-corp with no preferred series, because they weren't in the
+        _RULE_MATCHERS dispatch table and defaulted to _matcher_always.
+
+        Now gated to: jurisdiction_includes_israel AND has_preferred_series.
+        """
+        delaware_inputs = {
+            "jurisdiction": {"structure": "delaware"},
+            "mode": "standard",
+        }
+        empty_instruments = {"safes": [], "notes": [], "warrants": [], "option_grants": []}
+        empty_cap_state = {"preferred_series": []}
+
+        for rule_id in (
+            "israeli_aoa.drag_along_threshold_below_75_percent",
+            "israeli_aoa.section_102_plan_absent",
+            "israeli_aoa.liquidation_preference_above_1x",
+            "israeli_aoa.full_ratchet_anti_dilution",
+        ):
+            matcher = rule_audit._RULE_MATCHERS.get(rule_id, rule_audit._matcher_always)
+            assert matcher(delaware_inputs, empty_instruments, empty_cap_state) is False, (
+                f"{rule_id} should NOT match on Delaware engagement with no preferred series"
+            )
+
+    def test_israeli_aoa_rules_fire_on_israeli_with_preferred(self) -> None:
+        """Israeli engagement WITH a preferred series → israeli_aoa.* rules apply."""
+        israeli_inputs = {
+            "jurisdiction": {"structure": "israeli"},
+            "mode": "standard",
+        }
+        empty_instruments = {"safes": [], "notes": [], "warrants": [], "option_grants": []}
+        cap_state_with_preferred = {
+            "preferred_series": [
+                {
+                    "series_name": "Series Seed",
+                    "anti_dilution_protection": "broad_based_weighted_average",
+                    "liquidation_preference_multiple": 1.0,
+                }
+            ]
+        }
+
+        for rule_id in (
+            "israeli_aoa.drag_along_threshold_below_75_percent",
+            "israeli_aoa.section_102_plan_absent",
+            "israeli_aoa.liquidation_preference_above_1x",
+            "israeli_aoa.full_ratchet_anti_dilution",
+        ):
+            matcher = rule_audit._RULE_MATCHERS.get(rule_id, rule_audit._matcher_always)
+            assert matcher(israeli_inputs, empty_instruments, cap_state_with_preferred) is True, (
+                f"{rule_id} should match on Israeli engagement with preferred series"
+            )
+
     def test_classify_scope_legal_tax_applicability(self) -> None:
         rule = {"date_window": {"event_date_field": "stock_issue_date", "start": "2025-07-05"}}
         assert rule_audit._classify_scope(rule) == "legal_tax_applicability"
