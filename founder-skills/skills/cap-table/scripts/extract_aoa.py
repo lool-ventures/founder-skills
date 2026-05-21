@@ -225,7 +225,72 @@ def detect_counsel_review_items(fields: dict[str, Any]) -> list[dict[str, Any]]:
                 }
             )
 
+    # v0.4.0: pay-to-play provision detection (rule pack:
+    # anti_dilution.pay_to_play_provision_detected). v0.4.0 does NOT model
+    # P2P math (deferred to v0.5.0); this is a detection-only counsel flag.
+    if detect_pay_to_play(fields):
+        items.append(
+            {
+                "rule_id": "anti_dilution.pay_to_play_provision_detected",
+                "severity": "high",
+                "summary": (
+                    "AoA contains a pay-to-play provision: AD-protected holders who "
+                    "do not participate pro-rata in a down round forfeit AD protection "
+                    "and/or convert to common. v0.4.0 does NOT model P2P math (v0.5.0 "
+                    "scope); current dilution figures may over-protect non-participating "
+                    "holders. Counsel verifies whether each AD-protected holder will "
+                    "participate at full pro-rata."
+                ),
+            }
+        )
+
     return items
+
+
+# Pay-to-play text patterns. Matches common drafting language across NVCA-form
+# COIs, Israeli AoAs, and Cooley templates. Each pattern is OR-combined; one
+# match is enough to flag.
+_P2P_PATTERNS = [
+    r"\bpay\s*[- ]?\s*to\s*[- ]?\s*play\b",
+    r"\bpay\b.{0,40}\bplay\b",  # within-sentence variant
+    r"failure\s+to\s+(participate|invest|purchase).{0,80}(forfeit|lose|convert)",
+    r"(forfeit|lose).{0,40}anti[\s-]*dilution",
+    r"mandatory\s+conversion.{0,80}(non[\s-]*participating|fail|did\s+not\s+participate)",
+    r"(participate|invest|purchase)\s+(pro\s*-?\s*rata|its\s+pro\s*rata\s+share).{0,120}(or|otherwise).{0,40}(forfeit|lose|convert|automatically\s+convert)",
+    r"(shadow|junior)\s+series.{0,80}(non[\s-]*participat|failure)",
+    r"(non[\s-]*participat|failure).{0,120}(shadow|junior)\s+series",
+]
+
+
+def detect_pay_to_play(fields: dict[str, Any]) -> bool:
+    """True if any pay-to-play text pattern matches the AoA source text.
+
+    Reads `fields["source_text"]` if present (caller may attach the full
+    AoA text from extract_aoa's input). Falls back to scanning any free-text
+    fields the extractor surfaced (`pay_to_play_clause_text`, `notes`).
+
+    v0.4.0 is detection-only — the rule fires as a counsel-review flag.
+    v0.5.0 will implement P2P math (forced conversion, AD-protection
+    forfeiture, shadow-series mechanics).
+    """
+    import re
+
+    haystacks: list[str] = []
+    src = fields.get("source_text")
+    if isinstance(src, str):
+        haystacks.append(src.lower())
+    for k in ("pay_to_play_clause_text", "notes", "free_text_notes"):
+        v = fields.get(k)
+        if isinstance(v, str):
+            haystacks.append(v.lower())
+    # Explicit boolean override — if the extractor identified P2P upstream
+    if fields.get("pay_to_play_present") is True:
+        return True
+
+    if not haystacks:
+        return False
+
+    return any(any(re.search(pattern, h, re.IGNORECASE | re.DOTALL) for h in haystacks) for pattern in _P2P_PATTERNS)
 
 
 def merge_into_inputs(
