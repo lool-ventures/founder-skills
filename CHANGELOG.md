@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-05-21
+
+### Added — Coupled anti-dilution in the cap-table priced-round solver
+
+Substantial feature: `priced_round.solve_priced_round` now applies anti-dilution adjustments to existing preferred series WITHIN the priced-round fixed-point iteration, in a single Banach loop with SAFE conversion, note conversion, pool top-up, and new-money issuance. Closes a class of silent-correctness bugs where a down-round scenario showed the pre-AD founder % as the headline (e.g., 38.46% instead of the actual coupled 35.71% — a 2.75pp under-statement) because AD was modeled by a separate script the founder/agent had to invoke manually and reconcile by hand.
+
+- **Three-stage adjuster chain per iteration:** `adjust_cap_state` (AntiDilutionAdjuster mutates `current_conversion_price` on each AD-protected preferred series; orchestrator recomputes as-converted totals), `convert_securities` (SAFE + note conversion against AD-adjusted total FD), `size_round` (pool top-up + new money). The math producers (`anti_dilution.bbwa_new_conversion_price`, `full_ratchet_new_conversion_price`, `convert_safe_priced_round`, `convert_note`, `option_pool.required_topup`) remain the single source of truth; the solver delegates rather than rewrites.
+
+- **AD mechanic is CCP mutation, not share-minting.** Preferred-as-converted shares are derived via `shares × OCP / CCP` (matches `cap_state._compute_as_converted_totals`); the actual `shares` field on the preferred series never changes. Three price fields with distinct roles: `original_issue_price` (OIP — NVCA-default trigger threshold per §4.4.4(b)), `original_conversion_price` (OCP — drives the as-converted ratio), `current_conversion_price` (CCP — mutates).
+
+- **Per-series knobs** (additive optional schema fields, all backwards-compatible): `ad_trigger_basis` (OIP vs CCP), `ad_a_denominator_basis` (NVCA broad vs narrow), `ad_cp2_floor` (charter-specific clamp), `ad_carve_outs` (v0.4.0 accepts only `nvca_default`; custom carve-out lists are deferred).
+
+- **Stale-CCP guard:** if a series has `current_conversion_price == original_conversion_price` but `cap_table_history[]` records a prior `anti_dilution_applied` event for that series, the solver emits `W_STALE_CCP_SUSPECTED` so a founder can verify which value is authoritative.
+
+- **Frozen pre-financing snapshots** per NVCA §4.4.4 "immediately prior to such issue": `pre_financing_a_components` (broad: common + preferred-as-converted + options outstanding + options reserved; narrow: common + preferred-as-converted only) and `pre_financing_cp1_snapshots` (CP1 per series). Both are captured at iter 0 and never recomputed inside the loop — prevents the ratchet-on-ratchet pathology (deferred to a future release).
+
+- **Convergence guards** for the positive-feedback regime: sign-flip damping with α=0.5 under-relaxation on 3+ alternating-sign deltas; Aitken Δ² acceleration when `|f'_est| > 0.9`; Aitken fallback fence at 20× the latest vanilla step (reverts to vanilla if the projection would overshoot); hard 200-iteration cap (raised from 50); termination at `|Δp/p| < 1e-6 AND |Δp| < 1e-9`. Empirical contraction constants on the regression goldens are 0.05–0.40 — well within Banach contraction.
+
+- **Deep-copy boundary:** the caller's `cap_state` is never mutated. The new `cap_state_after_round.py` script reads the priced-round scenario's `ccp_mutations` + `anti_dilution_breakdown` and produces a `cap_state_after_round.json` artifact (post-round preferred-series CCP values, recomputed as-converted totals, an appended `anti_dilution_applied` event in `cap_table_history`) — lets the next round's solver start from the correct mutated state.
+
+- **Report surface.** When AD fires, `compose_report.py` renders the three-way founder-ownership narrative: pre-AD baseline / coupled post-AD (headline) / AD-impact delta in percentage points. `visualize.py` shows the same narrative in the scenario card plus per-series CCP-before-to-after rows with floor-clamped series flagged. New counsel items surface automatically through `rule_audit.py`.
+
+- **Rule pack v0.4.0** — 25 new rules in the `anti_dilution` domain (citing NVCA Model COI §4.4.4 / §4.4.5 + Cooley GO down-round article + YC SAFE primer): 3 coupled math variants (BBWA / narrow-based / full-ratchet), 2 trigger-basis rules (OIP default, CCP charter-override), 2 A-denominator-basis rules (broad / narrow), 2 CP2-floor rules (config + runtime), 1 stale-CCP-detected runtime event, 4 solver-internal convergence-guard events (counsel_review=false because they're math events the script can responsibly conclude on), 10 NVCA §4.4.5 carve-out source notes, and a `pay_to_play_provision_detected` counsel-review flag fired by text-pattern detection in `extract_aoa.py` (P2P math itself is deferred — flag signals that v0.4.0's dilution figures may over-protect non-participating AD holders).
+
+- **35 new regression tests:** 15 coupled-solver math goldens locking the BBWA / full-ratchet / multi-series-mixed / per-series-knobs / CP2-floor / stale-CCP / SAFE-conversion-coupled / note-conversion-coupled behaviors (Test A's coupled answer 35.71% is now a regression; Test 2 full-ratchet at 27.27% similarly locked; Goldens 3 + 12 derived against opus subagent closed-form work); 16 convergence-guard tests including the Aitken Δ² formula against three geometric-sequence closed forms (caught a numerator bug where an earlier design pseudocode used `(p_n - p_{n-2})²` instead of the correct `(p_{n-1} - p_{n-2})²`); 4 `cap_state_after_round.json` builder tests; 10 P2P-detection text-pattern tests. The full repo now has 1,517 passing tests.
+
+### Also in 0.4.8
+
+- **Schema-gap fix:** `cap-table-rules.schema.json` now lists `israeli_aoa` in both the `domains` enum and the per-rule `domain` enum. The v0.3.2 release added the `israeli_aoa` domain to the rule pack but never updated the schema, so strict validation had been failing silently.
+
+- **`extract_instrument.py` type-guard:** `confirm_required()` now raises an explicit `ValueError` with a remediation pointer when a sub-agent returns `confidence` as a bare string instead of the per-field map (matches a real failure mode caught in end-to-end testing).
+
+- **`references/inputs-skeleton.md`:** new reference doc showing the full common-case `inputs.json` shape with the validator-strictness gotcha (unknown top-level keys silently dropped — `stakeholders[]` from Carta/Pulley would lose 10M founder shares with no warning) + the OIP/OCP/CCP three-field distinction. SKILL.md Step 2 heredoc now includes `founders[]` and `option_pool` by default.
+
+- **Sub-agent dispatch contract documented:** `lanes/lane-1-pdf-docx.md` now has a "Sub-agent response shape" section with a fully-fleshed JSON example showing `instrument_type` as the routing key for subtype gates (`convertible_loan_agreement` / `convertible_security` / `convertible_note`), the per-field `confidence: {level, evidence_quote, document_location?}` shape, and form-template handling guidance.
+
+- **`rule_audit.py` docstring fix:** the `--phase=post_math` documentation incorrectly claimed it re-reads `scenarios.json`; in fact only `--run-id` and `--output` are consumed. Sub-agents repeatedly tried to pass the full input set per the docstring; now corrected.
+
 ### Added
 
 - **New skill: `cap-table`.** Extracts structured terms from cap-table source documents (SAFEs, convertible notes, term sheets, articles of association, Carta/Pulley XLSX exports), runs them through a layered math pipeline (cap state → SAFE/note conversions → option-pool top-up → anti-dilution → priced-round solver → flip scenarios), and produces a counsel-handoff packet + human-readable report. Designed for founders preparing for priced rounds, secondary sales, or jurisdiction flips.
