@@ -148,6 +148,16 @@ def _classify_branch(
     return "no_conversion_path"
 
 
+# Default proxy rate for statutory ITA Section 3(j) when no
+# counsel-supplied value is available. Historic range 2024-2025 ≈ 4.27-5.00%;
+# 5% is a conservative upper bound. Counsel should always supply the current
+# published ITA rate for binding math (the rate is republished quarterly).
+# Real-doc end-to-end test (May 2026) surfaced that math producers can't run
+# with annual_interest_rate=null even when interest_rate_type='none' (no interest)
+# or 'statutory_ita_section_3j' (rate set by ITA, not the document).
+STATUTORY_ITA_DEFAULT_RATE = 0.05
+
+
 def convert_note(
     note: dict[str, Any],
     *,
@@ -157,11 +167,65 @@ def convert_note(
 ) -> dict[str, Any]:
     """Single-note conversion. Returns per-note outputs matching the design's
     branch enum + per-note schema fields.
+
+    Per the post-J audit (commit #5+) + real-doc calibration (May 2026):
+    `annual_interest_rate` may legitimately be null when:
+      - `interest_rate_type="none"` (SAFE-equivalent convertible_security
+        subtype): treat as 0% (no interest accrues).
+      - `interest_rate_type="statutory_ita_section_3j"` (Israeli CLAs
+        referencing the ITA-set quarterly rate): use STATUTORY_ITA_DEFAULT_RATE
+        (5%) as proxy and surface a warning so counsel supplies the actual
+        published rate.
     """
     days = _days_elapsed(note, conversion_event_date)
+
+    # Resolve interest rate when document defers to statute or has no interest.
+    effective_rate = note.get("annual_interest_rate")
+    interest_rate_type = note.get("interest_rate_type", "fixed_numeric")
+    warnings: list[dict[str, Any]] = []
+    if effective_rate is None:
+        if interest_rate_type == "none":
+            # SAFE-equivalent: no interest accrues.
+            effective_rate = 0.0
+        elif interest_rate_type == "statutory_ita_section_3j":
+            effective_rate = STATUTORY_ITA_DEFAULT_RATE
+            warnings.append(
+                {
+                    "code": "statutory_ita_3j_proxy_rate_used",
+                    "severity": "high",
+                    "message": (
+                        f"This convertible note's interest_rate_type is "
+                        f"statutory_ita_section_3j (rate set quarterly by the "
+                        f"Israeli Tax Authority — not stated in the document). "
+                        f"Math producer used proxy rate "
+                        f"{STATUTORY_ITA_DEFAULT_RATE:.1%}/yr to compute accrued "
+                        f"interest. Counsel must supply the actual published "
+                        f"ITA §3(j) rate for the conversion window before "
+                        f"relying on the conversion shares figure. Historic "
+                        f"range 2024-2025 ≈ 4.27-5.0%."
+                    ),
+                }
+            )
+        else:
+            # fixed_numeric / fixed_numeric_simple with null rate should have
+            # been caught by the validator. Defensive: treat as 0 + warn.
+            effective_rate = 0.0
+            warnings.append(
+                {
+                    "code": "missing_numeric_interest_rate",
+                    "severity": "high",
+                    "message": (
+                        f"interest_rate_type={interest_rate_type!r} requires a "
+                        f"numeric annual_interest_rate but received null. "
+                        f"Math producer used 0% — this is almost certainly "
+                        f"wrong. Validator should have rejected this earlier."
+                    ),
+                }
+            )
+
     accrued = compute_accrued_interest(
         principal=note["principal"],
-        annual_interest_rate=note["annual_interest_rate"],
+        annual_interest_rate=effective_rate,
         days_elapsed=days,
         day_count_basis=note.get("day_count_basis", 365),
         compounding_periods_per_year=note.get("compounding_periods_per_year"),
@@ -180,6 +244,8 @@ def convert_note(
         "accrued_interest": accrued,
         "days_elapsed": days,
     }
+    if warnings:
+        base["warnings"] = warnings
 
     if branch == "no_conversion_path":
         base["error"] = E_NOTE_NO_CONVERSION_PATH

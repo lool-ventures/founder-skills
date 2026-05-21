@@ -577,6 +577,74 @@ class TestNoteConversion:
         }
         assert note_conversion.derive_scenario_completeness(per_note) == "structural_only"
 
+    def test_statutory_ita_3j_with_null_rate_uses_proxy(self) -> None:
+        """Real-doc end-to-end test (May 2026) surfaced this: Israeli CLAs with
+        interest_rate_type='statutory_ita_section_3j' have annual_interest_rate=null
+        (rate is set quarterly by Israeli Tax Authority — not stated in document).
+        The validator accepts null per commit #5; the math producer must too.
+        Math producer uses STATUTORY_ITA_DEFAULT_RATE (5%) as proxy + warns.
+        """
+        note = {
+            "id": "cla_1",
+            "investor_name": "Israeli investor",
+            "principal": 1_000_000,
+            "interest_rate_type": "statutory_ita_section_3j",
+            "annual_interest_rate": None,
+            "day_count_basis": 365,
+            "issuance_date": "2024-09-01",
+            "valuation_cap": 8_000_000,
+            "capitalization_denominator": 11_000_000,
+            "discount_multiplier": None,
+            "qualified_financing_threshold": 1_000_000,
+            "maturity_date": "2026-03-01",
+            "maturity_default_treatment": "convert_at_cap",
+            "interest_converts_to_shares": True,
+        }
+        r = note_conversion.convert_note(
+            note,
+            conversion_event_date="2026-06-01",
+            priced_round_new_money=4_000_000,
+            qualified_financing_price=1.0,
+        )
+        # Should NOT crash with TypeError (None * float).
+        assert r["accrued_interest"] > 0  # proxy rate produced non-zero accrual
+        # Warning surfaced for counsel to substitute the actual ITA rate.
+        assert "warnings" in r
+        assert any(w["code"] == "statutory_ita_3j_proxy_rate_used" for w in r["warnings"])
+
+    def test_none_interest_rate_type_uses_zero(self) -> None:
+        """convertible_security subtype (SAFE-equivalent) sets
+        interest_rate_type='none'. Math producer must treat as 0% — no accrual,
+        no warning (it's the intended document shape).
+        """
+        note = {
+            "id": "cs_1",
+            "investor_name": "SAFE-equivalent investor",
+            "principal": 500_000,
+            "interest_rate_type": "none",
+            "annual_interest_rate": None,
+            "day_count_basis": 365,
+            "issuance_date": "2019-08-01",
+            "valuation_cap": 15_000_000,
+            "capitalization_denominator": 11_000_000,
+            "discount_multiplier": None,
+            "qualified_financing_threshold": 1_000_000,
+            "maturity_date": None,
+            "maturity_default_treatment": None,
+            "interest_converts_to_shares": True,
+        }
+        r = note_conversion.convert_note(
+            note,
+            conversion_event_date="2026-06-01",
+            priced_round_new_money=4_000_000,
+            qualified_financing_price=1.0,
+        )
+        assert r["accrued_interest"] == 0
+        # No warning — none-interest is the intended shape, not an inference fallback.
+        assert "warnings" not in r or not any(
+            w["code"] == "statutory_ita_3j_proxy_rate_used" for w in r.get("warnings", [])
+        )
+
 
 # ===========================================================================
 # option_pool.py
