@@ -383,7 +383,7 @@ def _assert_coaching_payload_privacy_clean(
 
     The Context B coaching dispatch contract requires `coaching_payload` to
     refer to investors and founders abstractly (no concrete names). Per
-    `agents/cap-table.md` "Privacy boundary" (v0.3.1: narrowed from "investor
+    `agents/cap-table.md` "Privacy boundary" (narrowed from "investor
     names AND founder names AND document text" to just "investor names AND
     founder names" — document text isn't structurally in the payload).
 
@@ -392,8 +392,8 @@ def _assert_coaching_payload_privacy_clean(
     1. **Investor names** from `instruments.safes[].investor_name` and
        `instruments.notes[].investor_name` — the primary leak surface
        (extracted from source documents; must not surface in coaching).
-    2. **Founder names** from `inputs.founders[].name` — added in v0.3.1
-       (commit #9 of post-J audit) so the contract matches the agent body's
+    2. **Founder names** from `inputs.founders[].name` — included so the
+       contract matches the agent body's
        privacy promise.
 
     Carve-outs (matches that are NOT leaks):
@@ -602,7 +602,7 @@ def render_report_markdown(
         # Math outputs (when full/mixed)
         if completeness in {"full", "mixed"} and co.get("aggregate_ownership_by_class"):
             agg = co["aggregate_ownership_by_class"]
-            # v0.4.0: when AD fires, show three-way headline (pre-AD baseline /
+            # When AD fires, show three-way headline (pre-AD baseline /
             # coupled with-AD / delta) so founders understand the AD impact.
             ad_breakdown = co.get("anti_dilution_breakdown") or []
             if ad_breakdown:
@@ -622,7 +622,7 @@ def render_report_markdown(
                         )
                     lines.append("")
             lines.append("**Post-round ownership:**")
-            # v0.4.8: skip the AD comparison fields here — they're rendered in
+            # Skip the AD comparison fields here — they're rendered in
             # the three-way headline block above, and the delta field is in
             # percentage points (not a fraction), so _percent() would
             # double-encode it as "−256.6%" instead of "-2.57 pp".
@@ -636,7 +636,7 @@ def render_report_markdown(
                     continue
                 lines.append(f"- {k.replace('_', ' ')}: {_percent(v)}")
             lines.append("")
-            # v0.4.0: per-series AD breakdown
+            # Per-series AD breakdown
             if ad_breakdown:
                 lines.append("**Anti-dilution adjustments (per series):**")
                 for bd in ad_breakdown:

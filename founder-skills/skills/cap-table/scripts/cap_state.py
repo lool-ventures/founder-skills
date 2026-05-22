@@ -167,7 +167,7 @@ def build_cap_state(
             "liquidation_preference_type": s.get("liquidation_preference_type", "non_participating"),
             "participation_cap_multiple": s.get("participation_cap_multiple"),
             "anti_dilution_protection": s.get("anti_dilution_protection", "none"),
-            # v0.4.8: per-series AD knobs. Default to NVCA-default semantics so
+            # Per-series AD knobs. Default to NVCA-default semantics so
             # downstream priced_round.py sees the right contract; the input
             # may omit these fields and they'll be filled in here.
             "ad_trigger_basis": s.get("ad_trigger_basis", "original_issue_price"),
@@ -198,7 +198,7 @@ def build_cap_state(
         "founders": canonical_founders,
         "common_batches": common_batches,
         "preferred_series": canonical_preferred,
-        # v0.4.8: cap_table_history carries prior anti_dilution_applied events.
+        # cap_table_history carries prior anti_dilution_applied events.
         # Read by priced_round.py's stale-CCP guard. Optional in inputs; defaults
         # to an empty list. cap_state_after_round.py writes new events here.
         **({"cap_table_history": inputs["cap_table_history"]} if "cap_table_history" in inputs else {}),

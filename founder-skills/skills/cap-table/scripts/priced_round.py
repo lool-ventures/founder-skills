@@ -5,9 +5,7 @@
 # ///
 """Coupled priced-round solver with anti-dilution.
 
-Per design doc §9 Step 5 + the v0.4.0 coupled-AD refactor (see
-docs/internal/2026-05-21-priced-round-coupled-solver-design.md): priced
-rounds have circular dependencies (option-pool top-up needs
+Priced rounds have circular dependencies (option-pool top-up needs
 new_money_shares; new_money_shares depends on equity_financing_price;
 price depends on post-SAFE/note/pool FD; anti-dilution to existing
 preferred series depends on the new PPS AND changes total FD via mutated
@@ -30,7 +28,7 @@ Architecture (Adjuster Protocol):
   * MFN resolution stays STRUCTURAL (one-time pre-pass, not per-iter) —
     inheritance is PPS-independent.
   * CP1 (the original CCP per AD-protected series) is FROZEN at iter 0
-    in `pre_financing_cp1_snapshots` to avoid ratchet-on-ratchet (v0.5.0).
+    in `pre_financing_cp1_snapshots` to avoid ratchet-on-ratchet.
   * A denominator components are FROZEN at iter 0 in
     `pre_financing_a_components` per NVCA §4.4.4 "immediately prior to
     such issue."
@@ -47,10 +45,9 @@ Convergence:
 Backwards compatibility:
   * When no preferred series has anti_dilution_protection != none, the
     AntiDilutionAdjuster short-circuits — output is semantically
-    identical to the pre-v0.4.0 solver. Existing 164 cap-table tests
-    pass with old-shape fields bit-for-bit; new optional fields
-    (anti_dilution_breakdown, founders_pct_pre_anti_dilution) are added
-    with no-op values.
+    identical to a no-AD solver. Old-shape fields bit-for-bit; new optional
+    fields (anti_dilution_breakdown, founders_pct_pre_anti_dilution) are
+    added with no-op values.
 """
 
 from __future__ import annotations
@@ -182,7 +179,7 @@ def _compute_a_denominator(components: dict[str, int], basis: str) -> float:
         )
     elif basis == "nvca_narrow":
         return float(components["common_shares"] + components["preferred_shares_as_converted"])
-    raise ValueError(f"Unknown ad_a_denominator_basis: {basis}. (Custom A-basis is v0.5.0 scope.)")
+    raise ValueError(f"Unknown ad_a_denominator_basis: {basis}. (Custom A-basis is a future extension.)")
 
 
 def _prior_down_round_in_history(series_id: str, cap_table_history: list[dict[str, Any]]) -> bool:
@@ -203,7 +200,7 @@ def _apply_anti_dilution(
 ) -> tuple[dict[str, float], list[dict[str, Any]], list[dict[str, Any]]]:
     """AntiDilutionAdjuster.compute() core. Returns (ccp_mutations, breakdown, warnings).
 
-    `cp1_snapshots` is FROZEN at iter 0 to avoid ratchet-on-ratchet (v0.5.0).
+    `cp1_snapshots` is FROZEN at iter 0 to avoid ratchet-on-ratchet.
     Within a single round, CP1 stays constant; only new_pps moves through the
     fixed-point iteration.
 
@@ -262,7 +259,7 @@ def _apply_anti_dilution(
         else:
             raise ValueError(f"Unknown anti_dilution_protection: {protection}")
 
-        # CP2 floor enforcement (per-series; v0.4.0 in scope)
+        # CP2 floor enforcement (per-series)
         floor = series.get("ad_cp2_floor")
         cp2_unfloored = cp2
         floor_applied = False
@@ -385,7 +382,7 @@ def _aitken_projection(history: list[float]) -> float | None:
 
     Returns None if catastrophic cancellation (Δ² near zero — near a 2-cycle).
 
-    Sprint 1 reviewer caught the v1 numerator bug: the original code used
+    A reviewer caught an earlier numerator bug: a prior version used
     `(p_n - p_{n-2})²` which overshoots by a factor of ~(1+r)² where r is the
     convergence rate. The 20× fallback fence masked the divergence on most
     realistic inputs but would have slowed convergence rather than
@@ -406,7 +403,7 @@ def _aitken_projection(history: list[float]) -> float | None:
 # SAFE / Note conversion stages
 # ============================================================================
 # These wrap existing math producers and are called by the orchestrator inside
-# the iteration loop. Behavior matches the pre-v0.4.0 solver verbatim — the
+# the iteration loop. Behavior matches the legacy no-AD solver verbatim — the
 # wrapping is structural, not semantic.
 
 
@@ -488,7 +485,7 @@ def solve_priced_round(
 ) -> dict[str, Any]:
     """Solve the coupled priced-round system with anti-dilution.
 
-    Per v3 design §3.5 orchestrator pseudocode + v0.4.0 coupled-AD architecture.
+    Implements the coupled-AD priced-round equilibrium via fixed-point iteration.
 
     Returns a structured result with the resolved equity_financing_price,
     per-SAFE / per-note conversion, pool top-up, post-round cap table,
@@ -503,7 +500,7 @@ def solve_priced_round(
 
     Backwards compat:
       * When no preferred series has AD protection, output is semantically
-        identical to the pre-v0.4.0 solver — old-shape fields bit-for-bit.
+        identical to a no-AD solver — old-shape fields bit-for-bit.
     """
     # DEEP-COPY BOUNDARY: every adjuster operates on this working copy.
     # The caller's cap_state is never touched.
@@ -560,7 +557,7 @@ def solve_priced_round(
 
     # IMMUTABLE CP1 SNAPSHOTS — frozen at iter 0 per AD-protected series.
     # Without freezing, AntiDilutionAdjuster would read the iter-mutated CCP
-    # and apply AD on top of itself (ratchet-on-ratchet — v0.5.0 scope).
+    # and apply AD on top of itself (ratchet-on-ratchet — a future extension).
     preferred_series = working_cap_state.get("preferred_series", [])
     pre_financing_cp1_snapshots: dict[str, float] = {
         s["series_id"]: float(
@@ -578,7 +575,7 @@ def solve_priced_round(
 
     # Detect whether ANY series carries AD protection. When none, the
     # AntiDilutionAdjuster short-circuits and we never call
-    # _refresh_as_converted_totals — preserves the pre-v0.4.0 output bit-for-bit.
+    # _refresh_as_converted_totals — preserves the no-AD output bit-for-bit.
     has_ad_protection = any(s.get("anti_dilution_protection", "none") != "none" for s in preferred_series)
 
     # Initial price estimate: pre_money / pre_FD
@@ -612,7 +609,7 @@ def solve_priced_round(
                 preferred_series=preferred_series,
                 cp1_snapshots=pre_financing_cp1_snapshots,
                 new_pps=price,
-                consideration=new_money,  # NVCA-default carve-outs in v0.4.0
+                consideration=new_money,  # NVCA-default carve-outs only
                 a_components=pre_financing_a_components,
                 cap_table_history=working_cap_state.get("cap_table_history", []),
             )
@@ -723,7 +720,7 @@ def solve_priced_round(
             }
         )
 
-    # === Final pass at converged PPS (matches pre-v0.4.0 solver behavior) ===
+    # === Final pass at converged PPS ===
     if has_ad_protection:
         # Final AD pass to capture the breakdown at converged PPS
         ccp_mutations, ad_breakdown, ad_warnings = _apply_anti_dilution(
@@ -854,7 +851,7 @@ def solve_priced_round(
         ],
     }
 
-    # v0.4.0 additive outputs (emitted whenever ≥1 series carries AD protection,
+    # Additive AD outputs (emitted whenever ≥1 series carries AD protection,
     # so callers can inspect CCP state regardless of whether AD triggered)
     if has_ad_protection:
         # CCP per series — reflects post-round state for downstream
@@ -875,7 +872,7 @@ def solve_priced_round(
         if ad_warnings:
             result["warnings"] = ad_warnings
 
-    # Convergence diagnostics (always present; lets Sprint 1 acceleration tests inspect)
+    # Convergence diagnostics (emitted when sign-flip damping or Aitken engaged)
     if aitken_engaged or damping_engaged:
         result["convergence_diagnostics"] = {
             "aitken_engaged": aitken_engaged,

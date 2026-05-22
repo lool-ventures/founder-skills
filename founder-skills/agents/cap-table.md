@@ -196,7 +196,7 @@ strike-price methodology, vesting standard. Do NOT extract individual
 grant data from the plan document (grants live in
 `instruments.option_grants[]` populated from a separate source).
 
-**Articles of Association (AoA) extraction is deferred to v0.2** — see commit #7 in the post-J audit sweep. v0.1 routes AoA-only documents to the conversational fallback: the dispatching agent asks targeted `AskUserQuestion`s to populate `inputs.json.preferred_series[]` directly.
+**Articles of Association (AoA) extraction** uses a dedicated sub-context (`ARTICLES_OF_ASSOCIATION_EXTRACTION`) — see the AoA section below. When no AoA is supplied, fall back to the conversational path: the dispatching agent asks targeted `AskUserQuestion`s to populate `inputs.json.preferred_series[]` directly.
 
 **Corpus-derived guidance (from real signed convertible instruments — CLAs, US promissory notes, convertible securities):**
 
@@ -312,7 +312,7 @@ fields trigger user confirmation before commit.
 - **YC convertible security (pre-SAFE form, e.g. GS-Cap Table)**: return `convertible_security`. Validator stores as `convertible_note` with `subtype=convertible_security`. Required-field gate waives maturity_date, maturity_default_treatment, day_count_basis, and annual_interest_rate (SAFE-equivalents have no maturity / no interest). Set `interest_rate_type="none"`.
 - **Convertible bridge financing / convertible investment agreement**: return `convertible_note` (standard) with the bridge-specific fields populated.
 - **Share Purchase Agreement (SPA)**: return `term_sheet` (definitive purchase agreement carries the same cap-table-relevant fields as a term sheet for v0.1). v0.2 may add a dedicated SPA validator if eval data demands it.
-- **Articles of Association (AoA)**: dispatched via the dedicated `ARTICLES_OF_ASSOCIATION_EXTRACTION` sub-context (commit #7 post-J audit) — see that section.
+- **Articles of Association (AoA)**: dispatched via the dedicated `ARTICLES_OF_ASSOCIATION_EXTRACTION` sub-context — see that section.
 
 #### Sub-context: `SPREADSHEET_STRUCTURE_DETECTION`
 
@@ -794,7 +794,7 @@ quoted, e.g.:
 }
 ```
 
-**Type-literal note (M4 fix from post-J audit):** integer-typed fields are
+**Type-literal note:** integer-typed fields are
 JSON integers (no surrounding quotes), not stringified numbers. The
 `scenarios_modeled` value is `3`, not `"3"`. Strings (paths, status,
 descriptions) remain quoted.

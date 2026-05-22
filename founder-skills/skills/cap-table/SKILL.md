@@ -21,7 +21,7 @@ Model cap-table mechanics for founders so they understand what their term sheets
 - **Author:** lool-ventures
 - **Version:** managed in `founder-skills/.claude-plugin/plugin.json`
 - **Compatibility:** Python 3.10+ and `uv` for script execution.
-- **Rule pack:** consumes `cap-table-rules.json` (v0.3.0+) at script runtime.
+- **Rule pack:** consumes `cap-table-rules.json` at script runtime.
 - **Exports (full pipeline, in `cap-table-{slug}/`):**
   - `inputs.json` + `scenarios.json` → `financial-model-review` (cross-validates revenue/dilution scenarios)
   - `cap_state.json` → `ic-sim` (IC partners ask about dilution exposure)
@@ -63,7 +63,7 @@ This skill runs **inline in the main thread** (not as a sub-agent). The main thr
 
 Each lane produces normalized `instruments.json` and/or `cap_state.json` plus an `extraction_audit.json` trail. The main thread picks the lane from the founder's input type.
 
-- **Lane 1 — Single instrument (PDF / DOCX).** Typical: 5–15 page SAFE, term sheet, convertible note, option plan, **or Articles of Association**. Main thread reads via the Read tool (native PDF support, up to 20 pages per call; longer docs use `pages` parameter). For SAFEs/notes/term-sheets/option-plans: dispatch Context A `INSTRUMENT_EXTRACTION`; pipe returned JSON through `extract_instrument.py`. For AoAs: dispatch Context A `ARTICLES_OF_ASSOCIATION_EXTRACTION` (new in v0.3.2); pipe returned JSON through `extract_aoa.py` which validates + merges preferred-series terms into `inputs.json.preferred_series[]`. User confirmation via `AskUserQuestion` before math runs.
+- **Lane 1 — Single instrument (PDF / DOCX).** Typical: 5–15 page SAFE, term sheet, convertible note, option plan, **or Articles of Association**. Main thread reads via the Read tool (native PDF support, up to 20 pages per call; longer docs use `pages` parameter). For SAFEs/notes/term-sheets/option-plans: dispatch Context A `INSTRUMENT_EXTRACTION`; pipe returned JSON through `extract_instrument.py`. For AoAs: dispatch Context A `ARTICLES_OF_ASSOCIATION_EXTRACTION`; pipe returned JSON through `extract_aoa.py` which validates + merges preferred-series terms into `inputs.json.preferred_series[]`. User confirmation via `AskUserQuestion` before math runs.
 - **Lane 2 — Carta XLSX export.** Typical: multi-sheet XLSX (Securities, Convertibles, Stakeholders). `extract_cap_table.py --mode=carta` reads the sheet-name fingerprint and maps known columns → canonical schema. User confirms ambiguous mappings. See `references/carta-pulley-mapping.md` for the column-mapping table. Pulley is not yet supported end-to-end (`--mode=pulley` is a stub that returns a structured blocker pointing to `--mode=freeform`); restore when a real Pulley XLSX is available to verify against.
 - **Lane 3 — Freeform spreadsheet (founder's Excel).** Arbitrary structure. `extract_cap_table.py --mode=freeform` extracts cells + sheet structure. Dispatches Context A `SPREADSHEET_STRUCTURE_DETECTION` to identify cell semantics. Validation gate enforces per-field confidence before commit.
 - **Lane 4 — Structured JSON paste / conversational.** Founder pastes pre-built JSON or describes their cap-table in chat. Direct heredoc into `inputs.json` / `instruments.json`; still flows through `extract_cap_table.py --mode=validate` for schema enforcement.
@@ -343,11 +343,13 @@ python3 "$SCRIPTS/run_scenario.py" \
 
 ```bash
 python3 "$SCRIPTS/rule_audit.py" --phase=post_math \
+  --inputs "$REVIEW_DIR/inputs.json" \
+  --scenarios "$REVIEW_DIR/scenarios.json" \
   --run-id "$RUN_ID" \
   -o "$REVIEW_DIR/rule_audit.json" --pretty
 ```
 
-The gating block from Step 4.5 is preserved verbatim; this phase adds watchlist + counsel items.
+The gating block from Step 4.5 is preserved verbatim; this phase adds watchlist + counsel items. **`--inputs` and `--scenarios` are required for runtime-event counsel-rule gating** — the `anti_dilution.stale_ccp_detected`, `anti_dilution.cp2_floor_applied`, `anti_dilution.pay_to_play_provision_detected`, and four `anti_dilution.solver_*` rules each fire only when their underlying runtime event actually occurred (solver warning emitted, AoA P2P pattern detected, etc.). Without the flags, those rules default to suppressed — safe (no false positives) but produces false negatives instead. Always pass both.
 
 ### Step 7: Counsel Packet → `counsel_packet.json` + `counsel_packet.md`
 

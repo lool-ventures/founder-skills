@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.10] - 2026-05-22
+
+### Fixed — Two integration-layer bugs in v0.4.9's runtime-event counsel gating
+
+The v0.4.9 hotfix added `_runtime_event_predicate` to `rule_audit.py:build_counsel_review_items` so solver-event counsel rules (e.g., `anti_dilution.stale_ccp_detected`, `anti_dilution.pay_to_play_provision_detected`) only fire when the underlying runtime event actually occurred. Re-running the same 5 end-to-end tests against v0.4.9 surfaced two follow-on bugs in that fix:
+
+- **`_runtime_event_predicate` defaulted to permissive** when both `scenarios_data` and `inputs` were absent (returning `None` → defer to static gating, which is permissive for AD-protected scenarios). Callers following the SKILL.md Step 6 example didn't pass `--scenarios` / `--inputs`, so the v0.4.9 gating was a no-op and the original false-positive counsel items returned. Fix: a new `_RUNTIME_EVENT_RULE_IDS` frozenset identifies the runtime-event rules explicitly; when the predicate has no context for one of those rules, return `False` (default-deny) instead of `None`. Non-runtime rules continue to defer to static gating. SKILL.md Step 6 example now also documents `--inputs` and `--scenarios` as required flags so the gating is engaged in practice.
+
+- **`extract_aoa.merge_into_inputs()` didn't persist the pay-to-play detection.** `extract_aoa.detect_pay_to_play()` correctly fired on the AoA text patterns and emitted a counsel item, but the flag was never written to a location `_runtime_event_predicate` could read. With v0.4.10's default-deny semantics, this turned a v0.4.9 false-positive into a v0.4.10 false-negative — P2P would silently drop even when the AoA contained P2P drafting. Fix: `merge_into_inputs()` now accepts an `aoa_findings` dict, sets `inputs.aoa_findings.pay_to_play_detected` and the top-level `inputs.pay_to_play_detected` flag, and the CLI computes this flag and passes it through. `_runtime_event_predicate` reads all three locations.
+
+### Chore — Stripped internal version refs from committed code
+
+Per the new `feedback_no_internal_versions_in_skill_ref_files` memory rule: removed all references to internal release tags ("v0.4.0", "v0.4.8", "v0.5.0 scope"), sprint labels ("Sprint 1", "Sprint 2"), audit-cycle names ("post-J audit"), and reviewer-round labels from committed code — in SKILL.md, the agent body, schema descriptions, rule pack rule fields (`title`, `summary`, `warnings`), Python docstrings, and inline code comments. The rule pack's `metadata.purpose` field was rewritten to describe the pack's purpose (it had grown into a multi-paragraph version history; that history belongs here in CHANGELOG.md). Schema-identifier constants (`SCHEMA_VERSION = "v0.5.0-cap-table"`) and explicit version-meta fields (`pyproject.toml` `version`, `plugin.json` `version`, `metadata.version`) are kept — they're tagged contract identifiers, not internal release labels.
+
+Test count: 1,533 passed.
+
 ## [0.4.9] - 2026-05-22
 
 ### Fixed — Three integration-layer bugs in v0.4.8 surfaced by an end-to-end test batch

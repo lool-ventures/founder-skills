@@ -159,7 +159,7 @@ def detect_counsel_review_items(fields: dict[str, Any]) -> list[dict[str, Any]]:
     """Per-AoA counsel-review flags (Israeli AoA gotchas).
 
     Each item has a `rule_id` matching `cap-table-rules.json` Israeli AoA
-    domain entries (added in commit #7 post-J audit). Downstream
+    domain entries. Downstream
     `rule_audit.py` post-math phase consumes these.
     """
     items: list[dict[str, Any]] = []
@@ -225,9 +225,9 @@ def detect_counsel_review_items(fields: dict[str, Any]) -> list[dict[str, Any]]:
                 }
             )
 
-    # v0.4.0: pay-to-play provision detection (rule pack:
-    # anti_dilution.pay_to_play_provision_detected). v0.4.0 does NOT model
-    # P2P math (deferred to v0.5.0); this is a detection-only counsel flag.
+    # Pay-to-play provision detection (rule pack:
+    # anti_dilution.pay_to_play_provision_detected). P2P math is NOT modeled
+    # currently; this is a detection-only counsel flag.
     if detect_pay_to_play(fields):
         items.append(
             {
@@ -236,8 +236,8 @@ def detect_counsel_review_items(fields: dict[str, Any]) -> list[dict[str, Any]]:
                 "summary": (
                     "AoA contains a pay-to-play provision: AD-protected holders who "
                     "do not participate pro-rata in a down round forfeit AD protection "
-                    "and/or convert to common. v0.4.0 does NOT model P2P math (v0.5.0 "
-                    "scope); current dilution figures may over-protect non-participating "
+                    "and/or convert to common. The current solver does NOT model P2P "
+                    "math; dilution figures may over-protect non-participating "
                     "holders. Counsel verifies whether each AD-protected holder will "
                     "participate at full pro-rata."
                 ),
@@ -269,8 +269,8 @@ def detect_pay_to_play(fields: dict[str, Any]) -> bool:
     AoA text from extract_aoa's input). Falls back to scanning any free-text
     fields the extractor surfaced (`pay_to_play_clause_text`, `notes`).
 
-    v0.4.0 is detection-only — the rule fires as a counsel-review flag.
-    v0.5.0 will implement P2P math (forced conversion, AD-protection
+    Detection-only — the rule fires as a counsel-review flag.
+    A future extension will implement P2P math (forced conversion, AD-protection
     forfeiture, shadow-series mechanics).
     """
     import re
@@ -298,6 +298,7 @@ def merge_into_inputs(
     preferred_series: list[dict[str, Any]],
     source_doc: str | None,
     extraction_confidence_per_series: dict[str, str] | None = None,
+    aoa_findings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Merge validated AoA preferred_series block into existing inputs.json.
 
@@ -353,6 +354,20 @@ def merge_into_inputs(
             ),
         }
 
+    # Persist AoA-level findings (pay_to_play_detected, etc.) so
+    # rule_audit.py --phase=post_math's _runtime_event_predicate can suppress
+    # P2P false negatives + surface P2P true positives. Without this, P2P
+    # detection in detect_pay_to_play() fires at extraction time but the flag
+    # is never persisted, so the downstream counsel item silently drops when
+    # runtime gating is engaged.
+    if aoa_findings:
+        existing_findings = inputs.get("aoa_findings", {}) or {}
+        existing_findings.update(aoa_findings)
+        inputs["aoa_findings"] = existing_findings
+        # Also set the top-level flag for direct rule_audit consumption
+        if aoa_findings.get("pay_to_play_detected") is True:
+            inputs["pay_to_play_detected"] = True
+
     # Write back
     with open(inputs_path, "w", encoding="utf-8") as f:
         json.dump(inputs, f, indent=2)
@@ -363,6 +378,7 @@ def merge_into_inputs(
         "added_count": len(added),
         "total_preferred_series_after_merge": len(existing_series),
         "inputs_path": os.path.abspath(inputs_path),
+        "aoa_findings_persisted": bool(aoa_findings),
     }
 
 
@@ -418,11 +434,19 @@ def _cli() -> int:
     }
 
     if args.inputs:
+        # Also persist AoA-level findings (P2P detection, etc.) so
+        # rule_audit.py's _runtime_event_predicate can read them from inputs.json.
+        # Without this, P2P detection at extract time would silently drop
+        # downstream when runtime gating is engaged in rule_audit post_math.
+        aoa_findings_to_persist = {
+            "pay_to_play_detected": detect_pay_to_play(fields),
+        }
         merge_result = merge_into_inputs(
             args.inputs,
             preferred_series,
             source_doc=args.source_doc,
             extraction_confidence_per_series=series_conf,
+            aoa_findings=aoa_findings_to_persist,
         )
         receipt["merge"] = merge_result
         if merge_result.get("status") == "conflict" and not args.replace_existing:

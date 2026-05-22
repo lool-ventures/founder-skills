@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "cap-table inputs.json",
-  "description": "Founder-supplied + extracted engagement inputs. AoA extraction (commit #7 post-J audit) populates the `preferred_series` array via the merge_aoa_to_inputs.py helper. Founders block carries common-share holdings; option_pool carries existing pool sizing.",
+  "description": "Founder-supplied + extracted engagement inputs. AoA extraction populates the `preferred_series` array via the merge_aoa_to_inputs.py helper. Founders block carries common-share holdings; option_pool carries existing pool sizing.",
   "type": "object",
   "required": ["company_name", "analysis_date", "mode", "metadata"],
   "properties": {
@@ -62,7 +62,7 @@
     },
     "preferred_series": {
       "type": "array",
-      "description": "Preferred-stock series. Schema mirrors cap_state.preferred_series item shape. Populated by AoA extraction (commit #7 post-J audit) via merge_aoa_to_inputs.py, OR directly from founder input via heredoc.",
+      "description": "Preferred-stock series. Schema mirrors cap_state.preferred_series item shape. Populated by AoA extraction via merge_aoa_to_inputs.py, OR directly from founder input via heredoc.",
       "items": {
         "type": "object",
         "required": ["series_name", "shares", "original_issue_price", "original_conversion_price", "current_conversion_price", "issuance_date"],
@@ -110,7 +110,7 @@
     },
     "cap_table_history": {
       "type": "array",
-      "description": "v0.4.8+ optional. Prior anti_dilution_applied events; passed through cap_state.py to feed priced_round.py's stale-CCP guard.",
+      "description": "Optional. Prior anti_dilution_applied events; passed through cap_state.py to feed priced_round.py's stale-CCP guard.",
       "items": {
         "type": "object",
         "required": ["event_type", "series_id"],

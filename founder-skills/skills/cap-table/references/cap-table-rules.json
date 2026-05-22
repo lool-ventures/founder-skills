@@ -2,7 +2,7 @@
   "metadata": {
     "version": "0.4.0",
     "generated_date": "2026-05-21",
-    "purpose": "Verified source-backed rule pack for a future cap-table, dilution, SAFE, convertible note, option pool, anti-dilution, Israel/Delaware, and founder benchmark skill. v0.4.0: added 23 new rules in the `anti_dilution` domain for the coupled-AD priced-round solver — 3 coupled-math variants (BBWA/NBWA/full-ratchet, each cite NVCA §4.4.4 + Cooley), 2 trigger-basis rules (OIP default per NVCA §4.4.4(b), CCP override flagged for counsel), 2 A-denominator-basis rules (broad per §4.4.4(a)(i)-(v), narrow per charter), 2 CP2-floor rules (applicable config + runtime applied event), 1 stale-CCP-detected runtime event, 4 solver-internal convergence-guard runtime events (diverged, oscillating-damped, Aitken-engaged, Aitken-fallback-engaged), 9 NVCA §4.4.5 carve-out source notes (preferred-self-conversion, outstanding convertibles, pool grants, recapitalization, M&A, lessor/lender/strategic, acquisition/JV, public offering, SAFE/note conversion, reflexive catch-all), 1 pay-to-play detection counsel-review flag (math deferred to v0.5.0). Solver-internal runtime events (solver_diverged etc.) carry counsel_review=false per the memory-recorded counsel_review semantics (those events are math/convergence-only — script CAN conclude on them). Earlier v0.3.x history below. v0.3.2: added Israeli AoA counsel-review domain (israeli_aoa.*) with 4 rules for drag-along threshold below 75%, §102 plan absent, liquidation preference above 1x, and full-ratchet anti-dilution. Consumed by extract_aoa.py's detect_counsel_review_items() at extraction time. v0.3.1: added `safe.pre_money_cap_conversion` rule for legacy YC pre-money SAFE forms (yc_premoney_cap_only, pre_money_cap_and_discount_legacy). Post-J audit surfaced that the math producer applied the post-money formula universally; pre-money SAFEs must use pre-financing FD as denominator (cap_price = cap / pre_money_FD). The new rule documents the formula + the multi-SAFE denominator ambiguity (pre-existing snapshot vs as-converted interpretation; v0.1 uses pre-existing). Math producers' `RULE_PACK_VERSION` constants bumped 0.3.0 → 0.3.1. v0.3.0: clarified `safe.post_money_cap_conversion` denominator semantics. For YC post-money SAFEs, the ownership identity `safe_ownership = purchase / post_money_cap` is the load-bearing rule (per `safe.stacked_post_money_caps` and YC-PMSAFE-PRIMER worked examples). The downstream restatement `safe_price = cap / company_capitalization` must use a denominator that satisfies this identity \u2014 which is the FULL post-money fully-diluted snapshot INCLUDING new-money shares, not the pre-financing snapshot. Producers that pass pre-financing FD as `company_capitalization` produce the pre-money YC SAFE formula and under-allocate SAFE shares (math bug fixed in cap-table priced_round.py at this version). Earlier v0.2.x history below. v0.2.2: added NVCA-CERT-OF-INC and COOLEY-DOWN-ROUND as proper source IDs for the BBWA rule (formerly the rule cited NVCA Model Cert in prose without a corresponding source_id; the formula text is in the Cooley down-round article, not the glossary). v0.2.1 history: reverted BBWA B-divisor to CP1; replaced WSGR Q1 figures with verified FY2025 medians; softened ICNL Ordinance caveat. v0.2.0 history: TaxAdviser QSBS URL fix; ICNL Companies Law canonical PDF; WSGR direct URL; qualified-financing benchmark rewrite; Section 102 double-trigger split; option-pool source list cleaned; YC primer co-cites added. v0.2.3: appended verbatim BBWA formula text + 2022-01-24 last-reviewed date from Cooley GO down-round article into the COOLEY-DOWN-ROUND source notes; tightened COOLEY-ANTI-DILUTION notes to flag it as the concept-level glossary corroborator (formula text lives on COOLEY-DOWN-ROUND). v0.2.4: swapped NVCA-CERT-OF-INC URL from the index landing page to the direct downloadable .docx; verified \u00a74.4.4 contains the verbatim CP1-based BBWA formula text by extracting the document XML. v0.2.5: schema documents counsel_review semantics (reliance boundary, not confidence score) and adds optional script_allowed_outputs / script_disallowed_outputs enums; markdown gains a Counsel Review Semantics section. v0.2.6: schema adds optional `date_window.near_edge_days_before_start` and `date_window.near_edge_days_before_end` override fields per cap-table skill design (rev3); rule defaults remain 30/90 days; no rules in v0.2.6 use the overrides yet, but the schema permits them.",
+    "purpose": "Verified source-backed rule pack for the cap-table skill: SAFE conversion, convertible-note math, option-pool top-up, anti-dilution (including coupled-AD priced-round variants), Israeli equity-tax + AoA gotchas, Delaware cross-border / flip mechanics, and founder benchmarks. Every rule cites a primary or near-primary source (NVCA Model Certificate of Incorporation, Y Combinator SAFE primer / documents, Cooley GO down-round article, Israeli Companies Law / Income Tax Ordinance, Carta benchmarks, etc.). Version history lives in CHANGELOG.md.",
     "source_policy": "Rules cite original quotable legal documents, issuer documents, official agency pages, law-firm publications, and benchmark datasets. AI research notes and intermediate consolidated files are excluded from final references."
   },
   "source_bibliography": [
@@ -87,7 +87,7 @@
       "url": "https://nvca.org/wp-content/uploads/2019/06/NVCA-Model-Document-Certificate-of-Incorporation.docx",
       "source_type": "near_primary",
       "accessed_date": "2026-05-18",
-      "notes": "Direct downloadable .docx of the NVCA Model Certificate of Incorporation (2019 revision; NVCA refreshed its Series A doc set in Oct 2025 but this 2019/06 URL currently still serves a valid model document). Subsection 4.4.4 defines the BBWA conversion-price adjustment formula. Verified verbatim 2026-05-18: the section contains the language \"per share equal to CP 1 (determined by dividing the aggregate consideration received by the Corporation in respect of such issue by CP 1)\" \u2014 confirming B's divisor is CP1. Landing page: https://nvca.org/model-legal-documents/.",
+      "notes": "Direct downloadable .docx of the NVCA Model Certificate of Incorporation (2019 revision; NVCA refreshed its Series A doc set in Oct 2025 but this 2019/06 URL currently still serves a valid model document). Subsection 4.4.4 defines the BBWA conversion-price adjustment formula. Verified verbatim 2026-05-18: the section contains the language \"per share equal to CP 1 (determined by dividing the aggregate consideration received by the Corporation in respect of such issue by CP 1)\" — confirming B's divisor is CP1. Landing page: https://nvca.org/model-legal-documents/.",
       "publication_date": "2019-06"
     },
     {
@@ -1338,29 +1338,35 @@
         "rule_id": "anti_dilution.broad_based_weighted_average_coupled",
         "domain": "anti_dilution",
         "behavior_target": "script_formula",
-        "title": "BBWA applied within the coupled priced-round solver (v0.4.0)",
+        "title": "BBWA applied within the coupled priced-round solver",
         "summary": "Same BBWA formula as anti_dilution.broad_based_weighted_average, but applied per-iteration inside the priced_round.solve_priced_round fixed-point solver. CP1 is frozen at iter 0 (the original CCP); new_pps moves through the iteration; the AD adjustment mutates current_conversion_price on the preferred series and the orchestrator recomputes as_converted_totals so subsequent stages see AD-adjusted preferred-as-converted in total_FD.",
         "implementation_action": "hardcode",
         "confidence": "high",
-        "source_ids": ["COOLEY-DOWN-ROUND", "NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "COOLEY-DOWN-ROUND",
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "mixed",
         "counsel_review": false,
         "jurisdiction": "US startup market; document-specific",
         "applies_when": "Use within priced_round solver when a preferred series has anti_dilution_protection=broad_based_weighted_average and the new round PPS is below the trigger threshold.",
         "warnings": [
-          "v0.4.0 freezes CP1 at iter 0 to avoid ratchet-on-ratchet across multiple rounds (out of scope until v0.5.0).",
-          "Consideration in v0.4.0 = new_money only (NVCA-default carve-outs); custom carve-out lists deferred to v0.5.0."
+          "Freezes CP1 at iter 0 to avoid ratchet-on-ratchet across multiple rounds (a future extension).",
+          "Consideration = new_money only (NVCA-default carve-outs); custom carve-out lists deferred to a future extension."
         ]
       },
       {
         "rule_id": "anti_dilution.narrow_based_weighted_average_coupled",
         "domain": "anti_dilution",
         "behavior_target": "script_formula",
-        "title": "Narrow-based weighted-average applied within the coupled priced-round solver (v0.4.0)",
+        "title": "Narrow-based weighted-average applied within the coupled priced-round solver",
         "summary": "Same NBWA formula as the BBWA variant but with the A denominator restricted to common + preferred-as-converted only (excludes options outstanding and reserved). Per NVCA §4.4.4 the broad vs narrow scope is a charter-level election. Applied per-iteration inside priced_round.solve_priced_round with CP1 frozen at iter 0.",
         "implementation_action": "hardcode",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC", "COOLEY-ANTI-DILUTION"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC",
+          "COOLEY-ANTI-DILUTION"
+        ],
         "source_basis": "mixed",
         "counsel_review": false,
         "jurisdiction": "US startup market; document-specific",
@@ -1370,11 +1376,14 @@
         "rule_id": "anti_dilution.full_ratchet_coupled",
         "domain": "anti_dilution",
         "behavior_target": "script_formula",
-        "title": "Full-ratchet applied within the coupled priced-round solver (v0.4.0)",
+        "title": "Full-ratchet applied within the coupled priced-round solver",
         "summary": "Full-ratchet sets CP2 = new_issue_price when the trigger fires. Applied per-iteration inside priced_round.solve_priced_round with CP1 frozen at iter 0. The empirical contraction constant on full-ratchet single-series scenarios is ~0.40 (see TestCoupledSolverGolden/test_golden_2_full_ratchet).",
         "implementation_action": "hardcode",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC", "COOLEY-DOWN-ROUND"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC",
+          "COOLEY-DOWN-ROUND"
+        ],
         "source_basis": "mixed",
         "counsel_review": false,
         "jurisdiction": "US startup market; document-specific",
@@ -1385,10 +1394,12 @@
         "domain": "anti_dilution",
         "behavior_target": "validation_rule",
         "title": "NVCA-default AD trigger threshold is the series' OIP",
-        "summary": "Per NVCA §4.4.4(b), the dilutive-issuance trigger price is the series' original_issue_price (OIP), not its current_conversion_price (CCP). For a series that has not previously experienced an AD adjustment, OIP == CCP; for a series with prior AD, OIP > CCP, so OIP is the stricter (higher) threshold. v0.4.0 defaults to OIP per NVCA.",
+        "summary": "Per NVCA §4.4.4(b), the dilutive-issuance trigger price is the series' original_issue_price (OIP), not its current_conversion_price (CCP). For a series that has not previously experienced an AD adjustment, OIP == CCP; for a series with prior AD, OIP > CCP, so OIP is the stricter (higher) threshold. Defaults to OIP per NVCA.",
         "implementation_action": "parameterize",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; NVCA-form COIs",
@@ -1402,7 +1413,9 @@
         "summary": "Some custom charters trigger AD based on the current conversion price (CCP) rather than OIP. This produces a looser trigger when CCP < OIP (post-prior-AD state). Per-series ad_trigger_basis=current_conversion_price enables this variant.",
         "implementation_action": "parameterize",
         "confidence": "medium",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "US startup market; charter-specific",
@@ -1419,7 +1432,9 @@
         "summary": "Broad-based weighted-average A = common stock + preferred-as-converted + options outstanding + options reserved (and other deemed-issued convertibles). Per NVCA Model COI §4.4.4(a)(i)-(v). Default when anti_dilution_protection=broad_based_weighted_average.",
         "implementation_action": "parameterize",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; NVCA-form COIs"
@@ -1432,7 +1447,10 @@
         "summary": "Narrow-based weighted-average A = common stock + preferred-as-converted only. Excludes options outstanding, options reserved, and other deemed-issued convertibles. Per NVCA §4.4.4 the broad-vs-narrow scope is a charter-level election. Default when anti_dilution_protection=narrow_based_weighted_average.",
         "implementation_action": "parameterize",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC", "COOLEY-ANTI-DILUTION"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC",
+          "COOLEY-ANTI-DILUTION"
+        ],
         "source_basis": "mixed",
         "counsel_review": false,
         "jurisdiction": "US startup market; charter-specific"
@@ -1445,7 +1463,9 @@
         "summary": "Many NVCA-form COIs include a floor on the AD-adjusted conversion price (e.g., CP2 cannot fall below OIP / 2). When ad_cp2_floor is set on a preferred series, the solver clamps CP2 at that value and emits a warning. Counsel verifies the floor matches the founder's actual charter.",
         "implementation_action": "parameterize",
         "confidence": "medium",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "US startup market; charter-specific",
@@ -1459,7 +1479,9 @@
         "summary": "Runtime event emitted when the AntiDilutionAdjuster's computed CP2 fell below the configured ad_cp2_floor and was clamped. Counsel reviews the un-floored CP2 + floor value to verify the clamp matches the founder's charter language.",
         "implementation_action": "warn",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "US startup market; charter-specific",
@@ -1473,7 +1495,9 @@
         "summary": "Cap-state inconsistency detected: current_conversion_price equals original_conversion_price on a preferred series, but cap_table_history shows a prior anti_dilution_applied event for that series. Indicates someone reset CCP after AD without persisting the change, or attached history without persisting CCP. Counsel reviews to verify which value is authoritative.",
         "implementation_action": "warn",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "US startup market; data-integrity check",
@@ -1484,10 +1508,12 @@
         "domain": "anti_dilution",
         "behavior_target": "warning_rule",
         "title": "Coupled solver did not converge within max_iterations",
-        "summary": "Runtime event emitted when priced_round.solve_priced_round hits its iteration cap without satisfying |Δp/p| < 1e-6 AND |Δp| < 1e-9. Per the Sprint 0 reviewer cycle, this is a math/convergence event that the script CAN conclude on (does not require counsel review). Investigation paths: check for pathological contraction (multi-series full-ratchet + heavy preferred stacking), coupled SAFE conversion at sub-CP1 cap, or post-money pool target.",
+        "summary": "Runtime event emitted when priced_round.solve_priced_round hits its iteration cap without satisfying |Δp/p| < 1e-6 AND |Δp| < 1e-9. this is a math/convergence event that the script CAN conclude on (does not require counsel review). Investigation paths: check for pathological contraction (multi-series full-ratchet + heavy preferred stacking), coupled SAFE conversion at sub-CP1 cap, or post-money pool target.",
         "implementation_action": "warn",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; solver-internal"
@@ -1500,7 +1526,9 @@
         "summary": "Convergence-guard event: the solver detected ≥3 consecutive alternating-sign deltas in the PPS history and switched to under-relaxation (α=0.5) to suppress oscillation. Indicates the composed map has a negative-feedback channel beyond the AD positive-feedback regime.",
         "implementation_action": "warn",
         "confidence": "medium",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; solver-internal"
@@ -1510,10 +1538,12 @@
         "domain": "anti_dilution",
         "behavior_target": "warning_rule",
         "title": "Aitken Δ² acceleration engaged",
-        "summary": "Convergence-guard event: the solver estimated |f'_est| > 0.9 for 3+ iterations and switched to Aitken Δ² acceleration to project the fixed-point limit. Per the Shanks transformation, p* ≈ p_{n-2} - (p_{n-1} - p_{n-2})² / (p_n - 2 p_{n-1} + p_{n-2}). Sprint 1 fixed a v1 numerator bug that used the two-step span (p_n - p_{n-2})² instead of the first forward difference (p_{n-1} - p_{n-2})²; the 20× fallback fence had been silently masking the divergence.",
+        "summary": "Convergence-guard event: the solver estimated |f'_est| > 0.9 for 3+ iterations and switched to Aitken Δ² acceleration to project the fixed-point limit. Per the Shanks transformation, p* ≈ p_{n-2} - (p_{n-1} - p_{n-2})² / (p_n - 2 p_{n-1} + p_{n-2}).",
         "implementation_action": "warn",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; solver-internal"
@@ -1526,7 +1556,9 @@
         "summary": "Convergence-guard event: the Aitken-projected step exceeded 20× the latest vanilla step (the fallback-fence threshold). The solver reverted to vanilla iteration for safety. Bounded worst-case behavior near a 2-cycle (Δ² → 0 → catastrophic cancellation in the projection formula).",
         "implementation_action": "warn",
         "confidence": "medium",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; solver-internal"
@@ -1536,10 +1568,12 @@
         "domain": "anti_dilution",
         "behavior_target": "source_note",
         "title": "Carve-out: conversion of preferred stock (recursive trigger)",
-        "summary": "NVCA §4.4.5(a) Excluded Issuances. Conversion of preferred stock itself does not trigger anti-dilution adjustment on other preferred series (no recursive trigger). In v0.4.0 this carve-out is always applied (consideration = new_money only); v0.5.0 may allow per-series override.",
+        "summary": "NVCA §4.4.5(a) Excluded Issuances. Conversion of preferred stock itself does not trigger anti-dilution adjustment on other preferred series (no recursive trigger). This carve-out is always applied (consideration = new_money only); A future extension may allow per-series override.",
         "implementation_action": "warn",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; NVCA-form COIs"
@@ -1552,7 +1586,9 @@
         "summary": "NVCA §4.4.5(b) Excluded Issuances. Shares issued upon conversion or exercise of OUTSTANDING (pre-existing) warrants, options, or convertible securities do not trigger AD — those instruments had contractual conversion rights predating the new round.",
         "implementation_action": "warn",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; NVCA-form COIs"
@@ -1565,7 +1601,9 @@
         "summary": "NVCA §4.4.5(c) Excluded Issuances. Shares issued under a Board-approved equity incentive plan (option grants, RSU grants, the pool refresh itself) do not trigger AD.",
         "implementation_action": "warn",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; NVCA-form COIs"
@@ -1578,7 +1616,9 @@
         "summary": "NVCA §4.4.5(d) Excluded Issuances. Stock splits, stock dividends, and recapitalizations are mechanical adjustments that do not trigger AD.",
         "implementation_action": "warn",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; NVCA-form COIs"
@@ -1591,7 +1631,9 @@
         "summary": "NVCA §4.4.5(e) Excluded Issuances. Shares issued as merger / acquisition consideration are not dilutive issuances for AD purposes.",
         "implementation_action": "warn",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; NVCA-form COIs"
@@ -1604,7 +1646,9 @@
         "summary": "NVCA §4.4.5(f) Excluded Issuances. Shares issued to banks, equipment lessors, real-property lessors, or strategic partners in connection with debt, leases, or strategic arrangements are not AD triggers.",
         "implementation_action": "warn",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; NVCA-form COIs"
@@ -1617,7 +1661,9 @@
         "summary": "NVCA §4.4.5(g) Excluded Issuances. Board-approved acquisitions and joint-venture issuances are not AD triggers.",
         "implementation_action": "warn",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; NVCA-form COIs"
@@ -1630,7 +1676,9 @@
         "summary": "NVCA §4.4.5(h) Excluded Issuances. Shares issued in a registered public offering are not AD triggers.",
         "implementation_action": "warn",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; NVCA-form COIs"
@@ -1643,7 +1691,10 @@
         "summary": "NVCA §4.4.5 (by analogy) + YC SAFE primer: shares issued upon conversion of SAFEs or convertible notes are not dilutive issuances for AD purposes — those instruments had contractual conversion rights predating the new round. The new equity round itself triggers AD; the SAFE/note conversion that accompanies it does not double-count.",
         "implementation_action": "warn",
         "confidence": "high",
-        "source_ids": ["NVCA-CERT-OF-INC", "YC-PMSAFE-PRIMER"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC",
+          "YC-PMSAFE-PRIMER"
+        ],
         "source_basis": "mixed",
         "counsel_review": false,
         "jurisdiction": "US startup market; convention"
@@ -1656,7 +1707,9 @@
         "summary": "NVCA §4.4.5 (catch-all reflexive clause). Issuances that the protected preferred holders waive in writing or that the Board approves with affirmative AD-protected-holder consent are not AD triggers.",
         "implementation_action": "warn",
         "confidence": "medium",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; charter-specific"
@@ -1666,16 +1719,18 @@
         "domain": "anti_dilution",
         "behavior_target": "counsel_review_flag",
         "title": "Pay-to-play provision detected in AoA",
-        "summary": "Text-pattern detection from extract_aoa.py: the founder's Articles of Association include a pay-to-play provision (preferred holder must participate pro-rata in the new round or forfeit AD protection / convert to common). v0.4.0 does NOT implement pay-to-play math; the rule fires as a counsel-review item flagging the v0.5.0 gap. If the founder has investors that may not participate, the v0.4.0 dilution numbers may over-protect them.",
+        "summary": "Text-pattern detection from extract_aoa.py: the founder's Articles of Association include a pay-to-play provision (preferred holder must participate pro-rata in the new round or forfeit AD protection / convert to common). The current solver does NOT implement pay-to-play math; the rule fires as a counsel-review item flagging the gap. If the founder has investors that may not participate, the dilution numbers may over-protect them.",
         "implementation_action": "counsel_review",
         "confidence": "medium",
-        "source_ids": ["NVCA-CERT-OF-INC"],
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
         "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "US startup market; charter-specific",
         "applies_when": "Use when extract_aoa.py detects pay-to-play text patterns OR a founder/agent explicitly identifies the provision.",
         "warnings": [
-          "v0.4.0 limitation: AD math does not model pay-to-play forced conversion. Counsel verifies whether each AD-protected holder will participate at full pro-rata."
+          "Current limitation: AD math does not model pay-to-play forced conversion. Counsel verifies whether each AD-protected holder will participate at full pro-rata."
         ]
       }
     ],

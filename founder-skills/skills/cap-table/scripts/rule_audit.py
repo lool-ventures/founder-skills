@@ -366,7 +366,7 @@ _RULE_MATCHERS: dict[str, Any] = {
     "anti_dilution.full_ratchet": lambda i, inst, cs: any(
         s.get("anti_dilution_protection") == "full_ratchet" for s in (cs.get("preferred_series") or [])
     ),
-    # v0.4.0 coupled-solver AD variants — apply only when respective protection is present
+    # Coupled-solver AD variants — apply only when respective protection is present
     "anti_dilution.broad_based_weighted_average_coupled": lambda i, inst, cs: any(
         s.get("anti_dilution_protection") == "broad_based_weighted_average" for s in (cs.get("preferred_series") or [])
     ),
@@ -376,7 +376,7 @@ _RULE_MATCHERS: dict[str, Any] = {
     "anti_dilution.full_ratchet_coupled": lambda i, inst, cs: any(
         s.get("anti_dilution_protection") == "full_ratchet" for s in (cs.get("preferred_series") or [])
     ),
-    # v0.4.0 trigger-basis rules — apply when any AD-protected series uses the respective basis
+    # Trigger-basis rules — apply when any AD-protected series uses the respective basis
     "anti_dilution.trigger_basis_original_issue_price": lambda i, inst, cs: any(
         s.get("anti_dilution_protection", "none") != "none"
         and s.get("ad_trigger_basis", "original_issue_price") == "original_issue_price"
@@ -386,7 +386,7 @@ _RULE_MATCHERS: dict[str, Any] = {
         s.get("anti_dilution_protection", "none") != "none" and s.get("ad_trigger_basis") == "current_conversion_price"
         for s in (cs.get("preferred_series") or [])
     ),
-    # v0.4.0 A-denominator-basis rules — apply when respective basis is in use
+    # A-denominator-basis rules — apply when respective basis is in use
     "anti_dilution.a_denominator_nvca_broad": lambda i, inst, cs: any(
         s.get("anti_dilution_protection") in {"broad_based_weighted_average", "narrow_based_weighted_average"}
         and s.get("ad_a_denominator_basis", "nvca_broad") == "nvca_broad"
@@ -397,11 +397,11 @@ _RULE_MATCHERS: dict[str, Any] = {
         and s.get("ad_a_denominator_basis") == "nvca_narrow"
         for s in (cs.get("preferred_series") or [])
     ),
-    # v0.4.0 CP2 floor configuration rule — applies when any series has a floor configured
+    # CP2 floor configuration rule — applies when any series has a floor configured
     "anti_dilution.cp2_floor_applicable": lambda i, inst, cs: any(
         s.get("ad_cp2_floor") is not None for s in (cs.get("preferred_series") or [])
     ),
-    # v0.4.0 carve-out source notes — applies when any AD-protected series exists
+    # Carve-out source notes — apply when any AD-protected series exists
     # (the carve-outs ARE the consideration-set definition, so they're relevant whenever AD runs)
     "anti_dilution.carve_out_preferred_self_conversion": lambda i, inst, cs: any(
         s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
@@ -433,7 +433,7 @@ _RULE_MATCHERS: dict[str, Any] = {
     "anti_dilution.carve_out_reflexive_catch_all": lambda i, inst, cs: any(
         s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
     ),
-    # v0.4.0 runtime events — default-True via the dispatch table's fallback would surface them
+    # Runtime events — default-True via the dispatch table's fallback would surface them
     # always; instead scope to AD presence so they don't pollute no-AD engagements.
     "anti_dilution.cp2_floor_applied": lambda i, inst, cs: any(
         s.get("ad_cp2_floor") is not None for s in (cs.get("preferred_series") or [])
@@ -453,7 +453,7 @@ _RULE_MATCHERS: dict[str, Any] = {
     "anti_dilution.solver_aitken_fallback_engaged": lambda i, inst, cs: any(
         s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
     ),
-    # v0.4.0 P2P detection — text-pattern flag from extract_aoa; safer to default-True (the
+    # P2P detection — text-pattern flag from extract_aoa; safer to default-True (the
     # rule_audit phase doesn't have access to the AoA text patterns, so applicability is
     # determined upstream by whether the extraction flagged P2P).
     "anti_dilution.pay_to_play_provision_detected": _matcher_always,
@@ -470,7 +470,7 @@ _RULE_MATCHERS: dict[str, Any] = {
     "israeli_ltd.preferred_governance_checklist": lambda i, inst, cs: (
         _structure_includes_israel(i) and _has_preferred(cs)
     ),
-    # Israeli AoA rules (commit #7 post-J audit) — apply ONLY when:
+    # Israeli AoA rules — apply ONLY when:
     #   (a) jurisdiction structure includes Israel, AND
     #   (b) a preferred series is in cap_state (i.e., AoA terms have actually
     #       been extracted / the engagement is modeling preferred-stock economics).
@@ -753,12 +753,25 @@ def _action_for_status(entry: dict[str, Any], rule: dict[str, Any]) -> str:
     return "Review status."
 
 
+_RUNTIME_EVENT_RULE_IDS = frozenset(
+    {
+        "anti_dilution.stale_ccp_detected",
+        "anti_dilution.cp2_floor_applied",
+        "anti_dilution.solver_diverged",
+        "anti_dilution.solver_oscillating_damped",
+        "anti_dilution.solver_aitken_acceleration_applied",
+        "anti_dilution.solver_aitken_fallback_engaged",
+        "anti_dilution.pay_to_play_provision_detected",
+    }
+)
+
+
 def _runtime_event_predicate(
     rule_id: str,
     scenarios_data: dict[str, Any] | None,
     inputs: dict[str, Any] | None,
 ) -> bool | None:
-    """v0.4.8: gate solver-event counsel rules on the actual runtime event.
+    """Gate solver-event counsel rules on the actual runtime event firing.
 
     Static gating (`applies_when_matched` from `_RULE_MATCHERS`) is intentionally
     permissive — it scopes to "AD-protected series present." But for runtime-event
@@ -768,9 +781,19 @@ def _runtime_event_predicate(
       * True  → surface the counsel item (event fired)
       * False → suppress (event did not fire — would have been a false positive)
       * None  → not a runtime-event rule; use static gating
+
+    Default-deny semantics: when this is a runtime-event rule AND the caller
+    didn't supply scenarios_data / inputs, return False (suppress) rather than
+    None (defer). Without this, callers that don't pass --scenarios/--inputs
+    end up admitting every runtime-event counsel rule whenever AD-protected
+    preferred is present, regardless of whether the event happened. Non-runtime
+    rules continue to defer to static gating via the final `return None`.
     """
-    if scenarios_data is None and inputs is None:
-        return None  # no runtime context; defer to static gating
+    if rule_id in _RUNTIME_EVENT_RULE_IDS and scenarios_data is None and inputs is None:
+        # Default-deny for runtime-event rules when no context supplied.
+        return False
+    if rule_id not in _RUNTIME_EVENT_RULE_IDS and scenarios_data is None and inputs is None:
+        return None  # not a runtime-event rule, no context; defer to static gating
 
     scenarios = (scenarios_data or {}).get("scenarios", []) or []
 
@@ -835,10 +858,10 @@ def build_counsel_review_items(
 ) -> list[dict[str, Any]]:
     """Extract counsel_review_items from rules where counsel_review=true.
 
-    v0.4.8: runtime-event rules (solver warnings, AoA detections) are gated on
-    the actual event having occurred — see _runtime_event_predicate. Without
-    this, every AD-domain counsel-review rule fires whenever the engagement
-    has AD-protected preferred series, which produces false positives like
+    Runtime-event rules (solver warnings, AoA detections) are gated on the
+    actual event having occurred — see _runtime_event_predicate. Without this,
+    every AD-domain counsel-review rule fires whenever the engagement has
+    AD-protected preferred series, producing false positives like
     `stale_ccp_detected` and `pay_to_play_provision_detected` in scenarios
     where the underlying event never happened.
     """
@@ -857,7 +880,7 @@ def build_counsel_review_items(
         )
         if not any_applicable:
             continue
-        # v0.4.8 runtime gating: for solver-event / AoA-detection rules, also
+        # Runtime gating: for solver-event / AoA-detection rules, also
         # require the underlying event to have actually occurred.
         runtime_gate = _runtime_event_predicate(rule_id, scenarios_data, inputs)
         if runtime_gate is False:
@@ -983,7 +1006,7 @@ def _phase_post_math(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # v0.4.8: optionally load scenarios.json + inputs.json to gate runtime-event
+    # Optionally load scenarios.json + inputs.json to gate runtime-event
     # counsel rules (stale_ccp_detected, pay_to_play_provision_detected, etc.)
     # on the actual event having fired. Without these reads, every AD-domain
     # counsel-review rule surfaces whenever AD-protected preferred is present.
