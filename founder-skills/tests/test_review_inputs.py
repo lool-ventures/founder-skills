@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import types
 import urllib.error
 import urllib.request
 from typing import Any
@@ -22,6 +24,39 @@ _SCRIPTS = os.path.join(
 )
 _SCRIPT = os.path.join(_SCRIPTS, "review_inputs.py")
 _APPLY_SCRIPT = os.path.join(_SCRIPTS, "apply_corrections.py")
+
+
+def _load_review_inputs_module() -> types.ModuleType:
+    """Import review_inputs.py as a module (unique sys.modules key to avoid collisions)."""
+    key = "fmr_review_inputs_test"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    spec = importlib.util.spec_from_file_location(key, _SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def _generate_static_stdout(inputs: dict[str, Any]) -> tuple[int, str, str, str]:
+    """Write inputs to temp file, run script with --static, return (exit_code, html, stderr, stdout)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        inputs_path = os.path.join(tmpdir, "inputs.json")
+        output_path = os.path.join(tmpdir, "review.html")
+        with open(inputs_path, "w") as f:
+            json.dump(inputs, f)
+        result = subprocess.run(
+            [sys.executable, _SCRIPT, inputs_path, "--static", output_path],
+            capture_output=True,
+            text=True,
+        )
+        html = ""
+        if os.path.exists(output_path):
+            with open(output_path) as f:
+                html = f.read()
+        return result.returncode, html, result.stderr, result.stdout
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -536,11 +571,12 @@ class TestServerMode:
             proc.terminate()
             proc.wait(timeout=5)
 
-    def test_get_feedback_restores_state(self) -> None:
-        """GET /api/feedback returns previously saved feedback."""
+    def test_get_feedback_returns_405(self) -> None:
+        """GET /api/feedback must return 405 — corrections are write-only over HTTP
+        (regression: previously served stored founder data back to GET callers)."""
         port, tmpdir, proc = _start_server(_FULL_INPUTS)
         try:
-            # First save some feedback
+            # First POST some feedback so there is data on disk
             payload = json.dumps({"test": "data"}).encode()
             req = urllib.request.Request(
                 f"http://127.0.0.1:{port}/api/feedback",
@@ -549,10 +585,12 @@ class TestServerMode:
                 method="POST",
             )
             urllib.request.urlopen(req)
-            # Then read it back
-            resp = urllib.request.urlopen(f"http://127.0.0.1:{port}/api/feedback")
-            result = json.loads(resp.read())
-            assert result["test"] == "data"
+            # GET must return 405, not the stored data
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/api/feedback")
+                raise AssertionError("Expected HTTP 405 but got 200")
+            except urllib.error.HTTPError as e:
+                assert e.code == 405, f"Expected 405, got {e.code}"
         finally:
             proc.terminate()
             proc.wait(timeout=5)
@@ -693,3 +731,75 @@ class TestIntegration:
         assert corrected["cash"]["current_balance"] == 800000
         # Verify metadata preserved
         assert corrected["metadata"]["run_id"] == "20260309T120000Z"
+
+
+# ---------------------------------------------------------------------------
+# Task 13a — _kill_port must only kill prior review_inputs.py instances
+# ---------------------------------------------------------------------------
+
+
+def test_kill_port_spares_foreign_processes(monkeypatch: Any) -> None:
+    """_kill_port must only SIGTERM prior review_inputs.py instances — never
+    whatever unrelated process happens to own the port (regression: it killed
+    any PID lsof returned)."""
+    import time
+
+    mod = _load_review_inputs_module()
+    killed: list[int] = []
+
+    def fake_run(cmd: list[str], **kw: Any) -> Any:
+        class R:
+            stdout = ""
+
+        r = R()
+        if cmd[0] == "lsof":
+            r.stdout = "4242\n"
+        elif cmd[0] == "ps":
+            r.stdout = "/usr/bin/some-other-daemon --port 3117\n"
+        return r
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mod.os, "kill", lambda pid, sig: killed.append(pid))
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+    mod._kill_port(3117)
+    assert killed == []
+
+
+def test_kill_port_kills_prior_instance(monkeypatch: Any) -> None:
+    """_kill_port must SIGTERM a process whose command line contains review_inputs.py."""
+    import time
+
+    mod = _load_review_inputs_module()
+    killed: list[int] = []
+
+    def fake_run(cmd: list[str], **kw: Any) -> Any:
+        class R:
+            stdout = ""
+
+        r = R()
+        if cmd[0] == "lsof":
+            r.stdout = "4242\n"
+        elif cmd[0] == "ps":
+            r.stdout = "python3 .../scripts/review_inputs.py inputs.json --workspace x\n"
+        return r
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mod.os, "kill", lambda pid, sig: killed.append(pid))
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+    mod._kill_port(3117)
+    assert killed == [4242]
+
+
+# ---------------------------------------------------------------------------
+# Task 13c — static receipt must include ok + bytes
+# ---------------------------------------------------------------------------
+
+
+def test_static_receipt_has_ok_and_bytes() -> None:
+    """Static-mode receipt must match the visualize/explore receipt convention."""
+    rc, _html, _stderr, stdout = _generate_static_stdout(_FULL_INPUTS)
+    assert rc == 0
+    receipt = json.loads(stdout)
+    assert receipt["ok"] is True
+    assert receipt["mode"] == "static"
+    assert receipt["bytes"] > 0

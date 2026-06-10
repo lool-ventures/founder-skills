@@ -1574,7 +1574,7 @@ def _write_static(inputs: dict[str, Any], output_path: str, extraction_warnings:
     with open(output_path, "w") as f:
         f.write(html)
     abs_path = os.path.abspath(output_path)
-    print(json.dumps({"mode": "static", "path": abs_path}))
+    print(json.dumps({"ok": True, "mode": "static", "path": abs_path, "bytes": len(html.encode("utf-8"))}))
 
 
 # ---------------------------------------------------------------------------
@@ -1833,7 +1833,11 @@ _WARNING_TAB: dict[str, str] = {
 
 
 def _kill_port(port: int) -> None:
-    """Try to kill whatever is listening on the given port."""
+    """Kill a previous review_inputs.py instance listening on the port.
+
+    Only kills processes whose command line contains review_inputs.py —
+    never an unrelated process that happens to own the port.
+    """
     try:
         result = subprocess.run(
             ["lsof", "-ti", f":{port}"],
@@ -1841,13 +1845,29 @@ def _kill_port(port: int) -> None:
             text=True,
             timeout=5,
         )
+        killed = False
         for pid_str in result.stdout.strip().split():
             with contextlib.suppress(ValueError, OSError):
-                os.kill(int(pid_str), signal.SIGTERM)
-        if result.stdout.strip():
+                pid = int(pid_str)
+                cmdline = subprocess.run(
+                    ["ps", "-p", str(pid), "-o", "command="],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                ).stdout
+                if "review_inputs.py" not in cmdline:
+                    print(
+                        f"Warning: port {port} is owned by an unrelated process "
+                        f"(pid {pid}); not killing it — will fall back to an ephemeral port",
+                        file=sys.stderr,
+                    )
+                    continue
+                os.kill(pid, signal.SIGTERM)
+                killed = True
+        if killed:
             import time
 
-            time.sleep(0.5)
+            time.sleep(1.0)
     except Exception:
         pass
 
@@ -1890,12 +1910,9 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(html.encode())
         elif self.path == "/api/feedback":
-            fb_path = os.path.join(self.workspace, "corrections.json")
-            data: dict[str, Any] = {}
-            if os.path.exists(fb_path):
-                with open(fb_path) as f:
-                    data = json.load(f)
-            self._send_json(200, data)
+            # corrections are write-only over HTTP; the agent reads the file
+            # from disk — never serve stored founder data back to GET callers
+            self.send_error(405)
         else:
             self.send_error(404)
 
