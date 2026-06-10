@@ -416,10 +416,12 @@ def _safe_shares_at_price(
 ) -> tuple[float, dict[str, dict[str, Any]]]:
     """Sum SAFE shares at a given (candidate) equity_financing_price.
 
-    Passes BOTH `company_capitalization` (post-money FD, iterates each round)
-    AND `pre_money_fd` (pre-financing FD, constant). The math producer routes
-    on form: post-money forms use company_capitalization; pre-money (legacy)
-    forms use pre_money_fd.
+    Passes BOTH `company_capitalization` (YC "Company Capitalization" measured
+    immediately prior to the equity financing = adj_pre_fd + converting
+    securities, EXCLUDING new-money shares and in-connection pool top-ups; per
+    rule `safe.company_capitalization_yc_post_money`) AND `pre_money_fd`
+    (pre-financing FD, constant). The math producer routes on form: post-money
+    forms use company_capitalization; pre-money (legacy) forms use pre_money_fd.
     """
     total = 0.0
     per_safe: dict[str, dict[str, Any]] = {}
@@ -585,7 +587,14 @@ def solve_priced_round(
     history: list[float] = [price]
     rel_change = float("inf")
     abs_change = float("inf")
-    total_fd_estimate = pre_fd
+    # company_cap_estimate tracks the YC post-money SAFE denominator:
+    # "Company Capitalization" measured immediately prior to the equity financing
+    # = existing shares + pre-existing unissued pool + ALL converting securities
+    # (SAFEs + notes, self-referential via the fixed-point loop).
+    # Per the YC post-money SAFE definition and rule
+    # `safe.company_capitalization_yc_post_money`, this EXCLUDES new-money
+    # financing shares and in-connection pool top-ups.
+    company_cap_estimate = float(pre_fd)
     aitken_engaged = False
     damping_engaged = False
     ad_breakdown: list[dict[str, Any]] = []
@@ -627,9 +636,15 @@ def solve_priced_round(
         adj_pre_fd = float(working_cap_state["as_converted_totals"]["fully_diluted_shares"])
 
         # === Stage 2: convert_securities (SAFE + Note) ===
+        # company_cap_estimate is the YC "Company Capitalization" denominator:
+        # adj_pre_fd + safe_shares + note_shares from the previous iteration.
+        # It excludes new-money shares and pool top-ups per the YC post-money
+        # SAFE definition. The fixed-point loop self-consistently resolves the
+        # circular dependency (converting securities appear in both the numerator
+        # share count and the denominator they convert against).
         safe_shares, per_safe = _safe_shares_at_price(
             safes,
-            company_capitalization=total_fd_estimate,
+            company_capitalization=company_cap_estimate,
             pre_money_fd=adj_pre_fd,
             equity_financing_price=price,
         )
@@ -670,10 +685,12 @@ def solve_priced_round(
             break
         new_price = pre_money / denom
 
-        # Update total_fd_estimate for next iter (per YC post-money SAFE math —
-        # company_capitalization is the FULL post-money FD INCLUDING new money)
-        new_money_shares_for_fd = new_money / new_price if new_price > 0 else 0.0
-        total_fd_estimate = denom + new_money_shares_for_fd
+        # Update company_cap_estimate for the next iteration: adj_pre_fd + the
+        # converting securities just computed. This is the YC post-money SAFE
+        # "Company Capitalization" — it EXCLUDES new-money shares and the
+        # in-connection pool top-up per the YC post-money SAFE definition
+        # (rule `safe.company_capitalization_yc_post_money`).
+        company_cap_estimate = adj_pre_fd + safe_shares + note_shares
 
         rel_change = abs(new_price - price) / max(price, 1e-12)
         abs_change = abs(new_price - price)
@@ -741,7 +758,7 @@ def solve_priced_round(
     adj_pre_fd = float(working_cap_state["as_converted_totals"]["fully_diluted_shares"])
     safe_shares, per_safe = _safe_shares_at_price(
         safes,
-        company_capitalization=total_fd_estimate,
+        company_capitalization=company_cap_estimate,
         pre_money_fd=adj_pre_fd,
         equity_financing_price=price,
     )

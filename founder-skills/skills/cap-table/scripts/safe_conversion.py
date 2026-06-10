@@ -110,10 +110,14 @@ def convert_safe_cap_implied(
 
 
 # Form classification for denominator routing.
-# Post-money forms: each SAFE locks `purchase / cap` of POST-money FD. The
-# operational denominator passed via `company_capitalization` is the converged
-# post-money FD (including new money). See rule `safe.post_money_cap_conversion`
-# v0.3.0 clarification.
+# Post-money forms: each SAFE locks `purchase / cap` of Company Capitalization,
+# measured immediately prior to the equity financing (= existing shares +
+# pre-existing unissued pool + ALL converting securities, but EXCLUDING new-money
+# financing shares and in-connection pool top-ups). The operational denominator
+# passed via `company_capitalization` must reflect this pre-new-money snapshot,
+# resolved self-consistently via the fixed-point loop in the solver.
+# See rule `safe.company_capitalization_yc_post_money` and the YC post-money
+# SAFE definition.
 POST_MONEY_FORMS: set[str] = {
     "yc_postmoney_cap",
     "yc_postmoney_discount",
@@ -154,7 +158,9 @@ def convert_safe_priced_round(
         * pre_money_cap_and_discount_legacy → min(cap_price[pre-money], discount_price)
 
     Denominator routing: post-money forms use `company_capitalization`
-    (= converged post-money FD); pre-money forms use `pre_money_fd`
+    (= Company Capitalization immediately prior to the equity financing:
+    adj_pre_fd + converting securities, EXCLUDING new-money shares and
+    in-connection pool top-ups); pre-money forms use `pre_money_fd`
     (= pre-financing FD constant). See `POST_MONEY_FORMS` / `PRE_MONEY_FORMS`.
 
     Caller is responsible for resolving MFN cherry-pick BEFORE calling this

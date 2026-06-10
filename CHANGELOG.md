@@ -62,8 +62,11 @@ Cap state → SAFE/note conversion → option-pool top-up → coupled priced-rou
 anti-dilution → flip scenarios → report assembly.
 
 - **SAFE conversion** — all five YC forms including the pre-money (legacy) family. Post-money forms
-  lock `purchase/cap` of the full post-money FD (the YC primer identity); pre-money forms use the
-  pre-financing FD as denominator — the two families produce materially different cap tables.
+  lock `purchase/cap` of Company Capitalization measured immediately prior to the equity financing
+  (= existing shares + pre-existing unissued pool + all converting securities), then are diluted by
+  the new-money round like all other holders — per the YC post-money SAFE definition and rule
+  `safe.company_capitalization_yc_post_money`; pre-money forms use the pre-financing FD as
+  denominator — the two families produce materially different cap tables.
   MFN auto-bind: when an uncapped MFN SAFE has `mfn_provision.elected_against_safe_id` pointing to
   a resolved sibling, the election is pre-resolved before iteration. Transitive MFN chains resolve
   to a fixed point (bounded by `len(safes)` iterations). Genuinely uncapped MFNs still hit the
