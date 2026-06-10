@@ -5,7 +5,7 @@ Reports BOTH candidates separately when the document is ambiguous:
   - `pre_money_valuation_cap` if bare "Valuation Cap" without "Post-Money" prefix
 
 cross_checker uses this to detect when the sub-agent picked the wrong field.
-When BOTH appear in the doc (OVLP pattern: bare term + post-money formulas),
+When BOTH appear in the doc (overlap pattern: bare term + post-money formulas),
 the extractor returns BOTH with ambiguity signals; cross_checker treats this
 as non-disagreement vs. the sub-agent's classification.
 """
@@ -107,7 +107,8 @@ def extract(ctx: ExtractionContext) -> list[FieldExtraction]:
         )
     elif bare_matches and has_post_money_anywhere:
         # Hybrid case: bare defined term but post-money references in formulas
-        # (the OVLP precedent). Take the value from the bare match but classify
+        # (the bare-term + post-money overlap pattern seen in real SAFEs).
+        # Take the value from the bare match but classify
         # as post-money on the basis of the formula references.
         m = bare_matches[0]
         val = _parse_amount(m.group(1), text[m.start() : m.end()])

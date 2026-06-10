@@ -2732,7 +2732,7 @@ class TestPreBaselinePatches:
         assert errs == [], errs
 
     # ------------------------------------------------------------------
-    # Convertible aliases (commit #6 post-J audit)
+    # Convertible aliases
     # ------------------------------------------------------------------
 
     def test_validate_note_subtype_cla_uses_standard_gate(self) -> None:
@@ -2747,8 +2747,8 @@ class TestPreBaselinePatches:
                 "interest_rate_type": "statutory_ita_section_3j",
                 "annual_interest_rate": None,
                 "day_count_basis": 365,
-                "issuance_date": "2019-03-03",
-                "maturity_date": "2021-03-03",
+                "issuance_date": "2019-06-01",
+                "maturity_date": "2021-06-01",
                 "maturity_default_treatment": "convert_at_cap",
             },
             subtype="convertible_loan_agreement",
@@ -2811,11 +2811,11 @@ class TestPreBaselinePatches:
                 "annual_interest_rate": None,
                 "day_count_basis": 365,
                 "interest_converts_to_shares": True,
-                "issuance_date": "2019-03-03",
+                "issuance_date": "2019-06-01",
                 "valuation_cap": 50_000_000,
                 "discount_multiplier": 0.80,
                 "qualified_financing_threshold": 5_000_000,
-                "maturity_date": "2021-03-03",
+                "maturity_date": "2021-06-01",
                 "maturity_default_treatment": "convert_at_cap",
                 "extraction_confidence": "high",
             },
@@ -2851,11 +2851,11 @@ class TestPreBaselinePatches:
     def test_cli_routes_convertible_security_with_null_maturity(self) -> None:
         """End-to-end CLI: convertible_security input lands in instruments.notes[]
         with subtype tag and null maturity fields. Validates the SAFE-equivalent
-        path against a synthetic Foxtrotcorp-style convertible_security shape."""
+        path against a synthetic Israeli-style convertible_security shape."""
         cs_extraction = {
             "instrument_type": "convertible_security",
             "fields": {
-                "investor_name": "Acmecorp Holdings",  # synthetic; real doc was Foxtrotcorp
+                "investor_name": "Acmecorp Holdings",
                 "principal": 250_000,
                 "interest_rate_type": "none",
                 "annual_interest_rate": None,
@@ -2997,11 +2997,9 @@ class TestAoAExtraction:
     """Tests for extract_aoa.py — AoA (Articles of Association) extraction
     validator + counsel-review item detection + merge-into-inputs flow.
 
-    Commit #7 post-J audit. Synthetic fixtures based on the 5 real Israeli
-    AoAs at ~/private-corpus/aoa/ (Deltacorp 2024, Bravocorp Series A 2022,
-    Charliecorp Seed-2 2016, Acmecorp 2012, generic 2015). Real AoAs are NOT
-    included as fixtures (per the redaction rule — no real founder/company
-    names in committed artifacts).
+    Synthetic fixtures modeled on five real Israeli AoAs (2012–2024
+    vintages, anonymized). Real AoAs are NOT included as fixtures (per the
+    redaction rule — no real founder/company names in committed artifacts).
     """
 
     @staticmethod

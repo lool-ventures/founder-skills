@@ -600,7 +600,9 @@ def main() -> int:
 
     results = []
     for p in paths:
-        label = p.name[:70]
+        # Anonymize: never store the raw filename in results/report (real
+        # company names). Real name goes to stderr only under --verbose.
+        label = f"file_{len(results):03d}"
         try:
             text = extract_text(p)
             result = analyze_doc(text, label)
@@ -630,7 +632,8 @@ def main() -> int:
             print(
                 f"  [{j:15}] {dt:11} {s:14} "
                 f"inv={inv:8} pre={pre:8} post={post:8} pool={pool_str:6} "
-                f"liq={liq_str:18} {firms[:20]}"
+                f"liq={liq_str:18} {firms[:20]} {label}: {p.name[:50]}",
+                file=sys.stderr,
             )
 
     # Summary

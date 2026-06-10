@@ -399,15 +399,15 @@ This sub-context exists specifically for AoA documents. CLAs and convertible sec
 - `shares` — actual outstanding count is on the cap table, not in the AoA (return as null; ingest helper merges)
 - `extraction_provenance.source_doc` / `extracted_at` — populated by the validator, not the sub-agent
 
-**Corpus-derived guidance (5 real Israeli AoAs: Deltacorp 2024, Bravocorp Series A 2022, Charliecorp Seed-2 2016, Acmecorp 2012, Echocorp 2015) — calibrated end-to-end via the validator in May 2026:**
+**Corpus-derived guidance (five real Israeli AoAs spanning 2012–2024 vintages, anonymized — calibrated end-to-end via the validator):**
 
 1. **OIP is in the Definitions section, not in tables.** Israeli AoA format:
    `"[Series Name] Original Issue Price" means ... US$ X.XXX` — literal dollar
    sign followed by a space then the value. Each series gets its own definition.
    Multi-series AoAs may cross-reference an SPA or Schedule for the OIP; if no
    inline value found, return `extraction_confidence: "absent"` with an
-   ambiguity flag. **OIPs commonly carry 4 decimal places (e.g. $X.XXXXXXX,
-   $X.XX) — treat as literal; do not round.** Prices are typically computed
+   ambiguity flag. **OIPs commonly carry 4+ decimal places (e.g. $0.7361942,
+   $10.4733) — treat as literal; do not round.** Prices are typically computed
    by inverting a target valuation / target share count, not set nominally.
 
 2. **NIS 0.01 = par value, NOT the OIP.** Every Israeli company assigns a nominal
@@ -423,14 +423,14 @@ This sub-context exists specifically for AoA documents. CLAs and convertible sec
    higher multiple — the underlying multiple is still 1.0.** Do not mis-extract
    "OIP × (1+r)^t" as a multiple above 1x.
 
-4. **Liquidation preference type — calibration-corrected (May 2026):** earlier
-   guidance claimed "all 5 corpus AoAs were fully participating." Real-doc
-   calibration shows **4 of 5 corpus AoAs (Deltacorp 2024, Bravocorp 2022,
-   Charliecorp 2016, Echocorp 2015) are non_participating** with the disjunction
+4. **Liquidation preference type — calibration-corrected:** real-doc
+   calibration shows **4 of 5 corpus AoAs are non_participating** with the
+   disjunction
    "greater of (i) Original Issue Price [plus any accruing dividend] or
    (ii) [amount that would be received as if converted to Ordinary]" — the
-   Delaware-style 1x non-participating idiom in Israeli drafting. The 2012
-   Acmecorp AoA is the lone `participating_capped` example (4x aggregate cap).
+   Delaware-style 1x non-participating idiom in Israeli drafting. The lone
+   `participating_capped` example in the corpus is the 2012-vintage AoA
+   (participation capped at a multiple of aggregate OIP).
    **Structural test:** if the AoA's liquidation waterfall has a "greater of"
    disjunction AND residual goes only to Ordinary (not pro-rata to both
    classes as-converted), it is `non_participating`. If residual is pro-rata
@@ -450,17 +450,17 @@ This sub-context exists specifically for AoA documents. CLAs and convertible sec
    These refer to the same series; normalize on `"Preferred [Letter]"` as
    canonical and cross-check the Definitions section. Sub-series use
    `"[Letter]-[n] Preferred"` (e.g. "Seed-1", "Seed-2"). **Real-doc finding:
-   up to 6 sub-series observed (Bravocorp Series A: Seed-1 / Seed-2 / Seed-3 /
-   Seed-4 / A-1 / A-2). OIPs across sub-series may be DESCENDING (Bravocorp
-   Seed-1 $X.XX → Seed-4 $X.XX), not just ascending. Do not assume monotonic
-   price ordering. When a Seed-2 round is being papered, the prior Series
-   Seed is often NOT renamed "Seed-1" — it stays "Preferred Seed" (Charliecorp).**
+   up to 6 sub-series observed in a single AoA (Seed-1 / Seed-2 / Seed-3 /
+   Seed-4 / A-1 / A-2). OIPs across sub-series may be DESCENDING (later seed
+   tranches priced materially below the first), not just ascending. Do not
+   assume monotonic price ordering. When a Seed-2 round is being papered, the
+   prior Series Seed is often NOT renamed "Seed-1" — it stays "Preferred Seed".**
 
 7. **Dividend phrasing.** Israeli AoAs state "X% per annum compounded annually"
    — map to `dividend_rate_percent: X/100` (e.g. 8% → 0.08). `dividend_cumulative:
    true` if "shall accrue" / "accumulate" / "shall continue to accrue whether or
    not declared"; `false` if "as and when declared by the Board."
-   **Vintage caveat (Acmecorp 2012):** older Israeli AoAs frame the accruing
+   **Vintage caveat (2012-vintage corpus doc):** older Israeli AoAs frame the accruing
    return as "interest" on the OIP rather than as a "dividend" — same math,
    different word. Map to `dividend_rate_percent` regardless; surface as
    ambiguity for counsel to confirm tax characterization.
@@ -480,9 +480,9 @@ This sub-context exists specifically for AoA documents. CLAs and convertible sec
      APM/Amit Pollak Matalon, Gornitzky, Pearl Cohen
    - Counsel firms (legacy, in older AoAs): GKH / Gross Kleinhendler Hodak,
      Yigal Arnon, Meitar Liquornik Geva Leshem
-   - **2012-vintage AoAs may have NO law-firm marker** (Acmecorp had only a
-     Word file path footer). Fall back to statutory + currency + Hebrew-
-     disclaimer signals.
+   - **2012-vintage AoAs may have NO law-firm marker** (one corpus doc had
+     only a Word file-path footer). Fall back to statutory + currency +
+     Hebrew-disclaimer signals.
 
 9. **§102 plan reference: typically ABSENT from the AoA body.** All 5 corpus
    AoAs lacked §102 references. This is the expected Israeli pattern — §102
@@ -492,7 +492,7 @@ This sub-context exists specifically for AoA documents. CLAs and convertible sec
    "no §102 plan exists" (the AoA cannot assert the latter).
 
 10. **Drag-along thresholds below 75% are corpus-wide.** All 5 corpus AoAs had
-    drag-along below the 75% "Israeli market norm" (50%, 50%, 55%, 66%, 70%).
+    drag-along below the 75% "Israeli market norm" (observed range: 50–70%).
     The high-severity counsel-review item should frame the question as: does
     a Preferred-Majority protective veto under a separate Article (typical
     drafting pattern: §61 / §22.4.2 / §8.2.1 references) compound with the
@@ -503,17 +503,17 @@ This sub-context exists specifically for AoA documents. CLAs and convertible sec
 11. **Section 341 explicit override is a sharper red flag.** When the AoA
     contains language like "The threshold set forth in Section 341 of the
     Companies Law shall be replaced by the aforesaid required majority"
-    (Acmecorp Article NN.N verbatim), founders/minority lost a STATUTORY
+    (verbatim from one corpus AoA's override article), founders/minority lost a STATUTORY
     default. Surface this alongside the sub-75% drag rule with higher
     urgency — Israeli Companies Law §341's 95% default protects against
     forced-sale below-fair-value claims.
 
 12. **Restatement AoAs and `issuance_date`.** Multi-restatement AoAs (e.g.,
-    Bravocorp Series A AoA covering Seed-1 through Series A-2) do NOT
+    a Series A restatement covering Seed-1 through Series A-2) do NOT
     recite per-series original issuance dates. Only the most-recent series
     typically has an "Original Issue Date" definition. For older series,
     leave `issuance_date` null in extraction — the validator does NOT
-    require it (calibration finding from May 2026). It is merged in from
+    require it. It is merged in from
     the SPA / Carta cap-table data at ingest time.
 
 13. **Redline handling.** If the document carries tracked changes /

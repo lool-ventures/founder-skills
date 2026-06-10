@@ -139,7 +139,7 @@ class TestValuationCap:
         assert out[0].value == 10_000_000
 
     def test_hybrid_terminology_prefers_post_money(self) -> None:
-        # The OVLP pattern: bare "Valuation Cap" in defined term + Post-Money
+        # The overlap pattern: bare "Valuation Cap" in defined term + Post-Money
         # references in price formulas.
         text = (
             'The "Valuation Cap" is US$15,000,000. The Safe Price means the '

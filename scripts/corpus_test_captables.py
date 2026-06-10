@@ -9,6 +9,12 @@ of past lawyer-produced cap tables). For each file:
   * Sheet + column header inventory (xlsx/xls only)
   * Anonymized aggregate findings (corpus statistics)
 
+Anonymization: filenames are replaced with file_NNN; raw document text is
+never stored; per-file sheet/header inventories are reduced to counts; and
+sheet/header name aggregates only include names recurring in >= 3 files
+(company-specific names — e.g. Carta's "{Company} Cap Table" banner — do
+not recur across companies and are excluded).
+
 Usage:
     python3 scripts/corpus_test_captables.py <CORPUS_DIR> [-o report.json]
 """
@@ -213,7 +219,6 @@ def load_pdf(path: Path) -> tuple[bool, dict[str, Any]]:
             "text_density_per_page": text_density,
             "tables_extracted": tables_found,
             "is_image_only": is_image_only,
-            "sample_text": total_text[:300].replace("\n", " ").strip(),
         }
     except Exception as e:
         return False, {"error": f"{type(e).__name__}: {e}"[:300]}
@@ -293,16 +298,42 @@ def main() -> int:
         if r["loadable"] and r["extension_class"] in {"xlsx", "xls"}:
             format_counts[r.get("detected_format", "unknown")] += 1
 
-    # Sheet name popularity across the corpus (XLSX/XLS only)
+    # Sheet name popularity across the corpus (XLSX/XLS only).
+    # Count DISTINCT FILES per name, then keep only names recurring in >= 3
+    # files: company-specific names (Carta banner sheets, shareholder names
+    # in misdetected header rows) don't recur across companies and would
+    # leak real names into the report.
     sheet_name_counts: Counter[str] = Counter()
     column_header_counts: Counter[str] = Counter()
     for r in results:
-        for sn in r.get("sheet_names", []):
+        for sn in set(r.get("sheet_names", [])):
             sheet_name_counts[sn] += 1
+        seen_headers: set[str] = set()
         for headers in r.get("headers_per_sheet", {}).values():
             for h in headers:
                 if 2 <= len(h) <= 60:
-                    column_header_counts[h] += 1
+                    seen_headers.add(h)
+        for h in seen_headers:
+            column_header_counts[h] += 1
+
+    MIN_RECURRENCE = 3
+    redacted_sheet_names = sum(1 for c in sheet_name_counts.values() if c < MIN_RECURRENCE)
+    redacted_headers = sum(1 for c in column_header_counts.values() if c < MIN_RECURRENCE)
+    sheet_name_counts = Counter({n: c for n, c in sheet_name_counts.items() if c >= MIN_RECURRENCE})
+    column_header_counts = Counter({n: c for n, c in column_header_counts.items() if c >= MIN_RECURRENCE})
+
+    # Reduce per-file inventories to counts — raw sheet/header names can
+    # carry real company names and must not reach the report.
+    for r in results:
+        if "sheet_names" in r:
+            r["n_sheets"] = len(r.pop("sheet_names"))
+        if "headers_per_sheet" in r:
+            r["n_header_columns_per_sheet"] = [len(v) for v in r.pop("headers_per_sheet").values()]
+        if "sheet_info" in r:
+            # dict keyed by raw sheet name → keep only the dimension values
+            r["sheet_dimensions"] = list(r.pop("sheet_info").values())
+        if "likely_header_row_per_sheet" in r:
+            r["likely_header_rows"] = list(r.pop("likely_header_row_per_sheet").values())
 
     # PDF text-extractability
     pdf_results = [r for r in results if r["extension_class"] == "pdf"]
@@ -329,6 +360,11 @@ def main() -> int:
         },
         "top_30_sheet_names": sheet_name_counts.most_common(30),
         "top_50_column_headers": column_header_counts.most_common(50),
+        "name_aggregation": {
+            "min_recurrence_threshold": MIN_RECURRENCE,
+            "sheet_names_redacted_below_threshold": redacted_sheet_names,
+            "column_headers_redacted_below_threshold": redacted_headers,
+        },
         "failures": [
             {"anon": r["anon_name"], "ext": r["extension_class"], "error": r.get("error", "")[:200]}
             for r in results

@@ -144,10 +144,9 @@ def validate_safe(fields: dict[str, Any]) -> list[str]:
 
 # Per-subtype required-field gates for the convertible_note family.
 # Routing is done in _cli via the instrument_type enum; the subtype value is
-# stored on the canonical convertible_note shape (added in commit #6 post-J
-# audit) and surfaced as provenance to downstream consumers. Reflects real
-# convertible eval data at ~/private-corpus/convertible/ (Acmecorp CLA, Foxtrotcorp
-# convertible_security, Golfcorp bridge).
+# stored on the canonical convertible_note shape and surfaced as provenance
+# to downstream consumers. Reflects real-world convertible eval data (CLA,
+# convertible_security, and bridge-note shapes; anonymized).
 CONVERTIBLE_SUBTYPE_GATES: dict[str, dict[str, Any]] = {
     # Standard YC / NVCA convertible note (Series Seed Note, US promissory).
     # All canonical fields apply. This is the default when no subtype is set.
