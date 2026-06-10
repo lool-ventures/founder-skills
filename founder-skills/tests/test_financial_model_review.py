@@ -854,6 +854,38 @@ def test_checklist_no_model_format_backward_compat() -> None:
     assert "model_maturity_pct" in summary
 
 
+def test_checklist_dispatch_shape_propagates_run_id_and_gates(tmp_path: Any) -> None:
+    """The exact shape the SKILL.md CHECKLIST dispatch returns must yield a
+    checklist.json with metadata.run_id (Context B parity) and engaged
+    profile auto-gating (regression: items-only payloads produced neither)."""
+    items = _make_checklist_items()
+    payload = json.dumps(
+        {
+            "company": {
+                "company_name": "TestCo",
+                "slug": "testco",
+                "stage": "pre-seed",
+                "sector": "B2B SaaS",
+                "geography": "US",
+                "revenue_model_type": "saas-sales-led",
+            },
+            "metadata": {"run_id": "20260610T000000Z"},
+            "items": items,
+        }
+    )
+    rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data["metadata"]["run_id"] == "20260610T000000Z"
+    # pre-seed profile must auto-gate at least one seed+ item (e.g. UNIT_17)
+    gated = [
+        i
+        for i in data["items"]
+        if i["status"] == "not_applicable" and str(i.get("evidence", "")).startswith("Auto-gated")
+    ]
+    assert gated, "company block present but no profile auto-gating engaged"
+
+
 # --- Valid inputs fixture ---
 
 _VALID_INPUTS: dict[str, Any] = {
