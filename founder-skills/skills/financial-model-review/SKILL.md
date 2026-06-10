@@ -102,6 +102,7 @@ Every review deposits structured JSON artifacts into a working directory. The fi
 | 5 | `unit_economics.json` | direct pipe: `inputs.json` → `unit_economics.py` |
 | 6 | `runway.json` | direct pipe: `inputs.json` → `runway.py` |
 | 7 | Report | `compose_report.py` (writes both `report.json` and `report.md`) |
+| 7.5 | `commentary.json` | agent-authored (main thread heredoc) — required by Gate 2 for quantitative reviews |
 | 8a | HTML report | `visualize.py` |
 | 8b | Explorer | `explore.py` |
 | 8c | Coaching | Context B dispatch: POST_COMPOSE_COACHING |
@@ -151,7 +152,8 @@ Pass `RUN_ID` to all sub-agents. Every artifact written to `$REVIEW_DIR` must in
 
 If `REVIEW_DIR` already contains artifacts from a previous run, remove them before starting:
 
-    rm -f "$REVIEW_DIR"/{inputs,checklist,unit_economics,runway,report,model_data}.json "$REVIEW_DIR/report.html"
+    rm -f "$REVIEW_DIR"/{inputs,checklist,unit_economics,runway,report,model_data,extraction_validation,corrected_inputs,extraction_corrections,corrections_from_agent,commentary}.json \
+          "$REVIEW_DIR/report.html" "$REVIEW_DIR/explore.html" "$REVIEW_DIR/review.html" "$REVIEW_DIR/report.md"
 
 In Cowork, file deletion may require explicit permission. If cleanup fails with "Operation not permitted", request delete permission and retry before proceeding.
 
@@ -412,6 +414,35 @@ python3 "$SCRIPTS/verify_review.py" --dir "$REVIEW_DIR" --gate 1 --pretty
 ```
 
 **If exit code is non-zero:** read `summary.errors`. Fix the issue by re-running the failing step, then re-run `verify_review.py --gate 1`. **Do not proceed until it exits 0.**
+
+### Step 7.5: Write Commentary (agent-authored, required for quantitative reviews)
+
+`verify_review.py --gate 2` requires `commentary.json` whenever `unit_economics.json`
+and `runway.json` are real (non-stub) — and `explore.py` embeds it into the
+interactive explorer. Author it now, in the main thread, from the artifacts you
+have already seen (checklist summary, unit-economics ratings, runway scenarios).
+Schema: `$REFS/artifact-schemas.md` § commentary.json. `headline` is required;
+include only the lens keys whose artifacts exist (valid lens keys: `runway`,
+`unit_economics`, `stress_test`, `raise_planner`).
+
+```bash
+cat > "$REVIEW_DIR/commentary.json" <<'COMMENTARY_EOF'
+{
+  "headline": "<one-sentence financial health summary>",
+  "investor_talking_points": [
+    "<sentence the founder can say out loud during a fundraise conversation>"
+  ],
+  "lenses": {
+    "runway": {"callout": "<key insight>", "highlight": "<secondary observation>", "watch_out": "<risk>"},
+    "unit_economics": {"callout": "<key insight>", "watch_out": "<risk>"}
+  }
+}
+COMMENTARY_EOF
+```
+
+Ground every sentence in artifact values — never invent numbers. If both
+`unit_economics.json` and `runway.json` are skipped stubs (qualitative path),
+skip this step; Gate 2 will not require the file.
 
 ### Steps 8a-8b: Visualize and Generate Explorer (Optional)
 

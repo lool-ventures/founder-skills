@@ -109,6 +109,44 @@ def test_no_shell_variable_capture_of_python_output() -> None:
     )
 
 
+def test_skill_md_produces_every_gate_required_artifact() -> None:
+    """verify_review.py's required-artifact set (including the conditional
+    commentary.json) must each appear in SKILL.md — a gate requirement with
+    no producing step means every review fails the final gate (regression)."""
+    verify_src = (FMR_DIR / "scripts" / "verify_review.py").read_text(encoding="utf-8")
+    skill_text = SKILL_MD.read_text(encoding="utf-8")
+    required = set(re.findall(r'"([a-z_]+\.json)"', verify_src.split("_OPTIONAL")[0]))
+    required.add("commentary.json")  # the conditional gate-2 requirement
+    missing = sorted(n for n in required if n not in skill_text)
+    assert not missing, f"verify_review requires artifacts SKILL.md never produces: {missing}"
+
+
+def test_cleanup_list_covers_every_pipeline_artifact() -> None:
+    """Every artifact file named in the pipeline table must appear in the
+    previous-run `rm -f` cleanup line — a stale artifact surviving cleanup
+    can silently satisfy a gate with last run's content (regression:
+    commentary.json and five others were missing from the list)."""
+    # Artifacts that are NOT per-run outputs in $REVIEW_DIR and may legitimately
+    # be absent from the cleanup line:
+    _ALLOWLIST = frozenset(
+        {
+            "benchmarks.md",  # shared reference file in $REFS/, never written to $REVIEW_DIR
+            "corrections.json",  # founder-uploaded file consumed by the agent, not a pipeline output
+        }
+    )
+    text = SKILL_MD.read_text(encoding="utf-8")
+    cleanup_start = text.find("rm -f")
+    assert cleanup_start != -1
+    # the cleanup command may span continuation lines — take its paragraph
+    cleanup = text[cleanup_start : text.find("\n\n", cleanup_start)]
+    # brace-expansion form: rm -f "$REVIEW_DIR"/{a,b,c}.json — expand it
+    for stems, ext in re.findall(r"\{([^}]+)\}\.(json|html|md)", cleanup):
+        cleanup += " " + " ".join(f"{s}.{ext}" for s in stems.split(","))
+    artifact_names = set(re.findall(r"`([a-z_]+\.(?:json|html|md))`", text))
+    missing = sorted(n for n in artifact_names - _ALLOWLIST if n not in cleanup)
+    assert not missing, f"pipeline artifacts missing from the cleanup rm -f list: {missing}"
+
+
 def test_checklist_dispatch_template_includes_run_id_and_company() -> None:
     """The CHECKLIST dispatch return shape must carry metadata.run_id (else
     Context B blocks on parity) and the company block (else auto-gating
