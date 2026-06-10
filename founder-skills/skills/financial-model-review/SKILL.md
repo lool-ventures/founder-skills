@@ -33,7 +33,7 @@ This skill runs **inline in the main thread** (not as a sub-agent). The main thr
 
 **Two dispatch contexts for the sub-agent:**
 
-- **Context A — Per-step analytical dispatch (Mitigation 1):** Steps for INPUTS_REVIEW, UNIT_ECONOMICS, RUNWAY_SCENARIOS, and CHECKLIST dispatch the financial-model-review agent via the `Task` tool. The agent does deep analysis and returns structured JSON. The main thread captures the JSON and pipes it through the producer script. The sub-agent does NOT write artifacts directly.
+- **Context A — Per-step analytical dispatch (Mitigation 1):** The INPUTS_REVIEW and CHECKLIST steps dispatch the financial-model-review agent via the `Task` tool. The agent does deep analysis and returns structured JSON. The main thread captures the JSON and pipes it through the producer script. The sub-agent does NOT write artifacts directly. (Unit economics and runway are NOT dispatched — those producers consume `inputs.json` verbatim, so the main thread pipes the file directly.)
 - **Context B — Post-compose coaching dispatch:** The final step dispatches the sub-agent after `compose_report.py` writes `report.md`. The sub-agent reads `report.md`, appends `## Coaching Commentary`, verifies all canonical artifacts on disk, and returns a structured success payload.
 
 **Why this model:** In Cowork, sub-agents have a restricted tool allowlist (no Bash). By keeping orchestration in the main thread and dispatching sub-agents only for analytical or post-compose tasks that use only Read/Edit/Glob/Grep, the pipeline works correctly in both Claude Code (CLI) and Cowork.
@@ -99,8 +99,8 @@ Every review deposits structured JSON artifacts into a working directory. The fi
 | 3 | `inputs.json` | Context A dispatch: INPUTS_REVIEW → `apply_corrections.py` |
 | 3.5 | `corrected_inputs.json` | `apply_corrections.py` (from INPUTS_REVIEW dispatch) |
 | 4 | `checklist.json` | Context A dispatch: CHECKLIST → `checklist.py` |
-| 5 | `unit_economics.json` | Context A dispatch: UNIT_ECONOMICS → `unit_economics.py` |
-| 6 | `runway.json` | Context A dispatch: RUNWAY_SCENARIOS → `runway.py` |
+| 5 | `unit_economics.json` | direct pipe: `inputs.json` → `unit_economics.py` |
+| 6 | `runway.json` | direct pipe: `inputs.json` → `runway.py` |
 | 7 | Report | `compose_report.py` (writes both `report.json` and `report.md`) |
 | 8a | HTML report | `visualize.py` |
 | 8b | Explorer | `explore.py` |
@@ -337,11 +337,7 @@ Wait for the founder to say done, then kill the server and apply corrections.
 
 **Path B — Conversational** (`model_format` is `conversational` or `deck`): present a confirmation table (stage, MRR, growth rate, burn, cash, customers, CAC, target raise) and use `AskUserQuestion` to confirm.
 
-### Steps 4-6: Parallel Analysis Dispatch (Context A)
-
-**IMPORTANT — PARALLEL DISPATCH IS MANDATORY for Steps 5 and 6:** Spawn the UNIT_ECONOMICS and RUNWAY_SCENARIOS dispatches **in a single message** — both Task calls MUST appear in the same assistant response. CHECKLIST may be dispatched alongside them or separately. No `isolation: "worktree"`.
-
-#### CHECKLIST Dispatch
+### Step 4: CHECKLIST Dispatch (Context A)
 
 **Dispatch prompt template:**
 
@@ -378,57 +374,22 @@ cat <<'CHECKLIST_EOF' | python3 "$SCRIPTS/checklist.py" --pretty -o "$REVIEW_DIR
 CHECKLIST_EOF
 ```
 
-#### UNIT_ECONOMICS Dispatch
+### Steps 5-6: Unit Economics and Runway (direct — no dispatch)
 
-**Dispatch prompt template:**
-
-```
-CONTEXT: UNIT_ECONOMICS
-REVIEW_DIR: <absolute path to REVIEW_DIR>
-RUN_ID: <RUN_ID>
-
-You are the financial-model-review agent dispatched in Context A (UNIT_ECONOMICS).
-Read inputs.json at <REVIEW_DIR>/inputs.json.
-
-Return JSON only — the full inputs.json structure (pass-through) for unit_economics.py
-to process via stdin. Include the company, revenue, expenses, unit_economics, and
-cash sections. Shape:
-{<full inputs.json contents>}
-```
-
-**After the sub-agent returns:** apply the tolerant JSON extraction protocol. Pipe through the producer script:
+These two producers consume `inputs.json` verbatim. Run them directly from the
+on-disk file — do NOT round-trip the JSON through a sub-agent (an LLM re-typing
+multi-KB financial JSON risks silently corrupting numbers, and it saves no
+context since the JSON would land in the main thread anyway):
 
 ```bash
-cat <<'UE_EOF' | python3 "$SCRIPTS/unit_economics.py" --pretty -o "$REVIEW_DIR/unit_economics.json"
-<JSON extracted from sub-agent reply>
-UE_EOF
+SCRIPTS="${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/scripts"
+cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/unit_economics.py" --pretty -o "$REVIEW_DIR/unit_economics.json"
+cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/runway.py" --pretty -o "$REVIEW_DIR/runway.json"
 ```
 
-#### RUNWAY_SCENARIOS Dispatch
-
-**Dispatch prompt template:**
-
-```
-CONTEXT: RUNWAY_SCENARIOS
-REVIEW_DIR: <absolute path to REVIEW_DIR>
-RUN_ID: <RUN_ID>
-
-You are the financial-model-review agent dispatched in Context A (RUNWAY_SCENARIOS).
-Read inputs.json at <REVIEW_DIR>/inputs.json.
-
-Return JSON only — the full inputs.json structure (pass-through) for runway.py
-to process via stdin. The company and cash sections are required; revenue and
-israel_specific are optional but include if present. Shape:
-{<full inputs.json contents>}
-```
-
-**After the sub-agent returns:** apply the tolerant JSON extraction protocol. Pipe through the producer script:
-
-```bash
-cat <<'RUNWAY_EOF' | python3 "$SCRIPTS/runway.py" --pretty -o "$REVIEW_DIR/runway.json"
-<JSON extracted from sub-agent reply>
-RUNWAY_EOF
-```
+Both scripts propagate `metadata.run_id` from `inputs.json` into their outputs
+(required by the Context B run_id-parity check). All metric fields are optional —
+missing data yields `not_rated` / a partial-analysis stub, never a crash.
 
 ### Step 7: Compose and Validate Report
 

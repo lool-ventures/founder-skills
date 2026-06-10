@@ -85,6 +85,17 @@ def test_no_base_hash_in_dispatch_prompts() -> None:
                 raise AssertionError(f"{doc.name}:{i} instructs use of base_hash: {line.strip()}")
 
 
+def test_no_passthrough_dispatches() -> None:
+    """unit_economics.py and runway.py consume inputs.json verbatim — routing
+    that JSON through a sub-agent risks silent number corruption (regression:
+    the UNIT_ECONOMICS / RUNWAY_SCENARIOS pass-through dispatches)."""
+    for doc in (SKILL_MD, AGENT_MD):
+        text = doc.read_text(encoding="utf-8")
+        assert "UNIT_ECONOMICS" not in text and "RUNWAY_SCENARIOS" not in text, (
+            f"{doc.name} still contains a pass-through dispatch"
+        )
+
+
 def test_checklist_dispatch_template_includes_run_id_and_company() -> None:
     """The CHECKLIST dispatch return shape must carry metadata.run_id (else
     Context B blocks on parity) and the company block (else auto-gating

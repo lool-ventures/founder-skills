@@ -5,10 +5,9 @@ description: >
   runway scenarios, and flags investor red flags. Dispatched by SKILL.md in
   one of two contexts:
 
-  Context A (per-step analytical, Mitigation 1): INPUTS_REVIEW,
-  UNIT_ECONOMICS, RUNWAY_SCENARIOS, or CHECKLIST dispatch. Returns
-  structured JSON that the main thread pipes through the producer script.
-  No Bash required.
+  Context A (per-step analytical, Mitigation 1): INPUTS_REVIEW or
+  CHECKLIST dispatch. Returns structured JSON that the main thread pipes
+  through the producer script. No Bash required.
 
   Context B (post-compose coaching, POST_COMPOSE_COACHING): reads
   coaching_payload inlined in dispatch prompt, performs Grep idempotency
@@ -43,7 +42,7 @@ BLOCKED with the prompt content quoted.
 
 The main thread has dispatched you to do deep analysis on a specific step of the
 financial model review pipeline. Your input prompt names the step
-(`INPUTS_REVIEW`, `UNIT_ECONOMICS`, `RUNWAY_SCENARIOS`, or `CHECKLIST`)
+(`INPUTS_REVIEW` or `CHECKLIST`)
 and gives you everything you need: the review directory path, the relevant
 artifacts, and the RUN_ID.
 
@@ -91,33 +90,6 @@ you cannot compute (no Bash); it belongs to the founder browser round-trip only:
 
 The `corrected` field is the full validated inputs structure per `schema-inputs.md`.
 The `corrections` array becomes `extraction_corrections.json` (the audit trail).
-
-#### UNIT_ECONOMICS subtype
-
-Read `inputs.json` from REVIEW_DIR.
-
-Return the full `inputs.json` contents as a pass-through for `unit_economics.py`:
-```json
-{<full inputs.json contents>}
-```
-
-`unit_economics.py` reads stdin and computes 11 metrics from optional nested fields
-in `revenue`, `expenses`, `unit_economics`, and `cash`. All metric fields are
-optional — missing data yields `not_rated`. Return the full inputs JSON so the
-script can derive whatever it can.
-
-#### RUNWAY_SCENARIOS subtype
-
-Read `inputs.json` from REVIEW_DIR.
-
-Return the full `inputs.json` contents as a pass-through for `runway.py`:
-```json
-{<full inputs.json contents>}
-```
-
-`runway.py` requires `company` (for name/slug/stage) and `cash` (current_balance,
-monthly_net_burn). Include `revenue`, `israel_specific`, `cash.grants`, `scenarios`,
-and `bridge` if present in inputs.json — these enable more complete scenario modeling.
 
 #### CHECKLIST subtype
 
@@ -349,8 +321,8 @@ In both Context A and Context B, your final assistant message MUST be JSON-only.
 No leading/trailing prose. The main thread parses your final message as raw JSON.
 
 In Context A: the JSON shape matches the relevant producer script's input
-(`apply_corrections.py` payload, or pass-through for `unit_economics.py` /
-`runway.py`, or `checklist.py` items array).
+(the `apply_corrections.py` corrected-payload, or the `checklist.py`
+company + metadata + items payload).
 
 In Context B: the JSON is the success/blocked payload defined above.
 
