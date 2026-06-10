@@ -7,159 +7,222 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.4.10] - 2026-05-22
+## [0.5.0] - 2026-06-10 — New skill: cap-table; financial-model-review hardening
 
-### Fixed — Two integration-layer bugs in v0.4.9's runtime-event counsel gating
+This release ships the cap-table skill for the first time and completes a pre-distribution hardening
+pass on financial-model-review. Users upgrading from 0.4.7 get both skills in their first-ever
+stable form — neither was available in any prior distributed release.
 
-The v0.4.9 hotfix added `_runtime_event_predicate` to `rule_audit.py:build_counsel_review_items` so solver-event counsel rules (e.g., `anti_dilution.stale_ccp_detected`, `anti_dilution.pay_to_play_provision_detected`) only fire when the underlying runtime event actually occurred. Re-running the same 5 end-to-end tests against v0.4.9 surfaced two follow-on bugs in that fix:
+*Versions 0.4.8–0.4.11 were internal development versions and were never distributed; all of their
+changes ship in 0.5.0.*
 
-- **`_runtime_event_predicate` defaulted to permissive** when both `scenarios_data` and `inputs` were absent (returning `None` → defer to static gating, which is permissive for AD-protected scenarios). Callers following the SKILL.md Step 6 example didn't pass `--scenarios` / `--inputs`, so the v0.4.9 gating was a no-op and the original false-positive counsel items returned. Fix: a new `_RUNTIME_EVENT_RULE_IDS` frozenset identifies the runtime-event rules explicitly; when the predicate has no context for one of those rules, return `False` (default-deny) instead of `None`. Non-runtime rules continue to defer to static gating. SKILL.md Step 6 example now also documents `--inputs` and `--scenarios` as required flags so the gating is engaged in practice.
+### Added — new skill: cap-table
 
-- **`extract_aoa.merge_into_inputs()` didn't persist the pay-to-play detection.** `extract_aoa.detect_pay_to_play()` correctly fired on the AoA text patterns and emitted a counsel item, but the flag was never written to a location `_runtime_event_predicate` could read. With v0.4.10's default-deny semantics, this turned a v0.4.9 false-positive into a v0.4.10 false-negative — P2P would silently drop even when the AoA contained P2P drafting. Fix: `merge_into_inputs()` now accepts an `aoa_findings` dict, sets `inputs.aoa_findings.pay_to_play_detected` and the top-level `inputs.pay_to_play_detected` flag, and the CLI computes this flag and passes it through. `_runtime_event_predicate` reads all three locations.
+The cap-table skill extracts structured terms from SAFEs, convertible notes, term sheets, articles
+of association, and Carta XLSX exports, then runs a layered math pipeline to produce a
+counsel-handoff packet and founder-readable report.
 
-### Chore — Stripped internal version refs from committed code
+#### Extraction
 
-Per the new `feedback_no_internal_versions_in_skill_ref_files` memory rule: removed all references to internal release tags ("v0.4.0", "v0.4.8", "v0.5.0 scope"), sprint labels ("Sprint 1", "Sprint 2"), audit-cycle names ("post-J audit"), and reviewer-round labels from committed code — in SKILL.md, the agent body, schema descriptions, rule pack rule fields (`title`, `summary`, `warnings`), Python docstrings, and inline code comments. The rule pack's `metadata.purpose` field was rewritten to describe the pack's purpose (it had grown into a multi-paragraph version history; that history belongs here in CHANGELOG.md). Schema-identifier constants (`SCHEMA_VERSION = "v0.5.0-cap-table"`) and explicit version-meta fields (`pyproject.toml` `version`, `plugin.json` `version`, `metadata.version`) are kept — they're tagged contract identifiers, not internal release labels.
+Four lanes share a common anti-hallucination validator:
 
-Test count: 1,533 passed.
+- **Lane 1 — unstructured instruments (PDF/DOCX).** A sub-agent extracts; the validator enforces
+  form-dependent required-field gates, normalizes the discount-rate multiplier-vs-rate trap, and
+  routes warrants and non-instruments to clean classification. Accepted instrument types include
+  all five YC SAFE forms (post-money cap, uncapped MFN, cap-and-discount, pre-money legacy cap,
+  pre-money legacy cap-and-discount), convertible notes, convertible loan agreements (Israeli
+  CLA/CIA), YC convertible securities, term sheets, option plans, and warrants.
+- **Lane 2 — Carta XLSX exports.** Verified sheet-name fingerprint, Convertible Ledger parsing,
+  discount normalization, and cancelled-record skipping. `--mode=pulley` routes to freeform with a
+  structured blocker until a verified Pulley workbook fingerprint is available.
+- **Lane 3 — freeform spreadsheets.** Sub-agent identifies cell semantics; validator gates per-field
+  confidence.
+- **Lane 4 — structured JSON paste / conversational.** Pre-built JSON or chat-described cap tables
+  still flow through `--mode=validate` for schema enforcement.
 
-## [0.4.9] - 2026-05-22
+A four-layer verification stack runs by default on every Lane-1 extraction:
 
-### Fixed — Three integration-layer bugs in v0.4.8 surfaced by an end-to-end test batch
+- **Forward verification** — three-layer check catches hallucinated values not present in the source
+  document. Calibrated at 3.6% FPR / 100% TPR on verifiable docs; handles 8 PDF
+  extraction-artifact patterns (CID-encoded fonts, image-only PDFs, DocuSign overlays, etc.).
+- **Invariant checking** — per-field real-world bounds and cross-field math invariants. 0% FPR /
+  63% TPR on ×1000 unit-error perturbations. Hard math impossibilities block; soft bounds warn-only.
+- **Deterministic backstop extractors** — regex-based span-preserving extractors for SAFEs
+  (`purchase_amount`, `discount_multiplier`, `valuation_cap`, `issuance_date`, `investor_name`).
+- **Cross-check** — demote-only confidence modulator when sub-agent and backstop disagree.
+  Agreement never bumps; informational only.
 
-Five `claude --plugin-dir` tests against the v0.4.8 release surfaced three real bugs in the producer chain that the in-process goldens didn't catch (because the goldens call `solve_priced_round` directly, bypassing the surrounding `cap_state.build_cap_state` canonicalization and the `rule_audit` / `visualize` / `compose_report` rendering). Math correctness is unaffected — these are integration-layer fixes.
+An optional fifth layer (backward verification via fresh-sub-agent re-extraction) catches
+semantic-confusion errors and is dispatched when the `attention_needed_fields[]` receipt signals
+high-stakes ambiguity.
 
-- **`cap_state.py` field-drop (critical):** `canonical_preferred` was a hand-rolled allowlist of 14 fields per series. The v0.4.8 per-series knobs (`ad_trigger_basis`, `ad_a_denominator_basis`, `ad_cp2_floor`, `ad_carve_outs`) plus the top-level `cap_table_history` array all silently dropped from `inputs.json` → `cap_state.json`. The solver reads them from `cap_state`, so they never reached the math. The Test-4 CP2-floor scenario surfaced this: an `ad_cp2_floor` of $0.50 set in inputs.json produced a final CCP of $0.117 (the un-floored BBWA value) instead of the clamped $0.50. Fix: added the 4 v0.4.8 fields to the canonical preferred-series shape with NVCA defaults (`original_issue_price` trigger, `nvca_broad`/`nvca_narrow` per protection, `null` floor, `nvca_default` carve-outs), and added an opt-in `cap_table_history` passthrough on the cap-state dict. `inputs.schema.json` now declares `cap_table_history` as an optional top-level field.
+#### Math pipeline
 
-- **`rule_audit.py --phase=post_math` false-positive counsel items (high):** `build_counsel_review_items` surfaced every `counsel_review: true` rule whose static `_RULE_MATCHERS` gate matched, regardless of whether the runtime event (solver warning, AoA detection) actually occurred. For any scenario with AD-protected preferred series, `anti_dilution.stale_ccp_detected` and `anti_dilution.pay_to_play_provision_detected` ALWAYS fired — even when no `W_STALE_CCP_SUSPECTED` warning was emitted and no P2P text pattern was detected. The result: counsel packets falsely asserted facts (e.g., "your AoA contains a pay-to-play clause") that could mislead a counsel reader. Fix: added `_runtime_event_predicate(rule_id, scenarios_data, inputs)` that gates 7 runtime-event rules on the actual event having fired (`stale_ccp_detected`, `cp2_floor_applied`, `solver_diverged`, `solver_oscillating_damped`, `solver_aitken_acceleration_applied`, `solver_aitken_fallback_engaged`, `pay_to_play_provision_detected`). `_phase_post_math` now reads `--scenarios` and `--inputs` (both optional; missing inputs default to None and the predicate returns None → static gating wins, preserving backwards compat).
+Cap state → SAFE/note conversion → option-pool top-up → coupled priced-round solver with
+anti-dilution → flip scenarios → report assembly.
 
-- **`visualize.py` + `compose_report.py` double-encode `anti_dilution_delta_pct_points` (medium):** Both renderers looped over `aggregate_ownership_by_class.items()` and piped each value through `_pct()` / `_percent()`, which multiplies by 100. The v0.4.8 `anti_dilution_delta_pct_points` field is already in percentage points (not a fraction), so a `-2.57` value rendered as `-256.6%` in the HTML legend. The Markdown report's three-way narrative block at the top correctly rendered `-2.57 pp`, but the legacy "Post-round ownership" list below also rendered the same value as a percentage. Fix: both renderers now skip the three v0.4.8 AD-meta fields (`founders_pct_pre_anti_dilution`, `preferred_pct_pre_anti_dilution`, `anti_dilution_delta_pct_points`), which are exclusively rendered by the dedicated three-way AD narrative block.
+- **SAFE conversion** — all five YC forms including the pre-money (legacy) family. Post-money forms
+  lock `purchase/cap` of the full post-money FD (the YC primer identity); pre-money forms use the
+  pre-financing FD as denominator — the two families produce materially different cap tables.
+  MFN auto-bind: when an uncapped MFN SAFE has `mfn_provision.elected_against_safe_id` pointing to
+  a resolved sibling, the election is pre-resolved before iteration. Transitive MFN chains resolve
+  to a fixed point (bounded by `len(safes)` iterations). Genuinely uncapped MFNs still hit the
+  cycle guard.
+- **Note conversion** — seven-branch enum (`cap_conversion` / `discount_only` /
+  `maturity_floor_conversion` / `maturity_discount_only` / `maturity_outstanding` /
+  `maturity_forgiven` / `threshold_not_met`) plus override branch. Accepted subtypes: standard
+  convertible note, Israeli CLA, YC convertible security.
+- **Option-pool top-up** — four `target_basis` modes. When `pre_money` basis produces a zero top-up
+  because the existing pool already meets target, the skill issues a clarifying question so the
+  founder confirms pre-money vs post-close-unallocated intent.
+- **Coupled priced-round solver** — fixed-point iteration couples SAFE conversion, note conversion,
+  pool top-up, new-money issuance, and anti-dilution (BBWA and full ratchet) in a single Banach
+  loop. Per-series knobs: `ad_trigger_basis`, `ad_a_denominator_basis`, `ad_cp2_floor`,
+  `ad_carve_outs`. Convergence guards: sign-flip damping (α=0.5), Aitken Δ² acceleration,
+  fallback fence, 200-iteration hard cap. When anti-dilution fires, the report renders a three-way
+  founder-ownership narrative: pre-AD baseline / coupled post-AD headline / delta in pp.
+- **Warrants as first-class instruments.** Vested outstanding warrants are included in
+  `fully_diluted_shares`; unvested are surfaced separately and excluded per the YC primer narrow
+  `company_capitalization` convention. A deterministic pre-round pump applies cash-exercise or
+  net-share settlement for warrants whose exercise date precedes the transaction date. Preferred-stock
+  warrants route into the matching series. Three settlement variants are explicitly rejected with
+  structured errors: debt cancellation, share-for-share exchange, VWAP-cashless.
+- **Dual-class / super-voting.** When any holder carries `voting_rights_multiple != 1.0`, the report
+  adds a voting-pct column to the cap-table summary.
+- **AoA-only engagements.** The skill accepts an Articles of Association with no
+  SAFEs/notes/grants. The AoA extractor populates `preferred_series[]` and `aoa_findings` (9
+  findings: drag-along threshold, Section 102 plan, liquidation preference above 1×, participation,
+  dividend provisions, protective provisions, bring-along threshold, pay-to-play detection, full
+  ratchet presence). The report renders an AoA-summary view.
+- **Fast-assess mode.** A 1-page founder-facing markdown report in under 60 seconds for
+  conversational queries that don't need the full pipeline. Step 0 routes between fast-assess and
+  full pipeline based on whether a document is attached.
+- **Israeli ↔ Delaware flip analysis.** `flip_scenario.py` models the 1:1 share-for-share flip.
+  QSBS eligibility gates against the post-flip Delaware C-corp issuance date (`flip_closing_date`),
+  not the pre-flip Israeli date.
+- **Counsel-handoff packet.** Standalone JSON + Markdown deliverable (`counsel_packet.py`).
 
-16 new regression tests lock all three fixes (`test_v48_hotfix_regressions.py`). Test count: **1,533 passed** (was 1,517).
+#### Rule pack and counsel items
 
-## [0.4.8] - 2026-05-21
+~75 rules across 10 domains, citing NVCA Model COI §4.4.4/§4.4.5, YC SAFE primer, Cooley GO
+down-round article, and ITA §102. The `counsel_review` flag is a reliance boundary — a rule can be
+`confidence: high` and `counsel_review: true` simultaneously. The rule-audit pipeline runs in two
+phases: `--phase=pre_math` writes a gating block before math runs; `--phase=post_math` composes
+watchlist and counsel items after. The founder-facing report splits the watchlist into "Active"
+(applies to this engagement) and "For-Reference Annotations" (tracked but not currently applicable).
+Per-scenario completeness lines expand the bare enum value into plain language so founders know
+whether legal/tax math ran.
 
-### Added — Coupled anti-dilution in the cap-table priced-round solver
+#### Scope and explicitly rejected inputs
 
-Substantial feature: `priced_round.solve_priced_round` now applies anti-dilution adjustments to existing preferred series WITHIN the priced-round fixed-point iteration, in a single Banach loop with SAFE conversion, note conversion, pool top-up, and new-money issuance. Closes a class of silent-correctness bugs where a down-round scenario showed the pre-AD founder % as the headline (e.g., 38.46% instead of the actual coupled 35.71% — a 2.75pp under-statement) because AD was modeled by a separate script the founder/agent had to invoke manually and reconcile by hand.
+The following are rejected with structured errors or surfaced as counsel items rather than silently
+mis-modeled: RSU grants (`E_RSU_NOT_MODELED`), cumulative-preferred dividend math
+(`E_DIVIDEND_FIELDS_REMOVED` — dividend provisions surface in `aoa_findings` for counsel-handoff),
+warrant repricing under issuer AD clauses, three exotic warrant settlement variants (debt
+cancellation / share-for-share exchange / VWAP-cashless), non-1:1 flip ratios, non-unity preferred
+voting (surfaces `W_PREFERRED_VOTING_NON_UNITY_NOT_MODELED`), Pulley XLSX (structured blocker routes
+to freeform), LLC structures and profits-interests, SPAC/de-SPAC mechanics, multi-class liquidation
+waterfalls at exit, 409A valuations, pro-rata side-letter exercise, cumulative preferred dividends,
+83(b) elections.
 
-- **Three-stage adjuster chain per iteration:** `adjust_cap_state` (AntiDilutionAdjuster mutates `current_conversion_price` on each AD-protected preferred series; orchestrator recomputes as-converted totals), `convert_securities` (SAFE + note conversion against AD-adjusted total FD), `size_round` (pool top-up + new money). The math producers (`anti_dilution.bbwa_new_conversion_price`, `full_ratchet_new_conversion_price`, `convert_safe_priced_round`, `convert_note`, `option_pool.required_topup`) remain the single source of truth; the solver delegates rather than rewrites.
+#### Engineering reliability
 
-- **AD mechanic is CCP mutation, not share-minting.** Preferred-as-converted shares are derived via `shares × OCP / CCP` (matches `cap_state._compute_as_converted_totals`); the actual `shares` field on the preferred series never changes. Three price fields with distinct roles: `original_issue_price` (OIP — NVCA-default trigger threshold per §4.4.4(b)), `original_conversion_price` (OCP — drives the as-converted ratio), `current_conversion_price` (CCP — mutates).
+Every consumer reads artifacts through a typed loader (`_artifact_io.py`) that validates
+`schema_version` stamps and re-runs 14 semantic invariants at the load boundary, including FD-sum
+equality, CCP ≤ OCP ratchet-down, warrant vested_flag / exercise_event_date parity, and
+mirrored-field drift detection. Solver convergence guards (damping, Aitken acceleration, fallback
+fence) ensure deterministic outputs. 1,588 non-e2e tests pass. The property-based solver
+convergence harness and fresh-AI replay tests are scheduled as a v0.5.1 follow-up.
 
-- **Per-series knobs** (additive optional schema fields, all backwards-compatible): `ad_trigger_basis` (OIP vs CCP), `ad_a_denominator_basis` (NVCA broad vs narrow), `ad_cp2_floor` (charter-specific clamp), `ad_carve_outs` (v0.4.0 accepts only `nvca_default`; custom carve-out lists are deferred).
+### Fixed — all skills
 
-- **Stale-CCP guard:** if a series has `current_conversion_price == original_conversion_price` but `cap_table_history[]` records a prior `anti_dilution_applied` event for that series, the solver emits `W_STALE_CCP_SUSPECTED` so a founder can verify which value is authoritative.
+- **Claude Cowork in-VM script discovery.** `${CLAUDE_PLUGIN_ROOT}` substitutes to a host-side
+  path that does not exist inside the Cowork session VM — non-empty but invalid — so the documented
+  Glob fallback never fired and agents hit "No such file" with no cue to fall back. The fallback
+  condition in all six SKILL.md files now also fires when the resolved path does not exist.
+  (Developed internally as v0.4.11; first ships here — satisfies downstream skills declaring
+  `requires founder-skills ≥ v0.4.11`.)
+- **Version-ref policy (fleet-wide).** Removed internal release markers, sprint labels, and
+  audit-cycle references from SKILL.md files, agent bodies, schema descriptions, rule pack fields,
+  and inline comments across all skills. A new contract test
+  (`test_no_internal_version_refs_in_user_facing_files`) enforces this policy on every PR.
 
-- **Frozen pre-financing snapshots** per NVCA §4.4.4 "immediately prior to such issue": `pre_financing_a_components` (broad: common + preferred-as-converted + options outstanding + options reserved; narrow: common + preferred-as-converted only) and `pre_financing_cp1_snapshots` (CP1 per series). Both are captured at iter 0 and never recomputed inside the loop — prevents the ratchet-on-ratchet pathology (deferred to a future release).
+### financial-model-review: pre-ship hardening
 
-- **Convergence guards** for the positive-feedback regime: sign-flip damping with α=0.5 under-relaxation on 3+ alternating-sign deltas; Aitken Δ² acceleration when `|f'_est| > 0.9`; Aitken fallback fence at 20× the latest vanilla step (reverts to vanilla if the projection would overshoot); hard 200-iteration cap (raised from 50); termination at `|Δp/p| < 1e-6 AND |Δp| < 1e-9`. Empirical contraction constants on the regression goldens are 0.05–0.40 — well within Banach contraction.
+A focused pre-distribution hardening pass carried in this release. All changes are in `founder-skills/skills/financial-model-review/` and its tests.
 
-- **Deep-copy boundary:** the caller's `cap_state` is never mutated. The new `cap_state_after_round.py` script reads the priced-round scenario's `ccp_mutations` + `anti_dilution_breakdown` and produces a `cap_state_after_round.json` artifact (post-round preferred-series CCP values, recomputed as-converted totals, an appended `anti_dilution_applied` event in `cap_table_history`) — lets the next round's solver start from the correct mutated state.
+#### Orchestration contract fixes
 
-- **Report surface.** When AD fires, `compose_report.py` renders the three-way founder-ownership narrative: pre-AD baseline / coupled post-AD (headline) / AD-impact delta in percentage points. `visualize.py` shows the same narrative in the scenario card plus per-series CCP-before-to-after rows with floor-clamped series flagged. New counsel items surface automatically through `rule_audit.py`.
+- **CHECKLIST dispatch shape corrected.** The sub-agent return shape now includes `company` (copied verbatim from `inputs.json`) and `metadata: {"run_id": "<RUN_ID>"}` alongside `items`. This ensures `checklist.py` can apply profile-based auto-gating (stage/geography/sector/model_format) and that `checklist.json` carries a `run_id` consistent with the other three producer artifacts. Context B coaching dispatch was structurally blocked on every run due to the missing `run_id`; that is now fixed.
+- **Checklist ID enumeration corrected (`BRIDGE_36..38`).** SKILL.md and the agent body both previously referenced non-existent `SCENARIO_36..38` IDs while double-booking positions 36–38. The canonical set from `checklist.py` is `METRIC_33..35, BRIDGE_36..38, SECTOR_39..44, OVERALL_45..46`. Sub-agents following the corrected prompt will no longer emit unknown IDs that `checklist.py` rejects.
+- **`commentary.json` authoring step added.** `verify_review.py --gate 2` requires `commentary.json` for quantitative reviews, but no workflow step produced it. Added an explicit agent-authored heredoc step (after Step 7, before Step 8b) with schema reference. Cleanup list extended to cover this and other previously missing artifacts (`extraction_validation.json`, `corrected_inputs.json`, `extraction_corrections.json`, `corrections_from_agent.json`, `commentary.json`, `explore.html`, `review.html`).
+- **`coaching_payload` now printed, not captured.** The `COACHING_PAYLOAD="$( ... )"` assignment wrapped the extraction in command substitution, sending output to a shell variable that neither persisted between Bash calls nor reached the tool result. Changed to a bare `python3 -c '...'` invocation so the payload prints directly to stdout.
+- **UE and runway dispatches replaced with direct pipes.** `UNIT_ECONOMICS` and `RUNWAY_SCENARIOS` sub-agent dispatches were pure pass-through round-trips (read `inputs.json`, return `inputs.json`), exposing multi-KB financial figures to LLM transcription errors. Both steps now use `cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/<producer>.py" ...` directly from the main thread.
+- **INPUTS_REVIEW dispatch uses deterministic corrected-payload path.** Sub-agent return shape now explicitly excludes `changes` and `base_hash` keys, routing through the deterministic `corrected`-shaped path in `apply_corrections.py`. The broken `base_hash`-verification patch path (which always errored because the sub-agent has no Bash) is avoided.
+- **`dispatch_contracts.json` fixtures updated.** Synced with the direct-pipe UE/runway change and the `overall_status` field rename.
 
-- **Rule pack v0.4.0** — 25 new rules in the `anti_dilution` domain (citing NVCA Model COI §4.4.4 / §4.4.5 + Cooley GO down-round article + YC SAFE primer): 3 coupled math variants (BBWA / narrow-based / full-ratchet), 2 trigger-basis rules (OIP default, CCP charter-override), 2 A-denominator-basis rules (broad / narrow), 2 CP2-floor rules (config + runtime), 1 stale-CCP-detected runtime event, 4 solver-internal convergence-guard events (counsel_review=false because they're math events the script can responsibly conclude on), 10 NVCA §4.4.5 carve-out source notes, and a `pay_to_play_provision_detected` counsel-review flag fired by text-pattern detection in `extract_aoa.py` (P2P math itself is deferred — flag signals that v0.4.0's dilution figures may over-protect non-participating AD holders).
+#### `verify_review.py` fix — default-alive companies
 
-- **35 new regression tests:** 15 coupled-solver math goldens locking the BBWA / full-ratchet / multi-series-mixed / per-series-knobs / CP2-floor / stale-CCP / SAFE-conversion-coupled / note-conversion-coupled behaviors (Test A's coupled answer 35.71% is now a regression; Test 2 full-ratchet at 27.27% similarly locked; Goldens 3 + 12 derived against opus subagent closed-form work); 16 convergence-guard tests including the Aitken Δ² formula against three geometric-sequence closed forms (caught a numerator bug where an earlier design pseudocode used `(p_n - p_{n-2})²` instead of the correct `(p_{n-1} - p_{n-2})²`); 4 `cap_state_after_round.json` builder tests; 10 P2P-detection text-pattern tests. The full repo now has 1,517 passing tests.
+Gate 2 no longer blocks publication for profitable or default-alive companies. Previously any review where no scenario had `runway_months` (correct for a company that never runs out of cash) caused exit 1. Fixed to: only error if no runway **and** no scenario is default-alive.
 
-### Also in 0.4.8
+#### `coaching_payload` field fixes
 
-- **Schema-gap fix:** `cap-table-rules.schema.json` now lists `israeli_aoa` in both the `domains` enum and the per-rule `domain` enum. The v0.3.2 release added the `israeli_aoa` domain to the rule pack but never updated the schema, so strict validation had been failing silently.
+- **`runway_months` added.** `_emit_coaching_payload` in `compose_report.py` now extracts the base-scenario `runway_months` (may be `null` for default-alive companies) and includes it in the payload.
+- **`overall_status` rename.** The agent success payload field was renamed from `unit_economics_status` to `overall_status`, correctly mapped to `coaching_payload.summary.overall_status` (the checklist overall status). Dispatch-contract fixtures updated to match.
 
-- **`extract_instrument.py` type-guard:** `confirm_required()` now raises an explicit `ValueError` with a remediation pointer when a sub-agent returns `confidence` as a bare string instead of the per-field map (matches a real failure mode caught in end-to-end testing).
+#### HTML self-containment and escaping
 
-- **`references/inputs-skeleton.md`:** new reference doc showing the full common-case `inputs.json` shape with the validator-strictness gotcha (unknown top-level keys silently dropped — `stakeholders[]` from Carta/Pulley would lose 10M founder shares with no warning) + the OIP/OCP/CCP three-field distinction. SKILL.md Step 2 heredoc now includes `founders[]` and `option_pool` by default.
+- **Chart.js vendored into `explore.py`.** The explorer previously loaded Chart.js from a CDN. The Cowork iframe sandbox blocks external fetches; offline `file://` viewing also broke. Copied the vendored `chart.min.js` (already used by `competitive-positioning/scripts/explore.py`) into `financial-model-review/scripts/vendor/` and switched to inline embedding.
+- **`</script>` injection hardening.** Founder-document-derived data (company names, LLM-extracted strings) embedded as JSON in `<script>` blocks now has `<` escaped to `<` at every embed site in both `explore.py` and `review_inputs.py`.
+- **HTML escaping for warning/commentary fields.** Extraction-warning `candidates` and `untraceable[*].role` strings in `review_inputs.py` are now wrapped with `html.escape()`. Commentary fields (`callout`, `highlight`, `watch_out`) in `explore.py` are assigned via `textContent`/`createTextNode` instead of HTML string concatenation.
+- **Scenario labels and banner title escaped** via the shared `_esc()` helper throughout the explorer.
 
-- **Sub-agent dispatch contract documented:** `lanes/lane-1-pdf-docx.md` now has a "Sub-agent response shape" section with a fully-fleshed JSON example showing `instrument_type` as the routing key for subtype gates (`convertible_loan_agreement` / `convertible_security` / `convertible_note`), the per-field `confidence: {level, evidence_quote, document_location?}` shape, and form-template handling guidance.
+#### `review_inputs.py` hardening
 
-- **`rule_audit.py` docstring fix:** the `--phase=post_math` documentation incorrectly claimed it re-reads `scenarios.json`; in fact only `--run-id` and `--output` are consumed. Sub-agents repeatedly tried to pass the full input set per the docstring; now corrected.
+- **Kill-port guard targets only own instances.** `_kill_port` previously sent SIGTERM to whatever process owned the port; now checks the process command line contains `review_inputs.py` before signalling.
+- **`GET /api/feedback` returns 405.** The handler previously returned the stored corrections payload to any local caller; changed to an explicit 405.
+- **Static-mode receipt carries `ok` and `bytes` keys**, aligned with the receipt shape used by `visualize.py` and `explore.py`.
 
-### Added
+#### Input-pipeline robustness
 
-- **New skill: `cap-table`.** Extracts structured terms from cap-table source documents (SAFEs, convertible notes, term sheets, articles of association, Carta/Pulley XLSX exports), runs them through a layered math pipeline (cap state → SAFE/note conversions → option-pool top-up → anti-dilution → priced-round solver → flip scenarios), and produces a counsel-handoff packet + human-readable report. Designed for founders preparing for priced rounds, secondary sales, or jurisdiction flips.
+- **Structured `READ_ERROR` on corrupt corrections upload.** `apply_corrections.py` previously produced a raw Python traceback when the uploaded corrections file was corrupt; now emits `{"status": "error", "errors": [{"code": "READ_ERROR", ...}]}` consistent with every other error path.
+- **BOM-tolerant CSV reading.** `extract_model.py` now opens CSV files with `encoding="utf-8-sig"`, so Windows Excel exports parse correctly instead of producing a `"﻿Month"` header that silently fails column matching.
+- **Root-dir write guard in `validate_extraction.py`.** Added the same output-path root-directory guard that every sibling script already has.
 
-  Three extraction lanes share a common validator (`extract_instrument.py` / `extract_cap_table.py`):
+#### Heuristic guards
 
-  - **Lane 1** — Unstructured instruments (PDF/DOCX SAFEs, convertibles, term sheets). Sub-agent extracts; the validator enforces form-dependent required-field gates, normalizes the discount-rate multiplier-vs-rate trap, and routes warrants / non-instruments to clean classification rather than forcing them into a SAFE shape.
-  - **Lane 2** — Carta XLSX exports. Verified against real Carta exports across multiple companies; sheet-name fingerprint, Convertible Ledger parsing, discount normalization, and cancelled-record skipping.
-  - **Lane 3** — Freeform spreadsheets. Sub-agent identifies cell semantics; validator gates per-field confidence.
+- **Scale-fix requires ≥ 2 corroborating fields.** `validate_extraction.py --fix` previously applied a ×1000 scale correction if any scale indicator was present and values appeared implausible, even when only one monetary field was populated (insufficient evidence for majority vote). Now requires at least 2 monetary fields.
+- **Post-fix plausibility check.** After applying a scale correction, `validate_extraction.py --fix` verifies the corrected values are plausible before writing; skips and warns if the corrected values are still implausible.
+- **Mixed/unknown periodicity uses multi-multiplier scan.** Traceability checks on models where `periodicity_summary` is `"mixed"` or `"unknown"` previously scaled as monthly (×1), producing spurious `REVENUE_TRACEABILITY` warnings on quarterly or annual models. Now tries ×3 and ×12 for `"mixed"`, and skips periodicity-aware scaling for `"unknown"`.
 
-  A four-layer verification stack runs by default on every Lane-1 extraction (`extract_instrument.py --source-doc <path>` — verification flags all default-on; use `--no-<flag>` to opt out):
+#### Analysis fixes
 
-  - **Forward verification** (`evidence_verifier.py`) — three-layer check (`quote_in_doc` / `value_in_quote` / `value_in_doc`) catches the hallucination class where the model fabricates a value not present in the source. Calibrated against a private eval set at 3.6% FPR / 100% TPR on verifiable docs. Handles 8 PDF extraction-artifact patterns: CID-encoded fonts, image-only PDFs, space-stripping, hyphenation across line breaks, footnote markers, DocuSign overlays, non-Latin scripts, XLSX cell-reference quotes.
-  - **Invariant checking** (`invariant_checker.py`) — per-field real-world bounds (SAFE `purchase_amount` ≤ $50M; `discount_multiplier ∈ [0.5, 1.0]`; note `annual_interest_rate ≤ 20%`; etc.) plus cross-field math invariants (`options_granted ≤ total_authorized`; SAFE pre/post-money caps mutually exclusive; term-sheet `pre + investment ≈ post` within 2%). Hard math impossibilities block; soft bounds warn-only. 0% FPR against canonical labels; 63% TPR on ×1000 unit-error perturbations.
-  - **Deterministic backstop extractors** for SAFEs (`extractors/safe/`): regex-based `purchase_amount`, `discount_multiplier`, `valuation_cap`, `issuance_date`, `investor_name`. Span-preserved via the `FieldExtraction` / `SourceSpan` types in `extractors/types.py`. `discount_multiplier` refuses to decide the multiplier-vs-rate semantic when tiered or conditional clauses are present (emits ambiguity signals instead). `valuation_cap` handles hybrid-terminology SAFEs where the defined term is bare "Valuation Cap" but the Safe Price / Liquidity Price formulas reference "Post-Money Valuation Cap".
-  - **Cross-check** (`cross_checker.py`) — pipes sub-agent extractions and deterministic backstops through a demote-only confidence modulator. Agreement never bumps; disagreement demotes one level (`high → medium → low → absent`). Ambiguity-tagged backstop results treated as non-disagreement. Informational — never blocks.
+- **`monthly_total` fallback in expense-coverage check.** `validate_inputs.py` `EXPENSE_COVERAGE_SUSPECT` now reads `revenue.monthly_total` when `revenue.mrr.value` is absent, avoiding false-positive critical warnings for companies that express revenue via monthly total rather than MRR.
+- **Sub-score `None` semantics for inapplicable categories.** `checklist.py` `business_quality_pct` previously returned `0.0` when zero business items were applicable; now mirrors the `None` pattern used by `model_maturity_pct` so downstream display code treats it as "not computed" rather than "zero quality."
+- **Near-zero cash warning guard.** `compose_report.py` `RUNWAY_INCONSISTENCY` check now requires `abs(inputs_cash) >= 1000` before computing a delta percentage, avoiding false positives near zero.
+- **Breakeven note.** `runway.py` now emits a human-readable note when `monthly_net_burn = 0` (breakeven), instead of "Infinite" for every row of the burn-sensitivity table.
+- **Negative USD formatting.** `visualize.py` `_fmt_usd` now handles negative values with `"-" + _fmt_usd(-value)`, producing `"-$200K"` instead of `"$-200,000.00"` (which overflowed SVG label slots on the runway chart's Y-axis).
+- **`bench` initialized to `None`.** `unit_economics.py` declared `bench` as annotation-only; initialized to prevent potential `UnboundLocalError` on refactoring paths.
 
-  Optional fifth layer dispatched by the SKILL.md when warranted:
+#### Version-ref policy cleanup (fleet-wide)
 
-  - **Backward verification** (`backward_verifier.py`) — two-phase CLI (`--phase=prompt` → `--phase=score`) that catches semantic-confusion errors (right value, wrong field; e.g., extracting cap from a referenced prior SAFE instead of the current one) via fresh-sub-agent re-extraction. WARN-mode by default; ~7% disagreement rate against canonical labels makes it valuable as a confirmation prompt for high-stakes fields but too noisy for auto-rejection.
+A new contract test (`test_no_internal_version_refs_in_user_facing_files`) now enforces the version-ref policy fleet-wide on every PR. As part of this pass: removed internal version markers from the financial-model-review SKILL.md and agent body; converted the agent-body changelog section into present-tense instructions; cleaned up garbled arithmetic in the agent body; applied the same removal to `agents/deck-review.md` (had one stale reference).
 
-  The receipt surfaces an `attention_needed_fields[]` array (union of low-confidence fields, soft invariant warnings, unverifiable evidence fields, and cross-check disagreements) that the dispatching agent uses to scope `AskUserQuestion` escalation and optional backward verification.
+#### Schema-doc drift fixes
 
-  Math producers cite a `rule_id` from `cap-table-rules.json`. The two-phase `rule_audit.py` writes a gating block before math runs and composes watchlist + counsel items after. Counsel-handoff packet is a standalone deliverable; the compose-report stage assembles `report.md` + `report.json` with an embedded `coaching_payload` block (schema `v0.5.0-cap-table`).
+- `references/schema-inputs.md`: `company.stage` enum now lists all five values; both `revenue_model_type` enum tables now list all 10 canonical values; `model_format` pipeline-effects subsection moved below the `company` field table; `--strict` semantics note corrected (blocks on high-severity warnings only).
+- SKILL.md: `--sector-type` valid-values list extended to include `transactional-fintech`; stale Context B preamble replaced with accurate description; `metadata.run_id` requirement scoped to the four producer artifacts.
 
-  Self-contained HTML output: `visualize.py` produces a report dashboard with inline SVG charts (no CDN); `explore.py` produces an interactive scenario picker (vanilla JS).
+#### CI registry wiring
 
-  Six anonymized synthetic source/label pairs ship as public CI fixtures under `founder-skills/tests/fixtures/cap-table-eval/`, covering the template-blank hallucination archetype, canonical SAFE forms, legacy YC pre-money form, the multiplier-vs-rate discount trap, and the ITA Section 3(j) statutory-interest case. The `test_eval_harness.py` fixture runs these in CI; an `EVAL_DATA_PATH` env-var override enables an additional regression pass against a private 69-doc corpus locally.
+- `financial-model-review` added to `compose_invocations.py` registry (`_COMPOSE_FLAGS` and `_RUN_ID_MUTATION_TARGET`).
+- `financial-model-review` added to `COACHING_SKILLS` in `test_compose_invariants.py`.
+- Fixture directory `tests/fixtures/financial-model-review/` populated with `inputs.json`, `checklist.json`, `unit_economics.json`, `runway.json` — the shared `coaching_payload` + `STALE_ARTIFACT` invariant suite now exercises this skill.
+- New `test_fmr_skill_contract.py`: CHECKLIST ID enumeration, SKILL.md/agent body ID consistency, fleet-wide internal-version-ref policy enforcement.
 
-### Added
+### Out of scope for v0.5.0
 
-- **`cap-table`: Articles of Association extraction pipeline.** Commit #7 of the post-J audit sweep. New end-to-end path for extracting preferred-series terms from AoA documents (Israeli Ltd / Delaware C-corp foundational governance docs):
-  - **New Context A sub-context `ARTICLES_OF_ASSOCIATION_EXTRACTION`** in `agents/cap-table.md`. Sub-agent reads the AoA and returns a structured JSON shape (per-preferred-series terms + AoA-level metadata) using schema-canonical field names matching `cap_state.schema.json.preferred_series` item shape (`liquidation_preference_multiple`, `anti_dilution_protection`, `dividend_rate_percent` — not the older `interest_rate_on_preference` / `anti_dilution_type` placeholders).
-  - **New `scripts/extract_aoa.py`** validates the AoA extraction (per-series required-field gates, enum value checks for liquidation_preference_type + anti_dilution_protection, OIP > 0, liquidation_preference_multiple ≥ 1) and surfaces 4 Israeli AoA counsel-review items via `detect_counsel_review_items()`. With `--inputs` flag, merges the validated preferred_series block into `inputs.json.preferred_series[]` with extraction provenance stamp (source doc + confidence + extracted_at). Conflict detection on duplicate series_name (caller must resolve).
-  - **`inputs.schema.json` extended** with full `preferred_series` array definition (mirroring `cap_state.schema.json` item shape), plus `founders`, `common_batches`, and `option_pool` blocks. These were previously consumed by `cap_state.py` but undeclared in the schema (only tolerated because `additionalProperties: false` was absent). Now schema-formal and the AoA ingest path has a real landing zone. New `extraction_provenance` sub-object on preferred_series items tracks AoA-extracted provenance.
-  - **Rule pack v0.3.1 → v0.3.2:** added new `israeli_aoa` domain with 4 rules: `drag_along_threshold_below_75_percent` (Israeli market norm + fiduciary concern), `section_102_plan_absent` (ITA filing deadline), `liquidation_preference_above_1x` (market deviation), `full_ratchet_anti_dilution` (founder dilution exposure in down rounds). Each cites Israeli Companies Law (ICNL-COMPANIES-LAW), Section 102 (ICNL-ORDINANCE-SECTION-102), and/or Cooley GO down-round article (COOLEY-DOWN-ROUND). All carry `counsel_review: true`.
-  - Test coverage: 14 new tests in `TestAoAExtraction` covering validator gates (valid extraction passes; wrong extraction_type rejected; missing OIP rejected; participating_capped requires cap multiple; invalid anti-dilution enum rejected; liquidation pref < 1x rejected), counsel-review item detection (5 cases including a clean-AoA negative), merge-into-inputs flow (appends with provenance; conflict detection on duplicate series_name), and end-to-end CLI invocation. Synthetic fixtures based on the 5 real Israeli AoAs at `~/private-corpus/aoa/` (Deltacorp 2024, Bravocorp Series A 2022, Charliecorp Seed-2 2016, Acmecorp 2012, generic 2015) — real names redacted per memory rule. 1,468 tests pass total.
-
-  **Eval calibration deferred.** The 5 real Israeli AoAs at `~/private-corpus/aoa/` are NOT processed in this commit — opus subagent dispatch with PDF Read + `ARTICLES_OF_ASSOCIATION_EXTRACTION` protocol is tracked as a follow-up paid-API workstream. The synthetic-fixture tests cover the validator logic + counsel-review detection + merge flow; eval calibration verifies extraction accuracy against real Israeli AoAs (separately).
-
-- **`cap-table`: convertible-instrument aliases (CLA + convertible_security).** Commit #6 of the post-J audit sweep. `extract_instrument.py` now accepts two new `instrument_type` values in addition to the standard six:
-  - `convertible_loan_agreement` — Israeli CLA / CIA (GKH / Herzog / Meitar templates with "Investment Amount" / "Investors" terminology). Mathematically identical to a standard convertible note; routes through the same `validate_note` gate with full canonical fields required.
-  - `convertible_security` — YC's pre-SAFE convertible security form (GS-Cap Table etc.). SAFE-equivalent: no interest, no maturity. Per-subtype gate via `CONVERTIBLE_SUBTYPE_GATES["convertible_security"]` waives `maturity_date`, `maturity_default_treatment`, `day_count_basis`, and `annual_interest_rate` (any may be null). Defaults `interest_rate_type` to `"none"` when extraction left it unset.
-
-  Both types normalize to canonical `instrument_type=convertible_note` on storage, with the original classification preserved in the new `subtype` field for provenance. Math producers (`note_conversion.py`) consume the canonical shape regardless of subtype; subtype informs counsel-review framing ("Israeli CLA terms..." vs "convertible security (SAFE-equivalent)..."). `instruments.schema.json` notes block extended: `subtype` enum added; `maturity_date`/`maturity_default_treatment`/`day_count_basis`/`qualified_financing_threshold` moved from strict `required` to optional with `null` allowed (subtype gates now enforce them where applicable, replacing the schema-level requirement).
-
-  Agent body updated: enum mapping table directs CLAs → `convertible_loan_agreement`, YC convertible securities → `convertible_security`, with field-population guidance per subtype. Israeli statutory ITA Section 3(j) interest stays at `interest_rate_type="statutory_ita_section_3j"` + `annual_interest_rate=null`.
-
-  Test coverage: 5 new tests in `TestExtractInstrument` — CLA subtype validates as standard note; convertible_security waives maturity; unknown subtype falls back to standard gate; end-to-end CLI routing for CLA (lands in instruments.notes[] with subtype tag); end-to-end CLI routing for convertible_security (null maturity preserved). 1,454 tests pass total.
-
-  **Eval calibration deferred.** The 10 real convertibles at `~/private-corpus/convertible/` (Acmecorp CLA 2014/2019, Hotelcorp note, Foxtrotcorp convertible_security, Golfcorp bridge + promissory, Indiacorp, Julietcorp, plus others) are NOT processed in this commit — calibration via opus subagent dispatch is tracked as a follow-up. The synthetic-fixture tests cover the validator logic; eval calibration verifies extraction accuracy against real PDFs.
-
-- **`cap-table`: fast-assess entry mode.** New `scripts/quick_assess.py` produces a 1-page founder-facing markdown report in under 60 seconds for conversational queries that don't need the full 13-step pipeline. Writes to a separate `cap-table-{slug}-fastassess/` directory (single-dash suffix, pinned for `find_artifact.py` slug-parser compatibility) containing only `report_fast_assess.md` + a `fast_assess_only.json` sentinel. Sentinel contract documented at `references/sentinel-schema.md` with JSON Schema at `references/schemas/fast_assess_only.schema.json`. The sentinel carries `inputs_fingerprint` (sha256 of founder prompt + attached doc paths), `rule_pack_version`, denormalized `headline_data` mirroring `coaching_payload` field names, and `produces_canonical_artifacts: false` so future cross-skill consumers (`financial-model-review`, `ic-sim`, `fundraise-readiness`) can detect fast-assess mode and either use the headline data directly or prompt for a full re-run. SKILL.md Step 0 routes between fast-assess and full pipeline based on whether the founder has attached a document or explicitly asked for the full review.
-- **`cap-table`: MFN auto-bind to elected SAFE's terms.** When an `yc_uncapped_mfn` SAFE has `mfn_provision.elected_against_safe_id` pointing to a sibling with a resolved cap, the priced-round solver now pre-resolves the election (inherits form + cap + discount) before iteration. Previously required a `conversion_price_override` even when MFN election was unambiguous — needless friction. Truly uncapped MFNs (no election, or unresolvable election chains) still hit the cycle guard correctly (Gotcha #4).
-- **`cap-table`: pool-basis clarifying question.** When `option_pool.required_topup` runs with `target_basis="pre_money"` and the existing pool already meets the target (silent 0-topup no-op), the script now emits a structured `clarifying_question` in the receipt. The dispatching agent escalates via `AskUserQuestion` so the founder confirms whether they meant literal pre-money basis (no top-up) or industry-norm post-close unallocated (real top-up). Phase M+S — addresses the eval-3 ambiguity finding.
-- **`cap-table`: watchlist active vs for-reference split.** Founder-facing `report.md` now splits the date-sensitive watchlist into "Active" (rules whose `applies_when_matched=true` for this engagement) and "For-Reference Annotations" (rules that don't apply in the current state but are tracked in case the engagement evolves). Founders no longer see 50 unfiltered items including inapplicable Israeli rules in a Delaware-only engagement.
-- **`cap-table`: structural_only completeness legibility.** The per-scenario `**Completeness:**` line in `report.md` now expands the bare enum value into a plain-language explanation (e.g., `structural_only` becomes "schema and rule-applicability checks passed, but no share-producing math ran"). Founders previously saw "0 blockers, converged" and didn't register that legal/tax math wasn't modeled.
-
-### Fixed
-
-- **`cap-table`: math edge cases + privacy false-positive (post-J audit cleanup).** Bundle of small fixes surfaced by the 5-reviewer + 1-meta-reviewer audit:
-  - **MFN chain auto-bind (was single-hop).** `_resolve_mfn_elections` now iterates to a fixed point, so A→B→C MFN chains resolve transitively. Bounded by `len(safes)` iterations. Previously a chain where B itself hadn't resolved yet on the first pass would leave A unresolved and cause `E_SAFE_REQUIRES_CONVERSION_EVENT` even when the chain ultimately anchored at a capped SAFE.
-  - **`_mfn_inherited_from` provenance propagation.** The shadow record's inheritance marker now flows through to the `per_safe` result so downstream counsel-review reporting can phrase "Investor X's MFN-inherited terms from Investor Y."
-  - **Privacy assertion word-boundary + length threshold.** `_assert_coaching_payload_privacy_clean` previously used a bare substring `in` check with length threshold >2, which caused false positives on short / common investor-name fragments ("SAFE", "Inc", "Capital", "LLC") inside legitimate template prose (e.g., `branch_summary="cap_plus_discount"`). Now uses `\b` regex with `re.escape(name)` and raised the threshold to >8 chars. Genuine investor names like "Sequoia Capital Operations" still fire correctly.
-  - **`option_pool` ZeroDivisionError guard (M7).** Library callers passing `pre_topup_fully_diluted_shares=0` would crash in the warning's `existing / pre_fd` format string. Now guarded.
-  - **`option_pool` clarifying_question gating (M8).** The "pool target already met" clarifying_question now only fires when the post-money interpretation produces a NONZERO top-up. If both pre-money and post-money interpretations yield 0 (pool is legitimately oversized), the warning is noise — now suppressed.
-  - **`priced_round.py` docstring corrected (M6).** Removed false claim about a "closed-form path" that never existed in code. Iteration runs always; convergence is typically 3-7 iterations.
-  - **`priced_round.py` defensive `rel_change` init (R4 LOW.a).** Initialize `rel_change = float("inf")` so degenerate `max_iterations=0` doesn't NameError when reporting non-convergence.
-  - **`compose_report.py` defensive `computed_outputs` get (R4 LOW.b).** `failed_items` collection now uses `s.get("computed_outputs", {}) or {}` matching the convention elsewhere in the file; previously would KeyError if a scenario lacked the field.
-  - **`quick_assess.py` driver sign convention (R4 LOW.c).** `headline_data.drivers[].impact_pct` now emitted as positive dilution magnitudes (not sign-flipped negatives that the renderer un-negated). The sentinel JSON exposed to external consumers now agrees with the markdown display.
-
-  Test coverage: +11 new tests across `TestStackedPostMoneySAFEsGolden` (3-hop MFN chain, missing election target, inheritance provenance), `TestOptionPool` (clarifying-question positive + negative + suppression + pre_fd=0 guard), and new `TestPrivacyAssertion` class (positive leak detection, clean passthrough, short-name false-positive prevention, word-boundary substring check). 1,446 tests pass total. Rule pack bumped 0.3.0 → 0.3.1 (a `safe.pre_money_cap_conversion` rule was added in the prior commit).
-
-- **`cap-table`: pre-money (legacy) SAFE form dispatch — math regression introduced by post-money fix.** The earlier post-money fix (commit `8642db5`) corrected math for current YC SAFEs but applied the same denominator-handling universally — `convert_safe_priced_round` was rejecting pre-money form SAFEs (`yc_premoney_cap_only`, `pre_money_cap_and_discount_legacy`) at the cap branch because they have `post_money_valuation_cap=None`. Pre-Oct-2018 YC SAFE conversions silently failed with `E_SAFE_REQUIRES_CONVERSION_EVENT`. Fix: route `convert_safe_priced_round` on `form` to pick the correct cap field and denominator. Post-money forms use `post_money_valuation_cap / company_capitalization` (post-money FD); pre-money (legacy) forms use `pre_money_valuation_cap / pre_money_fd` (pre-financing FD, constant). The two SAFE families produce materially different cap tables: post-money locks `purchase/cap` of post-money; pre-money locks `purchase/cap` of pre-money and dilutes with new money + pool refresh. Verified via independent first-principles triangulation: for the canonical scenario (10M founders + 1M pool, $500k @ $5M cap, $5M Series A at $5M pre), pre-money math produces founder 41.32% / safe 4.55% / new money 50%, materially different from the post-money form's founder 36.36% / safe 10% / new money 50%. New golden tests at `tests/test_cap_table.py::TestLegacyPreMoneySAFEs` (3 tests including a mixed-form scenario that exercises form-dispatch routing). Rule pack `safe.pre_money_cap_conversion` added (v0.3.1) with full formula + YC primer source citation + multi-SAFE denominator ambiguity note. RULE_PACK_VERSION bumped 0.3.0 → 0.3.1 atomically across 8 math producers.
-
-- **`cap-table`: math correctness for stacked YC post-money cap SAFEs.** Prior pre-release behavior over-stated founder ownership by ~6 percentage points on a routine Series A with three stacked post-money cap SAFEs. Root cause: `priced_round.py` passed the pre-financing fully-diluted snapshot as `company_capitalization` to `safe_conversion.convert_safe_priced_round`, which applied the pre-money YC SAFE formula (`cap_price = cap / pre_fd`) to post-money instruments. Each post-money SAFE's locked ownership must be `purchase_amount / post_money_valuation_cap` of the FULL post-money FD (the YC primer's marketing identity, equivalent to `safe.stacked_post_money_caps` in the rule pack); the bugged denominator under-allocated SAFE shares by `1 - new_money_pct`. Fix: solver now iterates `company_capitalization` toward the converged post-money FD (including new-money shares). Verified against a 4-way triangulation (two independent opus reviewers, a baseline subagent's first-principles derivation, and a dedicated triangulation subagent) — all four arrive at the same golden values: founder 53.33% / aggregate SAFE 16.67% / PPS $1.3333 / total post-money FD 18,750,000 for the canonical eval-2 scenario. Golden test coverage at `tests/test_cap_table.py::TestStackedPostMoneySAFEsGolden` (7 tests including ownership-sum-to-1 cross-check and aggregate-equals-sum-of-per-safe assertion). Rule pack bumped 0.2.8 → 0.3.0 with a clarifying note on the load-bearing identity to prevent re-implementers from replicating the same denominator confusion. Math producers' `RULE_PACK_VERSION` constants updated atomically.
-
-### Changed
-
-- **`cap-table`: agent body sync (H5 enum + H6 privacy + H7 inline-Context-B + M4 type literals).** Post-J audit cleanup. (1) **H5 enum collapsed to validator-accepted set**: dropped `convertible_loan_agreement`, `convertible_security`, `spa`, `articles_of_association` from `agents/cap-table.md:376` `INSTRUMENT_EXTRACTION` return shape. The validator (`extract_instrument.py:361`) only accepts {safe, convertible_note, term_sheet, option_plan, warrant, non_instrument}; the prior 4 extra values silently died at validation. Added enum mapping table directing Israeli CLAs → `convertible_note`, convertible_security → `convertible_note` with `interest_rate_type=none`, SPAs → `term_sheet`. AoA dispatch path deferred to commit #7 with its own ARTICLES_OF_ASSOCIATION_EXTRACTION sub-context; ~60 lines of stale AoA extraction guidance (corpus-derived 8-point list + AoA return shape JSON) removed from the agent body to be rebuilt against the schema-canonical field names in #7. (2) **H6 privacy assertion extended to founder names**: `_assert_coaching_payload_privacy_clean` now takes an `inputs` parameter and walks `inputs.founders[].name` in addition to `instruments.{safes,notes}[].investor_name`. Two carve-outs prevent false positives: company-name overlap (founder "Acme Holdings Founder Trust" at "Acme Holdings"), and founder-becomes-investor (common in Israeli market — founder anchors their own SAFE round; treated as investor for the duplicate-name check). Agent body's privacy boundary claim narrowed from "investor + founder + document text" to "investor + founder" (document text isn't structurally in the payload). (3) **H7 inline-Context-B acknowledgment**: agent body Context B intro now explicitly permits the inline execution path (privacy enforced at compose time regardless of dispatch). (4) **M4 integer-typed return-payload fields un-quoted**: `agents/cap-table.md:567` template was emitting `"scenarios_modeled": "<number>"`; literal-minded sub-agents would return strings. Now `<integer>` placeholder convention; added a type-literal note.
-
-  Test coverage: 3 new tests in `TestPrivacyAssertion` (founder name leak detection, company-name carve-out, founder-becomes-investor carve-out). 1,449 tests pass total.
-
-- **`cap-table`: Pulley XLSX path scoped down.** Removed Pulley promises from the SKILL.md description, `when_to_use`, Lane-2 reference, Carta/Pulley vendor doc, and trigger-eval queries until a real Pulley XLSX is available to verify mappings against. `--mode=pulley` remains a stub returning a structured blocker routing to `--mode=freeform`. Don't promise what we don't ship.
-- **`cap-table`: Context B (POST_COMPOSE_COACHING) inline alternative.** The fresh-sub-agent dispatch contract for Context B coaching commentary was load-bearing for context isolation (preventing Context A verifier bleed) but not strictly required for privacy (the `coaching_payload` is already scrubbed by `build_coaching_payload`). SKILL.md Step 11 now explicitly permits inline execution as an alternative, with the privacy boundary enforced at compose time via a new `_assert_coaching_payload_privacy_clean()` assertion in `compose_report.py` that walks every string in the payload and asserts no investor names from `instruments.json` leak through. Defense-in-depth; fires regardless of dispatch path.
+Surfaces-based counsel-packet rendering and tag backfill across the existing ~70 rules, property-based solver convergence harness, fresh-AI replay tests. All three are scheduled for v0.5.1 follow-ups; the internal contract spec lays out the design.
 
 ## [0.4.7] - 2026-05-19
 
