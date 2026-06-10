@@ -93,6 +93,7 @@ def quick_assess(
     target_basis: str,
     founder_prompt: str = "",
     attached_docs: list[str] | None = None,
+    run_id_override: str | None = None,
 ) -> dict[str, Any]:
     """Run a fast-assess directional review.
 
@@ -151,7 +152,7 @@ def quick_assess(
         drivers = headline["drivers"]
 
     now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    run_id = now.replace(":", "").replace("-", "")
+    run_id = run_id_override if run_id_override else now.replace(":", "").replace("-", "")
     slug = company_name.lower().replace(" ", "-").replace("_", "-")
 
     sentinel: dict[str, Any] = {
@@ -218,9 +219,30 @@ def quick_assess(
         md_lines.append(f"**Post-financing founder ownership: {_percent(fi['ownership_post_financing_pct'])}**")
         md_lines.append(f"**Price per share: ${fi['pps_priced_round']:.4f}**")
         md_lines.append("")
+        shares_bd = solver_result.get("shares_breakdown", {})
+        existing_unallocated = int(cs.get("option_pool", {}).get("available_for_grant", 0))
         md_lines.append("Dilution by source (post-money percentage):")
         for d in drivers:
-            md_lines.append(f"- {d['type'].replace('_', ' ').title()}: {_percent(d['impact_pct'])}")
+            dtype = d["type"]
+            line = f"- {dtype.replace('_', ' ').title()}: {_percent(d['impact_pct'])}"
+            if dtype == "pool_refresh":
+                topup_shares = int(shares_bd.get("pool_topup", 0))
+                if topup_shares > 0:
+                    total_pool = existing_unallocated + topup_shares
+                    line = (
+                        f"- Pool Top-Up: +{topup_shares:,} shares"
+                        f" (unallocated pool grows to {total_pool:,}"
+                        f" = {_percent(d['impact_pct'])} post-money)"
+                    )
+            elif dtype == "safe_conversion":
+                safe_shares = int(shares_bd.get("safe_converted", 0))
+                if safe_shares > 0:
+                    line = (
+                        f"- Safe Conversion: {_percent(d['impact_pct'])}"
+                        f" of pre-round company capitalization"
+                        f" → {safe_shares:,} shares"
+                    )
+            md_lines.append(line)
     else:
         md_lines.append(f"_Solver could not produce a full answer ({completeness})._")
         for b in solver_result.get("blockers", []):
@@ -260,6 +282,7 @@ def _cli() -> int:
     p.add_argument("--review-dir", required=True, help="Output directory (e.g. cap-table-{slug}-fastassess/)")
     p.add_argument("--founder-prompt", default="")
     p.add_argument("--attached-doc", action="append", default=[])
+    p.add_argument("--run-id", default=None, help="Override the run_id in the sentinel (optional)")
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
 
@@ -292,6 +315,7 @@ def _cli() -> int:
         target_basis=args.target_basis,
         founder_prompt=args.founder_prompt,
         attached_docs=args.attached_doc,
+        run_id_override=args.run_id,
     )
 
     os.makedirs(args.review_dir, exist_ok=True)

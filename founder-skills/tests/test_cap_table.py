@@ -4850,6 +4850,94 @@ class TestQuickAssessUX:
             # company_name from nested path must appear in the report
             assert "NestedCo" in md, f"Expected 'NestedCo' in report; got: {md[:500]}"
 
+    def test_run_id_arg_overrides_sentinel(self) -> None:
+        """Fix 1: --run-id must be accepted and override the sentinel's run_id."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            inputs_path = os.path.join(d, "inputs.json")
+            safes_path = os.path.join(d, "safes.json")
+            with open(inputs_path, "w") as f:
+                json.dump(self._INPUTS, f)
+            with open(safes_path, "w") as f:
+                json.dump([self._SAFE], f)
+
+            rc, stdout, stderr = _run(
+                "quick_assess.py",
+                [
+                    "--inputs",
+                    inputs_path,
+                    "--safes",
+                    safes_path,
+                    "--pre-money",
+                    "5000000",
+                    "--new-money",
+                    "3000000",
+                    "--review-dir",
+                    d,
+                    "--run-id",
+                    "test-run-42",
+                    "--pretty",
+                ],
+            )
+            assert rc == 0, f"quick_assess.py rejected --run-id: {stderr}"
+            receipt = json.loads(stdout)
+            # receipt carries run_id
+            assert receipt["run_id"] == "test-run-42", f"receipt run_id mismatch: {receipt}"
+            # sentinel JSON also carries run_id
+            sentinel_path = os.path.join(d, "fast_assess_only.json")
+            with open(sentinel_path) as f:
+                sentinel = json.load(f)
+            assert sentinel["run_id"] == "test-run-42", f"sentinel run_id mismatch: {sentinel['run_id']}"
+
+    def test_pool_topup_share_counts_in_report(self) -> None:
+        """Fix 2: when a pool top-up ran, the report must contain the share count line."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            inputs_path = os.path.join(d, "inputs.json")
+            safes_path = os.path.join(d, "safes.json")
+            with open(inputs_path, "w") as f:
+                json.dump(self._INPUTS, f)
+            with open(safes_path, "w") as f:
+                json.dump([self._SAFE], f)
+
+            rc, stdout, stderr = _run(
+                "quick_assess.py",
+                [
+                    "--inputs",
+                    inputs_path,
+                    "--safes",
+                    safes_path,
+                    "--pre-money",
+                    "5000000",
+                    "--new-money",
+                    "3000000",
+                    "--target-pool-percent",
+                    "0.10",
+                    "--target-basis",
+                    "post_money",
+                    "--review-dir",
+                    d,
+                    "--pretty",
+                ],
+            )
+            assert rc == 0, f"quick_assess.py failed: {stderr}"
+            receipt = json.loads(stdout)
+            md_path = receipt["wrote"]["fast_assess_report_md"]
+            with open(md_path) as f:
+                md = f.read()
+            # Report must include share counts for pool top-up
+            assert "shares" in md.lower() and "pool" in md.lower(), (
+                f"Expected pool top-up share count in report; got:\n{md}"
+            )
+            # More specifically, look for the pattern "+ N shares" or "N shares" near Pool
+            import re
+
+            assert re.search(r"Pool.*\d[\d,]* shares", md, re.IGNORECASE), (
+                f"Expected 'Pool ... N shares' in report dilution lines; got:\n{md}"
+            )
+
 
 # ===========================================================================
 # Item 2 — Quantitative AD + SAFE golden (test_golden_4 extension)

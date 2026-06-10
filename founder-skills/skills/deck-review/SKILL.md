@@ -105,7 +105,7 @@ mkdir -p "$ARTIFACTS_ROOT"
 RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 ```
 
-If `CLAUDE_PLUGIN_ROOT` is empty OR the path it resolves to does not exist in your environment (in Claude Cowork it substitutes to a host-side path that is not present inside the session VM — test with `ls`), fall back: `Glob` for `**/founder-skills/skills/deck-review/scripts/checklist.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`.
+If `CLAUDE_PLUGIN_ROOT` is empty OR the path it resolves to does not exist in your environment (in Claude Cowork it substitutes to a host-side path that is not present inside the session VM — test with `ls`), fall back: `Glob` for `**/founder-skills/skills/deck-review/scripts/checklist.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`. In Claude Cowork this is always the case — don't retry the substituted path; go straight to the Glob fallback.
 
 After Step 1 (when the slug is known) — call `setup_run.py` to resolve `REVIEW_DIR` and clean stale state in one atomic step. **Re-invocation special case:** if the caller's task prompt indicated this is a resume (it includes `REVIEW_DIR=...` and / or `RUN_ID=...`, or `$REVIEW_DIR/gate_state.json` already exists with a non-empty `answer`), rehydrate `RUN_ID` from `gate_state.json`'s `metadata.run_id` and skip the `--clean` flag:
 
