@@ -104,7 +104,7 @@ COACHING_PAYLOADS: dict[str, list[str]] = {
         "review_dir",
         "report_path",
         "runway_months",
-        "unit_economics_status",
+        "overall_status",
         "red_flags",
         "high_severity_warnings",
     ],

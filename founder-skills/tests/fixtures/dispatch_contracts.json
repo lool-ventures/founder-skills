@@ -75,20 +75,8 @@
     "INPUTS_REVIEW": {
       "schema": "",
       "validates_via": "argparse",
-      "required_fields_minus_metadata": ["changes", "base_hash"],
-      "notes": "apply_corrections.py takes two file arguments (not stdin): corrections.json and --original inputs.json, plus --output-dir. New-style corrections payload requires 'changes' (array of {path, expected_old, new, type}) and 'base_hash' (sha256 of original for stale-edit detection). Legacy style uses 'corrected' object directly. Optional: warning_overrides, ils_fields. Output: corrected_inputs.json + extraction_corrections.json."
-    },
-    "UNIT_ECONOMICS": {
-      "schema": "",
-      "validates_via": "inline_dict_check",
-      "required_fields_minus_metadata": ["company"],
-      "notes": "unit_economics.py reads stdin inputs.json and requires 'company' (with stage, sector, revenue_model_type). Computes 11 metrics from optional nested fields: revenue (mrr.value, arr.value, customers, growth_rate_monthly, churn_monthly, nrr, grr, monthly[], quarterly[]), expenses (headcount[], opex_monthly[], cogs), unit_economics (cac.total, ltv.value, ltv.inputs, gross_margin, payback_months, burn_multiple), cash (monthly_net_burn). All metric fields are optional — missing data yields not_rated."
-    },
-    "RUNWAY_SCENARIOS": {
-      "schema": "",
-      "validates_via": "inline_dict_check",
-      "required_fields_minus_metadata": ["company", "cash"],
-      "notes": "runway.py reads stdin inputs.json and requires 'company' (for name/slug/stage/data_confidence) and 'cash' (current_balance, monthly_net_burn). Optional: revenue (mrr.value, growth_rate_monthly, monthly[], quarterly[]), israel_specific (fx_rate_ils_usd, ils_expense_fraction), cash.grants (iia_approved, iia_pending, iia_disbursement_months, iia_start_month), scenarios (dict of name->params with growth_rate, burn_change), bridge (runway_target_months). Gracefully handles missing cash data with sensitivity tables."
+      "required_fields_minus_metadata": ["corrected", "corrections"],
+      "notes": "Agent returns {corrected: <full inputs object>, corrections: [{path, old, new, reason}]}. apply_corrections.py writes corrected_inputs.json (from 'corrected') and extraction_corrections.json (from 'corrections'). No 'changes' or 'base_hash' keys — the patch protocol with sha256 belongs to the founder browser round-trip only."
     },
     "CHECKLIST": {
       "schema": "",
@@ -108,7 +96,7 @@
       "forbidden_actions": ["read_full_report_md"],
       "return_payload_keys": [
         "status", "review_dir", "report_path",
-        "runway_months", "unit_economics_status", "red_flags", "high_severity_warnings"
+        "runway_months", "overall_status", "red_flags", "high_severity_warnings"
       ],
       "notes": "Context B; reads coaching_payload from dispatch prompt (includes truncated/truncated_count flags); tightened idempotency (commentary==1 AND marker==0 means already-inserted; any other state BLOCKED)"
     }
