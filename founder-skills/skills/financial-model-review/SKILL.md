@@ -349,15 +349,19 @@ Read inputs.json at <REVIEW_DIR>/inputs.json.
 Also read ${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/references/checklist-criteria.md.
 
 Assess all 46 checklist items (STRUCT_01..09, UNIT_10..19, CASH_20..32,
-METRIC_33..35, SCENARIO_36..38, BRIDGE_37..38, SECTOR_39..44, OVERALL_45..46).
+METRIC_33..35, BRIDGE_36..38, SECTOR_39..44, OVERALL_45..46).
 Profile-based auto-gating applies by stage/geography/sector/model_format.
 
 Evidence is MANDATORY for every item: every fail and warn MUST have a non-empty
 evidence string citing specific values from the model. Every pass MUST have
 evidence noting what was checked.
 
-Return JSON only — items array without summary (producer script computes summary):
-{"items": [{"id": "STRUCT_01", "status": "pass", "evidence": "...", "notes": null}, ...all 46 items...]}
+Return JSON only — company + metadata + items (producer script computes summary):
+{
+  "company": {<the company object copied verbatim from inputs.json — enables profile auto-gating>},
+  "metadata": {"run_id": "<RUN_ID>"},
+  "items": [{"id": "STRUCT_01", "status": "pass", "evidence": "...", "notes": null}, ...all 46 items...]
+}
 ```
 
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol. Pipe through the producer script:

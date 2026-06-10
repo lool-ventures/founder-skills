@@ -124,16 +124,22 @@ Read `inputs.json` from REVIEW_DIR. Also read
 `${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/references/checklist-criteria.md`.
 
 Assess all 46 checklist items: STRUCT_01..09, UNIT_10..19, CASH_20..32,
-METRIC_33..35, SCENARIO_36..38, BRIDGE_37..38, SECTOR_39..44, OVERALL_45..46.
+METRIC_33..35, BRIDGE_36..38, SECTOR_39..44, OVERALL_45..46.
 Profile-based auto-gating applies by stage/geography/sector/model_format.
 
 Every `fail` and `warn` MUST cite specific evidence. Every `pass` MUST note what
 was checked. Empty evidence produces blank lines in the report.
 
-Return JSON matching `checklist.py`'s input format (items only — producer script
-computes the summary):
+Return JSON matching `checklist.py`'s input format — `company` + `metadata` +
+`items` (the producer script computes the summary; `company` enables its
+profile auto-gating; `metadata.run_id` flows into checklist.json for the
+Context B run_id-parity check):
 ```json
-{"items": [{"id": "STRUCT_01", "status": "pass", "evidence": "...", "notes": "..."}, ...all 46 items...]}
+{
+  "company": {<the company object copied verbatim from inputs.json>},
+  "metadata": {"run_id": "<RUN_ID>"},
+  "items": [{"id": "STRUCT_01", "status": "pass", "evidence": "...", "notes": "..."}, ...all 46 items...]
+}
 ```
 
 **Hard rules in Context A:**
