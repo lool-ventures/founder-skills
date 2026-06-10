@@ -1704,7 +1704,7 @@ function renderStressTest() {{
         ? '<span class="badge strong">Self-sustaining</span>'
         : '<span class="badge fail">'
           + (s.runway_months || '?') + ' months</span>';
-      markup += '<tr><td>' + label + '</td><td>' + gr
+      markup += '<tr><td>' + escHtml(label) + '</td><td>' + gr
         + '</td><td>' + (s.runway_months || 'N/A')
         + '</td><td>' + status + '</td></tr>';
     }});

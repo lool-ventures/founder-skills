@@ -851,3 +851,15 @@ def test_explorer_commentary_rendered_via_escape_helper() -> None:
     assert "escHtml(c.callout)" in html
     assert "escHtml(c.highlight)" in html
     assert "escHtml(c.watch_out)" in html
+
+
+def test_explorer_scenario_label_rendered_via_escape_helper() -> None:
+    """Scenario name/label comes from founder-extracted inputs.json — same
+    class as the commentary sink.  The scenario table builder must route
+    the resolved label through escHtml() before HTML insertion."""
+    d = _make_artifact_dir()
+    rc, html, _ = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    assert "function escHtml(" in html
+    # Source-level pin: the concatenation site must use escHtml(label)
+    assert "escHtml(label)" in html, "scenario table must wrap 'label' in escHtml() before HTML concatenation"
