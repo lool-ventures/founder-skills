@@ -2898,6 +2898,100 @@ class TestPreBaselinePatches:
             assert note["maturity_date"] is None
             assert note["interest_rate_type"] == "none"
 
+    # ------------------------------------------------------------------
+    # Fix A: duplicate instrument id guard + --replace upsert
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _base_instr() -> dict[str, Any]:
+        return {
+            "safes": [],
+            "convertible_notes": [],
+            "warrants": [],
+            "option_grants": [],
+            "metadata": {"run_id": "test"},
+        }
+
+    @staticmethod
+    def _safe_extraction(safe_id: str = "safe_seed_1") -> dict[str, Any]:
+        return {
+            "instrument_type": "safe",
+            "fields": {
+                "id": safe_id,
+                "investor_name": "Angel A",
+                "purchase_amount": 500_000,
+                "post_money_valuation_cap": 8_000_000,
+                "discount_multiplier": None,
+                "issuance_date": "2025-01-01",
+                "form": "yc_postmoney_cap",
+                "extraction_confidence": "high",
+            },
+            "confidence": {},
+            "ambiguities": [],
+        }
+
+    def test_duplicate_id_exits_1_no_flag(self) -> None:
+        """Second insert with same id and no --replace flag must exit 1,
+        emit E_DUPLICATE_INSTRUMENT_ID in output, and leave the file with
+        exactly one entry."""
+        with tempfile.TemporaryDirectory() as d:
+            instr_path = os.path.join(d, "instruments.json")
+            with open(instr_path, "w") as f:
+                json.dump(self._base_instr(), f)
+            # First insert succeeds
+            rc1, _, _ = _run(
+                "extract_instrument.py",
+                ["--instruments", instr_path, "--run-id", "t1", "--no-verify", "--no-invariants"],
+                stdin_data=json.dumps(self._safe_extraction("safe_seed_1")),
+            )
+            assert rc1 == 0, "first insert should succeed"
+            # Second insert with same id — must fail
+            rc2, stdout2, stderr2 = _run(
+                "extract_instrument.py",
+                ["--instruments", instr_path, "--run-id", "t2", "--no-verify", "--no-invariants"],
+                stdin_data=json.dumps(self._safe_extraction("safe_seed_1")),
+            )
+            assert rc2 == 1, "duplicate id without --replace must exit 1"
+            combined = stdout2 + stderr2
+            assert "E_DUPLICATE_INSTRUMENT_ID" in combined, (
+                f"expected E_DUPLICATE_INSTRUMENT_ID in output; got:\n{combined}"
+            )
+            assert "safe_seed_1" in combined, "error must name the duplicate id"
+            # File must still have exactly one entry (not two)
+            with open(instr_path) as f:
+                instruments = json.load(f)
+            assert len(instruments["safes"]) == 1, (
+                "file must be unchanged (still exactly 1 safe) after duplicate-id rejection"
+            )
+
+    def test_duplicate_id_with_replace_upserts(self) -> None:
+        """Second insert with same id and --replace must exit 0, leave
+        exactly one entry in the array, and reflect the updated values."""
+        with tempfile.TemporaryDirectory() as d:
+            instr_path = os.path.join(d, "instruments.json")
+            with open(instr_path, "w") as f:
+                json.dump(self._base_instr(), f)
+            # First insert
+            rc1, _, _ = _run(
+                "extract_instrument.py",
+                ["--instruments", instr_path, "--run-id", "t1", "--no-verify", "--no-invariants"],
+                stdin_data=json.dumps(self._safe_extraction("safe_seed_1")),
+            )
+            assert rc1 == 0
+            # Updated extraction — same id, different purchase_amount
+            updated = self._safe_extraction("safe_seed_1")
+            updated["fields"]["purchase_amount"] = 750_000
+            rc2, _, stderr2 = _run(
+                "extract_instrument.py",
+                ["--instruments", instr_path, "--run-id", "t2", "--no-verify", "--no-invariants", "--replace"],
+                stdin_data=json.dumps(updated),
+            )
+            assert rc2 == 0, f"--replace should succeed; stderr={stderr2}"
+            with open(instr_path) as f:
+                instruments = json.load(f)
+            assert len(instruments["safes"]) == 1, "--replace must leave exactly 1 entry"
+            assert instruments["safes"][0]["purchase_amount"] == 750_000, "--replace must update to new values"
+
 
 class TestAoAExtraction:
     """Tests for extract_aoa.py — AoA (Articles of Association) extraction

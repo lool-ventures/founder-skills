@@ -573,6 +573,12 @@ This sub-context exists specifically for AoA documents. CLAs and convertible sec
 
 The validator (`extract_instrument.py --aoa-mode`) validates per-series + per-field confidence + evidence quotes, then the ingest helper (`merge_aoa_to_inputs.py`) merges into `inputs.json.preferred_series[]`. The `shares` field is left null by extraction and merged in from cap-table data (founder input or Carta export) at ingest time.
 
+**Dispatch-independence rule (applies to all three Context A sub-contexts):**
+
+The dispatch prompt you receive contains the document text and GENERIC extraction rules only. The main thread MUST NOT pre-decide field values or classification in the dispatch prompt (e.g. "this doc's form is cap_plus_discount", "use issuance_date 2024-01-15", "this document has both cap and discount"). Your reading of the document must be independent — the verification stack (`evidence_verifier.py` → `invariant_checker.py` → `cross_checker.py`) exists to catch divergence, and a led witness cannot diverge. Generic normalization rules are field semantics, not per-document answers, and are legitimate in the dispatch prompt.
+
+If a dispatch prompt you receive does contain per-document hints or pre-decided values, extract independently from the document text regardless — do not anchor on the hint.
+
 **Hard rules in Context A (all three sub-contexts):**
 
 - Return JSON only. No prose, no markdown wrapper, no explanatory message.

@@ -1240,7 +1240,7 @@ def _phase_post_math(args: argparse.Namespace) -> int:
         sys.stderr.write(
             f"  applied: {len(audit_data['applied_rules'])} | "
             f"counsel: {len(audit_data['counsel_review_items'])} | "
-            f"watchlist: {len(audit_data['date_sensitive_watchlist'])}\n"
+            f"date_sensitive_watchlist: {len(audit_data['date_sensitive_watchlist'])}\n"
         )
     return 0
 

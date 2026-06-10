@@ -242,7 +242,7 @@ INPUTS_EOF
 
 **`option_pool.plan_type` enum:** `iso` | `nso` | `section_102_cg` | `section_102_oi` | `section_3i` | `mixed`. The Israeli §102 capital-gains track is `section_102_cg` — there is no `"israeli_102"` or `"102_cg"` value; those fail validation. See `references/inputs-skeleton.md` for the jurisdiction-to-plan_type mapping table.
 
-**Omit optional fields you don't know — do not write `null`.** Most schema fields are typed non-nullable (e.g., `jurisdiction.incorporated_date` is `string`, not `string | null`); writing `null` fails validation. Fields shown in the Step 2 skeleton with values are either required or strongly recommended. `jurisdiction.incorporated_date` matters for §102/QSBS date math — ask the founder rather than omitting if the engagement touches those.
+**Omit unknown optional fields rather than writing `null`, EXCEPT fields the skeleton explicitly shows as `null` — those are schema-nullable (`["string","null"]` or `["number","null"]`) and keeping them as `null` is correct.** Most other schema fields are typed non-nullable (e.g., `jurisdiction.incorporated_date` is `string`, not `string | null`); writing `null` for those fails validation. Fields shown in the Step 2 skeleton with values are either required or strongly recommended. `jurisdiction.incorporated_date` matters for §102/QSBS date math — ask the founder rather than omitting if the engagement touches those.
 
 Validate immediately:
 
@@ -260,6 +260,21 @@ Route by input format. Each lane has a dedicated dispatch + validation protocol 
 | Carta multi-sheet XLSX export (Pulley not yet end-to-end) | 2 | [`references/lanes/lane-2-carta-pulley.md`](references/lanes/lane-2-carta-pulley.md) |
 | Freeform founder spreadsheet (arbitrary structure) | 3 | [`references/lanes/lane-3-freeform.md`](references/lanes/lane-3-freeform.md) |
 | Structured JSON paste or conversational reconstruction | 4 | [`references/lanes/lane-4-structured.md`](references/lanes/lane-4-structured.md) |
+
+**Lane 1 invocation pattern** — after capturing the sub-agent's JSON reply into a shell variable or staging file, pipe it through `extract_instrument.py` like this:
+
+```bash
+cat <<'EXTRACT_EOF' | python3 "$SCRIPTS/extract_instrument.py" \
+  --instruments "$REVIEW_DIR/instruments.json" \
+  --source-doc "$SOURCE_DOC_PATH" \
+  --run-id "$RUN_ID" --pretty
+<JSON extracted from sub-agent reply>
+EXTRACT_EOF
+```
+
+`extract_instrument.py` reads the sub-agent JSON from **stdin** and updates `--instruments` **in place** — there is no `-o` flag. If the id already exists in the target array you'll get `E_DUPLICATE_INSTRUMENT_ID`; re-run with `--replace` to overwrite the existing entry instead.
+
+**Dispatch independence rule (CRITICAL):** the sub-agent dispatch prompt for `INSTRUMENT_EXTRACTION` contains the document text and the GENERIC extraction rules only. NEVER include per-document hints, expected values, or pre-decided classifications in the dispatch prompt (e.g. "this doc's form is cap_plus_discount", "use issuance_date 2024-01-15") — the sub-agent's reading must be independent. The verification stack (`evidence_verifier.py` → `invariant_checker.py` → `cross_checker.py`) exists to catch divergence; a led witness cannot diverge. Generic normalization rules (e.g. '"Discount Rate is 80%" means multiplier 0.80') are field semantics, not per-document answers — those belong in the dispatch prompt.
 
 **Verification stack** (Lane 1 and any other lane that piped through `extract_instrument.py`): forward `evidence_verifier.py` → `invariant_checker.py` → `cross_checker.py` → optional `backward_verifier.py`. All default-on; see the Lane 1 reference for the receipt schema, `attention_needed_fields` semantics, and when to run backward verification.
 
@@ -286,7 +301,7 @@ Route by input format. Each lane has a dedicated dispatch + validation protocol 
 }
 ```
 
-Field-name traps: it's `purchase_amount` (not `principal` — that's convertible notes), `post_money_valuation_cap` (not `valuation_cap`), `form` (not `safe_type`/`instrument_type`), `id` (not `safe_id`). The `form` enum values are: `yc_postmoney_cap`, `yc_postmoney_discount`, `yc_uncapped_mfn`, `cap_plus_discount`, `yc_premoney_cap_only`, `pre_money_cap_and_discount_legacy`, `other`.
+Field-name traps: it's `purchase_amount` (not `principal` — that's convertible notes), `post_money_valuation_cap` (not `valuation_cap`), `form` (not `safe_type`/`instrument_type`), `id` (not `safe_id`). The `form` enum values are: `yc_postmoney_cap`, `yc_postmoney_discount`, `yc_uncapped_mfn`, `cap_plus_discount`, `yc_premoney_cap_only`, `pre_money_cap_and_discount_legacy`, `other`. For a cap-AND-discount SAFE use `form: "cap_plus_discount"` with BOTH `post_money_valuation_cap` and `discount_multiplier` non-null.
 
 **Field-name boundary — `id` vs `safe_id`:** When authoring or validating `instruments.json`, each SAFE object uses the field name **`id`** (e.g. `"id": "safe_seed_1"`). The field `safe_id` appears ONLY in `cap_state.json` output objects, where `cap_state.py` renames it for that artifact. Never write `safe_id` into `instruments.json`; the schema will reject it as an unknown key, and `cap_state.py` will raise `E_SAFE_MISSING_FIELD`.
 
@@ -497,7 +512,11 @@ cp "$REVIEW_DIR/explorer.html" "${SLUG_TITLE}_Cap_Table_Explorer.html"
 cp "$REVIEW_DIR/counsel_packet.md" "${SLUG_TITLE}_Counsel_Packet.md"
 
 rm -rf "$REVIEW_DIR/.staging" 2>/dev/null || true
+# In Cowork, the outputs sandbox may deny file deletion — that's fine; leave
+# staging files in place. The || true above ensures the step never fails.
 ```
+
+**Fixing a bad artifact (Cowork-safe):** to correct a wrong artifact, **overwrite it in place** by re-running the producer script that writes it (e.g., re-run `cap_state.py` / `extract_instrument.py --replace` / `compose_report.py`). Do NOT delete-and-recreate; deletion may be denied in Cowork. Writing (overwriting) is always permitted.
 
 In flip-focused mode, the flip-impact narrative is rendered as a dedicated section inside `report.md` by the standard compose pipeline — no separate file.
 

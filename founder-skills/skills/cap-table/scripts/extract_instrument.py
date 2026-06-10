@@ -401,6 +401,13 @@ def main() -> int:
         "instrument types that have backstop extractors (currently SAFE only). "
         "Always informational — never blocks.",
     )
+    p.add_argument(
+        "--replace",
+        action="store_true",
+        help="If the target array already contains an entry with the same id, overwrite it "
+        "in place (upsert). Without this flag, a duplicate id is a hard error "
+        "(E_DUPLICATE_INSTRUMENT_ID) and the file is left unchanged.",
+    )
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
 
@@ -511,10 +518,43 @@ def main() -> int:
             field_level = "medium"
     fields.setdefault("extraction_confidence", field_level)
 
+    def _upsert_or_error(
+        array: list[Any],
+        entry: dict[str, Any],
+        *,
+        array_name: str,
+    ) -> str | None:
+        """Check for a duplicate id in array.
+
+        When args.replace is set, replace the existing entry in place and
+        return None. When args.replace is not set and a duplicate is found,
+        return the structured error code string (do not raise — caller exits 1).
+        When no duplicate exists, append and return None.
+
+        Requires entry to have an 'id' key already set.
+        """
+        eid = entry.get("id")
+        for i, existing in enumerate(array):
+            if existing.get("id") == eid:
+                if args.replace:
+                    array[i] = entry
+                    return None
+                return (
+                    f"E_DUPLICATE_INSTRUMENT_ID: entry '{eid}' already exists in "
+                    f"instruments.json {array_name}[] — pass --replace to overwrite it, "
+                    f"or use a new id"
+                )
+        array.append(entry)
+        return None
+
     if itype == "safe":
         # Allocate next id
         fields.setdefault("id", f"safe_{len(instruments['safes']) + 1:03d}")
-        instruments["safes"].append(fields)
+        dup_err = _upsert_or_error(instruments["safes"], fields, array_name="safes")
+        if dup_err:
+            sys.stderr.write(f"extract_instrument.py: {dup_err}\n")
+            print(json.dumps({"error": "E_DUPLICATE_INSTRUMENT_ID", "detail": dup_err}))
+            return 1
     elif itype == "convertible_note":
         fields.setdefault("id", f"note_{len(instruments['convertible_notes']) + 1:03d}")
         # Record subtype for provenance. Math producers consume the canonical
@@ -522,7 +562,11 @@ def main() -> int:
         # framing (Israeli CLA / YC convertible_security / standard note).
         if subtype:
             fields["subtype"] = subtype
-        instruments["convertible_notes"].append(fields)
+        dup_err = _upsert_or_error(instruments["convertible_notes"], fields, array_name="convertible_notes")
+        if dup_err:
+            sys.stderr.write(f"extract_instrument.py: {dup_err}\n")
+            print(json.dumps({"error": "E_DUPLICATE_INSTRUMENT_ID", "detail": dup_err}))
+            return 1
     elif itype == "warrant":
         # v0.5.0: warrants require a full item shape (shares_underlying,
         # exercise_price, warrant_type, issuance_date, settlement_type,
@@ -541,7 +585,11 @@ def main() -> int:
         )
         if all(k in fields for k in required_warrant_keys):
             fields.setdefault("id", f"warrant_{len(instruments['warrants']) + 1:03d}")
-            instruments["warrants"].append(fields)
+            dup_err = _upsert_or_error(instruments["warrants"], fields, array_name="warrants")
+            if dup_err:
+                sys.stderr.write(f"extract_instrument.py: {dup_err}\n")
+                print(json.dumps({"error": "E_DUPLICATE_INSTRUMENT_ID", "detail": dup_err}))
+                return 1
         else:
             warnings.append(
                 "extract_instrument.py: warrant classification accepted but the extraction did not provide a "
