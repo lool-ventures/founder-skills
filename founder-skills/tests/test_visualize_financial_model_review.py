@@ -12,16 +12,32 @@ All tests use subprocess to exercise the script exactly as the agent does.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import types
 from typing import Any
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FMR_SCRIPTS_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "financial-model-review", "scripts")
+_VISUALIZE_SCRIPT = os.path.join(FMR_SCRIPTS_DIR, "visualize.py")
+
+
+def _load_visualize_module() -> types.ModuleType:
+    """Import visualize.py as a module (unique sys.modules key to avoid collisions)."""
+    key = "fmr_visualize_test"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    spec = importlib.util.spec_from_file_location(key, _VISUALIZE_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
 
 
 # ---------------------------------------------------------------------------
@@ -487,3 +503,17 @@ def test_threshold_scenario_in_chart() -> None:
     # Verify purple color and dashed line for threshold scenario
     assert "#8b5cf6" in stdout, "Expected purple color (#8b5cf6) for threshold scenario"
     assert 'stroke-dasharray="6,3"' in stdout, "Expected dashed line for threshold scenario"
+
+
+# ---------------------------------------------------------------------------
+# Task 14 — _fmt_usd negative values
+# ---------------------------------------------------------------------------
+
+
+def test_fmt_usd_negative_values() -> None:
+    """Runway-chart Y-axes can go negative (min(all_cash, 0)); negatives must
+    format compactly, not fall through to '$-200,000.00'."""
+    mod = _load_visualize_module()
+    assert mod._fmt_usd(-200_000) == "-$200.0K"
+    assert mod._fmt_usd(-10_000_000) == "-$10.0M"
+    assert mod._fmt_usd(1_500_000) == "$1.5M"  # positive path unchanged

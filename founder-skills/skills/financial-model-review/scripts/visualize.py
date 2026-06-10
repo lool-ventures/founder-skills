@@ -112,6 +112,8 @@ def _num(value: Any, default: float = 0.0) -> float:
 
 def _fmt_usd(value: float | int) -> str:
     """Format a number as compact USD currency string."""
+    if value < 0:
+        return "-" + _fmt_usd(-value)
     if value >= 1_000_000_000:
         return f"${value / 1_000_000_000:,.1f}B"
     if value >= 1_000_000:
