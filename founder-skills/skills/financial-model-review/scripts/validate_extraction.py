@@ -135,13 +135,21 @@ def _find_numeric_in_model(
     if target == 0:
         return True  # Zero is trivially traceable
     nums = _all_numeric_values(model_data)
-    mult = _periodicity_multiplier(model_data) if periodicity_aware else 1
+    mults: list[int] = []
+    if periodicity_aware:
+        ps = model_data.get("periodicity_summary", "monthly")
+        if ps in ("mixed", "unknown"):
+            mults = [3, 12]  # try both — sheets disagree or we can't tell
+        else:
+            m = _periodicity_multiplier(model_data)
+            if m > 1:
+                mults = [m]
 
     for n in nums:
         if _close_enough(target, n, tolerance):
             return True
         # Periodicity-aware: monthly value * mult ≈ source value
-        if periodicity_aware and mult > 1:
+        for mult in mults:
             if _close_enough(target * mult, n, tolerance):
                 return True
             if _close_enough(target, n / mult, tolerance):
@@ -154,7 +162,7 @@ def _find_numeric_in_model(
             if _close_enough(descaled, n, tolerance):
                 return True
             # Combination: scale + periodicity
-            if periodicity_aware and mult > 1:
+            for mult in mults:
                 if _close_enough(descaled * mult, n, tolerance):
                     return True
                 if _close_enough(descaled, n / mult, tolerance):
@@ -181,12 +189,20 @@ def _find_cell_ref(
     """
     if target == 0:
         return None  # Zero is trivially traceable, no meaningful ref
-    mult = _periodicity_multiplier(model_data) if periodicity_aware else 1
+    mults: list[int] = []
+    if periodicity_aware:
+        ps = model_data.get("periodicity_summary", "monthly")
+        if ps in ("mixed", "unknown"):
+            mults = [3, 12]  # try both — sheets disagree or we can't tell
+        else:
+            m = _periodicity_multiplier(model_data)
+            if m > 1:
+                mults = [m]
 
     def _matches(t: float, fval: float) -> bool:
         if _close_enough(t, fval, tolerance):
             return True
-        if periodicity_aware and mult > 1:
+        for mult in mults:
             if _close_enough(t * mult, fval, tolerance):
                 return True
             if _close_enough(t, fval / mult, tolerance):
@@ -600,11 +616,11 @@ def _indicator_to_factor(indicator: str) -> int:
     return 1_000
 
 
-def _values_already_plausible(inputs: dict[str, Any]) -> bool:
-    """Check if monetary values are already in plausible ranges (already scaled).
+def _plausibility_vote(inputs: dict[str, Any]) -> tuple[bool, int]:
+    """Majority-vote plausibility over the checked monetary fields.
 
-    Checks multiple monetary fields — not just cash/burn — to avoid false
-    negatives when only some fields are populated.
+    Returns (majority_plausible, checked_count). checked_count == 0 returns
+    (True, 0): nothing to check — never fix blindly.
     """
     stage = inputs.get("company", {}).get("stage", "seed")
     ranges = _STAGE_RANGES.get(stage, _STAGE_RANGES["seed"])
@@ -647,10 +663,13 @@ def _values_already_plausible(inputs: dict[str, Any]) -> bool:
             break  # one salary check is enough
 
     if checked_count == 0:
-        return True  # no monetary fields to check — assume OK, don't fix blindly
+        return True, 0  # no monetary fields to check — assume OK, don't fix blindly
 
-    # If majority of checked fields are plausible, values are already scaled
-    return plausible_count > checked_count / 2
+    return plausible_count > checked_count / 2, checked_count
+
+
+def _values_already_plausible(inputs: dict[str, Any]) -> bool:
+    return _plausibility_vote(inputs)[0]
 
 
 def _apply_scale_fix(inputs: dict[str, Any], factor: int) -> int:
@@ -837,11 +856,23 @@ def main() -> None:
     if args.fix and model_data is not None:
         indicator = _detect_scale_indicator(model_data)
         already_corrected = bool(inputs.get("metadata", {}).get("scale_correction"))
-        if indicator and not already_corrected and not _values_already_plausible(inputs):
+        plausible, checked = _plausibility_vote(inputs)
+        if indicator and not already_corrected and not plausible and checked < 2:
+            print(
+                f"Warning: scale indicator '{indicator}' found but only {checked} monetary "
+                f"field(s) available to cross-check — skipping auto-correction; review manually",
+                file=sys.stderr,
+            )
+        elif indicator and not already_corrected and not plausible:
             factor = _indicator_to_factor(indicator)
             inputs_to_fix = copy.deepcopy(inputs)
             corrected_count = _apply_scale_fix(inputs_to_fix, factor)
-            if corrected_count > 0:
+            if corrected_count > 0 and not _values_already_plausible(inputs_to_fix):
+                print(
+                    "Warning: scale fix would produce implausible values — skipping auto-correction; review manually",
+                    file=sys.stderr,
+                )
+            elif corrected_count > 0:
                 # Write corrected inputs back to the same path
                 with open(args.inputs, "w", encoding="utf-8") as f:
                     json.dump(inputs_to_fix, f, indent=2)

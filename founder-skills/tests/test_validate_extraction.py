@@ -10,6 +10,7 @@ Run:  pytest founder-skills/tests/test_validate_extraction.py -v
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -19,6 +20,16 @@ from typing import Any
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FMR_SCRIPTS_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "financial-model-review", "scripts")
+
+
+def _load_validate_extraction_module() -> Any:
+    """Import validate_extraction.py as a module for direct function access."""
+    script_path = os.path.join(FMR_SCRIPTS_DIR, "validate_extraction.py")
+    spec = importlib.util.spec_from_file_location("fmr_validate_extraction_test", script_path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
 
 
 def _run(
@@ -615,3 +626,185 @@ class TestScaleFix:
         # Values should NOT have been changed
         assert modified["cash"]["current_balance"] == 3900
         assert data.get("fixed") is not True
+
+
+# ---------------------------------------------------------------------------
+# Scale-fix guard tests (minor 14)
+# ---------------------------------------------------------------------------
+
+
+def _model_with_scale_indicator(indicator: str = "($000)") -> dict[str, Any]:
+    """Minimal model_data with the given scale indicator string in a header."""
+    return {
+        "sheets": [
+            {
+                "name": "Summary",
+                "headers": [f"Line Item {indicator}", "Jan 2025"],
+                "rows": [
+                    ["Cash Balance", 30],
+                ],
+                "detected_type": "summary",
+                "periodicity": "monthly",
+                "row_count": 1,
+                "col_count": 2,
+                "pre_header_rows": [],
+                "cell_refs": [],
+            }
+        ],
+        "source_format": "xlsx",
+        "source_file": "model.xlsx",
+        "periodicity_summary": "monthly",
+    }
+
+
+class TestScaleFixGuards:
+    def test_scale_fix_skipped_on_single_checked_field(self, tmp_path: Any) -> None:
+        """One implausibly-low field + a ($000) indicator is too weak a signal for
+        a x1000 auto-rewrite — require >= 2 checked monetary fields (regression:
+        a majority vote of one corrupted correct values).
+
+        cash_balance=30_000 is below the seed lower bound (50_000), but it's the
+        ONLY checked monetary field.  The fix must be skipped.
+        """
+        inputs: dict[str, Any] = {
+            "company": {"stage": "seed", "model_format": "spreadsheet"},
+            "cash": {"current_balance": 30_000},
+        }
+        model = _model_with_scale_indicator("($000)")
+
+        inputs_path = str(tmp_path / "inputs.json")
+        model_path = str(tmp_path / "model.json")
+        with open(inputs_path, "w") as f:
+            json.dump(inputs, f)
+        with open(model_path, "w") as f:
+            json.dump(model, f)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                os.path.join(FMR_SCRIPTS_DIR, "validate_extraction.py"),
+                "--inputs",
+                inputs_path,
+                "--model-data",
+                model_path,
+                "--fix",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        with open(inputs_path) as f:
+            written = json.load(f)
+
+        assert written["cash"]["current_balance"] == 30_000, (
+            f"Expected 30_000 (untouched) but got {written['cash']['current_balance']}; stderr: {result.stderr}"
+        )
+        assert not written.get("metadata", {}).get("scale_correction"), (
+            "scale_correction should not be written when only one field checked"
+        )
+
+    def test_scale_fix_skipped_when_post_fix_implausible(self, tmp_path: Any) -> None:
+        """If applying the factor lands values OUTSIDE plausible ranges, the fix
+        must be skipped with a warning, not written.
+
+        For seed stage:
+          cash_balance range: (50_000, 100_000_000)
+          monthly_burn range: (5_000, 2_000_000)
+
+        We pick values that are BOTH implausible before AND after x1000:
+          cash_balance=500_000_000  → pre: 500M > 100M (implausible)
+                                    → post x1000: 500B > 100M (still implausible)
+          monthly_burn=5_000_000   → pre: 5M > 2M (implausible)
+                                    → post x1000: 5B > 2M (still implausible)
+
+        checked_count == 2, pre-fix majority implausible → enters the fix branch.
+        post-fix majority still implausible → must skip with warning.
+        """
+        inputs: dict[str, Any] = {
+            "company": {"stage": "seed", "model_format": "spreadsheet"},
+            "cash": {
+                "current_balance": 500_000_000,  # above 100M seed cap → implausible
+                "monthly_net_burn": 5_000_000,  # above 2M seed cap → implausible
+            },
+        }
+        model = _model_with_scale_indicator("($000)")
+
+        inputs_path = str(tmp_path / "inputs.json")
+        model_path = str(tmp_path / "model.json")
+        with open(inputs_path, "w") as f:
+            json.dump(inputs, f)
+        with open(model_path, "w") as f:
+            json.dump(model, f)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                os.path.join(FMR_SCRIPTS_DIR, "validate_extraction.py"),
+                "--inputs",
+                inputs_path,
+                "--model-data",
+                model_path,
+                "--fix",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        with open(inputs_path) as f:
+            written = json.load(f)
+
+        assert written["cash"]["current_balance"] == 500_000_000, (
+            f"Expected 500_000_000 (untouched) but got {written['cash']['current_balance']}; stderr: {result.stderr}"
+        )
+        assert not written.get("metadata", {}).get("scale_correction"), (
+            "scale_correction should not be written when post-fix values are implausible"
+        )
+        # Should emit a warning to stderr
+        assert "implausible" in result.stderr.lower() or "warning" in result.stderr.lower(), (
+            f"Expected warning in stderr but got: {result.stderr!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Mixed/unknown periodicity tests (minor 15)
+# ---------------------------------------------------------------------------
+
+
+class TestMixedPeriodicity:
+    def test_traceability_tries_quarterly_and_annual_for_mixed_periodicity(self) -> None:
+        """periodicity_summary 'mixed' must try x3 and x12 scaling — a monthly
+        inputs value sourced from a quarterly sheet is traceable (regression:
+        'mixed' was treated as monthly, producing spurious warns)."""
+        mod = _load_validate_extraction_module()
+        # Model has a quarterly figure: 300_000 (= 100_000 * 3)
+        model_data: dict[str, Any] = {
+            "periodicity_summary": "mixed",
+            "sheets": [{"name": "Sheet1", "rows": [[300_000]]}],
+        }
+        # inputs has monthly value 100_000; quarterly = 300_000 → traceable
+        assert mod._find_numeric_in_model(100_000, model_data, periodicity_aware=True), (
+            "_find_numeric_in_model should find 100_000 via x3 scaling in a 'mixed' model"
+        )
+
+    def test_traceability_tries_annual_for_mixed_periodicity(self) -> None:
+        """periodicity_summary 'mixed' must try x12 — a monthly inputs value
+        sourced from an annual sheet is traceable."""
+        mod = _load_validate_extraction_module()
+        # Model has an annual figure: 1_200_000 (= 100_000 * 12)
+        model_data: dict[str, Any] = {
+            "periodicity_summary": "mixed",
+            "sheets": [{"name": "Sheet1", "rows": [[1_200_000]]}],
+        }
+        assert mod._find_numeric_in_model(100_000, model_data, periodicity_aware=True), (
+            "_find_numeric_in_model should find 100_000 via x12 scaling in a 'mixed' model"
+        )
+
+    def test_unknown_periodicity_tries_quarterly_and_annual(self) -> None:
+        """periodicity_summary 'unknown' must also try x3 and x12."""
+        mod = _load_validate_extraction_module()
+        model_data: dict[str, Any] = {
+            "periodicity_summary": "unknown",
+            "sheets": [{"name": "Sheet1", "rows": [[360_000]]}],
+        }
+        # 30_000 * 12 = 360_000
+        assert mod._find_numeric_in_model(30_000, model_data, periodicity_aware=True), (
+            "_find_numeric_in_model should find 30_000 via x12 in an 'unknown' model"
+        )
