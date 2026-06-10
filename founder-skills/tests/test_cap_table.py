@@ -4982,12 +4982,12 @@ class TestQuickAssessUX:
 
 
 # ===========================================================================
-# Round-5 Fix — per-holder cap table + SAFE derivation in fast-assess report
+# Fast-assess report — per-holder cap table + SAFE derivation
 # ===========================================================================
 
 
 class TestFastAssessCapTableSection:
-    """Tests for Round-5 fix: per-holder cap table and SAFE derivation line.
+    """Per-holder cap table and SAFE derivation line in report_fast_assess.md.
 
     Scenario: EVAL2 single-SAFE (Angel A $500K @ $10M cap),
     pre_money=20M, new_money=5M, pool=10% post_money.

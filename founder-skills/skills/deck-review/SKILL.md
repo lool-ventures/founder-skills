@@ -218,7 +218,7 @@ PROFILE_EOF
 
 ### Gate: Confirm Stage and Scope
 
-**Sub-agent execution model:** sub-agents in Cowork cannot reliably call `AskUserQuestion`. The gate uses a checkpoint-and-resume pattern — the sub-agent writes a `gate_state.json` to disk and emits a structured `needs_input` payload as its final message. The parent (main thread or invoking agent) calls `AskUserQuestion` *if available* — or otherwise asks the founder via plain text — then writes the answer back into `gate_state.json` via `gate_state.py answer`, then re-invokes this sub-agent. The sub-agent detects re-invocation by checking whether `gate_state.json` already has an `answer` field. (Round-1 of the Phase 5 experiment confirmed plain-text round-trip works correctly even without `AskUserQuestion`.)
+**Sub-agent execution model:** sub-agents in Cowork cannot reliably call `AskUserQuestion`. The gate uses a checkpoint-and-resume pattern — the sub-agent writes a `gate_state.json` to disk and emits a structured `needs_input` payload as its final message. The parent (main thread or invoking agent) calls `AskUserQuestion` *if available* — or otherwise asks the founder via plain text — then writes the answer back into `gate_state.json` via `gate_state.py answer`, then re-invokes this sub-agent. The sub-agent detects re-invocation by checking whether `gate_state.json` already has an `answer` field. (The plain-text round-trip works correctly even without `AskUserQuestion`.)
 
 **How to detect re-invocation:** if `$REVIEW_DIR/gate_state.json` already exists AND has a non-empty `answer` field, you were re-invoked. Skip the gate-emit and read the answer:
 
@@ -376,7 +376,7 @@ python3 "$SCRIPTS/compose_report.py" --dir "$REVIEW_DIR" --pretty \
   --write-md "$REVIEW_DIR/report.md"
 ```
 
-`compose_report.py` writes both `report.json` and `report.md` deterministically. **Do NOT** read `report_markdown` out of `report.json` and re-write it via heredoc — the agent's heredoc handling drifted in the original Cowork run and produced an unparseable `report.json`. Compose owns the file outputs.
+`compose_report.py` writes both `report.json` and `report.md` deterministically. **Do NOT** read `report_markdown` out of `report.json` and re-write it via heredoc — heredoc re-writing can corrupt `report.json`. Compose owns the file outputs.
 
 Fix high-severity warnings and re-run. Use `--strict` to enforce a clean report.
 
