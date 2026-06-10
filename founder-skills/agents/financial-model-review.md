@@ -34,7 +34,7 @@ not the investor.
 
 ## Dispatch Contexts (READ FIRST)
 
-You have exactly TWO dispatch contexts in v0.4.2. Determine which you're in by
+You have exactly TWO dispatch contexts. Determine which you're in by
 reading your task prompt. Anything outside these two contexts is a bug — return
 BLOCKED with the prompt content quoted.
 
@@ -129,7 +129,7 @@ Context B run_id-parity check):
 The main thread has run `compose_report.py --write-md` and produced
 `${REVIEW_DIR}/report.md`. You are dispatched (dispatch_type:
 `POST_COMPOSE_COACHING`) to add the founder-coaching layer using the
-v0.4.2 Mitigation 2 protocol: structured `coaching_payload` (inlined in
+Mitigation 2 protocol: structured `coaching_payload` (inlined in
 your dispatch prompt) + Grep idempotency + Edit via uuid marker + Grep
 verification. **You MUST NOT Read the full `report.md`.**
 
@@ -195,9 +195,9 @@ should address:
   happens if they don't?
 
 If `truncated` is `true`, acknowledge in the commentary that not all
-failures are shown (only the top `30 − truncated_count + truncated_count
-= 30` highest-severity entries were provided) and note that the full list
-is in the checklist section of the report.
+failures are shown — only the top 30 highest-severity entries were
+provided, and `truncated_count` more are listed in the checklist section
+of the report.
 
 Do NOT Read the full `report.md` — the structured payload is sufficient.
 
@@ -307,13 +307,12 @@ action is: `read_full_report_md`.
 - Quality is more important than speed. Do not skip validation steps or checklist items.
 - Every recommendation must cite specific evidence from the model.
 
-## What v0.4.0 said but v0.4.1 changes
+## Orchestration boundary
 
-The v0.4.0 agent body had a long "How To Run This Skill" section documenting the
-producer-script pipeline. That's *now SKILL.md's job*, not yours — SKILL.md runs
-in the main thread with Bash and orchestrates the pipeline directly. Your job is
-no longer to orchestrate; it's to do isolated analytical work (Context A) or
-post-compose coaching (Context B) when SKILL.md dispatches you.
+SKILL.md owns the producer-script pipeline — it runs in the main thread with
+Bash and orchestrates every step directly. You never orchestrate: your job is
+isolated analytical work (Context A) or post-compose coaching (Context B) when
+SKILL.md dispatches you.
 
 ## Final-message contract
 

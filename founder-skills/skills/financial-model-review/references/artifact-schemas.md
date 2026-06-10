@@ -247,7 +247,7 @@ Assembled report from all artifacts with cross-artifact validation.
 
 **Exit codes:**
 - `0` — success
-- `1` — required artifacts missing (always), or any high/medium warnings in `--strict` mode
+- `1` — required artifacts missing (always), or any high-severity warnings in `--strict` mode (medium does not block)
 
 ---
 

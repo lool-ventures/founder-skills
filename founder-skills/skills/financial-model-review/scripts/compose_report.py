@@ -911,7 +911,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("-d", "--dir", required=True, help="Directory containing JSON artifacts")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
-    p.add_argument("--strict", action="store_true", help="Exit 1 if any high/medium warnings (CI mode)")
+    p.add_argument(
+        "--strict", action="store_true", help="Exit 1 on high-severity warnings (CI mode); medium does not block"
+    )
     p.add_argument(
         "--write-md",
         help="Also write the report markdown to this path (in addition to JSON output via -o)",

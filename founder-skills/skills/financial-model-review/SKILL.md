@@ -34,7 +34,7 @@ This skill runs **inline in the main thread** (not as a sub-agent). The main thr
 **Two dispatch contexts for the sub-agent:**
 
 - **Context A — Per-step analytical dispatch (Mitigation 1):** The INPUTS_REVIEW and CHECKLIST steps dispatch the financial-model-review agent via the `Task` tool. The agent does deep analysis and returns structured JSON. The main thread captures the JSON and pipes it through the producer script. The sub-agent does NOT write artifacts directly. (Unit economics and runway are NOT dispatched — those producers consume `inputs.json` verbatim, so the main thread pipes the file directly.)
-- **Context B — Post-compose coaching dispatch:** The final step dispatches the sub-agent after `compose_report.py` writes `report.md`. The sub-agent reads `report.md`, appends `## Coaching Commentary`, verifies all canonical artifacts on disk, and returns a structured success payload.
+- **Context B — Post-compose coaching dispatch:** The final step dispatches the sub-agent after `compose_report.py` writes `report.md`. The sub-agent consumes the `coaching_payload` inlined in its dispatch prompt (it does NOT read full `report.md`), inserts `## Coaching Commentary` via the uuid insertion marker, Grep-verifies all canonical artifacts on disk, and returns a structured success payload.
 
 **Why this model:** In Cowork, sub-agents have a restricted tool allowlist (no Bash). By keeping orchestration in the main thread and dispatching sub-agents only for analytical or post-compose tasks that use only Read/Edit/Glob/Grep, the pipeline works correctly in both Claude Code (CLI) and Cowork.
 
@@ -144,11 +144,11 @@ After Step 1 (when the slug is known):
 ```bash
 REVIEW_DIR="$ARTIFACTS_ROOT/financial-model-review-${SLUG}"
 mkdir -p "$REVIEW_DIR"
-mkdir -p "$REVIEW_DIR/.staging"   # for ad-hoc sub-agent JSON staging (v0.4.2)
+mkdir -p "$REVIEW_DIR/.staging"   # for ad-hoc sub-agent JSON staging
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
-Pass `RUN_ID` to all sub-agents. Every artifact written to `$REVIEW_DIR` must include `"metadata": {"run_id": "$RUN_ID"}` at the top level. `compose_report.py` checks that all artifact run IDs match — a mismatch triggers a `STALE_ARTIFACT` high-severity warning, blocking under `--strict`.
+Pass `RUN_ID` to all sub-agents. The four producer artifacts (`inputs.json`, `checklist.json`, `unit_economics.json`, `runway.json`) must carry `"metadata": {"run_id": "$RUN_ID"}` at the top level — the producers propagate it from their stdin payloads; never hand-edit script outputs to add it. (`model_data.json` and `extraction_validation.json` have no run_id by design.) `compose_report.py` checks that all four run IDs match — a mismatch triggers a `STALE_ARTIFACT` high-severity warning, blocking under `--strict`.
 
 If `REVIEW_DIR` already contains artifacts from a previous run, remove them before starting:
 
@@ -186,7 +186,7 @@ python3 "$SHARED_SCRIPTS/founder_context.py" init \
   --geography "US" --artifacts-root "$ARTIFACTS_ROOT"
 ```
 
-If the script prints a `sector_type` warning but exits 0, that's non-fatal — proceed without retrying. However, a null `sector_type` may suppress sector-specific checklist gating downstream. If you know the correct type, re-run with `--sector-type` (valid values: `saas`, `ai-native`, `marketplace`, `hardware`, `hardware-subscription`, `consumer-subscription`, `usage-based`).
+If the script prints a `sector_type` warning but exits 0, that's non-fatal — proceed without retrying. However, a null `sector_type` may suppress sector-specific checklist gating downstream. If you know the correct type, re-run with `--sector-type` (valid values: `saas`, `ai-native`, `marketplace`, `hardware`, `hardware-subscription`, `consumer-subscription`, `usage-based`, `transactional-fintech`).
 
 **Exit 2 (multiple context files):** Present the list to the founder, ask which company, then re-read with `--slug`.
 
@@ -204,7 +204,7 @@ Check the `periodicity_summary` and per-sheet `periodicity` fields. If periodici
 
 **When conversational input is provided (no files):** Gather all needed fields within Step 1 through normal conversation. Consult `references/schema-inputs.md` for the full schema.
 
-### Sub-agent JSON staging (v0.4.2)
+### Sub-agent JSON staging
 
 When a sub-agent returns JSON too large for bash heredoc, write it to
 `$REVIEW_DIR/.staging/<step>_input.json` first, then pipe via:
@@ -215,7 +215,7 @@ cat "$REVIEW_DIR/.staging/<step>_input.json" | python3 "$SCRIPTS/<producer>.py" 
 
 The `.staging/` directory is created at setup and removed at cleanup.
 This avoids `Operation not permitted` errors that occur when writing to
-`$OUTPUTS_ROOT/` (Cowork sandbox marks that read-only post-write).
+the session outputs mount (Cowork marks it read-only post-write).
 
 ### Step 3: INPUTS_REVIEW Dispatch (Context A)
 
@@ -457,7 +457,7 @@ Generate files silently — present paths after Gate 2 passes.
 
 **Dispatch the financial-model-review sub-agent in Context B.** Dispatch via the `Task` tool after `compose_report.py` has successfully written both `report.json` and `report.md`.
 
-**Mitigation 2 protocol (v0.4.2):** the main thread reads the structured `coaching_payload` from `report.json` and inlines it into the dispatch prompt. The sub-agent does NOT Read full `report.md` — it consumes `coaching_payload` directly, performs Grep idempotency, Edits via the per-run uuid `insertion_marker`, and Grep-verifies all artifacts. See the financial-model-review agent body's "Context B — Post-compose coaching dispatch (POST_COMPOSE_COACHING)" section for the full procedure.
+**Mitigation 2 protocol:** the main thread reads the structured `coaching_payload` from `report.json` and inlines it into the dispatch prompt. The sub-agent does NOT Read full `report.md` — it consumes `coaching_payload` directly, performs Grep idempotency, Edits via the per-run uuid `insertion_marker`, and Grep-verifies all artifacts. See the financial-model-review agent body's "Context B — Post-compose coaching dispatch (POST_COMPOSE_COACHING)" section for the full procedure.
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash

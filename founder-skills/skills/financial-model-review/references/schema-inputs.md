@@ -64,11 +64,13 @@ Canonical structured input for all downstream scripts. The `company` block is re
 |-------|------|----------|-------------|
 | `company_name` | string | yes | Company name |
 | `slug` | string | yes | URL-safe identifier |
-| `stage` | string | yes | One of: `"pre-seed"`, `"seed"`, `"series-a"` |
+| `stage` | string | yes | One of: `"pre-seed"`, `"seed"`, `"series-a"`, `"series-b"`, `"later"` |
 | `sector` | string | yes | Normalized sector string |
 | `geography` | string | yes | Primary geography |
-| `revenue_model_type` | string | yes | One of: `"saas-plg"`, `"saas-sales-led"`, `"marketplace"`, `"usage-based"`, `"ai-native"`, `"hardware"`, `"hardware-subscription"`, `"consumer-subscription"`, `"transactional-fintech"` |
+| `revenue_model_type` | string | yes | One of: `"saas-plg"`, `"saas-sales-led"`, `"marketplace"`, `"usage-based"`, `"ai-native"`, `"hardware"`, `"hardware-subscription"`, `"consumer-subscription"`, `"transactional-fintech"`, `"annual-contracts"` |
 | `model_format` | string | no | One of: `"spreadsheet"`, `"deck"`, `"conversational"`, `"partial"`. Defaults to `"spreadsheet"`. Controls which checklist items are applicable. |
+| `data_confidence` | string | no | One of: `"exact"`, `"estimated"`, `"mixed"`. Indicates reliability of input values. |
+| `traits` | string[] | no | Boolean trait flags: `"multi-currency"`, `"multi-entity"`, `"multi-market"`, `"annual-contracts"`, `"ai-powered"` — product uses AI/ML inference as a core feature (triggers AI cost scrutiny regardless of revenue model) |
 
 #### `model_format` pipeline effects
 
@@ -81,9 +83,6 @@ Canonical structured input for all downstream scripts. The `company` block is re
 
 Additional effects for `deck` / `conversational`:
 - `compose_report.py --strict`: Only high-severity warnings (corrupt/missing artifacts) block; checklist failures are review findings, not data errors
-
-| `data_confidence` | string | no | One of: `"exact"`, `"estimated"`, `"mixed"`. Indicates reliability of input values. |
-| `traits` | string[] | no | Boolean trait flags: `"multi-currency"`, `"multi-entity"`, `"multi-market"`, `"annual-contracts"`, `"ai-powered"` — product uses AI/ML inference as a core feature (triggers AI cost scrutiny regardless of revenue model) |
 
 ### revenue
 
@@ -374,6 +373,7 @@ Additional effects for `deck` / `conversational`:
 | `hardware` | Physical product | Peloton, Ring |
 | `hardware-subscription` | Hardware with recurring revenue | Tesla FSD, Apple One |
 | `consumer-subscription` | Consumer subscription | Netflix, Spotify |
+| `transactional-fintech` | Payment/transaction-fee revenue | Stripe, Wise |
 | `annual-contracts` | Enterprise annual/multi-year | Workday, ServiceNow |
 
 ### Sector Gate Mapping
