@@ -74,7 +74,7 @@ _COMPOSE_FLAGS: dict[str, list[str]] = {
     "cap-table": ["-o", "REPORT_JSON_OUT", "--write-md", "REPORT_MD_OUT", "--run-id", "test-run"],
     # "market-sizing": [...],            # confirm before adding
     # "ic-sim": [...],                   # confirm before adding
-    # "financial-model-review": [...],   # confirm before adding
+    "financial-model-review": ["-o", "REPORT_JSON_OUT", "--write-md", "REPORT_MD_OUT"],
     # "competitive-positioning": [...],  # confirm before adding
 }
 
@@ -94,7 +94,7 @@ _RUN_ID_MUTATION_TARGET: dict[str, str] = {
     "cap-table": "inputs.json",
     # "market-sizing": "inputs.json",            # confirm before adding
     # "ic-sim": "startup_profile.json",          # confirm before adding
-    # "financial-model-review": "inputs.json",   # confirm before adding
+    "financial-model-review": "inputs.json",
     # "competitive-positioning": "landscape.json", # confirm before adding
 }
 

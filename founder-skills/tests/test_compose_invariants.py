@@ -36,7 +36,7 @@ COACHING_SKILLS = [
     "cap-table",
     # "market-sizing",            # add when fixtures populated
     # "ic-sim",                   # add when fixtures populated
-    # "financial-model-review",   # add when fixtures populated
+    "financial-model-review",
     # "competitive-positioning",  # add when fixtures populated
 ]
 

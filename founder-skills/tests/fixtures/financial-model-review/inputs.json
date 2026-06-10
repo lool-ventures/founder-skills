@@ -1,0 +1,21 @@
+{
+  "company": {
+    "company_name": "TestCo",
+    "slug": "testco",
+    "stage": "seed",
+    "sector": "B2B SaaS",
+    "geography": "US",
+    "revenue_model_type": "saas-sales-led",
+    "model_format": "spreadsheet"
+  },
+  "revenue": {
+    "mrr": {"value": 80000, "as_of": "2026-05"},
+    "growth_rate_monthly": 0.08
+  },
+  "cash": {
+    "current_balance": 1500000,
+    "balance_date": "2026-05",
+    "monthly_net_burn": 120000
+  },
+  "metadata": {"run_id": "fixture-run"}
+}
