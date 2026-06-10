@@ -368,12 +368,15 @@ def _section_executive_summary(
         model_maturity = summary.get("model_maturity_pct")
         if model_maturity is None and data_confidence != "exact":
             bq_score = summary.get("business_quality_pct")
-            if bq_score is None:
-                bq_score = score
-            lines.append(
-                f"**Deck Financial Readiness:** {status} ({bq_score:.0f}%) "
-                f"(business quality only — no spreadsheet model)  "
-            )
+            if bq_score is not None:
+                lines.append(
+                    f"**Deck Financial Readiness:** {status} ({bq_score:.0f}%) "
+                    f"(business quality only — no spreadsheet model)  "
+                )
+            else:
+                # all business items gated N/A — deck-readiness score not computable;
+                # fall back to the overall score with an honest label
+                lines.append(f"**Model Quality:** {status} ({score:.0f}%)  ")
         else:
             lines.append(f"**Model Quality:** {status} ({score:.0f}%)  ")
 

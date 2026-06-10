@@ -2037,6 +2037,41 @@ def test_compose_report_estimated_label() -> None:
     assert "Deck Financial Readiness" in md or "business quality only" in md.lower()
 
 
+def test_compose_report_deck_biz_quality_none_uses_model_quality_label() -> None:
+    """When business_quality_pct is None (all business items N/A) and there is no
+    spreadsheet model, the report must NOT print the 'business quality only' label
+    with the overall score — that would be a mislabeled number.  Instead it must
+    fall back to the generic 'Model Quality' label.
+
+    Regression: the old code substituted `score` (overall) for `bq_score` but kept
+    the 'business quality only' label, misleading readers about what the number meant.
+    """
+    inputs_est = json.loads(json.dumps(_VALID_INPUTS))
+    inputs_est["company"]["data_confidence"] = "estimated"
+    inputs_est["company"]["model_format"] = "deck"
+    checklist_biz_na = json.loads(json.dumps(_VALID_CHECKLIST))
+    checklist_biz_na["summary"]["model_maturity_pct"] = None
+    checklist_biz_na["summary"]["business_quality_pct"] = None  # all biz items N/A
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": inputs_est,
+            "checklist.json": checklist_biz_na,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    # MUST NOT print the mislabeled line
+    assert "business quality only" not in md.lower(), (
+        "Report should not print 'business quality only' when business_quality_pct is None"
+    )
+    # MUST fall back to generic label
+    assert "Model Quality" in md, "Report should use 'Model Quality' label when business_quality_pct is None"
+
+
 def test_compose_report_exact_label() -> None:
     """Score label is 'Model Quality' when data_confidence is exact."""
     d = _make_fmr_artifact_dir(
