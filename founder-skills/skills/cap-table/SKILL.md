@@ -326,7 +326,6 @@ python3 "$SCRIPTS/quick_assess.py" \
   --inputs "$REVIEW_DIR/inputs.json" \
   --safes "$REVIEW_DIR/safes.json" \
   --pre-money 20000000 --new-money 5000000 \
-  --target-pool-percent 0.10 --target-basis post_money \
   --review-dir "$REVIEW_DIR" \
   --run-id "$RUN_ID" \
   --founder-prompt "<the founder's raw prompt>" \
@@ -335,7 +334,9 @@ python3 "$SCRIPTS/quick_assess.py" \
 
 **`--safes` takes a BARE JSON ARRAY of SAFE objects** (not the `instruments.json` envelope). Write a file that starts with `[` — an array of SAFE instrument objects — not `{"safes": [...]}`.
 
-Inputs are built from the founder's conversational description via targeted `AskUserQuestion` calls (Lane 4 only — fast-assess does NOT invoke Lane-1/2/3 extractors). The script writes:
+**Never assume a pool top-up.** Pass `--target-pool-percent X --target-basis post_money` ONLY when the founder stated a pool target (or confirmed one when you asked). Otherwise run WITHOUT those flags — the report then carries an explicit "No pool top-up modeled" note, and you offer the 10% what-if as a follow-up re-run. A silently assumed pool target materially changes the founder's headline ownership; it is the founder's negotiation variable, not yours.
+
+Inputs are built from the founder's conversational description via `AskUserQuestion` (Lane 4 only — fast-assess does NOT invoke Lane-1/2/3 extractors). **Do not skip the question gate, and do not split it:** batch everything still missing into ONE `AskUserQuestion` call before running — typically jurisdiction structure (if not obvious), IIA/OCS grant history (Israeli companies), and pool-target intent. If the founder's message already supplied everything, ask nothing and run. When you present the result, state in one line any flag choices that encode an assumption (e.g. "modeled with no pool top-up" / "modeled with the 10% post-money pool you mentioned"). The script writes:
 
 - `${REVIEW_DIR}/fast_assess_only.json` — sentinel for downstream consumers
 - `${REVIEW_DIR}/report_fast_assess.md` — 1-page founder-facing markdown
