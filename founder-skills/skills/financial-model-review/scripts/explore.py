@@ -22,6 +22,7 @@ import html
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any, TypeGuard
 
 # ---------------------------------------------------------------------------
@@ -30,6 +31,19 @@ from typing import Any, TypeGuard
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from unit_economics import CAC_PAYBACK_BY_ACV, STAGE_BENCHMARKS  # noqa: E402, I001
+
+# ---------------------------------------------------------------------------
+# Vendored assets (no CDN — Cowork's sandboxed iframe blocks external fetches)
+# ---------------------------------------------------------------------------
+
+_VENDOR_DIR = Path(__file__).resolve().parent / "vendor"
+
+
+def _chartjs_source() -> str:
+    """Return vendored Chart.js source for inline embedding (no CDN —
+    Cowork's sandboxed iframe blocks external fetches)."""
+    return (_VENDOR_DIR / "chart.min.js").read_text(encoding="utf-8")
+
 
 # ---------------------------------------------------------------------------
 # Artifact loading infrastructure (duplicated per PEP 723 convention)
@@ -429,6 +443,7 @@ def _generate_html(data: dict[str, Any]) -> str:
         disabled_reasons_html=disabled_reasons_html,
         enabled_count=enabled_count,
         disabled_names=disabled_names,
+        chartjs_source=_chartjs_source(),
     )
 
 
@@ -443,6 +458,7 @@ def _build_html_string(
     disabled_reasons_html: str,
     enabled_count: int,
     disabled_names: list[str],
+    chartjs_source: str,
 ) -> str:
     """Build the full HTML document string."""
     # CSS built as list to keep lines under 120 chars
@@ -573,7 +589,7 @@ def _build_html_string(
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FMR Explorer — {company_name}</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4"></script>
+<script>{chartjs_source}</script>
 <style>
 {css}
 </style>

@@ -489,12 +489,18 @@ def test_burn_multiple_method_field() -> None:
     assert bm["method"] in ("ttm", "quarterly", "growth_rate")
 
 
-def test_chartjs_cdn_link() -> None:
-    """Chart.js CDN link is present in HTML."""
+def test_explorer_html_is_self_contained() -> None:
+    """Cowork's sandboxed iframe blocks external fetches; file:// viewing may
+    be offline. No CDN script/link tags — Chart.js must be inlined
+    (regression: cdn.jsdelivr.net script tag made the explorer dead in Cowork)."""
     d = _make_artifact_dir()
     rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
     assert rc == 0
-    assert "chart.js@4.4" in stdout
+    html = stdout
+    assert "cdn.jsdelivr.net" not in html
+    assert not re.search(r'<script[^>]+src="https?://', html)
+    assert not re.search(r'<link[^>]+href="https?://', html)
+    assert "Chart" in html and len(html) > 200_000, "vendored Chart.js not inlined"
 
 
 def test_projection_engine_present() -> None:

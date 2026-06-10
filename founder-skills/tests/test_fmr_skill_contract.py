@@ -164,3 +164,21 @@ def test_checklist_dispatch_template_includes_run_id_and_company() -> None:
             f"{doc.name} CHECKLIST return shape is missing metadata.run_id"
         )
         assert '"company"' in section, f"{doc.name} CHECKLIST return shape is missing the company block"
+
+
+def test_vendored_chartjs_in_sync_with_competitive_positioning() -> None:
+    """Both skills vendor the same Chart.js bundle — if one is upgraded
+    without the other, behavior silently diverges across skills."""
+    import hashlib
+
+    fmr = FMR_DIR / "scripts" / "vendor" / "chart.min.js"
+    cp = REPO_ROOT / "founder-skills" / "skills" / "competitive-positioning" / "scripts" / "vendor" / "chart.min.js"
+    assert fmr.exists(), "FMR vendored chart.min.js missing"
+
+    def _sha256(p: Path) -> str:
+        return hashlib.sha256(p.read_bytes()).hexdigest()
+
+    assert _sha256(fmr) == _sha256(cp), (
+        "vendored chart.min.js diverged between financial-model-review and "
+        "competitive-positioning — upgrade both together"
+    )
