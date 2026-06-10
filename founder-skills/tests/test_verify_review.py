@@ -726,3 +726,48 @@ class TestEdgeCases:
         arts = _gate1_artifacts()  # no commentary
         rc, out, stderr = _run(arts)  # no --gate flag
         assert rc == 1  # fails because commentary missing for spreadsheet
+
+    def test_runway_quality_accepts_default_alive_company(self) -> None:
+        """A profitable company legitimately has runway_months: null in every
+        scenario (cash never runs out). The gate must not error on that
+        (regression: it demanded a non-null runway_months unconditionally)."""
+        arts = _full_artifacts()
+        arts["runway.json"] = {
+            "company": {"name": "TestCo", "slug": "testco", "stage": "seed"},
+            "baseline": {
+                "net_cash": 1000000,
+                "monthly_burn": 0,
+                "monthly_revenue": 150000,
+            },
+            "scenarios": [
+                {
+                    "name": "base",
+                    "runway_months": None,
+                    "default_alive": True,
+                    "cash_out_date": None,
+                    "growth_rate": 0.1,
+                    "decision_point": None,
+                    "became_profitable": True,
+                    "monthly_projections": [],
+                },
+                {
+                    "name": "downside",
+                    "runway_months": None,
+                    "default_alive": True,
+                    "cash_out_date": None,
+                    "growth_rate": 0.05,
+                    "decision_point": None,
+                    "became_profitable": True,
+                    "monthly_projections": [],
+                },
+            ],
+            "risk_assessment": "Company is default-alive",
+            "limitations": [],
+            "warnings": [],
+            "post_raise": None,
+            "metadata": {"run_id": _RUN_ID},
+        }
+        rc, out, stderr = _run(arts, ["--gate", "1"])
+        runway_issues = out["artifacts"]["runway.json"]["issues"]
+        runway_errors = [i for i in runway_issues if i["severity"] == "error"]
+        assert not runway_errors, f"Unexpected runway errors for default-alive company: {runway_errors}"

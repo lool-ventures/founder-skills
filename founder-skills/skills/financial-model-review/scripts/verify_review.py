@@ -262,7 +262,10 @@ def _check_runway_quality(data: dict[str, Any]) -> list[dict[str, str]]:
     # At least 1 scenario with non-null runway_months
     scenarios = data.get("scenarios", [])
     has_runway = any(s.get("runway_months") is not None for s in scenarios)
-    if not has_runway:
+    # default-alive companies legitimately have runway_months: null in every
+    # scenario (cash never runs out) — that is a valid, publishable result
+    default_alive = any(s.get("default_alive") for s in scenarios)
+    if not has_runway and not default_alive:
         issues.append(_issue("error", "No scenario has non-null runway_months"))
 
     # baseline.net_cash null is a warning
