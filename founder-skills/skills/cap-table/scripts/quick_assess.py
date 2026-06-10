@@ -249,6 +249,98 @@ def quick_assess(
         md_lines.append(f"_Solver could not produce a full answer ({completeness})._")
         for b in solver_result.get("blockers", []):
             md_lines.append(f"- `{b['code']}`: {b['remedy']}")
+    if completeness == "full" and headline:
+        # ── Per-holder cap table ─────────────────────────────────────────────
+        shares_bd = solver_result.get("shares_breakdown", {})
+        agg = solver_result["aggregate_ownership_by_class"]
+        post_fd = solver_result["post_round_fully_diluted_shares"]
+
+        md_lines.append("")
+        md_lines.append("## Post-Financing Cap Table")
+        md_lines.append("")
+        md_lines.append("| Holder | Shares | Ownership |")
+        md_lines.append("|---|---:|---:|")
+
+        # Founders row — shares directly from cap_state
+        founder_shares = sum(int(f["common_shares"]) for f in cs.get("founders", []))
+        md_lines.append(f"| Founders | {founder_shares:,} | {_percent(agg['founders_pct'])} |")
+
+        # Preferred series (existing, pre-financing) — if any
+        preferred_pct = agg.get("preferred_pct", 0.0)
+        if preferred_pct > 0:
+            final_ats = cs["as_converted_totals"]
+            pref_shares = final_ats.get("preferred_shares_as_converted", 0)
+            md_lines.append(f"| Existing preferred (as-converted) | {int(pref_shares):,} | {_percent(preferred_pct)} |")
+
+        # Option pool row (total: outstanding + unallocated + topup)
+        option_pool_pct = agg.get("option_pool_pct", 0.0)
+        if option_pool_pct > 0:
+            pool_total_shares = int(round(option_pool_pct * post_fd))
+            md_lines.append(f"| Option pool (unallocated) | {pool_total_shares:,} | {_percent(option_pool_pct)} |")
+
+        # SAFE rows — per-holder when ≤ 3 SAFEs, aggregate otherwise
+        per_safe_results = solver_result.get("per_safe", {})
+        safe_investors = {s["id"]: s for s in safes}
+        active_safes = [
+            (sid, safe_investors[sid], per_safe_results[sid])
+            for sid in per_safe_results
+            if sid in safe_investors and per_safe_results[sid].get("branch") != "rejected"
+        ]
+        if len(active_safes) <= 3:
+            for sid, sinst, sres in active_safes:
+                s_shares = int(round(sres.get("conversion_shares", 0)))
+                s_pct = s_shares / post_fd if post_fd else 0.0
+                cap = sinst.get("post_money_valuation_cap")
+                cap_str = f" @ {_money(cap)} cap" if cap else ""
+                label = f"SAFE — {sinst.get('investor_name', sid)} ({_money(sinst['purchase_amount'])}{cap_str})"
+                md_lines.append(f"| {label} | {s_shares:,} | {_percent(s_pct)} |")
+        else:
+            safe_total_shares = int(shares_bd.get("safe_converted", 0))
+            safe_total_pct = agg.get("safe_pct", 0.0)
+            md_lines.append(
+                f"| SAFEs (aggregate, {len(active_safes)}) | {safe_total_shares:,} | {_percent(safe_total_pct)} |"
+            )
+
+        # Convertible notes row (aggregate)
+        note_pct = agg.get("note_pct", 0.0)
+        if note_pct > 0:
+            note_shares = int(shares_bd.get("note_converted", 0))
+            md_lines.append(f"| Convertible notes (aggregate) | {note_shares:,} | {_percent(note_pct)} |")
+
+        # New investors row
+        new_money_pct = agg.get("new_money_pct", 0.0)
+        new_money_shares = int(shares_bd.get("new_money", 0))
+        md_lines.append(f"| New investors | {new_money_shares:,} | {_percent(new_money_pct)} |")
+
+        # Total row
+        md_lines.append(f"| **Total (fully diluted)** | **{post_fd:,}** | **100%** |")
+        md_lines.append("")
+
+        # ── SAFE derivation line(s) ───────────────────────────────────────────
+        if len(active_safes) <= 3:
+            for _sid, sinst, sres in active_safes:
+                cap = sinst.get("post_money_valuation_cap")
+                if cap and sinst.get("form", "").startswith("yc_postmoney"):
+                    purchase = sinst["purchase_amount"]
+                    s_shares = int(round(sres.get("conversion_shares", 0)))
+                    ownership_pct = purchase / cap
+                    md_lines.append(
+                        f"_Each post-money SAFE owns purchase ÷ cap of the post-conversion, "
+                        f"pre-new-money capitalization (YC convention): "
+                        f"{_money(purchase)} ÷ {_money(cap)} = {_percent(ownership_pct)} "
+                        f"→ {s_shares:,} shares._"
+                    )
+                    md_lines.append("")
+        elif len(active_safes) > 0:
+            # Aggregate sentence for many SAFEs
+            total_safe_pct = agg.get("safe_pct", 0.0)
+            md_lines.append(
+                f"_Each post-money SAFE owns purchase ÷ cap of the post-conversion, "
+                f"pre-new-money capitalization (YC convention). "
+                f"Aggregate SAFE ownership: {_percent(total_safe_pct)}._"
+            )
+            md_lines.append("")
+
     md_lines.append("")
     md_lines.append("## What this fast-assess does NOT cover")
     md_lines.append("")

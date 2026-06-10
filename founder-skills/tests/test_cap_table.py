@@ -4982,6 +4982,215 @@ class TestQuickAssessUX:
 
 
 # ===========================================================================
+# Round-5 Fix — per-holder cap table + SAFE derivation in fast-assess report
+# ===========================================================================
+
+
+class TestFastAssessCapTableSection:
+    """Tests for Round-5 fix: per-holder cap table and SAFE derivation line.
+
+    Scenario: EVAL2 single-SAFE (Angel A $500K @ $10M cap),
+    pre_money=20M, new_money=5M, pool=10% post_money.
+    """
+
+    # Reuse EVAL2 fixture data from TestPricedRound
+    _INPUTS = {
+        "company_name": "TestCo",
+        "analysis_date": "2026-05-21",
+        "mode": "standard",
+        "jurisdiction": {
+            "structure": "delaware",
+            "incorporated_date": "2024-06-01",
+            "iia_grants_history": {"has_grants": False, "grant_details": []},
+        },
+        "founders": [
+            {"name": "Founder", "founder_id": "founder_1", "common_shares": 10_000_000},
+        ],
+        "preferred_series": [],
+        "option_pool": {
+            "plan_type": "nso",
+            "authorized": 1_000_000,
+            "issued": 0,
+            "unallocated": 1_000_000,
+        },
+        "common_batches": [],
+        "metadata": {"run_id": "test"},
+    }
+
+    _SAFE = {
+        "id": "safe_1",
+        "investor_name": "Angel A",
+        "purchase_amount": 500_000,
+        "post_money_valuation_cap": 10_000_000,
+        "discount_multiplier": None,
+        "mfn_provision": None,
+        "pro_rata_side_letter": None,
+        "issuance_date": "2025-01-01",
+        "form": "yc_postmoney_cap",
+        "conversion_price_override": None,
+        "source_document": None,
+        "extraction_confidence": "high",
+    }
+
+    def _run(self) -> tuple[dict, str]:
+        """Return (sentinel, report_md) for the canonical single-SAFE scenario."""
+        import quick_assess as qa  # type: ignore[import-not-found]
+
+        sentinel = qa.quick_assess(
+            company_name="TestCo",
+            inputs=self._INPUTS,
+            safes=[self._SAFE],
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+        )
+        report_md = sentinel.pop("_report_md")
+        return sentinel, report_md
+
+    def test_cap_table_section_header_present(self) -> None:
+        """Report must contain '## Post-Financing Cap Table' when completeness=='full'."""
+        _, md = self._run()
+        assert "## Post-Financing Cap Table" in md, (
+            f"Expected '## Post-Financing Cap Table' section in report; got:\n{md[:1000]}"
+        )
+
+    def test_cap_table_founders_row_present(self) -> None:
+        """Founders row must be present with a share count in the cap table."""
+        import re
+
+        _, md = self._run()
+        # Must have a Founders row with a comma-formatted share count
+        assert re.search(r"Founders.*[\d,][\d,][\d,]+", md), (
+            f"Expected 'Founders' row with share count in cap table; got:\n{md}"
+        )
+
+    def test_cap_table_total_row_present(self) -> None:
+        """Total row must be present in the cap table."""
+        _, md = self._run()
+        assert "Total" in md and "100%" in md, f"Expected 'Total' row with 100% in cap table; got:\n{md}"
+
+    def test_cap_table_share_counts_consistent(self) -> None:
+        """Parse the cap table rows and verify: sum of holder shares == Total row shares,
+        and Total == solver post_round_fully_diluted_shares."""
+        import math
+        import re
+        import sys
+
+        sys.path.insert(0, SCRIPTS)
+        import cap_state as cap_state_mod  # type: ignore[import-not-found]
+        import priced_round as pr  # type: ignore[import-not-found]
+
+        _, md = self._run()
+
+        # Extract cap table section
+        cap_table_match = re.search(
+            r"## Post-Financing Cap Table\n(.*?)(?=\n##|\Z)",
+            md,
+            re.DOTALL,
+        )
+        assert cap_table_match, f"Could not find Post-Financing Cap Table section:\n{md}"
+        table_text = cap_table_match.group(1)
+
+        # Parse table rows: | ... | N,NNN,NNN | NN.NN% |
+        # Look for rows with integer share counts (skip header and separator rows)
+        row_shares: list[int] = []
+        total_shares_from_table: int | None = None
+        for line in table_text.splitlines():
+            if "|" not in line or "---" in line or "Holder" in line:
+                continue
+            # Bold total row check
+            cols = [c.strip() for c in line.split("|") if c.strip()]
+            if len(cols) < 2:
+                continue
+            # Strip markdown bold markers
+            share_str = cols[1].replace("*", "").replace(",", "").strip()
+            if not share_str.isdigit():
+                continue
+            shares = int(share_str)
+            holder_col = cols[0].replace("*", "").strip()
+            if "Total" in holder_col or "fully diluted" in holder_col.lower():
+                total_shares_from_table = shares
+            else:
+                row_shares.append(shares)
+
+        assert row_shares, f"No holder rows parsed from cap table:\n{table_text}"
+        assert total_shares_from_table is not None, f"No Total row with share count found in cap table:\n{table_text}"
+
+        # Sum of holder rows must equal total row (within ±2 for rounding)
+        holder_sum = sum(row_shares)
+        assert abs(holder_sum - total_shares_from_table) <= 2, (
+            f"Holder share sum ({holder_sum:,}) != Total row ({total_shares_from_table:,}); "
+            f"rounding divergence > 2 shares"
+        )
+
+        # Total must match solver post_round_fully_diluted_shares
+        cs = cap_state_mod.build_cap_state(
+            self._INPUTS,
+            {
+                "safes": [self._SAFE],
+                "convertible_notes": [],
+                "warrants": [],
+                "option_grants": [],
+                "metadata": {"run_id": "test"},
+            },
+        )
+        solver_result = pr.solve_priced_round(
+            cap_state=cs,
+            safes=[self._SAFE],
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+        )
+        solver_fd = solver_result["post_round_fully_diluted_shares"]
+        assert math.isclose(total_shares_from_table, solver_fd, abs_tol=2), (
+            f"Table Total ({total_shares_from_table:,}) != solver FD ({solver_fd:,})"
+        )
+
+    def test_safe_derivation_sentence_present(self) -> None:
+        """Report must contain the SAFE derivation canonical sentence."""
+        import re
+
+        _, md = self._run()
+        # The derivation uses "purchase ÷ cap" or the share count formula
+        assert re.search(r"purchase\s*[÷/]\s*cap", md) or re.search(r"purchase.*cap.*conversion", md, re.IGNORECASE), (
+            f"Expected SAFE derivation sentence with 'purchase ÷ cap' in report; got:\n{md}"
+        )
+
+    def test_safe_row_with_investor_name_in_cap_table(self) -> None:
+        """SAFE row must appear in cap table when only 1 SAFE is present (per-holder mode)."""
+        _, md = self._run()
+        # "Angel A" is the investor name from the SAFE fixture
+        assert "Angel A" in md, f"Expected SAFE investor name 'Angel A' in report cap table; got:\n{md[:1500]}"
+
+    def test_no_cap_table_section_when_completeness_not_full(self) -> None:
+        """Cap table section must NOT appear when solver cannot converge (no valid cap)."""
+        import quick_assess as qa  # type: ignore[import-not-found]
+
+        # SAFE with unknown form triggers E_UNKNOWN_SAFE_FORM -> completeness=structural_only
+        bad_safe = dict(self._SAFE)
+        bad_safe["form"] = "unknown_form_xyz"
+
+        sentinel = qa.quick_assess(
+            company_name="TestCo",
+            inputs=self._INPUTS,
+            safes=[bad_safe],
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+        )
+        report_md = sentinel.pop("_report_md")
+        assert "## Post-Financing Cap Table" not in report_md, (
+            "Cap table section must not appear when completeness != 'full'"
+        )
+
+
+# ===========================================================================
 # Item 2 — Quantitative AD + SAFE golden (test_golden_4 extension)
 # ===========================================================================
 

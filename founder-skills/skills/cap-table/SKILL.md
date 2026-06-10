@@ -179,6 +179,8 @@ python3 "$SHARED_SCRIPTS/founder_context.py" read --artifacts-root "$ARTIFACTS_R
 
 **Exit 0 (found):** Use the company slug and pre-filled fields. Proceed to Step 2.
 
+**`W_SECTOR_TYPE_UNKNOWN` is benign for cap-table engagements.** If `founder_context.py` emits a `W_SECTOR_TYPE_UNKNOWN` warning (triggered by free-text sectors such as "technology"), proceed — `sector_type` is not read by any cap-table rule or script, so this warning has no effect on cap-table math or counsel-review gating. Do not re-prompt the founder just to resolve it.
+
 **Exit 1 (not found):** This is normal for a first run — do not treat it as an error. Use `AskUserQuestion` (NOT plain chat) to ask for company name, stage, sector, and geography. Provide at least 2 options. Then create:
 
 ```bash
