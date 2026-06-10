@@ -82,7 +82,7 @@
       "schema": "",
       "validates_via": "inline_dict_check",
       "required_fields_minus_metadata": ["items"],
-      "notes": "financial-model-review/checklist.py requires 'items' (array of all 46 canonical IDs: STRUCT_01..09, UNIT_10..19, CASH_20..32, METRIC_33..35, SCENARIO_36..38, BRIDGE_37..38, SECTOR_39..44, OVERALL_45..46). Each item requires id, status (pass|fail|warn|not_applicable). Optional: company (for profile-based auto-gating by stage/geography/sector/model_format), inputs (for SECTOR_40 AI-cost detection), metadata."
+      "notes": "financial-model-review/checklist.py requires 'items' (array of all 46 canonical IDs: STRUCT_01..09, UNIT_10..19, CASH_20..32, METRIC_33..35, BRIDGE_36..38, SECTOR_39..44, OVERALL_45..46). Each item requires id, status (pass|fail|warn|not_applicable). Optional: company (for profile-based auto-gating by stage/geography/sector/model_format), inputs (for SECTOR_40 AI-cost detection), metadata."
     },
     "POST_COMPOSE_COACHING": {
       "schema_version": "v0.4.2-financial-model-review",

@@ -19,6 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FMR_DIR = REPO_ROOT / "founder-skills" / "skills" / "financial-model-review"
 SKILL_MD = FMR_DIR / "SKILL.md"
 AGENT_MD = REPO_ROOT / "founder-skills" / "agents" / "financial-model-review.md"
+DISPATCH_CONTRACTS = REPO_ROOT / "founder-skills" / "tests" / "fixtures" / "dispatch_contracts.json"
 
 _RANGE_TOKEN = re.compile(r"\b([A-Z]+)_(\d+)\.\.(\d+)\b")
 
@@ -62,7 +63,7 @@ def test_checklist_id_enumeration_matches_script() -> None:
 
 def test_no_phantom_scenario_prefix() -> None:
     """SCENARIO_* checklist IDs do not exist (the canonical set uses BRIDGE_36..38)."""
-    for doc in (SKILL_MD, AGENT_MD):
+    for doc in (SKILL_MD, AGENT_MD, DISPATCH_CONTRACTS):
         assert "SCENARIO_" not in doc.read_text(encoding="utf-8"), (
             f"{doc.name} references nonexistent SCENARIO_* checklist IDs"
         )

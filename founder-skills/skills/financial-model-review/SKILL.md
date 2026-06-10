@@ -98,6 +98,7 @@ Every review deposits structured JSON artifacts into a working directory. The fi
 | 2 | `model_data.json` | `extract_model.py` (Excel/CSV in main thread) |
 | 3 | `inputs.json` | Context A dispatch: INPUTS_REVIEW → `apply_corrections.py` |
 | 3.5 | `corrected_inputs.json` | `apply_corrections.py` (from INPUTS_REVIEW dispatch) |
+| 3.6 | `extraction_validation.json` | `validate_extraction.py` (when `model_data.json` exists) |
 | 4 | `checklist.json` | Context A dispatch: CHECKLIST → `checklist.py` |
 | 5 | `unit_economics.json` | direct pipe: `inputs.json` → `unit_economics.py` |
 | 6 | `runway.json` | direct pipe: `inputs.json` → `runway.py` |
