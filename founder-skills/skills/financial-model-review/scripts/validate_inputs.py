@@ -635,7 +635,9 @@ def _validate_sanity(inputs: dict[str, Any]) -> list[dict[str, Any]]:
             total_cogs = sum(v for v in cogs.values() if isinstance(v, (int, float)))
         total_extracted = total_salary_monthly + total_opex + total_cogs
         # Expected total expenses = burn + revenue (since burn = expenses - revenue)
-        rev = _deep_get(inputs, "revenue", "mrr", "value") or 0
+        rev = _deep_get(inputs, "revenue", "mrr", "value")
+        if not isinstance(rev, (int, float)):
+            rev = _deep_get(inputs, "revenue", "monthly_total")
         if not isinstance(rev, (int, float)):
             rev = 0
         expected_expenses = burn + rev

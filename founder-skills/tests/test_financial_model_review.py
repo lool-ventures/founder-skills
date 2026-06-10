@@ -4225,3 +4225,83 @@ def test_extract_dispatch_json_raises_when_no_json() -> None:
 
     with pytest.raises(ValueError):
         extract_dispatch_json("Just some prose with no JSON object anywhere.")
+
+
+# --- validate_inputs.py expense-coverage monthly_total regression ---
+
+
+def _make_inputs_with_expenses(
+    monthly_total: float | None = None,
+    mrr_value: float | None = None,
+    burn: float = 50_000,
+) -> dict[str, Any]:
+    """Build a validate_inputs fixture with headcount + opex but no mrr.value.
+
+    extracted = 4 engineers × 180K/12 + 40K opex = 60K + 40K = 100K.
+    With burn=50K and revenue=200K: expected_expenses = 250K;
+    threshold = 125K; 100K < 125K → EXPENSE_COVERAGE_SUSPECT must fire.
+    """
+    inputs: dict[str, Any] = {
+        "company": {
+            "company_name": "TestCo",
+            "slug": "testco",
+            "stage": "series-a",
+            "sector": "SaaS",
+            "geography": "US",
+            "revenue_model_type": "saas-plg",
+        },
+        "revenue": {},
+        "cash": {
+            "current_balance": 2_000_000,
+            "balance_date": "2025-01",
+            "monthly_net_burn": burn,
+        },
+        "expenses": {
+            "headcount": [
+                {"role": "Engineering", "count": 4, "salary_annual": 180_000},
+            ],
+            "opex_monthly": [
+                {"category": "cloud", "amount": 40_000},
+            ],
+        },
+    }
+    if mrr_value is not None:
+        inputs["revenue"]["mrr"] = {"value": mrr_value, "as_of": "2025-01"}
+    if monthly_total is not None:
+        inputs["revenue"]["monthly_total"] = monthly_total
+    return inputs
+
+
+def test_expense_coverage_counts_monthly_total_revenue() -> None:
+    """expected_expenses must include revenue.monthly_total when mrr is absent.
+
+    Regression: the old code read only revenue.mrr.value; when mrr was absent
+    rev fell back to 0, understating expected_expenses and suppressing the
+    coverage check for monthly_total-only companies.
+
+    Numbers: burn=50K, monthly_total=200K, extracted=100K.
+    Fixed → expected=250K, threshold=125K, 100K < 125K → warning FIRES.
+    Bug   → expected= 50K, threshold= 25K, 100K >= 25K → warning silent (RED).
+    """
+    inputs = _make_inputs_with_expenses(monthly_total=200_000)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data.get("warnings", [])]
+    assert "EXPENSE_COVERAGE_SUSPECT" in codes, (
+        f"Expected EXPENSE_COVERAGE_SUSPECT with monthly_total revenue, got: {codes}"
+    )
+
+
+def test_expense_coverage_mrr_and_monthly_total_parity() -> None:
+    """Same numbers via revenue.mrr.value must also trigger EXPENSE_COVERAGE_SUSPECT.
+
+    Parity check: the mrr path should already work; this ensures both paths
+    produce identical outcomes.
+    """
+    inputs = _make_inputs_with_expenses(mrr_value=200_000)
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data.get("warnings", [])]
+    assert "EXPENSE_COVERAGE_SUSPECT" in codes, f"Expected EXPENSE_COVERAGE_SUSPECT with mrr revenue, got: {codes}"
