@@ -719,6 +719,25 @@ class TestReadErrorHandling:
         assert out["errors"][0]["code"] == "READ_ERROR"
         assert "Traceback" not in result.stderr
 
+    def test_non_dict_corrections_file_yields_structured_error(self, tmp_path: Any) -> None:
+        """Valid JSON that is not an object ([1,2,3]) must be rejected with READ_ERROR,
+        not passed through to downstream logic."""
+        bad = tmp_path / "corrections.json"
+        bad.write_text("[1, 2, 3]")
+        original = tmp_path / "inputs.json"
+        original.write_text("{}")
+        out_dir = tmp_path / "out"
+        result = subprocess.run(
+            [sys.executable, _SCRIPT, str(bad), "--original", str(original), "--output-dir", str(out_dir)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        out = json.loads(result.stdout)
+        assert out["status"] == "error"
+        assert out["errors"][0]["code"] == "READ_ERROR"
+        assert "Traceback" not in result.stderr
+
 
 class TestAgentDispatchPayload:
     def test_agent_dispatch_payload_corrected_path(self) -> None:
