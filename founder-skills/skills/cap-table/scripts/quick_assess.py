@@ -234,6 +234,8 @@ def quick_assess(
                         f" (unallocated pool grows to {total_pool:,}"
                         f" = {_percent(d['impact_pct'])} post-money)"
                     )
+                else:
+                    line = f"- Existing option pool (no top-up): {_percent(d['impact_pct'])} post-money"
             elif dtype == "safe_conversion":
                 safe_shares = int(shares_bd.get("safe_converted", 0))
                 if safe_shares > 0:

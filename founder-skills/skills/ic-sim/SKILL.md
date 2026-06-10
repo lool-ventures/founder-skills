@@ -118,7 +118,7 @@ else
 fi
 ```
 
-If `CLAUDE_PLUGIN_ROOT` is empty OR the path it resolves to does not exist in your environment (in Claude Cowork it substitutes to a host-side path that is not present inside the session VM — test with `ls`), fall back: `Glob` for `**/founder-skills/skills/ic-sim/scripts/score_dimensions.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`. In Claude Cowork this is always the case — don't retry the substituted path; go straight to the Glob fallback.
+If `CLAUDE_PLUGIN_ROOT` is empty OR the path it resolves to does not exist in your environment (in Claude Cowork it substitutes to a host-side path that is not present inside the session VM — test with `ls`), fall back: `Glob` for `**/skills/ic-sim/scripts/score_dimensions.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`. In Claude Cowork this is always the case — don't retry the substituted path; go straight to the Glob fallback. If Glob returns multiple matches, prefer the one under a plugin mount (`.remote-plugins/` or the plugins cache) over any workspace copy. If Glob returns nothing, locate it with Bash: `find / -path '*/skills/ic-sim/scripts/score_dimensions.py' 2>/dev/null | head -5`.
 
 **If `ARTIFACTS_ROOT` resolves to `$(pwd)/artifacts` but no `artifacts/` directory exists at `$(pwd)`:** Use `Glob` with pattern `**/artifacts/founder_context.json` to locate existing artifacts, and derive `ARTIFACTS_ROOT` from the result. If nothing is found, `mkdir -p "$ARTIFACTS_ROOT"` and proceed.
 

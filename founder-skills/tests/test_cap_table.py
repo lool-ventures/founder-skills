@@ -4938,6 +4938,48 @@ class TestQuickAssessUX:
                 f"Expected 'Pool ... N shares' in report dilution lines; got:\n{md}"
             )
 
+    def test_no_topup_label_when_pool_not_topped_up(self) -> None:
+        """Fix 2a: when target_pool_percent is None (no top-up), dilution table must say
+        'Existing option pool (no top-up)' and must NOT say 'Pool Refresh'."""
+        import quick_assess as qa  # type: ignore[import-not-found]
+
+        sentinel = qa.quick_assess(
+            company_name="Foobar",
+            inputs=self._INPUTS,
+            safes=[self._SAFE],
+            notes=[],
+            pre_money=5_000_000.0,
+            new_money=3_000_000.0,
+            target_pool_percent=None,  # no top-up
+            target_basis="post_money",
+        )
+        report_md = sentinel.pop("_report_md")
+        assert "Pool Refresh" not in report_md, f"'Pool Refresh' must not appear when no top-up ran; got:\n{report_md}"
+        assert "Existing option pool (no top-up)" in report_md, (
+            f"Expected 'Existing option pool (no top-up)' in dilution table; got:\n{report_md}"
+        )
+
+    def test_topup_label_when_pool_topped_up(self) -> None:
+        """Fix 2b: when target_pool_percent is set and top-up shares > 0,
+        dilution table must say 'Pool Top-Up' and must NOT say 'Pool Refresh'."""
+        import quick_assess as qa  # type: ignore[import-not-found]
+
+        sentinel = qa.quick_assess(
+            company_name="Foobar",
+            inputs=self._INPUTS,
+            safes=[self._SAFE],
+            notes=[],
+            pre_money=5_000_000.0,
+            new_money=3_000_000.0,
+            target_pool_percent=0.10,  # top-up requested
+            target_basis="post_money",
+        )
+        report_md = sentinel.pop("_report_md")
+        assert "Pool Refresh" not in report_md, f"'Pool Refresh' must not appear in report; got:\n{report_md}"
+        assert "Pool Top-Up" in report_md, (
+            f"Expected 'Pool Top-Up' in dilution table when top-up ran; got:\n{report_md}"
+        )
+
 
 # ===========================================================================
 # Item 2 — Quantitative AD + SAFE golden (test_golden_4 extension)

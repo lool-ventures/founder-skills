@@ -152,12 +152,14 @@ mkdir -p "$ARTIFACTS_ROOT"
 RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 ```
 
-If `CLAUDE_PLUGIN_ROOT` is empty OR the path it resolves to does not exist in your environment (in Claude Cowork it substitutes to a host-side path that is not present inside the session VM — test with `ls`), fall back: `Glob` for `**/founder-skills/skills/cap-table/scripts/cap_state.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`. In Claude Cowork this is always the case — don't retry the substituted path; go straight to the Glob fallback.
+If `CLAUDE_PLUGIN_ROOT` is empty OR the path it resolves to does not exist in your environment (in Claude Cowork it substitutes to a host-side path that is not present inside the session VM — test with `ls`), fall back: `Glob` for `**/skills/cap-table/scripts/cap_state.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`. In Claude Cowork this is always the case — don't retry the substituted path; go straight to the Glob fallback. If Glob returns multiple matches, prefer the one under a plugin mount (`.remote-plugins/` or the plugins cache) over any workspace copy. If Glob returns nothing, locate it with Bash: `find / -path '*/skills/cap-table/scripts/cap_state.py' 2>/dev/null | head -5`.
 
 After Step 1 (when the company slug is known), derive `REVIEW_DIR`. Two modes:
 
 - **Full pipeline** (default — when the founder shared a document, asked for the full review, counsel packet, or interactive explorer, OR when there's no existing full review for this slug): `REVIEW_DIR="$ARTIFACTS_ROOT/cap-table-$SLUG"`.
 - **Fast-assess mode** (Phase O — short directional answer to a conversational question, no document attached, no explicit "full review" request): `REVIEW_DIR="$ARTIFACTS_ROOT/cap-table-$SLUG-fastassess"`. Run `quick_assess.py` (Step 5-fast) instead of Steps 2–11. Total wall-clock under 60 seconds.
+
+**Slug discipline:** Use the slug returned by `founder_context.py` VERBATIM in directory names — never invent ad-hoc suffixes (e.g. appending `-seed`, `-round`, or any other qualifier). Downstream `find_artifact.py` lookups resolve by that slug; a mismatched directory is invisible to the cross-skill layer.
 
 ```bash
 # Choose ONE based on the routing decision above.
@@ -324,6 +326,7 @@ python3 "$SCRIPTS/quick_assess.py" \
   --pre-money 20000000 --new-money 5000000 \
   --target-pool-percent 0.10 --target-basis post_money \
   --review-dir "$REVIEW_DIR" \
+  --run-id "$RUN_ID" \
   --founder-prompt "<the founder's raw prompt>" \
   --pretty
 ```
@@ -335,7 +338,7 @@ Inputs are built from the founder's conversational description via targeted `Ask
 - `${REVIEW_DIR}/fast_assess_only.json` — sentinel for downstream consumers
 - `${REVIEW_DIR}/report_fast_assess.md` — 1-page founder-facing markdown
 
-**Read `report_fast_assess.md` and present its numbers verbatim to the founder — never re-derive or reconstruct the ownership table in chat.** If you computed preliminary estimates while gathering inputs, discard them in favour of the script output. The script is the authoritative source; hand-reconstructed math will diverge from the fixed-point solver result. This includes the dilution explanation — use the share counts from the report; never re-derive top-up or conversion shares by hand.
+**Read `report_fast_assess.md` and present its numbers verbatim to the founder — never re-derive or reconstruct the ownership table in chat.** If you computed preliminary estimates while gathering inputs, discard them in favour of the script output. The script is the authoritative source; hand-reconstructed math will diverge from the fixed-point solver result. This includes the dilution explanation — use the share counts from the report; never re-derive top-up or conversion shares by hand. For what-if follow-ups (e.g. "what if we top up the pool to 10%?"), re-run `quick_assess.py` with the changed flag and present the new report — never estimate the answer by hand.
 
 Total wall-clock: under 60 seconds. Then jump to **Step 12: Deliver Artifacts** with the fast-assess deliverable. Offer the founder a follow-up: "I gave you the directional answer — want the full review with counsel packet and interactive explorer?"
 
