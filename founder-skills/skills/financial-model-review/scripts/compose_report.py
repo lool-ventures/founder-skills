@@ -744,11 +744,13 @@ def _emit_coaching_payload(
     review_dir: str,
     report_path: str,
     insertion_marker: str,
+    runway: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the v0.4.2 coaching_payload for financial-model-review.
 
     Read from existing artifacts; do not fabricate fields.
     company_name is sourced from inputs.json → company.company_name.
+    runway_months is the base scenario value (may be null for default-alive companies).
     """
     summary: dict[str, Any] = {}
     if checklist is not None:
@@ -762,6 +764,16 @@ def _emit_coaching_payload(
     company_name: str | None = None
     if inputs is not None:
         company_name = _as_dict(inputs.get("company")).get("company_name")
+
+    runway_months_base: float | int | None = None
+    if isinstance(runway, dict):
+        scenarios = _as_list(runway.get("scenarios"))
+        base = next(
+            (s for s in scenarios if isinstance(s, dict) and s.get("name") in ("base", "baseline")),
+            scenarios[0] if scenarios and isinstance(scenarios[0], dict) else None,
+        )
+        if base is not None:
+            runway_months_base = base.get("runway_months")
 
     return {
         "schema_version": "v0.4.2-financial-model-review",
@@ -778,6 +790,7 @@ def _emit_coaching_payload(
         "warned_items": warned_items,
         "high_severity_warnings": [w["code"] for w in validation_warnings if w.get("severity") == "high"],
         "company_name": company_name,
+        "runway_months": runway_months_base,
         "review_dir": review_dir,
         "report_path": report_path,
         "insertion_marker": insertion_marker,
@@ -872,6 +885,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         review_dir=os.path.abspath(dir_path),
         report_path=resolved_report_path,
         insertion_marker=marker,
+        runway=runway,
     )
 
     # Determine model_format for --strict context

@@ -258,8 +258,8 @@ quoted, e.g.:
   "status": "complete",
   "review_dir": "<absolute path>",
   "report_path": "<absolute path to report.md>",
-  "runway_months": "<number from coaching_payload — derive from runway.json base scenario if needed>",
-  "unit_economics_status": "<overall_status from coaching_payload summary>",
+  "runway_months": "<coaching_payload.runway_months — may be null for default-alive companies>",
+  "overall_status": "<coaching_payload.summary.overall_status (the checklist overall status)>",
   "red_flags": ["<from coaching_payload.high_severity_warnings>"],
   "high_severity_warnings": ["<from coaching_payload.high_severity_warnings>"]
 }

@@ -2656,6 +2656,48 @@ def test_payload_truncation_over_30() -> None:
     )
 
 
+def test_coaching_payload_includes_runway_months() -> None:
+    """Context B's success payload reports runway_months 'from coaching_payload'
+    — so compose must actually emit it (base scenario value, null for default-alive)."""
+    d = _make_fmr_v042_artifact_dir()
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0, stderr
+    assert data is not None
+    payload = data["coaching_payload"]
+    assert "runway_months" in payload, "coaching_payload missing runway_months key"
+    # _VALID_RUNWAY base scenario has runway_months=25
+    assert payload["runway_months"] == 25, (
+        f"Expected runway_months=25 from base scenario, got {payload['runway_months']!r}"
+    )
+
+
+def test_coaching_payload_runway_months_null_for_default_alive() -> None:
+    """When all scenarios are default-alive (runway_months: null), coaching_payload
+    must still emit runway_months: null (not omit the key)."""
+    import copy
+
+    default_alive_runway = copy.deepcopy(_VALID_RUNWAY)
+    for s in default_alive_runway["scenarios"]:
+        s["runway_months"] = None
+        s["default_alive"] = True
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": default_alive_runway,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0, stderr
+    assert data is not None
+    payload = data["coaching_payload"]
+    assert "runway_months" in payload, "coaching_payload must contain runway_months key even for default-alive"
+    assert payload["runway_months"] is None, (
+        f"Expected runway_months=None for default-alive company, got {payload['runway_months']!r}"
+    )
+
+
 # --- B3: burn multiple ARR floor ---
 
 

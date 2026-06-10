@@ -504,7 +504,7 @@ Follow your agent body's Context B procedure
    (must be 1).
 5. Return the success payload:
    {"status": "complete", "review_dir": "<path>", "report_path": "<path>",
-    "runway_months": <number>, "unit_economics_status": "<status>",
+    "runway_months": <number or null>, "overall_status": "<status>",
     "red_flags": [<list>], "high_severity_warnings": [<list>]}
    OR if verification fails:
    {"status": "blocked", "reason": "<specific gap>"}
@@ -539,7 +539,7 @@ python3 "$SCRIPTS/verify_review.py" --dir "$REVIEW_DIR" --pretty
 This skill runs inline in the main thread (not as a sub-agent). The final outcome the main thread delivers to the founder is:
 
 - The path to `$REVIEW_DIR/report.md` — the primary deliverable.
-- The structured success payload from the Context B sub-agent: `{status, review_dir, report_path, runway_months, unit_economics_status, red_flags, high_severity_warnings}`.
+- The structured success payload from the Context B sub-agent: `{status, review_dir, report_path, runway_months, overall_status, red_flags, high_severity_warnings}`.
 - Optionally: the HTML report and explorer paths.
 
 ## Scoring
