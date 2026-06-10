@@ -68,6 +68,23 @@ def test_no_phantom_scenario_prefix() -> None:
         )
 
 
+def test_no_base_hash_in_dispatch_prompts() -> None:
+    """The sub-agent has no Bash and cannot compute the canonical sha256 —
+    base_hash must never appear in a dispatch prompt (regression: the patch
+    protocol was dead on arrival and silently bypassed coercion)."""
+    for doc in (SKILL_MD, AGENT_MD):
+        lines = doc.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(lines, 1):
+            if "base_hash" not in line:
+                continue
+            # allowed only inside an explicit "do NOT include" instruction —
+            # check a 2-line window since the negation may sit on the
+            # preceding line after markdown wrapping
+            window = (lines[i - 2] if i >= 2 else "") + " " + line
+            if "NOT" not in window and "not " not in window:
+                raise AssertionError(f"{doc.name}:{i} instructs use of base_hash: {line.strip()}")
+
+
 def test_checklist_dispatch_template_includes_run_id_and_company() -> None:
     """The CHECKLIST dispatch return shape must carry metadata.run_id (else
     Context B blocks on parity) and the company block (else auto-gating

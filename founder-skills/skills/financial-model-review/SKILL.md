@@ -241,17 +241,17 @@ ARPU sanity check: if drivers.arpu_monthly or unit_economics.ltv.inputs.arpu_mon
 exceeds total MRR, it is probably aggregate revenue, not per-customer ARPU —
 divide by customer count.
 
-Return JSON only — exactly the validated inputs.json structure per schema-inputs.md,
-plus a top-level "changes" array listing what was corrected and a "base_hash"
-field (sha256 of the original model_data.json content, or empty string if no
-prior inputs.json existed). Shape:
+Return JSON only. Shape (do NOT include a "changes" or "base_hash" key — those
+belong to the founder browser round-trip, not this dispatch):
 {
-  "changes": [
-    {"path": "cash.current_balance", "expected_old": null, "new": 1500000, "type": "set"}
-  ],
-  "base_hash": "",
-  "corrected": {<full validated inputs.json contents>}
+  "corrected": {<full validated inputs.json contents per schema-inputs.md,
+                 including "metadata": {"run_id": "<RUN_ID>"}>},
+  "corrections": [
+    {"path": "cash.current_balance", "old": null, "new": 1500000,
+     "reason": "<where the value came from / what was fixed>"}
+  ]
 }
+The "corrections" array is the audit trail written to extraction_corrections.json.
 ```
 
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol (see "Skill Execution Model" preamble) to obtain the structured JSON.
@@ -274,12 +274,18 @@ prior inputs.json existed). Shape:
      --original "$REVIEW_DIR/inputs.json" \
      --output-dir "$REVIEW_DIR"
    ```
-4. Read the stdout JSON:
+4. `apply_corrections.py` prints a `Warning: legacy payload format` line to
+   stderr for `corrected`-shaped payloads — that is expected, not an error.
+   Read the stdout JSON:
    - If `status == "completed"`: promote `corrected_inputs.json` to `inputs.json`:
      ```bash
      mv "$REVIEW_DIR/corrected_inputs.json" "$REVIEW_DIR/inputs.json"
      ```
-   - If `status == "error"`: log the errors and write `inputs.json` directly from the `corrected` field in the sub-agent reply.
+   - If `status == "error"` (coercion or time-series validation failed): read the
+     `errors` array, fix the offending fields in the sub-agent's `corrected` object
+     yourself, re-write `corrections_from_agent.json`, and re-run step 3. Only as a
+     last resort write `inputs.json` directly from `corrected` — Step 3.5's
+     validate_inputs gate must then catch what coercion would have.
 
 ### Step 3.5: Validate `inputs.json` — STOP GATE
 

@@ -72,24 +72,25 @@ by customer count to get the correct value. This is the most common extraction e
 (burn, revenue, expenses) must be divided by 3 or 12 respectively. Do NOT convert
 stock metrics (cash balance, headcount, customer count, ARR).
 
-Return JSON with changes list and corrected inputs:
+Return JSON with the corrected inputs and an audit trail. Do NOT include a
+`changes` or `base_hash` key — the patch protocol requires a canonical sha256
+you cannot compute (no Bash); it belongs to the founder browser round-trip only:
 ```json
 {
-  "changes": [
-    {"path": "cash.current_balance", "expected_old": null, "new": 1500000, "type": "set"}
-  ],
-  "base_hash": "",
   "corrected": {
     "company": {"company_name": "...", "slug": "...", "stage": "...", "sector": "...", "geography": "..."},
     "revenue": {"mrr": {"value": 0, "as_of": "YYYY-MM"}, "growth_rate_monthly": 0.0},
     "cash": {"current_balance": 0, "balance_date": "YYYY-MM", "monthly_net_burn": 0},
     "metadata": {"run_id": "<RUN_ID>"}
-  }
+  },
+  "corrections": [
+    {"path": "cash.current_balance", "old": null, "new": 1500000, "reason": "..."}
+  ]
 }
 ```
 
-The `changes` array is used by `apply_corrections.py` to merge corrections. The
-`corrected` field is the full validated inputs structure per `schema-inputs.md`.
+The `corrected` field is the full validated inputs structure per `schema-inputs.md`.
+The `corrections` array becomes `extraction_corrections.json` (the audit trail).
 
 #### UNIT_ECONOMICS subtype
 

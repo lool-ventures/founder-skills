@@ -662,3 +662,48 @@ class TestPatchBasedFlow:
         }
         rc, stdout, corrected, audit = _run(payload, original_with_hc)
         assert rc == 1
+
+
+class TestAgentDispatchPayload:
+    def test_agent_dispatch_payload_corrected_path(self) -> None:
+        """The exact payload shape the INPUTS_REVIEW dispatch returns (corrected +
+        corrections, no changes/base_hash) must run the deterministic path:
+        exit 0, status completed, both audit artifacts written, coercion applied."""
+        payload = {
+            "corrected": {
+                "company": {
+                    "company_name": "TestCo",
+                    "slug": "testco",
+                    "stage": "seed",
+                    "sector": "B2B SaaS",
+                    "geography": "US",
+                },
+                "revenue": {
+                    "mrr": {"value": "80000", "as_of": "2026-05"},
+                    "growth_rate_monthly": 0.08,
+                },
+                "cash": {
+                    "current_balance": 1500000,
+                    "balance_date": "2026-05",
+                    "monthly_net_burn": 120000,
+                },
+                "metadata": {"run_id": "20260610T000000Z"},
+            },
+            "corrections": [
+                {
+                    "path": "cash.current_balance",
+                    "old": None,
+                    "new": 1500000,
+                    "reason": "extracted from Summary sheet",
+                }
+            ],
+        }
+        # Use an empty original (as the main thread writes '{}' before dispatch)
+        original: dict[str, Any] = {}
+        rc, stdout, corrected, audit = _run(payload, original)
+        assert rc == 0, stdout
+        assert stdout["status"] == "completed"
+        assert corrected is not None
+        assert audit is not None
+        # _coerce_state must have coerced the string "80000" to a number
+        assert corrected["revenue"]["mrr"]["value"] == 80000
