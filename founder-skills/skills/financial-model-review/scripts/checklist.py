@@ -793,7 +793,7 @@ def validate_checklist(
     if biz_applicable > 0:
         business_quality_pct: float | None = round((biz_pass + 0.5 * biz_warn) / biz_applicable * 100, 1)
     else:
-        business_quality_pct = 0.0
+        business_quality_pct = None
 
     if struct_applicable > 0:
         model_maturity_pct: float | None = round((struct_pass + 0.5 * struct_warn) / struct_applicable * 100, 1)

@@ -382,7 +382,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
     benchmarks = _get_stage_benchmarks(stage)
     metrics: list[dict[str, Any]] = []
     ue_warnings: list[dict[str, str]] = []
-    bench: dict[str, Any] | None  # reused across metric sections
+    bench: dict[str, Any] | None = None  # reused across metric sections
 
     _CONFIDENCE_QUALIFIERS: dict[str, str] = {
         "estimated": " (based on estimated inputs)",
@@ -972,6 +972,9 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
 
             # Prefer operating margin (burn-derived, closer to FCF margin)
             if monthly_burn_raw is not None and mrr is not None and mrr > 0:
+                # Negative monthly_net_burn below MRR yields a positive op margin — that is also
+                # what a genuinely cash-flow-positive company looks like; validate_inputs --fix
+                # handles sign errors upstream, and the >100% guard below catches the implausible cases.
                 op_margin = -monthly_burn_raw / mrr
                 if op_margin > 1.0:
                     # > 100% operating margin is implausible — likely sign error

@@ -4305,3 +4305,122 @@ def test_expense_coverage_mrr_and_monthly_total_parity() -> None:
     assert data is not None
     codes = [w["code"] for w in data.get("warnings", [])]
     assert "EXPENSE_COVERAGE_SUSPECT" in codes, f"Expected EXPENSE_COVERAGE_SUSPECT with mrr revenue, got: {codes}"
+
+
+# --- Task 16a: checklist.py business_quality_pct None when biz_applicable == 0 ---
+
+# Business item IDs (all non-structural categories)
+_BIZ_ITEM_IDS: list[str] = [
+    "UNIT_10",
+    "UNIT_11",
+    "UNIT_12",
+    "UNIT_13",
+    "UNIT_14",
+    "UNIT_15",
+    "UNIT_16",
+    "UNIT_17",
+    "UNIT_18",
+    "UNIT_19",
+    "METRIC_33",
+    "METRIC_34",
+    "METRIC_35",
+    "BRIDGE_36",
+    "BRIDGE_37",
+    "BRIDGE_38",
+    "SECTOR_39",
+    "SECTOR_40",
+    "SECTOR_41",
+    "SECTOR_42",
+    "SECTOR_43",
+    "SECTOR_44",
+    "OVERALL_45",
+    "OVERALL_46",
+]
+
+
+def test_checklist_business_quality_pct_none_when_all_biz_na() -> None:
+    """business_quality_pct must be None (not 0.0) when every business item is
+    not_applicable — mirrors the existing model_maturity_pct None semantics.
+
+    Regression: the old else-branch returned 0.0, misrepresenting 'no applicable
+    items' as 'zero score'."""
+    na_overrides = {item_id: {"status": "not_applicable", "evidence": "N/A"} for item_id in _BIZ_ITEM_IDS}
+    items = _make_checklist_items(overrides=na_overrides)
+    payload = json.dumps({"items": items})
+    rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    biz_pct = data["summary"]["business_quality_pct"]
+    assert biz_pct is None, f"Expected business_quality_pct=None when all business items are N/A, got: {biz_pct}"
+
+
+# --- Task 16b: compose_report.py RUNWAY_INCONSISTENCY near-zero cash guard ---
+
+
+def test_compose_runway_inconsistency_suppressed_for_near_zero_cash() -> None:
+    """RUNWAY_INCONSISTENCY must NOT fire when inputs_cash is near-zero (< 1000).
+
+    Regression: the guard used `inputs_cash != 0` so a cash balance of $1 with
+    debt $0 triggered a 49 900% delta against any non-trivial runway net_cash,
+    producing a spurious warning.  Fixed to abs(inputs_cash) >= 1000."""
+    # inputs_cash = 1 (current_balance=1, no debt)
+    # runway net_cash = 500  →  delta_pct ≈ 49 900% > 10%
+    # Bug  → inputs_cash(1) != 0 is True  → warning fires
+    # Fix  → abs(1) >= 1000 is False       → warning suppressed
+    inputs_tiny_cash = json.loads(json.dumps(_VALID_INPUTS))
+    inputs_tiny_cash["cash"]["current_balance"] = 1
+    inputs_tiny_cash["cash"].pop("debt", None)
+
+    runway_different = json.loads(json.dumps(_VALID_RUNWAY))
+    runway_different["baseline"]["net_cash"] = 500
+
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": inputs_tiny_cash,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": runway_different,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0, stderr
+    assert data is not None
+    warnings = data["validation"]["warnings"]
+    codes = [w["code"] for w in warnings]
+    assert "RUNWAY_INCONSISTENCY" not in codes, (
+        f"RUNWAY_INCONSISTENCY should be suppressed for near-zero cash (inputs_cash=1), got: {codes}"
+    )
+
+
+# --- Task 16c: runway.py breakeven warning when burn == 0 and no cash balance ---
+
+
+def test_runway_breakeven_warning_when_burn_zero_no_cash() -> None:
+    """runway.py must emit a 'breakeven' warning when monthly_net_burn=0 and
+    current_balance is absent — the sensitivity table is not meaningful in
+    this case."""
+    inputs: dict[str, Any] = {
+        "company": {
+            "company_name": "TestCo",
+            "slug": "testco",
+            "stage": "series-a",
+            "sector": "SaaS",
+            "geography": "US",
+        },
+        "cash": {
+            "monthly_net_burn": 0,
+            # deliberately no current_balance
+        },
+        "revenue": {
+            "mrr": {"value": 100_000, "as_of": "2025-01"},
+        },
+    }
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0
+    assert data is not None
+    warnings_list = data.get("warnings", [])
+    # Warnings may be strings or dicts
+    warnings_text = " ".join(w if isinstance(w, str) else str(w.get("message", w)) for w in warnings_list)
+    assert "breakeven" in warnings_text.lower(), (
+        f"Expected a 'breakeven' warning when burn=0 and no cash balance, got: {warnings_list}"
+    )

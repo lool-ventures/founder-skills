@@ -265,7 +265,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             runway_cash is not None
             and isinstance(runway_cash, (int, float))
             and isinstance(raw_balance, (int, float))
-            and inputs_cash != 0
+            and abs(inputs_cash) >= 1000
         ):
             delta_pct = abs(runway_cash - inputs_cash) / abs(inputs_cash) * 100
             if delta_pct > 10:
@@ -367,7 +367,9 @@ def _section_executive_summary(
         score = summary.get("score_pct", 0)
         model_maturity = summary.get("model_maturity_pct")
         if model_maturity is None and data_confidence != "exact":
-            bq_score = summary.get("business_quality_pct", score)
+            bq_score = summary.get("business_quality_pct")
+            if bq_score is None:
+                bq_score = score
             lines.append(
                 f"**Deck Financial Readiness:** {status} ({bq_score:.0f}%) "
                 f"(business quality only — no spreadsheet model)  "

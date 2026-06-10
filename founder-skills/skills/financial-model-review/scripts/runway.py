@@ -234,6 +234,8 @@ def _project_scenario(
             )
 
     # Compute dates
+    # Convention: runway_months is the month index in which cash first goes <= 0 (a ceiling vs.
+    # the simple cash/burn division). Deliberate; see 2026-06-10 pre-ship review.
     runway_months = cash_out_month
     cash_out_date: str | None = None
     decision_point: str | None = None
@@ -489,6 +491,12 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
     if current_balance is None and monthly_net_burn is not None:
         # Burn known but no cash balance — produce sensitivity table
         burn = abs(monthly_net_burn)
+        if burn == 0:
+            warnings.append(
+                "monthly_net_burn is 0 (breakeven) — runway depends entirely on "
+                "cash balance, not burn; the sensitivity table is not meaningful. "
+                "Ask the founder for the current cash balance."
+            )
         warnings.append(
             "Missing: cash.current_balance — producing burn-based sensitivity "
             "table instead of full projection. Ask the founder for current cash balance."
