@@ -96,6 +96,19 @@ def test_no_passthrough_dispatches() -> None:
         )
 
 
+def test_no_shell_variable_capture_of_python_output() -> None:
+    """Each Bash call runs in a fresh shell; VAR="$(python3 ...)" captures the
+    payload invisibly and the variable dies immediately (regression:
+    COACHING_PAYLOAD was captured and never printed, so the dispatch prompt
+    couldn't be built). Step 0's same-block ls/date captures are legitimate
+    (the block is prefixed onto every Bash call), so only python output
+    captures are flagged."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    assert not re.search(r'\w+="\$\(\s*python3?', text), (
+        "SKILL.md captures python output into a shell variable — print it instead"
+    )
+
+
 def test_checklist_dispatch_template_includes_run_id_and_company() -> None:
     """The CHECKLIST dispatch return shape must carry metadata.run_id (else
     Context B blocks on parity) and the company block (else auto-gating
