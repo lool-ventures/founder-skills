@@ -35,7 +35,7 @@ show exactly how to address them.
 
 ## Dispatch Contexts (READ FIRST)
 
-You have exactly TWO dispatch contexts in v0.4.2. Determine which you're in
+You have exactly TWO dispatch contexts. Determine which you're in
 by reading your task prompt. Anything outside these two contexts is a bug —
 return BLOCKED with the prompt content quoted.
 
@@ -172,7 +172,7 @@ they conflict).
 The main thread has run `compose_report.py --write-md` and produced
 `${SIM_DIR}/report.md`. You are dispatched (dispatch_type:
 `POST_COMPOSE_COACHING`) to add the founder-coaching layer using the
-v0.4.2 Mitigation 2 protocol: structured `coaching_payload` (inlined in
+Mitigation 2 protocol: structured `coaching_payload` (inlined in
 your dispatch prompt) + Grep idempotency + Edit via uuid marker + Grep
 verification. **You MUST NOT Read the full `report.md`.**
 
@@ -347,26 +347,23 @@ action is: `read_full_report_md`.
   resonate with investors, not just what will concern them.
 - Every recommendation must cite specific evidence from the startup materials.
 
-## What v0.4.0/v0.4.1 said but v0.4.2 changes
+## Orchestration boundary
 
-The v0.4.0 agent body had a long "How To Run This Skill" section documenting
-the producer-script pipeline. That's *now SKILL.md's job*, not yours — SKILL.md
-runs in the main thread with Bash and orchestrates the pipeline directly. Your
-job is no longer to orchestrate; it's to do isolated analytical work (Context A)
-or post-compose coaching (Context B) when SKILL.md dispatches you.
+SKILL.md owns the producer-script pipeline — it runs in the main thread with
+Bash and orchestrates the pipeline directly. You never orchestrate: your job is
+isolated analytical work (Context A) or post-compose coaching (Context B) when
+SKILL.md dispatches you.
 
-The key capability from v0.4.1: PARTNER_ANALYSIS dispatches run **in parallel**
-(three simultaneous Task calls in a single assistant turn). Each dispatch gets the
-same startup context but a different `archetype:` discriminator. You respond as
-that specific archetype only.
+PARTNER_ANALYSIS dispatches run **in parallel** (three simultaneous Task calls
+in a single assistant turn). Each dispatch gets the same startup context but a
+different `archetype:` discriminator. You respond as that specific archetype only.
 
-The key new capability in v0.4.2: Context B (POST_COMPOSE_COACHING) uses
-Mitigation 2 — the main thread inlines `coaching_payload` (dimension-based,
-schema_version v0.4.2-ic-sim) from `report.json` directly into your dispatch
-prompt. You reason from `dealbreakers` (with severity field) and `concerns`
-(with description field) plus `summary` (verdict, conviction_score, conviction
-counts). You do NOT Read the full report.md — you use Grep idempotency, Edit
-via uuid marker, and Grep verification.
+Context B (POST_COMPOSE_COACHING) uses Mitigation 2 — the main thread inlines
+`coaching_payload` (dimension-based, schema_version v0.4.2-ic-sim) from
+`report.json` directly into your dispatch prompt. You reason from `dealbreakers`
+(with severity field) and `concerns` (with description field) plus `summary`
+(verdict, conviction_score, conviction counts). You do NOT Read the full report.md
+— you use Grep idempotency, Edit via uuid marker, and Grep verification.
 
 ## Final-message contract
 

@@ -157,3 +157,30 @@ def test_total_listing_budget_under_default_floor() -> None:
         f"{total} chars, exceeds {soft_cap}-char soft cap "
         f"(8,000 absolute fallback). Trim description/when_to_use:\n" + "\n".join(breakdown)
     )
+
+
+_INTERNAL_VERSION_REF = re.compile(r"\bv0\.\d+\.\d+")
+
+
+def test_no_internal_version_refs_in_user_facing_files() -> None:
+    """Internal plugin version numbers belong in CHANGELOG / commits /
+    docs/internal — never in SKILL.md, skill references, or agent bodies
+    (they go stale immediately and leak release internals to users).
+    Exempt: lines mentioning schema_version (contractual artifact
+    identifiers) and cap-table-rules.json refs (rule-pack DATA-file version
+    pin, not a plugin release ref — confirmed contractual semantics)."""
+    repo = Path(__file__).resolve().parents[2] / "founder-skills"
+    files = (
+        list(repo.glob("skills/*/SKILL.md"))
+        + list(repo.glob("skills/*/references/*.md"))
+        + list(repo.glob("agents/*.md"))
+    )
+    assert files, "glob found no user-facing files — path layout changed?"
+    offenders = []
+    for path in files:
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if "schema_version" in line or "cap-table-rules" in line:
+                continue
+            if _INTERNAL_VERSION_REF.search(line):
+                offenders.append(f"{path.relative_to(repo)}:{i}: {line.strip()}")
+    assert not offenders, "internal version refs in user-facing files:\n" + "\n".join(offenders)

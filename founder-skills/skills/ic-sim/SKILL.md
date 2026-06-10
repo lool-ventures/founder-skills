@@ -127,7 +127,7 @@ After Step 1 (when the slug is known):
 ```bash
 SIM_DIR="$ARTIFACTS_ROOT/ic-sim-${SLUG}"
 mkdir -p "$SIM_DIR"
-mkdir -p "$SIM_DIR/.staging"   # for ad-hoc sub-agent JSON staging (v0.4.2)
+mkdir -p "$SIM_DIR/.staging"   # for ad-hoc sub-agent JSON staging
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
@@ -216,7 +216,7 @@ FUND_EOF
 
 **Accepted warnings:** Add `accepted_warnings` array with `code`, `match` (case-insensitive), and `reason`. Compose downgrades matching warnings to `"acknowledged"`.
 
-### Sub-agent JSON staging (v0.4.2)
+### Sub-agent JSON staging
 
 When a sub-agent returns JSON too large for bash heredoc, write it to
 `$SIM_DIR/.staging/<step>_input.json` first, then pipe via:
@@ -227,7 +227,7 @@ cat "$SIM_DIR/.staging/<step>_input.json" | python3 "$SCRIPTS/<producer>.py" ...
 
 The `.staging/` directory is created at setup and removed at cleanup.
 This avoids `Operation not permitted` errors that occur when writing to
-`$OUTPUTS_ROOT/` (Cowork sandbox marks that read-only post-write).
+the session outputs mount (Cowork marks it read-only post-write).
 
 ### Step 5a: Check Portfolio Conflicts -> `conflict_check.json` (Context A dispatch)
 
@@ -450,7 +450,7 @@ Fix high-severity warnings and re-run. Use `--strict` to enforce a clean report.
 
 **Dispatch the ic-sim sub-agent in Context B.** Dispatch via the `Task` tool after `compose_report.py` has successfully written both `report.json` and `report.md`.
 
-**Mitigation 2 protocol (v0.4.2):** the main thread reads the structured `coaching_payload` from `report.json` and inlines it into the dispatch prompt. The sub-agent does NOT Read full `report.md` — it consumes `coaching_payload` directly, performs Grep idempotency, Edits via the per-run uuid `insertion_marker`, and Grep-verifies all artifacts. See the ic-sim agent body's "Context B — Post-compose coaching dispatch (POST_COMPOSE_COACHING)" section for the full procedure.
+**Mitigation 2 protocol:** the main thread reads the structured `coaching_payload` from `report.json` and inlines it into the dispatch prompt. The sub-agent does NOT Read full `report.md` — it consumes `coaching_payload` directly, performs Grep idempotency, Edits via the per-run uuid `insertion_marker`, and Grep-verifies all artifacts. See the ic-sim agent body's "Context B — Post-compose coaching dispatch (POST_COMPOSE_COACHING)" section for the full procedure.
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash

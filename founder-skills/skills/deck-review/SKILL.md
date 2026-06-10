@@ -115,7 +115,7 @@ if [ -z "$REVIEW_DIR" ]; then
   REVIEW_DIR="$ARTIFACTS_ROOT/deck-review-$SLUG"
 fi
 mkdir -p "$REVIEW_DIR"
-mkdir -p "$REVIEW_DIR/.staging"   # for ad-hoc sub-agent JSON staging (v0.4.2)
+mkdir -p "$REVIEW_DIR/.staging"   # for ad-hoc sub-agent JSON staging
 
 IS_RESUMING=""
 if [ -f "$REVIEW_DIR/gate_state.json" ]; then
@@ -271,7 +271,7 @@ Then return — as your final assistant message — a JSON object the parent age
 - `Stop review` (out-of-scope): exit. Do not run later steps.
 - `Proceed anyway (best-effort)`: rebuild profile with `--rebuild-stage series_a` and add a low-confidence note.
 
-### Sub-agent JSON staging (v0.4.2)
+### Sub-agent JSON staging
 
 When a sub-agent returns JSON too large for bash heredoc, write it to
 `$REVIEW_DIR/.staging/<step>_input.json` first, then pipe via:
@@ -282,7 +282,7 @@ cat "$REVIEW_DIR/.staging/<step>_input.json" | python3 "$SCRIPTS/<producer>.py" 
 
 The `.staging/` directory is created at setup and removed at cleanup.
 This avoids `Operation not permitted` errors that occur when writing to
-`$OUTPUTS_ROOT/` (Cowork sandbox marks that read-only post-write).
+the session outputs mount (Cowork marks it read-only post-write).
 
 ### Step 4: Review Each Slide -> `slide_reviews.json` (Context A dispatch)
 
@@ -386,7 +386,7 @@ Fix high-severity warnings and re-run. Use `--strict` to enforce a clean report.
 
 **Dispatch the deck-review sub-agent in Context B.** Dispatch via the `Task` tool after `compose_report.py` has successfully written both `report.json` and `report.md`.
 
-**Mitigation 2 protocol (v0.4.2):** the main thread reads the structured `coaching_payload` from `report.json` and inlines it into the dispatch prompt. The sub-agent does NOT Read full `report.md` — it consumes `coaching_payload` directly, performs Grep idempotency, Edits via the per-run uuid `insertion_marker`, and Grep-verifies all artifacts. See the deck-review agent body's "Context B — Post-compose coaching dispatch (POST_COMPOSE_COACHING)" section for the full procedure.
+**Mitigation 2 protocol:** the main thread reads the structured `coaching_payload` from `report.json` and inlines it into the dispatch prompt. The sub-agent does NOT Read full `report.md` — it consumes `coaching_payload` directly, performs Grep idempotency, Edits via the per-run uuid `insertion_marker`, and Grep-verifies all artifacts. See the deck-review agent body's "Context B — Post-compose coaching dispatch (POST_COMPOSE_COACHING)" section for the full procedure.
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash

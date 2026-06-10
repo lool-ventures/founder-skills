@@ -136,7 +136,7 @@ After Step 1 (when the slug is known):
 ```bash
 ANALYSIS_DIR="$ARTIFACTS_ROOT/competitive-positioning-${SLUG}"
 mkdir -p "$ANALYSIS_DIR"
-mkdir -p "$ANALYSIS_DIR/.staging"   # for ad-hoc sub-agent JSON staging (v0.4.2)
+mkdir -p "$ANALYSIS_DIR/.staging"   # for ad-hoc sub-agent JSON staging
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
@@ -203,7 +203,7 @@ If founder requests changes, apply corrections and repeat Steps A+B.
 
 Apply all corrections to `landscape_draft.json` before proceeding.
 
-### Sub-agent JSON staging (v0.4.2)
+### Sub-agent JSON staging
 
 When a sub-agent returns JSON too large for bash heredoc, write it to
 `$ANALYSIS_DIR/.staging/<step>_input.json` first, then pipe via:
@@ -214,11 +214,11 @@ cat "$ANALYSIS_DIR/.staging/<step>_input.json" | python3 "$SCRIPTS/<producer>.py
 
 The `.staging/` directory is created at setup and removed at cleanup.
 This avoids `Operation not permitted` errors that occur when writing to
-`$OUTPUTS_ROOT/` (Cowork sandbox marks that read-only post-write).
+the session outputs mount (Cowork marks it read-only post-write).
 
 ### Step 4: Research & Enrich Competitors -> `landscape_enriched.json` -> `landscape.json` (Context A: LANDSCAPE_RESEARCH dispatch)
 
-**Dispatch the competitive-positioning sub-agent in Context A (LANDSCAPE_RESEARCH).** The sub-agent declares `WebSearch` in its tool allowlist (v0.4.7+) and performs the research itself — dispatch it via the `Task` tool so the research runs in an isolated context.
+**Dispatch the competitive-positioning sub-agent in Context A (LANDSCAPE_RESEARCH).** The sub-agent declares `WebSearch` in its tool allowlist and performs the research itself — dispatch it via the `Task` tool so the research runs in an isolated context.
 
 **Dispatch prompt template:**
 
@@ -447,7 +447,7 @@ python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --strict --pretty \
 
 **Dispatch the competitive-positioning sub-agent in Context B.** Dispatch via the `Task` tool after `compose_report.py` has successfully written both `report.json` and `report.md`.
 
-**Mitigation 2 protocol (v0.4.2):** the main thread reads the structured `coaching_payload` from `report.json` and inlines it into the dispatch prompt. The sub-agent does NOT Read full `report.md` — it consumes `coaching_payload` directly, performs Grep idempotency, Edits via the per-run uuid `insertion_marker`, and Grep-verifies all artifacts. See the competitive-positioning agent body's "Context B — Post-compose coaching dispatch (POST_COMPOSE_COACHING)" section for the full procedure.
+**Mitigation 2 protocol:** the main thread reads the structured `coaching_payload` from `report.json` and inlines it into the dispatch prompt. The sub-agent does NOT Read full `report.md` — it consumes `coaching_payload` directly, performs Grep idempotency, Edits via the per-run uuid `insertion_marker`, and Grep-verifies all artifacts. See the competitive-positioning agent body's "Context B — Post-compose coaching dispatch (POST_COMPOSE_COACHING)" section for the full procedure.
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash

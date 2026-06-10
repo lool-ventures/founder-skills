@@ -126,7 +126,7 @@ After Step 1 (when the slug is known):
 ```bash
 ANALYSIS_DIR="$ARTIFACTS_ROOT/market-sizing-${SLUG}"
 mkdir -p "$ANALYSIS_DIR"
-mkdir -p "$ANALYSIS_DIR/.staging"   # for ad-hoc sub-agent JSON staging (v0.4.2)
+mkdir -p "$ANALYSIS_DIR/.staging"   # for ad-hoc sub-agent JSON staging
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
@@ -285,7 +285,7 @@ cat <<'VAL_EOF' > "$ANALYSIS_DIR/validation.json"
 VAL_EOF
 ```
 
-### Sub-agent JSON staging (v0.4.2)
+### Sub-agent JSON staging
 
 When a sub-agent returns JSON too large for bash heredoc, write it to
 `$ANALYSIS_DIR/.staging/<step>_input.json` first, then pipe via:
@@ -296,7 +296,7 @@ cat "$ANALYSIS_DIR/.staging/<step>_input.json" | python3 "$SCRIPTS/<producer>.py
 
 The `.staging/` directory is created at setup and removed at cleanup.
 This avoids `Operation not permitted` errors that occur when writing to
-`$OUTPUTS_ROOT/` (Cowork sandbox marks that read-only post-write).
+the session outputs mount (Cowork marks it read-only post-write).
 
 ### Step 5: Calculate TAM/SAM/SOM -> `sizing.json` (Context A dispatch)
 
@@ -502,7 +502,7 @@ Fix high-severity warnings and re-run. Use `--strict` to enforce a clean report.
 
 ### Step 8: Post-Compose Coaching Commentary (Context B dispatch, POST_COMPOSE_COACHING)
 
-**Dispatch the market-sizing sub-agent in Context B** (v0.4.2 Mitigation 2).
+**Dispatch the market-sizing sub-agent in Context B** (Mitigation 2).
 Dispatch via the `Task` tool after `compose_report.py` has successfully written
 `report.md`.
 
@@ -534,7 +534,7 @@ RUN_ID: <RUN_ID>
 
 You are the market-sizing agent dispatched in Context B (POST_COMPOSE_COACHING).
 The main thread has already run all producer scripts and composed the final
-report using the v0.4.2 Mitigation 2 protocol. Do NOT read the full report.md.
+report using the Mitigation 2 protocol. Do NOT read the full report.md.
 
 coaching_payload:
 {
