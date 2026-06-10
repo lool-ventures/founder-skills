@@ -34,7 +34,11 @@ from typing import Any
 def _write_output(data: str, output_path: str | None) -> None:
     if output_path:
         abs_path = os.path.abspath(output_path)
-        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+        parent = os.path.dirname(abs_path)
+        if parent == "/":
+            print(f"Error: output path resolves to root directory: {output_path}", file=sys.stderr)
+            sys.exit(1)
+        os.makedirs(parent, exist_ok=True)
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(data)
         receipt = {"ok": True, "path": abs_path, "bytes": len(data.encode("utf-8"))}

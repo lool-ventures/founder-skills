@@ -290,7 +290,7 @@ def extract_xlsx(file_path: str) -> dict[str, Any]:
 
 def extract_csv(file_path: str) -> dict[str, Any]:
     """Extract data from a CSV file."""
-    with open(file_path, newline="", encoding="utf-8") as f:
+    with open(file_path, newline="", encoding="utf-8-sig") as f:
         reader = csv.reader(f)
         rows_raw = list(reader)
 

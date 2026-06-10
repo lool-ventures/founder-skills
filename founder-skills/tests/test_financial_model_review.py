@@ -114,6 +114,18 @@ def test_extract_model_nonexistent_file() -> None:
     assert rc == 1
 
 
+def test_extract_csv_handles_utf8_bom(tmp_path: Any) -> None:
+    """Windows-Excel CSV exports are BOM-prefixed; the first header must not
+    become '\\ufeffMonth' (silent header-match failure)."""
+    p = tmp_path / "model.csv"
+    # Real UTF-8 BOM bytes followed by CSV content
+    p.write_bytes(b"\xef\xbb\xbfMonth,Revenue\n2026-01,100000\n")
+    rc, data, stderr = run_script("extract_model.py", ["--file", str(p), "--pretty"])
+    assert rc == 0
+    headers = data["sheets"][0]["headers"]
+    assert headers[0] == "Month", f"Expected 'Month', got {headers[0]!r}"
+
+
 def test_extract_model_output_flag() -> None:
     """The -o flag writes to file instead of stdout."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:

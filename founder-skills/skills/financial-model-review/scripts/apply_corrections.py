@@ -514,10 +514,43 @@ def main() -> None:
     parser.add_argument("--pretty", action="store_true", help="Pretty-print stdout JSON")
     args = parser.parse_args()
 
-    with open(args.corrections, encoding="utf-8") as f:
-        payload = json.load(f)
-    with open(args.original, encoding="utf-8") as f:
-        original = json.load(f)
+    def _read_json_file(path: str, field: str) -> dict[str, Any]:
+        try:
+            with open(path, encoding="utf-8") as f:
+                loaded = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            json.dump(
+                {
+                    "status": "error",
+                    "errors": [{"code": "READ_ERROR", "message": str(e), "field": field, "layer": 0}],
+                },
+                sys.stdout,
+                indent=2 if args.pretty else None,
+            )
+            sys.stdout.write("\n")
+            sys.exit(1)
+        if not isinstance(loaded, dict):
+            json.dump(
+                {
+                    "status": "error",
+                    "errors": [
+                        {
+                            "code": "READ_ERROR",
+                            "message": f"{field} must be a JSON object",
+                            "field": field,
+                            "layer": 0,
+                        }
+                    ],
+                },
+                sys.stdout,
+                indent=2 if args.pretty else None,
+            )
+            sys.stdout.write("\n")
+            sys.exit(1)
+        return loaded
+
+    payload = _read_json_file(args.corrections, "corrections")
+    original = _read_json_file(args.original, "original")
 
     # Detect payload shape: new (changes[]) vs legacy (corrected{})
     if "changes" in payload:

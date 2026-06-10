@@ -664,6 +664,62 @@ class TestPatchBasedFlow:
         assert rc == 1
 
 
+class TestReadErrorHandling:
+    def test_corrupt_corrections_file_yields_structured_error(self, tmp_path: Any) -> None:
+        """A corrupt upload must produce the pipeline's structured JSON error,
+        not a raw traceback (the agent parses stdout)."""
+        bad = tmp_path / "corrections.json"
+        bad.write_text("{not json")
+        original = tmp_path / "inputs.json"
+        original.write_text("{}")
+        out_dir = tmp_path / "out"
+        result = subprocess.run(
+            [sys.executable, _SCRIPT, str(bad), "--original", str(original), "--output-dir", str(out_dir)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        out = json.loads(result.stdout)
+        assert out["status"] == "error"
+        assert out["errors"][0]["code"] == "READ_ERROR"
+        assert "Traceback" not in result.stderr
+
+    def test_missing_corrections_file_yields_structured_error(self, tmp_path: Any) -> None:
+        """A non-existent corrections path must produce a structured JSON error."""
+        missing = tmp_path / "does_not_exist.json"
+        original = tmp_path / "inputs.json"
+        original.write_text("{}")
+        out_dir = tmp_path / "out"
+        result = subprocess.run(
+            [sys.executable, _SCRIPT, str(missing), "--original", str(original), "--output-dir", str(out_dir)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        out = json.loads(result.stdout)
+        assert out["status"] == "error"
+        assert out["errors"][0]["code"] == "READ_ERROR"
+        assert "Traceback" not in result.stderr
+
+    def test_corrupt_original_file_yields_structured_error(self, tmp_path: Any) -> None:
+        """A corrupt original inputs.json must produce a structured JSON error."""
+        corrections = tmp_path / "corrections.json"
+        corrections.write_text("{}")
+        bad_original = tmp_path / "inputs.json"
+        bad_original.write_text("{not valid json")
+        out_dir = tmp_path / "out"
+        result = subprocess.run(
+            [sys.executable, _SCRIPT, str(corrections), "--original", str(bad_original), "--output-dir", str(out_dir)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        out = json.loads(result.stdout)
+        assert out["status"] == "error"
+        assert out["errors"][0]["code"] == "READ_ERROR"
+        assert "Traceback" not in result.stderr
+
+
 class TestAgentDispatchPayload:
     def test_agent_dispatch_payload_corrected_path(self) -> None:
         """The exact payload shape the INPUTS_REVIEW dispatch returns (corrected +
