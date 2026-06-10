@@ -139,10 +139,84 @@ def render_report_html(
                 + cap_state["as_converted_totals"]["options_available"]
             )
             / fd,
+            "warrants": cap_state["as_converted_totals"].get("warrants_underlying_total", 0) / fd,
         }
         if fd
         else {}
     )
+
+    # Voting_pct per-holder table when dual-class (§6.5 HTML mirror).
+    founders_list_v = cap_state.get("founders") or []
+    common_batches_list_v = cap_state.get("common_batches") or []
+    has_dual_class_v = any(float(f.get("voting_rights_multiple") or 1.0) != 1.0 for f in founders_list_v) or any(
+        float(b.get("voting_rights_multiple") or 1.0) != 1.0 for b in common_batches_list_v
+    )
+    voting_pct_html = ""
+    if has_dual_class_v:
+        rows_v: list[tuple[str, str, int, float, float]] = []
+        for f in founders_list_v:
+            cls = f.get("common_class") or "class_a"
+            vrm = float(f.get("voting_rights_multiple") or 1.0)
+            shares = int(f.get("common_shares") or 0)
+            rows_v.append((f.get("name", "Founder"), cls, shares, vrm, shares * vrm))
+        for b in common_batches_list_v:
+            cls = b.get("common_class") or "class_a"
+            vrm = float(b.get("voting_rights_multiple") or 1.0)
+            shares = int(b.get("shares") or 0)
+            rows_v.append((f"Batch {b.get('batch_id') or b.get('holder_id', '?')}", cls, shares, vrm, shares * vrm))
+        preferred_as_conv_v = int(cap_state["as_converted_totals"]["preferred_shares_as_converted"])
+        if preferred_as_conv_v > 0:
+            rows_v.append(
+                ("Preferred (as-converted)", "preferred", preferred_as_conv_v, 1.0, float(preferred_as_conv_v))
+            )
+        total_voting_v = sum(r[4] for r in rows_v) or 1.0
+        voting_rows_html = "".join(
+            f"<tr><td>{_esc(n)}</td><td>{_esc(c)}</td><td class='num'>{s:,}</td>"
+            f"<td class='num'>{vrm:g}× → {int(vu):,}</td>"
+            f"<td class='num'>{_pct(vu / total_voting_v)}</td></tr>"
+            for n, c, s, vrm, vu in rows_v
+        )
+        voting_pct_html = (
+            "<h2>Voting power (dual-class)</h2>"
+            "<p style='color:var(--muted);font-size:13px;'>Dual-class structure detected. Voting % = shares × voting_rights_multiple, normalized across all voting holders. "
+            "Preferred treated as 1× per v0.5.0 simplification; see <code>dual_class.founder_super_voting</code> counsel item.</p>"
+            "<table><thead><tr><th>Holder</th><th>Class</th><th>Shares</th><th>Voting units</th><th>Voting %</th></tr></thead>"
+            f"<tbody>{voting_rows_html}</tbody></table>"
+        )
+
+    # AoA Findings section — rendered when aoa_findings has extracted data.
+    aoa_v = cap_state.get("aoa_findings") or {}
+    aoa_has_data_v = any(v is not None and v is not False for v in aoa_v.values())
+    aoa_findings_html = ""
+    if aoa_has_data_v:
+        _aoa_v_map: list[tuple[str, str, str]] = [
+            ("Pay-to-play detected", "pay_to_play_detected", "bool"),
+            ("Drag-along threshold", "drag_along_threshold_pct", "pct"),
+            ("§102 plan reference present", "section_102_plan_reference", "bool"),
+            ("Ratchet anti-dilution detected", "ratchet_anti_dilution_detected", "bool"),
+            ("Liquidation preference > 1x", "liquidation_preference_above_1x", "bool"),
+            ("Participation present", "participation_present", "bool"),
+            ("Dividend provisions present", "dividend_provisions_present", "bool"),
+            ("Protective provisions below 75%", "protective_provisions_below_75_pct", "bool"),
+            ("Bring-along threshold", "bring_along_threshold_pct", "pct"),
+        ]
+        aoa_rows_html = ""
+        for label, key, fmt in _aoa_v_map:
+            val = aoa_v.get(key)
+            if val is None:
+                rendered = "<em>Not extracted</em>"
+            elif fmt == "bool":
+                rendered = "Yes" if val else "No"
+            elif fmt == "pct":
+                rendered = f"{val}%"
+            else:
+                rendered = _esc(str(val))
+            aoa_rows_html += f"<tr><td>{_esc(label)}</td><td>{rendered}</td></tr>"
+        aoa_findings_html = (
+            "<h2>Articles of Association — extracted findings</h2>"
+            "<table><thead><tr><th>Finding</th><th>Value</th></tr></thead>"
+            f"<tbody>{aoa_rows_html}</tbody></table>"
+        )
 
     scenario_cards = []
     for s in scenarios:
@@ -150,8 +224,12 @@ def render_report_html(
         completeness = co.get("completeness", "structural_only")
         agg = co.get("aggregate_ownership_by_class") or {}
         if completeness in {"full", "mixed"} and agg:
-            donut = render_donut(agg, size=180, label=_pct(agg.get("founders_pct", 0)))
-            details = render_legend(agg)
+            # agg contains a `founders_by_class` map sub-object; filter to
+            # scalar pct values before passing to donut/legend so the SVG
+            # math doesn't try to add a dict.
+            agg_scalar = {k: v for k, v in agg.items() if isinstance(v, (int, float))}
+            donut = render_donut(agg_scalar, size=180, label=_pct(agg.get("founders_pct", 0)))
+            details = render_legend(agg_scalar)
             fi = co.get("founder_impact", {}) or {}
             impact_line = _esc(fi.get("plain_language", ""))
             # Render AD breakdown when present
@@ -262,6 +340,8 @@ def render_report_html(
   {render_donut(pre_breakdown, size=180, label="current")}
   {render_legend(pre_breakdown)}
 </div>
+{voting_pct_html}
+{aoa_findings_html}
 
 <h2>Scenarios modeled</h2>
 {"".join(scenario_cards)}

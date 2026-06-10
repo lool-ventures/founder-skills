@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "cap-table inputs.json",
-  "description": "Founder-supplied + extracted engagement inputs. AoA extraction populates the `preferred_series` array via the merge_aoa_to_inputs.py helper. Founders block carries common-share holdings; option_pool carries existing pool sizing.",
+  "description": "Founder-supplied + extracted engagement inputs. AoA extraction populates the `preferred_series` array + `aoa_findings` block. Founders block carries common-share holdings; option_pool carries existing pool sizing.",
   "type": "object",
   "required": ["company_name", "analysis_date", "mode", "metadata"],
   "properties": {
@@ -35,20 +35,22 @@
     },
     "founders": {
       "type": "array",
-      "description": "Founder common-share holdings. Consumed by cap_state.py to build the pre-financing snapshot.",
+      "description": "Founder common-share holdings.",
       "items": {
         "type": "object",
         "required": ["name", "common_shares"],
         "properties": {
           "name": {"type": "string"},
           "founder_id": {"type": "string"},
-          "common_shares": {"type": "integer", "minimum": 0}
+          "common_shares": {"type": "integer", "minimum": 0},
+          "common_class": {"type": "string", "default": "class_a"},
+          "voting_rights_multiple": {"type": "number", "default": 1.0}
         }
       }
     },
     "common_batches": {
       "type": "array",
-      "description": "Issued common-share batches beyond the founders block (e.g., advisor common, exercised options that didn't get split into a separate class).",
+      "description": "Issued common-share batches beyond the founders block.",
       "items": {
         "type": "object",
         "properties": {
@@ -56,13 +58,15 @@
           "shares": {"type": "integer"},
           "issuance_date": {"type": "string"},
           "consideration": {"type": ["number", "null"]},
-          "purpose": {"enum": ["founder_issuance", "restricted_stock_purchase", "exercise", "conversion", "other"]}
+          "purpose": {"enum": ["founder_issuance", "restricted_stock_purchase", "exercise", "conversion", "other"]},
+          "common_class": {"type": "string", "default": "class_a"},
+          "voting_rights_multiple": {"type": "number", "default": 1.0}
         }
       }
     },
     "preferred_series": {
       "type": "array",
-      "description": "Preferred-stock series. Schema mirrors cap_state.preferred_series item shape. Populated by AoA extraction via merge_aoa_to_inputs.py, OR directly from founder input via heredoc.",
+      "description": "Preferred-stock series. v0.5.0 removes dividend_rate_percent + dividend_cumulative (E_DIVIDEND_FIELDS_REMOVED if present); dividend provisions surface via aoa_findings.dividend_provisions_present for counsel-handoff.",
       "items": {
         "type": "object",
         "required": ["series_name", "shares", "original_issue_price", "original_conversion_price", "current_conversion_price", "issuance_date"],
@@ -70,9 +74,9 @@
           "series_id": {"type": "string"},
           "series_name": {"type": "string"},
           "shares": {"type": "integer", "minimum": 0},
-          "original_issue_price": {"type": "number"},
-          "original_conversion_price": {"type": "number"},
-          "current_conversion_price": {"type": "number"},
+          "original_issue_price": {"type": "number", "exclusiveMinimum": 0},
+          "original_conversion_price": {"type": "number", "exclusiveMinimum": 0},
+          "current_conversion_price": {"type": "number", "exclusiveMinimum": 0},
           "issuance_date": {"type": "string"},
           "liquidation_preference_multiple": {"type": "number", "minimum": 1.0},
           "liquidation_preference_type": {"enum": ["non_participating", "participating", "participating_capped"]},
@@ -82,12 +86,9 @@
           "ad_a_denominator_basis": {"enum": ["nvca_broad", "nvca_narrow"]},
           "ad_cp2_floor": {"type": ["number", "null"]},
           "ad_carve_outs": {"enum": ["nvca_default"]},
-          "dividend_rate_percent": {"type": ["number", "null"]},
-          "dividend_cumulative": {"type": "boolean"},
           "pro_rata_rights": {"type": "boolean"},
           "extraction_provenance": {
             "type": "object",
-            "description": "When populated via AoA extraction, records the source document + evidence quotes so downstream tooling can trace each preferred-series term back to the AoA. Absent for series populated by direct founder input.",
             "properties": {
               "source_doc": {"type": "string"},
               "extraction_confidence": {"enum": ["high", "medium", "low"]},
@@ -99,7 +100,6 @@
     },
     "option_pool": {
       "type": "object",
-      "description": "Existing option pool sizing. Consumed by cap_state.py + option_pool.py.",
       "required": ["plan_type", "authorized", "issued", "unallocated"],
       "properties": {
         "plan_type": {"enum": ["iso", "nso", "section_102_cg", "section_102_oi", "section_3i", "mixed"]},
@@ -110,27 +110,47 @@
     },
     "cap_table_history": {
       "type": "array",
-      "description": "Optional. Prior anti_dilution_applied events; passed through cap_state.py to feed priced_round.py's stale-CCP guard.",
       "items": {
         "type": "object",
         "required": ["event_type", "series_id"],
         "properties": {
-          "event_type": {"enum": ["anti_dilution_applied"]},
+          "event_type": {"enum": ["anti_dilution_applied", "warrant_exercised"]},
           "round_id": {"type": "string"},
           "applied_at": {"type": "string"},
           "series_id": {"type": "string"},
           "previous_ccp": {"type": "number"},
           "new_ccp": {"type": "number"},
           "rule_id": {"type": "string"},
-          "rule_pack_version": {"type": "string"}
+          "rule_pack_version": {"type": "string"},
+          "warrant_id": {"type": ["string", "null"]},
+          "shares_added": {"type": ["integer", "null"]},
+          "exercised_at_pps": {"type": ["number", "null"]}
         }
+      }
+    },
+    "aoa_findings": {
+      "type": "object",
+      "description": "Source of truth for AoA-extracted findings. cap_state.py mirrors these into cap_state.aoa_findings (read-only mirror; never dual-written).",
+      "properties": {
+        "pay_to_play_detected": {"type": "boolean", "default": false},
+        "drag_along_threshold_pct": {"type": ["number", "null"]},
+        "section_102_plan_reference": {"type": ["boolean", "null"]},
+        "ratchet_anti_dilution_detected": {"type": "boolean", "default": false},
+        "liquidation_preference_above_1x": {"type": ["boolean", "null"]},
+        "participation_present": {"type": ["boolean", "null"]},
+        "dividend_provisions_present": {"type": ["boolean", "null"]},
+        "protective_provisions_below_75_pct": {"type": ["boolean", "null"]},
+        "bring_along_threshold_pct": {"type": ["number", "null"]}
       }
     },
     "engagement_questions": {"type": "array", "items": {"type": "string"}},
     "metadata": {
       "type": "object",
-      "required": ["run_id"],
-      "properties": {"run_id": {"type": "string"}}
+      "required": ["run_id", "schema_version"],
+      "properties": {
+        "run_id": {"type": "string"},
+        "schema_version": {"const": "v0.5.0-inputs"}
+      }
     }
   }
 }

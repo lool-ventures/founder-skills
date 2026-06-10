@@ -8,33 +8,37 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "founder-skills" / "skills" / "cap-table" / "scripts"))
 
-from cross_checker import _values_compatible, cross_check, cross_check_all  # noqa: E402
+from cross_checker import (  # type: ignore[import-not-found]  # noqa: E402
+    _values_compatible,
+    cross_check,
+    cross_check_all,
+)
 
 
 class TestValuesCompatible:
-    def test_exact_int_match(self):
+    def test_exact_int_match(self) -> None:
         assert _values_compatible(500_000, 500_000)
 
-    def test_int_relative_tolerance(self):
+    def test_int_relative_tolerance(self) -> None:
         # 0.5% diff — within 1%
         assert _values_compatible(1_000_000, 1_005_000)
 
-    def test_int_outside_tolerance(self):
+    def test_int_outside_tolerance(self) -> None:
         assert not _values_compatible(1_000_000, 1_020_000)  # 2% diff
 
-    def test_string_substring_match(self):
+    def test_string_substring_match(self) -> None:
         assert _values_compatible("Foobar Inc.", "Foobar Inc., a Delaware corp")
 
-    def test_string_mismatch(self):
+    def test_string_mismatch(self) -> None:
         assert not _values_compatible("Foobar Inc.", "Different Inc.")
 
-    def test_null_equality(self):
+    def test_null_equality(self) -> None:
         assert _values_compatible(None, None)
         assert not _values_compatible(None, 0)
 
 
 class TestCrossCheck:
-    def test_single_source_no_disagreement(self):
+    def test_single_source_no_disagreement(self) -> None:
         result = cross_check(
             "purchase_amount",
             [
@@ -45,7 +49,7 @@ class TestCrossCheck:
         assert result["agreed_value"] == 500_000
         assert result["confidence_modulated"] == "high"
 
-    def test_two_sources_agree_keeps_min_confidence(self):
+    def test_two_sources_agree_keeps_min_confidence(self) -> None:
         # Two sources both say 500_000, one high + one medium → keeps "medium"
         result = cross_check(
             "purchase_amount",
@@ -57,7 +61,7 @@ class TestCrossCheck:
         assert result["disagreement"] is False
         assert result["confidence_modulated"] == "medium"
 
-    def test_two_sources_disagree_demotes_one_level(self):
+    def test_two_sources_disagree_demotes_one_level(self) -> None:
         # Disagreement demotes: min was "medium" → demoted to "low"
         result = cross_check(
             "purchase_amount",
@@ -70,7 +74,7 @@ class TestCrossCheck:
         assert result["confidence_modulated"] == "low"
         assert result["agreed_value"] is None
 
-    def test_disagreement_at_low_demotes_to_absent(self):
+    def test_disagreement_at_low_demotes_to_absent(self) -> None:
         result = cross_check(
             "x",
             [
@@ -80,12 +84,12 @@ class TestCrossCheck:
         )
         assert result["confidence_modulated"] == "absent"
 
-    def test_empty_returns_absent(self):
+    def test_empty_returns_absent(self) -> None:
         result = cross_check("x", [])
         assert result["confidence_modulated"] == "absent"
         assert result["n_sources"] == 0
 
-    def test_string_agreement_via_substring(self):
+    def test_string_agreement_via_substring(self) -> None:
         # Both say "Foobar Inc." in some form → no disagreement
         result = cross_check(
             "investor_name",
@@ -98,7 +102,7 @@ class TestCrossCheck:
 
 
 class TestCrossCheckAll:
-    def test_aggregate(self):
+    def test_aggregate(self) -> None:
         report = cross_check_all(
             {
                 "purchase_amount": [

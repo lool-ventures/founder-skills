@@ -8,7 +8,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "founder-skills" / "skills" / "cap-table" / "scripts"))
 
-from invariant_checker import (  # noqa: E402
+from invariant_checker import (  # type: ignore[import-not-found]  # noqa: E402
     check_bounds,
     check_instrument,
     check_math,
@@ -16,7 +16,7 @@ from invariant_checker import (  # noqa: E402
 
 
 class TestSoftBounds:
-    def test_typical_safe_passes(self):
+    def test_typical_safe_passes(self) -> None:
         violations = check_bounds(
             "safe",
             {
@@ -27,35 +27,35 @@ class TestSoftBounds:
         )
         assert violations == []
 
-    def test_purchase_amount_above_max_warns(self):
+    def test_purchase_amount_above_max_warns(self) -> None:
         violations = check_bounds("safe", {"purchase_amount": 100_000_000})
         assert len(violations) == 1
         assert violations[0].stake == "soft"
         assert violations[0].bound == "above_max"
 
-    def test_discount_multiplier_below_min(self):
+    def test_discount_multiplier_below_min(self) -> None:
         # 0.30 is way below — discount of 70% is implausible
         violations = check_bounds("safe", {"discount_multiplier": 0.30})
         assert len(violations) == 1
         assert violations[0].field == "discount_multiplier"
 
-    def test_unit_error_giant_cap(self):
+    def test_unit_error_giant_cap(self) -> None:
         """$5B cap on a SAFE — likely $5M mis-extracted with units off by 3."""
         violations = check_bounds("safe", {"post_money_valuation_cap": 5_000_000_000})
         assert len(violations) == 1
         assert "unit error" in violations[0].reason
 
-    def test_high_interest_rate_warns(self):
+    def test_high_interest_rate_warns(self) -> None:
         violations = check_bounds("convertible_note", {"annual_interest_rate": 0.35})
         assert any(v.field == "annual_interest_rate" for v in violations)
 
-    def test_null_value_ignored(self):
+    def test_null_value_ignored(self) -> None:
         violations = check_bounds("safe", {"purchase_amount": None})
         assert violations == []
 
 
 class TestMathInvariants:
-    def test_captable_options_exceed_authorized_hard_fail(self):
+    def test_captable_options_exceed_authorized_hard_fail(self) -> None:
         violations = check_math(
             "captable",
             {
@@ -67,7 +67,7 @@ class TestMathInvariants:
         assert violations[0].stake == "hard"
         assert "math impossible" in violations[0].reason
 
-    def test_term_sheet_post_pre_inv_consistency(self):
+    def test_term_sheet_post_pre_inv_consistency(self) -> None:
         # pre=$10M + inv=$5M should equal post=$15M
         ok_violations = check_math(
             "term_sheet",
@@ -79,7 +79,7 @@ class TestMathInvariants:
         )
         assert ok_violations == []
 
-    def test_term_sheet_math_mismatch_flags(self):
+    def test_term_sheet_math_mismatch_flags(self) -> None:
         # pre=$10M + inv=$5M should equal post=$15M, but post=$20M provided
         violations = check_math(
             "term_sheet",
@@ -92,7 +92,7 @@ class TestMathInvariants:
         assert len(violations) == 1
         assert violations[0].stake == "hard"
 
-    def test_term_sheet_2pct_tolerance(self):
+    def test_term_sheet_2pct_tolerance(self) -> None:
         # Within 2% rounding tolerance — passes
         violations = check_math(
             "term_sheet",
@@ -104,7 +104,7 @@ class TestMathInvariants:
         )
         assert violations == []
 
-    def test_safe_both_caps_set_hard_fail(self):
+    def test_safe_both_caps_set_hard_fail(self) -> None:
         violations = check_math(
             "safe",
             {
@@ -117,7 +117,7 @@ class TestMathInvariants:
 
 
 class TestCheckInstrument:
-    def test_clean_safe_reports_no_violations(self):
+    def test_clean_safe_reports_no_violations(self) -> None:
         extraction = {
             "instrument_type": "safe",
             "fields": {
@@ -130,7 +130,7 @@ class TestCheckInstrument:
         assert report.n_violations == 0
         assert report.n_hard_violations == 0
 
-    def test_unit_error_flagged_soft(self):
+    def test_unit_error_flagged_soft(self) -> None:
         extraction = {
             "instrument_type": "safe",
             "fields": {
@@ -142,7 +142,7 @@ class TestCheckInstrument:
         assert report.n_violations == 1
         assert report.n_hard_violations == 0  # soft
 
-    def test_math_violation_flagged_hard(self):
+    def test_math_violation_flagged_hard(self) -> None:
         extraction = {
             "instrument_type": "safe",
             "fields": {

@@ -168,9 +168,26 @@ def _resolve_event_date(
     event_date_value, event_date_field) tuples — one per instance the rule
     applies to. For per-instrument fields, returns one entry per instrument.
     For engagement-scoped fields, returns a single entry.
+
+    QSBS is date-sensitive against the POST-FLIP Delaware C-corp share
+    issuance date, not the pre-flip Israeli issuance date. When in flip mode
+    (mode=flip_focused or scenario.type=flip or cross-border structure),
+    rewrite the QSBS rule's event_date_field from `stock_issue_date` →
+    `flip_closing_date` so the rule gates against the correct OBBBA cutoff.
     """
     dw = rule.get("date_window") or {}
     field = dw.get("event_date_field")
+    rid = rule.get("rule_id", "")
+
+    # In flip mode, gate QSBS on flip_closing_date instead of stock_issue_date
+    if rid == "delaware_cross_border.qsbs_date_sensitive":
+        is_flip = (
+            inputs.get("mode") == "flip_focused"
+            or _is_cross_border(inputs)
+            or (scenario is not None and scenario.get("type") == "flip")
+        )
+        if is_flip:
+            field = "flip_closing_date"
     if not field:
         return [
             {
@@ -281,16 +298,91 @@ def _has_safes(instruments: dict[str, Any]) -> bool:
 
 
 def _has_notes(instruments: dict[str, Any]) -> bool:
-    return bool(instruments.get("notes"))
+    return bool(instruments.get("convertible_notes"))
 
 
 def _has_preferred(cap_state: dict[str, Any]) -> bool:
     return bool(cap_state.get("preferred_series"))
 
 
-def _has_section_102_grants(instruments: dict[str, Any]) -> bool:
+def _has_warrants(cap_state: dict[str, Any]) -> bool:
+    return bool(cap_state.get("outstanding_warrants"))
+
+
+def _has_unvested_warrants(cap_state: dict[str, Any]) -> bool:
+    """Gate `warrant.unvested_excluded_from_fd_per_policy` on actual unvested
+    warrants existing (not just any warrant)."""
+    return any(not w.get("vested_flag", False) for w in cap_state.get("outstanding_warrants") or [])
+
+
+def _has_warrant_with_ad_clause(cap_state: dict[str, Any]) -> bool:
+    """Gate `warrant.repricing_not_modeled` on a warrant actually carrying an
+    anti_dilution_clause (mirrored from instruments at canonicalization per
+    §3.2). Per §3.5 the matcher reads cap_state, not instruments."""
+    return any(w.get("anti_dilution_clause") is not None for w in cap_state.get("outstanding_warrants") or [])
+
+
+def _has_dual_class_holder(cap_state: dict[str, Any]) -> bool:
+    """v0.5.0 §6.5: dual-class detection. Fires when any founder or common_batch
+    holder has voting_rights_multiple != 1.0."""
+    if any(float(f.get("voting_rights_multiple") or 1.0) != 1.0 for f in cap_state.get("founders") or []):
+        return True
+    return any(float(b.get("voting_rights_multiple") or 1.0) != 1.0 for b in cap_state.get("common_batches") or [])
+
+
+def _aoa_has_dividend_provisions(cap_state: dict[str, Any]) -> bool:
+    """Gate `cap_table.dividend_provisions_in_aoa_handoff` on the AoA-extracted
+    finding."""
+    return (cap_state.get("aoa_findings") or {}).get("dividend_provisions_present") is True
+
+
+def _drag_along_below_75(cap_state: dict[str, Any]) -> bool:
+    """Gate `israeli_aoa.drag_along_threshold_below_75_percent` on the actual
+    extracted threshold being strictly < 75. Null (AoA not extracted) →
+    default-deny."""
+    threshold = (cap_state.get("aoa_findings") or {}).get("drag_along_threshold_pct")
+    if threshold is None:
+        return False
+    try:
+        return float(threshold) < 75
+    except (TypeError, ValueError):
+        return False
+
+
+def _section_102_plan_absent(cap_state: dict[str, Any]) -> bool:
+    """Gate `israeli_aoa.section_102_plan_absent` on the AoA-extracted finding
+    `section_102_plan_reference is False` (the AoA was extracted AND it
+    explicitly does NOT reference a §102 plan). Null (AoA not extracted) →
+    default-deny: we don't know if a §102 plan exists, so don't fire the
+    "absent" warning."""
+    return (cap_state.get("aoa_findings") or {}).get("section_102_plan_reference") is False
+
+
+def _liquidation_preference_above_1x(cap_state: dict[str, Any]) -> bool:
+    """Gate `israeli_aoa.liquidation_preference_above_1x` on the AoA-extracted
+    finding being True. Null → default-deny."""
+    return (cap_state.get("aoa_findings") or {}).get("liquidation_preference_above_1x") is True
+
+
+def _full_ratchet_anti_dilution(cap_state: dict[str, Any]) -> bool:
+    """Gate `israeli_aoa.full_ratchet_anti_dilution` on the AoA-extracted
+    finding being True. Null → default-deny."""
+    return (cap_state.get("aoa_findings") or {}).get("ratchet_anti_dilution_detected") is True
+
+
+def _has_section_102_grants(instruments: dict[str, Any], cap_state: dict[str, Any] | None = None) -> bool:
+    """Read from cap_state.outstanding_options[*].plan_type (the canonical
+    location) when cap_state is available; fall back to
+    instruments.option_grants[*].plan_type for legacy callers. The two are
+    mirrored at canonicalization (cap_state.py), so they agree."""
+    if cap_state is not None:
+        opts = cap_state.get("outstanding_options", []) or []
+        if any((o.get("plan_type") or "").startswith("section_102") for o in opts):
+            return True
+        if opts:
+            return False
     grants = instruments.get("option_grants", []) or []
-    return any(g.get("plan_type", "").startswith("section_102") for g in grants)
+    return any((g.get("plan_type") or "").startswith("section_102") for g in grants)
 
 
 def _has_iia_grants(inputs: dict[str, Any]) -> bool:
@@ -478,29 +570,44 @@ _RULE_MATCHERS: dict[str, Any] = {
     # would be noise (e.g., firing "drag-along below 75%" when there's no AoA).
     # Real-doc test surfaced this as a false-positive class — see the
     # post-test bugfix commit (May 2026).
+    # Gate on the actual extracted threshold value < 75 (strict). Null
+    # drag_along_threshold_pct (AoA not extracted) → default-deny.
     "israeli_aoa.drag_along_threshold_below_75_percent": lambda i, inst, cs: (
-        _structure_includes_israel(i) and _has_preferred(cs)
+        _structure_includes_israel(i) and _has_preferred(cs) and _drag_along_below_75(cs)
     ),
-    "israeli_aoa.section_102_plan_absent": lambda i, inst, cs: _structure_includes_israel(i) and _has_preferred(cs),
+    # The three sibling israeli_aoa.* rules below each gate on the actual
+    # AoA-extracted finding (cap_state.aoa_findings.*) rather than just
+    # "Israeli + has_preferred". Null → default-deny: an Israeli engagement
+    # with findings that contradict a rule must not fire it as a false positive.
+    "israeli_aoa.section_102_plan_absent": lambda i, inst, cs: (
+        _structure_includes_israel(i) and _has_preferred(cs) and _section_102_plan_absent(cs)
+    ),
     "israeli_aoa.liquidation_preference_above_1x": lambda i, inst, cs: (
-        _structure_includes_israel(i) and _has_preferred(cs)
+        _structure_includes_israel(i) and _has_preferred(cs) and _liquidation_preference_above_1x(cs)
     ),
-    "israeli_aoa.full_ratchet_anti_dilution": lambda i, inst, cs: _structure_includes_israel(i) and _has_preferred(cs),
+    "israeli_aoa.full_ratchet_anti_dilution": lambda i, inst, cs: (
+        _structure_includes_israel(i) and _has_preferred(cs) and _full_ratchet_anti_dilution(cs)
+    ),
     # Delaware cross-border — apply when ANY of: Delaware engagement,
     # cross-border structure, or flip mode
     "delaware_cross_border.structure_note": lambda i, inst, cs: _is_cross_border(i) or _structure_includes_israel(i),
     "delaware_cross_border.section_102_parent_shares": lambda i, inst, cs: (
-        _is_cross_border(i) and _has_section_102_grants(inst)
+        _is_cross_border(i) and _has_section_102_grants(inst, cs)
     ),
     "delaware_cross_border.transfer_pricing_ip": lambda i, inst, cs: _is_cross_border(i),
     "delaware_cross_border.delaware_formation_defaults": lambda i, inst, cs: _structure_includes_delaware(i),
     "delaware_cross_border.qsbs_date_sensitive": lambda i, inst, cs: _structure_includes_delaware(i),
     # Delaware flip rules — apply when modeling a flip (mode or cross-border)
     "delaware_flip.share_exchange_mechanics": lambda i, inst, cs: _is_cross_border(i),
-    "delaware_flip.ruling_path": lambda i, inst, cs: _is_cross_border(i) or _structure_includes_israel(i),
-    "delaware_flip.part_e2_repeal": lambda i, inst, cs: _is_cross_border(i) or _structure_includes_israel(i),
+    # Narrow to flip-active engagements (cross-border structure OR
+    # mode=flip_focused). Bare-Israeli with mode=standard means "not planning
+    # a flip" — these flip-doctrine rules don't apply. The general
+    # "Israeli founder, consider flipping someday" coverage stays via
+    # `delaware_cross_border.structure_note` which keeps the broad OR.
+    "delaware_flip.ruling_path": lambda i, inst, cs: _is_cross_border(i) or i.get("mode") == "flip_focused",
+    "delaware_flip.part_e2_repeal": lambda i, inst, cs: _is_cross_border(i) or i.get("mode") == "flip_focused",
     "delaware_flip.options_convertibles": lambda i, inst, cs: (
-        _is_cross_border(i) and (_has_safes(inst) or _has_notes(inst) or _has_section_102_grants(inst))
+        _is_cross_border(i) and (_has_safes(inst) or _has_notes(inst) or _has_section_102_grants(inst, cs))
     ),
     "delaware_flip.iia_not_automatic_transfer": lambda i, inst, cs: _is_cross_border(i) and _has_iia_grants(i),
     "delaware_flip.timeline_cost": lambda i, inst, cs: _is_cross_border(i),
@@ -509,6 +616,19 @@ _RULE_MATCHERS: dict[str, Any] = {
     "founder_benchmarks.no_hard_redlines": _matcher_always,
     "founder_benchmarks.israel_preseed_context": lambda i, inst, cs: _structure_includes_israel(i),
     "founder_benchmarks.stacked_safe_warning": lambda i, inst, cs: len(inst.get("safes") or []) > 1,
+    # Warrants domain: state-readable matchers. The runtime-event subset
+    # (net_share_pre_round_fmv_approximation, exercise_event_before_round_pump)
+    # lives in _RUNTIME_EVENT_RULE_IDS + _runtime_event_predicate — those gate
+    # on actual pump events in scenarios.
+    "warrant.included_in_fd_per_policy": lambda i, inst, cs: _has_warrants(cs),
+    "warrant.unvested_excluded_from_fd_per_policy": lambda i, inst, cs: _has_unvested_warrants(cs),
+    "warrant.repricing_not_modeled": lambda i, inst, cs: _has_warrant_with_ad_clause(cs),
+    "warrant.net_share_pre_round_fmv_approximation": lambda i, inst, cs: _has_warrants(cs),
+    "warrant.exercise_event_before_round_pump": lambda i, inst, cs: _has_warrants(cs),
+    # Dual-class domain (§6.5): fires when any holder has voting_rights_multiple != 1.0
+    "dual_class.founder_super_voting": lambda i, inst, cs: _has_dual_class_holder(cs),
+    # Cap-table domain: dividend handoff — gates on AoA-extracted finding
+    "cap_table.dividend_provisions_in_aoa_handoff": lambda i, inst, cs: _aoa_has_dividend_provisions(cs),
 }
 
 
@@ -762,6 +882,10 @@ _RUNTIME_EVENT_RULE_IDS = frozenset(
         "anti_dilution.solver_aitken_acceleration_applied",
         "anti_dilution.solver_aitken_fallback_engaged",
         "anti_dilution.pay_to_play_provision_detected",
+        # Warrant runtime-event rules: gate on actual pump events in
+        # scenarios[*].computed_outputs.warrant_exercise_events[*].
+        "warrant.net_share_pre_round_fmv_approximation",
+        "warrant.exercise_event_before_round_pump",
     }
 )
 
@@ -847,6 +971,28 @@ def _runtime_event_predicate(
                 return True
         findings = inputs.get("aoa_findings") or {}
         return findings.get("pay_to_play_detected") is True
+
+    # v0.5.0 warrant runtime events
+    def _any_warrant_event_with(field: str, value: Any = True) -> bool:
+        for s in scenarios:
+            co = s.get("computed_outputs", {}) or {}
+            for evt in co.get("warrant_exercise_events", []) or []:
+                if evt.get(field) == value:
+                    return True
+        return False
+
+    if rule_id == "warrant.net_share_pre_round_fmv_approximation":
+        # Fires only when a pump event actually used the FMV approximation
+        # (settlement_type=net_share AND no prior priced-round PPS).
+        return _any_warrant_event_with("fmv_approximation_used", True)
+    if rule_id == "warrant.exercise_event_before_round_pump":
+        # Informational source note; fires when ANY pump event occurred in a scenario.
+        for s in scenarios:
+            co = s.get("computed_outputs", {}) or {}
+            if co.get("warrant_exercise_events") or []:
+                return True
+        return False
+
     return None  # not a runtime-event rule
 
 
@@ -897,6 +1043,57 @@ def build_counsel_review_items(
                 "founder_question": (rule.get("warnings") or [""])[0] or "",
                 "counsel_question": rule.get("summary", ""),
                 "documents_needed": [],  # placeholder; design §17 promises richer field
+                "source_ids": rule.get("source_ids", []),
+            }
+        )
+    return items
+
+
+def build_source_notes(
+    gating: dict[str, dict[str, dict[str, Any]]],
+    rules: dict[str, Any],
+    scenarios_data: dict[str, Any] | None = None,
+    inputs: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Surface `behavior_target=source_note` rules whose matcher predicate
+    fires AND (for runtime-event rules) whose underlying event actually
+    occurred. counsel_review_items only emits rules with counsel_review=true;
+    source notes have counsel_review=false and would otherwise vanish from
+    the report.
+
+    Source notes are informational citations — "this number was computed via
+    rule X per NVCA §Y." They surface in a dedicated `## Source Notes`
+    section of report.md so founders can trace each computation back to a
+    primary source.
+    """
+    rule_lookup = {r["rule_id"]: r for domain in rules.get("domains", {}).values() for r in domain}
+    items = []
+    seen_rules = set()
+    for rule_id, instances in gating.items():
+        rule = rule_lookup.get(rule_id)
+        if not rule:
+            continue
+        if rule.get("behavior_target") != "source_note":
+            continue
+        # Same gating logic as counsel-review items: matcher fired + status applicable.
+        any_applicable = any(
+            e.get("applies_when_matched") and e.get("status") not in {"pre_effective", "expired"}
+            for e in instances.values()
+        )
+        if not any_applicable:
+            continue
+        runtime_gate = _runtime_event_predicate(rule_id, scenarios_data, inputs)
+        if runtime_gate is False:
+            continue
+        if rule_id in seen_rules:
+            continue
+        seen_rules.add(rule_id)
+        items.append(
+            {
+                "rule_id": rule_id,
+                "domain": rule.get("domain", ""),
+                "title": rule.get("title", rule_id),
+                "summary": rule.get("summary", ""),
                 "source_ids": rule.get("source_ids", []),
             }
         )
@@ -1023,6 +1220,7 @@ def _phase_post_math(args: argparse.Namespace) -> int:
         "gating": gating,  # preserved verbatim
         "applied_rules": build_applied_rules(gating, scenarios_data),
         "counsel_review_items": build_counsel_review_items(gating, rules, scenarios_data, inputs_data),
+        "source_notes": build_source_notes(gating, rules, scenarios_data, inputs_data),
         "date_sensitive_watchlist": build_watchlist(gating, rules),
     }
     schema = load_schema(os.path.join(_SCHEMA_DIR, "rule_audit.schema.json"))

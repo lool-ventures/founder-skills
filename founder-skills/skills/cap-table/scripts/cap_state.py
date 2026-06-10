@@ -5,16 +5,31 @@
 # ///
 """Compute cap_state.json from inputs.json + instruments.json.
 
-cap_state.py is the foundational aggregation step. It reads `inputs.json`
-(founder/preferred/option-pool declarations) plus `instruments.json` (SAFEs,
-notes, warrants, option grants) and produces `cap_state.json` — the
-authoritative current cap-table state every math producer consumes.
+cap_state.py is the foundational aggregation step (the canonicalizer). It
+reads `inputs.json` and `instruments.json` and produces `cap_state.json` —
+the authoritative current cap-table state every math producer consumes.
 
 Per design doc §11 + Gotcha #1, `as_converted_totals.*` is the
 **pre-financing** snapshot. It does NOT include new-money financing shares
 or new pool top-ups. The YC Company Capitalization denominator
 (`safe.company_capitalization_yc_post_money`) binds to this field
 precisely because of the no-new-money-in-the-denominator invariant.
+
+v0.5.0 contract additions (cap-table-data-contract §2-§6):
+- Warrants land in cap_state.outstanding_warrants[] with the full item shape
+  (warrant_id, exercise_price, warrant_type, vested_flag, settlement_type,
+  holder_election_choice, anti_dilution_clause, exercise_event_date,
+  exercised_flag). Vested warrants pump `warrants_underlying_total` into
+  `as_converted_totals.fully_diluted_shares` (per contract §6.1).
+- aoa_findings mirrors from inputs to cap_state (read-only).
+- outstanding_safes carries mfn_status derived from instruments.safes[].mfn_provision.
+- outstanding_options carries plan_type + section_102_trustee_deposit_date
+  (matchers + compose_report.flip_specifics read from cap_state, not instruments).
+- outstanding_notes carries subtype + governing_law mirrors.
+- Founders + common_batches carry common_class + voting_rights_multiple
+  (dual-class voting_pct support).
+- inputs.preferred_series with dividend_rate_percent or dividend_cumulative
+  is hard-rejected with E_DIVIDEND_FIELDS_REMOVED (dividend math out of scope).
 
 Usage:
     python3 cap_state.py --inputs inputs.json --instruments instruments.json \\
@@ -38,29 +53,130 @@ _SCHEMA_DIR = os.path.join(
     "schemas",
 )
 
+CAP_STATE_SCHEMA_VERSION = "v0.5.0-cap-state"
+
+
+class CapStateInvariantError(ValueError):
+    """Raised when a semantic invariant fails at canonicalization."""
+
+
+def _check_invariants_preferred_series(preferred: list[dict[str, Any]]) -> None:
+    """§4.5 semantic invariants for preferred series + dividend rejection (§6.2).
+
+    Dividend-field violations are aggregated into a single error so a founder
+    doesn't have to migrate field-by-field across multiple runs. Other
+    invariants (OIP/OCP > 0, CCP <= OCP) remain fail-fast — they're not
+    migration-related so aggregation doesn't help.
+    """
+    # Pass 1: collect ALL dividend-field violations across the entire preferred
+    # series list, then raise once with the aggregate.
+    dividend_violations: list[str] = []
+    for s in preferred:
+        sname = s.get("series_name", "?")
+        if "dividend_rate_percent" in s and s.get("dividend_rate_percent") is not None:
+            dividend_violations.append(f"preferred_series[{sname}].dividend_rate_percent")
+        if "dividend_cumulative" in s and s.get("dividend_cumulative") is True:
+            dividend_violations.append(f"preferred_series[{sname}].dividend_cumulative=true")
+    if dividend_violations:
+        err = CapStateInvariantError(
+            "E_DIVIDEND_FIELDS_REMOVED: the following removed-in-v0.5.0 fields are present: "
+            + "; ".join(dividend_violations)
+            + ". Cumulative-preferred dividend math is not modeled in v0.5.0 (waterfall + cumulative dividends "
+            "are out of scope). Remove ALL of these fields in one pass; the AoA-extraction handoff surfaces "
+            "dividend provisions via inputs.aoa_findings.dividend_provisions_present for counsel review. "
+            "See contract §6.2 / §10.1."
+        )
+        err.violations = dividend_violations  # type: ignore[attr-defined]
+        raise err
+
+    for s in preferred:
+        # OIP > 0 / OCP > 0 divide-by-zero guard
+        if float(s.get("original_issue_price", 0)) <= 0:
+            raise CapStateInvariantError(
+                f"E_PREFERRED_SERIES_INVALID_PRICE: preferred_series[{s.get('series_name', '?')}].original_issue_price "
+                f"must be > 0 (divide-by-zero guard in AD math)."
+            )
+        if float(s.get("original_conversion_price", 0)) <= 0:
+            sname = s.get("series_name", "?")
+            raise CapStateInvariantError(
+                f"E_PREFERRED_SERIES_INVALID_PRICE: preferred_series[{sname}].original_conversion_price must be > 0."
+            )
+        # CCP <= OCP (ratchet only ratchets down)
+        ccp = float(s.get("current_conversion_price", s.get("original_conversion_price", 0)))
+        ocp = float(s.get("original_conversion_price", 0))
+        if ccp > ocp + 1e-9:
+            sname = s.get("series_name", "?")
+            raise CapStateInvariantError(
+                f"E_PREFERRED_SERIES_CCP_ABOVE_OCP: preferred_series[{sname}].current_conversion_price "
+                f"({ccp}) > original_conversion_price ({ocp}); AD only ratchets down."
+            )
+
+
+def _check_invariants_warrants(warrants: list[dict[str, Any]]) -> None:
+    """§4.5 warrant semantic invariants."""
+    for w in warrants:
+        wid = w.get("id", "?")
+        # Unvested implies no exercise_event_date
+        if not w.get("vested_flag", False) and w.get("exercise_event_date") is not None:
+            raise CapStateInvariantError(
+                f"E_WARRANT_UNVESTED_EXERCISE_DATE: warrants[{wid}] has exercise_event_date set "
+                f"but vested_flag=false. Unvested warrants cannot have a pre-round exercise date."
+            )
+        # Expiration vs exercise
+        eed = w.get("exercise_event_date")
+        exp = w.get("expiration_date")
+        if eed and exp and eed > exp:
+            raise CapStateInvariantError(
+                f"E_WARRANT_EXERCISE_AFTER_EXPIRATION: warrants[{wid}].exercise_event_date ({eed}) "
+                f"is after expiration_date ({exp})."
+            )
+        # Holder-election declaration
+        if w.get("settlement_type") == "holder_election":
+            choice = w.get("holder_election_choice")
+            if choice not in ("cash", "net_share"):
+                raise CapStateInvariantError(
+                    f"E_WARRANT_HOLDER_ELECTION_UNSPECIFIED: warrants[{wid}].settlement_type=holder_election "
+                    f"but holder_election_choice is not 'cash' or 'net_share' (got {choice!r})."
+                )
+        # Forbidden settlement variants (§5.1)
+        forbidden = {
+            "debt_cancellation": "E_WARRANT_DEBT_CANCELLATION_NOT_MODELED",
+            "share_for_share_exchange": "E_WARRANT_EXCHANGE_NOT_MODELED",
+        }
+        st = w.get("settlement_type")
+        if st in forbidden:
+            raise CapStateInvariantError(
+                f"{forbidden[st]}: warrants[{wid}].settlement_type={st!r} is not modeled in v0.5.0."
+            )
+        # Preferred-stock-series warrant must declare which series it maps to
+        # so the pump can route shares + as-converted ratio correctly.
+        if w.get("warrant_type") == "preferred_stock_series" and not w.get("preferred_series_id"):
+            raise CapStateInvariantError(
+                f"E_WARRANT_PREFERRED_SERIES_ID_REQUIRED: warrants[{wid}].warrant_type=preferred_stock_series "
+                f"but preferred_series_id is null. Specify which series this warrant exercises into."
+            )
+
 
 def _compute_as_converted_totals(
     founders: list[dict[str, Any]],
     canonical_preferred_series: list[dict[str, Any]],
     canonical_option_pool: dict[str, Any],
     common_batches: list[dict[str, Any]],
+    outstanding_warrants: list[dict[str, Any]],
 ) -> dict[str, int]:
     """Compute pre-financing as-converted totals.
 
     Per Gotcha #1: this snapshot is what `safe.company_capitalization_yc_post_money`
     binds to. It MUST NOT include new-money financing shares or new
     post-financing pool top-ups. Pre-existing pool (issued + available) IS
-    included.
+    included. Per contract §6.1, vested outstanding warrants are also included.
 
-    All inputs must be in the **canonical cap_state shape** (post-mapping),
-    not the raw inputs.json shape.
+    All inputs must be in the **canonical cap_state shape** (post-mapping).
     """
     founder_shares = sum(int(f.get("common_shares", 0)) for f in founders)
     batch_shares = sum(int(b.get("shares", 0)) for b in common_batches)
     common_shares = founder_shares + batch_shares
 
-    # As-converted preferred: each series's shares × (OCP / current_conversion_price)
-    # When AD hasn't triggered, current = original, so the ratio is 1.0.
     preferred_as_converted = 0
     for s in canonical_preferred_series:
         shares = int(s.get("shares", 0))
@@ -74,14 +190,39 @@ def _compute_as_converted_totals(
     options_outstanding = int(canonical_option_pool.get("issued_and_outstanding", 0))
     options_available = int(canonical_option_pool.get("available_for_grant", 0))
 
-    fd = common_shares + preferred_as_converted + options_outstanding + options_available
+    # Include vested outstanding warrants in FD per contract §6.1. Unvested
+    # warrants are surfaced in cap_state.outstanding_warrants[] but excluded
+    # from FD math (matches YC primer narrow company_capitalization per Gotcha #1).
+    warrants_underlying_total = sum(
+        int(w.get("shares_underlying", 0))
+        for w in outstanding_warrants
+        if w.get("vested_flag", False) and not w.get("exercised_flag", False)
+    )
+
+    fd = common_shares + preferred_as_converted + options_outstanding + options_available + warrants_underlying_total
     return {
         "common_shares": common_shares,
         "preferred_shares_as_converted": preferred_as_converted,
         "options_outstanding": options_outstanding,
         "options_available": options_available,
+        "warrants_underlying_total": warrants_underlying_total,
         "fully_diluted_shares": fd,
     }
+
+
+def _derive_mfn_status(safe: dict[str, Any]) -> str:
+    """Derive mfn_status enum from instruments.safes[i].mfn_provision (§5.2).
+
+    Returns: 'absent' | 'present_unelected' | 'elected' | 'cherry_pick_pending'.
+    """
+    mfn = safe.get("mfn_provision") or {}
+    if not mfn or not mfn.get("present", False):
+        return "absent"
+    if mfn.get("cherry_pick_attempted"):
+        return "cherry_pick_pending"
+    if mfn.get("elected"):
+        return "elected"
+    return "present_unelected"
 
 
 def _build_outstanding_options(
@@ -89,9 +230,10 @@ def _build_outstanding_options(
 ) -> list[dict[str, Any]]:
     """Build outstanding_options[] from instruments.option_grants[].
 
-    Per Gotcha #6 + design rev16: grant_date / strike / plan_type are NOT
-    re-declared here. cap_state.outstanding_options[] carries grant_id +
-    as-converted-math fields (vested / exercised / unvested) only.
+    Carries plan_type + section_102_trustee_deposit_date + strike_price +
+    grant_date through to cap_state, so rule_audit matchers +
+    compose_report.flip_specifics + counsel_packet all read from a single
+    canonical location (cap_state.outstanding_options[*]).
     """
     out = []
     for g in grants:
@@ -106,6 +248,13 @@ def _build_outstanding_options(
                 "shares_vested_to_date": vested,
                 "shares_exercised": exercised,
                 "shares_outstanding_unvested": unvested,
+                "plan_type": g.get("plan_type", "nso"),
+                "section_102_trustee_deposit_date": g.get("section_102_trustee_deposit_date"),
+                "strike_price": g.get("strike_price"),
+                "grant_date": g.get("grant_date"),
+                "vesting": g.get("vesting"),
+                "source_doc": g.get("source_document"),
+                "extraction_confidence": g.get("extraction_confidence"),
             }
         )
     return out
@@ -115,8 +264,12 @@ def _build_outstanding_safes(safes: list[dict[str, Any]]) -> list[dict[str, Any]
     return [
         {
             "safe_id": s["id"],
+            "investor_name": s.get("investor_name"),
             "purchase_amount": s["purchase_amount"],
             "issuance_date": s["issuance_date"],
+            "mfn_status": _derive_mfn_status(s),
+            "source_doc": s.get("source_document"),
+            "extraction_confidence": s.get("extraction_confidence"),
         }
         for s in safes
     ]
@@ -126,11 +279,83 @@ def _build_outstanding_notes(notes: list[dict[str, Any]]) -> list[dict[str, Any]
     return [
         {
             "note_id": n["id"],
+            "investor_name": n.get("investor_name"),
             "principal": n["principal"],
             "issuance_date": n["issuance_date"],
+            "subtype": n.get("subtype", "convertible_note"),
+            "governing_law": n.get("governing_law"),
+            "source_doc": n.get("source_document"),
+            "extraction_confidence": n.get("extraction_confidence"),
         }
         for n in notes
     ]
+
+
+def _build_outstanding_warrants(warrants: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build outstanding_warrants[] from instruments.warrants[].
+
+    Maps `id` -> `warrant_id` for cap_state convention. Carries the full
+    item shape so rule_audit matchers, compose_report, visualize/explore,
+    and the run_scenario.py pre-round pump can all read from cap_state.
+    """
+    out = []
+    for w in warrants:
+        out.append(
+            {
+                "warrant_id": w["id"],
+                "investor_name": w.get("investor_name"),
+                "shares_underlying": int(w["shares_underlying"]),
+                "exercise_price": float(w["exercise_price"]),
+                "warrant_type": w["warrant_type"],
+                "preferred_series_id": w.get("preferred_series_id"),
+                "vested_flag": bool(w.get("vested_flag", False)),
+                "vesting": w.get("vesting"),
+                "issuance_date": w["issuance_date"],
+                "expiration_date": w.get("expiration_date"),
+                "origin": w.get("origin"),
+                "settlement_type": w["settlement_type"],
+                "holder_election_choice": w.get("holder_election_choice"),
+                "anti_dilution_clause": w.get("anti_dilution_clause"),
+                "exercise_event_date": w.get("exercise_event_date"),
+                "exercised_flag": bool(w.get("exercised_flag", False)),
+                "source_doc": w.get("source_document"),
+                "extraction_confidence": w.get("extraction_confidence"),
+            }
+        )
+    return out
+
+
+def _build_aoa_findings_mirror(inputs: dict[str, Any]) -> dict[str, Any]:
+    """Mirror inputs.aoa_findings to cap_state.aoa_findings (§2.1 / §3.4).
+
+    Reads from inputs.aoa_findings (the canonical source). Soft-default to
+    empty findings when absent. Never mutated downstream; cap_state.py is
+    the only writer.
+    """
+    src = inputs.get("aoa_findings") or {}
+    return {
+        "pay_to_play_detected": bool(src.get("pay_to_play_detected", False)),
+        "drag_along_threshold_pct": src.get("drag_along_threshold_pct"),
+        "section_102_plan_reference": src.get("section_102_plan_reference"),
+        "ratchet_anti_dilution_detected": bool(src.get("ratchet_anti_dilution_detected", False)),
+        "liquidation_preference_above_1x": src.get("liquidation_preference_above_1x"),
+        "participation_present": src.get("participation_present"),
+        "dividend_provisions_present": src.get("dividend_provisions_present"),
+        "protective_provisions_below_75_pct": src.get("protective_provisions_below_75_pct"),
+        "bring_along_threshold_pct": src.get("bring_along_threshold_pct"),
+    }
+
+
+def _canonicalize_common_class(holder: dict[str, Any]) -> dict[str, Any]:
+    """Apply dual-class soft defaults (§10.2.5)."""
+    cls = holder.get("common_class") or "class_a"
+    vrm_raw = holder.get("voting_rights_multiple")
+    vrm = float(vrm_raw) if vrm_raw is not None else 1.0
+    return {
+        **holder,
+        "common_class": cls,
+        "voting_rights_multiple": vrm,
+    }
 
 
 def build_cap_state(
@@ -139,21 +364,42 @@ def build_cap_state(
     *,
     currency: str = "USD",
 ) -> dict[str, Any]:
-    """Build cap_state.json content (no metadata.run_id; writer injects)."""
+    """Build cap_state.json content (no metadata.run_id; writer injects).
+
+    Hard-rejects v0.4.x dividend fields. Runs §4.5 semantic invariants on
+    preferred_series + warrants before assembling the canonical state.
+    """
     founders = inputs.get("founders", []) or []
     preferred_series = inputs.get("preferred_series", []) or []
     option_pool = inputs.get("option_pool", {}) or {}
     common_batches = inputs.get("common_batches", []) or []
+    warrants_raw = instruments.get("warrants", []) or []
+
+    # Invariants (§4.5)
+    _check_invariants_preferred_series(preferred_series)
+    _check_invariants_warrants(warrants_raw)
 
     canonical_founders = [
-        {
-            "name": f["name"],
-            "founder_id": f.get("founder_id", f"founder_{i:03d}"),
-            "common_shares": int(f.get("common_shares", 0)),
-            "vesting": f.get("vesting"),
-        }
+        _canonicalize_common_class(
+            {
+                "name": f["name"],
+                "founder_id": f.get("founder_id", f"founder_{i:03d}"),
+                "common_shares": int(f.get("common_shares", 0)),
+                "vesting": f.get("vesting"),
+                "common_class": f.get("common_class"),
+                "voting_rights_multiple": f.get("voting_rights_multiple"),
+            }
+        )
         for i, f in enumerate(founders, start=1)
     ]
+    # Founder-shares invariant (§4.5)
+    if founders and sum(f["common_shares"] for f in canonical_founders) <= 0:
+        raise CapStateInvariantError(
+            "E_FOUNDER_SHARES_REQUIRED: at least one founder is declared but total common_shares across founders is 0."
+        )
+
+    canonical_batches = [_canonicalize_common_class(b) for b in common_batches]
+
     canonical_preferred = [
         {
             "series_id": s.get("series_id", s["series_name"].lower().replace(" ", "_")),
@@ -167,9 +413,6 @@ def build_cap_state(
             "liquidation_preference_type": s.get("liquidation_preference_type", "non_participating"),
             "participation_cap_multiple": s.get("participation_cap_multiple"),
             "anti_dilution_protection": s.get("anti_dilution_protection", "none"),
-            # Per-series AD knobs. Default to NVCA-default semantics so
-            # downstream priced_round.py sees the right contract; the input
-            # may omit these fields and they'll be filled in here.
             "ad_trigger_basis": s.get("ad_trigger_basis", "original_issue_price"),
             "ad_a_denominator_basis": s.get(
                 "ad_a_denominator_basis",
@@ -177,9 +420,8 @@ def build_cap_state(
             ),
             "ad_cp2_floor": s.get("ad_cp2_floor"),
             "ad_carve_outs": s.get("ad_carve_outs", "nvca_default"),
-            "dividend_rate_percent": s.get("dividend_rate_percent"),
-            "dividend_cumulative": bool(s.get("dividend_cumulative", False)),
             "pro_rata_rights": bool(s.get("pro_rata_rights", False)),
+            **({"extraction_provenance": s["extraction_provenance"]} if "extraction_provenance" in s else {}),
         }
         for s in preferred_series
     ]
@@ -192,28 +434,54 @@ def build_cap_state(
         "expired_or_forfeited": int(option_pool.get("expired_or_forfeited", 0)),
     }
 
+    outstanding_warrants = _build_outstanding_warrants(warrants_raw)
+
+    outstanding_options = _build_outstanding_options(instruments.get("option_grants", []) or [])
+    outstanding_safes = _build_outstanding_safes(instruments.get("safes", []) or [])
+    outstanding_notes = _build_outstanding_notes(instruments.get("convertible_notes", []) or [])
+    aoa_findings_mirror = _build_aoa_findings_mirror(inputs)
+
+    # W_AOA_ONLY_NO_INSTRUMENTS — AoA-only engagement detection (§6.0). When all
+    # instruments arrays are empty AND aoa_findings has actual data, downstream
+    # consumers (compose_report, rule_audit) surface this as a banner + a
+    # "no scenarios runnable" sentinel.
+    no_instruments = not (outstanding_options or outstanding_safes or outstanding_notes or outstanding_warrants)
+    aoa_has_data = any(v is not None and v is not False for v in aoa_findings_mirror.values())
+    warnings_list: list[str] = []
+    if no_instruments and aoa_has_data:
+        warnings_list.append("W_AOA_ONLY_NO_INSTRUMENTS")
+
+    # v0.5.0 Q7: warn on non-1.0 preferred VRM. The math doesn't model non-1.0
+    # preferred voting (§6.5 simplification); surface a warning so counsel
+    # knows preferred voting was passed through as data-only, not as math.
+    for s in preferred_series:
+        vrm = s.get("voting_rights_multiple")
+        if vrm is not None and float(vrm) != 1.0:
+            warnings_list.append("W_PREFERRED_VOTING_NON_UNITY_NOT_MODELED")
+            break
+
     cap_state: dict[str, Any] = {
         "as_of_date": inputs.get("analysis_date", ""),
         "currency": currency,
         "founders": canonical_founders,
-        "common_batches": common_batches,
+        "common_batches": canonical_batches,
         "preferred_series": canonical_preferred,
-        # cap_table_history carries prior anti_dilution_applied events.
-        # Read by priced_round.py's stale-CCP guard. Optional in inputs; defaults
-        # to an empty list. cap_state_after_round.py writes new events here.
         **({"cap_table_history": inputs["cap_table_history"]} if "cap_table_history" in inputs else {}),
         "option_pool": canonical_option_pool,
-        "outstanding_options": _build_outstanding_options(instruments.get("option_grants", []) or []),
-        "outstanding_safes": _build_outstanding_safes(instruments.get("safes", []) or []),
-        "outstanding_notes": _build_outstanding_notes(instruments.get("notes", []) or []),
-        "outstanding_warrants": instruments.get("warrants", []) or [],
+        "outstanding_options": outstanding_options,
+        "outstanding_safes": outstanding_safes,
+        "outstanding_notes": outstanding_notes,
+        "outstanding_warrants": outstanding_warrants,
+        "aoa_findings": aoa_findings_mirror,
         "as_converted_totals": _compute_as_converted_totals(
-            canonical_founders, canonical_preferred, canonical_option_pool, common_batches
+            canonical_founders, canonical_preferred, canonical_option_pool, canonical_batches, outstanding_warrants
         ),
         "metadata": {
             "produced_by": "cap_state.py",
             "source_inputs": ["inputs.json", "instruments.json"],
+            "company_name": inputs.get("company_name"),
         },
+        **({"warnings": warnings_list} if warnings_list else {}),
     }
     return cap_state
 
@@ -248,7 +516,12 @@ def main() -> int:
     with open(args.instruments, encoding="utf-8") as f:
         instruments = json.load(f)
 
-    cap_state = build_cap_state(inputs, instruments, currency=args.currency)
+    try:
+        cap_state = build_cap_state(inputs, instruments, currency=args.currency)
+    except CapStateInvariantError as e:
+        sys.stderr.write(f"cap_state.py: invariant violation: {e}\n")
+        return 1
+
     schema = load_schema(os.path.join(_SCHEMA_DIR, "cap_state.schema.json"))
 
     try:
@@ -258,6 +531,7 @@ def main() -> int:
             run_id=args.run_id,
             output_path=args.output,
             pretty=args.pretty,
+            schema_version=CAP_STATE_SCHEMA_VERSION,
         )
     except ArtifactValidationError as e:
         sys.stderr.write(f"cap_state.py: schema validation failed: {e}\n")

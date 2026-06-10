@@ -36,7 +36,7 @@ series + any low-confidence fields the validator flagged.
 
 Schema: `extraction_type: "articles_of_association"` (NOT `instrument_type`).
 Output goes to `inputs.json.preferred_series[]`, NOT
-`instruments.json.notes[]`.
+`instruments.json.convertible_notes[]`.
 """
 
 from __future__ import annotations
@@ -324,10 +324,13 @@ def merge_into_inputs(
 
     added: list[str] = []
     conflicts: list[str] = []
-    now = _dt.datetime.now(_dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     for series in preferred_series:
         name = series.get("series_name")
+        if not isinstance(name, str):
+            # Series without a string series_name is invalid — skip silently
+            continue
         if name in existing_names:
             conflicts.append(name)
             continue
@@ -364,9 +367,16 @@ def merge_into_inputs(
         existing_findings = inputs.get("aoa_findings", {}) or {}
         existing_findings.update(aoa_findings)
         inputs["aoa_findings"] = existing_findings
-        # Also set the top-level flag for direct rule_audit consumption
+        # v0.4.10 → v0.5.0: pay_to_play_detected lives under aoa_findings;
+        # the top-level alias is still emitted for v0.4.10-cache compatibility
+        # but loaders rewrite via the soft-carve-out in _artifact_io.load_inputs.
         if aoa_findings.get("pay_to_play_detected") is True:
             inputs["pay_to_play_detected"] = True
+
+    # v0.5.0: stamp schema_version on inputs.json so the typed loader catches
+    # stale AoA-merged inputs against a newer skill version (§10.4).
+    inputs.setdefault("metadata", {})
+    inputs["metadata"]["schema_version"] = "v0.5.0-inputs"
 
     # Write back
     with open(inputs_path, "w", encoding="utf-8") as f:
@@ -402,12 +412,12 @@ def _cli() -> int:
 
     errors = validate_aoa_extraction(extraction)
     if errors:
-        receipt = {
+        err_receipt = {
             "status": "validation_failed",
             "errors": errors,
             "extraction_type": extraction.get("extraction_type"),
         }
-        print(json.dumps(receipt, indent=2 if args.pretty else None))
+        print(json.dumps(err_receipt, indent=2 if args.pretty else None))
         sys.stderr.write(f"extract_aoa.py: {len(errors)} validation error(s)\n")
         return 1
 

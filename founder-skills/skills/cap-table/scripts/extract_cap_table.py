@@ -43,7 +43,15 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _artifact_writer import load_schema  # noqa: E402
-from _schema_validator import validate  # noqa: E402
+from _cap_table_schema_validator import validate  # noqa: E402
+
+
+class CartaFingerprintMismatchError(ValueError):
+    """Raised by _carta_extract when --mode=carta is explicit but the workbook
+    doesn't match Carta's verified sheet fingerprint. Caller (_mode_carta)
+    catches this and emits an E_CARTA_FINGERPRINT_MISMATCH blocker receipt
+    with exit code 1."""
+
 
 # Carta export sheet fingerprints (verified against real exports in
 # captable corpus). The "primary" check uses just `Summary Cap Table` for
@@ -339,6 +347,25 @@ def _carta_extract(xlsx_path: str) -> dict[str, Any]:
     warnings_list: list[str] = []
     sheets_consumed: list[str] = []
 
+    # When --mode=carta is explicit but the sheet fingerprint doesn't match
+    # Carta's verified shape ("Summary Cap Table" + "Convertible Ledger"),
+    # fail loudly. The previous behavior returned ok=true, format="unknown"
+    # while still running the Convertible Ledger consumer on whatever sheet
+    # happened to be named that, producing nonsense (cancelled SAFEs not
+    # skipped, discount normalization not applied, both rows classified as
+    # notes). Raising E_CARTA_FINGERPRINT_MISMATCH tells the founder the
+    # file isn't the expected shape so they can re-export or fall back to
+    # --mode=freeform.
+    if format_detected == "unknown":
+        raise CartaFingerprintMismatchError(
+            "E_CARTA_FINGERPRINT_MISMATCH: --mode=carta was specified but the workbook "
+            f"sheet names {sheet_names!r} do not match Carta's verified Summary Cap Table + "
+            "Convertible Ledger fingerprint. The export may be from a different version of "
+            "Carta, a different vendor (Pulley/etc.), or a custom workbook. Re-export the "
+            "Carta cap table or use --mode=freeform to dispatch a Context-A "
+            "SPREADSHEET_STRUCTURE_DETECTION sub-agent."
+        )
+
     # 1. Read Summary Cap Table for share-class totals
     summary_totals: dict[str, Any] = {}
     if "Summary Cap Table" in sheet_names:
@@ -388,7 +415,7 @@ def _carta_extract(xlsx_path: str) -> dict[str, Any]:
 
     instruments = {
         "safes": instruments_safes,
-        "notes": instruments_notes,
+        "convertible_notes": instruments_notes,
         "warrants": [],  # Lane-2 warrant extraction is a follow-up (per-class warrant ledgers)
         "option_grants": [],  # Lane-2 grant extraction is a follow-up (Equity Incentive Plan)
         "metadata": {},
@@ -420,8 +447,22 @@ def _mode_carta(args: argparse.Namespace) -> int:
         return 1
     try:
         result = _carta_extract(args.xlsx)
-    except Exception as e:
+    except CartaFingerprintMismatchError as e:
+        # Surface the structured blocker; do NOT run partial consumers.
         err_receipt: dict[str, Any] = {
+            "ok": False,
+            "mode": "carta",
+            "blocker": "E_CARTA_FINGERPRINT_MISMATCH",
+            "error": str(e)[:600],
+            "remedy": (
+                "The workbook isn't the Carta shape we extract from. Re-export from Carta, "
+                "or fall back to --mode=freeform to dispatch Context-A SPREADSHEET_STRUCTURE_DETECTION."
+            ),
+        }
+        print(json.dumps(err_receipt, indent=2))
+        return 1
+    except Exception as e:
+        err_receipt = {
             "ok": False,
             "mode": "carta",
             "blocker": "carta_extraction_failed",
@@ -458,12 +499,14 @@ def _mode_carta(args: argparse.Namespace) -> int:
         if os.path.exists(inst_path):
             with open(inst_path, encoding="utf-8") as f:
                 existing = json.load(f)
+        existing_meta = dict(existing.get("metadata") or {})
+        existing_meta["schema_version"] = "v0.5.0-instruments"
         merged = {
             "safes": existing.get("safes", []) + result["instruments"]["safes"],
-            "notes": existing.get("notes", []) + result["instruments"]["notes"],
+            "convertible_notes": existing.get("convertible_notes", []) + result["instruments"]["convertible_notes"],
             "warrants": existing.get("warrants", []),
             "option_grants": existing.get("option_grants", []),
-            "metadata": existing.get("metadata", {}),
+            "metadata": existing_meta,
         }
         with open(inst_path, "w", encoding="utf-8") as f:
             json.dump(merged, f, indent=2, default=str)

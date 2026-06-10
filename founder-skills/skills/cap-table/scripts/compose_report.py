@@ -286,7 +286,7 @@ def build_extraction_confidence(instruments: dict[str, Any]) -> dict[str, int]:
         "low_confidence": 0,
         "user_confirmations_outstanding": 0,
     }
-    for category in ("safes", "notes", "warrants", "option_grants"):
+    for category in ("safes", "convertible_notes", "warrants", "option_grants"):
         for item in instruments.get(category, []) or []:
             counts["instruments_extracted"] += 1
             conf = item.get("extraction_confidence", "high")
@@ -354,17 +354,29 @@ def build_coaching_payload(
 
     # flip_specifics only when applicable
     if inputs.get("mode") == "flip_focused" or any(s.get("type") == "flip" for s in scenarios):
+        # Read from cap_state.outstanding_options[*].plan_type — the canonical
+        # location per the v0.5.0 contract. compose_report is a pure consumer
+        # of cap_state, not instruments.option_grants[].
+        cs = artifacts["cap_state.json"]
         section_102 = sum(
-            1 for g in instruments.get("option_grants", []) if g.get("plan_type", "").startswith("section_102")
+            1 for o in cs.get("outstanding_options", []) or [] if (o.get("plan_type") or "").startswith("section_102")
         )
         iia = inputs.get("jurisdiction", {}).get("iia_grants_history", {}).get("has_grants", False)
-        founders_count = len(artifacts["cap_state.json"].get("founders", []))
-        preferred_count = len(artifacts["cap_state.json"].get("preferred_series", []))
+        founders_count = len(cs.get("founders", []) or [])
+        preferred_count = len(cs.get("preferred_series", []) or [])
+        warrants_count = len(cs.get("outstanding_warrants", []) or [])
+        founders = cs.get("founders", []) or []
+        dual_class = any((f.get("common_class") or "class_a") != "class_a" for f in founders) or any(
+            float(f.get("voting_rights_multiple") or 1.0) != 1.0 for f in founders
+        )
         payload["flip_specifics"] = {
             "_note": "Present when mode=flip_focused or a flip scenario is modeled",
             "iia_grants_in_history": iia,
             "section_102_grants_outstanding": section_102,
             "estimated_holders_to_remap": founders_count + preferred_count,
+            "warrants_outstanding_count": warrants_count,
+            "preferred_class_count": preferred_count,
+            "dual_class_present": dual_class,
         }
     else:
         payload["flip_specifics"] = None
@@ -390,7 +402,7 @@ def _assert_coaching_payload_privacy_clean(
     This assertion walks every string in `payload` and rejects matches against:
 
     1. **Investor names** from `instruments.safes[].investor_name` and
-       `instruments.notes[].investor_name` — the primary leak surface
+       `instruments.convertible_notes[].investor_name` — the primary leak surface
        (extracted from source documents; must not surface in coaching).
     2. **Founder names** from `inputs.founders[].name` — included so the
        contract matches the agent body's
@@ -421,7 +433,7 @@ def _assert_coaching_payload_privacy_clean(
 
     raw_investor_names = {
         s.get("investor_name", "")
-        for s in instruments.get("safes", []) + instruments.get("notes", [])
+        for s in instruments.get("safes", []) + instruments.get("convertible_notes", [])
         if s.get("investor_name")
     }
     raw_founder_names: set[str] = set()
@@ -529,37 +541,167 @@ def render_report_markdown(
         )
     lines.append("")
 
+    # W_AOA_ONLY_NO_INSTRUMENTS banner — surfaces when the engagement has no
+    # instruments + has AoA findings. The cap_state.py warnings array carries
+    # the warning code; render it as a preamble above Current Cap State so the
+    # founder sees the engagement scope first.
+    cap_state_warnings = cap_state.get("warnings") or []
+    if any(w == "W_AOA_ONLY_NO_INSTRUMENTS" for w in cap_state_warnings):
+        lines.append("> **AoA-only engagement detected.** No instruments to convert; this report renders the")
+        lines.append("> Articles-of-Association findings and the current pre-financing cap state. To model")
+        lines.append("> dilution scenarios, add SAFEs, convertible notes, option grants, or warrants to")
+        lines.append("> `instruments.json`.")
+        lines.append("")
+
     # 2. Current Cap State
     lines.append("## Current Cap State")
     lines.append("")
     lines.append(f"As of: {cap_state.get('as_of_date', 'N/A')}")
     lines.append("")
-    lines.append("| Holder class | Shares (as-converted) | % of FD |")
-    lines.append("|---|---:|---:|")
+
+    # Dual-class voting_pct rendering (§6.5): when any holder has
+    # voting_rights_multiple != 1.0, switch from the aggregate FD table to a
+    # per-holder breakdown with a voting_pct column. Detect across both
+    # founders AND common_batches.
+    founders_list = cap_state.get("founders") or []
+    common_batches_list = cap_state.get("common_batches") or []
+    has_dual_class = any(float(f.get("voting_rights_multiple") or 1.0) != 1.0 for f in founders_list) or any(
+        float(b.get("voting_rights_multiple") or 1.0) != 1.0 for b in common_batches_list
+    )
+
     fd = cap_state["as_converted_totals"]["fully_diluted_shares"]
-    pcts = {
-        "Founders (common)": cap_state["as_converted_totals"]["common_shares"],
-        "Preferred (as-converted)": cap_state["as_converted_totals"]["preferred_shares_as_converted"],
-        "Options outstanding": cap_state["as_converted_totals"]["options_outstanding"],
-        "Options available": cap_state["as_converted_totals"]["options_available"],
-    }
-    for label, shares in pcts.items():
-        pct = shares / fd if fd else 0.0
-        lines.append(f"| {label} | {shares:,} | {_percent(pct)} |")
-    lines.append(f"| **Total fully-diluted** | **{fd:,}** | **100.0%** |")
+
+    if has_dual_class:
+        # Per-holder table with voting_pct column. Preferred is treated as
+        # voting_rights_multiple=1.0 per the v0.5.0 §6.5 simplification (the
+        # math doesn't model non-unity preferred voting; warn separately if
+        # the input declares it).
+        lines.append("| Holder | Class | Shares | Voting units | Voting % | FD % |")
+        lines.append("|---|---|---:|---:|---:|---:|")
+        rows: list[tuple[str, str, int, float, float]] = []
+        for f in founders_list:
+            cls = f.get("common_class") or "class_a"
+            vrm = float(f.get("voting_rights_multiple") or 1.0)
+            shares = int(f.get("common_shares") or 0)
+            rows.append((f.get("name", "Founder"), cls, shares, vrm, shares * vrm))
+        for b in common_batches_list:
+            cls = b.get("common_class") or "class_a"
+            vrm = float(b.get("voting_rights_multiple") or 1.0)
+            shares = int(b.get("shares") or 0)
+            rows.append((f"Batch {b.get('batch_id') or b.get('holder_id', '?')}", cls, shares, vrm, shares * vrm))
+        # Preferred aggregated (v0.5.0 treats preferred VRM as 1.0)
+        preferred_as_converted = int(cap_state["as_converted_totals"]["preferred_shares_as_converted"])
+        if preferred_as_converted > 0:
+            rows.append(
+                ("Preferred (as-converted)", "preferred", preferred_as_converted, 1.0, float(preferred_as_converted))
+            )
+        options_outstanding = int(cap_state["as_converted_totals"]["options_outstanding"])
+        if options_outstanding > 0:
+            rows.append(("Options outstanding", "—", options_outstanding, 0.0, 0.0))  # options don't vote
+        options_available = int(cap_state["as_converted_totals"]["options_available"])
+        if options_available > 0:
+            rows.append(("Options available", "—", options_available, 0.0, 0.0))
+        warrants_underlying = int(cap_state["as_converted_totals"].get("warrants_underlying_total", 0))
+        if warrants_underlying > 0:
+            rows.append(("Warrants outstanding (vested)", "—", warrants_underlying, 0.0, 0.0))
+
+        total_voting_units = sum(r[4] for r in rows)
+        for name, cls, shares, vrm, voting_units in rows:
+            voting_pct = voting_units / total_voting_units if total_voting_units else 0.0
+            fd_pct = shares / fd if fd else 0.0
+            vrm_label = f"{vrm:g}×" if vrm > 0 else "—"
+            lines.append(
+                f"| {name} | {cls} | {shares:,} | {vrm_label} → {int(voting_units):,} | "
+                f"{_percent(voting_pct)} | {_percent(fd_pct)} |"
+            )
+        lines.append(
+            f"| **Total fully-diluted** | | **{fd:,}** | **{int(total_voting_units):,}** | **100.0%** | **100.0%** |"
+        )
+        lines.append("")
+        lines.append(
+            "_Dual-class structure detected. Voting % reflects current voting power "
+            "(shares × voting_rights_multiple); see `dual_class.founder_super_voting` "
+            "counsel item for investor-objection considerations at later rounds._"
+        )
+    else:
+        # Single-class engagement: keep the v0.4.x aggregate FD table.
+        lines.append("| Holder class | Shares (as-converted) | % of FD |")
+        lines.append("|---|---:|---:|")
+        pcts = {
+            "Founders (common)": cap_state["as_converted_totals"]["common_shares"],
+            "Preferred (as-converted)": cap_state["as_converted_totals"]["preferred_shares_as_converted"],
+            "Options outstanding": cap_state["as_converted_totals"]["options_outstanding"],
+            "Options available": cap_state["as_converted_totals"]["options_available"],
+            "Warrants outstanding (vested)": cap_state["as_converted_totals"].get("warrants_underlying_total", 0),
+        }
+        for label, shares in pcts.items():
+            pct = shares / fd if fd else 0.0
+            lines.append(f"| {label} | {shares:,} | {_percent(pct)} |")
+        lines.append(f"| **Total fully-diluted** | **{fd:,}** | **100.0%** |")
     lines.append("")
     safes = cap_state.get("outstanding_safes", [])
     notes = cap_state.get("outstanding_notes", [])
+    warrants = cap_state.get("outstanding_warrants", [])
     if safes:
         lines.append(f"Outstanding SAFEs: {len(safes)}")
     if notes:
         lines.append(f"Outstanding convertible notes: {len(notes)}")
-    if safes or notes:
+    if warrants:
+        unvested = sum(1 for w in warrants if not w.get("vested_flag", False))
+        vested = len(warrants) - unvested
+        warrant_note = f"Outstanding warrants: {len(warrants)} ({vested} vested, {unvested} unvested)"
+        lines.append(warrant_note)
+    if safes or notes or warrants:
+        lines.append("")
+
+    # Dedicated AoA Findings section when cap_state.aoa_findings has any
+    # non-default value (i.e., the AoA was actually extracted). For AoA-only
+    # engagements this is the primary deliverable; for others it surfaces the
+    # findings the rules are gating on.
+    aoa = cap_state.get("aoa_findings") or {}
+    aoa_has_data = any(v is not None and v is not False for v in aoa.values())
+    if aoa_has_data:
+        lines.append("## Articles of Association — Extracted Findings")
+        lines.append("")
+        lines.append("| Finding | Value |")
+        lines.append("|---|---|")
+        _aoa_render_map: list[tuple[str, str, Any]] = [
+            ("Pay-to-play detected", "pay_to_play_detected", "bool"),
+            ("Drag-along threshold", "drag_along_threshold_pct", "pct"),
+            ("§102 plan reference present", "section_102_plan_reference", "bool"),
+            ("Ratchet anti-dilution detected", "ratchet_anti_dilution_detected", "bool"),
+            ("Liquidation preference > 1x", "liquidation_preference_above_1x", "bool"),
+            ("Participation present", "participation_present", "bool"),
+            ("Dividend provisions present", "dividend_provisions_present", "bool"),
+            ("Protective provisions below 75%", "protective_provisions_below_75_pct", "bool"),
+            ("Bring-along threshold", "bring_along_threshold_pct", "pct"),
+        ]
+        for label, key, fmt in _aoa_render_map:
+            val = aoa.get(key)
+            if val is None:
+                rendered = "_Not extracted_"
+            elif fmt == "bool":
+                rendered = "Yes" if val else "No"
+            elif fmt == "pct":
+                rendered = f"{val}%"
+            else:
+                rendered = str(val)
+            lines.append(f"| {label} | {rendered} |")
         lines.append("")
 
     # 3. Scenarios Modeled
     lines.append("## Scenarios Modeled")
     lines.append("")
+    if not scenarios:
+        # Sentinel when no scenarios runnable (AoA-only, empty-instruments
+        # engagements). Narrate the absence rather than leaving the founder
+        # with an unexplained empty section.
+        lines.append(
+            "_No scenarios runnable for this engagement. This is expected when only Articles of "
+            "Association have been extracted (no SAFEs, notes, option grants, or warrants present). "
+            "Add instruments to `instruments.json` to model conversion and dilution scenarios._"
+        )
+        lines.append("")
     for s in scenarios:
         lines.append(f"### {s.get('label', s['scenario_id'])} ({s['type']})")
         lines.append("")
@@ -631,10 +773,21 @@ def render_report_markdown(
                 "preferred_pct_pre_anti_dilution",
                 "anti_dilution_delta_pct_points",
             }
+            # founders_by_class is a map, not a scalar pct; render it
+            # separately as a sub-list when dual-class is present.
+            _structured_fields = {"founders_by_class"}
             for k, v in agg.items():
-                if k in _ad_meta_fields:
+                if k in _ad_meta_fields or k in _structured_fields:
                     continue
                 lines.append(f"- {k.replace('_', ' ')}: {_percent(v)}")
+            fbc = agg.get("founders_by_class") or {}
+            if len(fbc) > 1 or (fbc and "class_a" not in fbc):
+                # Render only when meaningful: more than one class, or a single
+                # non-class_a (unusual). Single-class_a-only engagements get
+                # the aggregate founders_pct line above.
+                lines.append("- founders by class:")
+                for cls, pct in sorted(fbc.items()):
+                    lines.append(f"  - {cls}: {_percent(pct)}")
             lines.append("")
             # Per-series AD breakdown
             if ad_breakdown:
@@ -671,6 +824,80 @@ def render_report_markdown(
         if completeness == "repay_only" and co.get("aggregate_cash_repayment"):
             lines.append(f"**Cash repayment:** {_money(co['aggregate_cash_repayment'])}")
             lines.append("")
+
+        # Per-instrument narrative for note_conversion + safe_conversion
+        # scenarios. Founders reading report.md for a note conversion need to
+        # see branch, accrued_interest, conversion_price, and
+        # conversion_shares — without these, the report only shows
+        # "completeness=full" and inputs.
+        per_note = co.get("per_note") or {}
+        if s.get("type") == "note_conversion" and per_note:
+            lines.append("**Per-note conversion math:**")
+            lines.append("")
+            lines.append("| Note | Branch | Accrued interest | Conversion price | Conversion shares |")
+            lines.append("|---|---|---:|---:|---:|")
+            for nid, r in per_note.items():
+                branch = r.get("branch", "—")
+                ai = r.get("accrued_interest")
+                cp = r.get("conversion_price")
+                shares = r.get("conversion_shares")
+                lines.append(
+                    f"| `{nid}` | `{branch}` | "
+                    f"{_money(ai) if ai is not None else '—'} | "
+                    f"{('$' + format(cp, '.4f')) if cp is not None else '—'} | "
+                    f"{(f'{int(shares):,}') if shares is not None else '—'} |"
+                )
+            lines.append("")
+        per_safe = co.get("per_safe") or {}
+        if s.get("type") == "safe_conversion" and per_safe:
+            lines.append("**Per-SAFE conversion math:**")
+            lines.append("")
+            lines.append("| SAFE | Branch | Conversion price | Conversion shares |")
+            lines.append("|---|---|---:|---:|")
+            for sid, r in per_safe.items():
+                if "cap_implied_ownership" in r:
+                    continue  # already rendered above for cap_implied_only
+                branch = r.get("branch", "—")
+                cp = r.get("conversion_price")
+                shares = r.get("conversion_shares")
+                lines.append(
+                    f"| `{sid}` | `{branch}` | "
+                    f"{('$' + format(cp, '.4f')) if cp is not None else '—'} | "
+                    f"{(f'{int(shares):,}') if shares is not None else '—'} |"
+                )
+            lines.append("")
+
+        # Pre-round warrant pump events table. When the pump fires (warrant
+        # exercise_event_date < scenario transaction_event_date), founders see
+        # exactly which warrants exercised, at what FMV, and how many shares
+        # entered the pre-financing FD.
+        warrant_events = co.get("warrant_exercise_events") or []
+        if warrant_events:
+            lines.append("**Pre-round warrant pump events:**")
+            lines.append("")
+            lines.append("| Warrant | Settlement | Exercised at | Shares added | FMV approximated? |")
+            lines.append("|---|---|---:|---:|---|")
+            for evt in warrant_events:
+                wid = evt.get("warrant_id", "?")
+                stype = evt.get("settlement_type", "?")
+                pps = evt.get("exercised_at_pps")
+                shares = evt.get("shares_added")
+                approx = "Yes" if evt.get("fmv_approximation_used") else "No"
+                lines.append(
+                    f"| `{wid}` | `{stype}` | "
+                    f"{('$' + format(pps, '.4f')) if pps is not None else '—'} | "
+                    f"{(f'{int(shares):,}') if shares is not None else '—'} | "
+                    f"{approx} |"
+                )
+            lines.append("")
+            if any(e.get("fmv_approximation_used") for e in warrant_events):
+                lines.append(
+                    "_FMV approximation: when no prior priced round exists, the pump used "
+                    "`pre_money / pre_pump_FD` as FMV. See `warrant.net_share_pre_round_fmv_approximation` "
+                    "counsel item — sub-percent divergence from the converged PPS for typical warrants; "
+                    "material for warrants that are a large fraction of FD._"
+                )
+                lines.append("")
 
         # Math provenance footer
         prov = co.get("math_provenance", [])
@@ -712,6 +939,27 @@ def render_report_markdown(
                 lines.append(f"- **{it['title']}** (`{it['rule_id']}`)")
                 if it.get("counsel_question"):
                     lines.append(f"  - {it['counsel_question']}")
+            lines.append("")
+
+    # 5b. Source Notes (behavior_target=source_note rules)
+    source_notes = rule_audit.get("source_notes") or []
+    if source_notes:
+        lines.append("## Source Notes")
+        lines.append("")
+        lines.append(
+            "_Informational citations for cap-table conventions applied above. Each note is "
+            "tied to a rule in the rule pack with its primary-source citations._"
+        )
+        lines.append("")
+        by_domain_sn: dict[str, list[dict[str, Any]]] = {}
+        for sn in source_notes:
+            by_domain_sn.setdefault(sn.get("domain", "other"), []).append(sn)
+        for domain in sorted(by_domain_sn.keys()):
+            lines.append(f"### {domain.replace('_', ' ').title()}")
+            for sn in by_domain_sn[domain]:
+                lines.append(f"- **{sn['title']}** (`{sn['rule_id']}`)")
+                if sn.get("summary"):
+                    lines.append(f"  - {sn['summary']}")
             lines.append("")
 
     # 6. Date-Sensitive Watchlist (split into active vs for-reference)

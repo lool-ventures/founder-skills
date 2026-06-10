@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
+from typing import Any
 
 SOLVER_PATH = pathlib.Path(__file__).parent.parent / "skills" / "cap-table" / "scripts" / "priced_round.py"
 spec = importlib.util.spec_from_file_location("priced_round", SOLVER_PATH)
@@ -31,7 +32,7 @@ class TestAitkenProjection:
     Aitken's Δ² gives p* = L exactly (within float precision).
     """
 
-    def test_geometric_sequence_converging_from_above(self):
+    def test_geometric_sequence_converging_from_above(self) -> None:
         """p_n = 0.357 + 0.5^n → p* = 0.357 exactly."""
         L = 0.357
         r = 0.5
@@ -40,7 +41,7 @@ class TestAitkenProjection:
         assert projection is not None
         assert abs(projection - L) < 1e-12
 
-    def test_geometric_sequence_converging_from_below(self):
+    def test_geometric_sequence_converging_from_below(self) -> None:
         """p_n = 1.0 - 0.7^n → p* = 1.0 exactly."""
         L = 1.0
         r = 0.7
@@ -49,7 +50,7 @@ class TestAitkenProjection:
         assert projection is not None
         assert abs(projection - L) < 1e-12
 
-    def test_alternating_sequence(self):
+    def test_alternating_sequence(self) -> None:
         """p_n = 0.5 + (-0.4)^n → p* = 0.5 exactly."""
         L = 0.5
         r = -0.4
@@ -58,11 +59,11 @@ class TestAitkenProjection:
         assert projection is not None
         assert abs(projection - L) < 1e-12
 
-    def test_returns_none_when_history_too_short(self):
+    def test_returns_none_when_history_too_short(self) -> None:
         assert priced_round._aitken_projection([0.5]) is None
         assert priced_round._aitken_projection([0.5, 0.4]) is None
 
-    def test_returns_none_on_near_2_cycle(self):
+    def test_returns_none_on_near_2_cycle(self) -> None:
         """When the sequence is converging on a 2-cycle, Δ² → 0 → catastrophic cancellation."""
         # p_0, p_1, p_0 (back to p_0): Δ² = p_0 - 2 p_1 + p_0 = 2(p_0 - p_1) ≠ 0
         # Construct a tighter case where Δ² IS near zero:
@@ -76,20 +77,20 @@ class TestAitkenProjection:
 class TestSignFlipDetector:
     """Sign-flip detection triggers under-relaxation."""
 
-    def test_no_flip_on_monotone_sequence(self):
+    def test_no_flip_on_monotone_sequence(self) -> None:
         # Monotone decreasing → no sign flips
         history = [1.0, 0.9, 0.8, 0.7, 0.6]
         assert priced_round._detect_sign_flip(history, window=3) is False
 
-    def test_detects_alternating_signs(self):
+    def test_detects_alternating_signs(self) -> None:
         # +, -, +, - (3 alternations in 4 deltas)
         history = [0.5, 0.6, 0.55, 0.62, 0.56]
         assert priced_round._detect_sign_flip(history, window=3) is True
 
-    def test_history_too_short(self):
+    def test_history_too_short(self) -> None:
         assert priced_round._detect_sign_flip([0.5, 0.4], window=3) is False
 
-    def test_zero_delta_breaks_detection(self):
+    def test_zero_delta_breaks_detection(self) -> None:
         # A zero delta should not count as a sign flip
         history = [0.5, 0.5, 0.6, 0.55]
         assert priced_round._detect_sign_flip(history, window=3) is False
@@ -98,26 +99,26 @@ class TestSignFlipDetector:
 class TestContractionEstimate:
     """Empirical |f'_est| ≈ |Δp_n / Δp_{n-1}|."""
 
-    def test_returns_ratio_of_deltas(self):
+    def test_returns_ratio_of_deltas(self) -> None:
         # p_0=1.0, p_1=0.5, p_2=0.3 → Δ_0=−0.5, Δ_1=−0.2 → |f'_est|=0.4
         history = [1.0, 0.5, 0.3]
         f_est = priced_round._estimate_contraction(history)
         assert f_est is not None
         assert abs(f_est - 0.4) < 1e-12
 
-    def test_returns_none_when_prior_step_zero(self):
+    def test_returns_none_when_prior_step_zero(self) -> None:
         # If prior step is zero, ratio is undefined
         history = [0.5, 0.5, 0.6]
         assert priced_round._estimate_contraction(history) is None
 
-    def test_returns_none_on_too_short_history(self):
+    def test_returns_none_on_too_short_history(self) -> None:
         assert priced_round._estimate_contraction([0.5]) is None
 
 
 class TestSolverIntegration:
     """End-to-end: solver should converge well-bounded on realistic goldens."""
 
-    def _build_test_a_cap_state(self):
+    def _build_test_a_cap_state(self) -> dict[str, Any]:
         return {
             "founders": [{"name": "Founder A", "common_shares": 10_000_000}],
             "preferred_series": [
@@ -145,7 +146,7 @@ class TestSolverIntegration:
             },
         }
 
-    def test_test_a_converges_within_expected_iterations(self):
+    def test_test_a_converges_within_expected_iterations(self) -> None:
         """Test A's contraction is |f'(p*)| ≈ 0.111; should converge in ≤ 15 iters."""
         result = priced_round.solve_priced_round(
             cap_state=self._build_test_a_cap_state(),
@@ -157,7 +158,7 @@ class TestSolverIntegration:
         assert result["converged"] is True
         assert result["iterations"] <= 15
 
-    def test_aitken_not_engaged_in_typical_regime(self):
+    def test_aitken_not_engaged_in_typical_regime(self) -> None:
         """When |f'| < 0.9 (typical), Aitken should NOT engage."""
         result = priced_round.solve_priced_round(
             cap_state=self._build_test_a_cap_state(),
@@ -171,7 +172,7 @@ class TestSolverIntegration:
         assert diag.get("aitken_engaged", False) is False
         assert diag.get("damping_engaged", False) is False
 
-    def test_caller_cap_state_not_mutated(self):
+    def test_caller_cap_state_not_mutated(self) -> None:
         """Verify the deep-copy boundary holds: caller's cap_state untouched."""
         cap_state = self._build_test_a_cap_state()
         # Snapshot the relevant fields
@@ -192,7 +193,7 @@ class TestSolverIntegration:
         assert cap_state["as_converted_totals"]["preferred_shares_as_converted"] == original_preferred_as_converted
         assert cap_state["as_converted_totals"]["fully_diluted_shares"] == original_fd
 
-    def test_convergence_history_populated(self):
+    def test_convergence_history_populated(self) -> None:
         """convergence_history should record each iteration's PPS."""
         result = priced_round.solve_priced_round(
             cap_state=self._build_test_a_cap_state(),

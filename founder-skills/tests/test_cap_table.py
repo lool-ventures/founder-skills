@@ -68,7 +68,7 @@ _BASIC_INPUTS = {
 
 _BASIC_INSTRUMENTS = {
     "safes": [],
-    "notes": [],
+    "convertible_notes": [],
     "warrants": [],
     "option_grants": [],
     "metadata": {"run_id": "test"},
@@ -190,9 +190,13 @@ class TestCapState:
         cs = cap_state_mod.build_cap_state(inputs, _BASIC_INSTRUMENTS)
         assert cs["as_converted_totals"]["common_shares"] == 10_250_000
 
-    def test_outstanding_options_references_instruments(self) -> None:
-        """Per Gotcha #6 + design rev16: outstanding_options carries grant_id only,
-        NOT the per-grant details (those live in instruments.option_grants[])."""
+    def test_outstanding_options_carries_per_grant_metadata(self) -> None:
+        """cap-table-data-contract §3.2: outstanding_options carries plan_type
+        + section_102_trustee_deposit_date + strike_price + grant_date through
+        to cap_state, so rule_audit matchers, compose_report.flip_specifics, and
+        counsel_packet all read from a single canonical location
+        (cap_state.outstanding_options[*]) instead of bypassing to
+        instruments.option_grants[]."""
         inst: dict[str, Any] = dict(_BASIC_INSTRUMENTS)
         inst["option_grants"] = [
             {
@@ -211,10 +215,12 @@ class TestCapState:
         opt = cs["outstanding_options"][0]
         assert opt["grant_id"] == "grant_001"
         assert opt["shares_vested_to_date"] == 25_000
-        assert opt["shares_outstanding_unvested"] == 75_000  # 100k granted - 25k vested
-        # Per design: grant_date NOT re-declared on cap_state.outstanding_options
-        assert "grant_date" not in opt
-        assert "strike_price" not in opt
+        assert opt["shares_outstanding_unvested"] == 75_000
+        # Per v0.5.0 contract: per-grant metadata is mirrored to cap_state so
+        # downstream consumers don't bypass to instruments.option_grants[].
+        assert opt["plan_type"] == "section_102_cg"
+        assert opt["grant_date"] == "2025-09-01"
+        assert opt["strike_price"] == 0.50
 
     def test_cli_writes_artifact_with_run_id(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -1027,7 +1033,7 @@ class TestStackedPostMoneySAFEsGolden:
     def _instruments(self) -> dict[str, Any]:
         return {
             "safes": self.EVAL2_SAFES,
-            "notes": [],
+            "convertible_notes": [],
             "warrants": [],
             "option_grants": [],
             "metadata": {"run_id": "test"},
@@ -1215,7 +1221,7 @@ class TestStackedPostMoneySAFEsGolden:
         ]
         instruments = {
             "safes": eval2_safes_with_real_mfn,
-            "notes": [],
+            "convertible_notes": [],
             "warrants": [],
             "option_grants": [],
             "metadata": {"run_id": "test"},
@@ -1287,7 +1293,7 @@ class TestStackedPostMoneySAFEsGolden:
     def test_fast_assess_sentinel_validates_against_schema(self) -> None:
         """Phase O: sentinel JSON validates against fast_assess_only.schema.json."""
         try:
-            import jsonschema
+            import jsonschema  # type: ignore[import-untyped]
         except ImportError:
             pytest.skip("jsonschema not installed")
 
@@ -1586,7 +1592,7 @@ class TestLegacyPreMoneySAFEs:
     def _instruments(self, safes: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "safes": safes,
-            "notes": [],
+            "convertible_notes": [],
             "warrants": [],
             "option_grants": [],
             "metadata": {"run_id": "test"},
@@ -1744,8 +1750,8 @@ class TestRuleAudit:
             "jurisdiction": {"structure": "delaware"},
             "mode": "standard",
         }
-        empty_instruments = {"safes": [], "notes": [], "warrants": [], "option_grants": []}
-        empty_cap_state = {"preferred_series": []}
+        empty_instruments: dict[str, Any] = {"safes": [], "convertible_notes": [], "warrants": [], "option_grants": []}
+        empty_cap_state: dict[str, Any] = {"preferred_series": []}
 
         for rule_id in (
             "israeli_aoa.drag_along_threshold_below_75_percent",
@@ -1764,7 +1770,11 @@ class TestRuleAudit:
             "jurisdiction": {"structure": "israeli"},
             "mode": "standard",
         }
-        empty_instruments = {"safes": [], "notes": [], "warrants": [], "option_grants": []}
+        empty_instruments: dict[str, Any] = {"safes": [], "convertible_notes": [], "warrants": [], "option_grants": []}
+        # All four israeli_aoa.* rules gate on the ACTUAL extracted aoa_findings
+        # flag (not just "Israeli + has_preferred"). Populate aoa_findings so
+        # every flag the rules consult is truthy in the firing sense, then
+        # assert all four fire.
         cap_state_with_preferred = {
             "preferred_series": [
                 {
@@ -1772,7 +1782,13 @@ class TestRuleAudit:
                     "anti_dilution_protection": "broad_based_weighted_average",
                     "liquidation_preference_multiple": 1.0,
                 }
-            ]
+            ],
+            "aoa_findings": {
+                "drag_along_threshold_pct": 50,  # sub-75 → drag_along fires
+                "section_102_plan_reference": False,  # absent → section_102_plan_absent fires
+                "liquidation_preference_above_1x": True,  # → liquidation_preference_above_1x fires
+                "ratchet_anti_dilution_detected": True,  # → full_ratchet_anti_dilution fires
+            },
         }
 
         for rule_id in (
@@ -1783,7 +1799,69 @@ class TestRuleAudit:
         ):
             matcher = rule_audit._RULE_MATCHERS.get(rule_id, rule_audit._matcher_always)
             assert matcher(israeli_inputs, empty_instruments, cap_state_with_preferred) is True, (
-                f"{rule_id} should match on Israeli engagement with preferred series"
+                f"{rule_id} should match on Israeli engagement with preferred series + matching aoa_findings"
+            )
+
+    def test_israeli_aoa_rules_default_deny_when_aoa_findings_contradict_rule(self) -> None:
+        """Regression: when aoa_findings flags contradict each rule's predicate
+        (or aoa_findings is absent), the rule must NOT fire.
+
+        Three rules (section_102_plan_absent, liquidation_preference_above_1x,
+        full_ratchet_anti_dilution) were firing as false positives because they
+        gated solely on `_structure_includes_israel + _has_preferred` instead
+        of reading aoa_findings.*. This regression asserts the matchers now
+        consult the AoA findings."""
+        israeli_inputs = {
+            "jurisdiction": {"structure": "israeli"},
+            "mode": "standard",
+        }
+        empty_instruments: dict[str, Any] = {"safes": [], "convertible_notes": [], "warrants": [], "option_grants": []}
+        # Each rule's contradicting AoA-finding flag:
+        cap_state_contradicts = {
+            "preferred_series": [
+                {
+                    "series_name": "Series A",
+                    "anti_dilution_protection": "broad_based_weighted_average",
+                    "liquidation_preference_multiple": 1.0,
+                }
+            ],
+            "aoa_findings": {
+                "drag_along_threshold_pct": 75,  # at threshold (not < 75) → drag_along does NOT fire
+                "section_102_plan_reference": True,  # plan present → absent rule does NOT fire
+                "liquidation_preference_above_1x": False,  # at-or-below 1x → rule does NOT fire
+                "ratchet_anti_dilution_detected": False,  # BBWA → full_ratchet rule does NOT fire
+            },
+        }
+        for rule_id in (
+            "israeli_aoa.drag_along_threshold_below_75_percent",
+            "israeli_aoa.section_102_plan_absent",
+            "israeli_aoa.liquidation_preference_above_1x",
+            "israeli_aoa.full_ratchet_anti_dilution",
+        ):
+            matcher = rule_audit._RULE_MATCHERS.get(rule_id, rule_audit._matcher_always)
+            assert matcher(israeli_inputs, empty_instruments, cap_state_contradicts) is False, (
+                f"{rule_id} should NOT match when aoa_findings contradict the rule"
+            )
+
+        # Null aoa_findings (AoA not extracted) → default-deny across all four.
+        cap_state_no_aoa = {
+            "preferred_series": [
+                {
+                    "series_name": "Series A",
+                    "anti_dilution_protection": "broad_based_weighted_average",
+                    "liquidation_preference_multiple": 1.0,
+                }
+            ],
+        }
+        for rule_id in (
+            "israeli_aoa.drag_along_threshold_below_75_percent",
+            "israeli_aoa.section_102_plan_absent",
+            "israeli_aoa.liquidation_preference_above_1x",
+            "israeli_aoa.full_ratchet_anti_dilution",
+        ):
+            matcher = rule_audit._RULE_MATCHERS.get(rule_id, rule_audit._matcher_always)
+            assert matcher(israeli_inputs, empty_instruments, cap_state_no_aoa) is False, (
+                f"{rule_id} should default-deny when aoa_findings is absent"
             )
 
     def test_classify_scope_legal_tax_applicability(self) -> None:
@@ -2605,7 +2683,14 @@ class TestPreBaselinePatches:
             instr_path = os.path.join(d, "instruments.json")
             with open(instr_path, "w") as f:
                 json.dump(
-                    {"safes": [], "notes": [], "warrants": [], "option_grants": [], "metadata": {"run_id": "test"}}, f
+                    {
+                        "safes": [],
+                        "convertible_notes": [],
+                        "warrants": [],
+                        "option_grants": [],
+                        "metadata": {"run_id": "test"},
+                    },
+                    f,
                 )
             rc, _, e = _run(
                 "extract_instrument.py",
@@ -2615,8 +2700,8 @@ class TestPreBaselinePatches:
             assert rc == 0, f"CLA extraction failed: rc={rc}, stderr={e}"
             with open(instr_path) as f:
                 instruments = json.load(f)
-            assert len(instruments["notes"]) == 1
-            note = instruments["notes"][0]
+            assert len(instruments["convertible_notes"]) == 1
+            note = instruments["convertible_notes"][0]
             assert note["subtype"] == "convertible_loan_agreement"
             assert note["principal"] == 7_000_000
 
@@ -2647,7 +2732,14 @@ class TestPreBaselinePatches:
             instr_path = os.path.join(d, "instruments.json")
             with open(instr_path, "w") as f:
                 json.dump(
-                    {"safes": [], "notes": [], "warrants": [], "option_grants": [], "metadata": {"run_id": "test"}}, f
+                    {
+                        "safes": [],
+                        "convertible_notes": [],
+                        "warrants": [],
+                        "option_grants": [],
+                        "metadata": {"run_id": "test"},
+                    },
+                    f,
                 )
             rc, _, e = _run(
                 "extract_instrument.py",
@@ -2657,8 +2749,8 @@ class TestPreBaselinePatches:
             assert rc == 0, f"convertible_security extraction failed: rc={rc}, stderr={e}"
             with open(instr_path) as f:
                 instruments = json.load(f)
-            assert len(instruments["notes"]) == 1
-            note = instruments["notes"][0]
+            assert len(instruments["convertible_notes"]) == 1
+            note = instruments["convertible_notes"][0]
             assert note["subtype"] == "convertible_security"
             assert note["maturity_date"] is None
             assert note["interest_rate_type"] == "none"
@@ -2930,7 +3022,7 @@ class TestPrivacyAssertion:
                     "extraction_confidence": "high",
                 }
             ],
-            "notes": [],
+            "convertible_notes": [],
             "warrants": [],
             "option_grants": [],
             "metadata": {"run_id": "test"},
@@ -3810,7 +3902,7 @@ class TestCartaExtraction:
         assert safe["source_document"] == "carta:SAFE1-1"
 
         # Verify the extracted note
-        notes = result["instruments"]["notes"]
+        notes = result["instruments"]["convertible_notes"]
         assert len(notes) == 1
         note = notes[0]
         assert note["investor_name"] == "Lender Larry"
@@ -3846,7 +3938,7 @@ class TestCartaExtraction:
             with open(inst) as f:
                 instruments = json.load(f)
             assert len(instruments["safes"]) == 1
-            assert len(instruments["notes"]) == 1
+            assert len(instruments["convertible_notes"]) == 1
 
     def test_freeform_routing_for_non_carta_xlsx(self) -> None:
         """--mode=auto on a freeform XLSX must route to the freeform fallback
@@ -4216,3 +4308,81 @@ class TestPipelineE2E:
             ]:
                 assert k in cp, f"missing required coaching_payload key: {k}"
             assert cp["schema_version"].endswith("-cap-table")
+
+    def test_compose_source_notes_rendered(self) -> None:
+        """Regression: render_report_markdown must not crash on source_notes.
+
+        Bug: variable `n` was already typed as int (n = len(scenarios) on
+        line 516) and was then reused as a loop variable over source_notes
+        dicts — a name-shadow. Fixed by renaming the loop variable to `sn`.
+        This test exercises the source_notes rendering path end-to-end.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            RID = "rid_sn"
+            inputs = dict(_BASIC_INPUTS)
+            inputs["metadata"] = {"run_id": RID}
+            instruments = dict(_BASIC_INSTRUMENTS)
+            instruments["metadata"] = {"run_id": RID}
+            for name, data in [
+                ("inputs.json", inputs),
+                ("instruments.json", instruments),
+            ]:
+                with open(os.path.join(d, name), "w") as f:
+                    json.dump(data, f)
+            cs = cap_state_mod.build_cap_state(inputs, instruments)
+            cs["metadata"]["run_id"] = RID
+            with open(os.path.join(d, "cap_state.json"), "w") as f:
+                json.dump(cs, f)
+            # Include a non-empty source_notes block to exercise the fixed path
+            rule_audit_with_source_notes = {
+                "gating": {},
+                "applied_rules": [],
+                "counsel_review_items": [],
+                "date_sensitive_watchlist": [],
+                "source_notes": [
+                    {
+                        "rule_id": "SAFE-001",
+                        "title": "YC Post-Money SAFE Denominator",
+                        "domain": "safe_conversion",
+                        "summary": "company_capitalization excludes the converting SAFE itself.",
+                    },
+                    {
+                        "rule_id": "OPT-003",
+                        "title": "Option Pool Top-Up Basis",
+                        "domain": "option_pool",
+                        "summary": "Target basis is post-round fully diluted.",
+                    },
+                ],
+                "metadata": {"run_id": RID},
+            }
+            for name, data in [
+                ("rule_audit.json", rule_audit_with_source_notes),
+                ("scenarios.json", {"scenarios": [], "metadata": {"run_id": RID}}),
+                (
+                    "counsel_packet.json",
+                    {"company_name": "Acmecorp", "engagement_summary": "", "items": [], "metadata": {"run_id": RID}},
+                ),
+            ]:
+                with open(os.path.join(d, name), "w") as f:
+                    json.dump(data, f)
+
+            rc, _, stderr = _run(
+                "compose_report.py",
+                [
+                    "--dir",
+                    d,
+                    "--run-id",
+                    RID,
+                    "-o",
+                    os.path.join(d, "report.json"),
+                    "--write-md",
+                    os.path.join(d, "report.md"),
+                ],
+            )
+            assert rc == 0, stderr
+            with open(os.path.join(d, "report.md")) as f:
+                md = f.read()
+            # Both source notes must appear in the rendered markdown
+            assert "YC Post-Money SAFE Denominator" in md, "source_note title missing from report.md"
+            assert "Option Pool Top-Up Basis" in md, "second source_note title missing from report.md"
+            assert "## Source Notes" in md, "Source Notes section header missing"

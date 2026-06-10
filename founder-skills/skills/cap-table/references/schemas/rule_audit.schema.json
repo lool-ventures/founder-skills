@@ -37,6 +37,21 @@
         }
       }
     },
+    "source_notes": {
+      "type": "array",
+      "description": "v0.5.0 Bug 7 fix: informational source notes for behavior_target=source_note rules whose matcher fired AND (for runtime-event rules) whose underlying event occurred. Rendered in report.md's '## Source Notes' section.",
+      "items": {
+        "type": "object",
+        "required": ["rule_id", "domain", "title"],
+        "properties": {
+          "rule_id": {"type": "string"},
+          "domain": {"type": "string"},
+          "title": {"type": "string"},
+          "summary": {"type": "string"},
+          "source_ids": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
     "date_sensitive_watchlist": {
       "type": "array",
       "items": {

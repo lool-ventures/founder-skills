@@ -8,8 +8,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "founder-skills" / "skills" / "cap-table" / "scripts"))
 
-from extractors import ExtractionContext  # noqa: E402
-from extractors.safe import (  # noqa: E402
+from extractors import ExtractionContext  # type: ignore[import-not-found]  # noqa: E402
+from extractors.safe import (  # type: ignore[import-not-found]  # noqa: E402
     SAFE_EXTRACTORS,
     discount_multiplier,
     investor_name,
@@ -29,43 +29,43 @@ def _ctx(text: str) -> ExtractionContext:
 
 
 class TestPurchaseAmount:
-    def test_canonical_form(self):
+    def test_canonical_form(self) -> None:
         text = 'in exchange for the payment of $500,000 (the "Purchase Amount")'
         out = purchase_amount.extract(_ctx(text))
         assert len(out) == 1
         assert out[0].value == 500_000
         assert out[0].confidence == "medium"
 
-    def test_no_thousands_separator(self):
+    def test_no_thousands_separator(self) -> None:
         text = 'payment of $500000 (the "Purchase Amount")'
         out = purchase_amount.extract(_ctx(text))
         assert len(out) == 1
         assert out[0].value == 500_000
 
-    def test_smart_quotes(self):
+    def test_smart_quotes(self) -> None:
         text = "payment of $1,000,000 (the “Purchase Amount”) on or about"
         out = purchase_amount.extract(_ctx(text))
         assert len(out) == 1
         assert out[0].value == 1_000_000
 
-    def test_investment_amount_alias(self):
+    def test_investment_amount_alias(self) -> None:
         text = '$100,000 (the "Investment Amount") was paid'
         out = purchase_amount.extract(_ctx(text))
         assert len(out) == 1
         assert out[0].value == 100_000
 
-    def test_no_match_returns_empty(self):
+    def test_no_match_returns_empty(self) -> None:
         out = purchase_amount.extract(_ctx("just text, no purchase amount here"))
         assert out == []
 
-    def test_multiple_candidates_flagged(self):
+    def test_multiple_candidates_flagged(self) -> None:
         text = '$500,000 (the "Purchase Amount") and later $750,000 (the "Purchase Amount")'
         out = purchase_amount.extract(_ctx(text))
         assert len(out) == 2
         assert all(r.confidence == "low" for r in out)
         assert all("multiple" in (r.ambiguity or "") for r in out)
 
-    def test_span_preserved(self):
+    def test_span_preserved(self) -> None:
         text = 'XXX $500,000 (the "Purchase Amount") YYY'
         out = purchase_amount.extract(_ctx(text))
         assert len(out) == 1
@@ -80,7 +80,7 @@ class TestPurchaseAmount:
 
 
 class TestDiscountMultiplier:
-    def test_multiplier_form_X_geq_50(self):
+    def test_multiplier_form_X_geq_50(self) -> None:
         text = 'The "Discount Rate" is 80%.'
         out = discount_multiplier.extract(_ctx(text))
         assert len(out) == 1
@@ -88,14 +88,14 @@ class TestDiscountMultiplier:
         assert out[0].confidence == "medium"
         assert "multiplier-form" in (out[0].ambiguity or "")
 
-    def test_rate_form_X_lt_50(self):
+    def test_rate_form_X_lt_50(self) -> None:
         text = "discount equal to 25%"
         out = discount_multiplier.extract(_ctx(text))
         assert len(out) == 1
         assert out[0].value == 0.75
         assert "rate-form" in (out[0].ambiguity or "")
 
-    def test_tiered_emits_low_confidence_no_value(self):
+    def test_tiered_emits_low_confidence_no_value(self) -> None:
         # Multiple distinct percentages → ambiguity
         text = "Discount Rate is 95% after 3 months, 90% after 6 months, and 85% thereafter."
         out = discount_multiplier.extract(_ctx(text))
@@ -105,7 +105,7 @@ class TestDiscountMultiplier:
         amb = out[0].ambiguity or ""
         assert "multi_value" in amb or "conditional" in amb
 
-    def test_conditional_lower_of(self):
+    def test_conditional_lower_of(self) -> None:
         # Realistic legal phrasing — "discount" keyword anchors the regex.
         text = "the discount equal to the lower of 20% or the rate offered to subsequent investors"
         out = discount_multiplier.extract(_ctx(text))
@@ -113,7 +113,7 @@ class TestDiscountMultiplier:
         assert out[0].value is None  # extractor refuses to decide
         assert "conditional" in (out[0].ambiguity or "").lower()
 
-    def test_no_match_returns_empty(self):
+    def test_no_match_returns_empty(self) -> None:
         out = discount_multiplier.extract(_ctx("no discount terms here"))
         assert out == []
 
@@ -124,21 +124,21 @@ class TestDiscountMultiplier:
 
 
 class TestValuationCap:
-    def test_post_money_only(self):
+    def test_post_money_only(self) -> None:
         text = 'The "Post-Money Valuation Cap" is US$20,000,000.'
         out = valuation_cap.extract(_ctx(text))
         assert len(out) == 1
         assert out[0].name == "post_money_valuation_cap"
         assert out[0].value == 20_000_000
 
-    def test_pre_money_bare_only(self):
+    def test_pre_money_bare_only(self) -> None:
         text = 'The "Valuation Cap" is US$10,000,000. No post-money references anywhere.'
         out = valuation_cap.extract(_ctx(text))
         assert len(out) == 1
         assert out[0].name == "pre_money_valuation_cap"
         assert out[0].value == 10_000_000
 
-    def test_hybrid_terminology_prefers_post_money(self):
+    def test_hybrid_terminology_prefers_post_money(self) -> None:
         # The OVLP pattern: bare "Valuation Cap" in defined term + Post-Money
         # references in price formulas.
         text = (
@@ -151,7 +151,7 @@ class TestValuationCap:
         assert out[0].name == "post_money_valuation_cap"
         assert "hybrid_terminology" in (out[0].ambiguity or "")
 
-    def test_no_match(self):
+    def test_no_match(self) -> None:
         out = valuation_cap.extract(_ctx("unrelated text"))
         assert out == []
 
@@ -162,20 +162,20 @@ class TestValuationCap:
 
 
 class TestIssuanceDate:
-    def test_on_or_about_pattern(self):
+    def test_on_or_about_pattern(self) -> None:
         text = "on or about January 15, 2024, the Company issues"
         out = issuance_date.extract(_ctx(text))
         assert len(out) == 1
         assert out[0].value == "2024-01-15"
         assert out[0].confidence == "medium"
 
-    def test_as_of_pattern(self):
+    def test_as_of_pattern(self) -> None:
         text = "this Agreement is entered into as of March 5, 2023"
         out = issuance_date.extract(_ctx(text))
         assert len(out) == 1
         assert out[0].value == "2023-03-05"
 
-    def test_template_blank_returns_null(self):
+    def test_template_blank_returns_null(self) -> None:
         text = "this Agreement is entered into as of __________, 2024 between"
         out = issuance_date.extract(_ctx(text))
         assert len(out) == 1
@@ -183,14 +183,14 @@ class TestIssuanceDate:
         assert out[0].confidence == "absent"
         assert "template_blank" in (out[0].ambiguity or "")
 
-    def test_multiple_dates_uses_first(self):
+    def test_multiple_dates_uses_first(self) -> None:
         text = "on or about May 1, 2024 ... later amended as of December 31, 2024"
         out = issuance_date.extract(_ctx(text))
         assert len(out) == 1
         assert out[0].value == "2024-05-01"
         assert "multiple_dates" in (out[0].ambiguity or "")
 
-    def test_no_match(self):
+    def test_no_match(self) -> None:
         out = issuance_date.extract(_ctx("just other content"))
         assert out == []
 
@@ -201,19 +201,19 @@ class TestIssuanceDate:
 
 
 class TestInvestorName:
-    def test_canonical_form(self):
+    def test_canonical_form(self) -> None:
         text = 'in exchange for the payment by Foobar Capital LLC (the "Investor")'
         out = investor_name.extract(_ctx(text))
         assert len(out) == 1
         assert out[0].value == "Foobar Capital LLC"
 
-    def test_long_legal_name(self):
+    def test_long_legal_name(self) -> None:
         text = 'in exchange for the payment by Acmecorp Ventures III, L.P. (the "Investor")'
         out = investor_name.extract(_ctx(text))
         assert len(out) == 1
         assert "Acmecorp Ventures" in out[0].value
 
-    def test_no_match(self):
+    def test_no_match(self) -> None:
         out = investor_name.extract(_ctx("no investor pattern here"))
         assert out == []
 
@@ -224,7 +224,7 @@ class TestInvestorName:
 
 
 class TestRegistry:
-    def test_safe_extractors_listed(self):
+    def test_safe_extractors_listed(self) -> None:
         assert len(SAFE_EXTRACTORS) == 5
         # Each module exposes extract(ctx)
         for mod in SAFE_EXTRACTORS:

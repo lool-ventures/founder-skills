@@ -118,25 +118,25 @@ The most important sheet for our skill. Row 5 headers (22 columns; verified):
 
 | Carta column | Maps to (cap-table canonical) | Notes |
 |---|---|---|
-| `Formatted Security ID` | `safes[].id` / `notes[].id` (display form) | `SAFE1-01`, `SAFE2-03`, `CN-001` |
+| `Formatted Security ID` | `safes[].id` / `convertible_notes[].id` (display form) | `SAFE1-01`, `SAFE2-03`, `CN-001` |
 | `Security ID` | (internal ID) | `SAFE1-1`, `CN-1`; **SAFE prefix `SAFE\d*-\d+` is how we distinguish SAFEs from notes** |
-| `Stakeholder Name` | `safes[].investor_name` / `notes[].investor_name` | |
+| `Stakeholder Name` | `safes[].investor_name` / `convertible_notes[].investor_name` | |
 | `Stakeholder Email` | (informational) | |
-| `Principal` | `safes[].purchase_amount` / `notes[].principal` | |
+| `Principal` | `safes[].purchase_amount` / `convertible_notes[].principal` | |
 | `Other Consideration` | (ignored for v0.1) | |
-| `Interest` | `notes[].principal` × `annual_interest_rate` × time (already accrued in Carta's view) | |
+| `Interest` | `convertible_notes[].principal` × `annual_interest_rate` × time (already accrued in Carta's view) | |
 | `Total` | `Principal + Interest` (computed; ignored) | |
 | `Destination` | (ignored) | What the convertible converts INTO; informational |
-| `Issue Date` | `safes[].issuance_date` / `notes[].issuance_date` | datetime → ISO |
+| `Issue Date` | `safes[].issuance_date` / `convertible_notes[].issuance_date` | datetime → ISO |
 | `Board Approval Date` | date; nullable | |
 | `Termination Date` | (paired with cancellation) | |
 | `Canceled Date` | **non-null → skip this record (already cancelled)** | |
 | `Cancellation Reason` | `Conversion`, `Repayment`, etc. | |
 | `Converted Date` | **non-null → skip this record (already converted)** | |
-| `Maturity Date` | `notes[].maturity_date` | nullable for SAFEs (use sentinel `9999-12-31`) |
-| `Interest Rate` | `notes[].annual_interest_rate` | already decimal (0.06 = 6%); leave as-is |
-| `Valuation Cap` | `safes[].post_money_valuation_cap` / `notes[].valuation_cap` | money; 0 → treat as null |
-| `Conversion Discount` | `safes[].discount_multiplier` / `notes[].discount_multiplier` | **MUST normalize via `extract_instrument.normalize_discount_multiplier`** — Carta stores percent-as-fraction (0.2 = 20% discount); our canonical form is the multiplier (0.80). Per Gotcha #3. |
+| `Maturity Date` | `convertible_notes[].maturity_date` | nullable for SAFEs (use sentinel `9999-12-31`) |
+| `Interest Rate` | `convertible_notes[].annual_interest_rate` | already decimal (0.06 = 6%); leave as-is |
+| `Valuation Cap` | `safes[].post_money_valuation_cap` / `convertible_notes[].valuation_cap` | money; 0 → treat as null |
+| `Conversion Discount` | `safes[].discount_multiplier` / `convertible_notes[].discount_multiplier` | **MUST normalize via `extract_instrument.normalize_discount_multiplier`** — Carta stores percent-as-fraction (0.2 = 20% discount); our canonical form is the multiplier (0.80). Per Gotcha #3. |
 | `Change In Control Percent` | (ignored for v0.1) | |
 | `Conversion Trigger` | (informational; usually a money amount for qualified-financing threshold) | |
 | `Note Block Name` | (informational; e.g. `SAFE1 Notes`, `2023 Bridge Notes`) | groups SAFEs by template |

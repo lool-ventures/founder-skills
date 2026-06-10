@@ -781,8 +781,20 @@ def solve_priced_round(
     preferred_as_conv = final_ats["preferred_shares_as_converted"]
     pool_total = final_ats["options_outstanding"] + final_ats["options_available"] + pool_topup_shares
 
+    # Per-class founder breakdown as a map. Always emitted so downstream
+    # consumers (compose_report, visualize, explore) have a stable shape
+    # regardless of whether the engagement is dual-class. N-class
+    # extensibility for engagements with class_c or beyond.
+    founders_by_class: dict[str, float] = {}
+    for f in working_cap_state["founders"]:
+        cls = f.get("common_class") or "class_a"
+        founders_by_class[cls] = founders_by_class.get(cls, 0.0) + (
+            int(f["common_shares"]) / post_fd if post_fd else 0.0
+        )
+
     aggregate: dict[str, Any] = {
         "founders_pct": founders_shares / post_fd if post_fd else 0.0,
+        "founders_by_class": founders_by_class,
         "preferred_pct": preferred_as_conv / post_fd if post_fd else 0.0,
         "option_pool_pct": pool_total / post_fd if post_fd else 0.0,
         "safe_pct": safe_shares / post_fd if post_fd else 0.0,
@@ -904,7 +916,7 @@ def _cli() -> int:
     result = solve_priced_round(
         cap_state=cap_state,
         safes=instruments.get("safes", []),
-        notes=instruments.get("notes", []),
+        notes=instruments.get("convertible_notes", []),
         pre_money=args.pre_money,
         new_money=args.new_money,
         target_pool_percent=args.target_pool_pct,

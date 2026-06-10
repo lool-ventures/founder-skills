@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "cap-table instruments.json",
   "type": "object",
-  "required": ["safes", "notes", "warrants", "option_grants", "metadata"],
+  "required": ["safes", "convertible_notes", "warrants", "option_grants", "metadata"],
   "properties": {
     "safes": {
       "type": "array",
@@ -43,7 +43,7 @@
         }
       }
     },
-    "notes": {
+    "convertible_notes": {
       "type": "array",
       "items": {
         "type": "object",
@@ -70,11 +70,37 @@
           "non_qualified_financing_treatment": {"type": ["string", "null"], "enum": ["convert_anyway", "do_not_convert", "negotiate", null]},
           "source_document": {"type": ["string", "null"]},
           "extraction_confidence": {"enum": ["high", "medium", "low"]},
-          "subtype": {"type": ["string", "null"], "enum": ["convertible_note", "convertible_loan_agreement", "convertible_security", null], "description": "Document-origin provenance marker (commit #6 post-J audit). Math producers consume the canonical convertible_note shape regardless of subtype; subtype informs counsel-review framing (Israeli CLA / YC convertible_security / standard note). When null, the document is the standard convertible_note shape with all canonical fields populated."}
+          "subtype": {"type": ["string", "null"], "enum": ["convertible_note", "convertible_loan_agreement", "convertible_security", null], "description": "Document-origin provenance marker. Math producers consume the canonical convertible_note shape regardless of subtype; subtype informs counsel-review framing (Israeli CLA / YC convertible_security / standard note). Soft default = 'convertible_note' per contract §10.2.5."},
+          "governing_law": {"type": ["string", "null"], "enum": ["delaware", "israeli", "uk", "cayman", "other", null], "description": "Governing law of the instrument. Soft default = 'delaware' (or 'israeli' when inputs.jurisdiction.structure == 'israeli_ltd') per contract §10.2.5."}
         }
       }
     },
-    "warrants": {"type": "array"},
+    "warrants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "shares_underlying", "exercise_price", "warrant_type", "issuance_date", "settlement_type", "vested_flag", "extraction_confidence"],
+        "properties": {
+          "id": {"type": "string"},
+          "investor_name": {"type": ["string", "null"]},
+          "shares_underlying": {"type": "integer", "minimum": 1},
+          "exercise_price": {"type": "number", "minimum": 0.0},
+          "warrant_type": {"enum": ["common_stock", "preferred_stock_series", "preferred_stock_blank_check"]},
+          "preferred_series_id": {"type": ["string", "null"], "description": "When warrant_type=preferred_stock_series, which series this maps to."},
+          "vested_flag": {"type": "boolean"},
+          "vesting": {"type": ["object", "null"], "description": "Extension point (v0.5.0). Math producers do NOT read into the object; vesting fires via vested_flag. Tightens in v0.6.0+."},
+          "issuance_date": {"type": "string"},
+          "expiration_date": {"type": ["string", "null"]},
+          "origin": {"type": ["string", "null"], "enum": ["debt_facility_kicker", "equipment_lease", "advisor_grant", "investor_kicker", "other", null]},
+          "settlement_type": {"enum": ["cash_exercise", "net_share_settlement", "holder_election"]},
+          "holder_election_choice": {"type": ["string", "null"], "enum": ["cash", "net_share", null], "description": "Required when settlement_type=holder_election; otherwise null. v0.5.0 invariant rejects E_WARRANT_HOLDER_ELECTION_UNSPECIFIED when missing."},
+          "anti_dilution_clause": {"type": ["object", "null"], "description": "Extension point (v0.5.0). Math producers do NOT read into the interior — warrant repricing under issuer AD is not modeled in v0.5.0 (counsel-review only). When non-null, emits warrant.repricing_not_modeled counsel item."},
+          "exercise_event_date": {"type": ["string", "null"], "description": "Date the warrant exercises (or has exercised). Drives run_scenario.py pre-round pump per §6.1.5."},
+          "source_document": {"type": ["string", "null"]},
+          "extraction_confidence": {"enum": ["high", "medium", "low"]}
+        }
+      }
+    },
     "option_grants": {
       "type": "array",
       "items": {
@@ -84,11 +110,14 @@
           "id": {"type": "string"},
           "holder_id": {"type": "string"},
           "grant_date": {"type": "string"},
-          "shares_granted": {"type": "integer"},
-          "strike_price": {"type": "number"},
+          "shares_granted": {"type": "integer", "minimum": 0},
+          "shares_vested_to_date": {"type": ["integer", "null"], "minimum": 0},
+          "shares_exercised": {"type": ["integer", "null"], "minimum": 0},
+          "shares_outstanding_unvested": {"type": ["integer", "null"], "minimum": 0},
+          "strike_price": {"type": "number", "minimum": 0.0},
           "plan_type": {"enum": ["iso", "nso", "section_102_cg", "section_102_oi", "section_3i"]},
           "section_102_trustee_deposit_date": {"type": ["string", "null"]},
-          "vesting": {"type": ["object", "null"]},
+          "vesting": {"type": ["object", "null"], "description": "Extension point (v0.5.0). Math producers do NOT read into the object; tightens in v0.6.0+."},
           "source_document": {"type": ["string", "null"]},
           "extraction_confidence": {"enum": ["high", "medium", "low"]}
         }
@@ -96,8 +125,11 @@
     },
     "metadata": {
       "type": "object",
-      "required": ["run_id"],
-      "properties": {"run_id": {"type": "string"}}
+      "required": ["run_id", "schema_version"],
+      "properties": {
+        "run_id": {"type": "string"},
+        "schema_version": {"const": "v0.5.0-instruments"}
+      }
     }
   }
 }

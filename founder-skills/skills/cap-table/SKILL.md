@@ -1,6 +1,6 @@
 ---
 name: cap-table
-description: "Models cap-table mechanics for founders modeling dilution before signing. Use when a founder shares a SAFE, convertible note, term sheet, option plan, Carta XLSX export, or describes their cap-table — and asks to convert SAFEs/notes at a priced round, model option-pool top-ups, run anti-dilution, or evaluate an Israeli ↔ Delaware flip. Produces rule-pack-cited math, a founder-facing report, an interactive scenario explorer, and a counsel-handoff packet."
+description: "Models cap-table mechanics for founders modeling dilution before signing — SAFE/note conversion, priced rounds with BBWA / narrow-based / full-ratchet anti-dilution, option-pool top-ups, warrants (cash and net-share exercise of vested outstanding warrants, deterministic pre-round pump), Israeli ↔ Delaware flips (1:1 share-for-share), MFN chains, pay-to-play, dual-class structures with voting-power render, Israeli §102 / IIA cap-table interactions, multi-scenario chained or independent rounds, and counsel-handoff packets citing NVCA, YC SAFE primer, Cooley GO. Use when a founder shares a SAFE, convertible note, term sheet, option plan, warrant, Articles of Association, or Carta XLSX. NOT for waterfall modeling, cumulative dividends, RSUs, 83(b), 409A, SPAC, or warrant repricing — see scope notes."
 when_to_use: >
   Use ONLY when the user has cap-table content (a signed or draft SAFE / note,
   a term sheet, a Carta XLSX export, a freeform spreadsheet cap-table, or
@@ -152,7 +152,7 @@ mkdir -p "$ARTIFACTS_ROOT"
 RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 ```
 
-If `CLAUDE_PLUGIN_ROOT` is empty, fall back: `Glob` for `**/founder-skills/skills/cap-table/scripts/cap_state.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`.
+If `CLAUDE_PLUGIN_ROOT` is empty OR the path it resolves to does not exist in your environment (in Claude Cowork it substitutes to a host-side path that is not present inside the session VM — test with `ls`), fall back: `Glob` for `**/founder-skills/skills/cap-table/scripts/cap_state.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`.
 
 After Step 1 (when the company slug is known), derive `REVIEW_DIR`. Two modes:
 
@@ -227,12 +227,14 @@ cat <<INPUTS_EOF > "$REVIEW_DIR/inputs.json"
     "unallocated": 1500000
   },
   "engagement_questions": [],
-  "metadata": {"run_id": "$RUN_ID"}
+  "metadata": {"run_id": "$RUN_ID", "schema_version": "v0.5.0-inputs"}
 }
 INPUTS_EOF
 ```
 
 **`founders[]` and `option_pool` are required for any engagement with shares.** The schema marks them optional, but `cap_state.py` produces an empty pre-financing snapshot if either is missing — with no warning. Read `references/inputs-skeleton.md` if your scenario has preferred series, `common_batches`, or non-standard option-plan jurisdictions.
+
+**`metadata.schema_version` is required** on `inputs.json` (`"v0.5.0-inputs"`), `instruments.json` (`"v0.5.0-instruments"`), and `cap_state.json` (`"v0.5.0-cap-state"`). Producer scripts inject the value when they write; founder-supplied heredoc inputs must include it explicitly or `extract_cap_table.py --mode=validate` rejects with `E_SCHEMA_VERSION_MISMATCH`. Common field-name gotchas: `preferred_series[].shares` (not `shares_outstanding`); `preferred_series[].series_name` (not `series_label`); `preferred_series[].liquidation_preference_type` (not `participation`); `founders[].common_shares` (not `shares`).
 
 Validate immediately:
 

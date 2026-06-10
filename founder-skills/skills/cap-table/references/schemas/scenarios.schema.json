@@ -13,6 +13,7 @@
           "scenario_id": {"type": "string"},
           "label": {"type": "string"},
           "type": {"enum": ["safe_conversion", "note_conversion", "priced_round", "flip"]},
+          "chained_from_scenario_id": {"type": ["string", "null"], "default": null, "description": "If set, this scenario runs against the post-round cap_state from the named parent scenario (§6.7). If null, runs against original pre-financing cap_state. Validator rejects cycles with E_SCENARIO_CHAIN_CYCLE."},
           "parameters": {"type": "object"},
           "computed_outputs": {
             "type": "object",
@@ -92,6 +93,62 @@
                 "type": "object",
                 "description": "Optional. Map series_id -> CCP-after-this-scenario. Used by cap_state_after_round.json builder.",
                 "additionalProperties": {"type": "number"}
+              },
+              "per_safe_breakdown": {
+                "type": ["object", "null"],
+                "description": "Per-SAFE breakdown for compose_report's per-instrument narrative (Bug E fix). Keyed by safe_id.",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "branch": {"type": "string"},
+                    "candidate_set": {"type": "object"},
+                    "conversion_price": {"type": "number"},
+                    "conversion_shares": {"type": "integer"},
+                    "investor_name": {"type": ["string", "null"]}
+                  }
+                }
+              },
+              "per_note_breakdown": {
+                "type": ["object", "null"],
+                "description": "Per-note breakdown for compose_report's per-instrument narrative (Bug E fix). Keyed by note_id.",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "branch": {"type": "string"},
+                    "accrued_interest": {"type": "number"},
+                    "days_elapsed": {"type": "integer"},
+                    "conversion_price": {"type": "number"},
+                    "conversion_shares": {"type": "integer"},
+                    "investor_name": {"type": ["string", "null"]}
+                  }
+                }
+              },
+              "warrant_exercise_events": {
+                "type": "array",
+                "description": "Per-warrant exercise events from the pre-round pump (§6.1.5). Emitted by run_scenario.py orchestration.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "warrant_id": {"type": "string"},
+                    "exercised_at_pps": {"type": "number"},
+                    "shares_added": {"type": "integer"},
+                    "settlement_type": {"enum": ["cash_exercise", "net_share_settlement", "holder_election"]},
+                    "fmv_approximation_used": {"type": "boolean", "default": false}
+                  }
+                }
+              },
+              "convergence_history": {"type": ["array", "null"]},
+              "iterations": {"type": ["integer", "null"]},
+              "converged": {"type": ["boolean", "null"]},
+              "post_round_fully_diluted_shares": {"type": ["integer", "null"]},
+              "cap_state_after_pump": {
+                "type": ["object", "null"],
+                "description": "Phase F (v0.5.0): post-pump cap_state delta when a pre-round warrant pump fires. Embeds only the changing parts (as_converted_totals + outstanding_warrants + cap_table_history). Future debugging + the §4.5 FD-sum invariant trip-wire consume this.",
+                "properties": {
+                  "as_converted_totals": {"type": "object"},
+                  "outstanding_warrants": {"type": "array"},
+                  "cap_table_history": {"type": "array"}
+                }
               }
             }
           }

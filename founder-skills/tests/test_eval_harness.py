@@ -62,15 +62,15 @@ def _private_eval_available() -> bool:
 
 
 class TestPublicHarness:
-    def test_public_fixtures_loadable(self):
+    def test_public_fixtures_loadable(self) -> None:
         fixtures = _enumerate_public_fixtures()
         assert len(fixtures) >= 5, f"expected ≥5 fixtures, found {len(fixtures)}"
 
-    def test_public_fixtures_pass_invariant_check(self):
+    def test_public_fixtures_pass_invariant_check(self) -> None:
         """Every canonical label must pass invariant_checker (FPR=0 is the
         Sprint-4b gate). If any synthetic fixture fails, either the fixture
         is wrong or invariant_checker has a real bug."""
-        from invariant_checker import check_instrument
+        from invariant_checker import check_instrument  # type: ignore[import-not-found]
 
         for _scenario, _src, label_path in _enumerate_public_fixtures():
             label = json.loads(label_path.read_text())
@@ -84,11 +84,11 @@ class TestPublicHarness:
                 f"Violations: {[v.reason for v in report.violations]}"
             )
 
-    def test_public_fixtures_pass_value_in_doc(self):
+    def test_public_fixtures_pass_value_in_doc(self) -> None:
         """Every high-stakes value in a canonical label must be findable in
         the corresponding synthetic source via evidence_verifier.value_in_doc.
         """
-        from evidence_verifier import value_in_doc_check
+        from evidence_verifier import value_in_doc_check  # type: ignore[import-not-found]
 
         HIGH_STAKES = {
             "purchase_amount",
@@ -125,8 +125,8 @@ class TestPrivateHarness:
     --doc-text against each source, asserts FPR ≤ Sprint-2c threshold.
     """
 
-    def test_private_corpus_fpr_within_calibration(self):
-        from evidence_verifier import _load_doc_text, verify_extraction
+    def test_private_corpus_fpr_within_calibration(self) -> None:
+        from evidence_verifier import _load_doc_text, verify_extraction  # type: ignore[import-not-found]
 
         base = Path(os.environ[PRIVATE_EVAL_PATH_ENV])
         idx = json.loads((base / "corpus_index.json").read_text())
@@ -191,7 +191,7 @@ class TestPrivateHarness:
         )
 
 
-def test_private_path_skip_signals_correctly():
+def test_private_path_skip_signals_correctly() -> None:
     """Sanity check: when EVAL_DATA_PATH is unset, the private suite reports
     as skipped (not as a hard failure)."""
     # This test always passes; it's a meta-check that the skip mechanism

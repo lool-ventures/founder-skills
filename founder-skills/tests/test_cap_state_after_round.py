@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
+from typing import Any
 
 SCRIPT_PATH = pathlib.Path(__file__).parent.parent / "skills" / "cap-table" / "scripts" / "cap_state_after_round.py"
 spec = importlib.util.spec_from_file_location("cap_state_after_round", SCRIPT_PATH)
@@ -12,7 +13,7 @@ csar = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(csar)
 
 
-def _pre_cap_state():
+def _pre_cap_state() -> dict[str, Any]:
     return {
         "founders": [{"name": "Founder A", "common_shares": 10_000_000}],
         "preferred_series": [
@@ -41,7 +42,7 @@ def _pre_cap_state():
     }
 
 
-def test_no_ad_no_changes():
+def test_no_ad_no_changes() -> None:
     """When scenario_output has no ccp_mutations, cap_state is unchanged."""
     pre = _pre_cap_state()
     post = csar.build_cap_state_after_round(
@@ -54,7 +55,7 @@ def test_no_ad_no_changes():
     assert post["as_converted_totals"]["preferred_shares_as_converted"] == 2_000_000
 
 
-def test_ad_mutation_applied():
+def test_ad_mutation_applied() -> None:
     """Test A scenario: CCP $1.00 → $0.6667, preferred-as-converted recomputes to 3M."""
     pre = _pre_cap_state()
     # Use exact 2/3 to avoid rounding noise on the as-converted math
@@ -88,7 +89,7 @@ def test_ad_mutation_applied():
     assert ev["round_id"] == "series_a"
 
 
-def test_caller_not_mutated():
+def test_caller_not_mutated() -> None:
     """Verify the deep-copy boundary: caller's cap_state is untouched."""
     pre = _pre_cap_state()
     csar.build_cap_state_after_round(
@@ -110,7 +111,7 @@ def test_caller_not_mutated():
     assert pre["as_converted_totals"]["preferred_shares_as_converted"] == 2_000_000
 
 
-def test_appends_to_existing_history():
+def test_appends_to_existing_history() -> None:
     """When cap_table_history already exists, new events append."""
     pre = _pre_cap_state()
     pre["cap_table_history"] = [

@@ -494,7 +494,7 @@ def main() -> int:
     else:
         instruments = {
             "safes": [],
-            "notes": [],
+            "convertible_notes": [],
             "warrants": [],
             "option_grants": [],
             "metadata": {},
@@ -516,17 +516,39 @@ def main() -> int:
         fields.setdefault("id", f"safe_{len(instruments['safes']) + 1:03d}")
         instruments["safes"].append(fields)
     elif itype == "convertible_note":
-        fields.setdefault("id", f"note_{len(instruments['notes']) + 1:03d}")
-        # Record subtype for provenance (commit #6 post-J audit). Math producers
-        # consume the canonical convertible_note shape; subtype is informational
-        # for counsel-review framing ("Israeli CLA terms..." vs "convertible
-        # security (SAFE-equivalent)...").
+        fields.setdefault("id", f"note_{len(instruments['convertible_notes']) + 1:03d}")
+        # Record subtype for provenance. Math producers consume the canonical
+        # convertible_note shape; subtype is informational for counsel-review
+        # framing (Israeli CLA / YC convertible_security / standard note).
         if subtype:
             fields["subtype"] = subtype
-        instruments["notes"].append(fields)
+        instruments["convertible_notes"].append(fields)
     elif itype == "warrant":
-        fields.setdefault("id", f"warrant_{len(instruments['warrants']) + 1:03d}")
-        instruments["warrants"].append(fields)
+        # v0.5.0: warrants require a full item shape (shares_underlying,
+        # exercise_price, warrant_type, issuance_date, settlement_type,
+        # vested_flag). The Lane-1 warrant misfile escape hatch produces an
+        # empty fields-block; only persist the warrant when minimum required
+        # fields are present. Otherwise, surface as a non-instrument
+        # classification and let the founder re-extract via the Lane-2 Carta
+        # warrant ledger path.
+        required_warrant_keys = (
+            "shares_underlying",
+            "exercise_price",
+            "warrant_type",
+            "issuance_date",
+            "settlement_type",
+            "vested_flag",
+        )
+        if all(k in fields for k in required_warrant_keys):
+            fields.setdefault("id", f"warrant_{len(instruments['warrants']) + 1:03d}")
+            instruments["warrants"].append(fields)
+        else:
+            warnings.append(
+                "extract_instrument.py: warrant classification accepted but the extraction did not provide a "
+                "full warrant item shape (missing one of: " + ", ".join(required_warrant_keys) + "); "
+                "the warrant was NOT persisted. Re-extract via the Lane-2 Carta warrant ledger path or "
+                "supply a full warrant heredoc."
+            )
     # itype == "non_instrument": classified-as-non-extractable; do not append to
     # any instrument array. The receipt below surfaces the classification.
 
@@ -538,6 +560,7 @@ def main() -> int:
             run_id=args.run_id,
             output_path=args.instruments,
             pretty=args.pretty,
+            schema_version="v0.5.0-instruments",
         )
     except ArtifactValidationError as e:
         sys.stderr.write(f"extract_instrument.py: instruments.json schema validation failed: {e}\n")

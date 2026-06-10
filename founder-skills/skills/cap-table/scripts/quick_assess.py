@@ -102,7 +102,7 @@ def quick_assess(
     """
     instruments: dict[str, Any] = {
         "safes": safes,
-        "notes": notes or [],
+        "convertible_notes": notes or [],
         "warrants": [],
         "option_grants": [],
         "metadata": {"run_id": inputs.get("metadata", {}).get("run_id", "fast-assess")},
@@ -150,7 +150,7 @@ def quick_assess(
         }
         drivers = headline["drivers"]
 
-    now = _dt.datetime.now(_dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     run_id = now.replace(":", "").replace("-", "")
     slug = company_name.lower().replace(" ", "-").replace("_", "-")
 

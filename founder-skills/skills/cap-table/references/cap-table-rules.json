@@ -2359,6 +2359,149 @@
           "Show the drivers of dilution separately: SAFEs, notes, option pool, new-money shares, and anti-dilution."
         ]
       }
+    ],
+    "cap_table": [
+      {
+        "rule_id": "cap_table.dividend_provisions_in_aoa_handoff",
+        "domain": "cap_table",
+        "behavior_target": "counsel_review_flag",
+        "title": "Dividend provisions detected in AoA — handoff to tax/waterfall counsel",
+        "summary": "The Articles of Association contain dividend provisions, but the cap-table skill does not model cumulative or accruing dividends. Tax and waterfall counsel should review the provision and confirm whether it materially affects exit proceeds, conversion economics, or §305(c) PIK-dividend issues. Use this as a handoff to the eventual waterfall-modeling skill (when available) or directly to outside counsel.",
+        "implementation_action": "counsel_review",
+        "confidence": "high",
+        "source_ids": [
+          "NVCA-MODEL-COI-2019"
+        ],
+        "source_basis": "primary_doc",
+        "counsel_review": true,
+        "surfaces": ["cap_table_adjacent_counsel"],
+        "jurisdiction": "Delaware and Israel",
+        "applies_when": "Use when cap_state.aoa_findings.dividend_provisions_present is true (the AoA was extracted and includes a dividend provision). The rule fires regardless of jurisdiction because dividend provisions are not Delaware/Israel-specific.",
+        "warnings": [
+          "Cap-table conversion economics here ignore any accruing dividend; founders should confirm with counsel whether the exit waterfall changes the conversion math.",
+          "If the dividend is cumulative + PIK, the preferred-conversion shares grow over time and the founder dilution shown here may be understated."
+        ]
+      }
+    ],
+    "dual_class": [
+      {
+        "rule_id": "dual_class.founder_super_voting",
+        "domain": "dual_class",
+        "behavior_target": "counsel_review_flag",
+        "title": "Dual-class voting structure detected — investor objections likely at later rounds",
+        "summary": "A founder or common-batch holder carries a voting_rights_multiple greater than 1.0 (super-voting common; typically class_b with 10x voting). Series A and later investors frequently push back on dual-class structures during diligence; NVCA model docs and Carta benchmarks both note that ratification of dual-class can require negotiation, and IPO underwriters may require sunset provisions. The cap-table report shows the resulting voting concentration in the dual-class summary table.",
+        "implementation_action": "counsel_review",
+        "confidence": "high",
+        "source_ids": [
+          "NVCA-MODEL-COI-2019",
+          "CARTA-FOUNDER-2026"
+        ],
+        "source_basis": "primary_doc",
+        "counsel_review": true,
+        "surfaces": ["cap_table_core", "cap_table_adjacent_counsel"],
+        "jurisdiction": "Delaware (NVCA model); applies generally where dual-class structures are used",
+        "applies_when": "Use when any cap_state.founders[*].voting_rights_multiple or cap_state.common_batches[*].voting_rights_multiple is not equal to 1.0.",
+        "warnings": [
+          "Series A+ investors typically negotiate sunset provisions or carve-outs on super-voting common; confirm the term sheet does not unwind the structure.",
+          "IPO-readiness: most major exchanges accept dual-class but require disclosure; some institutional investors will not participate in dual-class IPOs without sunsets.",
+          "The voting_pct column in the cap-table summary reflects current voting power; it does NOT reflect any post-financing dilution of the super-voting class."
+        ]
+      }
+    ],
+    "warrants": [
+      {
+        "rule_id": "warrant.included_in_fd_per_policy",
+        "domain": "warrants",
+        "behavior_target": "source_note",
+        "title": "Vested outstanding warrants are included in pre-financing fully-diluted shares",
+        "summary": "v0.5.0 cap-table policy (per YC primer narrow company_capitalization, NVCA Model COI §4.4.4 'immediately prior to such issue'): outstanding warrants with vested_flag=true are included in the pre-financing fully-diluted denominator; unvested warrants are surfaced separately but excluded from FD.",
+        "implementation_action": "informational",
+        "confidence": "high",
+        "source_ids": [
+          "YC-POST-MONEY-SAFE-PRIMER",
+          "NVCA-MODEL-COI-2019"
+        ],
+        "source_basis": "primary_doc",
+        "counsel_review": false,
+        "surfaces": ["cap_table_core"],
+        "jurisdiction": "Delaware C corporation and Israeli Ltd, market practice",
+        "applies_when": "Use when cap_state.outstanding_warrants[] is non-empty.",
+        "warnings": []
+      },
+      {
+        "rule_id": "warrant.unvested_excluded_from_fd_per_policy",
+        "domain": "warrants",
+        "behavior_target": "counsel_review_flag",
+        "title": "Unvested warrants surfaced but excluded from FD",
+        "summary": "Counsel-review item: cap_state surfaces unvested warrants as a separate line but excludes them from pre-financing FD. Founders should confirm with counsel that the engagement's term sheets and SAFEs use the same convention (some custom term sheets define company_capitalization to include unvested warrants).",
+        "implementation_action": "counsel_review",
+        "confidence": "high",
+        "source_ids": [
+          "YC-POST-MONEY-SAFE-PRIMER",
+          "NVCA-MODEL-COI-2019"
+        ],
+        "source_basis": "primary_doc",
+        "counsel_review": true,
+        "surfaces": ["cap_table_core"],
+        "jurisdiction": "Delaware and Israeli startup market",
+        "applies_when": "Use when any cap_state.outstanding_warrants[i].vested_flag is false.",
+        "warnings": []
+      },
+      {
+        "rule_id": "warrant.repricing_not_modeled",
+        "domain": "warrants",
+        "behavior_target": "counsel_review_flag",
+        "title": "Warrant repricing under issuer AD is not modeled",
+        "summary": "v0.5.0 cap-table scope: warrants with their own anti_dilution_clause object are recognized but the repricing math is not modeled. If a downstream financing triggers issuer-level AD and the warrant's AD provision also fires, founder counsel must compute the warrant repricing separately. This is a counsel-review handoff; the cap-table report flags it.",
+        "implementation_action": "counsel_review",
+        "confidence": "medium",
+        "source_ids": [
+          "NVCA-MODEL-COI-2019",
+          "COOLEY-DOWN-ROUND"
+        ],
+        "source_basis": "primary_doc",
+        "counsel_review": true,
+        "surfaces": ["cap_table_core"],
+        "jurisdiction": "Delaware",
+        "applies_when": "Use when any instruments.warrants[i].anti_dilution_clause is non-null.",
+        "warnings": []
+      },
+      {
+        "rule_id": "warrant.net_share_pre_round_fmv_approximation",
+        "domain": "warrants",
+        "behavior_target": "counsel_review_flag",
+        "title": "Net-share warrant exercise pre-round used an FMV approximation",
+        "summary": "When a net-share-settlement warrant exercises pre-round AND no prior priced-round PPS is available (the typical first-round case), the pump approximates FMV as pre_money / pre_pump_fully_diluted. This is the only morally-correct value available pre-solver (Option A determinism avoids a circular dependency with the AD fixed point). For warrants that are a large fraction of FD, this approximation may diverge sub-percent from the converged round PPS; counsel should confirm the founder is comfortable with the proxy.",
+        "implementation_action": "counsel_review",
+        "confidence": "high",
+        "source_ids": [
+          "NVCA-MODEL-COI-2019"
+        ],
+        "source_basis": "primary_doc",
+        "counsel_review": true,
+        "surfaces": ["cap_table_core"],
+        "jurisdiction": "Delaware market practice",
+        "applies_when": "Use when scenarios[*].computed_outputs.warrant_exercise_events[*].fmv_approximation_used is true.",
+        "warnings": []
+      },
+      {
+        "rule_id": "warrant.exercise_event_before_round_pump",
+        "domain": "warrants",
+        "behavior_target": "source_note",
+        "title": "Pre-round warrant pump fired",
+        "summary": "Informational source note: a warrant with exercise_event_date strictly before the priced-round transaction_event_date was exercised pre-round; the resulting shares are in the pre-financing FD denominator. Founders should confirm the exercise event actually occurred as modeled.",
+        "implementation_action": "informational",
+        "confidence": "high",
+        "source_ids": [
+          "NVCA-MODEL-COI-2019"
+        ],
+        "source_basis": "primary_doc",
+        "counsel_review": false,
+        "surfaces": ["cap_table_core"],
+        "jurisdiction": "Delaware and Israeli market practice",
+        "applies_when": "Use when scenarios[*].computed_outputs.warrant_exercise_events is non-empty.",
+        "warnings": []
+      }
     ]
   }
 }

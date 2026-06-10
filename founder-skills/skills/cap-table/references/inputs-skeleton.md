@@ -48,7 +48,7 @@ If the validator passes but `cap_state.py` reports "founders: 0" or "preferred-a
     "unallocated": 1500000
   },
   "engagement_questions": [],
-  "metadata": {"run_id": "20260521T120000Z"}
+  "metadata": {"run_id": "20260521T120000Z", "schema_version": "v0.5.0-inputs"}
 }
 ```
 

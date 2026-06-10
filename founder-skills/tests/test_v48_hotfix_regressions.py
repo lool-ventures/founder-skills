@@ -25,11 +25,12 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
+from typing import Any
 
 SCRIPTS = pathlib.Path(__file__).parent.parent / "skills" / "cap-table" / "scripts"
 
 
-def _load(name: str):
+def _load(name: str) -> Any:
     spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
@@ -42,11 +43,11 @@ rule_audit = _load("rule_audit")
 
 
 # ---------------------------------------------------------------------------
-# Bug 1: cap_state.py field-drop for v0.4.8 per-series knobs + cap_table_history
+# Regression: cap_state.py field-drop for v0.4.8 per-series knobs + cap_table_history
 # ---------------------------------------------------------------------------
 
 
-def _inputs_with_v48_fields():
+def _inputs_with_v48_fields() -> dict[str, Any]:
     return {
         "company_name": "Test",
         "analysis_date": "2026-05-22",
@@ -82,35 +83,35 @@ def _inputs_with_v48_fields():
     }
 
 
-def test_ad_cp2_floor_survives_canonicalization():
+def test_ad_cp2_floor_survives_canonicalization() -> None:
     """The v0.4.8 floor knob must reach cap_state.preferred_series so priced_round can read it."""
     cs = cap_state.build_cap_state(_inputs_with_v48_fields(), {"safes": [], "notes": []})
     assert cs["preferred_series"][0]["ad_cp2_floor"] == 0.50
 
 
-def test_ad_trigger_basis_survives_canonicalization():
+def test_ad_trigger_basis_survives_canonicalization() -> None:
     cs = cap_state.build_cap_state(_inputs_with_v48_fields(), {"safes": [], "notes": []})
     assert cs["preferred_series"][0]["ad_trigger_basis"] == "current_conversion_price"
 
 
-def test_ad_a_denominator_basis_survives_canonicalization():
+def test_ad_a_denominator_basis_survives_canonicalization() -> None:
     cs = cap_state.build_cap_state(_inputs_with_v48_fields(), {"safes": [], "notes": []})
     assert cs["preferred_series"][0]["ad_a_denominator_basis"] == "nvca_narrow"
 
 
-def test_ad_carve_outs_survives_canonicalization():
+def test_ad_carve_outs_survives_canonicalization() -> None:
     cs = cap_state.build_cap_state(_inputs_with_v48_fields(), {"safes": [], "notes": []})
     assert cs["preferred_series"][0]["ad_carve_outs"] == "nvca_default"
 
 
-def test_cap_table_history_survives_canonicalization():
+def test_cap_table_history_survives_canonicalization() -> None:
     cs = cap_state.build_cap_state(_inputs_with_v48_fields(), {"safes": [], "notes": []})
     assert "cap_table_history" in cs
     assert len(cs["cap_table_history"]) == 1
     assert cs["cap_table_history"][0]["event_type"] == "anti_dilution_applied"
 
 
-def test_v48_defaults_when_input_omits_fields():
+def test_v48_defaults_when_input_omits_fields() -> None:
     """When the input omits the v0.4.8 knobs, canonicalization applies NVCA defaults."""
     inputs = _inputs_with_v48_fields()
     # Strip all v0.4.8 fields from input
@@ -129,11 +130,11 @@ def test_v48_defaults_when_input_omits_fields():
 
 
 # ---------------------------------------------------------------------------
-# Bug 2: rule_audit.py post_math false-positive counsel items
+# Regression: rule_audit.py post_math false-positive counsel items
 # ---------------------------------------------------------------------------
 
 
-def _gating_with_ad_rule_matched(rule_id: str):
+def _gating_with_ad_rule_matched(rule_id: str) -> dict[str, Any]:
     """Build a minimal gating block where rule_id has applies_when_matched=True."""
     return {
         rule_id: {
@@ -146,7 +147,7 @@ def _gating_with_ad_rule_matched(rule_id: str):
     }
 
 
-def _rules_with(rule_id: str, counsel_review: bool = True):
+def _rules_with(rule_id: str, counsel_review: bool = True) -> dict[str, Any]:
     """Build a minimal rules dict with one anti_dilution rule."""
     return {
         "domains": {
@@ -166,18 +167,18 @@ def _rules_with(rule_id: str, counsel_review: bool = True):
     }
 
 
-def test_stale_ccp_suppressed_when_warning_not_emitted():
+def test_stale_ccp_suppressed_when_warning_not_emitted() -> None:
     """The stale-CCP counsel item should NOT surface when the solver didn't emit
     W_STALE_CCP_SUSPECTED, even though the rule's static gate matched."""
     gating = _gating_with_ad_rule_matched("anti_dilution.stale_ccp_detected")
     rules = _rules_with("anti_dilution.stale_ccp_detected")
     # scenarios with no W_STALE_CCP_SUSPECTED warning
-    scenarios = {"scenarios": [{"computed_outputs": {"warnings": []}}]}
+    scenarios: dict[str, Any] = {"scenarios": [{"computed_outputs": {"warnings": []}}]}
     items = rule_audit.build_counsel_review_items(gating, rules, scenarios_data=scenarios, inputs={})
     assert items == []
 
 
-def test_stale_ccp_surfaces_when_warning_emitted():
+def test_stale_ccp_surfaces_when_warning_emitted() -> None:
     gating = _gating_with_ad_rule_matched("anti_dilution.stale_ccp_detected")
     rules = _rules_with("anti_dilution.stale_ccp_detected")
     scenarios = {"scenarios": [{"computed_outputs": {"warnings": [{"code": "W_STALE_CCP_SUSPECTED"}]}}]}
@@ -186,7 +187,7 @@ def test_stale_ccp_surfaces_when_warning_emitted():
     assert items[0]["rule_id"] == "anti_dilution.stale_ccp_detected"
 
 
-def test_pay_to_play_suppressed_when_no_aoa_flag():
+def test_pay_to_play_suppressed_when_no_aoa_flag() -> None:
     """P2P counsel item should NOT surface when extract_aoa didn't flag P2P."""
     gating = _gating_with_ad_rule_matched("anti_dilution.pay_to_play_provision_detected")
     rules = _rules_with("anti_dilution.pay_to_play_provision_detected")
@@ -194,7 +195,7 @@ def test_pay_to_play_suppressed_when_no_aoa_flag():
     assert items == []
 
 
-def test_pay_to_play_surfaces_when_top_level_flag():
+def test_pay_to_play_surfaces_when_top_level_flag() -> None:
     gating = _gating_with_ad_rule_matched("anti_dilution.pay_to_play_provision_detected")
     rules = _rules_with("anti_dilution.pay_to_play_provision_detected")
     items = rule_audit.build_counsel_review_items(
@@ -203,7 +204,7 @@ def test_pay_to_play_surfaces_when_top_level_flag():
     assert len(items) == 1
 
 
-def test_pay_to_play_surfaces_when_per_series_flag():
+def test_pay_to_play_surfaces_when_per_series_flag() -> None:
     gating = _gating_with_ad_rule_matched("anti_dilution.pay_to_play_provision_detected")
     rules = _rules_with("anti_dilution.pay_to_play_provision_detected")
     items = rule_audit.build_counsel_review_items(
@@ -212,37 +213,37 @@ def test_pay_to_play_surfaces_when_per_series_flag():
     assert len(items) == 1
 
 
-def test_cp2_floor_applied_suppressed_when_warning_not_emitted():
+def test_cp2_floor_applied_suppressed_when_warning_not_emitted() -> None:
     gating = _gating_with_ad_rule_matched("anti_dilution.cp2_floor_applied")
     rules = _rules_with("anti_dilution.cp2_floor_applied")
-    scenarios = {"scenarios": [{"computed_outputs": {"warnings": []}}]}
+    scenarios: dict[str, Any] = {"scenarios": [{"computed_outputs": {"warnings": []}}]}
     items = rule_audit.build_counsel_review_items(gating, rules, scenarios_data=scenarios, inputs={})
     assert items == []
 
 
-def test_cp2_floor_applied_surfaces_when_warning_emitted():
+def test_cp2_floor_applied_surfaces_when_warning_emitted() -> None:
     gating = _gating_with_ad_rule_matched("anti_dilution.cp2_floor_applied")
     rules = _rules_with("anti_dilution.cp2_floor_applied")
-    scenarios = {"scenarios": [{"computed_outputs": {"warnings": [{"code": "W_CP2_FLOOR_APPLIED"}]}}]}
+    scenarios: dict[str, Any] = {"scenarios": [{"computed_outputs": {"warnings": [{"code": "W_CP2_FLOOR_APPLIED"}]}}]}
     items = rule_audit.build_counsel_review_items(gating, rules, scenarios_data=scenarios, inputs={})
     assert len(items) == 1
 
 
-def test_solver_diverged_suppressed_when_no_blocker():
+def test_solver_diverged_suppressed_when_no_blocker() -> None:
     gating = _gating_with_ad_rule_matched("anti_dilution.solver_diverged")
     rules = _rules_with("anti_dilution.solver_diverged")
-    scenarios = {"scenarios": [{"computed_outputs": {"blockers": []}}]}
+    scenarios: dict[str, Any] = {"scenarios": [{"computed_outputs": {"blockers": []}}]}
     items = rule_audit.build_counsel_review_items(gating, rules, scenarios_data=scenarios, inputs={})
     assert items == []
 
 
 # ---------------------------------------------------------------------------
-# Bug 3: visualize.py + compose_report.py double-pct on
+# Regression: visualize.py + compose_report.py double-pct on
 # anti_dilution_delta_pct_points
 # ---------------------------------------------------------------------------
 
 
-def test_visualize_legend_skips_ad_meta_fields():
+def test_visualize_legend_skips_ad_meta_fields() -> None:
     """render_legend should not multiply the pp value by 100."""
     visualize = _load("visualize")
     breakdown = {
@@ -260,7 +261,7 @@ def test_visualize_legend_skips_ad_meta_fields():
     assert "anti dilution delta pct points" not in html
 
 
-def test_compose_report_ownership_block_skips_ad_meta_fields():
+def test_compose_report_ownership_block_skips_ad_meta_fields() -> None:
     """compose_report's Post-round ownership block should not render the pp meta fields."""
     compose_report = _load("compose_report")
     # We test indirectly: build a single scenario and call compose's renderer.

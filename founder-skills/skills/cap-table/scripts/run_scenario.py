@@ -152,7 +152,7 @@ def run_note_conversion_scenario(
 ) -> dict[str, Any]:
     params = scenario.get("parameters", {}) or {}
     notes_filter = params.get("note_ids")
-    all_notes = instruments.get("notes", [])
+    all_notes = instruments.get("convertible_notes", [])
     notes = [n for n in all_notes if not notes_filter or n["id"] in notes_filter]
 
     conv_date = params.get("transaction_event_date")
@@ -212,21 +212,65 @@ def run_priced_round_scenario(
     *,
     instruments: dict[str, Any],
     cap_state: dict[str, Any],
+    last_priced_round_pps: float | None = None,
 ) -> dict[str, Any]:
     params = scenario.get("parameters", {}) or {}
+
+    # §6.1.5: pre-round warrant pump. Runs against the pre-pump cap_state for
+    # warrants whose exercise_event_date is strictly before the scenario's
+    # transaction_event_date. The post-pump cap_state is what the priced-round
+    # solver consumes.
+    import warrant_exercise
+
+    try:
+        cap_state_post_pump, warrant_events = warrant_exercise.run_pre_round_pump(
+            cap_state,
+            params.get("transaction_event_date"),
+            last_priced_round_pps=last_priced_round_pps,
+            pre_money=params.get("pre_money"),
+        )
+    except warrant_exercise.WarrantPumpError as e:
+        return {
+            "completeness": "structural_only",
+            "blockers": [
+                {
+                    "code": str(e).split(":", 1)[0],
+                    "instance_id": None,
+                    "remedy": str(e).split(":", 1)[1].strip() if ":" in str(e) else str(e),
+                }
+            ],
+            "math_provenance": [],
+        }
+
     result = solve_priced_round(
-        cap_state=cap_state,
+        cap_state=cap_state_post_pump,
         safes=instruments.get("safes", []),
-        notes=instruments.get("notes", []),
+        notes=instruments.get("convertible_notes", []),
         pre_money=params["pre_money"],
         new_money=params["new_money"],
         target_pool_percent=params.get("target_pool_percent"),
         target_basis=params.get("target_basis", "pre_money"),
         conversion_event_date=params.get("transaction_event_date"),
     )
+
+    if warrant_events:
+        result["warrant_exercise_events"] = warrant_events
+        # Phase F (v0.5.0): embed post-pump cap_state delta so downstream
+        # debugging + the §4.5 FD-sum invariant can trip on future regressions.
+        # Only the changing parts are embedded (per reviewer Q10 recommendation)
+        # — full cap_state would duplicate top-level metadata. Schema-locked in
+        # scenarios.schema.json via cap_state_pump_delta sub-schema.
+        result["cap_state_after_pump"] = {
+            "as_converted_totals": cap_state_post_pump.get("as_converted_totals", {}),
+            "outstanding_warrants": cap_state_post_pump.get("outstanding_warrants", []),
+            "cap_table_history": cap_state_post_pump.get("cap_table_history", []),
+        }
+
     # Augment with founder_impact when completeness is full/mixed
     if result.get("completeness") in {"full", "mixed"}:
-        result["founder_impact"] = _compute_founder_impact(result.get("aggregate_ownership_by_class", {}), cap_state)
+        result["founder_impact"] = _compute_founder_impact(
+            result.get("aggregate_ownership_by_class", {}), cap_state_post_pump
+        )
     return result
 
 

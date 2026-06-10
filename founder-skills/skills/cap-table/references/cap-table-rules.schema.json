@@ -268,6 +268,16 @@
         "applies_when": {
           "type": "string"
         },
+        "surfaces": {
+          "type": "array",
+          "description": "Counsel surface taxonomy (v0.5.0 contract §7). 'cap_table_core' = central to cap-table math/structure/AD/conversion/voting; 'cap_table_adjacent_counsel' = tax/governance/operational reminders triggered by cap-table data. Multi-tag allowed for rules spanning both (e.g., delaware_flip.options_convertibles). The first element is the PRIMARY surface used by counsel_packet.md rendering (reading 3); the secondary section emits a one-line cross-reference pointer.",
+          "items": {
+            "enum": ["cap_table_core", "cap_table_adjacent_counsel"]
+          },
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
         "inputs": {
           "type": "array",
           "items": {

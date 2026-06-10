@@ -66,17 +66,17 @@ def _make_cap_state(
 
 def solve(
     *,
-    common_shares,
-    preferred_series,
-    options_outstanding=0,
-    options_available=0,
-    safes=None,
-    notes=None,
-    pre_money,
-    new_money,
-    target_pool_percent=None,
-    cap_table_history=None,
-):
+    common_shares: int,
+    preferred_series: list[dict[str, Any]],
+    options_outstanding: int = 0,
+    options_available: int = 0,
+    safes: list[dict[str, Any]] | None = None,
+    notes: list[dict[str, Any]] | None = None,
+    pre_money: float,
+    new_money: float,
+    target_pool_percent: float | None = None,
+    cap_table_history: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Convenience wrapper bridging the spike's call signature to solve_priced_round."""
     cs = _make_cap_state(
         common_shares=common_shares,
@@ -85,7 +85,7 @@ def solve(
         options_available=options_available,
         cap_table_history=cap_table_history,
     )
-    return priced_round.solve_priced_round(
+    return priced_round.solve_priced_round(  # type: ignore[no-any-return]
         cap_state=cs,
         safes=safes or [],
         notes=notes or [],
@@ -101,7 +101,7 @@ def solve(
 # AdjusterProtocol (SafeConversionAdjuster + NoteConversionAdjuster) provides
 # this; these tests are now active.
 # ---------------------------------------------------------------------------
-def test_golden_4_ad_plus_safe_conversion():
+def test_golden_4_ad_plus_safe_conversion() -> None:
     """AD + SAFE @ $10M post-money cap: SAFE converts at cap-implied; AD
     triggers off new PPS only (SAFE conversion is NVCA-default-carved-out).
 
@@ -148,7 +148,7 @@ def test_golden_4_ad_plus_safe_conversion():
     assert abs(bd["B"] - 5_000_000.0) < 1.0  # 5M / 1.00 = 5M shares
 
 
-def test_golden_18_ad_plus_note_convert_at_cap_maturity():
+def test_golden_18_ad_plus_note_convert_at_cap_maturity() -> None:
     """Note converts at cap on the round + AD-protected preferred series.
 
     Note conversion is NVCA-default carved-out from AD trigger. Verify the
@@ -220,7 +220,7 @@ def test_golden_18_ad_plus_note_convert_at_cap_maturity():
 # Golden 1 — Test A (BBWA broad, fully coupled)
 # Per v3 §3.8: p* = 5/14 = 0.35714, CP2 = 0.66667, founder = 35.71%, f'(p*) = 0.111
 # ---------------------------------------------------------------------------
-def test_golden_1_bbwa_test_a():
+def test_golden_1_bbwa_test_a() -> None:
     r = solve(
         common_shares=10_000_000,
         preferred_series=[
@@ -261,7 +261,7 @@ def test_golden_1_bbwa_test_a():
 # ---------------------------------------------------------------------------
 # Golden 2 — Full ratchet. Per v3 §3.9: p* = 3/11 = 0.27273, founder = 27.27%.
 # ---------------------------------------------------------------------------
-def test_golden_2_full_ratchet():
+def test_golden_2_full_ratchet() -> None:
     r = solve(
         common_shares=10_000_000,
         preferred_series=[
@@ -295,7 +295,7 @@ def test_golden_2_full_ratchet():
 # Golden 3 — Multi-series mixed (BBWA broad + full ratchet).
 # Closed-form via opus subagent: p* = 113/333.
 # ---------------------------------------------------------------------------
-def test_golden_3_multi_series_mixed():
+def test_golden_3_multi_series_mixed() -> None:
     r = solve(
         common_shares=10_000_000,
         preferred_series=[
@@ -336,7 +336,7 @@ def test_golden_3_multi_series_mixed():
 # ---------------------------------------------------------------------------
 # Golden 6 — No-AD control. Pre-v0.4.0-compatible output (no AD fields).
 # ---------------------------------------------------------------------------
-def test_golden_6_no_ad_control():
+def test_golden_6_no_ad_control() -> None:
     r = solve(
         common_shares=10_000_000,
         preferred_series=[
@@ -364,7 +364,7 @@ def test_golden_6_no_ad_control():
 # ---------------------------------------------------------------------------
 # Golden 7 — Up round (no trigger).
 # ---------------------------------------------------------------------------
-def test_golden_7_up_round_no_trigger():
+def test_golden_7_up_round_no_trigger() -> None:
     r = solve(
         common_shares=10_000_000,
         preferred_series=[
@@ -392,7 +392,7 @@ def test_golden_7_up_round_no_trigger():
 # Golden 8 — Pre-existing AD-adjusted CCP=$0.80 from prior round.
 # Spike-verified: PPS=$0.343625, CP2=$0.563322 (closed-form) / $0.563265 (spike).
 # ---------------------------------------------------------------------------
-def test_golden_8_preexisting_ad_adjusted_ccp():
+def test_golden_8_preexisting_ad_adjusted_ccp() -> None:
     r = solve(
         common_shares=10_000_000,
         preferred_series=[
@@ -435,7 +435,7 @@ def test_golden_8_preexisting_ad_adjusted_ccp():
 # ---------------------------------------------------------------------------
 # Golden 9 — ad_trigger_basis override (CCP vs OIP).
 # ---------------------------------------------------------------------------
-def test_golden_9_ad_trigger_basis_override():
+def test_golden_9_ad_trigger_basis_override() -> None:
     base = dict(
         common_shares=10_000_000,
         options_available=1_000_000,
@@ -453,9 +453,9 @@ def test_golden_9_ad_trigger_basis_override():
 
     r_ccp = solve(
         preferred_series=[{**series_template, "ad_trigger_basis": "current_conversion_price"}],
-        **base,
+        **base,  # type: ignore[arg-type]
     )
-    r_oip = solve(preferred_series=[series_template], **base)
+    r_oip = solve(preferred_series=[series_template], **base)  # type: ignore[arg-type]
 
     assert abs(r_ccp["equity_financing_price"] - 0.90) < 1e-5
     assert abs(r_oip["equity_financing_price"] - 0.90) < 1e-5
@@ -471,7 +471,7 @@ def test_golden_9_ad_trigger_basis_override():
 # ---------------------------------------------------------------------------
 # Golden 10 — CP2 floor enforcement.
 # ---------------------------------------------------------------------------
-def test_golden_10_cp2_floor_enforcement():
+def test_golden_10_cp2_floor_enforcement() -> None:
     r = solve(
         common_shares=10_000_000,
         preferred_series=[
@@ -503,7 +503,7 @@ def test_golden_10_cp2_floor_enforcement():
 # ---------------------------------------------------------------------------
 # Golden 11 — Stale-CCP guard fires.
 # ---------------------------------------------------------------------------
-def test_golden_11_stale_ccp_guard_fires():
+def test_golden_11_stale_ccp_guard_fires() -> None:
     r = solve(
         common_shares=10_000_000,
         preferred_series=[
@@ -537,7 +537,7 @@ def test_golden_11_stale_ccp_guard_fires():
 # ---------------------------------------------------------------------------
 # Golden 12 — Multi-series, different a_denominator_basis (broad vs narrow).
 # ---------------------------------------------------------------------------
-def test_golden_12_multi_series_different_a_basis():
+def test_golden_12_multi_series_different_a_basis() -> None:
     r = solve(
         common_shares=10_000_000,
         preferred_series=[
@@ -581,7 +581,7 @@ def test_golden_12_multi_series_different_a_basis():
 # ---------------------------------------------------------------------------
 # Golden 13 — anti_dilution_protection=none despite cap_table_history.
 # ---------------------------------------------------------------------------
-def test_golden_13_none_protection_despite_history():
+def test_golden_13_none_protection_despite_history() -> None:
     r = solve(
         common_shares=10_000_000,
         preferred_series=[
@@ -616,7 +616,7 @@ def test_golden_13_none_protection_despite_history():
 # ---------------------------------------------------------------------------
 # Golden 16 — Zero new_money (extension via SAFE only; AD essentially no-op).
 # ---------------------------------------------------------------------------
-def test_golden_16_zero_new_money_safe_only():
+def test_golden_16_zero_new_money_safe_only() -> None:
     r = solve(
         common_shares=10_000_000,
         preferred_series=[
@@ -641,7 +641,7 @@ def test_golden_16_zero_new_money_safe_only():
 # ---------------------------------------------------------------------------
 # Golden 17 — Boundary case new_pps == OIP. Strict `<` → no trigger.
 # ---------------------------------------------------------------------------
-def test_golden_17_boundary_new_pps_equals_oip():
+def test_golden_17_boundary_new_pps_equals_oip() -> None:
     r = solve(
         common_shares=10_000_000,
         preferred_series=[
