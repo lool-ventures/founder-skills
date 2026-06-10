@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib.util
 import re
 import sys
+import types
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -22,7 +23,7 @@ AGENT_MD = REPO_ROOT / "founder-skills" / "agents" / "financial-model-review.md"
 _RANGE_TOKEN = re.compile(r"\b([A-Z]+)_(\d+)\.\.(\d+)\b")
 
 
-def _load_checklist_module():
+def _load_checklist_module() -> types.ModuleType:
     path = FMR_DIR / "scripts" / "checklist.py"
     spec = importlib.util.spec_from_file_location("fmr_checklist_contract", path)
     assert spec is not None and spec.loader is not None

@@ -854,7 +854,7 @@ def test_checklist_no_model_format_backward_compat() -> None:
     assert "model_maturity_pct" in summary
 
 
-def test_checklist_dispatch_shape_propagates_run_id_and_gates(tmp_path: Any) -> None:
+def test_checklist_dispatch_shape_propagates_run_id_and_gates() -> None:
     """The exact shape the SKILL.md CHECKLIST dispatch returns must yield a
     checklist.json with metadata.run_id (Context B parity) and engaged
     profile auto-gating (regression: items-only payloads produced neither)."""
