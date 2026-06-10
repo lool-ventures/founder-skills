@@ -255,6 +255,8 @@ Route by input format. Each lane has a dedicated dispatch + validation protocol 
 
 **Verification stack** (Lane 1 and any other lane that piped through `extract_instrument.py`): forward `evidence_verifier.py` → `invariant_checker.py` → `cross_checker.py` → optional `backward_verifier.py`. All default-on; see the Lane 1 reference for the receipt schema, `attention_needed_fields` semantics, and when to run backward verification.
 
+**Field-name boundary — `id` vs `safe_id`:** When authoring or validating `instruments.json`, each SAFE object uses the field name **`id`** (e.g. `"id": "safe_seed_1"`). The field `safe_id` appears ONLY in `cap_state.json` output objects, where `cap_state.py` renames it for that artifact. Never write `safe_id` into `instruments.json`; the schema will reject it as an unknown key, and `cap_state.py` will raise `E_SAFE_MISSING_FIELD`.
+
 After Step 3 completes, `instruments.json` is committed and the run proceeds to Step 4.
 
 ### Step 4: Compute Cap State → `cap_state.json`
@@ -297,10 +299,14 @@ python3 "$SCRIPTS/quick_assess.py" \
   --pretty
 ```
 
+**`--safes` takes a BARE JSON ARRAY of SAFE objects** (not the `instruments.json` envelope). Write a file that starts with `[` — an array of SAFE instrument objects — not `{"safes": [...]}`.
+
 Inputs are built from the founder's conversational description via targeted `AskUserQuestion` calls (Lane 4 only — fast-assess does NOT invoke Lane-1/2/3 extractors). The script writes:
 
 - `${REVIEW_DIR}/fast_assess_only.json` — sentinel for downstream consumers
 - `${REVIEW_DIR}/report_fast_assess.md` — 1-page founder-facing markdown
+
+**Read `report_fast_assess.md` and present its numbers verbatim to the founder — never re-derive or reconstruct the ownership table in chat.** If you computed preliminary estimates while gathering inputs, discard them in favour of the script output. The script is the authoritative source; hand-reconstructed math will diverge from the fixed-point solver result.
 
 Total wall-clock: under 60 seconds. Then jump to **Step 12: Deliver Artifacts** with the fast-assess deliverable. Offer the founder a follow-up: "I gave you the directional answer — want the full review with counsel packet and interactive explorer?"
 

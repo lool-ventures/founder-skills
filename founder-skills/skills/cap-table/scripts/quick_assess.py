@@ -192,6 +192,11 @@ def quick_assess(
     md_lines.append(f"- Post-money valuation: {_money(pre_money + new_money)}")
     if target_pool_percent:
         md_lines.append(f"- Pool target: {target_pool_percent:.0%} ({target_basis.replace('_', ' ')})")
+    else:
+        md_lines.append(
+            "_No pool top-up modeled — seed investors typically require a 10–15% post-money "
+            "unallocated pool; re-run with a pool target to see that dilution._"
+        )
     md_lines.append("")
     md_lines.append("## Outstanding instruments")
     md_lines.append("")
@@ -267,8 +272,17 @@ def _cli() -> int:
         with open(args.notes) as f:
             notes = json.load(f)
 
+    # Accept both top-level and nested company_name; top-level wins.
+    company_name_raw = inputs.get("company_name") or inputs.get("company", {}).get("company_name")
+    if not company_name_raw:
+        print(
+            "Warning: company_name not found at top-level or under 'company.company_name'; using 'Unknown'.",
+            file=sys.stderr,
+        )
+        company_name_raw = "Unknown"
+
     sentinel = quick_assess(
-        company_name=inputs.get("company_name", "Unknown"),
+        company_name=company_name_raw,
         inputs=inputs,
         safes=safes,
         notes=notes,

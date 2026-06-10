@@ -261,34 +261,60 @@ def _build_outstanding_options(
 
 
 def _build_outstanding_safes(safes: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {
-            "safe_id": s["id"],
-            "investor_name": s.get("investor_name"),
-            "purchase_amount": s["purchase_amount"],
-            "issuance_date": s["issuance_date"],
-            "mfn_status": _derive_mfn_status(s),
-            "source_doc": s.get("source_document"),
-            "extraction_confidence": s.get("extraction_confidence"),
-        }
-        for s in safes
-    ]
+    out = []
+    for i, s in enumerate(safes):
+        investor = s.get("investor_name") or f"index {i}"
+        for field, hint in [
+            ("id", "add 'id' (a unique string key for this SAFE, e.g. 'safe_seed_1')"),
+            ("purchase_amount", "add 'purchase_amount' (the dollar amount invested, e.g. 500000)"),
+            ("issuance_date", "add 'issuance_date' (ISO date the SAFE was signed, e.g. '2024-01-15')"),
+        ]:
+            if field not in s:
+                raise CapStateInvariantError(
+                    f"E_SAFE_MISSING_FIELD: safes[{i}] (investor '{investor}') is missing required field "
+                    f"'{field}'. Remedy: {hint}."
+                )
+        out.append(
+            {
+                "safe_id": s["id"],
+                "investor_name": s.get("investor_name"),
+                "purchase_amount": s["purchase_amount"],
+                "issuance_date": s["issuance_date"],
+                "mfn_status": _derive_mfn_status(s),
+                "source_doc": s.get("source_document"),
+                "extraction_confidence": s.get("extraction_confidence"),
+            }
+        )
+    return out
 
 
 def _build_outstanding_notes(notes: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {
-            "note_id": n["id"],
-            "investor_name": n.get("investor_name"),
-            "principal": n["principal"],
-            "issuance_date": n["issuance_date"],
-            "subtype": n.get("subtype", "convertible_note"),
-            "governing_law": n.get("governing_law"),
-            "source_doc": n.get("source_document"),
-            "extraction_confidence": n.get("extraction_confidence"),
-        }
-        for n in notes
-    ]
+    out = []
+    for i, n in enumerate(notes):
+        investor = n.get("investor_name") or f"index {i}"
+        for field, hint in [
+            ("id", "add 'id' (a unique string key for this note, e.g. 'note_seed_1')"),
+            ("principal", "add 'principal' (the principal amount of the note, e.g. 250000)"),
+            ("issuance_date", "add 'issuance_date' (ISO date the note was issued, e.g. '2024-03-01')"),
+        ]:
+            if field not in n:
+                raise CapStateInvariantError(
+                    f"E_NOTE_MISSING_FIELD: notes[{i}] (investor '{investor}') is missing required field "
+                    f"'{field}'. Remedy: {hint}."
+                )
+        out.append(
+            {
+                "note_id": n["id"],
+                "investor_name": n.get("investor_name"),
+                "principal": n["principal"],
+                "issuance_date": n["issuance_date"],
+                "subtype": n.get("subtype", "convertible_note"),
+                "governing_law": n.get("governing_law"),
+                "source_doc": n.get("source_document"),
+                "extraction_confidence": n.get("extraction_confidence"),
+            }
+        )
+    return out
 
 
 def _build_outstanding_warrants(warrants: list[dict[str, Any]]) -> list[dict[str, Any]]:

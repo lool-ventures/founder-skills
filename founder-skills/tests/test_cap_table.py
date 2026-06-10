@@ -4529,3 +4529,486 @@ class TestPipelineE2E:
             assert "YC Post-Money SAFE Denominator" in md, "source_note title missing from report.md"
             assert "Option Pool Top-Up Basis" in md, "second source_note title missing from report.md"
             assert "## Source Notes" in md, "Source Notes section header missing"
+
+
+# ===========================================================================
+# Item 3 — Structured errors in cap_state._build_outstanding_safes / _notes
+# ===========================================================================
+
+
+class TestCapStateStructuredErrors:
+    """Missing required fields in SAFEs/notes yield CapStateInvariantError,
+    not raw KeyError, with the structured E_SAFE_MISSING_FIELD /
+    E_NOTE_MISSING_FIELD code embedded in the message."""
+
+    def _minimal_inputs(self) -> dict:
+        return {
+            "company_name": "TestCo",
+            "analysis_date": "2026-06-01",
+            "mode": "standard",
+            "jurisdiction": {
+                "structure": "delaware",
+                "incorporated_date": "2024-01-01",
+                "iia_grants_history": {"has_grants": False, "grant_details": []},
+            },
+            "founders": [{"name": "F", "founder_id": "f1", "common_shares": 10_000_000}],
+            "preferred_series": [],
+            "option_pool": {"plan_type": "iso", "authorized": 0, "issued": 0, "unallocated": 0},
+            "common_batches": [],
+            "metadata": {"run_id": "test"},
+        }
+
+    def test_safe_missing_id_raises_structured(self) -> None:
+        """SAFE missing 'id' → E_SAFE_MISSING_FIELD, not KeyError."""
+        instruments = {
+            "safes": [
+                {
+                    # 'id' intentionally absent
+                    "investor_name": "Angel Missing",
+                    "purchase_amount": 100_000,
+                    "issuance_date": "2024-01-01",
+                    "form": "yc_postmoney_cap",
+                    "post_money_valuation_cap": 5_000_000,
+                }
+            ],
+            "convertible_notes": [],
+            "warrants": [],
+            "option_grants": [],
+            "metadata": {"run_id": "test"},
+        }
+        with pytest.raises(cap_state_mod.CapStateInvariantError) as exc_info:
+            cap_state_mod.build_cap_state(self._minimal_inputs(), instruments)
+        msg = str(exc_info.value)
+        assert "E_SAFE_MISSING_FIELD" in msg, f"Expected E_SAFE_MISSING_FIELD in: {msg}"
+        assert "'id'" in msg, f"Expected field name 'id' in: {msg}"
+        assert "index 0" in msg or "safes[0]" in msg, f"Expected index in: {msg}"
+
+    def test_safe_missing_issuance_date_raises_structured(self) -> None:
+        """SAFE missing 'issuance_date' → E_SAFE_MISSING_FIELD with remediation hint."""
+        instruments = {
+            "safes": [
+                {
+                    "id": "safe_x",
+                    "investor_name": "Angel Date",
+                    "purchase_amount": 200_000,
+                    # 'issuance_date' intentionally absent
+                    "form": "yc_postmoney_cap",
+                    "post_money_valuation_cap": 5_000_000,
+                }
+            ],
+            "convertible_notes": [],
+            "warrants": [],
+            "option_grants": [],
+            "metadata": {"run_id": "test"},
+        }
+        with pytest.raises(cap_state_mod.CapStateInvariantError) as exc_info:
+            cap_state_mod.build_cap_state(self._minimal_inputs(), instruments)
+        msg = str(exc_info.value)
+        assert "E_SAFE_MISSING_FIELD" in msg
+        assert "'issuance_date'" in msg or "issuance_date" in msg
+
+    def test_note_missing_id_raises_structured(self) -> None:
+        """Note missing 'id' → E_NOTE_MISSING_FIELD, not KeyError."""
+        instruments = {
+            "safes": [],
+            "convertible_notes": [
+                {
+                    # 'id' intentionally absent
+                    "investor_name": "Lender Missing",
+                    "principal": 50_000,
+                    "issuance_date": "2024-06-01",
+                    "annual_interest_rate": 0.06,
+                    "day_count_basis": 365,
+                    "maturity_date": "2026-06-01",
+                    "maturity_default_treatment": "convert_at_cap",
+                }
+            ],
+            "warrants": [],
+            "option_grants": [],
+            "metadata": {"run_id": "test"},
+        }
+        with pytest.raises(cap_state_mod.CapStateInvariantError) as exc_info:
+            cap_state_mod.build_cap_state(self._minimal_inputs(), instruments)
+        msg = str(exc_info.value)
+        assert "E_NOTE_MISSING_FIELD" in msg, f"Expected E_NOTE_MISSING_FIELD in: {msg}"
+        assert "'id'" in msg
+
+    def test_note_missing_issuance_date_raises_structured(self) -> None:
+        """Note missing 'issuance_date' → E_NOTE_MISSING_FIELD."""
+        instruments = {
+            "safes": [],
+            "convertible_notes": [
+                {
+                    "id": "note_x",
+                    "investor_name": "Lender Date",
+                    "principal": 75_000,
+                    # 'issuance_date' intentionally absent
+                    "annual_interest_rate": 0.06,
+                    "day_count_basis": 365,
+                    "maturity_date": "2026-06-01",
+                    "maturity_default_treatment": "convert_at_cap",
+                }
+            ],
+            "warrants": [],
+            "option_grants": [],
+            "metadata": {"run_id": "test"},
+        }
+        with pytest.raises(cap_state_mod.CapStateInvariantError) as exc_info:
+            cap_state_mod.build_cap_state(self._minimal_inputs(), instruments)
+        msg = str(exc_info.value)
+        assert "E_NOTE_MISSING_FIELD" in msg
+        assert "issuance_date" in msg
+
+
+# ===========================================================================
+# Item 4 — Unknown SAFE form → E_UNKNOWN_SAFE_FORM blocker
+# ===========================================================================
+
+
+class TestUnknownSafeForm:
+    """A SAFE with an unrecognised form value surfaces E_UNKNOWN_SAFE_FORM
+    in both the per_safe dict and the solver's top-level blockers list,
+    and completeness is NOT 'full'."""
+
+    _CAP_STATE = {
+        "founders": [{"name": "F", "common_shares": 10_000_000}],
+        "preferred_series": [],
+        "as_converted_totals": {
+            "common_shares": 10_000_000,
+            "preferred_shares_as_converted": 0,
+            "options_outstanding": 0,
+            "options_available": 1_000_000,
+            "fully_diluted_shares": 11_000_000,
+        },
+        "option_pool": {
+            "plan_type": "iso",
+            "authorized": 1_000_000,
+            "issued_and_outstanding": 0,
+            "available_for_grant": 1_000_000,
+        },
+    }
+
+    def test_bogus_form_surfaces_e_unknown_safe_form(self) -> None:
+        """SAFE with form='bogus' → E_UNKNOWN_SAFE_FORM in blockers + not 'full'."""
+        bogus_safe = {
+            "id": "safe_bogus",
+            "investor_name": "Angel Typo",
+            "purchase_amount": 250_000,
+            "form": "bogus",
+            "post_money_valuation_cap": 5_000_000,
+            "pre_money_valuation_cap": None,
+            "discount_multiplier": None,
+        }
+        r = priced_round.solve_priced_round(
+            cap_state=self._CAP_STATE,
+            safes=[bogus_safe],
+            notes=[],
+            pre_money=5_000_000.0,
+            new_money=3_000_000.0,
+        )
+        assert r["completeness"] != "full", "completeness must not be 'full' with an unknown form"
+        codes = [b["code"] for b in r.get("blockers", [])]
+        assert "E_UNKNOWN_SAFE_FORM" in codes, f"Expected E_UNKNOWN_SAFE_FORM in blockers; got: {codes}"
+        # The per_safe dict also carries the error
+        ps = r["per_safe"]["safe_bogus"]
+        assert ps.get("error") == "E_UNKNOWN_SAFE_FORM"
+        # The remedy message should name the valid forms
+        blocker = next(b for b in r["blockers"] if b["code"] == "E_UNKNOWN_SAFE_FORM")
+        remedy = blocker.get("remedy", "")
+        assert "yc_postmoney_cap" in remedy, f"Valid forms not listed in remedy: {remedy}"
+
+    def test_valid_form_does_not_trigger_e_unknown_safe_form(self) -> None:
+        """Sanity check: a known form does NOT produce E_UNKNOWN_SAFE_FORM."""
+        good_safe = {
+            "id": "safe_good",
+            "investor_name": "Angel Good",
+            "purchase_amount": 250_000,
+            "form": "yc_postmoney_cap",
+            "post_money_valuation_cap": 5_000_000,
+            "pre_money_valuation_cap": None,
+            "discount_multiplier": None,
+        }
+        r = priced_round.solve_priced_round(
+            cap_state=self._CAP_STATE,
+            safes=[good_safe],
+            notes=[],
+            pre_money=5_000_000.0,
+            new_money=3_000_000.0,
+        )
+        codes = [b["code"] for b in r.get("blockers", [])]
+        assert "E_UNKNOWN_SAFE_FORM" not in codes
+
+
+# ===========================================================================
+# Item 5 — quick_assess.py UX: no-pool note + nested company_name
+# ===========================================================================
+
+
+class TestQuickAssessUX:
+    """Tests for fast-assess UX improvements:
+    5a. no-pool note appears when --target-pool-percent absent;
+    5b. nested company_name fallback."""
+
+    _INPUTS = {
+        "company_name": "Foobar",
+        "analysis_date": "2026-06-01",
+        "mode": "standard",
+        "jurisdiction": {
+            "structure": "delaware",
+            "incorporated_date": "2024-01-01",
+            "iia_grants_history": {"has_grants": False, "grant_details": []},
+        },
+        "founders": [{"name": "F", "founder_id": "f1", "common_shares": 10_000_000}],
+        "preferred_series": [],
+        "option_pool": {"plan_type": "iso", "authorized": 0, "issued": 0, "unallocated": 0},
+        "common_batches": [],
+        "metadata": {"run_id": "test"},
+    }
+
+    _SAFE = {
+        "id": "safe_1",
+        "investor_name": "Angel A",
+        "purchase_amount": 500_000,
+        "issuance_date": "2025-01-01",
+        "form": "yc_postmoney_cap",
+        "post_money_valuation_cap": 10_000_000,
+        "pre_money_valuation_cap": None,
+        "discount_multiplier": None,
+    }
+
+    def test_no_pool_note_present_when_flag_absent(self) -> None:
+        """When target_pool_percent is None, report must contain the pool note."""
+        import quick_assess as qa  # type: ignore[import-not-found]
+
+        sentinel = qa.quick_assess(
+            company_name="Foobar",
+            inputs=self._INPUTS,
+            safes=[self._SAFE],
+            notes=[],
+            pre_money=5_000_000.0,
+            new_money=3_000_000.0,
+            target_pool_percent=None,  # <-- no pool
+            target_basis="post_money",
+        )
+        report_md = sentinel.pop("_report_md")
+        assert "No pool top-up modeled" in report_md, "Expected pool note in report when target_pool_percent is absent"
+
+    def test_no_pool_note_absent_when_pool_present(self) -> None:
+        """When target_pool_percent is provided, the pool note must NOT appear."""
+        import quick_assess as qa  # type: ignore[import-not-found]
+
+        sentinel = qa.quick_assess(
+            company_name="Foobar",
+            inputs=self._INPUTS,
+            safes=[self._SAFE],
+            notes=[],
+            pre_money=5_000_000.0,
+            new_money=3_000_000.0,
+            target_pool_percent=0.10,  # <-- pool provided
+            target_basis="post_money",
+        )
+        report_md = sentinel.pop("_report_md")
+        assert "No pool top-up modeled" not in report_md, "Pool note must not appear when target_pool_percent is set"
+
+    def test_nested_company_name_fallback(self) -> None:
+        """When top-level company_name absent, nested company.company_name is used."""
+        import tempfile
+
+        inputs_nested = dict(self._INPUTS)
+        del inputs_nested["company_name"]
+        inputs_nested["company"] = {"company_name": "NestedCo"}
+
+        with tempfile.TemporaryDirectory() as d:
+            inputs_path = os.path.join(d, "inputs.json")
+            safes_path = os.path.join(d, "safes.json")
+            with open(inputs_path, "w") as f:
+                json.dump(inputs_nested, f)
+            with open(safes_path, "w") as f:
+                json.dump([self._SAFE], f)
+
+            rc, stdout, stderr = _run(
+                "quick_assess.py",
+                [
+                    "--inputs",
+                    inputs_path,
+                    "--safes",
+                    safes_path,
+                    "--pre-money",
+                    "5000000",
+                    "--new-money",
+                    "3000000",
+                    "--review-dir",
+                    d,
+                    "--pretty",
+                ],
+            )
+            assert rc == 0, f"quick_assess.py failed: {stderr}"
+            receipt = json.loads(stdout)
+            md_path = receipt["wrote"]["fast_assess_report_md"]
+            with open(md_path) as f:
+                md = f.read()
+            # company_name from nested path must appear in the report
+            assert "NestedCo" in md, f"Expected 'NestedCo' in report; got: {md[:500]}"
+
+
+# ===========================================================================
+# Item 2 — Quantitative AD + SAFE golden (test_golden_4 extension)
+# ===========================================================================
+
+
+class TestGolden4ADPlusSAFEQuantitative:
+    """Quantitative extension of test_golden_4_ad_plus_safe_conversion.
+
+    Derivation of the closed-form fixed point:
+    ----------------------------------------
+    Inputs:
+      founders:  10 M common shares
+      Series Seed:  2 M shares, OIP = OCP = CCP = $1.00, BBWA broad
+      option pool available:  1 M shares
+      SAFE:  $500k purchase @ $10M post-money cap (yc_postmoney_cap)
+      pre_money = $5M, new_money = $5M
+
+    The YC post-money SAFE identity:
+      SAFE shares = purchase_amount / safe_price
+      safe_price  = post_money_cap / company_capitalization
+      => SAFE ownership = purchase_amount / post_money_cap = 500k / 10M = 5%
+    This is a CONSTANT — it does not depend on the solver iteration. The
+    SAFE holder always owns exactly purchase/cap of "Company Capitalization",
+    regardless of how the AD loop resolves.
+
+    Therefore:
+      safe_shares / company_capitalization == purchase / cap
+        <=> safe_shares / company_cap == 0.05  (the YC identity)
+
+    For the BBWA CP2 derivation, safe_shares are carved out of the new-money
+    consideration (NVCA default). The AD trigger fires because new PPS < OIP.
+    The BD[B] term uses new_money only:
+      B = new_money / CP1 = 5_000_000 / 1.00 = 5_000_000 shares
+
+    The full closed-form fixed point is intractable here (coupled SAFE + BBWA
+    is a quadratic in safe_shares that depends on the AD-adjusted FD), so we
+    pin the verifiable identity and direction-of-effect assertions:
+
+    (a) YC identity: safe_shares / company_cap == 0.05
+    (b) Ownership sum to 1
+    (c) AD adjustment direction: founder_pct_post_AD < founder_pct_pre_AD
+    (d) B term = new_money / CP1 (SAFE carved out)
+    (e) Sanity pin on PPS (pre-money / pre_FD ≈ 5M / 13M; actual is less due
+        to SAFE + AD expansion of denominator)
+    """
+
+    _SAFE = {
+        "id": "safe_a",
+        "investor_name": "Angel A",
+        "purchase_amount": 500_000.0,
+        "form": "yc_postmoney_cap",
+        "post_money_valuation_cap": 10_000_000.0,
+        "pre_money_valuation_cap": None,
+        "discount_multiplier": None,
+    }
+
+    def _run(self) -> dict[str, Any]:
+        cap_state = {
+            "founders": [{"name": "Founder A", "common_shares": 10_000_000}],
+            "preferred_series": [
+                {
+                    "series_id": "series_seed",
+                    "shares": 2_000_000,
+                    "original_issue_price": 1.00,
+                    "original_conversion_price": 1.00,
+                    "current_conversion_price": 1.00,
+                    "anti_dilution_protection": "broad_based_weighted_average",
+                }
+            ],
+            "as_converted_totals": {
+                "common_shares": 10_000_000,
+                "preferred_shares_as_converted": 2_000_000,
+                "options_outstanding": 0,
+                "options_available": 1_000_000,
+                "fully_diluted_shares": 13_000_000,
+            },
+            "option_pool": {
+                "plan_type": "iso",
+                "authorized": 1_000_000,
+                "issued_and_outstanding": 0,
+                "available_for_grant": 1_000_000,
+            },
+        }
+        result: dict[str, Any] = priced_round.solve_priced_round(  # type: ignore[assignment]
+            cap_state=cap_state,
+            safes=[self._SAFE],
+            notes=[],
+            pre_money=5_000_000.0,
+            new_money=5_000_000.0,
+        )
+        return result
+
+    def test_converges(self) -> None:
+        r = self._run()
+        assert r["converged"], f"solver did not converge: {r.get('blockers')}"
+
+    def test_yc_safe_identity_purchase_over_cap(self) -> None:
+        """(a) YC post-money identity: safe_shares / company_cap == purchase / cap.
+
+        This is the load-bearing invariant for YC post-money SAFEs regardless
+        of how the AD fixed point resolves.  company_capitalization is the
+        adj_pre_fd at the converged price which equals
+        (pre_money / pps) — the converged Company Capitalization denominator
+        that the solver produces.
+        """
+        import math as _math
+
+        r = self._run()
+        assert r["completeness"] == "full", f"blockers: {r.get('blockers')}"
+
+        pps = r["equity_financing_price"]
+        # At convergence, company_capitalization = pre_money / pps
+        company_cap = 5_000_000.0 / pps
+        safe_shares = r["shares_breakdown"]["safe_converted"]
+        # YC identity: safe_shares / company_cap == purchase / cap
+        expected_ratio = 500_000.0 / 10_000_000.0  # = 0.05 exactly
+        actual_ratio = safe_shares / company_cap
+        assert _math.isclose(actual_ratio, expected_ratio, rel_tol=1e-4), (
+            f"YC identity failed: safe_shares/company_cap={actual_ratio:.6f}, "
+            f"expected purchase/cap={expected_ratio:.6f}"
+        )
+
+    def test_ownership_sums_to_one(self) -> None:
+        """(b) Aggregate ownership must sum to 1 (within floating-point tolerance)."""
+        import math as _math
+
+        r = self._run()
+        agg = r["aggregate_ownership_by_class"]
+        total = (
+            agg["founders_pct"] + agg["safe_pct"] + agg["preferred_pct"] + agg["option_pool_pct"] + agg["new_money_pct"]
+        )
+        assert _math.isclose(total, 1.0, abs_tol=1e-5), f"Ownership does not sum to 1: {total:.8f} (components: {agg})"
+
+    def test_ad_reduces_founder_pct(self) -> None:
+        """(c) AD adjustment direction: founder_pct post-AD < pre-AD."""
+        r = self._run()
+        agg = r["aggregate_ownership_by_class"]
+        assert "founders_pct_pre_anti_dilution" in agg, "founders_pct_pre_anti_dilution must be present when AD fires"
+        assert agg["founders_pct"] < agg["founders_pct_pre_anti_dilution"], (
+            f"AD should reduce founder pct: post={agg['founders_pct']:.5f} "
+            f"pre={agg['founders_pct_pre_anti_dilution']:.5f}"
+        )
+
+    def test_bbwa_b_term_uses_new_money_only(self) -> None:
+        """(d) BBWA B term = new_money / CP1 (SAFE carved out per NVCA default)."""
+        import math as _math
+
+        r = self._run()
+        bd = r["anti_dilution_breakdown"][0]
+        # B = consideration / CP1; consideration = new_money only (SAFE carved out)
+        # new_money = 5_000_000; CP1 = 1.00 => B = 5_000_000
+        assert _math.isclose(bd["B"], 5_000_000.0, abs_tol=1.0), (
+            f"B term {bd['B']} != 5_000_000 (new_money/CP1 with SAFE carved out)"
+        )
+
+    def test_pps_below_oip(self) -> None:
+        """(e) PPS must be below OIP=$1.00 (this is a down round — AD trigger fires)."""
+        r = self._run()
+        assert r["equity_financing_price"] < 1.00, (
+            f"PPS {r['equity_financing_price']} is not below OIP=1.00; AD should fire"
+        )

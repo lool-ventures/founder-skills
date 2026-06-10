@@ -961,3 +961,59 @@ def test_init_generates_run_id_when_not_provided(tmp_path: pathlib.Path) -> None
     with open(os.path.join(artifacts_root, "founder-context-acme.json")) as f:
         ctx = json.load(f)
     assert re.match(r"^\d{8}T\d{6}Z$", ctx["metadata"]["run_id"])
+
+
+# ---------------------------------------------------------------------------
+# Item 6 — sector_type warning lists valid values + warnings array in JSON
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_sector_type_stderr_lists_valid_values() -> None:
+    """When sector_type can't be derived, stderr includes the list of valid values."""
+    with tempfile.TemporaryDirectory(prefix="test-ctx-") as root:
+        rc, data, stderr = run_context(
+            [
+                "init",
+                "--company-name",
+                "WeirdCo",
+                "--stage",
+                "seed",
+                "--sector",
+                "Quantum Astrology Plus",
+                "--geography",
+                "US",
+            ],
+            artifacts_root=root,
+        )
+        assert rc == 0
+        # stderr must list at least one canonical sector type
+        assert "saas" in stderr, f"Expected 'saas' in stderr; got: {stderr!r}"
+        assert "ai-native" in stderr, f"Expected 'ai-native' in stderr; got: {stderr!r}"
+
+
+def test_unknown_sector_type_warnings_in_json() -> None:
+    """When sector_type can't be derived, JSON output carries a warnings[] entry."""
+    with tempfile.TemporaryDirectory(prefix="test-ctx-") as root:
+        rc, data, stderr = run_context(
+            [
+                "init",
+                "--company-name",
+                "WeirdCo",
+                "--stage",
+                "seed",
+                "--sector",
+                "Quantum Astrology Plus",
+                "--geography",
+                "US",
+            ],
+            artifacts_root=root,
+        )
+        assert rc == 0
+        assert data is not None
+        warnings = data.get("warnings", [])
+        assert len(warnings) > 0, "Expected at least one warning in JSON output"
+        codes = [w.get("code") for w in warnings]
+        assert "W_SECTOR_TYPE_UNKNOWN" in codes, f"Expected W_SECTOR_TYPE_UNKNOWN; got codes: {codes}"
+        # The warning message should also list valid values
+        msg = next(w["message"] for w in warnings if w.get("code") == "W_SECTOR_TYPE_UNKNOWN")
+        assert "saas" in msg, f"Valid values not in warning message: {msg}"

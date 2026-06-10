@@ -177,8 +177,11 @@ def _derive_sector_type(sector: str) -> str | None:
             return canonical
 
     # 4. No match
+    valid_list = sorted(CANONICAL_SECTOR_TYPES)
     print(
-        f"Warning: could not derive sector_type from '{sector}'; set explicitly with --sector-type",
+        f"Warning: could not derive sector_type from '{sector}'; "
+        f"valid sector_type values: {valid_list}. "
+        f"Set explicitly with --sector-type.",
         file=sys.stderr,
     )
     return None
@@ -330,7 +333,20 @@ def cmd_init(args: argparse.Namespace) -> None:
     if hasattr(args, "sector_type") and args.sector_type:
         context["sector_type"] = args.sector_type
     else:
-        context["sector_type"] = _derive_sector_type(args.sector)
+        derived = _derive_sector_type(args.sector)
+        context["sector_type"] = derived
+        if derived is None:
+            valid_list = sorted(CANONICAL_SECTOR_TYPES)
+            context.setdefault("warnings", []).append(
+                {
+                    "code": "W_SECTOR_TYPE_UNKNOWN",
+                    "message": (
+                        f"could not derive sector_type from '{args.sector}'. "
+                        f"Valid sector_type values: {valid_list}. "
+                        f"Re-run with --sector-type to set explicitly."
+                    ),
+                }
+            )
 
     path = _context_path(artifacts_root, slug)
     with open(path, "w", encoding="utf-8") as f:
@@ -503,8 +519,32 @@ def cmd_update_identity(args: argparse.Namespace) -> None:
         # Re-derive sector_type
         if hasattr(args, "sector_type") and args.sector_type:
             context["sector_type"] = args.sector_type
+            # Clear any prior sector_type warning now that it's resolved
+            context["warnings"] = [w for w in context.get("warnings", []) if w.get("code") != "W_SECTOR_TYPE_UNKNOWN"]
         else:
-            context["sector_type"] = _derive_sector_type(args.sector)
+            derived = _derive_sector_type(args.sector)
+            context["sector_type"] = derived
+            if derived is None:
+                valid_list = sorted(CANONICAL_SECTOR_TYPES)
+                # Replace any prior sector_type warning
+                context["warnings"] = [
+                    w for w in context.get("warnings", []) if w.get("code") != "W_SECTOR_TYPE_UNKNOWN"
+                ]
+                context["warnings"].append(
+                    {
+                        "code": "W_SECTOR_TYPE_UNKNOWN",
+                        "message": (
+                            f"could not derive sector_type from '{args.sector}'. "
+                            f"Valid sector_type values: {valid_list}. "
+                            f"Re-run with --sector-type to set explicitly."
+                        ),
+                    }
+                )
+            else:
+                # Resolved — clear prior warning if present
+                context["warnings"] = [
+                    w for w in context.get("warnings", []) if w.get("code") != "W_SECTOR_TYPE_UNKNOWN"
+                ]
 
     if args.stage:
         context["stage"] = args.stage

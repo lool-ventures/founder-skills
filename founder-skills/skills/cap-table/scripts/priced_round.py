@@ -662,9 +662,7 @@ def solve_priced_round(
 
         # === Stage 3: size_round (Pool + NewMoney) ===
         # NewMoneyAdjuster: this iteration's INPUT PPS basis. The orchestrator's
-        # post-loop block (~line 760) overwrites with the CONVERGED PPS basis.
-        # The inner write feeds total_fd_estimate's bookkeeping for the NEXT
-        # iter's SAFE math; the outer post-loop write drives the final output.
+        # post-loop block overwrites with the CONVERGED PPS basis.
         # Both are correct in their context.
         new_money_shares = new_money / price if price > 0 else 0.0
         pool_topup_shares = 0.0
@@ -838,16 +836,35 @@ def solve_priced_round(
         aggregate["preferred_pct_pre_anti_dilution"] = preferred_pct_pre_ad
         aggregate["anti_dilution_delta_pct_points"] = (aggregate["founders_pct"] - founder_pct_pre_ad) * 100
 
-    # Determine scenario completeness
-    rejected_safes = [s for s, r in per_safe.items() if r.get("branch") == "rejected"]
+    # Determine scenario completeness — bucket rejected SAFEs by error code so
+    # E_UNKNOWN_SAFE_FORM surfaces a clear blocker (not the generic fallback).
+    rejected_safes = {s: r for s, r in per_safe.items() if r.get("branch") == "rejected"}
     if rejected_safes:
-        blockers.append(
-            {
-                "code": "E_SAFE_REQUIRES_CONVERSION_EVENT",
-                "instance_id": ",".join(rejected_safes),
-                "remedy": "One or more SAFEs could not resolve to a conversion price; check forms + inputs.",
-            }
-        )
+        # Group by error code; emit one blocker per code so each has a clear remedy.
+        from collections import defaultdict  # noqa: PLC0415 (local import to avoid top-level dep)
+
+        by_code: dict[str, list[str]] = defaultdict(list)
+        for sid, rr in rejected_safes.items():
+            by_code[rr.get("error", "E_SAFE_REQUIRES_CONVERSION_EVENT")].append(sid)
+        for code, ids in by_code.items():
+            if code == "E_UNKNOWN_SAFE_FORM":
+                # Include the per-SAFE reason (first one) for the valid-forms hint.
+                sample_reason = per_safe[ids[0]].get("reason", "")
+                blockers.append(
+                    {
+                        "code": "E_UNKNOWN_SAFE_FORM",
+                        "instance_id": ",".join(ids),
+                        "remedy": sample_reason,
+                    }
+                )
+            else:
+                blockers.append(
+                    {
+                        "code": code,
+                        "instance_id": ",".join(ids),
+                        "remedy": "One or more SAFEs could not resolve to a conversion price; check forms + inputs.",
+                    }
+                )
 
     completeness = "full" if not blockers else "structural_only"
 

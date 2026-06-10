@@ -44,6 +44,7 @@ RULE_PACK_VERSION = "0.4.0"
 E_SAFE_REQUIRES_CONVERSION_EVENT = "E_SAFE_REQUIRES_CONVERSION_EVENT"
 E_SAFE_CAP_MISSING_DENOMINATOR = "E_SAFE_CAP_MISSING_DENOMINATOR"
 E_SAFE_CIRCULAR_MFN = "E_SAFE_CIRCULAR_MFN"
+E_UNKNOWN_SAFE_FORM = "E_UNKNOWN_SAFE_FORM"
 
 
 def convert_safe_cap_implied(
@@ -167,6 +168,23 @@ def convert_safe_priced_round(
     function (yc_uncapped_mfn with a trigger should be re-presented as if
     it were the triggering SAFE's form).
     """
+    # Unknown form — emit a structured blocker BEFORE any other logic so the
+    # caller sees exactly what value was rejected and what values are valid.
+    _all_valid_forms = POST_MONEY_FORMS | PRE_MONEY_FORMS
+    if form not in _all_valid_forms:
+        _sorted_valid = sorted(_all_valid_forms)
+        return {
+            "branch": "rejected",
+            "error": E_UNKNOWN_SAFE_FORM,
+            "reason": (
+                f"form={form!r} is not a recognised SAFE form. "
+                f"Valid values: {_sorted_valid}. "
+                f"Check instruments.json safes[].form and correct the typo or "
+                f"map to the nearest canonical form before re-running."
+            ),
+            "valid_forms": _sorted_valid,
+        }
+
     # Override branch — counsel-supplied price; bypass rule
     if conversion_price_override is not None:
         if conversion_price_override <= 0:
