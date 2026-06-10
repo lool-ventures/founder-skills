@@ -23,6 +23,7 @@ import argparse
 import contextlib
 import copy
 import hashlib
+import html as _html
 import json
 import os
 import signal
@@ -1504,11 +1505,17 @@ init();
 # ---------------------------------------------------------------------------
 
 
+def _embed_json(data: Any, **dumps_kwargs: Any) -> str:
+    """JSON-encode for safe embedding inside a <script> block: escape '<' so a
+    string containing '</script>' cannot terminate the block (XSS/breakage)."""
+    return json.dumps(data, **dumps_kwargs).replace("<", "\\u003c")
+
+
 def _build_html(inputs: dict[str, Any], extraction_warnings: dict[str, Any] | None = None) -> str:
     """Inject embedded data into the HTML template."""
     canonical = json.dumps(inputs, sort_keys=True, separators=(",", ":"))
     base_hash = "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
-    data_js = f"const DATA = {json.dumps(inputs)};\nconst BASE_HASH = {json.dumps(base_hash)};"
+    data_js = f"const DATA = {_embed_json(inputs)};\nconst BASE_HASH = {json.dumps(base_hash)};"
     html = _HTML_TEMPLATE.replace("/*__EMBEDDED_DATA__*/", data_js)
 
     # Inject extraction warnings banner above the warnings container
@@ -1528,19 +1535,20 @@ def _extraction_warnings_html(ew: dict[str, Any]) -> str:
 
     cards: list[str] = []
     for w in warns:
-        msg = w.get("message", "")
+        msg = _html.escape(str(w.get("message", "")))
         detail = ""
         if w.get("candidates"):
             detail = (
-                f' <span style="color:#6b7280;font-size:0.8rem">(candidates: {", ".join(w["candidates"][:3])})</span>'
+                f' <span style="color:#6b7280;font-size:0.8rem">'
+                f"(candidates: {', '.join(_html.escape(str(c)) for c in w['candidates'][:3])})</span>"
             )
         if w.get("untraceable"):
             items = w["untraceable"]
             if w["id"] == "SALARY_TRACEABILITY":
-                names = [u.get("role", "?") for u in items]
+                names = [_html.escape(str(u.get("role", "?"))) for u in items]
                 detail = f' <span style="color:#6b7280;font-size:0.8rem">({", ".join(names)})</span>'
             elif w["id"] == "REVENUE_TRACEABILITY":
-                names = [u.get("field", "?") for u in items]
+                names = [_html.escape(str(u.get("field", "?"))) for u in items]
                 detail = f' <span style="color:#6b7280;font-size:0.8rem">({", ".join(names)})</span>'
         cards.append(
             f'<div class="extraction-warn-card" style="background:#fef2f2;border-left:4px solid #ef4444;'

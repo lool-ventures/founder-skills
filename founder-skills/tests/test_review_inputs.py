@@ -397,6 +397,45 @@ class TestExtractionWarningsStatic:
 
 
 # ---------------------------------------------------------------------------
+# XSS / HTML-injection safety tests
+# ---------------------------------------------------------------------------
+
+_XSS_NAME = "</script><script>alert(1)</script>"
+
+
+class TestScriptEmbedEscaping:
+    def test_embedded_data_escapes_script_close(self) -> None:
+        """A company name containing </script> must not terminate the data
+        <script> block (page breakage at best, XSS at worst)."""
+        inputs = json.loads(json.dumps(_FULL_INPUTS))
+        inputs["company"]["company_name"] = _XSS_NAME
+        rc, html, _ = _generate_static(inputs)
+        assert rc == 0
+        assert "</script><script>alert(1)" not in html
+        assert "\\u003c/script" in html
+
+    def test_extraction_warning_fields_html_escaped(self) -> None:
+        """candidates / untraceable role strings come verbatim from the
+        founder's spreadsheet — they must be HTML-escaped in the warnings
+        banner."""
+        ew: dict[str, Any] = {
+            "status": "warn",
+            "checks": [
+                {
+                    "id": "SALARY_TRACEABILITY",
+                    "status": "warn",
+                    "message": "salary not traceable",
+                    "untraceable": [{"role": "<img src=x onerror=alert(1)>"}],
+                }
+            ],
+        }
+        rc, html, _ = _generate_static_with_ew(_FULL_INPUTS, ew)
+        assert rc == 0
+        assert "<img src=x" not in html
+        assert "&lt;img src=x" in html
+
+
+# ---------------------------------------------------------------------------
 # Extraction Warning Tests — Server Mode
 # ---------------------------------------------------------------------------
 

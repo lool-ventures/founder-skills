@@ -102,6 +102,12 @@ def _esc(text: Any) -> str:
     return html.escape(str(text), quote=True)
 
 
+def _embed_json(data: Any, **dumps_kwargs: Any) -> str:
+    """JSON-encode for safe embedding inside a <script> block: escape '<' so a
+    string containing '</script>' cannot terminate the block (XSS/breakage)."""
+    return json.dumps(data, **dumps_kwargs).replace("<", "\\u003c")
+
+
 # ---------------------------------------------------------------------------
 # Commentary loading
 # ---------------------------------------------------------------------------
@@ -394,7 +400,7 @@ def _generate_html(data: dict[str, Any]) -> str:
 
     # Remove internal field before embedding
     data_for_embed = {k: v for k, v in data.items() if not k.startswith("_")}
-    data_json = json.dumps(data_for_embed, indent=2, default=str)
+    data_json = _embed_json(data_for_embed, indent=2, default=str)
 
     company_name = _esc(data.get("company", {}).get("name", ""))
     stage = _esc(data.get("company", {}).get("stage", ""))
@@ -1013,16 +1019,21 @@ function makeSlider(opts) {{
   return div;
 }}
 
+function escHtml(s) {{
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}}
+
 function commentaryBox(lensKey) {{
   if (!DATA.commentary || !DATA.commentary.lenses) return '';
   var c = DATA.commentary.lenses[lensKey];
   if (!c) return '';
   var parts = [];
-  if (c.callout) parts.push('<div class="commentary-box">' + c.callout + '</div>');
+  if (c.callout) parts.push('<div class="commentary-box">' + escHtml(c.callout) + '</div>');
   if (c.highlight) parts.push('<div class="commentary-box"'
-    + ' style="border-color:#86868b;background:#f9f9fb">' + c.highlight + '</div>');
+    + ' style="border-color:#86868b;background:#f9f9fb">' + escHtml(c.highlight) + '</div>');
   if (c.watch_out) parts.push('<div class="commentary-box"'
-    + ' style="border-color:#f59e0b;background:#fffbeb">' + c.watch_out + '</div>');
+    + ' style="border-color:#f59e0b;background:#fffbeb">' + escHtml(c.watch_out) + '</div>');
   return parts.join('');
 }}
 

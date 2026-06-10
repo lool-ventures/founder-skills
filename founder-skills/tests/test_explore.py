@@ -819,3 +819,35 @@ def test_stress_chart_replaces_old_charts() -> None:
     assert "function renderStressChart" in html
     assert "chart-stress" in html
     assert "charts.stress" in html
+
+
+# ---------------------------------------------------------------------------
+# XSS / HTML-injection safety tests
+# ---------------------------------------------------------------------------
+
+_XSS_NAME = "</script><script>alert(1)</script>"
+
+
+def test_explorer_embedded_data_escapes_script_close() -> None:
+    """A company name containing </script> must not terminate the data
+    <script> block (page breakage at best, XSS at worst)."""
+    # Poison inputs.json company name; it flows into data_for_embed["company"]["name"]
+    xss_inputs = json.loads(json.dumps(_VALID_INPUTS))
+    xss_inputs["company"]["company_name"] = _XSS_NAME
+    d = _make_artifact_dir(overrides={"inputs.json": xss_inputs})
+    rc, html, _ = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    assert "</script><script>alert(1)" not in html
+    assert "\\u003c/script" in html
+
+
+def test_explorer_commentary_rendered_via_escape_helper() -> None:
+    """commentary.json strings are LLM prose derived from founder docs — the
+    embedded JS must route them through escHtml() before HTML insertion."""
+    d = _make_artifact_dir(include_commentary=True)
+    rc, html, _ = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    assert "function escHtml(" in html
+    assert "escHtml(c.callout)" in html
+    assert "escHtml(c.highlight)" in html
+    assert "escHtml(c.watch_out)" in html
