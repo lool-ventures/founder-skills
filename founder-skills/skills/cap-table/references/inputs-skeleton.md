@@ -70,8 +70,6 @@ Insert this block before `option_pool`:
       "liquidation_preference_type": "non_participating",
       "participation_cap_multiple": null,
       "anti_dilution_protection": "broad_based_weighted_average",
-      "dividend_rate_percent": null,
-      "dividend_cumulative": false,
       "pro_rata_rights": true
     }
   ],

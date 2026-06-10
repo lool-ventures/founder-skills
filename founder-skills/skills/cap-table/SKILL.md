@@ -234,7 +234,11 @@ INPUTS_EOF
 
 **`founders[]` and `option_pool` are required for any engagement with shares.** The schema marks them optional, but `cap_state.py` produces an empty pre-financing snapshot if either is missing — with no warning. Read `references/inputs-skeleton.md` if your scenario has preferred series, `common_batches`, or non-standard option-plan jurisdictions.
 
-**`metadata.schema_version` is required** on `inputs.json` (`"v0.5.0-inputs"`), `instruments.json` (`"v0.5.0-instruments"`), and `cap_state.json` (`"v0.5.0-cap-state"`). Producer scripts inject the value when they write; founder-supplied heredoc inputs must include it explicitly or `extract_cap_table.py --mode=validate` rejects with `E_SCHEMA_VERSION_MISMATCH`. Common field-name gotchas: `preferred_series[].shares` (not `shares_outstanding`); `preferred_series[].series_name` (not `series_label`); `preferred_series[].liquidation_preference_type` (not `participation`); `founders[].common_shares` (not `shares`).
+**`metadata.schema_version` is required** on `inputs.json` (`"v0.5.0-inputs"`), `instruments.json` (`"v0.5.0-instruments"`), and `cap_state.json` (`"v0.5.0-cap-state"`). Producer scripts inject the value when they write; founder-supplied heredoc inputs must include it explicitly or `extract_cap_table.py --mode=validate` rejects with `E_SCHEMA_VERSION_MISMATCH`. Common field-name gotchas: `preferred_series[].shares` (not `shares_outstanding`); `preferred_series[].series_name` (not `series_label`); `preferred_series[].liquidation_preference_type` (not `participation`); `founders[].common_shares` (not `shares`). `preferred_series[]` lives in `inputs.json`, NOT `instruments.json` — the instruments schema has no `preferred_series` key; an unknown top-level key in `instruments.json` is silently dropped rather than rejected, so there is no schema error to catch the mistake.
+
+**`option_pool.plan_type` enum:** `iso` | `nso` | `section_102_cg` | `section_102_oi` | `section_3i` | `mixed`. The Israeli §102 capital-gains track is `section_102_cg` — there is no `"israeli_102"` or `"102_cg"` value; those fail validation. See `references/inputs-skeleton.md` for the jurisdiction-to-plan_type mapping table.
+
+**Omit optional fields you don't know — do not write `null`.** Most schema fields are typed non-nullable (e.g., `jurisdiction.incorporated_date` is `string`, not `string | null`); writing `null` fails validation. Fields shown in the Step 2 skeleton with values are either required or strongly recommended. `jurisdiction.incorporated_date` matters for §102/QSBS date math — ask the founder rather than omitting if the engagement touches those.
 
 Validate immediately:
 
@@ -254,6 +258,31 @@ Route by input format. Each lane has a dedicated dispatch + validation protocol 
 | Structured JSON paste or conversational reconstruction | 4 | [`references/lanes/lane-4-structured.md`](references/lanes/lane-4-structured.md) |
 
 **Verification stack** (Lane 1 and any other lane that piped through `extract_instrument.py`): forward `evidence_verifier.py` → `invariant_checker.py` → `cross_checker.py` → optional `backward_verifier.py`. All default-on; see the Lane 1 reference for the receipt schema, `attention_needed_fields` semantics, and when to run backward verification.
+
+**Lane 4 instruments.json SAFE skeleton** (use when authoring by heredoc or conversational reconstruction):
+
+```json
+{
+  "safes": [
+    {
+      "id": "safe_1",
+      "investor_name": "Investor Name",
+      "purchase_amount": 500000,
+      "post_money_valuation_cap": 5000000,
+      "discount_multiplier": null,
+      "form": "yc_postmoney_cap",
+      "issuance_date": "2025-06-01",
+      "extraction_confidence": "high"
+    }
+  ],
+  "convertible_notes": [],
+  "warrants": [],
+  "option_grants": [],
+  "metadata": {"run_id": "<RUN_ID>", "schema_version": "v0.5.0-instruments"}
+}
+```
+
+Field-name traps: it's `purchase_amount` (not `principal` — that's convertible notes), `post_money_valuation_cap` (not `valuation_cap`), `form` (not `safe_type`/`instrument_type`), `id` (not `safe_id`). The `form` enum values are: `yc_postmoney_cap`, `yc_postmoney_discount`, `yc_uncapped_mfn`, `cap_plus_discount`, `yc_premoney_cap_only`, `pre_money_cap_and_discount_legacy`, `other`.
 
 **Field-name boundary — `id` vs `safe_id`:** When authoring or validating `instruments.json`, each SAFE object uses the field name **`id`** (e.g. `"id": "safe_seed_1"`). The field `safe_id` appears ONLY in `cap_state.json` output objects, where `cap_state.py` renames it for that artifact. Never write `safe_id` into `instruments.json`; the schema will reject it as an unknown key, and `cap_state.py` will raise `E_SAFE_MISSING_FIELD`.
 
@@ -346,6 +375,8 @@ python3 "$SCRIPTS/run_scenario.py" \
 ```
 
 `run_scenario.py` dispatches to the right math producer per scenario type and consumes the gating block from Step 4.5. After this completes, share a one-sentence finding per scenario with the founder (e.g., "Series A drops your stake from 87% to 64%; the 10% pool top-up costs you ~3pp").
+
+**`scenarios.json` ownership shape:** per-holder ownership percentages live in `scenarios.json` → `scenarios[n].computed_outputs.aggregate_ownership_by_class` (an object keyed by class, e.g. `{"founders": 0.64, "preferred": 0.26, "option_pool": 0.10}`). Per-holder share counts and full ownership tables are rendered in `report.md`'s tables by `compose_report.py`. There is no `post_financing_table.rows` field in `scenarios.json` — do not look for one there.
 
 ### Step 6: Post-Math Rule Audit → `rule_audit.json` (watchlist + counsel items)
 
