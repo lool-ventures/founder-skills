@@ -4,37 +4,45 @@ JSON schemas for all analysis artifacts deposited during the market sizing workf
 
 ## inputs.json
 
-**Producer:** Agent (heredoc, Step 1)
+**Producer:** Agent (heredoc, Step 2)
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `company_name` | string | yes | Company being analyzed |
 | `analysis_date` | string | yes | ISO date (YYYY-MM-DD) |
+| `stage` | string | yes | Funding stage (e.g., `"seed"`, `"series_a"`) |
+| `sector` | string | yes | Industry / sector (e.g., `"B2B SaaS"`) |
 | `materials_provided` | string[] | yes | List of input materials (e.g., "pitch deck", "financial model") |
 | `product_description` | string | yes | What the company sells |
-| `target_customer` | string | yes | Who they sell to |
+| `target_segments` | string[] | yes | Customer segments served |
 | `geography` | string | yes | Where they operate |
 | `pricing_model` | string | yes | How they charge |
+| `revenue_model` | string | yes | Revenue model (e.g., `"subscription"`, `"usage"`) |
 | `existing_claims` | object | no | Deck's TAM/SAM/SOM figures. Must be a flat object with lowercase keys `tam`, `sam`, `som` (use `null` when the deck does not state a figure). Non-canonical keys are silently ignored by reconciliation and trigger `EXISTING_CLAIMS_SHAPE`. |
 | `existing_claims_detail` | object \| null | no | Narrative-only deck claims that don't fit the canonical `{tam, sam, som}` shape (regional sub-SAMs, time-anchored figures, alternative TAM frames). Rendered as a "Deck Claims (Narrative)" sub-section in the report; **not** validated, **not** reconciled. |
 | `stated_metrics` | object | no | Revenue, customer count, growth rates from materials |
+| `metadata` | object | yes | `{"run_id": "<RUN_ID>"}` — stamped on every artifact; `compose_report.py` fires `STALE_ARTIFACT` if run IDs across artifacts mismatch |
 
 **Example:**
 ```json
 {
   "company_name": "Acme Corp",
   "analysis_date": "2026-01-15",
+  "stage": "seed",
+  "sector": "B2B SaaS",
   "materials_provided": ["pitch deck", "financial model"],
   "product_description": "Cloud-based SMB accounting software",
-  "target_customer": "Small businesses (1-50 employees)",
+  "target_segments": ["Small businesses (1-50 employees)"],
   "geography": "North America",
   "pricing_model": "Monthly SaaS subscription, $50-200/month",
+  "revenue_model": "subscription",
   "existing_claims": {"tam": 50000000000, "sam": 8000000000, "som": 200000000},
   "existing_claims_detail": {
     "regional_sam_north_america": 4500000000,
     "som_year_3_target": 350000000
   },
-  "stated_metrics": {"arr": 2000000, "customers": 500, "yoy_growth_pct": 150}
+  "stated_metrics": {"arr": 2000000, "customers": 500, "yoy_growth_pct": 150},
+  "metadata": {"run_id": "20260115T120000Z"}
 }
 ```
 
@@ -42,14 +50,14 @@ JSON schemas for all analysis artifacts deposited during the market sizing workf
 
 ## methodology.json
 
-**Producer:** Agent (heredoc, Step 2)
+**Producer:** Agent (heredoc, Step 3)
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `approach_chosen` | string | yes | One of: `"top_down"`, `"bottom_up"`, `"both"` |
 | `rationale` | string | yes | Why this approach was chosen |
-| `reference_file_read` | string[] | yes | List of reference filenames actually read (e.g., `["tam-sam-som-methodology.md", "artifact-schemas.md"]`) |
 | `accepted_warnings` | object[] | no | Warning codes the analyst expects and accepts |
+| `metadata` | object | yes | `{"run_id": "<RUN_ID>"}` — stamped on every artifact (see inputs.json) |
 
 ### accepted_warnings[] entry
 
@@ -64,10 +72,10 @@ JSON schemas for all analysis artifacts deposited during the market sizing workf
 {
   "approach_chosen": "both",
   "rationale": "Industry reports available for top-down, company has customer/pricing data for bottom-up. Cross-validation preferred.",
-  "reference_file_read": ["tam-sam-som-methodology.md", "pitfalls-checklist.md", "artifact-schemas.md"],
   "accepted_warnings": [
     {"code": "TAM_DISCREPANCY", "reason": "Different scopes intended", "match": "differ by"}
-  ]
+  ],
+  "metadata": {"run_id": "20260115T120000Z"}
 }
 ```
 
@@ -77,13 +85,14 @@ JSON schemas for all analysis artifacts deposited during the market sizing workf
 
 ## validation.json
 
-**Producer:** Agent (heredoc, Step 3)
+**Producer:** Main thread (heredoc after WebFetch/WebSearch research, Step 4)
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `sources` | object[] | yes | External sources found and used |
 | `figure_validations` | object[] | yes | Validation status per market figure |
 | `assumptions` | object[] | yes | All assumptions used in the analysis |
+| `metadata` | object | yes | `{"run_id": "<RUN_ID>"}` — stamped on every artifact (see inputs.json) |
 
 ### sources[] entry
 
@@ -148,7 +157,8 @@ Qualitative assumptions (e.g., `market_growing`, `regulatory_favorable`) are exe
     {"name": "segment_pct", "label": "SMB Segment Share", "value": 16, "category": "derived", "derivation": "SMB share of total market from BLS data"},
     {"name": "customer_count", "value": 4500000, "category": "agent_estimate"},
     {"name": "market_growing", "value": true, "category": "sourced", "source": "Grand View Research 2025"}
-  ]
+  ],
+  "metadata": {"run_id": "20260115T120000Z"}
 }
 ```
 
@@ -163,7 +173,7 @@ Qualitative assumptions (e.g., `market_growing`, `regulatory_favorable`) are exe
 
 ## sizing.json
 
-**Producer:** `market_sizing.py` (Step 4, `-o` output mode)
+**Producer:** `market_sizing.py` (Step 5, `-o` output mode)
 
 This is the direct output of `market_sizing.py`. Structure depends on approach used.
 
@@ -176,6 +186,7 @@ This is the direct output of `market_sizing.py`. Structure depends on approach u
 | `top_down` | approach is `"top-down"` or `"both"` | Top-down results |
 | `bottom_up` | approach is `"bottom-up"` or `"both"` | Bottom-up results |
 | `comparison` | approach is `"both"` | Cross-validation results |
+| `metadata` | when `--run-id` passed | `{"run_id": "<RUN_ID>"}` — stamped by the producer for `STALE_ARTIFACT` detection |
 
 ### top_down / bottom_up sub-object
 
@@ -236,7 +247,7 @@ Only parameters in `QUANTITATIVE_PARAMS` are matched: `customer_count`, `arpu`, 
 
 ## sensitivity.json
 
-**Producer:** `sensitivity.py` (Step 5, `-o` output mode)
+**Producer:** `sensitivity.py` (Step 6a, `-o` output mode)
 
 Direct output of `sensitivity.py` with confidence extensions.
 
@@ -264,6 +275,7 @@ Direct output of `sensitivity.py` with confidence extensions.
 | `scenarios` | object[] | Per-parameter sensitivity results |
 | `sensitivity_ranking` | object[] | Parameters ranked by SOM impact |
 | `most_sensitive` | string | Most impactful parameter name |
+| `metadata` | object | `{"run_id": "<RUN_ID>"}` — stamped by the producer when `--run-id` is passed (see inputs.json) |
 
 When `approach` is `"both"`, all 7 base params are required (`industry_total`, `segment_pct`, `share_pct`, `customer_count`, `arpu`, `serviceable_pct`, `target_pct`). Each range parameter is auto-detected to its approach (top-down or bottom-up) and sensitivity is run against that approach's calculation.
 
@@ -298,7 +310,7 @@ If the specified range is narrower than the minimum, it is widened. Wider ranges
 
 ## checklist.json
 
-**Producer:** `checklist.py` (Step 6, `-o` output mode)
+**Producer:** `checklist.py` (Step 6b, `-o` output mode)
 
 ### Input format (stdin)
 
@@ -334,6 +346,7 @@ Direct output of `checklist.py`.
 |-----|------|-------------|
 | `items` | object[] | All 22 checklist items with results |
 | `summary` | object | Aggregate counts and status |
+| `metadata` | object | `{"run_id": "<RUN_ID>"}` — stamped by the producer when `--run-id` is passed (see inputs.json) |
 
 ### items[] entry
 
@@ -353,6 +366,7 @@ Direct output of `checklist.py`.
 | `pass` | integer | Count of pass items |
 | `fail` | integer | Count of fail items |
 | `not_applicable` | integer | Count of N/A items |
+| `score_pct` | number | `pass / (total - not_applicable) * 100`, rounded to 1 decimal; drives `coaching_payload.confidence` |
 | `overall_status` | string | `"pass"` if fail==0, else `"fail"` |
 | `failed_items` | object[] | List of failed items with id, category, label, notes |
 

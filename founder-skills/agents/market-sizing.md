@@ -113,7 +113,10 @@ appears in `QUANTITATIVE_PARAMS` (`customer_count`, `arpu`, `serviceable_pct`,
 `target_pct`, `industry_total`, `segment_pct`, `share_pct`). Missing
 `agent_estimate` parameters triggers `UNSOURCED_ASSUMPTIONS` in compose.
 
-Return JSON only — exactly the shape expected by `sensitivity.py`:
+Return JSON only — exactly the shape expected by `sensitivity.py`. Each range
+MUST carry the parameter's `confidence` (`sourced` / `derived` /
+`agent_estimate`); without it, `sensitivity.py` defaults to `sourced` and the
+auto-widening above never fires:
 ```json
 {
   "approach": "bottom_up|top_down|both",
@@ -124,7 +127,7 @@ Return JSON only — exactly the shape expected by `sensitivity.py`:
     "target_pct": <from sizing.json>
   },
   "ranges": {
-    "<parameter>": {"low_pct": <negative>, "high_pct": <positive>}
+    "<parameter>": {"low_pct": <negative>, "high_pct": <positive>, "confidence": "sourced|derived|agent_estimate"}
   }
 }
 ```
