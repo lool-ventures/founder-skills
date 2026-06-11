@@ -1,6 +1,5 @@
 {
   "name": "lool-founder-skills",
-  "description": "Skills for startup founders by lool ventures",
   "owner": {"name": "lool ventures"},
   "plugins": [
     {
