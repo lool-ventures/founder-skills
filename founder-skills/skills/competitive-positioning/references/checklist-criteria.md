@@ -177,7 +177,7 @@ Items are auto-gated to `not_applicable` based on `input_mode` (from `landscape.
 **Fail:** Fewer than 40% of competitors have sourced evidence. Analysis is primarily based on agent knowledge or founder claims.
 **Warn:** 40-60% of competitors have sourced evidence. Mixed research quality.
 **Basis:** An analysis built primarily on agent knowledge (training data) is less reliable than one built on current research. Investors value current, sourced data.
-**Mode gating:** Auto-gated to `not_applicable` in `deck` mode (deck-sourced analyses rely on deck claims as primary input).
+**Mode gating:** None — EVID_02 is active in all input modes (deck, conversation, document). Only EVID_04 and NARR_03 are auto-gated; see the gating table above.
 
 ### `EVID_03`
 **Label:** Evidence sources distinguished (researched vs. estimated)
