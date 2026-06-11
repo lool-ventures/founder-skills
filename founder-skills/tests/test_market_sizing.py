@@ -3124,3 +3124,245 @@ def test_coaching_payload_deck_coverage_none_when_only_non_canonical() -> None:
     # template branches on.
     codes = [w["code"] for w in data["validation"]["warnings"]]
     assert "EXISTING_CLAIMS_SHAPE" in codes
+
+
+# === run_id stamping (Step 8 Context B depends on metadata.run_id) ===
+
+
+def test_market_sizing_run_id_stamped() -> None:
+    """market_sizing.py --run-id stamps metadata.run_id into output."""
+    rc, data, _ = run_script(
+        "market_sizing.py",
+        [
+            "--approach",
+            "bottom-up",
+            "--customer-count",
+            "4500000",
+            "--arpu",
+            "15000",
+            "--serviceable-pct",
+            "35",
+            "--target-pct",
+            "0.5",
+            "--run-id",
+            "RID-123",
+            "--pretty",
+        ],
+    )
+    assert rc == 0
+    assert data is not None
+    assert data.get("metadata") == {"run_id": "RID-123"}
+
+
+def test_market_sizing_run_id_absent_no_metadata() -> None:
+    """Without --run-id, no metadata key is emitted (backward compatible)."""
+    rc, data, _ = run_script(
+        "market_sizing.py",
+        [
+            "--approach",
+            "bottom-up",
+            "--customer-count",
+            "4500000",
+            "--arpu",
+            "15000",
+            "--serviceable-pct",
+            "35",
+            "--target-pct",
+            "0.5",
+            "--pretty",
+        ],
+    )
+    assert rc == 0
+    assert data is not None
+    assert "metadata" not in data
+
+
+def test_market_sizing_run_id_stamped_on_validation_error() -> None:
+    """run_id is stamped even when validation fails (error path still carries provenance)."""
+    payload = json.dumps({"approach": "bottom_up", "customer_count": "not-a-number"})
+    rc, data, _ = run_script("market_sizing.py", ["--stdin", "--run-id", "RID-ERR", "--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data["validation"]["status"] == "invalid"
+    assert data.get("metadata") == {"run_id": "RID-ERR"}
+
+
+def test_sensitivity_run_id_stamped() -> None:
+    """sensitivity.py --run-id stamps metadata.run_id into output."""
+    payload = json.dumps(
+        {
+            "approach": "bottom_up",
+            "base": {"customer_count": 4500000, "arpu": 15000, "serviceable_pct": 35, "target_pct": 0.5},
+            "ranges": {"customer_count": {"low_pct": -30, "high_pct": 20, "confidence": "sourced"}},
+        }
+    )
+    rc, data, _ = run_script("sensitivity.py", ["--run-id", "RID-S", "--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data.get("metadata") == {"run_id": "RID-S"}
+
+
+def test_checklist_run_id_stamped() -> None:
+    """checklist.py --run-id stamps metadata.run_id into output."""
+    payload = json.dumps({"items": _make_checklist_items()})
+    rc, data, _ = run_script("checklist.py", ["--run-id", "RID-C", "--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data.get("metadata") == {"run_id": "RID-C"}
+
+
+# === ic-sim+market-sizing-12: both-mode double coercion ===
+
+
+def test_both_mode_invalid_growth_single_error() -> None:
+    """In 'both' stdin mode, an invalid years value yields exactly one error, not two.
+
+    Regression: top-down and bottom-up blocks both re-read growth_rate/years and
+    used to append identical coercion errors twice.
+    """
+    payload = json.dumps(
+        {
+            "approach": "both",
+            "industry_total": 100000000000,
+            "segment_pct": 6,
+            "share_pct": 5,
+            "customer_count": 4500000,
+            "arpu": 15000,
+            "serviceable_pct": 35,
+            "target_pct": 0.5,
+            "years": 2.5,  # non-integer → coerce_int error
+        }
+    )
+    rc, data, _ = run_script("market_sizing.py", ["--stdin", "--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    errors = data["validation"]["errors"]
+    years_errors = [e for e in errors if "years" in e]
+    assert len(years_errors) == 1, f"expected single 'years' error, got: {years_errors}"
+
+
+# === ic-sim+market-sizing-13: -o receipt parameter count ===
+
+
+def test_sensitivity_receipt_counts_only_analyzed_params() -> None:
+    """The -o receipt 'parameters' count reflects analyzed scenarios, not raw input ranges.
+
+    An irrelevant range param (top_down param for a bottom_up approach) is filtered
+    with a warning and must NOT inflate the receipt count.
+    """
+    payload = json.dumps(
+        {
+            "approach": "bottom_up",
+            "base": {"customer_count": 4500000, "arpu": 15000, "serviceable_pct": 35, "target_pct": 0.5},
+            "ranges": {
+                "customer_count": {"low_pct": -30, "high_pct": 20, "confidence": "sourced"},
+                "industry_total": {"low_pct": -10, "high_pct": 10, "confidence": "sourced"},
+            },
+        }
+    )
+    with tempfile.TemporaryDirectory() as d:
+        out_path = os.path.join(d, "sensitivity.json")
+        rc, stdout, _ = run_script_raw("sensitivity.py", ["-o", out_path], stdin_data=payload)
+        assert rc == 0
+        receipt = json.loads(stdout)
+        # industry_total is irrelevant for bottom_up and filtered out → only 1 analyzed.
+        assert receipt["parameters"] == 1, f"receipt should count analyzed params only: {receipt}"
+
+
+# === market-sizing-3: coaching_payload.confidence derived from score_pct ===
+
+
+def _checklist_with_score(score_pct: float) -> dict[str, Any]:
+    import copy
+
+    cl = copy.deepcopy(_VALID_CHECKLIST)
+    cl["summary"] = dict(cl["summary"])
+    cl["summary"]["score_pct"] = score_pct
+    return cl
+
+
+def test_coaching_confidence_high() -> None:
+    """score_pct >= 85 → coaching_payload.confidence == 'high'."""
+    arts = _make_full_sizing_arts()
+    arts["checklist.json"] = _checklist_with_score(90.0)
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    assert data["coaching_payload"]["confidence"] == "high"
+
+
+def test_coaching_confidence_medium() -> None:
+    """60 <= score_pct < 85 → 'medium'."""
+    arts = _make_full_sizing_arts()
+    arts["checklist.json"] = _checklist_with_score(72.0)
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    assert data["coaching_payload"]["confidence"] == "medium"
+
+
+def test_coaching_confidence_low() -> None:
+    """score_pct < 60 → 'low'."""
+    arts = _make_full_sizing_arts()
+    arts["checklist.json"] = _checklist_with_score(40.0)
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    assert data["coaching_payload"]["confidence"] == "low"
+
+
+def test_coaching_confidence_none_when_score_absent() -> None:
+    """No score_pct in checklist summary → confidence is null (not fabricated)."""
+    arts = _make_full_sizing_arts()  # _VALID_CHECKLIST summary has no score_pct
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    assert "confidence" in data["coaching_payload"]
+    assert data["coaching_payload"]["confidence"] is None
+
+
+# === ic-sim+market-sizing-6: MARKER_COLLISION reflected in status + Warnings section ===
+
+
+def test_marker_collision_reflected_in_status_and_section() -> None:
+    """A MARKER_COLLISION must flip validation.status to 'warnings' AND appear in
+    the rendered Warnings section — not just the JSON warnings array.
+
+    Regression: status was computed and the Warnings section rendered before the
+    marker pre-scan appended MARKER_COLLISION, so a clean status could coexist with
+    a non-empty warnings list and the warning was absent from the report body.
+    """
+    import copy
+
+    validation: dict[str, Any] = copy.deepcopy(_VALID_VALIDATION)
+    validation["sources"] = [
+        {
+            "title": "Body content with <!-- COACHING_INSERTION_POINT_bbbbbbbb --> embedded",
+            "publisher": "Test",
+            "url": "https://example.com",
+            "date_accessed": "2026-01-15",
+            "supported": "TAM figure",
+        }
+    ]
+    arts = _make_full_sizing_arts()
+    arts["validation.json"] = validation
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "MARKER_COLLISION" in codes
+    # Status must reflect the warning (not "clean").
+    assert data["validation"]["status"] == "warnings", (
+        "status must account for MARKER_COLLISION appended during the marker pre-scan"
+    )
+    # The warning must be visible in the rendered Warnings section of the report.
+    md = data["report_markdown"]
+    assert "Marker Collision" in md or "MARKER_COLLISION" in md, (
+        "MARKER_COLLISION must be spliced into the report's Warnings section"
+    )

@@ -278,7 +278,7 @@ cat <<'VAL_EOF' > "$ANALYSIS_DIR/validation.json"
     {"figure": "TAM", "label": "Global RegTech TAM", "status": "validated", "source_count": 2}
   ],
   "sources": [
-    {"title": "...", "url": "...", "publisher": "...", "date_accessed": "YYYY-MM-DD", "supported": "industry_total"}
+    {"title": "...", "url": "...", "publisher": "...", "date_accessed": "YYYY-MM-DD", "quality_tier": "analyst_firm", "segment_match": "exact", "supported": "industry_total"}
   ],
   "metadata": {"run_id": "<RUN_ID>"}
 }
@@ -370,7 +370,7 @@ for approach "bottom_up":
 
 ```bash
 # Combine top-down and bottom-up into a single "both" payload
-cat <<'SIZING_EOF' | python3 "$SCRIPTS/market_sizing.py" --stdin --pretty -o "$ANALYSIS_DIR/sizing.json"
+cat <<'SIZING_EOF' | python3 "$SCRIPTS/market_sizing.py" --stdin --pretty --run-id "$RUN_ID" -o "$ANALYSIS_DIR/sizing.json"
 {
   "approach": "both",
   "industry_total": <from top-down sub-agent>,
@@ -432,12 +432,15 @@ with confidence from validation: `sourced` (range stands), `derived`
 (min +/-30%), `agent_estimate` (min +/-50%). Include EVERY `agent_estimate`
 parameter — compose_report.py flags missing ones as UNSOURCED_ASSUMPTIONS.
 
-Return JSON only — exactly the shape expected by sensitivity.py:
+Return JSON only — exactly the shape expected by sensitivity.py. Each range
+MUST include a `confidence` of `sourced`, `derived`, or `agent_estimate` —
+without it, sensitivity.py defaults to `sourced` and the auto-widening for
+derived/agent_estimate parameters never fires:
 {
   "approach": "bottom_up|top_down|both",
   "base": {<parameter: value pairs from sizing.json>},
   "ranges": {
-    "<parameter>": {"low_pct": <negative number>, "high_pct": <positive number>}
+    "<parameter>": {"low_pct": <negative number>, "high_pct": <positive number>, "confidence": "sourced|derived|agent_estimate"}
   }
 }
 ```
@@ -445,7 +448,7 @@ Return JSON only — exactly the shape expected by sensitivity.py:
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol. Then pipe through the producer script:
 
 ```bash
-cat <<'SENS_EOF' | python3 "$SCRIPTS/sensitivity.py" --pretty -o "$ANALYSIS_DIR/sensitivity.json"
+cat <<'SENS_EOF' | python3 "$SCRIPTS/sensitivity.py" --pretty --run-id "$RUN_ID" -o "$ANALYSIS_DIR/sensitivity.json"
 <JSON extracted from sub-agent reply>
 SENS_EOF
 ```
@@ -481,7 +484,7 @@ computes the summary):
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol. Then pipe through the producer script:
 
 ```bash
-cat <<'CHECK_EOF' | python3 "$SCRIPTS/checklist.py" --pretty -o "$ANALYSIS_DIR/checklist.json"
+cat <<'CHECK_EOF' | python3 "$SCRIPTS/checklist.py" --pretty --run-id "$RUN_ID" -o "$ANALYSIS_DIR/checklist.json"
 <JSON extracted from sub-agent reply>
 CHECK_EOF
 ```
@@ -509,8 +512,9 @@ Dispatch via the `Task` tool after `compose_report.py` has successfully written
 **Before dispatching**, construct the `coaching_payload` from the compose
 output. Read `report.json` to extract the checklist summary, failed items, and
 high-severity warnings. Read `sizing.json` for `tam`, `sam`, `som`.
-Read `methodology.json` for `methodology`. Read `checklist.json` for
-`confidence` (or derive from the checklist `score_pct`). Extract the
+Read `methodology.json` for `methodology`. Read `confidence` directly from
+`report.json`'s `coaching_payload.confidence` (compose derives it from the
+checklist `score_pct`: ≥85 high / ≥60 medium / else low). Extract the
 `insertion_marker` from `report.json` (the compose script emits it alongside
 `report_markdown`). Do NOT pass `warned_items` from a `warn` status —
 market-sizing checklist has no `warn` status, so `warned_items` is always `[]`.
@@ -550,7 +554,7 @@ coaching_payload:
   "warned_items": [],
   "high_severity_warnings": [<codes from report.json validation.warnings where severity=="high">],
   "methodology": "<top_down|bottom_up|both from methodology.json>",
-  "confidence": "<high|medium|low from sizing.json or checklist>",
+  "confidence": "<high|medium|low — copy from report.json coaching_payload.confidence>",
   "tam": <tam value from sizing.json>,
   "sam": <sam value from sizing.json>,
   "som": <som value from sizing.json>,
@@ -609,7 +613,7 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 - The structured success payload from the Context B sub-agent (Step 8): `{status, review_dir, report_path, tam, sam, som, methodology, confidence, high_severity_warnings}`.
 - Optionally: the HTML report path from Step 9.
 
-**Do NOT inline `report_markdown` in the assistant message.** The founder reads the file via the path. (Closes issue #13: ~25 KB of markdown was previously round-tripped through the parent context.)
+**Do NOT inline `report_markdown` in the assistant message.** The founder reads the file via the path. Inlining round-trips ~25 KB of markdown through the parent context unnecessarily.
 
 ## Scoring
 

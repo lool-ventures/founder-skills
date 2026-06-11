@@ -389,6 +389,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Market sizing sensitivity analysis (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
+    p.add_argument("--run-id", help="Inject metadata.run_id into output (for stale-artifact detection)")
     return p.parse_args()
 
 
@@ -417,15 +418,23 @@ def main() -> None:
 
     if errors:
         result: dict[str, Any] = {"validation": {"status": "invalid", "errors": errors}}
+        # On the error path no scenarios are produced — report 0 analyzed params.
+        analyzed_params = 0
     else:
         result = run_sensitivity(approach, base_params, ranges)
         result["validation"] = {"status": "valid", "errors": []}
+        # Count scenarios actually analyzed (irrelevant range params are filtered
+        # out with stderr warnings inside run_sensitivity), not the raw input count.
+        analyzed_params = len(result.get("scenarios", []))
+
+    if args.run_id:
+        result["metadata"] = {"run_id": args.run_id}
 
     out = json.dumps(result, indent=indent) + "\n"
     _write_output(
         out,
         args.output,
-        summary={"approach": approach, "parameters": len(ranges)},
+        summary={"approach": approach, "parameters": analyzed_params},
     )
 
 

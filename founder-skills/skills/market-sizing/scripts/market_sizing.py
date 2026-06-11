@@ -356,6 +356,13 @@ def _validate_inputs(
             else:
                 errors.append("bottom-up requires --customer-count, --arpu, --serviceable-pct, --target-pct")
         else:
+            # In "both" mode the top-down block already coerced and range-checked
+            # growth_rate/years from the same raw keys — reuse its result to avoid
+            # appending identical errors twice.
+            growth_already_validated = approach == "both" and "td" in parsed
+            if growth_already_validated:
+                gr, yr = parsed["td"][3], parsed["td"][4]
+
             # Coerce JSON string values to numeric types
             bu_ok = True
             if data is not None:
@@ -375,15 +382,16 @@ def _validate_inputs(
                 if err:
                     errors.append(err)
                     bu_ok = False
-                if gr is not None:
-                    gr, err = coerce_float("growth_rate", gr)
+                if not growth_already_validated:
+                    if gr is not None:
+                        gr, err = coerce_float("growth_rate", gr)
+                        if err:
+                            errors.append(err)
+                            bu_ok = False
+                    yr, err = coerce_int("years", yr)
                     if err:
                         errors.append(err)
                         bu_ok = False
-                yr, err = coerce_int("years", yr)
-                if err:
-                    errors.append(err)
-                    bu_ok = False
 
             # Validate ranges only if coercion succeeded
             if bu_ok:
@@ -399,7 +407,7 @@ def _validate_inputs(
                 err = validate_pct("target_pct", tgtp)
                 if err:
                     errors.append(err)
-                if gr is not None and gr < -100:
+                if not growth_already_validated and gr is not None and gr < -100:
                     errors.append(f"growth_rate cannot be below -100% (got {gr}%)")
 
             parsed["bu"] = (cc, arpu, svcp, tgtp, gr, yr)
@@ -436,8 +444,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--currency", default="USD", help="Currency label (default: USD)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
+    p.add_argument("--run-id", help="Inject metadata.run_id into output (for stale-artifact detection)")
 
     return p.parse_args()
+
+
+def _stamp_run_id(result: dict[str, Any], run_id: str | None) -> dict[str, Any]:
+    """Stamp metadata.run_id into a result dict (last step before serialization)."""
+    if run_id:
+        result["metadata"] = {"run_id": run_id}
+    return result
 
 
 def main() -> None:
@@ -464,7 +480,7 @@ def main() -> None:
                     "errors": [f"approach must be a string (got {type(raw_approach).__name__})"],
                 }
             }
-            _write_output(json.dumps(result, indent=indent) + "\n", args.output)
+            _write_output(json.dumps(_stamp_run_id(result, args.run_id), indent=indent) + "\n", args.output)
             return
         approach = raw_approach.replace("_", "-")
     else:
@@ -479,7 +495,7 @@ def main() -> None:
                 "errors": [f"approach must be one of {sorted(valid_approaches)} (got '{approach}')"],
             }
         }
-        _write_output(json.dumps(result, indent=indent) + "\n", args.output)
+        _write_output(json.dumps(_stamp_run_id(result, args.run_id), indent=indent) + "\n", args.output)
         return
 
     parsed, errors = _validate_inputs(data, args, approach)
@@ -502,6 +518,7 @@ def main() -> None:
 
         result["validation"] = {"status": "valid", "errors": []}
 
+    _stamp_run_id(result, args.run_id)
     out = json.dumps(result, indent=indent) + "\n"
     _write_output(out, args.output, summary={"approach": approach})
 

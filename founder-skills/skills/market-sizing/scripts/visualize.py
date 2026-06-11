@@ -35,8 +35,9 @@ REQUIRED_ARTIFACTS = [
     "validation.json",
     "sizing.json",
     "checklist.json",
+    "sensitivity.json",
 ]
-OPTIONAL_ARTIFACTS = ["sensitivity.json"]
+OPTIONAL_ARTIFACTS: list[str] = []
 
 # Canonical category order for assumption confidence donut
 _CONFIDENCE_CATEGORIES: list[str] = ["sourced", "derived", "agent_estimate"]
@@ -136,6 +137,18 @@ def _fmt_usd(value: float | int) -> str:
     return f"${value:,.2f}"
 
 
+def _try_float(value: Any) -> float | None:
+    """Coerce to float, returning None on non-numeric input.
+
+    Mirrors the _compute_delta tolerance: a non-numeric deck claim (e.g. "$5B"
+    or "TBD") must be skipped, not crash the whole HTML render.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _compute_delta(calculated: float, deck_claim: Any) -> float | None:
     """Returns signed percentage delta, or None if claim is invalid."""
     try:
@@ -199,8 +212,8 @@ def _compute_provenance(
                     breakdown[cat] += 1
 
             deck_claim = existing_claims.get(metric)
-            value = m.get("value", 0)
-            delta = _compute_delta(float(value), deck_claim) if deck_claim is not None else None
+            value_num = _try_float(m.get("value", 0))
+            delta = _compute_delta(value_num, deck_claim) if value_num is not None and deck_claim is not None else None
 
             approach_prov[metric] = {
                 "classification": classification,
@@ -928,7 +941,7 @@ def _chart_tornado(sensitivity: dict[str, Any] | None) -> str:
             if approach in approach_groups:
                 approach_groups[approach][param] = s
             else:
-                # Scenarios without a recognized approach_used are silently skipped
+                # Scenarios without a recognized approach_used are skipped with a stderr warning
                 print(
                     f"Warning: scenario '{param}' has unrecognized approach_used '{approach}', skipping",
                     file=sys.stderr,
@@ -1227,7 +1240,8 @@ def _chart_provenance_summary(
             color = badge_colors.get(classification, "#9ca3af")
             label = badge_labels.get(classification, classification)
 
-            deck_str = _esc(_fmt_usd(float(deck_claim))) if deck_claim is not None else "\u2014"
+            deck_claim_num = _try_float(deck_claim) if deck_claim is not None else None
+            deck_str = _esc(_fmt_usd(deck_claim_num)) if deck_claim_num is not None else "\u2014"
             delta_str = _esc(f"{delta:+.1f}%") if delta is not None else "\u2014"
 
             # Look up the agent's calculated estimate from sizing data
@@ -1235,9 +1249,9 @@ def _chart_provenance_summary(
             if sizing is not None:
                 approach_sizing = _as_dict(sizing.get(approach_key))
                 metric_data = _as_dict(approach_sizing.get(metric))
-                estimate_val = metric_data.get("value")
-                if estimate_val is not None:
-                    estimate_str = _esc(_fmt_usd(float(estimate_val)))
+                estimate_num = _try_float(metric_data.get("value"))
+                if estimate_num is not None:
+                    estimate_str = _esc(_fmt_usd(estimate_num))
 
             rows.append(
                 f"<tr>"
@@ -1287,7 +1301,8 @@ def _chart_key_findings(
                 continue
             if item.get("status") == "fail":
                 label = str(item.get("label", item.get("id", "Unknown")))
-                notes = str(item.get("notes", ""))
+                raw_notes = item.get("notes")
+                notes = str(raw_notes) if raw_notes is not None else ""
                 text = f"{label}: {notes}" if notes else label
                 attention.append(text)
                 actions.append(f"Address: {label}")
@@ -1305,7 +1320,8 @@ def _chart_key_findings(
                 confirmed += 1
             elif status in ("refuted", "unsupported"):
                 figure_name = str(fig.get("figure", "Unknown"))
-                notes = str(fig.get("notes", ""))
+                raw_notes = fig.get("notes")
+                notes = str(raw_notes) if raw_notes is not None else ""
                 prefix = "Refuted" if status == "refuted" else "Unsupported"
                 text = f"{prefix}: {figure_name}" + (f" — {notes}" if notes else "")
                 attention.append(text)
