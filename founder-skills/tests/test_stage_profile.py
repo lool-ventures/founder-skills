@@ -89,6 +89,49 @@ def test_stage_profile_rebuild_mode_replaces_framework_and_benchmarks() -> None:
         assert written["confidence"] == "high"
 
 
+def test_stage_profile_rebuild_default_confidence_is_high() -> None:
+    """--rebuild-stage without --confidence defaults to high (founder picked a different stage)."""
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "stage_profile.json")
+        rc, _, err = _run(["--run-id", "r1", "-o", out, "--rebuild-stage", "series_a"], json.dumps(_VALID))
+        assert rc == 0, err
+        with open(out) as f:
+            written = json.load(f)
+        assert written["confidence"] == "high"
+
+
+def test_stage_profile_rebuild_low_confidence_for_unsure_founder() -> None:
+    """--rebuild-stage <detected> --confidence low records low confidence + an 'unsure' evidence line."""
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "stage_profile.json")
+        # Founder unsure: rebuild to the SAME (detected) stage at low confidence.
+        rc, _, err = _run(
+            ["--run-id", "r1", "-o", out, "--rebuild-stage", "seed", "--confidence", "low"],
+            json.dumps(_VALID),
+        )
+        assert rc == 0, err
+        with open(out) as f:
+            written = json.load(f)
+        assert written["detected_stage"] == "seed"
+        assert written["confidence"] == "low"
+        assert any("unsure" in e.lower() for e in written["evidence"])
+
+
+def test_stage_profile_rebuild_low_confidence_best_effort_different_stage() -> None:
+    """--rebuild-stage <other> --confidence low (best-effort) records low confidence + correction note."""
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "stage_profile.json")
+        rc, _, err = _run(
+            ["--run-id", "r1", "-o", out, "--rebuild-stage", "series_a", "--confidence", "low"],
+            json.dumps(_VALID),
+        )
+        assert rc == 0, err
+        with open(out) as f:
+            written = json.load(f)
+        assert written["confidence"] == "low"
+        assert any("Founder corrected stage" in e for e in written["evidence"])
+
+
 def test_stage_profile_rebuild_to_out_of_scope_stage_keeps_stub_benchmarks() -> None:
     """series_b/growth: detected_stage set, but framework/benchmarks not synthesized."""
     with tempfile.TemporaryDirectory() as d:

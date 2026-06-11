@@ -75,6 +75,30 @@ def test_gate_state_answer_updates_existing_file() -> None:
         assert written["answer"] == "Looks right"
 
 
+def test_gate_state_answer_handles_corrupt_file_cleanly() -> None:
+    """A truncated/corrupt gate_state.json -> clean stderr + exit 1, not a raw traceback."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "gate_state.json")
+        with open(path, "w") as f:
+            f.write('{"metadata": {"run_id": "r1"}, "options": [')  # truncated JSON
+        rc, _, err = _run(["answer", "--file", path, "--answer", "Looks right"])
+        assert rc == 1
+        assert "not valid json" in err.lower()
+        assert "Traceback" not in err
+
+
+def test_gate_state_answer_rejects_non_dict_json() -> None:
+    """A gate file that is valid JSON but not an object -> clean error, no AttributeError."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "gate_state.json")
+        with open(path, "w") as f:
+            f.write("[1, 2, 3]")
+        rc, _, err = _run(["answer", "--file", path, "--answer", "Looks right"])
+        assert rc == 1
+        assert "json object" in err.lower()
+        assert "Traceback" not in err
+
+
 def test_gate_state_answer_rejects_answer_not_in_options() -> None:
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "gate_state.json")

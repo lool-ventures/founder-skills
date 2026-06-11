@@ -506,6 +506,19 @@ def test_slide_map_legend() -> None:
     assert "Weaknesses" in stdout
 
 
+def test_slide_map_legend_missing_color_matches_chart() -> None:
+    """The 'Missing expected slide' legend swatch color must match the chart's dashed-line stroke."""
+    arts = _all_artifacts()
+    arts["slide_reviews.json"] = _VALID_REVIEWS_RICH
+    arts["stage_profile.json"] = _VALID_PROFILE_WITH_FRAMEWORK
+    d = _make_artifact_dir(arts)
+    rc, stdout, _ = _run_viz(d)
+    assert rc == 0
+    # The missing-slide dashed lines use stroke #9ca3af; the legend swatch must too.
+    assert "#9ca3af" in stdout
+    assert "#52525b" not in stdout
+
+
 def test_malformed_list_elements() -> None:
     """Non-dict items in slide reviews list don't crash."""
     arts = dict(_all_artifacts())

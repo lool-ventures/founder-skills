@@ -118,7 +118,7 @@ def _make_checklist_items(
 def test_checklist_all_pass() -> None:
     """All 35 items pass."""
     payload = json.dumps({"items": _make_checklist_items()})
-    rc, data, _ = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    rc, data, _ = run_script("checklist.py", ["--pretty", "--run-id", "test-run"], stdin_data=payload)
     assert rc == 0
     assert data is not None
     s = data["summary"]
@@ -145,7 +145,7 @@ def test_checklist_score_thresholds() -> None:
         ]
     }
     payload = json.dumps({"items": _make_checklist_items(overrides=ai_na)})
-    rc, data, _ = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    rc, data, _ = run_script("checklist.py", ["--pretty", "--run-id", "test-run"], stdin_data=payload)
     assert rc == 0
     if data:
         assert data["summary"]["overall_status"] == "strong"
@@ -158,7 +158,7 @@ def test_checklist_score_thresholds() -> None:
     for cid in fail_ids:
         overrides[cid] = {"status": "fail", "evidence": "test", "notes": "test fail"}
     payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
-    rc, data, _ = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    rc, data, _ = run_script("checklist.py", ["--pretty", "--run-id", "test-run"], stdin_data=payload)
     assert rc == 0
     if data:
         assert data["summary"]["overall_status"] == "needs_work"
@@ -169,7 +169,7 @@ def test_checklist_score_thresholds() -> None:
     for cid in fail_ids_more:
         overrides2[cid] = {"status": "fail", "evidence": "test", "notes": "test fail"}
     payload = json.dumps({"items": _make_checklist_items(overrides=overrides2)})
-    rc, data, _ = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    rc, data, _ = run_script("checklist.py", ["--pretty", "--run-id", "test-run"], stdin_data=payload)
     assert rc == 0
     if data:
         assert data["summary"]["overall_status"] == "major_revision"
@@ -183,7 +183,7 @@ def test_checklist_warn_status() -> None:
         "competition_honest": {"status": "fail", "evidence": "test", "notes": "Missing"},
     }
     payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
-    rc, data, _ = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    rc, data, _ = run_script("checklist.py", ["--pretty", "--run-id", "test-run"], stdin_data=payload)
     assert rc == 0
     assert data is not None
     s = data["summary"]
@@ -203,7 +203,7 @@ def test_checklist_by_category() -> None:
         "headlines_carry_story": {"status": "warn", "evidence": "test", "notes": "Mixed"},
     }
     payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
-    rc, data, _ = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    rc, data, _ = run_script("checklist.py", ["--pretty", "--run-id", "test-run"], stdin_data=payload)
     assert rc == 0
     assert data is not None
     cat = data["summary"]["by_category"]
@@ -226,7 +226,7 @@ def test_checklist_missing_items() -> None:
     """Only 32 items -- should produce validation error."""
     items = _make_checklist_items(exclude=["data_room_ready", "contact_info_present", "numbers_consistent"])
     payload = json.dumps({"items": items})
-    rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
+    rc, data, _ = run_script("checklist.py", ["--run-id", "test-run"], stdin_data=payload)
     assert rc == 0
     _assert_validation_errors(data, "missing")
 
@@ -236,7 +236,7 @@ def test_checklist_duplicate_id() -> None:
     items = _make_checklist_items()
     items.append({"id": "purpose_clear", "status": "pass", "evidence": "dup", "notes": None})
     payload = json.dumps({"items": items})
-    rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
+    rc, data, _ = run_script("checklist.py", ["--run-id", "test-run"], stdin_data=payload)
     assert rc == 0
     _assert_validation_errors(data, "duplicate")
 
@@ -246,7 +246,7 @@ def test_checklist_unknown_id() -> None:
     items = _make_checklist_items()
     items[0] = {"id": "bogus_criterion", "status": "pass", "evidence": "test", "notes": None}
     payload = json.dumps({"items": items})
-    rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
+    rc, data, _ = run_script("checklist.py", ["--run-id", "test-run"], stdin_data=payload)
     assert rc == 0
     _assert_validation_errors(data, "unknown")
 
@@ -255,7 +255,7 @@ def test_checklist_invalid_status() -> None:
     """Status 'maybe' -- should produce validation error."""
     overrides = {"purpose_clear": {"status": "maybe", "evidence": "test", "notes": None}}
     payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
-    rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
+    rc, data, _ = run_script("checklist.py", ["--run-id", "test-run"], stdin_data=payload)
     assert rc == 0
     _assert_validation_errors(data, "invalid")
 
@@ -263,7 +263,7 @@ def test_checklist_invalid_status() -> None:
 def test_checklist_non_dict_item() -> None:
     """Non-dict item in checklist items array -> validation error."""
     payload = json.dumps({"items": ["not_a_dict"]})
-    rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
+    rc, data, _ = run_script("checklist.py", ["--run-id", "test-run"], stdin_data=payload)
     assert rc == 0
     _assert_validation_errors(data, "must be an object")
 
@@ -274,7 +274,9 @@ def test_checklist_output_flag() -> None:
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
         tmp = f.name
     try:
-        rc, stdout, stderr = run_script_raw("checklist.py", ["--pretty", "-o", tmp], stdin_data=payload)
+        rc, stdout, stderr = run_script_raw(
+            "checklist.py", ["--pretty", "--run-id", "test-run", "-o", tmp], stdin_data=payload
+        )
         assert rc == 0, f"rc={rc}, stderr={stderr}"
         receipt = json.loads(stdout)
         assert receipt["ok"] is True
@@ -285,6 +287,81 @@ def test_checklist_output_flag() -> None:
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
+
+
+def test_checklist_omits_null_evidence_and_notes() -> None:
+    """Pass items without evidence/notes must NOT emit null keys (schema types them as string)."""
+    # All-pass, no evidence/notes supplied at all.
+    items = [{"id": cid, "status": "pass"} for cid in _CHECKLIST_IDS]
+    payload = json.dumps({"items": items})
+    rc, data, _ = run_script("checklist.py", ["--run-id", "test-run"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    for item in data["items"]:
+        assert "evidence" not in item, f"{item['id']} emitted a null evidence key"
+        assert "notes" not in item, f"{item['id']} emitted a null notes key"
+
+
+def test_checklist_output_validates_against_schema() -> None:
+    """Real -o producer output (all pass, no evidence) must pass checklist.schema.json — no false SCHEMA_VIOLATION."""
+    sys.path.insert(0, DECK_REVIEW_DIR)
+    from _artifact_writer import load_schema  # type: ignore[import-not-found]  # noqa: E402
+    from _schema_validator import validate as _schema_validate  # type: ignore[import-not-found]  # noqa: E402
+
+    items = [{"id": cid, "status": "pass"} for cid in _CHECKLIST_IDS]
+    payload = json.dumps({"items": items})
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        tmp = f.name
+    try:
+        rc, _, stderr = run_script_raw("checklist.py", ["--run-id", "r1", "-o", tmp], stdin_data=payload)
+        assert rc == 0, stderr
+        with open(tmp) as fh:
+            data = json.load(fh)
+        schema = load_schema(os.path.join(DECK_REVIEW_DIR, "..", "references", "schemas", "checklist.schema.json"))
+        errs = _schema_validate(data, schema)
+        assert errs == [], f"producer output should be schema-clean, got: {errs}"
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def test_checklist_fixture_matches_producer_shape_and_schema() -> None:
+    """The committed checklist fixture must validate against the schema and carry no null evidence/notes."""
+    sys.path.insert(0, DECK_REVIEW_DIR)
+    from _artifact_writer import load_schema  # type: ignore[import-not-found]  # noqa: E402
+    from _schema_validator import validate as _schema_validate  # type: ignore[import-not-found]  # noqa: E402
+
+    fixture_path = os.path.join(SCRIPT_DIR, "fixtures", "deck-review", "checklist.json")
+    with open(fixture_path) as f:
+        fixture = json.load(f)
+    schema = load_schema(os.path.join(DECK_REVIEW_DIR, "..", "references", "schemas", "checklist.schema.json"))
+    errs = _schema_validate(fixture, schema)
+    assert errs == [], f"fixture must be schema-clean, got: {errs}"
+    # Must carry the producer's validation block and never a null evidence/notes key.
+    assert "validation" in fixture
+    for item in fixture["items"]:
+        # Keys are omitted when absent; when present they must be non-null strings.
+        if "evidence" in item:
+            assert item["evidence"] is not None
+        if "notes" in item:
+            assert item["notes"] is not None
+
+
+def test_checklist_o_mode_validation_failure_exits_1_no_write() -> None:
+    """In -o mode, invalid input -> stderr + exit 1, and NO artifact is written."""
+    items = _make_checklist_items(exclude=["data_room_ready"])  # missing item
+    payload = json.dumps({"items": items})
+    d = tempfile.mkdtemp(prefix="test-checklist-fail-")
+    out = os.path.join(d, "checklist.json")
+    try:
+        rc, stdout, stderr = run_script_raw("checklist.py", ["--run-id", "r1", "-o", out], stdin_data=payload)
+        assert rc == 1, f"expected exit 1, got {rc}; stdout={stdout}"
+        assert "validation failed" in stderr.lower()
+        assert not os.path.exists(out), "no artifact must be written on validation failure"
+    finally:
+        if os.path.exists(out):
+            os.unlink(out)
+        os.rmdir(d)
 
 
 # -- Compose report tests --
@@ -353,7 +430,9 @@ _VALID_REVIEWS = {
 _VALID_CHECKLIST = {
     "metadata": {"run_id": "run-test"},
     "items": [
-        {"id": cid, "category": "Test", "label": "Test", "status": "pass", "evidence": "test", "notes": None}
+        # Schema-clean shape: evidence is a string; notes is omitted when absent
+        # (the producer omits null keys — see test_checklist_omits_null_evidence_and_notes).
+        {"id": cid, "category": "Test", "label": "Test", "status": "pass", "evidence": "test"}
         for cid in _CHECKLIST_IDS
     ],
     "summary": {
@@ -938,6 +1017,74 @@ def test_compose_malformed_field_types() -> None:
     assert data is not None
 
 
+def test_compose_malformed_by_category_does_not_crash() -> None:
+    """summary.by_category set to a non-dict value (passes schema) must not crash rendering."""
+    import copy
+
+    checklist: dict[str, Any] = copy.deepcopy(_VALID_CHECKLIST)
+    checklist["summary"]["by_category"] = {"Narrative Flow": "oops-not-a-dict"}
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": checklist,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0, stderr
+    assert data is not None
+    assert len(data["report_markdown"]) > 100
+
+
+def test_compose_marker_collision_status_not_clean() -> None:
+    """When MARKER_COLLISION is the only warning, status must be 'warnings', not 'clean'."""
+    import copy
+
+    reviews = copy.deepcopy(_VALID_REVIEWS)
+    # Embed the marker prefix in a RENDERED body field so the pre-scan trips
+    # MARKER_COLLISION (overall_narrative_assessment is rendered into the report).
+    reviews["overall_narrative_assessment"] = "Narrative: <!-- COACHING_INSERTION_POINT_deadbeef --> embedded"
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": reviews,
+            "checklist.json": _VALID_CHECKLIST,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "MARKER_COLLISION" in codes
+    # status must reflect the appended warning, not the pre-marker-append snapshot
+    assert data["validation"]["status"] == "warnings"
+
+
+def test_compose_acknowledged_warnings_counted_in_stderr() -> None:
+    """Accepted (acknowledged) warnings are counted in the stderr summary line; no dead 'info' bucket."""
+    profile = dict(_VALID_PROFILE)
+    profile["detected_stage"] = "series_a"
+    profile["accepted_warnings"] = [
+        {"code": "STAGE_MISMATCH", "reason": "Intentional", "match": "claims"},
+    ]
+    inventory = dict(_VALID_INVENTORY)
+    inventory["claimed_stage"] = "seed"
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": inventory,
+            "stage_profile.json": profile,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+        }
+    )
+    rc, _, stderr = _run_compose(d)
+    assert rc == 0
+    assert "acknowledged" in stderr
+    assert "info" not in stderr.lower().split("warnings:")[-1].split("\n")[0]
+
+
 def test_compose_ai_criteria_missing_no_warning() -> None:
     """AI company with checklist missing AI items -> NO AI_CRITERIA_SKIPPED."""
     profile = dict(_VALID_PROFILE)
@@ -1044,7 +1191,7 @@ def test_checklist_fail_without_evidence_warned() -> None:
         "purpose_clear": {"status": "fail", "evidence": "", "notes": "bad"},
     }
     payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
-    rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    rc, data, stderr = run_script("checklist.py", ["--pretty", "--run-id", "test-run"], stdin_data=payload)
     assert rc == 0
     assert data is not None
     assert "evidence" in stderr.lower()
