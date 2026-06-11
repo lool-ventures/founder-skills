@@ -699,13 +699,14 @@ class TestEdgeCases:
             assert "\n  " in result.stdout
 
     def test_output_to_file(self) -> None:
-        """The -o flag writes output to a file."""
+        """The -o flag writes output to a file and emits a JSON receipt on
+        stdout (per the shared script convention)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             for name, data in _full_artifacts().items():
                 with open(os.path.join(tmpdir, name), "w") as f:
                     json.dump(data, f)
             out_path = os.path.join(tmpdir, "verification.json")
-            subprocess.run(
+            result = subprocess.run(
                 [sys.executable, _SCRIPT, "--dir", tmpdir, "-o", out_path],
                 capture_output=True,
                 text=True,
@@ -714,6 +715,11 @@ class TestEdgeCases:
             with open(out_path) as f:
                 data = json.load(f)
             assert data["status"] == "pass"
+            # stdout carries the receipt, not the raw result JSON.
+            receipt = json.loads(result.stdout)
+            assert receipt["ok"] is True
+            assert receipt["path"] == os.path.abspath(out_path)
+            assert receipt["bytes"] > 0
 
     def test_gate1_flag(self) -> None:
         """--gate 1 skips commentary check."""

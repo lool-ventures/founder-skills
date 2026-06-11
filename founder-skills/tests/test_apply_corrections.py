@@ -782,3 +782,59 @@ class TestAgentDispatchPayload:
         assert audit is not None
         # _coerce_state must have coerced the string "80000" to a number
         assert corrected["revenue"]["mrr"]["value"] == 80000
+
+
+class TestOutputConvention:
+    """-o support + JSON receipt, and legacy-payload shape guard."""
+
+    def test_dash_o_writes_file_and_emits_receipt(self, tmp_path: Any) -> None:
+        """-o writes the status JSON to the file and emits a {"ok": true, ...}
+        receipt on stdout (per the shared script convention)."""
+        corr = tmp_path / "corrections.json"
+        # Legacy 'corrected' payload (a full dict) so the run succeeds (exit 0).
+        corr.write_text(json.dumps({"corrected": {"company": {"stage": "seed"}}}))
+        original = tmp_path / "inputs.json"
+        original.write_text(json.dumps({"company": {"stage": "seed"}}))
+        out_dir = tmp_path / "out"
+        status_file = tmp_path / "status.json"
+        result = subprocess.run(
+            [
+                sys.executable,
+                _SCRIPT,
+                str(corr),
+                "--original",
+                str(original),
+                "--output-dir",
+                str(out_dir),
+                "-o",
+                str(status_file),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        receipt = json.loads(result.stdout)
+        assert receipt["ok"] is True
+        assert receipt["path"] == str(status_file.resolve())
+        assert receipt["bytes"] > 0
+        written = json.loads(status_file.read_text())
+        assert written["status"] == "completed"
+
+    def test_legacy_corrected_non_dict_yields_structured_error(self, tmp_path: Any) -> None:
+        """A legacy payload whose 'corrected' is a list/scalar must produce a
+        structured {"status": "error"} JSON, not a raw traceback."""
+        corr = tmp_path / "corrections.json"
+        corr.write_text(json.dumps({"corrected": [1, 2, 3]}))
+        original = tmp_path / "inputs.json"
+        original.write_text("{}")
+        out_dir = tmp_path / "out"
+        result = subprocess.run(
+            [sys.executable, _SCRIPT, str(corr), "--original", str(original), "--output-dir", str(out_dir)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        out = json.loads(result.stdout)
+        assert out["status"] == "error"
+        assert out["errors"][0]["code"] == "INVALID_PAYLOAD"
+        assert "Traceback" not in result.stderr
