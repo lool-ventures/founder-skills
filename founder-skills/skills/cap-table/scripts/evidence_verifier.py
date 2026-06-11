@@ -442,7 +442,7 @@ def _load_doc_text(source_path: Path) -> str:
     suffix = source_path.suffix.lower()
     try:
         if suffix == ".pdf":
-            import pdfplumber  # type: ignore[import-not-found]
+            import pdfplumber
 
             with pdfplumber.open(source_path) as pdf:
                 return "\n".join((p.extract_text() or "") for p in pdf.pages)
