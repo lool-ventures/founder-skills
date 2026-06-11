@@ -637,6 +637,67 @@ def test_provenance_table_shows_estimate_column() -> None:
 
 
 # ---------------------------------------------------------------------------
+# ic-sim+market-sizing-1: non-numeric deck claim must not crash HTML render
+# ---------------------------------------------------------------------------
+
+
+def test_non_numeric_deck_claim_does_not_crash() -> None:
+    """A string existing_claims figure (e.g. "$5B") must not abort the whole render.
+
+    Regression: _chart_provenance_summary called float(deck_claim) guarded only by
+    'is not None', so a non-numeric claim raised ValueError and aborted visualization.
+    The pipeline contract (_compute_delta returns None on non-numeric) is to tolerate.
+    """
+    arts = _all_artifacts()
+    arts["inputs.json"] = dict(_VALID_INPUTS)
+    arts["inputs.json"]["existing_claims"] = {"tam": "$5B", "sam": "TBD", "som": None}
+    d = _make_artifact_dir(arts)
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, f"render must not crash on non-numeric deck claim; stderr: {stderr}"
+    assert "<html" in stdout.lower()
+    # Non-numeric claim is rendered as em dash, not crashed.
+    assert "—" in stdout
+
+
+def test_non_numeric_sizing_value_does_not_crash() -> None:
+    """A non-numeric sizing 'value' must not abort the provenance summary render."""
+    import copy
+
+    arts = _all_artifacts()
+    sizing = copy.deepcopy(_VALID_SIZING)
+    sizing["top_down"]["tam"]["value"] = "not-a-number"
+    arts["sizing.json"] = sizing
+    arts["inputs.json"] = dict(_VALID_INPUTS)
+    arts["inputs.json"]["existing_claims"] = {"tam": 50000000000}
+    d = _make_artifact_dir(arts)
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, f"render must not crash on non-numeric sizing value; stderr: {stderr}"
+    assert "<html" in stdout.lower()
+
+
+def test_failed_checklist_item_null_notes_no_literal_none() -> None:
+    """A failed checklist item with notes:null must not render 'Label: None'.
+
+    Regression: _chart_key_findings did str(item.get("notes", "")), so a present
+    null became the string "None".
+    """
+    import copy
+
+    arts = _all_artifacts()
+    checklist = copy.deepcopy(_VALID_CHECKLIST)
+    items = checklist["items"]
+    items[0] = dict(items[0])
+    items[0]["status"] = "fail"
+    items[0]["notes"] = None
+    label = items[0].get("label", items[0]["id"])
+    arts["checklist.json"] = checklist
+    d = _make_artifact_dir(arts)
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, stderr
+    assert f"{label}: None" not in stdout, "null notes must not render as the literal string 'None'"
+
+
+# ---------------------------------------------------------------------------
 # Cross-renderer provenance drift guard
 # ---------------------------------------------------------------------------
 
