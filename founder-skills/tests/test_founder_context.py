@@ -176,6 +176,48 @@ def test_merge_adds_fields() -> None:
         assert data["company_name"] == "Gamma Co"
 
 
+def test_merge_deep_merges_nested_dicts() -> None:
+    """merge recurses into nested sub-dicts instead of clobbering siblings.
+
+    Regression for shared-scripts-6: a single-level dict.update replaced the
+    whole nested dict, silently discarding existing sibling keys.
+    """
+    with tempfile.TemporaryDirectory(prefix="test-ctx-") as root:
+        run_context(
+            [
+                "init",
+                "--company-name",
+                "Nested Co",
+                "--stage",
+                "seed",
+                "--sector",
+                "saas",
+                "--geography",
+                "US",
+            ],
+            artifacts_root=root,
+        )
+        # Seed a nested structure with two sibling keys under fundraising.round
+        seed = json.dumps({"fundraising": {"round": {"target": 5, "lead": "Acmecorp"}}})
+        rc, _, stderr = run_context(
+            ["merge", "--slug", "nested-co", "--data", seed, "--source", "user"],
+            artifacts_root=root,
+        )
+        assert rc == 0, f"seed merge failed: {stderr}"
+
+        # Merge an update to one nested key; the sibling must survive.
+        upd = json.dumps({"fundraising": {"round": {"target": 7}}})
+        rc, data, stderr = run_context(
+            ["merge", "--slug", "nested-co", "--data", upd, "--source", "user"],
+            artifacts_root=root,
+        )
+        assert rc == 0, f"update merge failed: {stderr}"
+        assert data is not None
+        round_data = data["fundraising"]["round"]
+        assert round_data["target"] == 7, "updated key not applied"
+        assert round_data["lead"] == "Acmecorp", "sibling nested key was clobbered"
+
+
 def test_merge_updates_last_updated() -> None:
     """merge always updates timestamp."""
     with tempfile.TemporaryDirectory(prefix="test-ctx-") as root:

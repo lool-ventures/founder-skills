@@ -5,9 +5,9 @@
 # ///
 """Per-company founder context manager.
 
-Manages founder-context-{slug}.json files with init/read/merge/validate
-subcommands. Each file stores stable identity fields, key metrics with
-provenance, fundraising data, and prior skill run history.
+Manages founder-context-{slug}.json files with init/read/merge/validate/
+update-identity subcommands. Each file stores stable identity fields, key
+metrics with provenance, fundraising data, and prior skill run history.
 
 Usage:
     python founder_context.py init --company-name "Acme Corp" --stage seed \
@@ -19,6 +19,9 @@ Usage:
         --data '{"team_size": 12}' --artifacts-root ./artifacts
 
     python founder_context.py validate --slug acme-corp --artifacts-root ./artifacts
+
+    python founder_context.py update-identity --slug acme-corp --stage series-a \
+        --sector "ai-native" --artifacts-root ./artifacts
 
 Exit codes:
     0 = success
@@ -294,6 +297,19 @@ def _check_protected_fields(merge_data: dict[str, Any], source: str, force: bool
     return False
 
 
+def _deep_merge(target: dict[str, Any], updates: dict[str, Any]) -> None:
+    """Recursively merge ``updates`` into ``target`` in place.
+
+    For keys present in both whose values are dicts, recurse so nested
+    sub-dicts are merged rather than clobbered. Otherwise overwrite.
+    """
+    for key, val in updates.items():
+        if key in target and isinstance(target[key], dict) and isinstance(val, dict):
+            _deep_merge(target[key], val)
+        else:
+            target[key] = val
+
+
 def _stamp_key_metrics_source(km: dict[str, Any], source: str) -> dict[str, Any]:
     """Add source provenance to each key_metrics entry."""
     stamped: dict[str, Any] = {}
@@ -414,12 +430,10 @@ def cmd_merge(args: argparse.Namespace) -> None:
     if "key_metrics" in merge_data and isinstance(merge_data["key_metrics"], dict):
         merge_data["key_metrics"] = _stamp_key_metrics_source(merge_data["key_metrics"], source)
 
-    # Deep merge: for dict values, merge recursively; otherwise overwrite
-    for key, val in merge_data.items():
-        if key in context and isinstance(context[key], dict) and isinstance(val, dict):
-            context[key].update(val)
-        else:
-            context[key] = val
+    # Deep merge: for dict values, merge recursively; otherwise overwrite.
+    # Protected fields are gated by _check_protected_fields above, so recursion
+    # here only touches user-confirmed or non-protected nested data.
+    _deep_merge(context, merge_data)
 
     # Handle --add-skill-run
     if args.add_skill_run:
@@ -487,7 +501,7 @@ def cmd_validate(args: argparse.Namespace) -> None:
             print(f"Validation error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Valid — output the context
+    # Valid — this is a gate (no -o/--pretty); report status to stderr, no stdout.
     print("Valid", file=sys.stderr)
 
 
