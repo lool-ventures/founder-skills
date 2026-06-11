@@ -279,6 +279,17 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Competitive positioning checklist scorer (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
+    p.add_argument(
+        "--input-mode",
+        choices=("deck", "conversation", "document"),
+        help="Input mode for mode gating. Overrides 'input_mode' in the stdin JSON. "
+        "Defaults to the stdin value, then 'conversation'.",
+    )
+    p.add_argument(
+        "--run-id",
+        help="Run identifier stamped into result.metadata.run_id. Overrides any "
+        "'metadata' in the stdin JSON (the sub-agent returns items only).",
+    )
     return p.parse_args()
 
 
@@ -307,16 +318,29 @@ def main() -> None:
     if not isinstance(data["items"], list):
         _die("'items' must be an array")
 
-    input_mode = data.get("input_mode", "conversation")
+    # input_mode precedence: CLI flag > stdin JSON > default ("conversation").
+    # The CHECKLIST sub-agent returns items only, so the main thread stamps the
+    # real input_mode via --input-mode; without it deck/document runs would
+    # silently default to "conversation" and mis-gate NARR_03/EVID_04.
+    input_mode = args.input_mode or data.get("input_mode", "conversation")
     if input_mode not in ("deck", "conversation", "document"):
         _die(f"Invalid input_mode '{input_mode}'. Must be 'deck', 'conversation', or 'document'")
 
     data_confidence = data.get("data_confidence", "exact")
-    metadata = data.get("metadata", {})
+
+    # metadata precedence: --run-id (CLI) wins over any 'metadata' in stdin JSON.
+    # The CHECKLIST sub-agent returns items only — the main thread stamps run_id
+    # via --run-id so checklist.json carries the run_id the Context B verifier
+    # greps for.
+    if args.run_id:
+        metadata: dict[str, Any] = {"run_id": args.run_id}
+    else:
+        metadata = data.get("metadata", {})
 
     result = validate_and_score(data["items"], input_mode, data_confidence)
     result["_produced_by"] = "checklist"
     result["metadata"] = metadata
+    result["input_mode"] = input_mode
 
     if result["fail_count"] == 0 and result["warn_count"] == 0:
         print("Note: all items passed — verify assessments are evidence-based, not defaulting to pass", file=sys.stderr)
