@@ -515,6 +515,13 @@ def main() -> int:
         "--source", type=Path, help="Source document (PDF/DOCX/XLSX) — required unless --doc-text is given"
     )
     parser.add_argument("--doc-text", type=Path, help="Pre-extracted text file (skips parsing)")
+    parser.add_argument(
+        "--doc-text-source",
+        choices=("text_layer", "model_vision"),
+        default="text_layer",
+        help="Provenance of --doc-text. 'model_vision' (a fresh sub-agent transcribed an "
+        "image-only doc) stamps verification_source and demotes confidence one level.",
+    )
     parser.add_argument("--fuzzy-threshold", type=float, default=DEFAULT_FUZZY_THRESHOLD)
     parser.add_argument("--pretty", action="store_true")
     parser.add_argument("-o", "--output", type=Path)
@@ -542,6 +549,13 @@ def main() -> int:
 
     report = verify_extraction(extraction, doc_text, fuzzy_threshold=args.fuzzy_threshold)
     out = report_to_dict(report)
+
+    # Vision-fallback provenance: when --doc-text came from a fresh sub-agent's
+    # transcription of an image-only doc, stamp the source and signal a
+    # one-level confidence demotion (vision is less reliable than a text layer).
+    if args.doc_text and args.doc_text_source == "model_vision":
+        out["doc_metadata"]["verification_source"] = "model_vision"
+        out["doc_metadata"]["confidence_demoted"] = True
 
     if args.output:
         args.output.write_text(json.dumps(out, indent=2 if args.pretty else None))

@@ -106,7 +106,11 @@ The dispatching agent should escalate these via `AskUserQuestion` AND, for high-
 
 ## Unverifiable documents
 
-If the source document is image-only or DocuSign-overlay (verifier returns `overall_status: "unverifiable_doc"` or `verifier_blind_demoted`), verification cannot run — surface this to the founder and ask for explicit confirmation of the extracted values before commit.
+If the source document is image-only or DocuSign-overlay (verifier returns `overall_status: "unverifiable_doc"` or `verifier_blind_demoted`, i.e. the text layer is empty / `is_doc_image_only`), the text-based verifier has nothing to match against.
+
+**Vision fallback:** before giving up, dispatch a FRESH sub-agent to transcribe the relevant passages of the image-only document into plain text, then feed that transcription back to the verifier via `--doc-text <file>` (instead of `--source`). When the document text came from model vision rather than a text layer, the verifier stamps `verification_source: "model_vision"` and demotes the field confidence one level (vision transcription is less reliable than a real text layer). Surface the demotion to the founder and ask for explicit confirmation of the extracted values before commit.
+
+If no usable transcription is possible, surface the unverifiable status to the founder and ask for explicit confirmation of the extracted values before commit.
 
 If the extraction surfaced ambiguities or low-confidence fields, present them via `AskUserQuestion` for confirmation before proceeding.
 

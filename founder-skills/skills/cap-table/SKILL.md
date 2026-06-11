@@ -280,6 +280,8 @@ EXTRACT_EOF
 
 **Verification stack** (Lane 1 and any other lane that piped through `extract_instrument.py`): forward `evidence_verifier.py` → `invariant_checker.py` → `cross_checker.py` → optional `backward_verifier.py`. All default-on; see the Lane 1 reference for the receipt schema, `attention_needed_fields` semantics, and when to run backward verification.
 
+**Image-only PDFs (vision fallback):** if the document has no text layer, the verifier can't match values. Dispatch a FRESH sub-agent to transcribe the relevant passages, then feed that text to the verifier via `--doc-text <file> --doc-text-source model_vision`. The verifier stamps `verification_source: "model_vision"` and demotes confidence one level — surface that to the founder. (A missing PDF parser is different: it raises `E_MISSING_DEPENDENCY` and blocks, not a silent image-only pass.)
+
 **Lane 4 instruments.json SAFE skeleton** (use when authoring by heredoc or conversational reconstruction):
 
 ```json
