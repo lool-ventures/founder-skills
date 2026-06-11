@@ -38,7 +38,6 @@ WARNING_SEVERITY: dict[str, str] = {
     "OVERCLAIMED_VALIDATION": "high",
     "UNVALIDATED_CLAIMS": "high",
     # Medium severity — include in Warnings section of report
-    "MISSING_OPTIONAL_ARTIFACT": "low",
     "UNSOURCED_ASSUMPTIONS": "medium",
     "APPROACH_MISMATCH": "medium",
     "TAM_DISCREPANCY": "medium",
@@ -48,10 +47,12 @@ WARNING_SEVERITY: dict[str, str] = {
     "LOW_CHECKLIST_COVERAGE": "medium",
     "REFUTED_CLAIMS": "medium",
     "REFUTED_MISSING_REASON": "medium",
+    "EXISTING_CLAIMS_SHAPE": "medium",
+    # Low severity — informational; do not block under --strict
+    "MISSING_OPTIONAL_ARTIFACT": "low",
     "DECK_CLAIM_MISMATCH": "low",
     "PROVENANCE_UNRESOLVED": "low",
-    "EXISTING_CLAIMS_SHAPE": "medium",
-    # v0.4.2 Mitigation 2 — informational only (uuid is per-run, won't collide)
+    # Marker collision is informational only (uuid is per-run, won't collide)
     "MARKER_COLLISION": "low",
 }
 
@@ -307,7 +308,7 @@ def _warn(code: str, message: str) -> dict[str, str]:
 
 
 def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict[str, str]]:
-    """Run all 16 validation checks across artifacts. Returns list of warnings."""
+    """Run all 17 validation checks across artifacts. Returns list of warnings."""
     warnings: list[dict[str, str]] = []
 
     methodology = artifacts.get("methodology.json")
@@ -1041,6 +1042,19 @@ def _emit_coaching_payload(
     """
     summary = _as_dict(checklist.get("summary"))
 
+    # Derive a confidence tier from the checklist score_pct so the Context B
+    # agent reads it directly from coaching_payload (no fabrication from
+    # nonexistent sizing.json/checklist.json fields).
+    confidence: str | None = None
+    score_pct = summary.get("score_pct")
+    if isinstance(score_pct, (int, float)):
+        if score_pct >= 85:
+            confidence = "high"
+        elif score_pct >= 60:
+            confidence = "medium"
+        else:
+            confidence = "low"
+
     # Compute deck_coverage from inputs.existing_claims (canonical keys only).
     # Non-canonical keys do NOT count here — EXISTING_CLAIMS_SHAPE warning is
     # the dedicated shape signal. Only meaningful when the agent populated at
@@ -1072,6 +1086,7 @@ def _emit_coaching_payload(
         "high_severity_warnings": [w["code"] for w in validation_warnings if w.get("severity") == "high"],
         "company_name": inputs.get("company_name"),
         "methodology": methodology.get("approach_chosen"),
+        "confidence": confidence,  # derived from checklist score_pct; null if unavailable
         "deck_coverage": deck_coverage,  # nullable; additive in v0.4.2-market-sizing
         "review_dir": review_dir,
         "report_path": report_path,
@@ -1098,6 +1113,9 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     if _usable(methodology_art):
         acceptances: list[dict[str, str]] = []
         for aw in _as_list(methodology_art.get("accepted_warnings")):
+            if not isinstance(aw, dict):
+                print("Warning: accepted_warnings entry is not an object — skipped", file=sys.stderr)
+                continue
             code = aw.get("code", "")
             match_str = aw.get("match", "")
             if not code or not match_str:
@@ -1124,9 +1142,6 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
                     w["message"] += f" [Accepted: {acc['reason']}]"
                     break
 
-    # Determine status
-    status = "clean" if not warnings else "warnings"
-
     # Assemble report — treat corrupt artifacts as None for rendering
     def _render_safe(data: dict[str, Any] | None) -> dict[str, Any] | None:
         return None if data is _CORRUPT else data
@@ -1143,6 +1158,11 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     if _usable(sizing) and not _is_stub(sizing):
         provenance_data, _ = _compute_provenance(sizing, validation_data, inputs)
 
+    # Render every section EXCEPT Warnings first. The marker pre-scan and the
+    # MARKER_COLLISION append must run before the Warnings section is rendered
+    # and before status is computed, so that a marker collision is reflected in
+    # both validation.status and the report's Warnings section.
+    _WARNINGS_PLACEHOLDER = "\x00__WARNINGS_SECTION__\x00"
     sections = [
         _section_title_provenance(inputs),
         _section_executive_summary(sizing, sensitivity, provenance_data),
@@ -1154,11 +1174,11 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         _section_assumptions(validation_data),
         _section_validation(validation_data),
         _section_sensitivity(sensitivity),
-        _section_warnings(warnings),
+        _WARNINGS_PLACEHOLDER,
         _section_sources(validation_data),
     ]
 
-    report_markdown = "\n".join(sections)
+    body_without_warnings = "\n".join(s for s in sections if s != _WARNINGS_PLACEHOLDER)
 
     # v0.4.2 Mitigation 2: per-run uuid marker for Context B's Edit
     marker = f"<!-- COACHING_INSERTION_POINT_{uuid.uuid4().hex[:8]} -->"
@@ -1167,7 +1187,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # always find our own emission). Agent post-Edit verification uses the
     # EXACT uuid (per-run), so substring collisions with body content are
     # informational only — but worth flagging so authors can sanitize.
-    if "<!-- COACHING_INSERTION_POINT_" in report_markdown:
+    if "<!-- COACHING_INSERTION_POINT_" in body_without_warnings:
         warnings.append(
             _warn(
                 "MARKER_COLLISION",
@@ -1178,6 +1198,12 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
                 ),
             )
         )
+
+    # Determine status AFTER all warnings (including MARKER_COLLISION) are known.
+    status = "clean" if not warnings else "warnings"
+
+    # Splice the Warnings section in now that the warnings list is final.
+    report_markdown = "\n".join(_section_warnings(warnings) if s == _WARNINGS_PLACEHOLDER else s for s in sections)
 
     report_markdown += (
         f"\n\n{marker}\n\n---\n"
@@ -1232,7 +1258,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("-d", "--dir", required=True, help="Directory containing JSON artifacts")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
-    p.add_argument("--strict", action="store_true", help="Exit 1 if any warnings (CI mode)")
+    p.add_argument("--strict", action="store_true", help="Exit 1 on high/medium-severity warnings (CI mode)")
     p.add_argument(
         "--write-md",
         help="Also write the report markdown to this path (in addition to JSON output via -o)",
