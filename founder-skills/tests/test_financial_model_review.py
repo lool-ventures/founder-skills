@@ -4471,3 +4471,118 @@ def test_runway_breakeven_warning_when_burn_zero_no_cash() -> None:
     assert "breakeven" in warnings_text.lower(), (
         f"Expected a 'breakeven' warning when burn=0 and no cash balance, got: {warnings_list}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Null-coercion regression: present-but-null numeric fields must not crash the
+# math producers. The corrections layer writes None for blank/cleared cells.
+# ---------------------------------------------------------------------------
+
+
+def test_runway_null_debt_does_not_crash() -> None:
+    """cash.debt: null must not raise TypeError (the .get default only applies
+    to missing keys, not explicit JSON null)."""
+    inputs = {
+        "company": {"company_name": "TestCo", "stage": "seed"},
+        "cash": {"current_balance": 1_000_000, "monthly_net_burn": 50_000, "debt": None},
+    }
+    rc, data, stderr = run_script("runway.py", stdin_data=json.dumps(inputs))
+    assert rc == 0, f"runway.py crashed on null debt: {stderr}"
+    assert data.get("baseline", {}).get("net_cash") == 1_000_000
+
+
+def test_runway_null_grant_and_target_fields_do_not_crash() -> None:
+    """IIA grant fields, ils_expense_fraction, and runway_target_months set to
+    null must not raise TypeError."""
+    inputs = {
+        "company": {"company_name": "TestCo", "stage": "seed"},
+        "cash": {
+            "current_balance": 1_000_000,
+            "monthly_net_burn": 50_000,
+            "grants": {
+                "iia_approved": 500_000,
+                "iia_disbursement_months": None,
+                "iia_start_month": None,
+            },
+            "fundraising": {"target_raise": 2_000_000},
+        },
+        "bridge": {"runway_target_months": None},
+        "israel_specific": {"fx_rate_ils_usd": 3.5, "ils_expense_fraction": None},
+    }
+    rc, data, stderr = run_script("runway.py", stdin_data=json.dumps(inputs))
+    assert rc == 0, f"runway.py crashed on null grant/target fields: {stderr}"
+    assert data.get("post_raise") is not None
+
+
+def test_unit_economics_null_headcount_count_does_not_crash() -> None:
+    """A headcount entry with count/salary/burden null must not raise TypeError
+    in either the ARR/FTE path or the magic-number S&M loop."""
+    inputs = {
+        "company": {"company_name": "TestCo", "stage": "seed"},
+        "revenue_model_type": "saas-plg",
+        "revenue": {
+            "arr": {"value": 2_000_000},
+            "mrr": {"value": 166_666},
+            "growth_rate_monthly": 0.1,
+        },
+        "expenses": {
+            "headcount": [
+                {"role": "sales", "count": None, "salary_annual": None, "burden_pct": None},
+                {"role": "eng", "count": 5, "salary_annual": 150_000, "burden_pct": 0.3},
+            ]
+        },
+    }
+    rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(inputs))
+    assert rc == 0, f"unit_economics.py crashed on null headcount count: {stderr}"
+    assert data is not None
+
+
+def test_compose_marker_collision_reflected_in_status_and_report() -> None:
+    """When body content contains the marker prefix, MARKER_COLLISION must be
+    in validation.warnings, status must be 'warnings' (not 'clean'), and the
+    warning must render in the report's Validation Warnings section — i.e. the
+    pre-scan happens before status + the Warnings section are finalized."""
+    inputs_collide = json.loads(json.dumps(_VALID_INPUTS))
+    inputs_collide["company"]["company_name"] = "TestCo <!-- COACHING_INSERTION_POINT_deadbeef -->"
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": inputs_collide,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "MARKER_COLLISION" in codes, "MARKER_COLLISION must be recorded in validation.warnings"
+    assert data["validation"]["status"] == "warnings", "status must reflect MARKER_COLLISION"
+    # The warning must actually render in the report body (not just JSON). The
+    # Validation Warnings section humanizes the code to its label.
+    md = data["report_markdown"]
+    assert "## Validation Warnings" in md
+    assert "Marker Collision" in md, "MARKER_COLLISION must render in the Warnings section"
+
+
+def test_compose_fmt_usd_negative_net_cash() -> None:
+    """Negative net_cash (debt > balance) must render as '-$..' not '$-..'."""
+    inputs_debt = json.loads(json.dumps(_VALID_INPUTS))
+    inputs_debt["cash"]["current_balance"] = 500_000
+    inputs_debt["cash"]["debt"] = 2_000_000
+    runway_neg = json.loads(json.dumps(_VALID_RUNWAY))
+    runway_neg["baseline"]["net_cash"] = -1_500_000
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": inputs_debt,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": runway_neg,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    assert "$-1,500,000.00" not in md, "Negative must not fall through to $-.. form"
+    assert "-$1.5M" in md, "Negative net cash should render as -$1.5M"

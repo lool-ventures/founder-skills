@@ -62,6 +62,20 @@ def _deep_get(data: dict[str, Any], *keys: str, default: Any = None) -> Any:
     return current
 
 
+def _num(x: Any, default: float) -> float:
+    """Coerce x to a numeric value, falling back to default for null/non-numeric.
+
+    The dict.get() default only applies to missing keys, not to keys present
+    with an explicit JSON null. Used inside sanity arithmetic so a present-but-
+    null headcount cell is reported (Layer 1 TYPE_ERROR) rather than crashing.
+    """
+    if isinstance(x, bool):
+        return default
+    if isinstance(x, (int, float)):
+        return x
+    return default
+
+
 def _deep_get_by_path(data: dict[str, Any], dotted_path: str) -> Any:
     """Navigate nested dict by dotted path like 'cash.monthly_net_burn'."""
     obj: Any = data
@@ -139,6 +153,31 @@ def _validate_structural(
                     "layer": 1,
                 }
             )
+
+    # --- Type correctness for headcount numeric cells ---
+    # Present-but-null count/salary_annual cells (produced by the corrections
+    # coercion layer for blank fields) make the entry unusable and would crash
+    # the downstream Layer-3 sanity arithmetic; report them here as TYPE_ERROR.
+    headcount_entries = _deep_get(inputs, "expenses", "headcount")
+    if isinstance(headcount_entries, list):
+        for idx, entry in enumerate(headcount_entries):
+            if not isinstance(entry, dict):
+                continue
+            for hc_field in ("count", "salary_annual"):
+                if hc_field not in entry:
+                    continue
+                cell = entry[hc_field]
+                if isinstance(cell, bool) or not isinstance(cell, (int, float)):
+                    field_path = f"expenses.headcount[{idx}].{hc_field}"
+                    got = "null" if cell is None else type(cell).__name__
+                    errors.append(
+                        {
+                            "code": "TYPE_ERROR",
+                            "message": f"Field '{field_path}' must be numeric, got {got}",
+                            "field": field_path,
+                            "layer": 1,
+                        }
+                    )
 
     # --- Burn sign check ---
     burn = _deep_get(inputs, "cash", "monthly_net_burn")
@@ -605,9 +644,9 @@ def _validate_sanity(inputs: dict[str, Any]) -> list[dict[str, Any]]:
     # Expense coverage: headcount costs should roughly account for stated burn
     headcount = _deep_get(inputs, "expenses", "headcount")
     if isinstance(burn, (int, float)) and burn > 0 and isinstance(headcount, list) and len(headcount) > 0:
-        total_hc = sum(h.get("count", 0) for h in headcount if isinstance(h, dict))
+        total_hc = sum(_num(h.get("count", 0), 0) for h in headcount if isinstance(h, dict))
         total_salary_monthly = sum(
-            h.get("salary_annual", 0) / 12 * h.get("count", 1)
+            h.get("salary_annual", 0) / 12 * _num(h.get("count", 1), 1)
             for h in headcount
             if isinstance(h, dict) and isinstance(h.get("salary_annual"), (int, float))
         )
@@ -617,7 +656,7 @@ def _validate_sanity(inputs: dict[str, Any]) -> list[dict[str, Any]]:
                 burden = h.get("burden_pct")
                 if isinstance(burden, (int, float)) and burden > 0:
                     sal = h.get("salary_annual", 0)
-                    cnt = h.get("count", 1)
+                    cnt = _num(h.get("count", 1), 1)
                     if isinstance(sal, (int, float)):
                         total_salary_monthly += sal / 12 * cnt * burden
         # Sum opex and COGS for total extracted expenses
@@ -848,7 +887,8 @@ def validate(inputs: dict[str, Any], *, fix: bool = False) -> dict[str, Any]:
     # Layer 4
     all_warnings.extend(_validate_completeness(inputs))
 
-    overrides = inputs.get("metadata", {}).get("warning_overrides", [])
+    metadata = inputs.get("metadata")
+    overrides = metadata.get("warning_overrides", []) if isinstance(metadata, dict) else []
 
     return {
         "valid": len(all_errors) == 0,

@@ -293,6 +293,20 @@ def _deep_get(data: dict[str, Any], *keys: str, default: Any = None) -> Any:
     return current
 
 
+def _num(x: Any, default: float) -> float:
+    """Coerce x to a numeric value, falling back to default for null/non-numeric.
+
+    The dict.get() default only applies to missing keys, not to keys present
+    with an explicit JSON null. Blank/cleared headcount cells are coerced to
+    None by the corrections layer, so numeric reads must guard against None.
+    """
+    if isinstance(x, bool):
+        return default
+    if isinstance(x, (int, float)):
+        return x
+    return default
+
+
 # ---------------------------------------------------------------------------
 # Time-series net new ARR helpers
 # ---------------------------------------------------------------------------
@@ -812,9 +826,9 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
         for person in headcount:
             role = str(person.get("role", "")).lower()
             if role in ("sales", "marketing", "sales & marketing", "s&m", "growth"):
-                count = person.get("count", 0)
-                salary = person.get("salary_annual", 0)
-                burden = person.get("burden_pct", 0.0)
+                count = _num(person.get("count", 0), 0)
+                salary = _num(person.get("salary_annual", 0), 0)
+                burden = _num(person.get("burden_pct", 0.0), 0.0)
                 sm_spend_annual += count * salary * (1 + burden)
 
         if mrr is not None and growth_rate is not None and growth_rate > 0 and sm_spend_annual > 0:
@@ -1075,16 +1089,10 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                             f"(using operating margin (burn-derived)); no benchmark for stage '{stage}'",
                         )
                     )
-        elif arr_val_for_r40 is not None and arr_val_for_r40 < 1_000_000:
-            metrics.append(
-                _metric(
-                    "rule_of_40",
-                    None,
-                    "not_applicable",
-                    f"Rule of 40 not meaningful below $1M ARR (current: ${arr_val_for_r40:,.0f})",
-                )
-            )
         else:
+            # Note: the < $1M ARR not_applicable case is handled by the first
+            # branch above (line ~972); arr_val_for_r40 is not reassigned, so
+            # only the insufficient-data fallthrough remains here.
             metrics.append(_metric("rule_of_40", None, "not_rated", "Insufficient data for Rule of 40"))
     else:
         metrics.append(_metric("rule_of_40", None, "not_applicable", "Rule of 40 applies to SaaS models only"))
@@ -1093,7 +1101,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
     if saas:
         arr_val = _deep_get(revenue, "arr", "value")
         headcount = _deep_get(expenses, "headcount", default=[])
-        total_fte = sum(p.get("count", 0) for p in headcount) if headcount else 0
+        total_fte = sum(_num(p.get("count", 0), 0) for p in headcount) if headcount else 0
         if arr_val is not None and total_fte > 0:
             arr_fte = round(arr_val / total_fte)
             # No stage benchmark for arr_per_fte; use general SaaS benchmark
