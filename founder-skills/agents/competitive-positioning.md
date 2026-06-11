@@ -185,6 +185,12 @@ computes the summary):
 {"items": [{"id": "COVER_01", "status": "pass", "evidence": "...", "notes": "..."}, ...all 25 items...]}
 ```
 
+`input_mode` and `metadata.run_id` are stamped on the producer-script CLI by the
+main thread (`checklist.py --input-mode ... --run-id ...`) — you return the
+`items` array only. Do not add `input_mode` or `metadata` to your output; the
+main thread supplies the authoritative values so mode gating and run_id parity
+are correct.
+
 **Hard rules in Context A:**
 
 - Return JSON only. No prose, no markdown wrapper, no explanatory message. The

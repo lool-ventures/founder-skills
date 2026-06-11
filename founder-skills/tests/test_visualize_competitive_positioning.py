@@ -467,3 +467,20 @@ def test_axis_rationale_xss() -> None:
         block = rationale_blocks[0]
         assert "<script>" not in block, "Raw <script> should not appear in rationale block"
         assert "&lt;script&gt;" in block, "Script tag should be HTML-escaped"
+
+
+# ---------------------------------------------------------------------------
+# Audit regression test (a4: visualize.py)
+# ---------------------------------------------------------------------------
+
+
+def test_non_dict_artifact_does_not_crash() -> None:
+    """A top-level JSON array artifact must degrade to the placeholder/corrupt
+    path, not crash visualize.py with AttributeError (audit cp-scripts-6)."""
+    artifacts = _all_artifacts()
+    artifacts["report.json"] = '["x"]'  # raw string → written verbatim
+    with _make_artifact_dir(artifacts) as d:
+        rc, stdout, stderr = _run_visualize(d)
+        assert "Traceback" not in stderr
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        assert "<html" in stdout.lower()

@@ -87,11 +87,10 @@ Every analysis deposits structured JSON artifacts into a working directory. The 
 |------|----------|----------|
 | 2 | `product_profile.json` | Agent (main) |
 | 3 | `landscape_draft.json` | Agent (main) |
-| 4 | `landscape_enriched.json` | Context A dispatch: LANDSCAPE_RESEARCH |
-| 4b | `landscape.json` | `validate_landscape.py` (from enriched) |
-| 5a | `moat_scores.json` | Context A dispatch: MOAT_SCORING → `score_moats.py` |
-| 5b | `positioning_scores.json` | Context A dispatch: POSITIONING_SCORING → `score_positioning.py` |
-| 5c | `positioning.json` | Agent (main — views, moats, stress-tests) |
+| 4 | `landscape.json` | Context A dispatch: LANDSCAPE_RESEARCH → `validate_landscape.py` |
+| 5a | `positioning.json` | Agent (main — views, moats, stress-tests) |
+| 5b | `moat_scores.json` | Context A dispatch: MOAT_SCORING → `score_moats.py` |
+| 5c | `positioning_scores.json` | Context A dispatch: POSITIONING_SCORING → `score_positioning.py` |
 | 6 | `checklist.json` | Context A dispatch: CHECKLIST → `checklist.py` |
 | 7 | `report.json` | `compose_report.py` reads all |
 | 7d | `report.html` | `visualize.py` |
@@ -125,7 +124,7 @@ else
 fi
 ```
 
-The path setup handles both Claude Code (local filesystem) and Cowork (mounted sessions). In most cases, only the first branch (`./artifacts`) applies.
+The path setup handles both Claude Code (local filesystem) and Cowork (mounted sessions). In most cases, only the final fallback branch (`./artifacts`) applies; the two `mnt/*/` branches above it are Cowork-only.
 
 If `CLAUDE_PLUGIN_ROOT` is empty OR the path it resolves to does not exist in your environment (in Claude Cowork it substitutes to a host-side path that is not present inside the session VM — test with `ls`), fall back: run `Glob` with pattern `**/skills/competitive-positioning/scripts/validate_landscape.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`. In Claude Cowork this is always the case — don't retry the substituted path; go straight to the Glob fallback. If Glob returns multiple matches, prefer the one under a plugin mount (`.remote-plugins/` or the plugins cache) over any workspace copy. If Glob returns nothing, locate it with Bash: `find / -path '*/skills/competitive-positioning/scripts/validate_landscape.py' 2>/dev/null | head -5`.
 
@@ -144,7 +143,7 @@ Pass `RUN_ID` to all sub-agents. Every artifact must include `"metadata": {"run_
 
 If `ANALYSIS_DIR` already contains artifacts from a previous run, remove them before starting:
 
-    rm -f "$ANALYSIS_DIR"/{product_profile,landscape_draft,landscape_enriched,landscape,positioning,moat_scores,positioning_scores,checklist,report}.json "$ANALYSIS_DIR/report.html" "$ANALYSIS_DIR/explore.html"
+    rm -f "$ANALYSIS_DIR"/{product_profile,landscape_draft,landscape,positioning,moat_scores,positioning_scores,checklist,report}.json "$ANALYSIS_DIR/report.html" "$ANALYSIS_DIR/explore.html"
 
 ### Step 1: Read or Create Founder Context
 
@@ -170,7 +169,11 @@ Extract from the founder's materials or conversation: company name, product desc
 
 **For deck mode:** Read ALL pages of the deck systematically — not just the competition slide. Problem, solution, traction, and team slides contain competitive claims and differentiation context that inform the analysis. If the deck has a competition slide with its own positioning axes, record them in `product_profile.json` under `deck_axes` for potential use as a secondary positioning view.
 
-Write `product_profile.json` to `$ANALYSIS_DIR`. Consult `references/artifact-schemas.md` for the schema.
+Write `product_profile.json` to `$ANALYSIS_DIR`. Consult `references/artifact-schemas.md` for the schema. Set `INPUT_MODE` to the chosen mode (`deck`, `conversation`, or `document`) — Step 6's checklist pipe passes it to `checklist.py --input-mode` so mode gating is applied correctly:
+
+```bash
+INPUT_MODE="deck"   # or "conversation" / "document"
+```
 
 If materials are sparse, use `AskUserQuestion` to gather missing fields. At minimum: product description, target customers, and what the founder believes differentiates them.
 
@@ -216,7 +219,7 @@ The `.staging/` directory is created at setup and removed at cleanup.
 This avoids `Operation not permitted` errors that occur when writing to
 the session outputs mount (Cowork marks it read-only post-write).
 
-### Step 4: Research & Enrich Competitors -> `landscape_enriched.json` -> `landscape.json` (Context A: LANDSCAPE_RESEARCH dispatch)
+### Step 4: Research & Enrich Competitors -> `landscape.json` (Context A: LANDSCAPE_RESEARCH dispatch)
 
 **Dispatch the competitive-positioning sub-agent in Context A (LANDSCAPE_RESEARCH).** The sub-agent declares `WebSearch` in its tool allowlist and performs the research itself — dispatch it via the `Task` tool so the research runs in an isolated context.
 
@@ -266,18 +269,20 @@ LANDSCAPE_EOF
 
 Fix any errors (exit 1) and re-run. Warnings are acceptable — address medium-severity ones in the report.
 
-### Gate 2: Founder Validation of Positioning
+### Gate 2: Founder Validation of Axis Selection
 
 **MANDATORY STOP — TWO SEPARATE STEPS, same pattern as Gate 1.**
 
-**Step A: Output a chat message** with the positioning preview.
+At this point no competitor coordinates exist yet — those are produced in Step 5 (POSITIONING_SCORING) and written to `positioning.json`. Gate 2 validates **which axis pair(s)** to plot on and **which competitors** belong on the map, NOT coordinate positions.
+
+**Step A: Output a chat message** with the chosen axis pair(s) (the candidate axes from Step 3, with their rationale) and the confirmed competitor set that will be positioned.
 
 **Step B: AFTER the chat message, call `AskUserQuestion`** with ONLY a short question.
 
-Question: `Does this positioning look right?`
-Options: `Proceed to scoring` / `Adjust positions` / `Change axes` / `Other changes`
+Question: `Do these positioning axes look right?`
+Options: `Proceed to scoring` / `Change axes` / `Adjust competitor set` / `Other changes`
 
-If founder changes an axis (not just coordinates), re-assign ALL competitor coordinates on the new axis with fresh evidence. Apply all corrections before proceeding to Step 5.
+If the founder changes an axis pair or the competitor set, apply the change before proceeding to Step 5. Founder adjustments to individual coordinates happen later — at the Step 5 founder-override flow, after coordinates have been assigned.
 
 ### Step 5: Positioning & Moat Assessment -> `positioning.json` + Dispatch Moat/Positioning Scoring (Context A)
 
@@ -376,6 +381,8 @@ cat <<'POS_EOF' | python3 "$SCRIPTS/score_positioning.py" --pretty -o "$ANALYSIS
 POS_EOF
 ```
 
+**Founder coordinate-override flow (optional):** Now that competitor coordinates exist, present the positioned map to the founder if they asked to adjust positions (or flagged "Adjust positions" at any earlier gate). If the founder corrects a specific coordinate, update the corresponding point in `positioning.json` and re-run `score_positioning.py`, stamping `x_evidence_source` / `y_evidence_source: "founder_override"` on the changed coordinate so `compose_report.py` records it via `FOUNDER_OVERRIDE_COUNT`. Re-pipe the updated `positioning.json` views through `score_positioning.py` to refresh `positioning_scores.json`.
+
 ### Step 6: Score Checklist -> `checklist.json` (Context A: CHECKLIST dispatch)
 
 **REQUIRED — read `$REFS/checklist-criteria.md` now.**
@@ -407,13 +414,16 @@ computes the summary):
 {"items": [{"id": "COVER_01", "status": "pass", "evidence": "...", "notes": "..."}, ...all 25 items...]}
 ```
 
-**After the sub-agent returns:** apply the tolerant JSON extraction protocol to obtain the structured JSON. Then pipe through the producer script:
+**After the sub-agent returns:** apply the tolerant JSON extraction protocol to obtain the structured JSON. Then pipe through the producer script. The sub-agent returns items only — pass the real input mode and run_id on the CLI so `checklist.py` gates the right items and stamps `metadata.run_id`:
 
 ```bash
-cat <<'CHECKLIST_EOF' | python3 "$SCRIPTS/checklist.py" --pretty -o "$ANALYSIS_DIR/checklist.json"
+cat <<'CHECKLIST_EOF' | python3 "$SCRIPTS/checklist.py" --pretty \
+  --input-mode "$INPUT_MODE" --run-id "$RUN_ID" -o "$ANALYSIS_DIR/checklist.json"
 <JSON extracted from sub-agent reply>
 CHECKLIST_EOF
 ```
+
+`$INPUT_MODE` is the mode established in Steps 1-2 (`deck`, `conversation`, or `document`). Without `--input-mode`, deck/document runs silently default to `conversation` and mis-gate NARR_03/EVID_04; without `--run-id`, `checklist.json` carries no run_id and the Step 7c verifier blocks.
 
 ### Step 7: Compose, Validate, and Post-Compose Coaching
 
@@ -547,7 +557,7 @@ Where `COMPANY_NAME` is the company name with spaces replaced by underscores (e.
 
 ## Cross-Agent Integration
 
-This skill imports artifacts from prior deck-review (competition slide claims) and market-sizing (market scope validation) analyses. Imported artifacts are recorded with dates. Imports older than 7 days are flagged as `STALE_IMPORT`.
+This skill imports artifacts from prior deck-review (competition slide claims) and market-sizing (market scope validation) analyses. Imported artifacts are recorded with dates so cross-skill findings can be cited with their provenance.
 
 ## Main-Thread Return
 

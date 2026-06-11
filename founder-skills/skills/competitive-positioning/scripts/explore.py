@@ -4,10 +4,16 @@
 # dependencies = []
 # ///
 """
-Generate self-contained interactive HTML explorer for competitive positioning.
+Generate an interactive HTML explorer for competitive positioning.
 
-Outputs HTML (not JSON). Embeds Chart.js (vendored) for interactive scatter
+Outputs HTML (not JSON). Embeds Chart.js (vendored) for the interactive scatter
 plot with view switching, bubble encoding controls, and company detail panels.
+
+The 2D scatter, tables, and detail panels are fully self-contained (no network
+access required). The OPTIONAL "3D View" tab is the one exception: it lazily
+loads Plotly from a third-party CDN (cdn.plot.ly) on demand, so that single tab
+requires network access. A graceful fallback card is shown if the CDN load
+fails. Everything else works offline.
 
 Usage:
     python explore.py --dir ./competitive-positioning-secureflow/
@@ -45,9 +51,14 @@ def _load_artifact(dir_path: str, name: str) -> dict[str, Any] | None:
         return None
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)  # type: ignore[no-any-return]
+            loaded = json.load(f)
     except (json.JSONDecodeError, OSError):
         return _CORRUPT
+    # Wrong-shape valid JSON (list/string/number) degrades to the corrupt path
+    # rather than crashing downstream `.get()` access.
+    if not isinstance(loaded, dict):
+        return _CORRUPT
+    return loaded
 
 
 def _is_stub(data: dict[str, Any] | None) -> bool:
@@ -343,7 +354,7 @@ def compose_explorer(dir_path: str) -> str:
 <div class="tab-panel" id="panel-3d">
   <div id="3d-axes-bar" style="display:none; padding: 0.5rem 2rem; background: #fff;
        border-bottom: 1px solid #e2e8f0; font-size: 0.8rem; color: #475569;
-       display: flex; gap: 2rem; flex-wrap: wrap;">
+       gap: 2rem; flex-wrap: wrap;">
   </div>
   <div id="chart-3d-container">
     <div class="placeholder" id="3d-placeholder">

@@ -2849,3 +2849,241 @@ def test_payload_arrays_match_summary_counts() -> None:
     payload = data["coaching_payload"]
     assert len(payload["failed_items"]) == payload["summary"]["fail"] == 2
     assert len(payload["warned_items"]) == payload["summary"]["warn"] == 1
+
+
+# ===========================================================================
+# Audit regression tests (a4: competitive-positioning)
+# ===========================================================================
+
+
+class TestChecklistInputModeAndRunIdFlags:
+    """checklist.py --input-mode / --run-id flags (audit cp-1, MAJOR).
+
+    The CHECKLIST sub-agent returns items only. The main thread stamps the real
+    input_mode and run_id via CLI flags so deck/document runs gate correctly and
+    checklist.json carries a run_id for the Context B verifier.
+    """
+
+    def _items_only(self) -> str:
+        payload = _make_valid_checklist_input(input_mode="deck")
+        # Strip the fields the sub-agent must NOT supply.
+        payload.pop("input_mode", None)
+        payload.pop("metadata", None)
+        return json.dumps(payload)
+
+    def test_input_mode_flag_overrides_gating_for_deck(self) -> None:
+        # Items-only input + --input-mode deck: NARR_03 stays active, EVID_04 gated.
+        rc, data, stderr = run_script(
+            "checklist.py",
+            args=["--input-mode", "deck"],
+            stdin_data=self._items_only(),
+        )
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data["input_mode"] == "deck"
+        by_id = {item["id"]: item for item in data["items"]}
+        # Deck gates EVID_04 only — NARR_03 must remain active (deck cross-check applies).
+        assert by_id["EVID_04"]["status"] == "not_applicable"
+        assert by_id["NARR_03"]["status"] != "not_applicable"
+
+    def test_missing_input_mode_flag_defaults_to_conversation(self) -> None:
+        # Without --input-mode and without input_mode in JSON, default is conversation.
+        rc, data, stderr = run_script("checklist.py", stdin_data=self._items_only())
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data["input_mode"] == "conversation"
+
+    def test_input_mode_flag_precedence_over_stdin(self) -> None:
+        # CLI flag must win over the input_mode in the stdin JSON.
+        payload = _make_valid_checklist_input(input_mode="conversation")
+        payload.pop("metadata", None)
+        rc, data, stderr = run_script(
+            "checklist.py",
+            args=["--input-mode", "document"],
+            stdin_data=json.dumps(payload),
+        )
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data["input_mode"] == "document"
+        by_id = {item["id"]: item for item in data["items"]}
+        # document gates NARR_03 only, not EVID_04.
+        assert by_id["NARR_03"]["status"] == "not_applicable"
+        assert by_id["EVID_04"]["status"] != "not_applicable"
+
+    def test_run_id_flag_stamps_metadata(self) -> None:
+        # --run-id must populate result.metadata.run_id even with items-only input.
+        rc, data, stderr = run_script(
+            "checklist.py",
+            args=["--input-mode", "deck", "--run-id", "20260611T120000Z"],
+            stdin_data=self._items_only(),
+        )
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data["metadata"].get("run_id") == "20260611T120000Z"
+
+    def test_run_id_flag_overrides_stdin_metadata(self) -> None:
+        # --run-id (CLI) wins over any metadata embedded in the stdin JSON.
+        payload = _make_valid_checklist_input(run_id="STALE_FROM_STDIN")
+        payload.pop("input_mode", None)
+        rc, data, stderr = run_script(
+            "checklist.py",
+            args=["--run-id", "AUTHORITATIVE"],
+            stdin_data=json.dumps(payload),
+        )
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data["metadata"].get("run_id") == "AUTHORITATIVE"
+
+    def test_invalid_input_mode_flag_rejected(self) -> None:
+        # argparse choices reject an unknown mode (exit 2).
+        rc, _data, _stderr = run_script(
+            "checklist.py",
+            args=["--input-mode", "bogus"],
+            stdin_data=self._items_only(),
+        )
+        assert rc == 2
+
+
+class TestScoreMoatsNonStringEvidence:
+    """score_moats.py must reject non-string evidence with a structured error,
+    not a raw TypeError traceback (audit cp-scripts-5)."""
+
+    def test_null_evidence_strong_status(self) -> None:
+        payload = {
+            "moat_assessments": {
+                "_startup": {
+                    "moats": [
+                        {
+                            "id": "network_effects",
+                            "status": "strong",
+                            "evidence": None,
+                            "evidence_source": "researched",
+                            "trajectory": "building",
+                        }
+                    ]
+                }
+            },
+            "metadata": {"run_id": "20260611T120000Z"},
+        }
+        rc, _data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}"
+        assert "must be a string" in stderr
+        assert "Traceback" not in stderr
+
+    def test_numeric_evidence_estimated_confidence(self) -> None:
+        payload = {
+            "moat_assessments": {
+                "_startup": {
+                    "moats": [
+                        {
+                            "id": "network_effects",
+                            "status": "moderate",
+                            "evidence": 42,
+                            "evidence_source": "agent_estimate",
+                            "trajectory": "stable",
+                        }
+                    ]
+                }
+            },
+            "data_confidence": "estimated",
+            "metadata": {"run_id": "20260611T120000Z"},
+        }
+        rc, _data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}"
+        assert "must be a string" in stderr
+        assert "Traceback" not in stderr
+
+
+class TestComposeNonDictArtifact:
+    """compose_report.py must flag a top-level-array artifact as CORRUPT_ARTIFACT,
+    not crash with AttributeError (audit cp-scripts-2)."""
+
+    def test_array_landscape_degrades_to_corrupt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            # Overwrite landscape.json with a top-level JSON array.
+            with open(os.path.join(tmp, "landscape.json"), "w") as f:
+                f.write('["not", "a", "dict"]')
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert "Traceback" not in stderr
+            assert data is not None
+            codes = {w["code"] for w in data["warnings"]}
+            assert "CORRUPT_ARTIFACT" in codes
+
+    def test_array_artifact_blocks_under_strict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            with open(os.path.join(tmp, "positioning.json"), "w") as f:
+                f.write("[1, 2, 3]")
+            rc, _data, stderr = run_script(
+                "compose_report.py",
+                args=["--dir", tmp, "--strict", "-o", os.path.join(tmp, "report.json")],
+            )
+            assert "Traceback" not in stderr
+            assert rc == 1
+
+
+class TestComposeExecutiveSummaryStrongThreshold:
+    """The executive-summary 'strong' label and 'strong differentiation' paragraph
+    must use the same >=75 threshold (audit cp-scripts-3). A score in [70, 75)
+    labelled Moderate must not be described as strong in the paragraph below."""
+
+    def test_score_72_not_described_as_strong(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(
+                tmp,
+                positioning_scores_overrides={"overall_differentiation": 72.0},
+                moat_scores_overrides=None,
+            )
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            assert data is not None
+            md = data["report_markdown"]
+            # The score label for 72 is "Moderate"; the paragraph must not call it strong.
+            assert "Moderate — differentiated but the lead is narrow" in md
+            assert "strong competitive differentiation" not in md
+
+    def test_score_80_still_described_as_strong(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(
+                tmp,
+                positioning_scores_overrides={"overall_differentiation": 80.0},
+            )
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            assert data is not None
+            assert "strong competitive differentiation" in data["report_markdown"]
+
+
+class TestComposeNonStringViewId:
+    """compose_report.py _section_positioning must coerce a non-string view_id
+    rather than crash on .title() (audit cp-scripts-7)."""
+
+    def test_numeric_view_id_does_not_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            ps_path = os.path.join(tmp, "positioning_scores.json")
+            with open(ps_path) as f:
+                ps = json.load(f)
+            if ps.get("views"):
+                ps["views"][0]["view_id"] = 42
+            with open(ps_path, "w") as f:
+                json.dump(ps, f)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert "Traceback" not in stderr
+            assert data is not None
+
+
+class TestValidateLandscapeNoStdinFlag:
+    """validate_landscape.py must no longer expose the dead --stdin flag
+    (audit cp-scripts-9)."""
+
+    def test_stdin_flag_removed(self) -> None:
+        rc, _stdout, stderr = run_script_raw(
+            "validate_landscape.py",
+            args=["--stdin"],
+            stdin_data=json.dumps(_make_valid_landscape()),
+        )
+        # Unknown flag → argparse exit 2 + "unrecognized arguments".
+        assert rc == 2
+        assert "unrecognized arguments" in stderr or "--stdin" in stderr
