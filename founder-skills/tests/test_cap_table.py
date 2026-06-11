@@ -2403,7 +2403,7 @@ class TestGotchas:
         assert mult == 0.50, mult
 
         mult, warn = normalize_discount_multiplier(49.0)
-        assert abs(mult - 0.51) < 1e-9, mult
+        assert mult is not None and abs(mult - 0.51) < 1e-9, mult
 
         mult, warn = normalize_discount_multiplier(0.0)
         assert mult is None
