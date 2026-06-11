@@ -360,14 +360,18 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # 3. ORPHANED_CONFLICT — conflict company not found in fund_profile portfolio
     if _usable(conflict_check) and _usable(fund_profile):
         portfolio_names = {
-            _normalize_company(entry.get("name", ""))
+            _normalize_company(name)
             for entry in _as_list(fund_profile.get("portfolio"))
             if isinstance(entry, dict)
+            for name in [entry.get("name", "")]
+            if isinstance(name, str)
         }
         for conflict in _as_list(conflict_check.get("conflicts")):
             if not isinstance(conflict, dict):
                 continue
             company = conflict.get("company", "")
+            if not isinstance(company, str):
+                continue
             if _normalize_company(company) not in portfolio_names:
                 warnings.append(
                     _warn(
@@ -478,7 +482,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
         if len(partner_verdicts) != 3:
             warnings.append(_warn("INVALID_PARTNER_COUNT", f"Expected 3 partner verdicts, got {len(partner_verdicts)}"))
 
-        if len(partner_verdicts) == 3:
+        if len(partner_verdicts) == 3 and all(isinstance(pv, dict) for pv in partner_verdicts):
             verdicts_list = [pv.get("verdict") for pv in partner_verdicts]
             rationales = [pv.get("rationale", "") for pv in partner_verdicts]
 
@@ -746,7 +750,9 @@ def _section_executive_summary(
         partner_verdicts = _as_list(discussion.get("partner_verdicts"))
         if partner_verdicts:
             verdict_strs = [
-                f"{(pv.get('partner') or '?').title()}: {pv.get('verdict') or '?'}" for pv in partner_verdicts
+                f"{(pv.get('partner') or '?').title()}: {pv.get('verdict') or '?'}"
+                for pv in partner_verdicts
+                if isinstance(pv, dict)
             ]
             lines.append(f"**Partner Split:** {' | '.join(verdict_strs)}")
 
@@ -780,7 +786,7 @@ def _section_fund_profile(fund: dict[str, Any] | None) -> str:
         lines.append(f"**Thesis Areas:** {', '.join(str(t) for t in thesis)}")
 
     check_size = fund.get("check_size_range", {})
-    if check_size:
+    if isinstance(check_size, dict) and check_size:
         currency = check_size.get("currency", "USD")
         min_str = _fmt_number(check_size.get("min"))
         max_str = _fmt_number(check_size.get("max"))
@@ -790,6 +796,8 @@ def _section_fund_profile(fund: dict[str, Any] | None) -> str:
     if archetypes:
         lines.append("\n**Partners:**")
         for arch in archetypes:
+            if not isinstance(arch, dict):
+                continue
             role = arch.get("role", "?").title()
             name = arch.get("name", "?")
             lines.append(f"- **{name}** ({role}): {arch.get('background', '?')}")
@@ -877,6 +885,8 @@ def _section_scorecard(score_dims: dict[str, Any] | None) -> str:
     lines.append("| Category | Strong | Moderate | Concern | Dealbreaker | N/A |")
     lines.append("|----------|--------|----------|---------|-------------|-----|")
     for cat, counts in by_cat.items():
+        if not isinstance(counts, dict):
+            continue
         lines.append(
             f"| {cat} | {counts.get('strong_conviction', 0)} | {counts.get('moderate_conviction', 0)} "
             f"| {counts.get('concern', 0)} | {counts.get('dealbreaker', 0)} "
@@ -896,6 +906,8 @@ def _section_scorecard(score_dims: dict[str, Any] | None) -> str:
     lines.append("| # | Category | Dimension | Status |")
     lines.append("|---|----------|-----------|--------|")
     for i, item in enumerate(items, 1):
+        if not isinstance(item, dict):
+            continue
         cat = item.get("category", "?")
         label = item.get("label", item.get("id", "?"))
         status = status_icons.get(item.get("status", "?"), "?")
@@ -970,9 +982,34 @@ def _section_warnings(warnings: list[dict[str, str]]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _derive_consensus_strength(discussion: dict[str, Any]) -> str:
+    """Derive consensus_strength from discussion.json partner_verdicts.
+
+    "strong" = all 3 partner verdicts match, "mixed" = a 2-1 split,
+    "weak" = otherwise (no clear majority, missing/malformed verdicts).
+    """
+    verdicts = [
+        _normalize_verdict(pv.get("verdict"))
+        for pv in _as_list(discussion.get("partner_verdicts"))
+        if isinstance(pv, dict) and pv.get("verdict")
+    ]
+    if len(verdicts) != 3:
+        return "weak"
+    counts: dict[str, int] = {}
+    for v in verdicts:
+        counts[v] = counts.get(v, 0) + 1
+    top = max(counts.values())
+    if top == 3:
+        return "strong"
+    if top == 2:
+        return "mixed"
+    return "weak"
+
+
 def _emit_coaching_payload(
     startup_profile: dict[str, Any],
     score_dims: dict[str, Any],
+    discussion: dict[str, Any],
     validation_warnings: list[dict[str, str]],
     review_dir: str,
     report_path: str,
@@ -981,7 +1018,7 @@ def _emit_coaching_payload(
     """Build the v0.4.2 coaching_payload for ic-sim (schema_version v0.4.2-ic-sim).
 
     Uses dimension-based schema (no checklist concept).
-    Source: score_dimensions.json summary fields.
+    Source: score_dimensions.json summary fields + discussion.json partner verdicts.
     """
     summary = _as_dict(score_dims.get("summary"))
 
@@ -1022,6 +1059,7 @@ def _emit_coaching_payload(
 
     return {
         "schema_version": "v0.4.2-ic-sim",
+        "consensus_strength": _derive_consensus_strength(discussion),
         "summary": {
             "verdict": summary.get("verdict"),
             "conviction_score": summary.get("conviction_score"),
@@ -1084,8 +1122,6 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
                     w["message"] += f" [Accepted: {acc['reason']}]"
                     break
 
-    status = "clean" if not warnings else "warnings"
-
     # Assemble report sections — treat corrupt artifacts as None for rendering
     def _render_safe(data: dict[str, Any] | None) -> dict[str, Any] | None:
         return None if data is _CORRUPT else data
@@ -1096,7 +1132,10 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     discussion = _render_safe(artifacts.get("discussion.json"))
     score_dims = _render_safe(artifacts.get("score_dimensions.json"))
 
-    sections = [
+    # Render every section EXCEPT Warnings first; the Warnings section, status,
+    # validation.warnings, and coaching_payload must all observe the SAME final
+    # warnings list — including any MARKER_COLLISION discovered by scanning the body.
+    pre_warning_sections = [
         _section_title(profile),
         _section_executive_summary(profile, score_dims, discussion),
         _section_fund_profile(fund),
@@ -1105,19 +1144,18 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         _section_scorecard(score_dims),
         _section_concerns(score_dims),
         _section_diligence(discussion),
-        _section_warnings(warnings),
     ]
-
-    report_markdown = "\n".join(s for s in sections if s)
+    body_markdown = "\n".join(s for s in pre_warning_sections if s)
 
     # v0.4.2 Mitigation 2: per-run uuid marker for Context B's Edit
     marker = f"<!-- COACHING_INSERTION_POINT_{uuid.uuid4().hex[:8]} -->"
 
-    # Pre-scan: check assembled body BEFORE appending the marker (otherwise we
-    # always find our own emission). Agent post-Edit verification uses the
-    # EXACT uuid (per-run), so substring collisions with body content are
-    # informational only — but worth flagging so authors can sanitize.
-    if "<!-- COACHING_INSERTION_POINT_" in report_markdown:
+    # Pre-scan the body (before appending our own marker, otherwise we always
+    # find our own emission). Agent post-Edit verification uses the EXACT uuid
+    # (per-run), so substring collisions with body content are informational
+    # only — but worth flagging so authors can sanitize. Append BEFORE status is
+    # computed and BEFORE the Warnings section is rendered so all consumers agree.
+    if "<!-- COACHING_INSERTION_POINT_" in body_markdown:
         warnings.append(
             _warn(
                 "MARKER_COLLISION",
@@ -1128,6 +1166,13 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
                 ),
             )
         )
+
+    status = "clean" if not warnings else "warnings"
+
+    # Render the Warnings section against the final warnings list and splice it in.
+    warnings_section = _section_warnings(warnings)
+    sections = [body_markdown, warnings_section] if warnings_section else [body_markdown]
+    report_markdown = "\n".join(s for s in sections if s)
 
     report_markdown += (
         f"\n\n{marker}\n\n---\n"
@@ -1158,6 +1203,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     coaching_payload = _emit_coaching_payload(
         startup_profile=_as_dict(profile),
         score_dims=_as_dict(score_dims),
+        discussion=_as_dict(discussion),
         validation_warnings=warnings,
         review_dir=os.path.abspath(dir_path),
         report_path=resolved_report_path,

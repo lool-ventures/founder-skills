@@ -295,7 +295,7 @@ quoted, e.g.:
   "review_dir": "<absolute path>",
   "report_path": "<absolute path to report.md>",
   "decision": "<summary.verdict from coaching_payload — invest|more_diligence|pass|hard_pass>",
-  "consensus_strength": "strong|mixed|weak",
+  "consensus_strength": "<coaching_payload.consensus_strength — strong|mixed|weak>",
   "key_concerns": ["<top 3 concerns from coaching_payload.concerns[].dimension>"],
   "high_severity_warnings": ["<from coaching_payload.high_severity_warnings>"]
 }
