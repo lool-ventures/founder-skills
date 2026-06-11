@@ -192,15 +192,15 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   /* Corrections drawer */
   .corrections-bar {
     position: fixed; bottom: 0; left: 0; right: 0;
-    background: #ffffff; border-top: 1px solid #e5e7eb;
-    z-index: 100; box-shadow: 0 -2px 8px rgba(0,0,0,0.05);
+    background: #f8fafc; border-top: 3px solid #0d549d;
+    z-index: 100; box-shadow: 0 -6px 16px rgba(0,0,0,0.14);
     transition: max-height 0.25s ease;
   }
   .corrections-summary {
     padding: 12px 32px; display: flex; align-items: center;
     gap: 16px; cursor: pointer; user-select: none;
   }
-  .corrections-summary:hover { background: #f9fafb; }
+  .corrections-summary:hover { background: #eef2f7; }
   .corrections-count { font-size: 0.875rem; color: #6b7280; }
   .corrections-count strong { color: #0d549d; }
   .corrections-toggle {
@@ -290,7 +290,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <div class="corrections-bar" id="corrections-bar">
   <div class="corrections-summary" id="corrections-summary">
-    <div class="corrections-count"><strong id="corr-count">0</strong> corrections</div>
+    <div class="corrections-count"><strong id="corr-count">0</strong> <span id="corr-noun">corrections</span></div>
     <div class="corrections-toggle"><span>Show changes</span> <span class="arrow">&#9650;</span></div>
   </div>
   <div class="corrections-drawer" id="corrections-drawer">
@@ -385,7 +385,9 @@ function updateField(path, newVal) {
   if (same) {
     corrections.delete(path);
   } else {
-    corrections.set(path, { path: path, label: path.split(".").pop(), was: origVal, now: newVal });
+    // human-readable field identity: full dotted path, not just the leaf
+    // ("revenue › mrr › value" beats a bare "value" in the corrections tray)
+    corrections.set(path, { path: path, label: path.replace(/\./g, " › ").replace(/_/g, " "), was: origVal, now: newVal });
   }
   refreshSanity();
   refreshCorrectionsBar();
@@ -588,6 +590,7 @@ function updateSanityFromServer(sanity) {
 /* ===== Corrections drawer ===== */
 function refreshCorrectionsBar() {
   document.getElementById("corr-count").textContent = String(corrections.size);
+  document.getElementById("corr-noun").textContent = corrections.size === 1 ? "correction" : "corrections";
   var tbody = document.getElementById("corrections-tbody");
   while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
   var empty = document.getElementById("corrections-empty");
@@ -1229,7 +1232,10 @@ function updateTableCell(arrayPath, rowIdx, colKey, newVal, renderFn) {
   if (JSON.stringify(origVal) === JSON.stringify(newVal)) {
     corrections.delete(changePath);
   } else {
-    corrections.set(changePath, { path: changePath, label: colKey, was: origVal, now: newVal });
+    // identify the row by its month/name when available, not a bare column key
+    var rowTag = (arr[rowIdx] && (arr[rowIdx].month || arr[rowIdx].name)) || ("row " + (rowIdx + 1));
+    var label = arrayPath.replace(/\./g, " › ").replace(/_/g, " ") + " [" + rowTag + "] › " + colKey;
+    corrections.set(changePath, { path: changePath, label: label, was: origVal, now: newVal });
   }
   refreshSanity();
   refreshCorrectionsBar();
