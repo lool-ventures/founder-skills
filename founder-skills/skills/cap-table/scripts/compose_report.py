@@ -214,9 +214,13 @@ def build_top_dilution_drivers(scenarios: list[dict[str, Any]]) -> list[dict[str
     for s in scenarios:
         co = s.get("computed_outputs", {}) or {}
         agg = co.get("aggregate_ownership_by_class") or {}
+        breakdown = co.get("shares_breakdown") or {}
+        post_fd = co.get("post_round_fully_diluted_shares") or 0
         scenario_id = s["scenario_id"]
         new_money_pct = agg.get("new_money_pct", 0.0)
         safe_pct = agg.get("safe_pct", 0.0)
+        note_pct = agg.get("note_pct", 0.0)
+        pool_topup = breakdown.get("pool_topup") or 0
         if new_money_pct > 0.01:
             drivers.append(
                 {
@@ -233,6 +237,24 @@ def build_top_dilution_drivers(scenarios: list[dict[str, Any]]) -> list[dict[str
                     "founder_impact_pp": round(safe_pct * 100, 1),
                 }
             )
+        if note_pct > 0.01:
+            drivers.append(
+                {
+                    "driver": "Note conversion",
+                    "scenarios": [scenario_id],
+                    "founder_impact_pp": round(note_pct * 100, 1),
+                }
+            )
+        if pool_topup > 0 and post_fd > 0:
+            pool_topup_pct = pool_topup / post_fd
+            if pool_topup_pct > 0.01:
+                drivers.append(
+                    {
+                        "driver": "Option pool top-up",
+                        "scenarios": [scenario_id],
+                        "founder_impact_pp": round(pool_topup_pct * 100, 1),
+                    }
+                )
     # Sort by impact desc, top 5
     drivers.sort(key=lambda d: d["founder_impact_pp"], reverse=True)
     return drivers[:5]

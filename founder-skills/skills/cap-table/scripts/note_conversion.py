@@ -255,7 +255,11 @@ def convert_note(
         base["error"] = E_NOTE_NO_CONVERSION_PATH
         base["reason"] = (
             "convert_at_cap requires non-null valuation_cap + capitalization_denominator "
-            "OR maturity_conversion_price_override; neither provided"
+            "(the share count defined by the note's 'Company Capitalization' clause — "
+            "ask the founder; commonly the pre-financing fully-diluted count) "
+            "OR maturity_conversion_price_override; neither provided. "
+            "Do NOT default to cap_state fully-diluted — the denominator definition "
+            "is note-text-specific and must be confirmed with the founder or note text."
         )
         return base
 

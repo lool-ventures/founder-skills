@@ -110,7 +110,12 @@ mkdir -p "$ARTIFACTS_ROOT"
 RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 ```
 
-If `CLAUDE_PLUGIN_ROOT` is empty OR the path it resolves to does not exist in your environment (in Claude Cowork it substitutes to a host-side path that is not present inside the session VM — test with `ls`), fall back: `Glob` for `**/skills/deck-review/scripts/checklist.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`. In Claude Cowork this is always the case — don't retry the substituted path; go straight to the Glob fallback. If Glob returns multiple matches, prefer the one under a plugin mount (`.remote-plugins/` or the plugins cache) over any workspace copy. If Glob returns nothing, locate it with Bash: `find / -path '*/skills/deck-review/scripts/checklist.py' 2>/dev/null | head -5`.
+If `CLAUDE_PLUGIN_ROOT` is empty OR the path it resolves to does not exist in your environment (in Claude Cowork it substitutes to a host-side path that is not present inside the session VM — test with `ls`), use the appropriate fallback:
+
+- **In Claude Cowork:** go straight to Bash: `find / -path '*/skills/deck-review/scripts/checklist.py' 2>/dev/null | head -5`. The Glob tool searches only the workspace directory tree; the plugin is mounted outside the workspace at `.remote-plugins/`, so Glob will never find it in Cowork.
+- **Outside Cowork (workspace copy):** use `Glob` for `**/skills/deck-review/scripts/checklist.py` as before.
+
+Strip the anchor filename to derive `SCRIPTS`; derive `REFS` and `SHARED_SCRIPTS` from `SCRIPTS`. If the find/Glob returns multiple matches, prefer the one under a plugin mount (`.remote-plugins/` or the plugins cache) over any workspace copy.
 
 After Step 1 (when the slug is known) — call `setup_run.py` to resolve `REVIEW_DIR`, detect whether this is a resume, and clean stale state in one atomic step. **Always** call `setup_run.py` with `--clean` and `--run-id "$RUN_ID"`; do not pre-read `gate_state.json` yourself. `setup_run.py` decides resume vs. fresh by comparing the answered `gate_state.json`'s `run_id` against `--run-id`, and on a fresh (non-resume) run it deletes a stale answered `gate_state.json` so a prior completed run cannot be misread as a resume:
 

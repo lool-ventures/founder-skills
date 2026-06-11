@@ -6153,3 +6153,370 @@ class TestAoAMergeMatrix:
             receipt = json.loads(out)
             assert receipt["status"] == "merged"
             assert receipt["merge"]["added"] == ["Series Seed"]
+
+
+# ===========================================================================
+# Fix 1 — build_top_dilution_drivers includes note conversion + pool top-up
+# ===========================================================================
+
+
+class TestTopDilutionDrivers:
+    """compose_report.build_top_dilution_drivers must surface note_pct and
+    pool_topup as dilution drivers, sorted by impact descending."""
+
+    def _make_scenario(
+        self,
+        scenario_id: str,
+        *,
+        new_money_pct: float,
+        safe_pct: float,
+        note_pct: float,
+        new_money: float = 5_000_000,
+        pool_topup: int = 0,
+        post_round_fd: int = 10_000_000,
+    ) -> dict:
+        return {
+            "scenario_id": scenario_id,
+            "parameters": {"new_money": new_money},
+            "computed_outputs": {
+                "aggregate_ownership_by_class": {
+                    "new_money_pct": new_money_pct,
+                    "safe_pct": safe_pct,
+                    "note_pct": note_pct,
+                },
+                "shares_breakdown": {
+                    "pool_topup": pool_topup,
+                },
+                "post_round_fully_diluted_shares": post_round_fd,
+            },
+        }
+
+    def test_note_appears_in_drivers(self) -> None:
+        """A note_pct of 4.1pp must surface as 'Note conversion' driver."""
+        sys.path.insert(0, SCRIPTS)
+        import compose_report  # type: ignore[import-not-found]
+
+        s = self._make_scenario(
+            "s1",
+            new_money_pct=0.1724,
+            safe_pct=0.0259,
+            note_pct=0.0411,
+        )
+        drivers = compose_report.build_top_dilution_drivers([s])
+        names = [d["driver"] for d in drivers]
+        assert any("note" in n.lower() for n in names), f"Expected 'Note conversion' driver in {names}"
+        note_driver = next(d for d in drivers if "note" in d["driver"].lower())
+        assert abs(note_driver["founder_impact_pp"] - 4.1) < 0.2, (
+            f"Note driver impact {note_driver['founder_impact_pp']!r} not ~4.1"
+        )
+
+    def test_ordering_new_money_note_safe(self) -> None:
+        """new_money_pct=17.2 > note_pct=4.1 > safe_pct=2.6 → that ordering."""
+        sys.path.insert(0, SCRIPTS)
+        import compose_report  # type: ignore[import-not-found]
+
+        s = self._make_scenario(
+            "s1",
+            new_money_pct=0.1724,
+            safe_pct=0.0259,
+            note_pct=0.0411,
+        )
+        drivers = compose_report.build_top_dilution_drivers([s])
+        # Sorted descending: new_money(~17.2) > note(~4.1) > safe(~2.6)
+        impacts = [d["founder_impact_pp"] for d in drivers]
+        assert impacts == sorted(impacts, reverse=True), f"Not sorted desc: {impacts}"
+        assert drivers[0]["founder_impact_pp"] > drivers[1]["founder_impact_pp"]
+        # Note must come before SAFE
+        note_idx = next(i for i, d in enumerate(drivers) if "note" in d["driver"].lower())
+        safe_idx = next(i for i, d in enumerate(drivers) if "safe" in d["driver"].lower())
+        assert note_idx < safe_idx, "Note driver must appear before SAFE driver"
+
+    def test_zero_note_pct_omitted(self) -> None:
+        """note_pct == 0 must not create a driver (same gate as safe_pct)."""
+        sys.path.insert(0, SCRIPTS)
+        import compose_report  # type: ignore[import-not-found]
+
+        s = self._make_scenario(
+            "s1",
+            new_money_pct=0.15,
+            safe_pct=0.05,
+            note_pct=0.0,
+        )
+        drivers = compose_report.build_top_dilution_drivers([s])
+        names = [d["driver"] for d in drivers]
+        assert not any("note" in n.lower() for n in names), f"Zero note_pct should not create a driver; got {names}"
+
+    def test_pool_topup_driver_when_present(self) -> None:
+        """pool_topup > 0 and post_round_fd > 0 → pool top-up driver appears."""
+        sys.path.insert(0, SCRIPTS)
+        import compose_report  # type: ignore[import-not-found]
+
+        s = self._make_scenario(
+            "s1",
+            new_money_pct=0.15,
+            safe_pct=0.02,
+            note_pct=0.0,
+            pool_topup=800_000,
+            post_round_fd=10_000_000,
+        )
+        drivers = compose_report.build_top_dilution_drivers([s])
+        names = [d["driver"] for d in drivers]
+        assert any("pool" in n.lower() for n in names), f"Expected pool top-up driver; got {names}"
+
+    def test_pool_topup_zero_omitted(self) -> None:
+        """pool_topup == 0 must not create a pool driver."""
+        sys.path.insert(0, SCRIPTS)
+        import compose_report  # type: ignore[import-not-found]
+
+        s = self._make_scenario(
+            "s1",
+            new_money_pct=0.15,
+            safe_pct=0.02,
+            note_pct=0.0,
+            pool_topup=0,
+            post_round_fd=10_000_000,
+        )
+        drivers = compose_report.build_top_dilution_drivers([s])
+        names = [d["driver"] for d in drivers]
+        assert not any("pool" in n.lower() for n in names), f"Zero pool_topup should not create a driver; got {names}"
+
+
+# ===========================================================================
+# Fix 2 — Carta extractor emits schema-required interest_rate_type
+# ===========================================================================
+
+
+class TestCartaInterestRateType:
+    """extract_cap_table._convertible_record_to_instrument must emit
+    interest_rate_type on every convertible note it produces."""
+
+    @pytest.mark.skipif(
+        not os.path.exists(
+            os.path.join(
+                _REPO,
+                "founder-skills",
+                "tests",
+                "fixtures",
+                "cap-table-corpus",
+                "synthetic_carta.xlsx",
+            )
+        ),
+        reason="Carta fixture missing",
+    )
+    def test_carta_note_has_interest_rate_type(self) -> None:
+        """Extracted note must carry a valid interest_rate_type enum value."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_cap_table import _carta_extract  # type: ignore[import-not-found]
+
+        result = _carta_extract(_CARTA_FIXTURE)
+        notes = result["instruments"]["convertible_notes"]
+        assert len(notes) >= 1, "Expected at least one note from synthetic fixture"
+        note = notes[0]
+        valid_types = {"fixed_numeric", "fixed_numeric_simple", "statutory_ita_section_3j", "none"}
+        assert "interest_rate_type" in note, f"Note missing interest_rate_type: {list(note.keys())}"
+        assert note["interest_rate_type"] in valid_types, (
+            f"interest_rate_type {note['interest_rate_type']!r} not in {valid_types}"
+        )
+
+    @pytest.mark.skipif(
+        not os.path.exists(
+            os.path.join(
+                _REPO,
+                "founder-skills",
+                "tests",
+                "fixtures",
+                "cap-table-corpus",
+                "synthetic_carta.xlsx",
+            )
+        ),
+        reason="Carta fixture missing",
+    )
+    def test_carta_note_interest_rate_type_assumed_warning(self) -> None:
+        """When interest_rate_type is assumed (not in Carta export), a warning
+        matching 'interest_rate_type assumed' must appear."""
+        sys.path.insert(0, SCRIPTS)
+        from extract_cap_table import _carta_extract  # type: ignore[import-not-found]
+
+        result = _carta_extract(_CARTA_FIXTURE)
+        warnings = result.get("warnings", [])
+        assert any("interest_rate_type assumed" in w for w in warnings), (
+            f"Expected 'interest_rate_type assumed' warning; got: {warnings}"
+        )
+
+    @pytest.mark.skipif(
+        not os.path.exists(
+            os.path.join(
+                _REPO,
+                "founder-skills",
+                "tests",
+                "fixtures",
+                "cap-table-corpus",
+                "synthetic_carta.xlsx",
+            )
+        ),
+        reason="Carta fixture missing",
+    )
+    def test_carta_validate_mode_accepts_instruments(self) -> None:
+        """instruments.json written by carta extractor must pass --mode=validate."""
+        with tempfile.TemporaryDirectory() as d:
+            audit = os.path.join(d, "audit.json")
+            inst = os.path.join(d, "instruments.json")
+            rc_carta, _, err_carta = _run(
+                "extract_cap_table.py",
+                [
+                    "--mode",
+                    "auto",
+                    "--xlsx",
+                    _CARTA_FIXTURE,
+                    "-o",
+                    audit,
+                    "--instruments",
+                    inst,
+                    "--run-id",
+                    "test-carta",
+                    "--pretty",
+                ],
+            )
+            assert rc_carta == 0, f"Carta extraction failed: {err_carta}"
+            # Also need a minimal inputs.json for validate mode (with schema_version)
+            inputs = dict(_BASIC_INPUTS)
+            inputs["metadata"] = {"run_id": "test-carta", "schema_version": "v0.5.0-inputs"}
+            inp_path = os.path.join(d, "inputs.json")
+            with open(inp_path, "w") as f:
+                json.dump(inputs, f)
+            rc_val, out_val, err_val = _run(
+                "extract_cap_table.py",
+                ["--mode", "validate", "--dir", d],
+            )
+            assert rc_val == 0, (
+                f"validate mode rejected carta-produced instruments.json:\nstdout: {out_val}\nstderr: {err_val}"
+            )
+
+
+# ===========================================================================
+# Fix 3 — extract_cap_table.py accepts --run-id
+# ===========================================================================
+
+
+class TestExtractCapTableRunId:
+    """extract_cap_table.py --run-id must stamp metadata.run_id in
+    the instruments.json it writes."""
+
+    @pytest.mark.skipif(
+        not os.path.exists(
+            os.path.join(
+                _REPO,
+                "founder-skills",
+                "tests",
+                "fixtures",
+                "cap-table-corpus",
+                "synthetic_carta.xlsx",
+            )
+        ),
+        reason="Carta fixture missing",
+    )
+    def test_run_id_stamped_in_instruments(self) -> None:
+        """--run-id t → instruments.json metadata.run_id == 't'."""
+        with tempfile.TemporaryDirectory() as d:
+            audit = os.path.join(d, "audit.json")
+            inst = os.path.join(d, "instruments.json")
+            rc, stdout, stderr = _run(
+                "extract_cap_table.py",
+                [
+                    "--mode",
+                    "auto",
+                    "--xlsx",
+                    _CARTA_FIXTURE,
+                    "-o",
+                    audit,
+                    "--instruments",
+                    inst,
+                    "--run-id",
+                    "t",
+                    "--pretty",
+                ],
+            )
+            assert rc == 0, f"exit {rc}: {stderr}"
+            with open(inst) as f:
+                instruments = json.load(f)
+            assert instruments["metadata"]["run_id"] == "t", (
+                f"Expected run_id='t', got {instruments['metadata'].get('run_id')!r}"
+            )
+
+    def test_run_id_flag_accepted_freeform(self) -> None:
+        """--run-id must not be rejected (unknown-arg error) on freeform mode."""
+        # freeform reads stdin; pass minimal valid payload
+        payload = json.dumps({"blocks": []})
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "audit.json")
+            rc, stdout, stderr = _run(
+                "extract_cap_table.py",
+                ["--mode", "freeform", "--run-id", "myrun", "-o", out],
+                stdin_data=payload,
+            )
+            # rc may be 0 or non-zero depending on payload, but NOT argparse error
+            assert "unrecognized arguments" not in stderr, f"--run-id was rejected by argparse: {stderr}"
+
+
+# ===========================================================================
+# Fix 4 — E_NOTE_NO_CONVERSION_PATH reason includes capitalization_denominator
+# ===========================================================================
+
+
+class TestNoteNoConversionPathReason:
+    """note_conversion E_NOTE_NO_CONVERSION_PATH reason must name
+    capitalization_denominator and tell the agent to ask the founder."""
+
+    def _note(self, **overrides: Any) -> dict[str, Any]:
+        base: dict[str, Any] = {
+            "id": "note_001",
+            "investor_name": "Lender",
+            "principal": 100_000,
+            "annual_interest_rate": 0.06,
+            "interest_rate_type": "fixed_numeric",
+            "day_count_basis": 365,
+            "compounding_periods_per_year": None,
+            "interest_converts_to_shares": True,
+            "issuance_date": "2025-01-01",
+            "last_interest_event_date": None,
+            "valuation_cap": 10_000_000,
+            "discount_multiplier": None,
+            "capitalization_denominator": None,  # <-- triggers no_conversion_path
+            "capitalization_denominator_policy": None,
+            "qualified_financing_threshold": 1_000_000,
+            "maturity_date": "9999-12-31",  # not maturity branch
+            "maturity_default_treatment": None,
+            "maturity_conversion_price_override": None,
+            "non_qualified_financing_treatment": None,
+            "source_document": None,
+            "extraction_confidence": "high",
+        }
+        base.update(overrides)
+        return base
+
+    def test_reason_names_capitalization_denominator(self) -> None:
+        """The reason string must mention capitalization_denominator."""
+        result = note_conversion.convert_note(
+            self._note(),
+            conversion_event_date="2026-06-01",
+            priced_round_new_money=5_000_000,
+            qualified_financing_price=1.0,
+        )
+        assert result.get("error") == note_conversion.E_NOTE_NO_CONVERSION_PATH, (
+            f"Expected E_NOTE_NO_CONVERSION_PATH; got {result}"
+        )
+        reason = result.get("reason", "")
+        assert "capitalization_denominator" in reason, f"reason must name capitalization_denominator; got: {reason!r}"
+
+    def test_reason_tells_agent_to_ask_founder(self) -> None:
+        """The reason string must direct the agent to ask the founder."""
+        result = note_conversion.convert_note(
+            self._note(),
+            conversion_event_date="2026-06-01",
+            priced_round_new_money=5_000_000,
+            qualified_financing_price=1.0,
+        )
+        reason = result.get("reason", "")
+        # Must contain an action word pointing to a human source
+        action_present = any(kw in reason.lower() for kw in ("ask", "founder", "note text", "confirm"))
+        assert action_present, f"reason must direct agent to ask/confirm; got: {reason!r}"

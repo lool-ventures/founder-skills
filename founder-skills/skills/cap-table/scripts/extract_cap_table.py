@@ -328,6 +328,17 @@ def _convertible_record_to_instrument(rec: dict[str, Any], idx: int) -> tuple[st
     # conventions we keep, but they are still assumptions on a Carta import, so
     # they (and the other unsupplied fields) get receipt warnings. Carta notes
     # are capped at "medium" extraction_confidence for the same reason.
+    # Determine interest_rate_type from the Carta row.
+    # Carta exports carry a numeric Interest Rate column but no type qualifier.
+    # When a rate is present, default to fixed_numeric_simple (simple interest,
+    # fixed numeric rate — the most common convention for convertible notes).
+    # When no rate, use "none". Both are assumptions; warn so the agent asks.
+    assumed_irt = "fixed_numeric_simple" if interest_rate else "none"
+    warnings_list.append(
+        f"{sec_id}: interest_rate_type assumed {assumed_irt!r} (Carta export carries no rate-type qualifier) "
+        f"— confirm with note text"
+    )
+
     for assumed_field, note in (
         ("day_count_basis", "assumed 365 (Carta export carries no day-count basis); confirm with note text"),
         (
@@ -354,7 +365,8 @@ def _convertible_record_to_instrument(rec: dict[str, Any], idx: int) -> tuple[st
             "id": f"note_{idx:03d}",
             "investor_name": investor_name,
             "principal": float(principal),
-            "annual_interest_rate": float(interest_rate),
+            "annual_interest_rate": float(interest_rate) if interest_rate else None,
+            "interest_rate_type": assumed_irt,
             "day_count_basis": 365,
             "compounding_periods_per_year": None,
             "interest_converts_to_shares": True,
@@ -542,6 +554,8 @@ def _mode_carta(args: argparse.Namespace) -> int:
                 existing = json.load(f)
         existing_meta = dict(existing.get("metadata") or {})
         existing_meta["schema_version"] = "v0.5.0-instruments"
+        if getattr(args, "run_id", None):
+            existing_meta["run_id"] = args.run_id
         merged = {
             "safes": existing.get("safes", []) + result["instruments"]["safes"],
             "convertible_notes": existing.get("convertible_notes", []) + result["instruments"]["convertible_notes"],
@@ -675,6 +689,7 @@ def main() -> int:
     p.add_argument("--xlsx", help="Path to XLSX file (for carta/pulley/auto)")
     p.add_argument("--instruments", help="(Carta mode) Where to write/append instruments.json")
     p.add_argument("-o", "--output", help="Where to write extraction_audit.json")
+    p.add_argument("--run-id", dest="run_id", help="Run identifier stamped into metadata.run_id")
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()
 

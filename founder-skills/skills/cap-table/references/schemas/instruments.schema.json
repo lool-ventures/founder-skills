@@ -67,7 +67,7 @@
           "maturity_date": {"type": ["string", "null"]},
           "maturity_default_treatment": {"type": ["string", "null"], "enum": ["convert_at_cap", "repay", "extend", "counsel_review", null]},
           "maturity_conversion_price_override": {"type": ["number", "null"]},
-          "non_qualified_financing_treatment": {"type": ["string", "null"], "enum": ["convert_anyway", "do_not_convert", "negotiate", null]},
+          "non_qualified_financing_treatment": {"type": ["string", "null"], "enum": ["convert_anyway", "do_not_convert", "negotiate", null], "description": "Action when the financing round misses the qualified_financing_threshold. 'convert_anyway' = convert at cap/discount regardless of whether the threshold was met (there is no separate convert_at_cap value for this field). 'do_not_convert' = note stays outstanding. 'negotiate' = routes to counsel_review branch. null = no override (threshold_not_met branch is returned when the round misses the threshold)."},
           "source_document": {"type": ["string", "null"]},
           "extraction_confidence": {"enum": ["high", "medium", "low"]},
           "subtype": {"type": ["string", "null"], "enum": ["convertible_note", "convertible_loan_agreement", "convertible_security", null], "description": "Document-origin provenance marker. Math producers consume the canonical convertible_note shape regardless of subtype; subtype informs counsel-review framing (Israeli CLA / YC convertible_security / standard note). Soft default = 'convertible_note' per contract §10.2.5."},

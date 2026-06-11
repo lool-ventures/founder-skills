@@ -126,7 +126,12 @@ fi
 
 The path setup handles both Claude Code (local filesystem) and Cowork (mounted sessions). In most cases, only the final fallback branch (`./artifacts`) applies; the two `mnt/*/` branches above it are Cowork-only.
 
-If `CLAUDE_PLUGIN_ROOT` is empty OR the path it resolves to does not exist in your environment (in Claude Cowork it substitutes to a host-side path that is not present inside the session VM — test with `ls`), fall back: run `Glob` with pattern `**/skills/competitive-positioning/scripts/validate_landscape.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`. In Claude Cowork this is always the case — don't retry the substituted path; go straight to the Glob fallback. If Glob returns multiple matches, prefer the one under a plugin mount (`.remote-plugins/` or the plugins cache) over any workspace copy. If Glob returns nothing, locate it with Bash: `find / -path '*/skills/competitive-positioning/scripts/validate_landscape.py' 2>/dev/null | head -5`.
+If `CLAUDE_PLUGIN_ROOT` is empty OR the path it resolves to does not exist in your environment (in Claude Cowork it substitutes to a host-side path that is not present inside the session VM — test with `ls`), use the appropriate fallback:
+
+- **In Claude Cowork:** go straight to Bash: `find / -path '*/skills/competitive-positioning/scripts/validate_landscape.py' 2>/dev/null | head -5`. The Glob tool searches only the workspace directory tree; the plugin is mounted outside the workspace at `.remote-plugins/`, so Glob will never find it in Cowork.
+- **Outside Cowork (workspace copy):** use `Glob` with pattern `**/skills/competitive-positioning/scripts/validate_landscape.py` as before.
+
+Strip the anchor filename to derive `SCRIPTS`; derive `REFS` and `SHARED_SCRIPTS` from `SCRIPTS`. If the find/Glob returns multiple matches, prefer the one under a plugin mount (`.remote-plugins/` or the plugins cache) over any workspace copy.
 
 **If `ARTIFACTS_ROOT` resolves to `./artifacts` but no `artifacts/` directory exists at `$(pwd)`:** The workspace may not be mounted yet. Use `Glob` with pattern `**/artifacts/founder_context.json` to locate existing artifacts, and derive `ARTIFACTS_ROOT` from the result. If nothing is found, `mkdir -p ./artifacts` and proceed.
 
