@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["pdfplumber", "python-docx>=1.2.0"]
+# ///
 """Corpus test: Convertible instrument document extraction simulation.
 
 Handles: PDF, DOCX, DOC (via antiword fallback), ZIP (extracts members).
@@ -340,8 +344,10 @@ def extract_zip_members(path: Path) -> list[tuple[str, str]]:
                 continue
             try:
                 data = zf.read(name)
-                tmp = Path(tempfile.mktemp(suffix=suffix))
-                tmp.write_bytes(data)
+                fd, tmp_name = tempfile.mkstemp(suffix=suffix)
+                tmp = Path(tmp_name)
+                with os.fdopen(fd, "wb") as tf:
+                    tf.write(data)
                 try:
                     if suffix == ".pdf":
                         text = extract_pdf_text(tmp)

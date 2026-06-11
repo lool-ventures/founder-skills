@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["openpyxl", "xlrd", "pdfplumber"]
+# ///
 """Corpus test: cap-table extraction against a real-world spreadsheet/PDF corpus.
 
-Designed to run against any folder of cap-table files (e.g. a portfolio
-of past lawyer-produced cap tables). For each file:
+Designed to run against any folder of cap-table files (a real-world sample
+of lawyer-produced cap tables). For each file:
   * Loadability (can openpyxl / xlrd / pdfplumber open it without crashing?)
   * Format detection (Carta / Pulley / OCX fingerprint check via
     extract_cap_table.py mode-detection logic)
@@ -124,7 +128,6 @@ def load_xlsx(path: Path) -> tuple[bool, dict[str, Any]]:
             best_row_idx = 0
             best_score = -1
             best_headers: list[str] = []
-            all_row1 = []
             for i, row in enumerate(rows_to_scan):
                 strs = [str(c).strip() for c in row if c is not None]
                 # Header heuristic: count cells with 2-30 chars that don't look like full sentences
@@ -133,13 +136,8 @@ def load_xlsx(path: Path) -> tuple[bool, dict[str, Any]]:
                     best_score = header_like
                     best_row_idx = i + 1
                     best_headers = strs
-                if i == 0:
-                    all_row1 = strs
             headers_per_sheet[sn] = best_headers
             likely_header_row_per_sheet[sn] = best_row_idx
-            # also keep raw row1 for comparison
-            if sn not in headers_per_sheet:
-                headers_per_sheet[sn] = all_row1
         wb.close()
         return True, {
             "sheet_names": sheet_names,

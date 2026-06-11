@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["pdfplumber"]
+# ///
 """Corpus test: SAFE / convertible-instrument PDF extraction simulation.
 
 Designed to run against a folder of individual signed SAFE / note / warrant
@@ -65,7 +69,7 @@ SPA_MARKERS = [
 ]
 CLA_MARKERS = [
     r"Convertible Loan Agreement",
-    r"CLA",
+    r"\bCLA\b",
     r"convertible loan",
 ]
 
@@ -329,13 +333,16 @@ def extract_fields(text: str) -> dict[str, Any]:
             result["issuance_date_raw"] = m.group(1).strip()
             break
 
-    # Investor name — header form
+    # Investor name — record only DETECTABILITY, never the real party name.
+    # The corpus is real signed SAFEs; storing the captured name would leak a
+    # real counterparty into the (anonymized) report. A boolean is enough to
+    # measure how reliably the pattern surfaces.
     inv_m = re.search(
         r"(?:Investor\s*Name|Name of Investor)[:\s]+([A-Z][\w\s.,&-]{2,80})",
         text,
     )
     if inv_m:
-        result["investor_name_hint"] = inv_m.group(1).strip()[:80]
+        result["investor_name_detected"] = True
     else:
         # Try prose form: "exchange for the payment by <NAME> (the 'Investor')"
         inv_m = re.search(
@@ -344,7 +351,7 @@ def extract_fields(text: str) -> dict[str, Any]:
             re.IGNORECASE,
         )
         if inv_m and "(cid:" not in inv_m.group(1):
-            result["investor_name_hint"] = inv_m.group(1).strip()[:80]
+            result["investor_name_detected"] = True
 
     return result
 
