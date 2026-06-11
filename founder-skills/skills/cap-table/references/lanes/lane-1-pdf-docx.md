@@ -64,7 +64,7 @@ After the sub-agent returns, apply the [tolerant JSON extraction protocol](../..
 Notes the dispatcher MUST honor:
 
 - **`instrument_type` is the routing key for subtype gates.** Per `extract_instrument.py:434`, accepted subtype values are `convertible_loan_agreement`, `convertible_security`, and the canonical `convertible_note`. To route a YC-style convertible_security through the relaxed gate (waives `day_count_basis` / `maturity_date` / `maturity_default_treatment` / `annual_interest_rate`), set `instrument_type: "convertible_security"`. Setting `instrument_type: "convertible_note"` and putting `subtype: "convertible_security"` inside `fields` does NOT work — the strict gate fires and validation fails on missing convertible_note fields.
-- **`confidence` is keyed by `fields` field name**, and each value is a `{level, evidence_quote, document_location?}` object. A bare string like `"confidence": "medium"` is rejected (`extract_instrument.py` will exit non-zero with a clear error rather than crashing on `.items()`). The `level` enum is `high | medium | low`.
+- **`confidence` is keyed by `fields` field name**, and each value is a `{level, evidence_quote, document_location?}` object. A bare string like `"confidence": "medium"` is rejected (`extract_instrument.py` will exit non-zero with a clear error rather than crashing on `.items()`). The `level` enum is `high | medium | low | absent` (use `absent` when the document is silent on a field).
 - **`evidence_quote` lives inside each `confidence` entry**, NOT as a top-level `evidence` block, NOT as a per-field key inside `fields`. The forward evidence verifier (`evidence_verifier.py`) reads `confidence[fname].evidence_quote` for its three-layer check (`quote_in_doc` / `value_in_quote` / `value_in_doc`).
 - **Synthesized fields** (computed/classified rather than extracted — e.g., `id`, derived counts, `extraction_confidence`, the `subtype` stamp itself) do NOT need an `evidence_quote`. The verifier has a built-in skip list (~30 fields) and produces `skipped_synthesized` rather than `fail`.
 - **Form-template / unexecuted-counterpart documents** (Word/PDF templates with blank investor name, amount, date) should NOT have placeholder values fabricated. Set the appropriate field to `null` AND add an `ambiguities` entry of the form `{"field": "purchase_amount", "reason": "form template — investor amount blank in source"}`. The main thread will surface to the founder via `AskUserQuestion` rather than pushing fabricated data through the verifier.
@@ -106,7 +106,11 @@ The dispatching agent should escalate these via `AskUserQuestion` AND, for high-
 
 ## Unverifiable documents
 
-If the source document is image-only or DocuSign-overlay (verifier returns `overall_status: "unverifiable_doc"` or `verifier_blind_demoted`), verification cannot run — surface this to the founder and ask for explicit confirmation of the extracted values before commit.
+If the source document is image-only or DocuSign-overlay (verifier returns `overall_status: "unverifiable_doc"` or `verifier_blind_demoted`, i.e. the text layer is empty / `is_doc_image_only`), the text-based verifier has nothing to match against.
+
+**Vision fallback:** before giving up, dispatch a FRESH sub-agent to transcribe the relevant passages of the image-only document into plain text, then feed that transcription back to the verifier via `--doc-text <file>` (instead of `--source`). When the document text came from model vision rather than a text layer, the verifier stamps `verification_source: "model_vision"` and demotes the field confidence one level (vision transcription is less reliable than a real text layer). Surface the demotion to the founder and ask for explicit confirmation of the extracted values before commit.
+
+If no usable transcription is possible, surface the unverifiable status to the founder and ask for explicit confirmation of the extracted values before commit.
 
 If the extraction surfaced ambiguities or low-confidence fields, present them via `AskUserQuestion` for confirmation before proceeding.
 

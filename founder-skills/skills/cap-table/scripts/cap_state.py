@@ -101,8 +101,22 @@ def _check_invariants_preferred_series(preferred: list[dict[str, Any]]) -> None:
             raise CapStateInvariantError(
                 f"E_PREFERRED_SERIES_INVALID_PRICE: preferred_series[{sname}].original_conversion_price must be > 0."
             )
+        # Resolved current_conversion_price must be > 0 (same fallback chain the
+        # canonicalizer uses: current -> original -> ocp). A resolved CCP <= 0
+        # would silently corrupt the as-converted ratio and blow up AD math.
+        ccp = float(
+            s.get(
+                "current_conversion_price",
+                s.get("original_conversion_price", s.get("ocp", 0)),
+            )
+        )
+        if ccp <= 0:
+            sname = s.get("series_name", "?")
+            raise CapStateInvariantError(
+                f"E_PREFERRED_SERIES_INVALID_PRICE: preferred_series[{sname}].current_conversion_price "
+                f"resolves to {ccp} (must be > 0). Provide current_conversion_price or original_conversion_price."
+            )
         # CCP <= OCP (ratchet only ratchets down)
-        ccp = float(s.get("current_conversion_price", s.get("original_conversion_price", 0)))
         ocp = float(s.get("original_conversion_price", 0))
         if ccp > ocp + 1e-9:
             sname = s.get("series_name", "?")
@@ -182,10 +196,14 @@ def _compute_as_converted_totals(
         shares = int(s.get("shares", 0))
         ocp = float(s.get("original_conversion_price", 1.0))
         ccp = float(s.get("current_conversion_price", ocp))
-        if ccp == 0:
-            preferred_as_converted += shares
-        else:
-            preferred_as_converted += int(round(shares * (ocp / ccp)))
+        if ccp <= 0:
+            # Must never reach here: the §4.5 invariant rejects resolved CCP <= 0
+            # upstream. Raise rather than silently masking as 1:1.
+            raise CapStateInvariantError(
+                f"E_PREFERRED_SERIES_INVALID_PRICE: preferred_series[{s.get('series_id', '?')}]"
+                f".current_conversion_price resolves to {ccp} (must be > 0)."
+            )
+        preferred_as_converted += int(round(shares * (ocp / ccp)))
 
     options_outstanding = int(canonical_option_pool.get("issued_and_outstanding", 0))
     options_available = int(canonical_option_pool.get("available_for_grant", 0))
@@ -325,7 +343,20 @@ def _build_outstanding_warrants(warrants: list[dict[str, Any]]) -> list[dict[str
     and the run_scenario.py pre-round pump can all read from cap_state.
     """
     out = []
-    for w in warrants:
+    for i, w in enumerate(warrants):
+        for field, hint in [
+            ("id", "add 'id' (a unique string key for this warrant, e.g. 'warrant_1')"),
+            ("shares_underlying", "add 'shares_underlying' (shares the warrant exercises into)"),
+            ("exercise_price", "add 'exercise_price' (per-share exercise/strike price)"),
+            ("warrant_type", "add 'warrant_type' (e.g. 'common_stock' or 'preferred_stock_series')"),
+            ("issuance_date", "add 'issuance_date' (ISO date the warrant was issued)"),
+            ("settlement_type", "add 'settlement_type' (e.g. 'physical', 'net_share', 'holder_election')"),
+        ]:
+            if field not in w:
+                raise CapStateInvariantError(
+                    f"E_WARRANT_MISSING_FIELD: warrants[{i}] (id '{w.get('id', f'index {i}')}') is missing "
+                    f"required field '{field}'. Remedy: {hint}."
+                )
         out.append(
             {
                 "warrant_id": w["id"],
@@ -433,7 +464,12 @@ def build_cap_state(
             "shares": int(s["shares"]),
             "original_issue_price": float(s.get("original_issue_price", s.get("oip", 0))),
             "original_conversion_price": float(s.get("original_conversion_price", s.get("ocp", 0))),
-            "current_conversion_price": float(s.get("current_conversion_price", s.get("ocp", 0))),
+            "current_conversion_price": float(
+                s.get(
+                    "current_conversion_price",
+                    s.get("original_conversion_price", s.get("ocp", 0)),
+                )
+            ),
             "issuance_date": s["issuance_date"],
             "liquidation_preference_multiple": float(s.get("liquidation_preference_multiple", 1.0)),
             "liquidation_preference_type": s.get("liquidation_preference_type", "non_participating"),

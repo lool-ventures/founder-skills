@@ -276,7 +276,35 @@ class TestCliRoundTrip:
         assert report["overall_status"] == "pass"
         assert report["n_matched"] == 3
 
-    def test_score_phase_exits_1_on_mismatch(self, extraction_file: Path) -> None:
+    def test_score_phase_exits_1_on_mismatch_block_mode(self, extraction_file: Path) -> None:
+        responses = {
+            "responses": [
+                {"field": "purchase_amount", "value": 99_999, "evidence_quote": "..."},  # wrong
+                {"field": "post_money_valuation_cap", "value": 20000000, "evidence_quote": "..."},
+                {"field": "discount_multiplier", "value": 0.80, "evidence_quote": "..."},
+            ]
+        }
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS_DIR / "backward_verifier.py"),
+                "--phase=score",
+                "--mode=block",
+                "--extraction",
+                str(extraction_file),
+            ],
+            input=json.dumps(responses),
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        report = json.loads(result.stdout)
+        assert report["overall_status"] == "fail"
+        assert report["n_mismatched"] == 1
+
+    def test_score_phase_warn_mode_default_exits_0_on_mismatch(self, extraction_file: Path) -> None:
+        """extraction-9: default --mode is warn — a mismatch is informational
+        (exit 0), per the calibrated noisy-disagreement contract."""
         responses = {
             "responses": [
                 {"field": "purchase_amount", "value": 99_999, "evidence_quote": "..."},  # wrong
@@ -296,8 +324,9 @@ class TestCliRoundTrip:
             capture_output=True,
             text=True,
         )
-        assert result.returncode == 1
+        assert result.returncode == 0, result.stderr
         report = json.loads(result.stdout)
+        # Status still reflects the disagreement; only the exit code is warn-mode.
         assert report["overall_status"] == "fail"
         assert report["n_mismatched"] == 1
 

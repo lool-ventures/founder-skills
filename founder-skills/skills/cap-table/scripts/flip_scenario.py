@@ -24,9 +24,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from copy import deepcopy
 from typing import Any
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _emit import add_output_args, emit  # noqa: E402
+from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 
 
 def flip_share_for_share(
@@ -159,7 +164,7 @@ def flip_share_for_share(
                 "output_field": "flip_exchange_ratio",
                 "source_type": "rule",
                 "rule_id": "delaware_flip.share_exchange_mechanics",
-                "rule_pack_version": "0.3.2",
+                "rule_pack_version": RULE_PACK_VERSION,
                 "source_ref": None,
             },
         ],
@@ -172,7 +177,7 @@ def _cli() -> int:
     p.add_argument("--cap-state", required=True)
     p.add_argument("--iia-grants", action="store_true")
     p.add_argument("--section-102-grants", type=int, default=0)
-    p.add_argument("--pretty", action="store_true")
+    add_output_args(p)
     args = p.parse_args()
 
     with open(args.cap_state, encoding="utf-8") as f:
@@ -182,7 +187,7 @@ def _cli() -> int:
         iia_grants_in_history=args.iia_grants,
         section_102_grants_outstanding=args.section_102_grants,
     )
-    print(json.dumps(result, indent=2 if args.pretty else None))
+    emit(result, args)
     return 0
 
 

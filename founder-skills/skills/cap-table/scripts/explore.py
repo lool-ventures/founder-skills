@@ -663,6 +663,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dir", required=True)
     p.add_argument("-o", "--output", required=True)
+    p.add_argument("--pretty", action="store_true", help="Indent the JSON receipt printed to stdout")
     args = p.parse_args()
 
     def _read(name: str) -> dict[str, Any]:
@@ -684,7 +685,12 @@ def main() -> int:
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         f.write(html_out)
-    print(json.dumps({"ok": True, "path": out, "bytes": len(html_out.encode("utf-8"))}))
+    print(
+        json.dumps(
+            {"ok": True, "path": out, "bytes": len(html_out.encode("utf-8"))},
+            indent=2 if args.pretty else None,
+        )
+    )
     return 0
 
 

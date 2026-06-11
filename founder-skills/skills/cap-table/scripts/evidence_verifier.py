@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["pdfplumber", "python-docx", "openpyxl"]
+# ///
 """Evidence-quote verification for cap-table Lane-1 extraction.
 
 Three-layer check per field:
@@ -66,6 +70,25 @@ DEFAULT_FUZZY_THRESHOLD = 0.85
 
 # Threshold below which doc text is treated as image-only / unverifiable.
 MIN_DOC_TEXT_CHARS = 500
+
+
+class MissingDependencyError(Exception):
+    """A required third-party parser (e.g. pdfplumber) is not installed.
+
+    Distinct from a genuine extraction failure: a missing dependency must
+    surface loudly (the blocking hallucination gate would otherwise silently
+    no-op for PDFs), not be swallowed as an image-only document.
+    """
+
+    def __init__(self, dependency: str, suffix: str) -> None:
+        self.dependency = dependency
+        self.suffix = suffix
+        super().__init__(
+            f"E_MISSING_DEPENDENCY: '{dependency}' is required to extract text from {suffix} files "
+            f"but is not installed. Install it (it is declared in pyproject dependencies and the "
+            f"script's PEP 723 header; `uv run` will fetch it)."
+        )
+
 
 # How close the value token must appear to the evidence quote anchor.
 # Currently this just checks that the token appears anywhere in the
@@ -440,19 +463,35 @@ def _load_doc_text(source_path: Path) -> str:
     """Best-effort text extraction. Defers to dedicated parsers; returns empty
     string on failure (verifier downstream will treat as image-only)."""
     suffix = source_path.suffix.lower()
+    # ImportError must NOT be swallowed: a missing parser silently degrades the
+    # blocking hallucination gate to a no-op for PDFs. Raise MissingDependencyError
+    # so the CLER surfaces E_MISSING_DEPENDENCY and exits non-zero.
     try:
         if suffix == ".pdf":
-            import pdfplumber
+            import pdfplumber  # noqa: PLC0415
+        elif suffix == ".docx":
+            import docx  # noqa: F401, PLC0415
+        elif suffix in (".xlsx", ".xlsm"):
+            import openpyxl  # noqa: F401, PLC0415
+    except ImportError as e:
+        dep = {".pdf": "pdfplumber", ".docx": "python-docx", ".xlsx": "openpyxl", ".xlsm": "openpyxl"}.get(
+            suffix, str(e)
+        )
+        raise MissingDependencyError(dep, suffix) from e
+
+    try:
+        if suffix == ".pdf":
+            import pdfplumber  # noqa: PLC0415
 
             with pdfplumber.open(source_path) as pdf:
                 return "\n".join((p.extract_text() or "") for p in pdf.pages)
         elif suffix == ".docx":
-            import docx
+            import docx  # noqa: PLC0415
 
             d = docx.Document(str(source_path))
             return "\n".join(p.text for p in d.paragraphs)
         elif suffix in (".xlsx", ".xlsm"):
-            import openpyxl
+            import openpyxl  # noqa: PLC0415
 
             wb = openpyxl.load_workbook(str(source_path), data_only=True, read_only=True)
             parts = []
@@ -476,6 +515,13 @@ def main() -> int:
         "--source", type=Path, help="Source document (PDF/DOCX/XLSX) — required unless --doc-text is given"
     )
     parser.add_argument("--doc-text", type=Path, help="Pre-extracted text file (skips parsing)")
+    parser.add_argument(
+        "--doc-text-source",
+        choices=("text_layer", "model_vision"),
+        default="text_layer",
+        help="Provenance of --doc-text. 'model_vision' (a fresh sub-agent transcribed an "
+        "image-only doc) stamps verification_source and demotes confidence one level.",
+    )
     parser.add_argument("--fuzzy-threshold", type=float, default=DEFAULT_FUZZY_THRESHOLD)
     parser.add_argument("--pretty", action="store_true")
     parser.add_argument("-o", "--output", type=Path)
@@ -486,7 +532,17 @@ def main() -> int:
     if args.doc_text:
         doc_text = args.doc_text.read_text()
     elif args.source:
-        doc_text = _load_doc_text(args.source)
+        try:
+            doc_text = _load_doc_text(args.source)
+        except MissingDependencyError as e:
+            payload = {
+                "error": "E_MISSING_DEPENDENCY",
+                "dependency": e.dependency,
+                "suffix": e.suffix,
+                "detail": str(e),
+            }
+            print(json.dumps(payload, indent=2 if args.pretty else None))
+            return 1
     else:
         print("error: must provide --source or --doc-text", file=sys.stderr)
         return 2
@@ -494,8 +550,17 @@ def main() -> int:
     report = verify_extraction(extraction, doc_text, fuzzy_threshold=args.fuzzy_threshold)
     out = report_to_dict(report)
 
+    # Vision-fallback provenance: when --doc-text came from a fresh sub-agent's
+    # transcription of an image-only doc, stamp the source and signal a
+    # one-level confidence demotion (vision is less reliable than a text layer).
+    if args.doc_text and args.doc_text_source == "model_vision":
+        out["doc_metadata"]["verification_source"] = "model_vision"
+        out["doc_metadata"]["confidence_demoted"] = True
+
     if args.output:
         args.output.write_text(json.dumps(out, indent=2 if args.pretty else None))
+        receipt = {"ok": True, "output": str(args.output.resolve())}
+        print(json.dumps(receipt, indent=2 if args.pretty else None))
     else:
         if args.pretty:
             print(json.dumps(out, indent=2))

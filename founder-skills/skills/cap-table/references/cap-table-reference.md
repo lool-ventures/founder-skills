@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This reference pack supports a future cap-table skill covering founder ownership, SAFEs, convertible notes, option pools, anti-dilution, Israeli company issues, Delaware/Israel cross-border structures, flips, and benchmark warnings.
+This reference pack supports the cap-table skill, covering founder ownership, SAFEs, convertible notes, option pools, anti-dilution, Israeli company issues, Delaware/Israel cross-border structures, flips, and benchmark warnings.
 
 The markdown is intentionally thin. Deterministic formulas, validation checks, date windows, and warning thresholds live in [`cap-table-rules.json`](./cap-table-rules.json), validated by [`cap-table-rules.schema.json`](./cap-table-rules.schema.json). Skill prose should point to rule IDs and call scripts built from the JSON spec rather than restating calculations inline.
 

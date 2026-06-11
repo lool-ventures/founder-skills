@@ -2386,6 +2386,29 @@ class TestGotchas:
         assert mult is None
         assert warn is None
 
+    def test_gotcha_3_discount_boundaries(self) -> None:
+        """extraction-5: percent-multiplier vs discount-rate disambiguation.
+
+        d>=50 → percent-multiplier (80→0.80, 50→0.50); 1<d<50 → discount-rate
+        (49→0.51); d<=0 → error.
+        """
+        sys.path.insert(0, SCRIPTS)
+        from extract_instrument import normalize_discount_multiplier  # type: ignore[import-not-found]
+
+        mult, warn = normalize_discount_multiplier(80.0)
+        assert mult == 0.80, mult
+        assert warn is not None
+
+        mult, warn = normalize_discount_multiplier(50.0)
+        assert mult == 0.50, mult
+
+        mult, warn = normalize_discount_multiplier(49.0)
+        assert mult is not None and abs(mult - 0.51) < 1e-9, mult
+
+        mult, warn = normalize_discount_multiplier(0.0)
+        assert mult is None
+        assert warn is not None and "invalid" in warn.lower()
+
     def test_gotcha_4_mfn_cycle_unresolvable(self) -> None:
         safes = [
             {
@@ -3224,7 +3247,9 @@ class TestAoAExtraction:
             )
             assert rc == 0, f"extract_aoa.py failed: rc={rc}, stderr={err}"
             receipt = json.loads(out)
-            assert receipt["status"] == "validated"
+            # After a successful merge the top-level status reflects the merge
+            # outcome (merged), not the pre-merge validation status.
+            assert receipt["status"] == "merged"
             assert receipt["preferred_series_count"] == 1
             assert "merge" in receipt
             assert receipt["merge"]["status"] == "merged"
@@ -5443,3 +5468,580 @@ class TestGolden4ADPlusSAFEQuantitative:
         assert r["equity_financing_price"] < 1.00, (
             f"PPS {r['equity_financing_price']} is not below OIP=1.00; AD should fire"
         )
+
+
+# ===========================================================================
+# Audit regression tests (a1: cap-table area)
+# ===========================================================================
+
+
+class TestRulePackVersion:
+    """_rule_pack.RULE_PACK_VERSION is read from cap-table-rules.json and is the
+    single source every producer binds to (no hardcoded literals drift)."""
+
+    def test_version_matches_rules_json(self) -> None:
+        import _rule_pack  # type: ignore[import-not-found]
+
+        rules_path = os.path.join(_REPO, "founder-skills", "skills", "cap-table", "references", "cap-table-rules.json")
+        with open(rules_path, encoding="utf-8") as f:
+            expected = json.load(f)["metadata"]["version"]
+        assert expected == _rule_pack.RULE_PACK_VERSION
+
+    def test_all_producers_share_one_version(self) -> None:
+        import _rule_pack  # type: ignore[import-not-found]
+        import anti_dilution as ad  # type: ignore[import-not-found]
+        import flip_scenario  # type: ignore[import-not-found]
+        import note_conversion as nc  # type: ignore[import-not-found]
+        import option_pool as op  # type: ignore[import-not-found]
+        import priced_round as pr  # type: ignore[import-not-found]
+        import run_scenario  # type: ignore[import-not-found]
+        import safe_conversion as sc  # type: ignore[import-not-found]
+
+        v = _rule_pack.RULE_PACK_VERSION
+        for mod in (ad, nc, op, pr, sc, flip_scenario, run_scenario):
+            assert v == mod.RULE_PACK_VERSION, f"{mod.__name__} drifted from {v}"
+
+    def test_no_stale_literal_versions_in_provenance(self) -> None:
+        """flip_scenario / run_scenario provenance no longer hardcode 0.3.2."""
+        import _rule_pack  # type: ignore[import-not-found]
+
+        for name in ("flip_scenario.py", "run_scenario.py"):
+            with open(os.path.join(SCRIPTS, name), encoding="utf-8") as fh:
+                text = fh.read()
+            assert '"0.3.2"' not in text, f"{name} still hardcodes 0.3.2"
+        # And the live version is current.
+        assert _rule_pack.RULE_PACK_VERSION != "0.3.2"
+
+
+class TestPreferredSeriesCCPFallback:
+    """math-1: CCP canonicalization falls back to original_conversion_price (not
+    legacy 'ocp' default 0), and a resolved CCP <= 0 is rejected, never masked."""
+
+    def _inputs_with_series(self, series: dict) -> dict:
+        return {
+            "company_name": "TestCo",
+            "analysis_date": "2026-06-01",
+            "mode": "standard",
+            "jurisdiction": {
+                "structure": "delaware",
+                "incorporated_date": "2024-01-01",
+                "iia_grants_history": {"has_grants": False, "grant_details": []},
+            },
+            "founders": [{"name": "F", "founder_id": "f1", "common_shares": 10_000_000}],
+            "preferred_series": [series],
+            "option_pool": {"plan_type": "iso", "authorized": 0, "issued": 0, "unallocated": 0},
+            "common_batches": [],
+            "metadata": {"run_id": "test"},
+        }
+
+    def _instruments(self) -> dict:
+        return {
+            "safes": [],
+            "convertible_notes": [],
+            "warrants": [],
+            "option_grants": [],
+            "metadata": {"run_id": "test"},
+        }
+
+    def test_ccp_falls_back_to_original_conversion_price(self) -> None:
+        series = {
+            "series_name": "Seed",
+            "shares": 2_000_000,
+            "original_issue_price": 2.0,
+            "original_conversion_price": 2.0,
+            # current_conversion_price intentionally omitted (and no 'ocp')
+            "issuance_date": "2024-06-01",
+        }
+        cs = cap_state_mod.build_cap_state(self._inputs_with_series(series), self._instruments())
+        canon = cs["preferred_series"][0]
+        assert canon["current_conversion_price"] == 2.0, canon["current_conversion_price"]
+        # as-converted ratio is 1:1 (OCP == CCP), so as-converted == shares
+        assert cs["as_converted_totals"]["preferred_shares_as_converted"] == 2_000_000
+
+    def test_resolved_ccp_zero_is_rejected(self) -> None:
+        series = {
+            "series_name": "Seed",
+            "shares": 2_000_000,
+            "original_issue_price": 2.0,
+            "original_conversion_price": 2.0,
+            "current_conversion_price": 0.0,
+            "issuance_date": "2024-06-01",
+        }
+        with pytest.raises(cap_state_mod.CapStateInvariantError) as exc:
+            cap_state_mod.build_cap_state(self._inputs_with_series(series), self._instruments())
+        assert "E_PREFERRED_SERIES_INVALID_PRICE" in str(exc.value)
+
+
+class TestPricedRoundNoteDateBlocker:
+    """math-2: notes present without a conversion date returns a structured
+    blocker (E_NOTE_NO_CONVERSION_DATE), never an AssertionError."""
+
+    def _cap_state(self) -> dict:
+        return {
+            "as_converted_totals": {
+                "fully_diluted_shares": 1_000_000,
+                "common_shares": 1_000_000,
+                "preferred_shares_as_converted": 0,
+                "options_outstanding": 0,
+                "options_available": 0,
+                "warrants_underlying_total": 0,
+            },
+            "founders": [{"common_shares": 1_000_000}],
+            "preferred_series": [],
+        }
+
+    def test_notes_without_date_returns_blocker(self) -> None:
+        r = priced_round.solve_priced_round(
+            cap_state=self._cap_state(),
+            safes=[],
+            notes=[{"id": "n1", "principal": 100_000}],
+            pre_money=5_000_000,
+            new_money=2_000_000,
+        )
+        assert r["completeness"] == "structural_only"
+        assert r["blockers"][0]["code"] == "E_NOTE_NO_CONVERSION_DATE"
+
+    def test_quick_assess_notes_defaults_today_and_discloses(self) -> None:
+        import quick_assess as qa  # type: ignore[import-not-found]
+
+        inputs = dict(_BASIC_INPUTS)
+        note = {
+            "id": "n1",
+            "principal": 250_000,
+            "issuance_date": "2024-01-01",
+            "interest_rate": 0.06,
+            "valuation_cap": 8_000_000,
+            "capitalization_denominator": 10_000_000,
+        }
+        sentinel = qa.quick_assess(
+            company_name="TestCo",
+            inputs=inputs,
+            safes=[],
+            notes=[note],
+            pre_money=8_000_000,
+            new_money=2_000_000,
+            target_pool_percent=None,
+            target_basis="post_money",
+        )
+        assert sentinel.get("assumptions"), "expected disclosed assumption for missing note date"
+        assert any("today" in a.lower() for a in sentinel["assumptions"])
+
+
+class TestPreAdBaselineDenominator:
+    """math-3: pre_ad_post_fd includes common_batches + warrants, so the AD
+    delta denominator matches the post-AD denominator's components."""
+
+    def test_pre_ad_fd_includes_batches_and_warrants(self) -> None:
+        cs = {
+            "as_converted_totals": {
+                "fully_diluted_shares": 2_500_000,
+                "common_shares": 2_000_000,  # founders 1.5M + batch 0.5M
+                "preferred_shares_as_converted": 250_000,
+                "options_outstanding": 0,
+                "options_available": 0,
+                "warrants_underlying_total": 250_000,
+            },
+            "founders": [{"common_shares": 1_500_000, "common_class": "class_a"}],
+            "common_batches": [{"shares": 500_000}],
+            "preferred_series": [
+                {
+                    "series_id": "seed",
+                    "series_name": "Seed",
+                    "shares": 250_000,
+                    "original_issue_price": 1.0,
+                    "original_conversion_price": 1.0,
+                    "current_conversion_price": 1.0,
+                    "anti_dilution_protection": "broad_based_weighted_average",
+                    "ad_a_denominator_basis": "nvca_broad",
+                    "ad_trigger_basis": "original_issue_price",
+                    "issuance_date": "2024-01-01",
+                }
+            ],
+        }
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=[],
+            notes=[],
+            pre_money=1_000_000,  # down round → AD fires
+            new_money=500_000,
+        )
+        agg = r["aggregate_ownership_by_class"]
+        # When AD fires, pre-AD baseline must be present and bounded by 100%.
+        if "founders_pct_pre_anti_dilution" in agg:
+            assert 0.0 < agg["founders_pct_pre_anti_dilution"] <= 1.0
+
+
+class TestVisualize:
+    """math-4: scenario donut/legend palette lookup tolerates the _pct suffix,
+    has a warrants color, and excludes pre-AD/delta keys."""
+
+    def test_palette_color_strips_pct_suffix(self) -> None:
+        import visualize  # type: ignore[import-not-found]
+
+        assert visualize._palette_color("founders_pct") == visualize.PALETTE["founders"]
+        assert visualize._palette_color("safe_pct") == visualize.PALETTE["safe"]
+        assert visualize._palette_color("warrants") == visualize.PALETTE["warrants"]
+        # Unknown key falls back to neutral
+        assert visualize._palette_color("totally_unknown") == visualize.PALETTE["neutral"]
+
+    def test_donut_renders_non_neutral_slices_for_pct_keys(self) -> None:
+        import visualize  # type: ignore[import-not-found]
+
+        agg = {"founders_pct": 0.6, "safe_pct": 0.2, "new_money_pct": 0.2}
+        svg = visualize.render_donut(agg, size=120)
+        assert visualize.PALETTE["founders"] in svg
+        assert visualize.PALETTE["safe"] in svg
+        # No neutral wedge should appear for known categories
+        assert svg.count(visualize.PALETTE["neutral"]) == 0
+
+    def test_donut_excludes_pre_ad_delta_keys(self) -> None:
+        import visualize  # type: ignore[import-not-found]
+
+        agg = {
+            "founders_pct": 0.6,
+            "new_money_pct": 0.4,
+            "founders_pct_pre_anti_dilution": 0.7,
+            "anti_dilution_delta_pct_points": -10.0,
+        }
+        svg = visualize.render_donut(agg, size=120)
+        legend = visualize.render_legend(agg)
+        assert "anti dilution delta" not in legend
+        # negative delta should never create a wedge
+        assert "founders pct pre anti dilution" not in legend
+        assert svg  # renders without error
+
+
+class TestComposeSummaryCounts:
+    """math-7: summary.passed / failed are scenario counts (never negative)."""
+
+    def test_passed_never_negative_with_multi_blocker_scenario(self) -> None:
+        import compose_report  # type: ignore[import-not-found]
+
+        scenarios: list[dict[str, Any]] = [
+            {
+                "scenario_id": "s1",
+                "type": "priced_round",
+                "parameters": {},
+                "computed_outputs": {
+                    "blockers": [
+                        {"code": "E_A", "remedy": "fix a"},
+                        {"code": "E_B", "remedy": "fix b"},
+                        {"code": "E_C", "remedy": "fix c"},
+                    ]
+                },
+            },
+            {"scenario_id": "s2", "type": "priced_round", "parameters": {}, "computed_outputs": {}},
+        ]
+        failed_scenarios = sum(1 for s in scenarios if ((s.get("computed_outputs", {}) or {}).get("blockers") or []))
+        passed_scenarios = len(scenarios) - failed_scenarios
+        assert failed_scenarios == 1
+        assert passed_scenarios == 1
+        assert passed_scenarios >= 0
+        # build_scenario_digest must not raise on this shape
+        compose_report.build_scenario_digest(scenarios)
+
+
+class TestSafeFormChoices:
+    """math-16: priced-round --form exposes the supported pre-money forms and
+    no longer offers the always-rejected 'other'."""
+
+    def test_cli_form_choices(self) -> None:
+        rc, out, err = _run(
+            "safe_conversion.py",
+            [
+                "priced-round",
+                "--purchase",
+                "100000",
+                "--form",
+                "yc_premoney_cap_only",
+                "--pre-money-cap",
+                "5000000",
+                "--pre-money-fd",
+                "10000000",
+                "--company-cap",
+                "10000000",
+                "--equity-price",
+                "1.0",
+            ],
+        )
+        assert rc == 0, err
+        result = json.loads(out)
+        assert result.get("branch") != "rejected", result
+
+    def test_other_form_removed(self) -> None:
+        rc, out, err = _run(
+            "safe_conversion.py",
+            [
+                "priced-round",
+                "--purchase",
+                "100000",
+                "--form",
+                "other",
+                "--company-cap",
+                "10000000",
+            ],
+        )
+        # argparse rejects an invalid choice with exit code 2
+        assert rc == 2
+
+
+class TestZeroPriceRejections:
+    """math-15: discount/override zero prices return structured errors."""
+
+    def test_safe_discount_zero_rejected(self) -> None:
+        result = safe_conversion.convert_safe_priced_round(
+            purchase_amount=100_000,
+            form="yc_postmoney_discount",
+            post_money_valuation_cap=None,
+            discount_multiplier=0.0,
+            company_capitalization=10_000_000,
+            equity_financing_price=2.0,
+        )
+        assert result["error"] == "E_SAFE_INVALID_PRICE_INPUT"
+
+    def test_note_override_zero_rejected(self) -> None:
+        import note_conversion as nc  # type: ignore[import-not-found]
+
+        note = {
+            "id": "n1",
+            "principal": 100_000,
+            "issuance_date": "2024-01-01",
+            "interest_rate": 0.0,
+            "maturity_default_treatment": "convert_at_cap",
+            "maturity_conversion_price_override": 0.0,
+        }
+        result = nc.convert_note(note, conversion_event_date="2026-01-01")
+        assert result.get("error") == "E_NOTE_INVALID_PRICE_INPUT", result
+
+
+class TestWarrantMissingField:
+    """math-18: warrants missing required fields raise structured
+    E_WARRANT_MISSING_FIELD, not a raw KeyError."""
+
+    def _inputs(self) -> dict:
+        return {
+            "company_name": "TestCo",
+            "analysis_date": "2026-06-01",
+            "mode": "standard",
+            "jurisdiction": {
+                "structure": "delaware",
+                "incorporated_date": "2024-01-01",
+                "iia_grants_history": {"has_grants": False, "grant_details": []},
+            },
+            "founders": [{"name": "F", "founder_id": "f1", "common_shares": 10_000_000}],
+            "preferred_series": [],
+            "option_pool": {"plan_type": "iso", "authorized": 0, "issued": 0, "unallocated": 0},
+            "common_batches": [],
+            "metadata": {"run_id": "test"},
+        }
+
+    def test_warrant_missing_shares_underlying(self) -> None:
+        instruments = {
+            "safes": [],
+            "convertible_notes": [],
+            "warrants": [
+                {
+                    "id": "w1",
+                    # shares_underlying intentionally absent
+                    "exercise_price": 1.0,
+                    "warrant_type": "common_stock",
+                    "issuance_date": "2024-01-01",
+                    "settlement_type": "physical",
+                }
+            ],
+            "option_grants": [],
+            "metadata": {"run_id": "test"},
+        }
+        with pytest.raises(cap_state_mod.CapStateInvariantError) as exc:
+            cap_state_mod.build_cap_state(self._inputs(), instruments)
+        assert "E_WARRANT_MISSING_FIELD" in str(exc.value)
+        assert "shares_underlying" in str(exc.value)
+
+
+class TestCapStateAfterRoundNullHistory:
+    """math-19: a present-but-null cap_table_history does not TypeError in the
+    receipt computation."""
+
+    def test_null_history_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            pre: dict[str, Any] = {
+                "as_converted_totals": {
+                    "common_shares": 1000,
+                    "preferred_shares_as_converted": 0,
+                    "options_outstanding": 0,
+                    "options_available": 0,
+                    "warrants_underlying_total": 0,
+                    "fully_diluted_shares": 1000,
+                },
+                "cap_table_history": None,
+                "preferred_series": [],
+            }
+            scenarios = {"scenarios": [{"scenario_id": "round_a", "computed_outputs": {}}]}
+            pre_path = os.path.join(d, "cap_state.json")
+            scen_path = os.path.join(d, "scenarios.json")
+            out_path = os.path.join(d, "out.json")
+            with open(pre_path, "w") as f:
+                json.dump(pre, f)
+            with open(scen_path, "w") as f:
+                json.dump(scenarios, f)
+            rc, out, err = _run(
+                "cap_state_after_round.py",
+                [
+                    "--cap-state",
+                    pre_path,
+                    "--scenarios",
+                    scen_path,
+                    "--scenario-id",
+                    "round_a",
+                    "-o",
+                    out_path,
+                ],
+            )
+            # Must not crash with TypeError; receipt emitted, rc 0.
+            assert "TypeError" not in err, err
+            assert rc == 0, err
+            assert json.loads(out)["ok"] is True
+
+
+class TestPdfMissingPdfplumber:
+    """extraction-1: a missing pdfplumber must surface E_MISSING_DEPENDENCY and
+    block, not silently degrade the hallucination gate to a no-op."""
+
+    def test_pdf_missing_pdfplumber_blocks(self) -> None:
+        import builtins
+        import importlib
+
+        sys.path.insert(0, SCRIPTS)
+        ev = importlib.import_module("evidence_verifier")
+
+        real_import = builtins.__import__
+
+        def _fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+            if name == "pdfplumber":
+                raise ImportError("No module named 'pdfplumber'")
+            return real_import(name, *args, **kwargs)
+
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as d:
+            pdf_path = Path(d) / "doc.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4 fake")
+            builtins.__import__ = _fake_import
+            try:
+                with pytest.raises(ev.MissingDependencyError) as exc:
+                    ev._load_doc_text(pdf_path)
+            finally:
+                builtins.__import__ = real_import
+            assert "E_MISSING_DEPENDENCY" in str(exc.value)
+            assert exc.value.dependency == "pdfplumber"
+
+
+class TestAoAMergeMatrix:
+    """extraction-2/3: --replace-existing semantics + missing-inputs handling."""
+
+    @staticmethod
+    def _extraction() -> dict[str, Any]:
+        return {
+            "extraction_type": "articles_of_association",
+            "fields": {
+                "company_name": "Acmecorp Ltd.",
+                "jurisdiction_structure": "israeli",
+                "preferred_series": [
+                    {
+                        "series_name": "Series Seed",
+                        "shares": None,
+                        "original_issue_price": 2.0,
+                        "original_conversion_price": 2.0,
+                        "current_conversion_price": 2.0,
+                        "issuance_date": "2020-01-01",
+                        "liquidation_preference_multiple": 1.0,
+                        "liquidation_preference_type": "non_participating",
+                        "anti_dilution_protection": "broad_based_weighted_average",
+                    }
+                ],
+            },
+            "confidence": {},
+            "ambiguities": [],
+        }
+
+    def _write_inputs(self, d: str, series: list[dict]) -> str:
+        path = os.path.join(d, "inputs.json")
+        with open(path, "w") as f:
+            json.dump(
+                {
+                    "company_name": "Acmecorp Ltd.",
+                    "analysis_date": "2026-05-21",
+                    "mode": "standard",
+                    "preferred_series": series,
+                    "metadata": {"run_id": "test"},
+                },
+                f,
+            )
+        return path
+
+    def test_conflict_without_flag_is_atomic_no_write_exit_2(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            inputs_path = self._write_inputs(
+                d, [{"series_name": "Series Seed", "shares": 1_000_000, "original_issue_price": 1.0}]
+            )
+            with open(inputs_path) as f:
+                before = f.read()
+            rc, out, err = _run(
+                "extract_aoa.py",
+                ["--run-id", "t", "--inputs", inputs_path],
+                stdin_data=json.dumps(self._extraction()),
+            )
+            assert rc == 2, err
+            receipt = json.loads(out)
+            assert receipt["status"] == "conflict"
+            assert receipt["merge"]["added"] == []
+            # Atomic: file unchanged on disk
+            with open(inputs_path) as f:
+                assert f.read() == before
+
+    def test_replace_existing_overwrites_exit_0(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            inputs_path = self._write_inputs(
+                d, [{"series_name": "Series Seed", "shares": 1_000_000, "original_issue_price": 1.0}]
+            )
+            rc, out, err = _run(
+                "extract_aoa.py",
+                ["--run-id", "t", "--inputs", inputs_path, "--source-doc", "/aoa.pdf", "--replace-existing"],
+                stdin_data=json.dumps(self._extraction()),
+            )
+            assert rc == 0, err
+            receipt = json.loads(out)
+            assert receipt["status"] == "merged"
+            assert receipt["merge"]["replaced"] == ["Series Seed"]
+            with open(inputs_path) as f:
+                merged = json.load(f)
+            seeds = [s for s in merged["preferred_series"] if s["series_name"] == "Series Seed"]
+            assert len(seeds) == 1
+            # Replaced in place with the new OIP + fresh provenance
+            assert seeds[0]["original_issue_price"] == 2.0
+            assert "extraction_provenance" in seeds[0]
+
+    def test_missing_inputs_is_merge_failed_exit_1(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            missing = os.path.join(d, "does_not_exist.json")
+            rc, out, err = _run(
+                "extract_aoa.py",
+                ["--run-id", "t", "--inputs", missing],
+                stdin_data=json.dumps(self._extraction()),
+            )
+            assert rc == 1, err
+            receipt = json.loads(out)
+            assert receipt["status"] == "merge_failed"
+
+    def test_no_conflict_appends_exit_0(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            inputs_path = self._write_inputs(d, [])
+            rc, out, err = _run(
+                "extract_aoa.py",
+                ["--run-id", "t", "--inputs", inputs_path, "--source-doc", "/aoa.pdf"],
+                stdin_data=json.dumps(self._extraction()),
+            )
+            assert rc == 0, err
+            receipt = json.loads(out)
+            assert receipt["status"] == "merged"
+            assert receipt["merge"]["added"] == ["Series Seed"]

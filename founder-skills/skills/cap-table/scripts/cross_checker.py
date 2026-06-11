@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = []
+# ///
 """Cross-extraction confidence modulator (demote-only) for cap-table Lane-1.
 
 When multiple extractors produce values for the same field (e.g. a sub-agent
@@ -25,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import Any
 
@@ -157,6 +162,7 @@ def main() -> int:
     if args.output:
         with open(args.output, "w") as f:
             f.write(payload)
+        print(json.dumps({"ok": True, "output": os.path.abspath(args.output)}, indent=2 if args.pretty else None))
     else:
         print(payload)
     # Informational mode: cross-checker never blocks. Disagreements surface in

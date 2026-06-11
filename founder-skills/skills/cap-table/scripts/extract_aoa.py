@@ -49,14 +49,13 @@ import sys
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 
 _SCHEMA_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "references",
     "schemas",
 )
-
-RULE_PACK_VERSION = "0.4.0"
 
 VALID_LIQ_PREF_TYPES = {"non_participating", "participating", "participating_capped"}
 VALID_ANTI_DILUTION = {
@@ -299,63 +298,75 @@ def merge_into_inputs(
     source_doc: str | None,
     extraction_confidence_per_series: dict[str, str] | None = None,
     aoa_findings: dict[str, Any] | None = None,
+    replace_existing: bool = False,
 ) -> dict[str, Any]:
     """Merge validated AoA preferred_series block into existing inputs.json.
 
     Behavior:
-    - Reads existing inputs.json (must exist)
+    - Reads existing inputs.json (must exist; missing → status 'merge_failed').
     - For each series in `preferred_series`: if a series with the same
-      `series_name` already exists, error out (caller must resolve manually).
-      Otherwise append to inputs.preferred_series[].
-    - Stamps `extraction_provenance` on each new entry so downstream tooling
-      can trace back to the AoA.
-    - Writes inputs.json back.
+      `series_name` already exists and `replace_existing` is False, this is a
+      CONFLICT — nothing is written (atomic), status 'conflict'. With
+      `replace_existing=True`, the existing entry is replaced in place with
+      fresh provenance.
+    - Otherwise append to inputs.preferred_series[].
+    - Stamps `extraction_provenance` on each new/replaced entry.
+    - Writes inputs.json back only when there are no unresolved conflicts.
 
     Returns a structured receipt (counts, paths, any conflicts).
     """
     if not os.path.exists(inputs_path):
-        return {"status": "error", "reason": f"inputs.json not found at {inputs_path}"}
+        return {"status": "merge_failed", "reason": f"inputs.json not found at {inputs_path}"}
 
     with open(inputs_path, encoding="utf-8") as f:
         inputs = json.load(f)
 
     existing_series = inputs.setdefault("preferred_series", [])
-    existing_names = {s.get("series_name") for s in existing_series}
+    existing_index = {s.get("series_name"): i for i, s in enumerate(existing_series) if isinstance(s, dict)}
 
-    added: list[str] = []
-    conflicts: list[str] = []
     now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    # First pass: detect conflicts WITHOUT mutating, so a no-flag conflict is an
+    # atomic no-write (nothing partially merged).
+    conflicts = [
+        series.get("series_name")
+        for series in preferred_series
+        if isinstance(series.get("series_name"), str) and series.get("series_name") in existing_index
+    ]
+    if conflicts and not replace_existing:
+        return {
+            "status": "conflict",
+            "added": [],
+            "conflicts": conflicts,
+            "reason": (
+                f"{len(conflicts)} series already present in inputs.preferred_series[]: "
+                f"{conflicts}. Nothing was written. Re-run with --replace-existing to "
+                f"overwrite in place."
+            ),
+        }
+
+    added: list[str] = []
+    replaced: list[str] = []
     for series in preferred_series:
         name = series.get("series_name")
         if not isinstance(name, str):
             # Series without a string series_name is invalid — skip silently
             continue
-        if name in existing_names:
-            conflicts.append(name)
-            continue
         new_entry = dict(series)
-        # Provenance stamp
         confidence_level = (extraction_confidence_per_series or {}).get(name, "medium")
         new_entry["extraction_provenance"] = {
             "source_doc": source_doc or "",
             "extraction_confidence": confidence_level,
             "extracted_at": now,
         }
-        existing_series.append(new_entry)
-        added.append(name)
-
-    if conflicts:
-        return {
-            "status": "conflict",
-            "added": added,
-            "conflicts": conflicts,
-            "reason": (
-                f"{len(conflicts)} series already present in inputs.preferred_series[]: "
-                f"{conflicts}. Caller must resolve (replace vs skip vs rename) before "
-                f"writing AoA extraction. Use --replace-existing to force overwrite."
-            ),
-        }
+        if name in existing_index:
+            # replace_existing path: overwrite in place with fresh provenance.
+            existing_series[existing_index[name]] = new_entry
+            replaced.append(name)
+        else:
+            existing_index[name] = len(existing_series)
+            existing_series.append(new_entry)
+            added.append(name)
 
     # Persist AoA-level findings (pay_to_play_detected, etc.) so
     # rule_audit.py --phase=post_math's _runtime_event_predicate can suppress
@@ -386,6 +397,8 @@ def merge_into_inputs(
         "status": "merged",
         "added": added,
         "added_count": len(added),
+        "replaced": replaced,
+        "replaced_count": len(replaced),
         "total_preferred_series_after_merge": len(existing_series),
         "inputs_path": os.path.abspath(inputs_path),
         "aoa_findings_persisted": bool(aoa_findings),
@@ -457,15 +470,26 @@ def _cli() -> int:
             source_doc=args.source_doc,
             extraction_confidence_per_series=series_conf,
             aoa_findings=aoa_findings_to_persist,
+            replace_existing=args.replace_existing,
         )
         receipt["merge"] = merge_result
-        if merge_result.get("status") == "conflict" and not args.replace_existing:
+        merge_status = merge_result.get("status")
+        if merge_status == "conflict":
+            # No-write atomic conflict (no --replace-existing).
+            receipt["status"] = "conflict"
             sys.stderr.write(
                 f"extract_aoa.py: merge conflict — {len(merge_result['conflicts'])} "
-                f"series already present. Use --replace-existing to force.\n"
+                f"series already present. Nothing written. Re-run with --replace-existing.\n"
             )
             print(json.dumps(receipt, indent=2 if args.pretty else None))
             return 2
+        if merge_status == "merge_failed":
+            receipt["status"] = "merge_failed"
+            sys.stderr.write(f"extract_aoa.py: merge failed — {merge_result.get('reason')}\n")
+            print(json.dumps(receipt, indent=2 if args.pretty else None))
+            return 1
+        # merged
+        receipt["status"] = "merged"
 
     print(json.dumps(receipt, indent=2 if args.pretty else None))
     return 0

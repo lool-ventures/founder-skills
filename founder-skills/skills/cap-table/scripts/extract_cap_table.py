@@ -288,6 +288,17 @@ def _convertible_record_to_instrument(rec: dict[str, Any], idx: int) -> tuple[st
 
     if is_safe:
         form = _infer_safe_form(valuation_cap, discount_raw)
+        # Carta's "Valuation Cap" column does not distinguish pre-money from
+        # post-money. We map cap-only to the post-money form (the modern default
+        # and the Carta export skew), but a legacy pre-money SAFE would get the
+        # wrong company-capitalization denominator (Gotcha #1). Warn and cap
+        # confidence at "medium" so a downstream reviewer confirms the vintage.
+        if valuation_cap and form == "yc_postmoney_cap":
+            warnings_list.append(
+                f"{sec_id}: cap mapped to post_money_valuation_cap (Carta export does not "
+                f"distinguish pre/post-money). If this is a legacy pre-money SAFE, the "
+                f"company-capitalization denominator differs (Gotcha #1) — confirm vintage."
+            )
         return (
             "safe",
             {
@@ -302,11 +313,41 @@ def _convertible_record_to_instrument(rec: dict[str, Any], idx: int) -> tuple[st
                 "form": form,
                 "conversion_price_override": None,
                 "source_document": f"carta:{sec_id}",
-                "extraction_confidence": "high",
+                "extraction_confidence": "medium",
             },
             warnings_list,
         )
-    # Convertible note
+    # Convertible note.
+    #
+    # The Carta export does not carry a qualified-financing threshold or a
+    # maturity-default treatment, and the math is sensitive to both
+    # (maturity_default_treatment selects the note_conversion 7-branch path; the
+    # QF threshold gates conversion). Do NOT fabricate them — leave null so the
+    # math producer surfaces a structural blocker rather than running on a guess.
+    # day_count_basis=365 and interest_converts_to_shares=True are standard
+    # conventions we keep, but they are still assumptions on a Carta import, so
+    # they (and the other unsupplied fields) get receipt warnings. Carta notes
+    # are capped at "medium" extraction_confidence for the same reason.
+    for assumed_field, note in (
+        ("day_count_basis", "assumed 365 (Carta export carries no day-count basis); confirm with note text"),
+        (
+            "interest_converts_to_shares",
+            "assumed true (Carta export does not state whether accrued interest converts); confirm with note text",
+        ),
+        (
+            "qualified_financing_threshold",
+            "left null (Carta export carries no QF threshold) — provide before running conversion math",
+        ),
+        (
+            "maturity_default_treatment",
+            "left null (Carta export carries no maturity-default treatment) — provide before running maturity math",
+        ),
+        (
+            "capitalization_denominator",
+            "left null (Carta export carries no cap-denominator) — confirm with note text",
+        ),
+    ):
+        warnings_list.append(f"{sec_id}: {assumed_field} {note}")
     return (
         "note",
         {
@@ -323,13 +364,13 @@ def _convertible_record_to_instrument(rec: dict[str, Any], idx: int) -> tuple[st
             "discount_multiplier": discount_mult,
             "capitalization_denominator": None,
             "capitalization_denominator_policy": "Carta-supplied: confirm with note text",
-            "qualified_financing_threshold": 1_000_000.0,  # default; confirm
+            "qualified_financing_threshold": None,
             "maturity_date": maturity_date,
-            "maturity_default_treatment": "convert_at_cap",
+            "maturity_default_treatment": None,
             "maturity_conversion_price_override": None,
             "non_qualified_financing_treatment": None,
             "source_document": f"carta:{sec_id}",
-            "extraction_confidence": "high",
+            "extraction_confidence": "medium",
         },
         warnings_list,
     )

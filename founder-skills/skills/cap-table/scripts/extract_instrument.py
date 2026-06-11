@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.10"
-# dependencies = []
+# dependencies = ["pdfplumber", "python-docx", "openpyxl"]
 # ///
 """Anti-hallucination validator for Lane-1 instrument extraction.
 
@@ -10,10 +10,11 @@ script validates the returned JSON, enforces form-dependent required-field
 gates (per SKILL.md §5.1), surfaces ambiguities for AskUserQuestion, and
 appends the validated instrument into instruments.json.
 
-Per Gotcha #3: this script also normalizes discount values: if a value > 1
-is given for discount_multiplier, treat it as percent and convert to
-multiplier form (90 → 0.90 = 10% discount; 80 → 0.80 = 20% discount; etc.)
-with a warning.
+Per Gotcha #3: this script also normalizes discount values to the canonical
+multiplier form. A value >= 50 is read as a percent-multiplier (80 → 0.80 =
+20% discount); a value in (1, 50) is read as a discount-rate percent (20 →
+0.80 multiplier); a value in (0, 1] passes through as an already-canonical
+multiplier; <= 0 is rejected. See normalize_discount_multiplier.
 """
 
 from __future__ import annotations
@@ -27,8 +28,12 @@ from typing import Any
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact  # noqa: E402
 from cross_checker import cross_check as _cross_check  # noqa: E402
+from evidence_verifier import (  # noqa: E402
+    MissingDependencyError,  # noqa: E402
+    report_to_dict,
+    verify_extraction,
+)
 from evidence_verifier import _load_doc_text as _ev_load_doc_text  # noqa: E402
-from evidence_verifier import report_to_dict, verify_extraction  # noqa: E402
 from extractors import ExtractionContext as _ExtractionContext  # noqa: E402
 from invariant_checker import check_instrument as _invariant_check  # noqa: E402
 from invariant_checker import report_to_dict as _invariant_report_to_dict  # noqa: E402
@@ -99,23 +104,54 @@ INTEREST_RATE_TYPES_ALL = INTEREST_RATE_TYPES_REQUIRING_NUMERIC | INTEREST_RATE_
 
 
 def normalize_discount_multiplier(d: float | None) -> tuple[float | None, str | None]:
-    """If discount looks like percent (>1), convert to multiplier and warn."""
+    """Normalize a discount input to the canonical multiplier form (Gotcha #3).
+
+    The canonical field stores the MULTIPLIER (0.80 = a 20% discount). YC SAFEs
+    phrase the "Discount Rate" as the multiplier itself (e.g. "Discount Rate is
+    80%"), so a raw value >= 50 is interpreted as a percent-multiplier
+    (80 -> 0.80); a value in (1, 50) is interpreted as a discount-rate percent
+    (20 -> 0.80 multiplier); a value in (0, 1] is already a multiplier and passes
+    through (with a warning below 0.5, since that is an unusually deep discount).
+    Matches extractors/safe/discount_multiplier.py and the backward_verifier
+    prompt template so the three never disagree.
+
+    Returns (multiplier_or_None, warning_or_error_message).
+    """
     if d is None:
         return None, None
-    if d > 1.0 and d <= 100.0:
-        # Treat as percent — e.g., 20 → 0.80 (20% discount)
-        multiplier = 1.0 - (d / 100.0)
-        return multiplier, (
-            f"discount value {d} > 1 — interpreted as a percent and converted to "
-            f"multiplier form {multiplier:.4f}. Per Gotcha #3, the canonical field "
-            f"is the multiplier (0.80 = 20% discount); confirm with founder."
-        )
-    if d > 100.0:
+    if d <= 0:
         return None, (
-            f"discount value {d} > 100 — uninterpretable. Field is the multiplier "
+            f"discount value {d} <= 0 is invalid. The canonical field is the multiplier "
             f"(0.80 = 20% discount); ask founder for clarification."
         )
-    return d, None
+    if d <= 1.0:
+        # Already a multiplier (0.80 = 20% discount). Pass through.
+        if d < 0.5:
+            return d, (
+                f"discount multiplier {d:.4f} implies a discount deeper than 50% — unusual; "
+                f"confirm with founder (the field is the multiplier, not the discount rate)."
+            )
+        return d, None
+    if d < 50.0:
+        # Discount-RATE percent (e.g. 20 means a 20% discount → 0.80 multiplier).
+        multiplier = 1.0 - (d / 100.0)
+        return multiplier, (
+            f"discount value {d} interpreted as a discount-rate percent and converted to "
+            f"multiplier form {multiplier:.4f}. Per Gotcha #3 the canonical field is the "
+            f"multiplier (0.80 = 20% discount); confirm with founder."
+        )
+    if d <= 100.0:
+        # Percent-MULTIPLIER (e.g. 80 means the multiplier is 0.80, a 20% discount).
+        multiplier = d / 100.0
+        return multiplier, (
+            f"discount value {d} interpreted as a percent-multiplier and converted to "
+            f"multiplier form {multiplier:.4f}. Per Gotcha #3 the canonical field is the "
+            f"multiplier (0.80 = 20% discount); confirm with founder."
+        )
+    return None, (
+        f"discount value {d} > 100 — uninterpretable. The field is the multiplier "
+        f"(0.80 = 20% discount); ask founder for clarification."
+    )
 
 
 def validate_safe(fields: dict[str, Any]) -> list[str]:
@@ -408,6 +444,7 @@ def main() -> int:
         "(E_DUPLICATE_INSTRUMENT_ID) and the file is left unchanged.",
     )
     p.add_argument("--pretty", action="store_true")
+    p.add_argument("-o", "--output", default=None, help="Write the receipt to this file; emit a receipt to stdout")
     args = p.parse_args()
 
     extraction = json.load(sys.stdin)
@@ -634,7 +671,20 @@ def main() -> int:
         else:
             from pathlib import Path as _Path
 
-            doc_text = _ev_load_doc_text(_Path(args.source_doc))
+            try:
+                doc_text = _ev_load_doc_text(_Path(args.source_doc))
+            except MissingDependencyError as _e:
+                # Blocking gate must fail loudly on a missing parser, not
+                # silently degrade to 'unverifiable_doc' (which would pass).
+                receipt["evidence_verification"] = {
+                    "overall_status": "error",
+                    "error": "E_MISSING_DEPENDENCY",
+                    "dependency": _e.dependency,
+                    "detail": str(_e),
+                }
+                sys.stderr.write(str(_e) + "\n")
+                print(json.dumps(receipt, indent=2 if args.pretty else None))
+                return 1
             verifier_input = build_verifier_input(fields, confidence)
             verification_report = verify_extraction(verifier_input, doc_text)
             raw_report = report_to_dict(verification_report)
@@ -700,8 +750,13 @@ def main() -> int:
             _backstop_extractors = []
         if _backstop_extractors:
             # Reuse doc_text from the verify block if available; otherwise reload.
-            # Using locals() avoids ruff F823 on the unbound-name path.
-            _doc_text = locals().get("doc_text") or _ev_load_doc_text(_Path(args.source_doc))
+            # Using locals() avoids ruff F823 on the unbound-name path. Cross-check
+            # is informational; a missing parser here downgrades to no-op rather
+            # than crashing (the blocking gate already covers the loud path).
+            try:
+                _doc_text = locals().get("doc_text") or _ev_load_doc_text(_Path(args.source_doc))
+            except MissingDependencyError:
+                _doc_text = ""
             ctx = _ExtractionContext(instrument_type=itype, source_text=_doc_text, source_path=args.source_doc)
             per_field_cross: list[dict[str, Any]] = []
             n_demotions = 0
@@ -760,7 +815,12 @@ def main() -> int:
                 attention_fields.add(r["field_name"])
     receipt["attention_needed_fields"] = sorted(attention_fields)
 
-    print(json.dumps(receipt, indent=2 if args.pretty else None))
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as _fh:
+            json.dump(receipt, _fh, indent=2 if args.pretty else None)
+        print(json.dumps({"ok": True, "output": os.path.abspath(args.output)}, indent=2 if args.pretty else None))
+    else:
+        print(json.dumps(receipt, indent=2 if args.pretty else None))
     return 0
 
 

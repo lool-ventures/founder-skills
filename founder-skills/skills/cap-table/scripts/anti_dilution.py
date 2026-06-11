@@ -23,11 +23,13 @@ Full ratchet: CP2 = new_issue_price (the lowest price paid).
 from __future__ import annotations
 
 import argparse
-import json
+import os
 import sys
 from typing import Any
 
-RULE_PACK_VERSION = "0.4.0"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _emit import add_output_args, emit  # noqa: E402
+from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 
 
 def bbwa_new_conversion_price(
@@ -114,7 +116,7 @@ def _cli() -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     shared = argparse.ArgumentParser(add_help=False)
-    shared.add_argument("--pretty", action="store_true")
+    add_output_args(shared)
 
     bb = sub.add_parser("bbwa", parents=[shared])
     bb.add_argument("--cp1", type=float, required=True)
@@ -143,7 +145,7 @@ def _cli() -> int:
             new_issue_price=args.new_price,
         )
 
-    print(json.dumps(result, indent=2 if args.pretty else None))
+    emit(result, args)
     return 0
 
 

@@ -48,7 +48,7 @@ to the founder, not the investor or counsel.
 
 ## Dispatch Contexts (READ FIRST)
 
-You have exactly TWO dispatch contexts in v0.1. Determine which you're in
+You have exactly TWO dispatch contexts. Determine which you're in
 by reading your task prompt. Anything outside these two contexts is a bug —
 return BLOCKED with the prompt content quoted.
 
@@ -56,7 +56,8 @@ return BLOCKED with the prompt content quoted.
 
 The main thread has dispatched you to extract structured data from a
 natural-language source. Your input prompt names the sub-context
-(`INSTRUMENT_EXTRACTION` or `SPREADSHEET_STRUCTURE_DETECTION`) and gives
+(`INSTRUMENT_EXTRACTION`, `SPREADSHEET_STRUCTURE_DETECTION`, or
+`ARTICLES_OF_ASSOCIATION_EXTRACTION`) and gives
 you everything you need: the document content (inlined) or the spreadsheet
 cell grid + sheet structure (inlined or as file paths).
 
@@ -311,7 +312,7 @@ fields trigger user confirmation before commit.
 - **Israeli convertible loan agreement / CIA**: return `convertible_loan_agreement`. Validator stores as `instrument_type=convertible_note` with `subtype=convertible_loan_agreement` for provenance. Israeli statutory ITA Section 3(j) interest: set `interest_rate_type="statutory_ita_section_3j"` and `annual_interest_rate=null` (rate is set annually by the Israeli Tax Authority — do NOT fabricate a numeric value).
 - **YC convertible security (pre-SAFE form, e.g. GS-Cap Table)**: return `convertible_security`. Validator stores as `convertible_note` with `subtype=convertible_security`. Required-field gate waives maturity_date, maturity_default_treatment, day_count_basis, and annual_interest_rate (SAFE-equivalents have no maturity / no interest). Set `interest_rate_type="none"`.
 - **Convertible bridge financing / convertible investment agreement**: return `convertible_note` (standard) with the bridge-specific fields populated.
-- **Share Purchase Agreement (SPA)**: return `term_sheet` (definitive purchase agreement carries the same cap-table-relevant fields as a term sheet for v0.1). v0.2 may add a dedicated SPA validator if eval data demands it.
+- **Share Purchase Agreement (SPA)**: return `term_sheet` (a definitive purchase agreement carries the same cap-table-relevant fields as a term sheet).
 - **Articles of Association (AoA)**: dispatched via the dedicated `ARTICLES_OF_ASSOCIATION_EXTRACTION` sub-context — see that section.
 
 #### Sub-context: `SPREADSHEET_STRUCTURE_DETECTION`
@@ -571,7 +572,7 @@ This sub-context exists specifically for AoA documents. CLAs and convertible sec
 }
 ```
 
-The validator (`extract_instrument.py --aoa-mode`) validates per-series + per-field confidence + evidence quotes, then the ingest helper (`merge_aoa_to_inputs.py`) merges into `inputs.json.preferred_series[]`. The `shares` field is left null by extraction and merged in from cap-table data (founder input or Carta export) at ingest time.
+The validator (`extract_aoa.py`, reading the extraction JSON on stdin) validates per-series + per-field confidence + evidence quotes; passing `--inputs <path>` also merges the validated `preferred_series[]` into `inputs.json` (use `--replace-existing` to overwrite a same-named series). The `shares` field is left null by extraction and merged in from cap-table data (founder input or Carta export) at ingest time.
 
 **Dispatch-independence rule (applies to all three Context A sub-contexts):**
 
@@ -880,7 +881,9 @@ message as raw JSON.
 
 In Context A: the JSON shape is per the sub-context above
 (`INSTRUMENT_EXTRACTION` returns `{instrument_type, fields, confidence,
-ambiguities}`; `SPREADSHEET_STRUCTURE_DETECTION` returns `{blocks: [...]}`).
+ambiguities}`; `SPREADSHEET_STRUCTURE_DETECTION` returns `{blocks: [...]}`;
+`ARTICLES_OF_ASSOCIATION_EXTRACTION` returns `{extraction_type, fields,
+confidence, ambiguities}`).
 
 In Context B: the JSON is the success/blocked payload defined above.
 
