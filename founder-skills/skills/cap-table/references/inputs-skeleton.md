@@ -112,7 +112,7 @@ Omit the whole `common_batches` array if not applicable. `purpose` enum: `founde
 | Israeli, non-employees | `section_3i` |
 | Multi-track | `mixed` |
 
-There is **no enum value for "no plan adopted yet" / "unallocated authorized"** in v0.3.x. For a Delaware engagement with authorized-but-no-grants pool, use `iso` as the intended-tax-treatment placeholder; a future schema revision may add `none` / `unallocated`.
+There is **no enum value for "no plan adopted yet" / "unallocated authorized"**. For a Delaware engagement with authorized-but-no-grants pool, use `iso` as the intended-tax-treatment placeholder.
 
 ## Cross-references
 

@@ -83,11 +83,13 @@ All scripts live at `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts/`:
 - **`priced_round.py`** — Priced-round math (pre-money, new-money, pool top-up, anti-dilution). Coupled with SAFE/note conversion via the solver.
 - **`option_pool.py`** — Option-pool top-up math (rule pack `option_pool.pre_money_topup`). Uses `target_basis` denominator.
 - **`anti_dilution.py`** — BBWA / full-ratchet anti-dilution (Gotcha #2 enforced here).
-- **`flip_scenario.py`** — Israeli ↔ Delaware flip mechanics (v0.1: share-for-share 1:1 only — see Gotcha #7).
+- **`flip_scenario.py`** — Israeli ↔ Delaware flip mechanics (share-for-share 1:1 only — see Gotcha #7).
 - **`counsel_packet.py`** — Extracts counsel-review items from `rule_audit.json` into a standalone counsel-handoff packet.
 - **`compose_report.py`** — Assembles all artifacts into `report.md` + `report.json` (with embedded `coaching_payload` block). Cross-artifact validation; emits per-uuid coaching insertion marker.
-- **`visualize.py`** — Generates `report.html` (self-contained, vendored Chart.js + inline SVG).
+- **`visualize.py`** — Generates `report.html` (self-contained, inline SVG donut + tables; no CDN). The interactive `explore.py` is the one that uses vendored Chart.js.
 - **`explore.py`** — Generates `explorer.html` (polished interactive scenario tool; demo/video-friendly).
+- **`quick_assess.py`** — Fast-assess directional review (Step 5-fast); writes the `fast_assess_only.json` sentinel + `report_fast_assess.md`, skipping the full pipeline.
+- **`evidence_verifier.py` / `invariant_checker.py` / `cross_checker.py` / `backward_verifier.py`** — Lane-1 verification stack (Step 3). Forward evidence-quote check, real-world-bounds check, multi-extractor cross-check (demote-only), and fresh-sub-agent backward re-extraction. `extract_instrument.py` invokes these by default; they are also runnable standalone.
 - **`_dispatch_json.py`** — Tolerant JSON extraction for Context A returns.
 
 Also available from `${CLAUDE_PLUGIN_ROOT}/scripts/` (shared):
@@ -102,9 +104,9 @@ Run with: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts/<script>.py --
 Read as needed from `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/references/`:
 
 - **`cap-table-reference.md`** — Domain primer: SAFE mechanics, note mechanics, anti-dilution formulas, §102/3(i)/85A/104H/103K, IIA royalty mechanics, BBWA formula, counsel-review semantics. **Read before implementing any math producer.**
-- **`cap-table-rules.json`** (v0.2.8+) — The executable reference layer; 44 rules across 9 domains with formulas, inputs, outputs, source citations, date_window semantics, behavior_target (`script_formula` / `validation_rule` / `warning_rule` / `counsel_review_flag` / `benchmark` / `source_note`). Every math producer loads this at start.
+- **`cap-table-rules.json`** — The executable reference layer: source-cited rules across the SAFE / convertible-note / option-pool / anti-dilution / Israeli-AoA / Delaware-flip / warrants / dual-class / benchmark domains, each with formulas, inputs, outputs, source citations, date_window semantics, and behavior_target (`script_formula` / `validation_rule` / `warning_rule` / `counsel_review_flag` / `benchmark` / `source_note`). Every math producer loads this at start and stamps its `metadata.version` into provenance.
 - **`cap-table-rules.schema.json`** — JSON Schema for the rule pack (Draft 2020-12). The schema description on `counsel_review` is the authoritative definition of "reliance boundary, not confidence score" (see Gotcha #9).
-- **`schemas/`** — JSON Schemas (Draft 2020-12) for every artifact: `inputs.schema.json`, `instruments.schema.json`, `cap_state.schema.json`, `scenarios.schema.json`, `rule_audit.schema.json`, `counsel_packet.schema.json`. Each producer script validates against the matching schema.
+- **`schemas/`** — JSON Schemas (Draft 2020-12) for every artifact: `inputs.schema.json`, `instruments.schema.json`, `cap_state.schema.json`, `scenarios.schema.json`, `rule_audit.schema.json`, `counsel_packet.schema.json`, `fast_assess_only.schema.json`. Each producer script validates against the matching schema.
 - **`carta-pulley-mapping.md`** — Per-vendor column-mapping table for Lane 2 extraction.
 
 ## Artifact Pipeline
@@ -334,7 +336,7 @@ Math producers in Step 5 consume `rule_audit.json.gating[R][I]` — they do NOT 
 
 ### Step 5-fast (FAST-ASSESS MODE ONLY): Run `quick_assess.py` and exit
 
-When the routing decision in Step 0 picked fast-assess, skip Steps 2–11 entirely. Run:
+When the routing decision in Step 0 picked fast-assess, skip the full Steps 2–11 pipeline (no cap_state / scenarios / rule_audit / counsel_packet / compose). You still author two small input files first — a minimal `inputs.json` and a bare SAFE array — directly from the founder's conversational answers (see the AskUserQuestion gate below); fast-assess does NOT run the Lane-1/2/3 extractors or the full Step 2 heredoc. Then run:
 
 ```bash
 python3 "$SCRIPTS/quick_assess.py" \
@@ -347,7 +349,9 @@ python3 "$SCRIPTS/quick_assess.py" \
   --pretty
 ```
 
-**`--safes` takes a BARE JSON ARRAY of SAFE objects** (not the `instruments.json` envelope). Write a file that starts with `[` — an array of SAFE instrument objects — not `{"safes": [...]}`.
+**`--safes` takes a BARE JSON ARRAY of SAFE objects** (not the `instruments.json` envelope). Write a file that starts with `[` — an array of SAFE instrument objects — not `{"safes": [...]}`. To author it, write the minimal `inputs.json` (company_name, founders, option_pool, jurisdiction) and the SAFE array straight from the founder's answers — these two files are the only artifacts fast-assess writes by hand.
+
+**Convertible notes need a conversion date.** If the founder has notes, pass `--event-date YYYY-MM-DD` (the date the notes convert). If you omit it when notes are present, fast-assess defaults to today and discloses the assumption (an Assumptions line in the report + a sentinel `assumptions[]` entry) — the math producer itself never assumes a date.
 
 **Never assume a pool top-up.** Pass `--target-pool-percent X --target-basis post_money` ONLY when the founder stated a pool target (or confirmed one when you asked). Otherwise run WITHOUT those flags — the report then carries an explicit "No pool top-up modeled" note, and you offer the 10% what-if as a follow-up re-run. A silently assumed pool target materially changes the founder's headline ownership; it is the founder's negotiation variable, not yours.
 
@@ -362,7 +366,7 @@ Total wall-clock: under 60 seconds. Then jump to **Step 12: Deliver Artifacts** 
 
 ### Step 5: Determine Scenarios + Run Math → `scenarios.json`
 
-Ask the founder via `AskUserQuestion` which scenarios to model (1–4 in v0.1). Common patterns:
+Ask the founder via `AskUserQuestion` which scenarios to model (1–4). Common patterns:
 
 - **Standalone SAFE conversion** (cap-implied math; no priced round): `{type: "safe_conversion", parameters: {}}`
 - **Series A priced round**: `{type: "priced_round", parameters: {pre_money, new_money, target_pool_percent, target_basis}}`
@@ -552,9 +556,9 @@ The override exists specifically to unblock the case where a note has `maturity_
 
 Section 102(b) capital-gains route requires that options be **held in trust** for 24 months from the **trustee deposit date**, which is typically a few days to weeks AFTER the grant date. Confusing the two silently breaks every §102 holding-period assertion. The `instruments.option_grants[]` schema carries `grant_date` AND `section_102_trustee_deposit_date` as separate fields for this reason.
 
-### 7. The Israeli → Delaware flip is share-for-share ONLY in v0.1
+### 7. The Israeli → Delaware flip is share-for-share ONLY
 
-Real flips often involve share exchange ratios other than 1:1, partial roll-forward of SAFEs/CLAs, and adjustment for option-plan continuity. v0.1 models only the 1:1 share-for-share case; anything else exits with "flip ratio modeling deferred to v0.2 — counsel-review required." SAFE/CLA conversion + pricing run as a SEPARATE priced-round scenario before or after the flip, not as part of the flip math. Don't try to collapse them.
+Real flips often involve share exchange ratios other than 1:1, partial roll-forward of SAFEs/CLAs, and adjustment for option-plan continuity. The skill models only the 1:1 share-for-share case; anything else exits with "flip ratio modeling deferred — counsel-review required." SAFE/CLA conversion + pricing run as a SEPARATE priced-round scenario before or after the flip, not as part of the flip math. Don't try to collapse them.
 
 ### 8. QSBS post-OBBBA start date is 2025-07-05, not 2025-07-04
 
@@ -579,7 +583,6 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 - The path to `{Company}_Cap_Table.md` in the workspace root — the primary narrative deliverable.
 - The path to `{Company}_Cap_Table_Explorer.html` — the polished interactive scenario tool.
 - The path to `{Company}_Counsel_Packet.md` — the counsel-handoff packet.
-- The structured success payload from the Context B sub-agent (Step 11): `{status, review_dir, report_path, scenarios_modeled, counsel_review_count, completeness_breakdown}`.
+- The structured success payload from the Context B sub-agent (Step 11): `{status, review_dir, report_path, scenarios_modeled, counsel_review_count, completeness_breakdown, high_severity_warnings}`.
 
 **Do NOT inline `report_markdown` in the assistant message.** The founder reads the file via the path. (Same rationale as deck-review #13: avoids ~25 KB round-trip through the parent context.)
-5. **`COACHING_SKILLS` registry wiring** — add `"cap-table"` to `tests/test_compose_invariants.py::COACHING_SKILLS`; add entries to `compose_invocations.py` (`_COMPOSE_FLAGS`, `_RUN_ID_MUTATION_TARGET`); populate fixtures at `founder-skills/tests/fixtures/cap-table/`. Without this, the cross-skill `coaching_payload` contract is not mechanically enforced for cap-table.

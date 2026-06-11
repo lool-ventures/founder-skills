@@ -123,7 +123,7 @@ The most important sheet for our skill. Row 5 headers (22 columns; verified):
 | `Stakeholder Name` | `safes[].investor_name` / `convertible_notes[].investor_name` | |
 | `Stakeholder Email` | (informational) | |
 | `Principal` | `safes[].purchase_amount` / `convertible_notes[].principal` | |
-| `Other Consideration` | (ignored for v0.1) | |
+| `Other Consideration` | (not modeled) | |
 | `Interest` | `convertible_notes[].principal` × `annual_interest_rate` × time (already accrued in Carta's view) | |
 | `Total` | `Principal + Interest` (computed; ignored) | |
 | `Destination` | (ignored) | What the convertible converts INTO; informational |
