@@ -28,8 +28,8 @@ If **3+ total fields are missing** AND `model_format` is `deck` or `conversation
 When the founder cannot provide missing critical data:
 
 - **checklist.py**: Always run (qualitative assessment works without financials)
-- **unit_economics.py**: Deposit stub: `{"skipped": true, "reason": "Insufficient quantitative data for unit economics computation"}`
-- **runway.py**: Deposit stub: `{"skipped": true, "reason": "Insufficient quantitative data for runway projection"}`
+- **unit_economics.py**: Deposit stub: `{"skipped": true, "reason": "Insufficient quantitative data for unit economics computation", "metadata": {"run_id": "<RUN_ID>"}}`
+- **runway.py**: Deposit stub: `{"skipped": true, "reason": "Insufficient quantitative data for runway projection", "metadata": {"run_id": "<RUN_ID>"}}`
 - **compose_report.py** and **visualize.py**: Handle stubs gracefully (already supported via `_is_stub()`)
 
 Always set `data_confidence: "estimated"` in `inputs.json` (agent-estimated values from indirect signals). Stubs carry no `data_confidence` — it lives in `inputs.json` and compose_report reads it from there.

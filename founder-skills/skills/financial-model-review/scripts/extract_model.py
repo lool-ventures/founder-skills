@@ -11,7 +11,24 @@ Usage:
     echo '{"sheets": [...]}' | python extract_model.py --stdin
 
 Output: JSON with structure:
-    {"sheets": [{"name": str, "headers": [str], "rows": [[value]], "detected_type": str|null}]}
+    {
+      "sheets": [
+        {
+          "name": str,
+          "headers": [str],
+          "rows": [[value]],
+          "detected_type": str|null,
+          "periodicity": str|null,
+          "row_count": int,
+          "col_count": int,
+          "pre_header_rows": [[value]],
+          "cell_refs": {str: str}
+        }
+      ],
+      "source_format": str,
+      "source_file": str,
+      "periodicity_summary": {str: int}
+    }
 """
 
 from __future__ import annotations

@@ -183,3 +183,29 @@ def test_vendored_chartjs_in_sync_with_competitive_positioning() -> None:
         "vendored chart.min.js diverged between financial-model-review and "
         "competitive-positioning — upgrade both together"
     )
+
+
+def test_qualitative_stub_carries_run_id_so_context_b_does_not_deadlock() -> None:
+    """The Context B run_id-parity grep checks all four producer artifacts.
+    On the qualitative path, unit_economics.json / runway.json are skipped
+    stubs — so the stub contract (schema-inputs.md + data-sufficiency.md) and
+    the agent's grep step must agree that stubs carry metadata.run_id, otherwise
+    every qualitative review deterministically returns BLOCKED."""
+    schema_inputs = (FMR_DIR / "references" / "schema-inputs.md").read_text()
+    data_sufficiency = (FMR_DIR / "references" / "data-sufficiency.md").read_text()
+    agent = AGENT_MD.read_text()
+
+    # The documented stub example must include a metadata.run_id block.
+    assert '"skipped": true' in schema_inputs
+    assert '"run_id"' in schema_inputs, "Stub Format must document metadata.run_id"
+
+    # The deposit commands the agent runs on the qualitative path must include it.
+    for stub_line in data_sufficiency.splitlines():
+        if '"skipped": true' in stub_line:
+            assert '"run_id"' in stub_line, f"Qualitative-path stub deposit command omits run_id: {stub_line.strip()}"
+
+    # The agent's run_id grep step must acknowledge stubs are verified too,
+    # rather than implying a missing match always blocks.
+    assert "stub" in agent.lower() and "run_id" in agent, (
+        "Agent run_id-parity step must mention that stubs also carry run_id"
+    )

@@ -149,7 +149,7 @@ mkdir -p "$REVIEW_DIR/.staging"   # for ad-hoc sub-agent JSON staging
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
-Pass `RUN_ID` to all sub-agents. The four producer artifacts (`inputs.json`, `checklist.json`, `unit_economics.json`, `runway.json`) must carry `"metadata": {"run_id": "$RUN_ID"}` at the top level — the producers propagate it from their stdin payloads; never hand-edit script outputs to add it. (`model_data.json` and `extraction_validation.json` have no run_id by design.) `compose_report.py` checks that all four run IDs match — a mismatch triggers a `STALE_ARTIFACT` high-severity warning, blocking under `--strict`.
+Pass `RUN_ID` to all sub-agents. The four producer artifacts (`inputs.json`, `checklist.json`, `unit_economics.json`, `runway.json`) must carry `"metadata": {"run_id": "$RUN_ID"}` at the top level — including skipped stubs, whose stub heredoc carries the same `"metadata": {"run_id": "$RUN_ID"}` block. The producers propagate it from their stdin payloads; never hand-edit script outputs to add it. (`model_data.json` and `extraction_validation.json` have no run_id by design.) `compose_report.py` checks that all present run IDs match — a mismatch triggers a `STALE_ARTIFACT` high-severity warning, blocking under `--strict`. Stub artifacts are exempt from the value comparison but still carry the `run_id` key so the Context B parity grep finds it.
 
 If `REVIEW_DIR` already contains artifacts from a previous run, remove them before starting:
 

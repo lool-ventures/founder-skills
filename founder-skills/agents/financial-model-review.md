@@ -136,11 +136,13 @@ verification. **You MUST NOT Read the full `report.md`.**
 The dispatch prompt contains a `coaching_payload` JSON object with these
 keys (do not refetch from disk):
 
+- `schema_version`
 - `summary` (score_pct, overall_status, total, pass, fail, warn,
   not_applicable)
 - `failed_items`, `warned_items`
 - `high_severity_warnings` (codes only)
 - `company_name`
+- `runway_months` (may be `null` — step 5 references it)
 - `review_dir`, `report_path`
 - `insertion_marker` — the EXACT per-run uuid-bearing string compose
   emitted into `report.md` (e.g.
@@ -230,8 +232,13 @@ yield at least one line of the form
 `"run_id": "20260503T151102Z",`. Extract the value with
 `re.search(r'"run_id"\s*:\s*"([^"]+)"', line)` — or, if you don't have
 regex available, split on `"` and take the value between the 3rd and 4th
-quote chars. All 4 extracted run_ids MUST be equal. If any differ or any
-file yields no match, return BLOCKED with `"run_id mismatch: <details>"`.
+quote chars.
+
+Skipped stubs (`{"skipped": true, ...}` for `unit_economics.json` /
+`runway.json`) also carry a `metadata.run_id` and are verified identically:
+grep yields the value the same way. All extracted run_ids MUST be equal. If
+any differ, or any file yields no `run_id` match (stubs included), return
+BLOCKED with `"run_id mismatch: <details>"`.
 
 For `${review_dir}/report.json` and `${review_dir}/report.md`, call
 `Read` with `limit: 1` purely to confirm existence. (`report.json` has no
