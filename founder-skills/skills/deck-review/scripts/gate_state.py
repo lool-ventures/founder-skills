@@ -65,8 +65,15 @@ def cmd_answer(args: argparse.Namespace) -> int:
     if not os.path.isfile(args.file):
         print(f"Error: gate_state file not found: {args.file}", file=sys.stderr)
         return 1
-    with open(args.file, encoding="utf-8") as f:
-        gate = json.load(f)
+    try:
+        with open(args.file, encoding="utf-8") as f:
+            gate = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"Error: gate_state file is not valid JSON: {e}", file=sys.stderr)
+        return 1
+    if not isinstance(gate, dict):
+        print("Error: gate_state file must contain a JSON object", file=sys.stderr)
+        return 1
 
     options = gate.get("options", [])
     if args.answer not in options:

@@ -439,9 +439,9 @@ def _key_findings(
 def _chart_score_gauge(checklist: dict[str, Any] | None) -> str:
     """Render a semi-circle score gauge SVG.
 
-    Uses stroked arcs inside an annular-semicircle clipPath.  The first
-    and last zone arcs (and the score arc) extend 2% past the baseline
-    so the clip hides endpoint artifacts.
+    Uses stroked zone arcs inside an annular-semicircle clipPath drawn at
+    exact ranges (the clipPath hides endpoint artifacts at the baseline).
+    The score is indicated by a needle, not an arc.
     """
     if checklist is None:
         return _placeholder("No data available")
@@ -1047,7 +1047,7 @@ def _chart_slide_map(
     legend_items: list[tuple[str, str, str]] = [
         (_COLOR_PASS, "rect", "Strengths"),
         (_COLOR_FAIL, "rect", "Weaknesses"),
-        ("#52525b", "dash", "Missing expected slide"),
+        ("#9ca3af", "dash", "Missing expected slide"),
     ]
     lx = _num(label_w)
     legend_svg = ""
