@@ -6,14 +6,14 @@
 [![Claude Code](https://img.shields.io/badge/Claude_Code-555?logo=claude&logoColor=fff)](https://code.claude.com/docs/en/plugins)
 [![CI](https://github.com/lool-ventures/founder-skills/actions/workflows/ci.yml/badge.svg)](https://github.com/lool-ventures/founder-skills/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/lool-ventures/founder-skills)
 [![Built with Skill Creator Plus](https://img.shields.io/badge/Built_with-Skill_Creator_Plus-4ecdc4?style=flat-square)](https://github.com/yaniv-golan/skill-creator-plus)
 [![Install in Claude Desktop](https://img.shields.io/badge/Install_in_Claude_Desktop-D97757?style=for-the-badge&logo=claude&logoColor=white)](https://lool-ventures.github.io/founder-skills/static/install-claude-desktop.html)
 
 Skills for startup founders by [lool ventures](https://lool.vc).
 
-A [Claude Cowork](https://claude.com/blog/cowork-plugins) plugin that gives founders five AI-powered coaching agents: market sizing, pitch deck review, financial model review, IC simulation, and competitive positioning. Each agent follows a structured, script-backed workflow to produce analysis that holds up under investor scrutiny.
+A [Claude Cowork](https://claude.com/blog/cowork-plugins) plugin that gives founders six AI-powered coaching agents: market sizing, pitch deck review, financial model review, IC simulation, competitive positioning, and cap-table modeling. Each agent follows a structured, script-backed workflow to produce analysis that holds up under investor scrutiny.
 
 ## Skills
 
@@ -139,6 +139,28 @@ Maps a startup's competitive landscape, scores differentiation and moat strength
 
 > Full workflow details: [`founder-skills/skills/competitive-positioning/SKILL.md`](founder-skills/skills/competitive-positioning/SKILL.md)
 
+### Cap-Table Agent
+
+Models what a founder's term sheets, SAFEs, and convertible notes actually do to their ownership — before they sign — with rule-pack-cited math and a counsel-handoff packet.
+
+**What it does:**
+- Extracts structured terms from SAFEs, convertible notes, term sheets, articles of association, and Carta XLSX exports
+- Runs SAFE and convertible-note conversion math across all forms (post-money cap, MFN, cap-and-discount, and legacy variants)
+- Projects priced-round dilution with BBWA, narrow-based, and full-ratchet anti-dilution, plus option-pool top-ups and warrants
+- Models Israeli ↔ Delaware flips (1:1 share-for-share), MFN chains, pay-to-play, and dual-class voting-power structures
+- Produces a counsel-handoff packet citing primary sources (NVCA model docs, YC SAFE primer, Cooley GO, Israeli Companies Law)
+
+**What to provide:** A signed or draft SAFE, convertible note, term sheet, option plan, warrant, articles of association, or Carta XLSX — or a structured description of holders and outstanding instruments.
+
+**What you get back:** Rule-pack-cited conversion and dilution math, a pre/post-financing cap-table snapshot, anti-dilution and option-pool scenarios, a counsel-handoff packet, and a founder-readable report explaining exactly how each instrument moves your ownership.
+
+**Example prompts:**
+- "Here's our YC SAFE -- how much do we dilute when we raise our priced round?"
+- "We have three SAFEs and a convertible note. What does the cap table look like after a $4M seed on a $16M pre?"
+- "We're flipping from an Israeli Ltd. to a Delaware C-corp -- what happens to the cap table?"
+
+> Full workflow details: [`founder-skills/skills/cap-table/SKILL.md`](founder-skills/skills/cap-table/SKILL.md)
+
 ## Getting Started
 
 ### Claude Desktop
@@ -179,7 +201,7 @@ claude plugin marketplace add lool-ventures/founder-skills
 claude plugin install founder-skills@lool-founder-skills
 ```
 
-Once installed, the agents activate automatically when you ask about market sizing, deck review, financial model review, IC simulation, or competitive positioning. No additional configuration required.
+Once installed, the agents activate automatically when you ask about market sizing, deck review, financial model review, IC simulation, competitive positioning, or cap-table modeling. No additional configuration required.
 
 ### Manus
 
@@ -191,7 +213,7 @@ OpenAI has [adopted the skills standard](https://simonwillison.net/2025/Dec/12/o
 
 ## Development
 
-Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/). Quick start:
+Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/). Quick start:
 
 ```bash
 git clone https://github.com/lool-ventures/founder-skills.git
