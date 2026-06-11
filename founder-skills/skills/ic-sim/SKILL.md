@@ -31,7 +31,7 @@ This skill runs **inline in the main thread** (not as a sub-agent). The main thr
 
 **Two dispatch contexts for the sub-agent:**
 
-- **Context A — Per-step analytical dispatch (Mitigation 1):** Steps 4, 5, and 6 dispatch the ic-sim agent via the `Task` tool. The novel element here is **parallel dispatch**: Step 4 (PARTNER_ANALYSIS) dispatches the agent **three times simultaneously** — one per partner archetype — in a **single assistant turn**. Steps 5 and 6 (SCORE_DIMENSIONS and DETECT_CONFLICTS) are sequential dispatches. The sub-agent does deep analysis and returns structured JSON. The main thread captures the JSON and pipes it through the producer script. The sub-agent does NOT write artifacts directly.
+- **Context A — Per-step analytical dispatch (Mitigation 1):** Steps 5a, 5b-d, and 7 dispatch the ic-sim agent via the `Task` tool. The novel element here is **parallel dispatch**: Step 5b-d (PARTNER_ANALYSIS) dispatches the agent **three times simultaneously** — one per partner archetype — in a **single assistant turn**. Step 5a (DETECT_CONFLICTS) and Step 7 (SCORE_DIMENSIONS) are sequential dispatches. The sub-agent does deep analysis and returns structured JSON. The main thread captures the JSON and pipes it through the producer script. The sub-agent does NOT write artifacts directly.
 - **Context B — Post-compose coaching dispatch:** The final step dispatches the sub-agent after `compose_report.py` writes `report.md`. The sub-agent reads `report.md`, appends `## Coaching Commentary`, verifies all canonical artifacts on disk, and returns a structured success payload.
 
 **Why this model:** In Cowork, sub-agents have a restricted tool allowlist (no Bash). By keeping orchestration in the main thread and dispatching sub-agents only for analytical or post-compose tasks that use only Read/Edit/Glob/Grep, the pipeline works correctly in both Claude Code (CLI) and Cowork.
@@ -194,7 +194,7 @@ PROFILE_EOF
 Write `prior_artifacts.json` (stub if no prior artifacts):
 ```bash
 cat <<'PRIOR_EOF' > "$SIM_DIR/prior_artifacts.json"
-{"imported": [], "skipped": [], "reason": "No prior artifacts available", "metadata": {"run_id": "<RUN_ID>"}}
+{"imported": [], "skipped": true, "reason": "No prior artifacts available", "metadata": {"run_id": "<RUN_ID>"}}
 PRIOR_EOF
 ```
 
@@ -209,7 +209,7 @@ PRIOR_EOF
 **Validation constraints:** `check_size_range` must be a dict (not a string), `stage_focus` must be a non-empty array, each source must have `url` or `title`.
 
 ```bash
-cat <<'FUND_EOF' | python3 "$SCRIPTS/fund_profile.py" --pretty -o "$SIM_DIR/fund_profile.json"
+cat <<'FUND_EOF' | python3 "$SCRIPTS/fund_profile.py" --pretty --run-id "$RUN_ID" -o "$SIM_DIR/fund_profile.json"
 {...fund profile JSON...}
 FUND_EOF
 ```
@@ -269,7 +269,7 @@ the number of companies in the fund's portfolio.
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol (see "Skill Execution Model" preamble) to obtain the structured JSON. Then pipe through the producer script:
 
 ```bash
-cat <<'CONFLICT_EOF' | python3 "$SCRIPTS/detect_conflicts.py" --pretty -o "$SIM_DIR/conflict_check.json"
+cat <<'CONFLICT_EOF' | python3 "$SCRIPTS/detect_conflicts.py" --pretty --run-id "$RUN_ID" -o "$SIM_DIR/conflict_check.json"
 <JSON extracted from sub-agent reply>
 CONFLICT_EOF
 ```
@@ -427,7 +427,7 @@ Return JSON only — the items array without summary (producer script computes s
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol to obtain the structured JSON. Then pipe through the producer script:
 
 ```bash
-cat <<'SCORE_EOF' | python3 "$SCRIPTS/score_dimensions.py" --pretty -o "$SIM_DIR/score_dimensions.json"
+cat <<'SCORE_EOF' | python3 "$SCRIPTS/score_dimensions.py" --pretty --run-id "$RUN_ID" -o "$SIM_DIR/score_dimensions.json"
 <JSON extracted from sub-agent reply>
 SCORE_EOF
 ```
