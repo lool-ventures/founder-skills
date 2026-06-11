@@ -1977,6 +1977,62 @@ def test_compose_infinite_runway_rendering() -> None:
     assert "Infinite" in md or "profitability" in md.lower(), "Report should indicate infinite runway / profitability"
 
 
+def test_compose_default_alive_coaching_payload_note() -> None:
+    """coaching_payload carries base_runway_note when base scenario is default-alive with null runway."""
+    runway_da = json.loads(json.dumps(_VALID_RUNWAY))
+    # Base scenario: default_alive=True, runway_months=None
+    runway_da["scenarios"][0]["runway_months"] = None
+    runway_da["scenarios"][0]["cash_out_date"] = None
+    runway_da["scenarios"][0]["decision_point"] = None
+    runway_da["scenarios"][0]["default_alive"] = True
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": runway_da,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    payload = data.get("coaching_payload", {})
+    # runway_months is null for default-alive
+    assert payload.get("runway_months") is None
+    # base_runway_note must be present and explain the null
+    assert "base_runway_note" in payload, "coaching_payload must carry base_runway_note for default-alive base scenario"
+    note = payload["base_runway_note"]
+    assert "default-alive" in note.lower() or "default_alive" in note.lower(), (
+        f"base_runway_note should explain default-alive semantics; got: {note!r}"
+    )
+    assert "null" in note.lower() or "by design" in note.lower(), (
+        f"base_runway_note should state runway_months is null by design; got: {note!r}"
+    )
+
+
+def test_compose_default_alive_note_absent_when_not_default_alive() -> None:
+    """coaching_payload does NOT carry base_runway_note when base scenario is not default-alive."""
+    # _VALID_RUNWAY base scenario has default_alive=True but runway_months=25 (non-null)
+    runway_normal = json.loads(json.dumps(_VALID_RUNWAY))
+    runway_normal["scenarios"][0]["default_alive"] = False
+    runway_normal["scenarios"][0]["runway_months"] = 20
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": runway_normal,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    payload = data.get("coaching_payload", {})
+    assert "base_runway_note" not in payload, (
+        "base_runway_note should only appear for default-alive null-runway base scenarios"
+    )
+
+
 def test_compose_post_raise_in_report() -> None:
     """Post-raise data appears in runway section when present."""
     runway_with_post = json.loads(json.dumps(_VALID_RUNWAY))

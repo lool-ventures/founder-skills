@@ -262,6 +262,7 @@ Return JSON only — exactly the shape expected by validate_landscape.py:
   "input_mode": "<from product_profile>",
   "metadata": {"run_id": "<RUN_ID>"}
 }
+Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol (see "Skill Execution Model" preamble) to obtain the structured JSON. If `suggested_additions` exist, present them to the founder and ask which to include. Merge approved ones into `competitors[]`. Then pipe through the producer script:
@@ -329,6 +330,7 @@ Return JSON only — exactly the shape expected by score_moats.py:
   },
   "metadata": {"run_id": "<RUN_ID>"}
 }
+Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 
 **POSITIONING_SCORING dispatch prompt:**
@@ -370,6 +372,7 @@ Return JSON only — exactly the shape expected by score_positioning.py:
   "differentiation_claims": [...],
   "metadata": {"run_id": "<RUN_ID>"}
 }
+Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 
 **After both sub-agents return:** apply the tolerant JSON extraction protocol to each. Pipe MOAT_SCORING output through `score_moats.py` and POSITIONING_SCORING output through `score_positioning.py`:
@@ -417,6 +420,7 @@ what was checked.
 Return JSON only — the items array without a summary (the producer script
 computes the summary):
 {"items": [{"id": "COVER_01", "status": "pass", "evidence": "...", "notes": "..."}, ...all 25 items...]}
+Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol to obtain the structured JSON. Then pipe through the producer script. The sub-agent returns items only — pass the real input mode and run_id on the CLI so `checklist.py` gates the right items and stamps `metadata.run_id`:

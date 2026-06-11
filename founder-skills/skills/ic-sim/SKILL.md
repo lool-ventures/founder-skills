@@ -269,6 +269,7 @@ Return JSON only — exactly the shape expected by detect_conflicts.py
 
 Return empty conflicts array if no conflicts found. portfolio_size must equal
 the number of companies in the fund's portfolio.
+Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol (see "Skill Execution Model" preamble) to obtain the structured JSON. Then pipe through the producer script:
@@ -330,6 +331,7 @@ Return JSON only — the partner assessment object (no metadata block):
   "questions_for_founders": ["<question the archetype would ask>", ...],
   "diligence_requirements": ["<what this partner needs to see before committing>", ...]
 }
+Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 
 **After all three sub-agents return:** apply the tolerant JSON extraction protocol to each of the three returned messages. Write each partner's assessment directly:
@@ -427,6 +429,7 @@ Return JSON only — the items array without summary (producer script computes s
     ...all 28 dimensions...
   ]
 }
+Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol to obtain the structured JSON. Then pipe through the producer script:

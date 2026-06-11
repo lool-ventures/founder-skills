@@ -45,6 +45,8 @@ This skill runs **inline in the main thread** (not as a sub-agent). The main thr
 3. If that fails, walk through the text looking for the first `{` character and try `json.JSONDecoder().raw_decode(text[i:])` — this is brace-aware and handles nested objects correctly (unlike regex, which truncates on the first `}`).
 4. If extraction fails entirely, re-prompt the sub-agent with: "Your previous reply could not be parsed as JSON. Return ONLY the JSON object — no markdown fences, no prose preamble."
 
+**If a sub-agent wrote artifact files directly anyway:** do not trust them — extract the JSON from its final message (or read the file it wrote), then re-pipe through the producer script as specified; the producer overwrites the file with the validated, run_id-stamped version. For INPUTS_REVIEW specifically: if `inputs.json` contains the `{"corrected": ..., "corrections": ...}` wrapper, the sub-agent wrote its reply to disk — feed that wrapper through `apply_corrections.py` as usual.
+
 **Context-pressure note:** This skill has the highest context budget of the 5 skills. The win from Mitigation 1 is excluding sub-agent reasoning and the 40-60 KB raw `extract_model.py` output — which flows *through* the INPUTS_REVIEW dispatch: the sub-agent reads it in its own context window, returns only the corrected `inputs.json`. The artifacts themselves still accumulate in the main thread (~80-130K total), but that is manageable.
 
 > See `founder-skills/references/skill-execution-model.md` for the full inline-skill execution model (3 dispatch contexts, Mitigation 1+2, producer contract, Cowork quirks, per-symptom triage).
@@ -260,6 +262,7 @@ belong to the founder browser round-trip, not this dispatch):
   ]
 }
 The "corrections" array is the audit trail written to extraction_corrections.json.
+Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol (see "Skill Execution Model" preamble) to obtain the structured JSON.
@@ -372,6 +375,7 @@ Return JSON only — company + metadata + items (producer script computes summar
   "metadata": {"run_id": "<RUN_ID>"},
   "items": [{"id": "STRUCT_01", "status": "pass", "evidence": "...", "notes": null}, ...all 46 items...]
 }
+Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol. Pipe through the producer script:

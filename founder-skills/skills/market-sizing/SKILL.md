@@ -344,6 +344,7 @@ for approach "top_down":
   "segment_pct": <number>,
   "share_pct": <number>
 }
+Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 
 **Full dispatch prompt template (BOTTOM_UP_METHODOLOGY):**
@@ -369,6 +370,7 @@ for approach "bottom_up":
   "serviceable_pct": <number>,
   "target_pct": <number>
 }
+Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 
 **After both sub-agents return:** apply the tolerant JSON extraction protocol (see "Skill Execution Model" preamble) to each returned message. Then pipe through the producer script for each, combining results:
@@ -448,6 +450,7 @@ derived/agent_estimate parameters never fires:
     "<parameter>": {"low_pct": <negative number>, "high_pct": <positive number>, "confidence": "sourced|derived|agent_estimate"}
   }
 }
+Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol. Then pipe through the producer script:
@@ -484,6 +487,7 @@ computes the summary):
     ...all 22 items...
   ]
 }
+Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol. Then pipe through the producer script:

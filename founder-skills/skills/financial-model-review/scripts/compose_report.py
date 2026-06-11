@@ -774,6 +774,20 @@ def _emit_coaching_payload(
         if base is not None:
             runway_months_base = base.get("runway_months")
 
+    # When base scenario is default-alive, runway_months is null by design.
+    # Add a sibling note so consumers don't misread null as "unknown".
+    runway_note: str | None = None
+    if isinstance(runway, dict):
+        scenarios = _as_list(runway.get("scenarios"))
+        base = next(
+            (s for s in scenarios if isinstance(s, dict) and s.get("name") in ("base", "baseline")),
+            scenarios[0] if scenarios and isinstance(scenarios[0], dict) else None,
+        )
+        if base is not None and base.get("default_alive") is True and base.get("runway_months") is None:
+            runway_note = (
+                "default-alive: projected cash never depletes at current trajectory; runway_months is null by design"
+            )
+
     return {
         "schema_version": "v0.4.2-financial-model-review",
         "summary": {
@@ -790,6 +804,7 @@ def _emit_coaching_payload(
         "high_severity_warnings": [w["code"] for w in validation_warnings if w.get("severity") == "high"],
         "company_name": company_name,
         "runway_months": runway_months_base,
+        **({"base_runway_note": runway_note} if runway_note is not None else {}),
         "review_dir": review_dir,
         "report_path": report_path,
         "insertion_marker": insertion_marker,

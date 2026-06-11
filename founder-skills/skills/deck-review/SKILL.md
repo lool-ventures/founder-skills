@@ -335,6 +335,7 @@ block; the producer script adds it):
   ],
   "overall_narrative_assessment": "..."
 }
+Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol (see "Skill Execution Model" preamble) to obtain the structured JSON from the sub-agent's final message. Then pipe through the producer script:
@@ -374,6 +375,7 @@ Evidence quality rules:
 Return JSON only — the items array without a summary (the producer script
 computes the summary):
 {"items": [{"id": "purpose_clear", "status": "pass", "evidence": "...", "notes": "..."}, ...all 35 items...]}
+Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol to obtain the structured JSON. Then pipe through the producer script:

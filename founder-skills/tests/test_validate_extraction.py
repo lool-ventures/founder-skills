@@ -224,6 +224,46 @@ class TestWarnConditions:
         assert "candidates" in checks_by_id["COMPANY_NAME"]
         assert any("company name" in h.lower() or "Company name" in h for h in data["correction_hints"])
 
+    def test_company_name_absent_not_mismatch(self) -> None:
+        """When company name is absent from model (no plausible candidate strings),
+        the check should skip/pass-with-note rather than warn — absence is not a mismatch signal."""
+        # Model with only numeric rows and no company-name-like strings
+        model_numeric_only = {
+            "sheets": [
+                {
+                    "name": "P&L",
+                    "headers": ["Jan 2025", "Feb 2025", "Mar 2025"],
+                    "rows": [
+                        [50000, 55000, 60000],
+                        [120000, 120000, 120000],
+                        [840000, 920000, 1000000],
+                    ],
+                    "detected_type": "pnl",
+                    "periodicity": "monthly",
+                    "row_count": 3,
+                    "col_count": 3,
+                    "pre_header_rows": [],
+                }
+            ],
+            "source_format": "xlsx",
+            "source_file": "template-model.xlsx",
+            "periodicity_summary": "monthly",
+        }
+        inputs = {**_INPUTS, "company": {**_INPUTS["company"], "company_name": "MyStartup"}}
+        rc, data, _ = _run(inputs, model_numeric_only)
+        assert rc == 0
+        checks_by_id = {c["id"]: c for c in data["checks"]}
+        company_check = checks_by_id["COMPANY_NAME"]
+        # Absent name must NOT warn — only a conflicting candidate name warrants a warn
+        assert company_check["status"] != "warn", (
+            f"Company name absent from model should not warn; got status={company_check['status']!r}, "
+            f"message={company_check.get('message', '')!r}"
+        )
+        # Should be skip (nothing to cross-check) or pass
+        assert company_check["status"] in ("skip", "pass"), (
+            f"Expected skip or pass for absent company name, got {company_check['status']!r}"
+        )
+
     def test_salary_untraceable(self) -> None:
         """Warn when salary values aren't found in model_data."""
         inputs = json.loads(json.dumps(_INPUTS))

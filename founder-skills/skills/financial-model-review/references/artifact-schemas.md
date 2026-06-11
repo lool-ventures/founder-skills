@@ -185,6 +185,10 @@ Cash runway projections across scenarios with decision-point analysis.
 
 ### scenarios[] entry
 
+Scenarios are identified by `name` (no `id` or `label` field). The canonical names are `"base"`, `"slow"`, `"crisis"`, and `"threshold"`. Downstream consumers (`compose_report.py`, `coaching_payload`) look up the base scenario by `name == "base"` or `name == "baseline"`.
+
+**Default-alive shape:** when a company is projected to never run out of cash, `runway_months` is `null`, `cash_out_date` is `null`, `decision_point` is `null`, `default_alive` is `true`, and the `note` field (if present) explains the assumption. `null` runway is intentional and correct for default-alive companies — it does not indicate missing data.
+
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | yes | Scenario name |

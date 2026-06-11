@@ -297,11 +297,22 @@ def _check_company_name(inputs: dict[str, Any], model_data: dict[str, Any]) -> d
         if len(unique) >= 5:
             break
 
+    if unique:
+        # A different plausible company name IS present — genuine mismatch signal
+        return {
+            "id": "COMPANY_NAME",
+            "status": "warn",
+            "message": f"Company name '{company_name}' not found in model data",
+            "candidates": unique,
+        }
+    # Name simply absent — common for template-derived models; nothing to cross-check
     return {
         "id": "COMPANY_NAME",
-        "status": "warn",
-        "message": f"Company name '{company_name}' not found in model data",
-        "candidates": unique,
+        "status": "skip",
+        "message": (
+            f"Company name '{company_name}' not present in model cells — "
+            "common for template-derived models; nothing to cross-check"
+        ),
     }
 
 
