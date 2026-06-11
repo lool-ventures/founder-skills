@@ -23,6 +23,21 @@ from typing import Any
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 IC_SIM_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "ic-sim", "scripts")
 
+# Producers that require --run-id (inject metadata.run_id). Tests that do not
+# care about the run_id value get a default injected so the producer contract
+# (required --run-id) is satisfied without rewriting every call site.
+_RUN_ID_PRODUCERS = {"fund_profile.py", "detect_conflicts.py", "score_dimensions.py"}
+_DEFAULT_RUN_ID = "20260101T000000Z"
+
+
+def _build_cmd(name: str, args: list[str] | None) -> list[str]:
+    cmd = [sys.executable, os.path.join(IC_SIM_DIR, name)]
+    args = list(args) if args else []
+    if name in _RUN_ID_PRODUCERS and "--run-id" not in args:
+        args = [*args, "--run-id", _DEFAULT_RUN_ID]
+    cmd.extend(args)
+    return cmd
+
 
 def run_script(
     name: str,
@@ -30,9 +45,7 @@ def run_script(
     stdin_data: str | None = None,
 ) -> tuple[int, dict | None, str]:
     """Run a script and return (exit_code, parsed_json_or_None, stderr)."""
-    cmd = [sys.executable, os.path.join(IC_SIM_DIR, name)]
-    if args:
-        cmd.extend(args)
+    cmd = _build_cmd(name, args)
     result = subprocess.run(cmd, input=stdin_data, capture_output=True, text=True)
     try:
         data = json.loads(result.stdout) if result.stdout.strip() else None
@@ -47,9 +60,7 @@ def run_script_raw(
     stdin_data: str | None = None,
 ) -> tuple[int, str, str]:
     """Like run_script but returns (exit_code, raw_stdout, stderr)."""
-    cmd = [sys.executable, os.path.join(IC_SIM_DIR, name)]
-    if args:
-        cmd.extend(args)
+    cmd = _build_cmd(name, args)
     result = subprocess.run(cmd, input=stdin_data, capture_output=True, text=True)
     return result.returncode, result.stdout, result.stderr
 
@@ -2493,3 +2504,288 @@ def test_extract_dispatch_json_raises_when_no_json() -> None:
 
     with pytest.raises(ValueError):
         extract_dispatch_json("Just some prose with no JSON object anywhere.")
+
+
+# ============================================================
+# Regression: producer --run-id injection (metadata.run_id)
+# ============================================================
+
+
+def _run_producer_explicit(name: str, args: list[str], stdin_data: str) -> tuple[int, dict | None, str]:
+    """Run a producer WITHOUT the test-helper run-id auto-injection (raw cmd)."""
+    cmd = [sys.executable, os.path.join(IC_SIM_DIR, name), *args]
+    result = subprocess.run(cmd, input=stdin_data, capture_output=True, text=True)
+    try:
+        data = json.loads(result.stdout) if result.stdout.strip() else None
+    except json.JSONDecodeError:
+        data = None
+    return result.returncode, data, result.stderr
+
+
+def test_fund_profile_run_id_required() -> None:
+    """fund_profile.py exits non-zero when --run-id is omitted."""
+    payload = json.dumps(_VALID_GENERIC_PROFILE)
+    rc, _data, err = _run_producer_explicit("fund_profile.py", ["--pretty"], payload)
+    assert rc != 0
+    assert "run-id" in err.lower() or "run_id" in err.lower()
+
+
+def test_fund_profile_injects_metadata_run_id() -> None:
+    """fund_profile.py writes metadata.run_id from --run-id."""
+    payload = json.dumps(_VALID_GENERIC_PROFILE)
+    rc, data, _err = _run_producer_explicit("fund_profile.py", ["--pretty", "--run-id", "RID-FUND"], payload)
+    assert rc == 0
+    assert data is not None
+    assert data.get("metadata") == {"run_id": "RID-FUND"}
+
+
+def test_fund_profile_run_id_overrides_stdin_metadata() -> None:
+    """--run-id overrides any metadata block supplied via stdin (last-write-wins)."""
+    profile = dict(_VALID_GENERIC_PROFILE)
+    profile["metadata"] = {"run_id": "STALE", "extra": "ignored"}
+    payload = json.dumps(profile)
+    rc, data, _err = _run_producer_explicit("fund_profile.py", ["--pretty", "--run-id", "FRESH"], payload)
+    assert rc == 0
+    assert data is not None
+    assert data["metadata"] == {"run_id": "FRESH"}
+
+
+def test_detect_conflicts_run_id_required() -> None:
+    """detect_conflicts.py exits non-zero when --run-id is omitted."""
+    payload = json.dumps({"portfolio_size": 2, "conflicts": []})
+    rc, _data, err = _run_producer_explicit("detect_conflicts.py", ["--pretty"], payload)
+    assert rc != 0
+    assert "run-id" in err.lower() or "run_id" in err.lower()
+
+
+def test_detect_conflicts_injects_metadata_run_id() -> None:
+    """detect_conflicts.py writes metadata.run_id from --run-id."""
+    payload = json.dumps({"portfolio_size": 2, "conflicts": []})
+    rc, data, _err = _run_producer_explicit("detect_conflicts.py", ["--pretty", "--run-id", "RID-CONF"], payload)
+    assert rc == 0
+    assert data is not None
+    assert data.get("metadata") == {"run_id": "RID-CONF"}
+
+
+def test_score_dimensions_run_id_required() -> None:
+    """score_dimensions.py exits non-zero when --run-id is omitted."""
+    payload = json.dumps({"items": _make_dimension_items()})
+    rc, _data, err = _run_producer_explicit("score_dimensions.py", ["--pretty"], payload)
+    assert rc != 0
+    assert "run-id" in err.lower() or "run_id" in err.lower()
+
+
+def test_score_dimensions_injects_metadata_run_id() -> None:
+    """score_dimensions.py writes metadata.run_id from --run-id."""
+    payload = json.dumps({"items": _make_dimension_items()})
+    rc, data, _err = _run_producer_explicit("score_dimensions.py", ["--pretty", "--run-id", "RID-SCORE"], payload)
+    assert rc == 0
+    assert data is not None
+    assert data.get("metadata") == {"run_id": "RID-SCORE"}
+
+
+# ============================================================
+# Regression: detect_conflicts dedup tolerates non-string company
+# ============================================================
+
+
+def test_detect_conflicts_non_string_company_no_crash() -> None:
+    """A non-string 'company' value degrades to a validation error, not an AttributeError crash."""
+    payload = json.dumps(
+        {
+            "portfolio_size": 2,
+            "conflicts": [
+                {"company": 12345, "type": "direct", "severity": "manageable", "rationale": "x"},
+            ],
+        }
+    )
+    rc, data, err = run_script("detect_conflicts.py", ["--pretty"], stdin_data=payload)
+    # Before the fix the dedup loop called .strip() on the int and crashed with
+    # an AttributeError traceback before structured validation could run.
+    assert rc == 0, err
+    assert data is not None
+    assert "Traceback" not in err
+    assert "validation" in data
+
+
+# ============================================================
+# Regression: score_dimensions reports correct non-dict item index
+# ============================================================
+
+
+def test_score_non_dict_item_reports_position_index() -> None:
+    """Index in 'Item N must be an object' is the list position, not len(seen_ids)."""
+    items = _make_dimension_items()
+    # Replace the SECOND item with a non-dict; the first remains a valid dict with an id.
+    items[1] = "not_a_dict"  # type: ignore[call-overload]
+    payload = json.dumps({"items": items})
+    rc, data, _err = run_script("score_dimensions.py", [], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    msgs = [e for e in data["validation"]["errors"] if "must be an object" in e]
+    assert msgs, data["validation"]["errors"]
+    # Position is index 1; the buggy version reported index 1 too only by luck —
+    # use two non-dict items to force divergence.
+    items2 = _make_dimension_items()
+    items2[1] = "nope"  # type: ignore[call-overload]
+    items2[3] = "nope2"  # type: ignore[call-overload]
+    payload2 = json.dumps({"items": items2})
+    _rc2, data2, _ = run_script("score_dimensions.py", [], stdin_data=payload2)
+    assert data2 is not None
+    bad_msgs = [e for e in data2["validation"]["errors"] if "must be an object" in e]
+    assert any("Item 1 " in e for e in bad_msgs), bad_msgs
+    assert any("Item 3 " in e for e in bad_msgs), bad_msgs
+
+
+# ============================================================
+# Regression: consensus_strength derived into coaching_payload
+# ============================================================
+
+
+def test_coaching_payload_consensus_strength_strong() -> None:
+    """Three identical partner verdicts -> consensus_strength 'strong'."""
+    arts = _all_required_artifacts()
+    discussion = dict(_VALID_DISCUSSION)
+    discussion["partner_verdicts"] = [
+        {"partner": "visionary", "verdict": "invest", "rationale": "a"},
+        {"partner": "operator", "verdict": "invest", "rationale": "b"},
+        {"partner": "analyst", "verdict": "invest", "rationale": "c"},
+    ]
+    arts["discussion.json"] = discussion
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    assert data["coaching_payload"]["consensus_strength"] == "strong"
+
+
+def test_coaching_payload_consensus_strength_mixed() -> None:
+    """A 2-1 split -> consensus_strength 'mixed'."""
+    arts = _all_required_artifacts()
+    # _VALID_DISCUSSION is already invest/more_diligence/more_diligence (2-1).
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    assert data["coaching_payload"]["consensus_strength"] == "mixed"
+
+
+def test_coaching_payload_consensus_strength_weak_when_three_way() -> None:
+    """Three distinct verdicts -> consensus_strength 'weak'."""
+    arts = _all_required_artifacts()
+    discussion = dict(_VALID_DISCUSSION)
+    discussion["partner_verdicts"] = [
+        {"partner": "visionary", "verdict": "invest", "rationale": "a"},
+        {"partner": "operator", "verdict": "pass", "rationale": "b"},
+        {"partner": "analyst", "verdict": "more_diligence", "rationale": "c"},
+    ]
+    arts["discussion.json"] = discussion
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    assert data["coaching_payload"]["consensus_strength"] == "weak"
+
+
+def test_coaching_payload_consensus_strength_weak_when_missing() -> None:
+    """Missing/fewer-than-3 partner verdicts -> consensus_strength 'weak'."""
+    arts = _all_required_artifacts()
+    discussion = dict(_VALID_DISCUSSION)
+    discussion["partner_verdicts"] = [
+        {"partner": "visionary", "verdict": "invest", "rationale": "a"},
+    ]
+    arts["discussion.json"] = discussion
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    assert data["coaching_payload"]["consensus_strength"] == "weak"
+
+
+# ============================================================
+# Regression: marker-collision ordering — status, warnings section,
+# validation.warnings, coaching_payload all agree
+# ============================================================
+
+
+def test_marker_collision_reflected_in_status_and_warnings_section() -> None:
+    """When MARKER_COLLISION fires, status != 'clean', it appears in the rendered
+    Warnings section, and validation.warnings + the report body agree."""
+    arts = _all_required_artifacts()
+    # Otherwise-clean set: align consensus to score verdict and use rich partners.
+    discussion = dict(_VALID_DISCUSSION)
+    discussion["consensus_verdict"] = "invest"
+    discussion["partner_verdicts"] = [
+        {"partner": "visionary", "verdict": "invest", "rationale": "Large market with clear timing catalyst"},
+        {"partner": "operator", "verdict": "invest", "rationale": "Strong product-market fit and retention"},
+        {"partner": "analyst", "verdict": "invest", "rationale": "Healthy unit economics and capital efficiency"},
+    ]
+    discussion["debate_sections"] = [
+        {
+            "topic": "GTM Motion",
+            "exchanges": [
+                {
+                    "partner": "operator",
+                    "position": "Body with <!-- COACHING_INSERTION_POINT_aaaaaaaa --> embedded substring",
+                },
+            ],
+        },
+    ]
+    arts["discussion.json"] = discussion
+    arts["partner_assessment_visionary.json"] = _VALID_PARTNER_VISIONARY
+    arts["partner_assessment_operator.json"] = _VALID_PARTNER_OPERATOR
+    arts["partner_assessment_analyst.json"] = _VALID_PARTNER_ANALYST
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "MARKER_COLLISION" in codes, codes
+    # Status must reflect the appended warning (not stale "clean").
+    assert data["validation"]["status"] == "warnings"
+    # The Warnings section must be rendered in the report body and include the collision.
+    md = data["report_markdown"]
+    assert "## Warnings" in md
+    assert "Marker Collision" in md
+
+
+# ============================================================
+# Regression: compose renderers tolerate malformed list elements
+# ============================================================
+
+
+def test_compose_tolerates_non_dict_partner_verdict() -> None:
+    """A non-dict partner_verdicts element must not crash compose (executive summary
+    + PARTNER_UNANIMITY both guard)."""
+    arts = _all_required_artifacts()
+    discussion = dict(_VALID_DISCUSSION)
+    discussion["partner_verdicts"] = [
+        {"partner": "visionary", "verdict": "invest", "rationale": "a"},
+        "a_bare_string",
+        {"partner": "analyst", "verdict": "pass", "rationale": "c"},
+    ]
+    arts["discussion.json"] = discussion
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    assert "Traceback" not in err
+
+
+def test_compose_tolerates_non_dict_archetype_and_counts() -> None:
+    """Non-dict archetype and non-dict by_category value must not crash rendering."""
+    arts = _all_required_artifacts()
+    fund = json.loads(json.dumps(_VALID_FUND))
+    fund["archetypes"].append("bogus_archetype_string")
+    fund["check_size_range"] = "not-a-dict"
+    arts["fund_profile.json"] = fund
+    score = json.loads(json.dumps(_VALID_SCORE))
+    score["summary"]["by_category"] = {"Team": "not-a-dict-counts"}
+    score["items"].append("bogus_item_string")
+    arts["score_dimensions.json"] = score
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert rc == 0, err
+    assert data is not None
+    assert "Traceback" not in err

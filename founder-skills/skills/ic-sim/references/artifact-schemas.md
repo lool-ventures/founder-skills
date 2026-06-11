@@ -2,12 +2,15 @@
 
 JSON schemas for all artifacts deposited during the IC simulation workflow. Each artifact is a JSON file written to the `SIM_DIR` working directory.
 
+**Every artifact must carry a `metadata.run_id` block** at the top level: `"metadata": {"run_id": "<RUN_ID>"}`. For agent-written artifacts (heredocs), include it inline. For producer-script artifacts (`fund_profile.py`, `detect_conflicts.py`, `score_dimensions.py`), pass `--run-id "$RUN_ID"` and the script injects the block. `compose_report.py` checks that all artifact run IDs match — a mismatch triggers a `STALE_ARTIFACT` warning. The `metadata.run_id` row and example are shown per artifact below.
+
 ## startup_profile.json
 
-**Producer:** Agent (heredoc, Step 1)
+**Producer:** Agent (heredoc, Step 2)
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `metadata` | object | yes | `{run_id}` — must match the run's `RUN_ID` |
 | `company_name` | string | yes | Company name |
 | `simulation_date` | string | yes | ISO date (YYYY-MM-DD) |
 | `stage` | string | yes | String. Expected values: `"pre_seed"`, `"seed"`, `"series_a"` (calibrated). For later-stage companies use `"series_b"` or `"growth"` — the compose report will flag these as out of calibrated scope. |
@@ -36,7 +39,8 @@ JSON schemas for all artifacts deposited during the IC simulation workflow. Each
   ],
   "current_raise": {"amount": "$4M", "valuation": "$20M pre"},
   "key_metrics": {"arr": "$800K", "mrr_growth": "15% MoM", "customers": 120, "ndr": "115%"},
-  "materials_provided": ["pitch deck (PDF)", "financial model"]
+  "materials_provided": ["pitch deck (PDF)", "financial model"],
+  "metadata": {"run_id": "20260222T140000Z"}
 }
 ```
 
@@ -44,12 +48,13 @@ JSON schemas for all artifacts deposited during the IC simulation workflow. Each
 
 ## prior_artifacts.json
 
-**Producer:** Agent (heredoc, Step 2, optional)
+**Producer:** Agent (heredoc, Step 3, optional)
 
-Contains imported artifacts from prior market-sizing or deck-review analyses. If no prior artifacts exist, deposit a stub: `{"imported": []}`.
+Contains imported artifacts from prior market-sizing or deck-review analyses. If no prior artifacts exist, deposit a stub: `{"imported": [], "skipped": true, "reason": "..."}`.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `metadata` | object | yes | `{run_id}` — must match the run's `RUN_ID` |
 | `imported` | object[] | yes | List of imported artifact summaries |
 
 ### imported[] entry
@@ -87,7 +92,8 @@ Contains imported artifacts from prior market-sizing or deck-review analyses. If
         "key_failures": ["competition_honest", "gtm_has_proof"]
       }
     }
-  ]
+  ],
+  "metadata": {"run_id": "20260222T140000Z"}
 }
 ```
 
@@ -95,10 +101,11 @@ Contains imported artifacts from prior market-sizing or deck-review analyses. If
 
 ## fund_profile.json
 
-**Producer:** `fund_profile.py` validates agent-provided JSON (Step 3)
+**Producer:** `fund_profile.py` validates agent-provided JSON and injects `metadata.run_id` (Step 4)
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `metadata` | object | output | Injected by `fund_profile.py` from `--run-id`: `{run_id}` |
 | `fund_name` | string | yes | Fund name (or "Generic Early-Stage Fund" for generic mode) |
 | `mode` | string | yes | `"generic"` or `"fund_specific"` |
 | `thesis_areas` | string[] | yes | At least 1 investment thesis area |
@@ -106,7 +113,7 @@ Contains imported artifacts from prior market-sizing or deck-review analyses. If
 | `stage_focus` | string[] | yes | Stages the fund invests in |
 | `archetypes` | object[] | yes | Exactly 3 partner archetypes |
 | `portfolio` | object[] | yes | Portfolio companies (for conflict checking) |
-| `sources` | string[] | conditional | Required when `mode == "fund_specific"` |
+| `sources` | object[] | conditional | Required when `mode == "fund_specific"`. Each entry is an object with at least `url` or `title`: `{url, title}` |
 | `validation` | object | output | Added by `fund_profile.py`: `{status, errors}` |
 | `accepted_warnings` | object[] | no | Warnings to acknowledge: `[{code, match, reason}]`. Match is case-insensitive substring. Only medium-severity codes can be accepted. |
 
@@ -127,6 +134,13 @@ Contains imported artifacts from prior market-sizing or deck-review analyses. If
 | `sector` | string | no | Industry/vertical |
 | `status` | string | no | `"active"`, `"exited"`, `"written_off"` |
 
+### sources[] entry
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `url` | string | conditional | At least one of `url` or `title` is required |
+| `title` | string | conditional | At least one of `url` or `title` is required |
+
 **Example:**
 ```json
 {
@@ -145,7 +159,8 @@ Contains imported artifacts from prior market-sizing or deck-review analyses. If
     {"name": "DataPipe", "sector": "Data Infrastructure", "status": "active"}
   ],
   "sources": [],
-  "validation": {"status": "valid", "errors": []}
+  "validation": {"status": "valid", "errors": []},
+  "metadata": {"run_id": "20260222T140000Z"}
 }
 ```
 
@@ -153,7 +168,7 @@ Contains imported artifacts from prior market-sizing or deck-review analyses. If
 
 ## conflict_check.json
 
-**Producer:** Agent assesses conflicts (heredoc) then `detect_conflicts.py` validates + summarizes (Step 4)
+**Producer:** Context A dispatch (DETECT_CONFLICTS) returns conflict JSON, piped through `detect_conflicts.py`, which validates + summarizes and injects `metadata.run_id` from `--run-id` (Step 5a)
 
 ### Input (agent-produced, piped to detect_conflicts.py)
 
@@ -179,6 +194,7 @@ Additional fields added by the script:
 |-------|------|-------------|
 | `summary` | object | Computed summary statistics |
 | `validation` | object | `{status: "valid"|"invalid", errors: [...]}` |
+| `metadata` | object | Injected by `detect_conflicts.py` from `--run-id`: `{run_id}` |
 
 ### summary
 
@@ -207,7 +223,8 @@ Additional fields added by the script:
     "has_blocking_conflict": false,
     "overall_severity": "manageable"
   },
-  "validation": {"status": "valid", "errors": []}
+  "validation": {"status": "valid", "errors": []},
+  "metadata": {"run_id": "20260222T140000Z"}
 }
 ```
 
@@ -215,10 +232,11 @@ Additional fields added by the script:
 
 ## partner_assessment_{visionary|operator|analyst}.json
 
-**Producer:** Sub-agent (Task, general-purpose) or main agent in sequential mode (Step 5a-5c)
+**Producer:** Context A dispatch (PARTNER_ANALYSIS) — the ic-sim agent dispatched three times in parallel, one per archetype; the main thread writes each return with `metadata.run_id` injected (Step 5b-d)
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `metadata` | object | yes | `{run_id}` — injected by the main thread when writing the return |
 | `partner` | string | yes | `"visionary"`, `"operator"`, or `"analyst"` |
 | `verdict` | string | yes | `"invest"`, `"more_diligence"`, `"pass"`, or `"hard_pass"` |
 | `rationale` | string | yes | Free-text rationale grounded in archetype's focus areas |
@@ -252,7 +270,8 @@ Additional fields added by the script:
     "Channel-level unit economics",
     "Cohort retention curves (monthly, by acquisition channel)",
     "Reference calls with 3 customers"
-  ]
+  ],
+  "metadata": {"run_id": "20260222T140000Z"}
 }
 ```
 
@@ -260,10 +279,11 @@ Additional fields added by the script:
 
 ## discussion.json
 
-**Producer:** Main agent (Step 5d — composes from partner assessments + debate)
+**Producer:** Main thread (Step 6 — composes from partner assessments + debate)
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `metadata` | object | yes | `{run_id}` — must match the run's `RUN_ID` |
 | `assessment_mode` | string | yes | `"sub-agent"` or `"sequential"` |
 | `assessment_mode_intentional` | boolean | no | Set `true` when sequential mode is deliberate (suppresses SEQUENTIAL_FALLBACK warning) |
 | `partner_verdicts` | object[] | yes | Summary of each partner's position |
@@ -315,7 +335,8 @@ Additional fields added by the script:
   ],
   "consensus_verdict": "more_diligence",
   "key_concerns": ["GTM channel economics unproven", "Need cohort retention data"],
-  "diligence_requirements": ["Channel-level CAC", "6-month cohort curves", "3 customer references"]
+  "diligence_requirements": ["Channel-level CAC", "6-month cohort curves", "3 customer references"],
+  "metadata": {"run_id": "20260222T140000Z"}
 }
 ```
 
@@ -323,7 +344,7 @@ Additional fields added by the script:
 
 ## score_dimensions.json
 
-**Producer:** `score_dimensions.py` (Step 6)
+**Producer:** `score_dimensions.py`, which injects `metadata.run_id` from `--run-id` (Step 7)
 
 ### Input (piped via stdin)
 
@@ -347,6 +368,7 @@ Additional fields added by the script:
 |-------|------|-------------|
 | `items` | object[] | All 28 items enriched with category and label |
 | `summary` | object | Aggregate scores and verdict |
+| `metadata` | object | Injected by `score_dimensions.py` from `--run-id`: `{run_id}` |
 
 ### summary
 
