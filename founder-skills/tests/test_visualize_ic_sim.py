@@ -864,3 +864,62 @@ def test_radar_outer_labels_show_scores() -> None:
     assert rc == 0, f"exit {rc}, stderr={stderr}"
     assert "38%" in stdout, "Team's 37.5% rounded to 38% should appear as outer label"
     assert "Team" in stdout, "Category name should appear as outer label"
+
+
+def test_key_findings_distinguishes_mixed_strong_from_all_strong() -> None:
+    """A category with strong AND moderate convictions (no concerns) must read
+    'leans strong with no concerns', not the inaccurate 'scores all strong
+    conviction' (which is reserved for categories that are purely strong)."""
+    arts = _all_required_artifacts()
+    score = dict(_VALID_SCORE)
+    summary = dict(score["summary"])
+    summary["by_category"] = {
+        # mixed positive: strong present, moderate present, no concerns
+        "Team": {"strong_conviction": 2, "moderate_conviction": 2, "concern": 0, "dealbreaker": 0, "not_applicable": 0},
+        # purely strong
+        "Market": {
+            "strong_conviction": 4,
+            "moderate_conviction": 0,
+            "concern": 0,
+            "dealbreaker": 0,
+            "not_applicable": 0,
+        },
+        "Product": {
+            "strong_conviction": 4,
+            "moderate_conviction": 0,
+            "concern": 0,
+            "dealbreaker": 0,
+            "not_applicable": 0,
+        },
+        "Business Model": {
+            "strong_conviction": 4,
+            "moderate_conviction": 0,
+            "concern": 0,
+            "dealbreaker": 0,
+            "not_applicable": 0,
+        },
+        "Financials": {
+            "strong_conviction": 4,
+            "moderate_conviction": 0,
+            "concern": 0,
+            "dealbreaker": 0,
+            "not_applicable": 0,
+        },
+        "Risk": {"strong_conviction": 4, "moderate_conviction": 0, "concern": 0, "dealbreaker": 0, "not_applicable": 0},
+        "Fund Fit": {
+            "strong_conviction": 4,
+            "moderate_conviction": 0,
+            "concern": 0,
+            "dealbreaker": 0,
+            "not_applicable": 0,
+        },
+    }
+    score["summary"] = summary
+    arts["score_dimensions.json"] = score
+    d = _make_artifact_dir(arts)
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, f"exit {rc}, stderr={stderr}"
+    assert "Team leans strong with no concerns" in stdout
+    assert "Team scores all strong conviction" not in stdout
+    # a purely-strong category still uses the original phrasing
+    assert "Market scores all strong conviction" in stdout

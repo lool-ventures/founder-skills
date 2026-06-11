@@ -334,14 +334,20 @@ def _key_findings(
         summary = _as_dict(score_dims.get("summary"))
         by_cat = _as_dict(summary.get("by_category"))
 
-        # Strong categories (all strong conviction, no concerns/dealbreakers)
+        # Strong categories: positive (>=1 strong) with no concerns/dealbreakers.
+        # Only claim "all strong conviction" when no moderate convictions exist
+        # either — otherwise the category is strong-leaning but mixed.
         for cat in _CANONICAL_CATEGORIES:
             counts = _as_dict(by_cat.get(cat))
             s = int(_num(counts.get("strong_conviction"), 0))
+            m = int(_num(counts.get("moderate_conviction"), 0))
             c = int(_num(counts.get("concern"), 0))
             d = int(_num(counts.get("dealbreaker"), 0))
             if s > 0 and c == 0 and d == 0:
-                strong.append(f"{cat} scores all strong conviction")
+                if m == 0:
+                    strong.append(f"{cat} scores all strong conviction")
+                else:
+                    strong.append(f"{cat} leans strong with no concerns")
 
         # Dealbreakers
         for db in _as_list(summary.get("dealbreakers")):

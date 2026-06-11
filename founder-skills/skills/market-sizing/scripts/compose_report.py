@@ -357,7 +357,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     if _usable(validation):
         agent_estimate_names: set[str] = set()
         for assumption in _as_list(validation.get("assumptions")):
-            if assumption.get("category") == "agent_estimate":
+            if isinstance(assumption, dict) and assumption.get("category") == "agent_estimate":
                 name = assumption.get("name", "")
                 if name in QUANTITATIVE_PARAMS:
                     agent_estimate_names.add(name)
@@ -365,7 +365,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
         sensitivity_params: set[str] = set()
         if _usable(sensitivity):
             for scenario in _as_list(sensitivity.get("scenarios")):
-                if scenario.get("confidence") == "agent_estimate":
+                if isinstance(scenario, dict) and scenario.get("confidence") == "agent_estimate":
                     sensitivity_params.add(scenario.get("parameter", ""))
 
         unsourced = agent_estimate_names - sensitivity_params
@@ -381,7 +381,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # 4. UNVALIDATED_CLAIMS
     if _usable(validation):
         for fig in _as_list(validation.get("figure_validations")):
-            if fig.get("status") == "unsupported":
+            if isinstance(fig, dict) and fig.get("status") == "unsupported":
                 fig_display = fig.get("label", fig.get("figure", "unknown"))
                 warnings.append(
                     _warn(
@@ -393,7 +393,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # 5. REFUTED_CLAIMS — surfaces refuted figures in warnings section
     if _usable(validation):
         for fig in _as_list(validation.get("figure_validations")):
-            if fig.get("status") == "refuted":
+            if isinstance(fig, dict) and fig.get("status") == "refuted":
                 fig_display = fig.get("label", fig.get("figure", "unknown"))
                 refutation = fig.get("refutation")
                 if not refutation:
@@ -491,7 +491,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # 13. NARROW_AGENT_ESTIMATE_RANGE
     if _usable(sensitivity):
         for scenario in _as_list(sensitivity.get("scenarios")):
-            if scenario.get("confidence") == "agent_estimate":
+            if isinstance(scenario, dict) and scenario.get("confidence") == "agent_estimate":
                 eff = _as_dict(scenario.get("effective_range"))
                 low = abs(eff.get("low_pct", 0))
                 high = abs(eff.get("high_pct", 0))
@@ -507,7 +507,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # 14. OVERCLAIMED_VALIDATION
     if _usable(validation):
         for fig in _as_list(validation.get("figure_validations")):
-            if fig.get("status") == "validated" and fig.get("source_count", 0) < 2:
+            if isinstance(fig, dict) and fig.get("status") == "validated" and fig.get("source_count", 0) < 2:
                 fig_display = fig.get("label", fig.get("figure", "unknown"))
                 warnings.append(
                     _warn(
@@ -874,6 +874,8 @@ def _section_assumptions(validation: dict[str, Any] | None) -> str:
     # Params whose values are monetary
     monetary_params = {"industry_total", "arpu"}
     for a in assumptions:
+        if not isinstance(a, dict):
+            continue
         cat = a.get("category", "unknown")
         cat_display = cat_labels.get(cat, cat)
         name = a.get("name", "unnamed")
@@ -902,6 +904,8 @@ def _section_validation(validation: dict[str, Any] | None) -> str:
 
     lines = ["## Validation\n"]
     for fig in figs:
+        if not isinstance(fig, dict):
+            continue
         figure = fig.get("label") or fig.get("figure", "unknown")
         status = fig.get("status", "unknown")
         source_count = fig.get("source_count", 0)
@@ -928,7 +932,7 @@ def _section_sensitivity(sensitivity: dict[str, Any] | None) -> str:
         " because they lack external sourcing — they tend to dominate the sensitivity,"
         " which highlights exactly where better data would most strengthen the analysis.\n",
     ]
-    has_approach_used = any(s.get("approach_used") for s in scenarios)
+    has_approach_used = any(isinstance(s, dict) and s.get("approach_used") for s in scenarios)
     if has_approach_used:
         lines.append("| Parameter | Approach | Confidence | Low SOM | Base SOM | High SOM | Range |")
         lines.append("|-----------|----------|------------|---------|----------|----------|-------|")
@@ -938,6 +942,8 @@ def _section_sensitivity(sensitivity: dict[str, Any] | None) -> str:
 
     conf_labels = {"sourced": "Sourced", "derived": "Derived", "agent_estimate": "Estimate"}
     for s in scenarios:
+        if not isinstance(s, dict):
+            continue
         param = _humanize_param(s.get("parameter", "?"))
         conf = conf_labels.get(s.get("confidence", "sourced"), s.get("confidence", "sourced"))
         low_som = _fmt_usd(s.get("low", {}).get("som", 0))

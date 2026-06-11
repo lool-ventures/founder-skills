@@ -3366,3 +3366,29 @@ def test_marker_collision_reflected_in_status_and_section() -> None:
     assert "Marker Collision" in md or "MARKER_COLLISION" in md, (
         "MARKER_COLLISION must be spliced into the report's Warnings section"
     )
+
+
+def test_compose_survives_malformed_list_elements() -> None:
+    """Agent-supplied artifacts may carry non-dict elements in assumption /
+    scenario / figure_validation lists. compose must flag/skip them, not crash
+    with AttributeError (parity with the ic-sim twin's isinstance guards)."""
+    import copy
+
+    bad_validation = copy.deepcopy(_VALID_VALIDATION)
+    bad_validation["assumptions"] = ["not-a-dict", 123, {"category": "agent_estimate", "name": "industry_total"}]
+    bad_validation["figure_validations"] = ["oops", {"status": "validated", "source_count": 3}]
+    bad_sensitivity = copy.deepcopy(_VALID_SENSITIVITY)
+    bad_sensitivity["scenarios"] = [None, 42, {"confidence": "agent_estimate"}]
+    d = _make_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "methodology.json": _VALID_METHODOLOGY,
+            "validation.json": bad_validation,
+            "sizing.json": _VALID_SIZING,
+            "sensitivity.json": bad_sensitivity,
+            "checklist.json": _VALID_CHECKLIST,
+        }
+    )
+    rc, data, err = _run_compose(d)
+    assert rc in (0, 2), f"compose crashed on malformed list elements: rc={rc}, stderr={err}"
+    assert "Traceback" not in err and "AttributeError" not in err
