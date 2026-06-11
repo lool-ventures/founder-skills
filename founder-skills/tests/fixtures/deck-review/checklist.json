@@ -1,314 +1,296 @@
 {
-  "metadata": {
-    "run_id": "fixture-deck-review-001"
-  },
   "items": [
     {
       "id": "purpose_clear",
       "category": "Narrative Flow",
-      "label": "Purpose Clear",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Company purpose is clear and specific",
+      "status": "pass"
     },
     {
       "id": "headlines_carry_story",
       "category": "Narrative Flow",
-      "label": "Headlines Carry Story",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Slide headlines are conclusions, not topics",
+      "status": "pass"
     },
     {
       "id": "narrative_arc_present",
       "category": "Narrative Flow",
-      "label": "Narrative Arc Present",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Narrative follows Problem-Solution-Proof-Ask arc",
+      "status": "pass"
     },
     {
       "id": "strongest_proof_early",
       "category": "Narrative Flow",
-      "label": "Strongest Proof Early",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Strongest proof appears by slide 4",
+      "status": "pass"
     },
     {
       "id": "story_stands_alone",
       "category": "Narrative Flow",
-      "label": "Story Stands Alone",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Deck tells story without narration",
+      "status": "pass"
     },
     {
       "id": "problem_quantified",
       "category": "Slide Content",
-      "label": "Problem Quantified",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Problem slide quantifies pain",
+      "status": "fail",
+      "evidence": "Problem slide states pain qualitatively but gives no metric",
+      "notes": "Add a quantified cost-of-inaction figure"
     },
     {
       "id": "solution_shows_workflow",
       "category": "Slide Content",
-      "label": "Solution Shows Workflow",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Solution shows before\u2192after, not feature list",
+      "status": "pass"
     },
     {
       "id": "why_now_has_catalyst",
       "category": "Slide Content",
-      "label": "Why Now Has Catalyst",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Why-now has genuine macro catalyst",
+      "status": "pass"
     },
     {
       "id": "market_bottom_up",
       "category": "Slide Content",
-      "label": "Market Bottom Up",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Market sizing uses bottom-up approach",
+      "status": "pass"
     },
     {
       "id": "competition_honest",
       "category": "Slide Content",
-      "label": "Competition Honest",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Competition section is honest and substantive",
+      "status": "warn",
+      "evidence": "Competition is a 2x2 with no named incumbents",
+      "notes": "Name the real alternatives"
     },
     {
       "id": "business_model_clear",
       "category": "Slide Content",
-      "label": "Business Model Clear",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Business model explains money flow and margins",
+      "status": "pass"
     },
     {
       "id": "gtm_has_proof",
       "category": "Slide Content",
-      "label": "Gtm Has Proof",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "GTM slide has ICP, channel, and early proof",
+      "status": "pass"
     },
     {
       "id": "team_has_depth",
       "category": "Slide Content",
-      "label": "Team Has Depth",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Team slide demonstrates founder-market fit",
+      "status": "pass"
     },
     {
       "id": "stage_appropriate_structure",
       "category": "Stage Fit",
-      "label": "Stage Appropriate Structure",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Slide order matches stage-specific framework",
+      "status": "pass"
     },
     {
       "id": "stage_appropriate_traction",
       "category": "Stage Fit",
-      "label": "Stage Appropriate Traction",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Traction metrics match stage expectations",
+      "status": "pass"
     },
     {
       "id": "stage_appropriate_financials",
       "category": "Stage Fit",
-      "label": "Stage Appropriate Financials",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Financial projections match stage depth",
+      "status": "pass"
     },
     {
       "id": "ask_ties_to_milestones",
       "category": "Stage Fit",
-      "label": "Ask Ties To Milestones",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Ask ties dollars to milestones to next round",
+      "status": "pass"
     },
     {
       "id": "round_size_realistic",
       "category": "Stage Fit",
-      "label": "Round Size Realistic",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Fundraising amount aligns with current benchmarks",
+      "status": "pass"
     },
     {
       "id": "one_idea_per_slide",
       "category": "Design & Readability",
-      "label": "One Idea Per Slide",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "One idea per slide",
+      "status": "pass"
     },
     {
       "id": "minimal_text",
       "category": "Design & Readability",
-      "label": "Minimal Text",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Big type, minimal paragraphs",
+      "status": "pass"
     },
     {
       "id": "slide_count_appropriate",
       "category": "Design & Readability",
-      "label": "Slide Count Appropriate",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Core deck is 10-12 slides",
+      "status": "pass"
     },
     {
       "id": "consistent_design",
       "category": "Design & Readability",
-      "label": "Consistent Design",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Consistent visual design language",
+      "status": "pass"
     },
     {
       "id": "mobile_readable",
       "category": "Design & Readability",
-      "label": "Mobile Readable",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Readable on mobile without zoom",
+      "status": "pass"
     },
     {
       "id": "no_vague_purpose",
       "category": "Common Mistakes",
-      "label": "No Vague Purpose",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "No vague or buzzwordy purpose statement",
+      "status": "pass"
     },
     {
       "id": "no_nice_to_have_problem",
       "category": "Common Mistakes",
-      "label": "No Nice To Have Problem",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Problem shows urgency, not a nice-to-have",
+      "status": "pass"
     },
     {
       "id": "no_hype_without_proof",
       "category": "Common Mistakes",
-      "label": "No Hype Without Proof",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "No hype without supporting evidence",
+      "status": "pass"
     },
     {
       "id": "no_features_over_outcomes",
       "category": "Common Mistakes",
-      "label": "No Features Over Outcomes",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Focuses on outcomes, not features",
+      "status": "pass"
     },
     {
       "id": "no_dodged_competition",
       "category": "Common Mistakes",
-      "label": "No Dodged Competition",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Competition slide exists and is substantive",
+      "status": "pass"
     },
     {
       "id": "ai_retention_rebased",
       "category": "AI Company",
-      "label": "Ai Retention Rebased",
-      "status": "not_applicable",
-      "evidence": "Not an AI company"
+      "label": "AI retention measured from Month 3",
+      "status": "pass"
     },
     {
       "id": "ai_cost_to_serve_shown",
       "category": "AI Company",
-      "label": "Ai Cost To Serve Shown",
-      "status": "not_applicable",
-      "evidence": "Not an AI company"
+      "label": "Compute economics and margin trajectory shown",
+      "status": "pass"
     },
     {
       "id": "ai_defensibility_beyond_model",
       "category": "AI Company",
-      "label": "Ai Defensibility Beyond Model",
-      "status": "not_applicable",
-      "evidence": "Not an AI company"
+      "label": "Defensibility beyond 'we use [foundation model]'",
+      "status": "pass"
     },
     {
       "id": "ai_responsible_controls",
       "category": "AI Company",
-      "label": "Ai Responsible Controls",
-      "status": "not_applicable",
-      "evidence": "Not an AI company"
+      "label": "Responsible AI / risk controls addressed",
+      "status": "pass"
     },
     {
       "id": "numbers_consistent",
       "category": "Diligence Readiness",
-      "label": "Numbers Consistent",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Claims in deck are internally consistent",
+      "status": "pass"
     },
     {
       "id": "data_room_ready",
       "category": "Diligence Readiness",
-      "label": "Data Room Ready",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Diligence materials referenced or available",
+      "status": "pass"
     },
     {
       "id": "contact_info_present",
       "category": "Diligence Readiness",
-      "label": "Contact Info Present",
-      "status": "pass",
-      "evidence": "Synthetic fixture data"
+      "label": "Contact information visible and correct",
+      "status": "pass"
     }
   ],
   "summary": {
     "total": 35,
-    "pass": 31,
-    "fail": 0,
-    "warn": 0,
-    "not_applicable": 4,
-    "score_pct": 100.0,
+    "pass": 33,
+    "fail": 1,
+    "warn": 1,
+    "not_applicable": 0,
+    "score_pct": 94.3,
     "overall_status": "strong",
     "by_category": {
       "Narrative Flow": {
-        "total": 5,
         "pass": 5,
         "fail": 0,
         "warn": 0,
         "not_applicable": 0
       },
       "Slide Content": {
-        "total": 8,
-        "pass": 8,
-        "fail": 0,
-        "warn": 0,
+        "pass": 6,
+        "fail": 1,
+        "warn": 1,
         "not_applicable": 0
       },
       "Stage Fit": {
-        "total": 5,
         "pass": 5,
         "fail": 0,
         "warn": 0,
         "not_applicable": 0
       },
       "Design & Readability": {
-        "total": 5,
         "pass": 5,
         "fail": 0,
         "warn": 0,
         "not_applicable": 0
       },
       "Common Mistakes": {
-        "total": 5,
         "pass": 5,
         "fail": 0,
         "warn": 0,
         "not_applicable": 0
       },
       "AI Company": {
-        "total": 4,
-        "pass": 0,
+        "pass": 4,
         "fail": 0,
         "warn": 0,
-        "not_applicable": 4
+        "not_applicable": 0
       },
       "Diligence Readiness": {
-        "total": 3,
         "pass": 3,
         "fail": 0,
         "warn": 0,
         "not_applicable": 0
       }
     },
-    "failed_items": [],
-    "warned_items": []
+    "failed_items": [
+      {
+        "id": "problem_quantified",
+        "category": "Slide Content",
+        "label": "Problem slide quantifies pain",
+        "evidence": "Problem slide states pain qualitatively but gives no metric",
+        "notes": "Add a quantified cost-of-inaction figure"
+      }
+    ],
+    "warned_items": [
+      {
+        "id": "competition_honest",
+        "category": "Slide Content",
+        "label": "Competition section is honest and substantive",
+        "evidence": "Competition is a 2x2 with no named incumbents",
+        "notes": "Name the real alternatives"
+      }
+    ]
+  },
+  "validation": {
+    "status": "valid",
+    "errors": []
+  },
+  "metadata": {
+    "run_id": "fixture-deck-review-001"
   }
 }

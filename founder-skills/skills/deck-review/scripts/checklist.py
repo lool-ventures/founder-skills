@@ -199,16 +199,21 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
         notes = item.get("notes")
         category = meta["category"]
 
-        enriched.append(
-            {
-                "id": item_id,
-                "category": category,
-                "label": meta["label"],
-                "status": status,
-                "evidence": evidence,
-                "notes": notes,
-            }
-        )
+        # Omit evidence/notes when absent — the schema types both as plain
+        # strings (no null), so emitting None would trip a false-positive
+        # SCHEMA_VIOLATION in compose_report. Evidence is only required for
+        # fail/warn items (checked below).
+        enriched_item: dict[str, Any] = {
+            "id": item_id,
+            "category": category,
+            "label": meta["label"],
+            "status": status,
+        }
+        if evidence is not None:
+            enriched_item["evidence"] = evidence
+        if notes is not None:
+            enriched_item["notes"] = notes
+        enriched.append(enriched_item)
 
         # Initialize category counters
         if category not in categories:
@@ -293,7 +298,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Deck review checklist scorer (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
-    p.add_argument("--run-id", help="Inject metadata.run_id into output")
+    p.add_argument("--run-id", required=True, help="Inject metadata.run_id into output")
     return p.parse_args()
 
 
@@ -320,27 +325,34 @@ def main() -> None:
 
     indent = 2 if args.pretty else None
 
-    # --- Validation (JSON error dict, exit 0) ---
+    # --- Validation ---
+    # On stdout (no -o): emit the JSON error dict and exit 0 (the caller pipes
+    # and inspects it). On -o (artifact-producer mode): match the sibling
+    # producers — print errors to stderr, write NO artifact, exit 1. Writing an
+    # error-shaped artifact with an "ok": true receipt would let a caller that
+    # checks the exit code or receipt proceed with a broken checklist.json.
     errors: list[str] = []
     if "items" not in data:
         errors.append("Missing required key: 'items'")
     elif not isinstance(data["items"], list):
         errors.append("'items' must be an array")
 
+    if not errors:
+        result, errors = validate_checklist(data["items"])
+    else:
+        result = {"items": [], "summary": None}
+
     if errors:
-        result: dict[str, Any] = {"validation": {"status": "invalid", "errors": errors}, "items": [], "summary": None}
-        _write_output(json.dumps(result, indent=indent) + "\n", args.output)
+        if args.output:
+            for err in errors:
+                print(f"Error: checklist validation failed: {err}", file=sys.stderr)
+            sys.exit(1)
+        result["validation"] = {"status": "invalid", "errors": errors}
+        _write_output(json.dumps(result, indent=indent) + "\n", None)
         return
 
-    result, errors = validate_checklist(data["items"])
-
-    if errors:
-        result["validation"] = {"status": "invalid", "errors": errors}
-    else:
-        result["validation"] = {"status": "valid", "errors": []}
-
-    if args.run_id:
-        result["metadata"] = {"run_id": args.run_id}
+    result["validation"] = {"status": "valid", "errors": []}
+    result["metadata"] = {"run_id": args.run_id}
 
     out = json.dumps(result, indent=indent) + "\n"
     s = result["summary"]
