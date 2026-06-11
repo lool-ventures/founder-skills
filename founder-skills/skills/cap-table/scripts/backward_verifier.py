@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = []
+# ///
 """Backward verification for cap-table Lane-1 extraction.
 
 Forward verification (`evidence_verifier.py`) catches the
@@ -406,6 +410,13 @@ def main() -> int:
     parser.add_argument("--source-doc", type=str, help="Path to source doc; used in prompt body")
     parser.add_argument("-o", "--output", type=Path)
     parser.add_argument("--pretty", action="store_true")
+    parser.add_argument(
+        "--mode",
+        choices=("warn", "block"),
+        default="warn",
+        help="warn (default): exit 0 even on disagreement (informational, per the calibrated "
+        "noisy-disagreement contract). block: exit 1 on overall_status==fail.",
+    )
     args = parser.parse_args()
 
     extraction = json.loads(args.extraction.read_text())
@@ -418,6 +429,7 @@ def main() -> int:
         out = {"n_prompts": len(prompts), "prompts": prompts}
         if args.output:
             args.output.write_text(json.dumps(out, indent=2 if args.pretty else None))
+            print(json.dumps({"ok": True, "output": str(args.output.resolve())}, indent=2 if args.pretty else None))
         else:
             print(json.dumps(out, indent=2 if args.pretty else None))
         return 0
@@ -435,10 +447,14 @@ def main() -> int:
     out = report_to_dict(report)
     if args.output:
         args.output.write_text(json.dumps(out, indent=2 if args.pretty else None))
+        print(json.dumps({"ok": True, "output": str(args.output.resolve())}, indent=2 if args.pretty else None))
     else:
         print(json.dumps(out, indent=2 if args.pretty else None))
 
-    # Exit code mirrors verifier semantics
+    # WARN-mode default (the calibrated contract): disagreements are noisy
+    # enough that auto-rejection over-rejects, so exit 0 unless --mode=block.
+    if args.mode == "warn":
+        return 0
     if report.overall_status == "pass":
         return 0
     if report.overall_status == "fail":

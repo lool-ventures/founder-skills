@@ -6,6 +6,7 @@ requires-python = ">=3.10"
 dependencies = [
     "openpyxl",
     "python-docx>=1.2.0",
+    "pdfplumber",
 ]
 
 [project.optional-dependencies]
