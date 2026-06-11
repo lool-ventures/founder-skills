@@ -332,11 +332,13 @@ Generate the HTML review page for the founder to inspect extracted values. In Co
 python3 "$SCRIPTS/review_inputs.py" "$REVIEW_DIR/inputs.json" --static "$REVIEW_DIR/review.html" --extraction-warnings "$REVIEW_DIR/extraction_validation.json"
 ```
 
-Tell the founder to open the review page, edit anything wrong, click Submit to download a corrections file, then upload it back. When they upload `corrections.json`:
+**This is a STOP point — do not proceed to Step 4 until the founder responds.** Present the `review.html` path to the founder, then ask via `AskUserQuestion` (two options): "I reviewed the page — the values look right, proceed" / "I edited values and will upload the corrections file". Generating the page and silently moving on defeats the human verification gate: the founder is the last check on extracted numbers before math runs on them. When they upload `corrections.json`:
 
 ```bash
 python3 "$SCRIPTS/apply_corrections.py" <uploaded-file> --original "$REVIEW_DIR/inputs.json" --output-dir "$REVIEW_DIR"
 ```
+
+Then promote `corrected_inputs.json` to `inputs.json` (same as Step 3) and re-run the Step 3.5 validation before proceeding.
 
 In Claude Code (local terminal), use **server mode**:
 
