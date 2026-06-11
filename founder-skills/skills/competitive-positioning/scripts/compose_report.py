@@ -184,15 +184,24 @@ def _warn(code: str, message: str) -> dict[str, Any]:
 
 
 def _load_artifact(dir_path: str, name: str) -> dict[str, Any] | None:
-    """Load a JSON artifact. Returns None if missing, _CORRUPT if unparseable."""
+    """Load a JSON artifact.
+
+    Returns None if missing, _CORRUPT if unparseable OR if the parsed top-level
+    payload is not a JSON object (e.g. a list/string/number). Wrong-shape valid
+    JSON degrades to the CORRUPT_ARTIFACT path rather than crashing downstream
+    `.get()` access.
+    """
     path = os.path.join(dir_path, name)
     if not os.path.exists(path):
         return None
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)  # type: ignore[no-any-return]
+            loaded = json.load(f)
     except (json.JSONDecodeError, OSError):
         return _CORRUPT
+    if not isinstance(loaded, dict):
+        return _CORRUPT
+    return loaded
 
 
 def _is_stub(data: dict[str, Any] | None) -> bool:
@@ -643,7 +652,10 @@ def _section_executive_summary(
     # Summary paragraph
     lines.append("")
     if diff_score is not None and defensibility is not None:
-        if diff_score >= 70 and defensibility in ("high", "moderate"):
+        # Use the same 'strong' threshold (>=75) as the score label above so the
+        # label and the prose paragraph never disagree (a score of 70-74.9 is
+        # labelled Moderate, so it must not be described as 'strong' here).
+        if diff_score >= 75 and defensibility in ("high", "moderate"):
             lines.append(
                 "The startup shows strong competitive differentiation with "
                 f"{defensibility} defensibility. The positioning analysis "
@@ -701,7 +713,7 @@ def _section_positioning(
 
     for view in _as_list(positioning_scores.get("views")):
         view = _as_dict(view)
-        vid = view.get("view_id", "?").title()
+        vid = str(view.get("view_id", "?")).title()
         lines.append(f"### {vid} View\n")
         lines.append(f"- **X-Axis:** {view.get('x_axis_name', '?')}")
         lines.append(f"  - Rationale: {view.get('x_axis_rationale', '?')}")
@@ -1008,7 +1020,10 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     positioning_scores = _render_safe(artifacts.get("positioning_scores.json"))
     checklist = _render_safe(artifacts.get("checklist.json"))
 
-    # Assemble report sections
+    # Assemble report sections — render everything EXCEPT the Warnings section
+    # first. The Warnings section must be spliced in only after the marker
+    # prescan has had a chance to append MARKER_COLLISION, otherwise that
+    # warning would never reach the rendered ## Warnings list.
     sections = [
         _section_title(product_profile, landscape),
         _section_executive_summary(product_profile, positioning_scores, moat_scores, checklist),
@@ -1017,7 +1032,6 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         _section_moat_assessment(moat_scores),
         _section_stress_test(positioning_scores),
         _section_key_findings(positioning_scores, moat_scores, checklist),
-        _section_warnings(warnings),
     ]
 
     report_markdown = "\n".join(s for s in sections if s)
@@ -1025,10 +1039,12 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # v0.4.2 Mitigation 2: per-run uuid marker for Context B's Edit
     marker = f"<!-- COACHING_INSERTION_POINT_{uuid.uuid4().hex[:8]} -->"
 
-    # Pre-scan: check assembled body BEFORE appending the marker (otherwise we
-    # always find our own emission). Agent post-Edit verification uses the
-    # EXACT uuid (per-run), so substring collisions with body content are
-    # informational only — but worth flagging so authors can sanitize.
+    # Pre-scan: check the assembled body BEFORE appending the marker (otherwise
+    # we always find our own emission) and BEFORE rendering the Warnings section
+    # (so the prescan only inspects report body content, not our own warning
+    # text). Agent post-Edit verification uses the EXACT uuid (per-run), so
+    # substring collisions with body content are informational only — but worth
+    # flagging so authors can sanitize.
     if "<!-- COACHING_INSERTION_POINT_" in report_markdown:
         warnings.append(
             _warn(
@@ -1040,6 +1056,15 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
                 ),
             )
         )
+
+    # Splice the Warnings section now that MARKER_COLLISION (if any) is in the
+    # warnings list. _section_warnings filters to high/medium/acknowledged only,
+    # so the low-severity MARKER_COLLISION still won't surface in the report,
+    # but the data flow is now correct for any future reportable warning the
+    # prescan might add.
+    warnings_section = _section_warnings(warnings)
+    if warnings_section:
+        report_markdown += "\n" + warnings_section
 
     report_markdown += (
         f"\n\n{marker}\n\n---\n"

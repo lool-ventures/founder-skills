@@ -44,15 +44,23 @@ OPTIONAL_ARTIFACTS = [
 
 
 def _load_artifact(dir_path: str, name: str) -> dict[str, Any] | None:
-    """Load a JSON artifact. Returns None if missing, _CORRUPT if unparseable."""
+    """Load a JSON artifact.
+
+    Returns None if missing, _CORRUPT if unparseable OR if the parsed top-level
+    payload is not a JSON object — wrong-shape valid JSON degrades to the
+    placeholder/corrupt path rather than crashing downstream `.get()` access.
+    """
     path = os.path.join(dir_path, name)
     if not os.path.exists(path):
         return None
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)  # type: ignore[no-any-return]
+            loaded = json.load(f)
     except (json.JSONDecodeError, OSError):
         return _CORRUPT
+    if not isinstance(loaded, dict):
+        return _CORRUPT
+    return loaded
 
 
 def _is_stub(data: dict[str, Any] | None) -> bool:

@@ -112,6 +112,11 @@ def _validate_moat_entry(entry: dict[str, Any], company: str, errors: list[str])
     if "evidence" not in entry:
         errors.append(f"{company}: missing 'evidence' for moat '{moat_id}'")
         return False
+    if not isinstance(entry["evidence"], str):
+        errors.append(
+            f"{company}: 'evidence' for moat '{moat_id}' must be a string (got {type(entry['evidence']).__name__})"
+        )
+        return False
 
     return True
 

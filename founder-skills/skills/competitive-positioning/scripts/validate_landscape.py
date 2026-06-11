@@ -207,7 +207,6 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Validate competitor landscape (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
-    p.add_argument("--stdin", action="store_true", default=True, help="Read from stdin (default)")
     return p.parse_args()
 
 
