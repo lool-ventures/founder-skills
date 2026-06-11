@@ -275,6 +275,14 @@ def _project_scenario(
         "became_profitable": became_profitable,
         "monthly_projections": projections,
     }
+    # runway_months: null is ambiguous to a reader of the raw artifact — make
+    # the default-alive meaning explicit alongside the null
+    if runway_months is None and default_alive:
+        result["note"] = (
+            "default_alive: projected cash never depletes within the projection "
+            "window (revenue covers expenses before cash-out); runway_months is "
+            "null by design, not missing data"
+        )
     if cash_direction_warning:
         result["cash_direction_warning"] = cash_direction_warning
     return result
