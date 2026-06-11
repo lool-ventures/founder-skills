@@ -94,9 +94,9 @@ def validate_dimensions(items: list[dict[str, Any]]) -> dict[str, Any]:
     """Validate dimension input and produce scored summary."""
     errors: list[str] = []
     seen_ids: set[str] = set()
-    for item in items:
+    for idx, item in enumerate(items):
         if not isinstance(item, dict):
-            errors.append(f"Item {len(seen_ids)} must be an object (got {type(item).__name__})")
+            errors.append(f"Item {idx} must be an object (got {type(item).__name__})")
             continue
         item_id = item.get("id", "")
         if item_id not in VALID_IDS:
@@ -235,6 +235,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="IC dimension scorer (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
+    p.add_argument("--run-id", required=True, help="Run identifier injected into metadata.run_id")
     return p.parse_args()
 
 
@@ -264,6 +265,9 @@ def main() -> None:
         sys.exit(1)
 
     result = validate_dimensions(data["items"])
+
+    # Inject metadata.run_id as the last step before serialization (overrides any stdin metadata).
+    result["metadata"] = {"run_id": args.run_id}
 
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"
