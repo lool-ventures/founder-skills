@@ -14,6 +14,8 @@ Items are tagged with applicability gates that determine when they should be eva
 - **Gate evaluation:** For each gate array, check if ANY value matches `company.geography` / `company.sector_type` OR appears in `company.traits`.
 - Items whose gate doesn't match are auto-scored as `not_applicable`.
 
+**Who applies the gates:** `checklist.py` (the producer script), AFTER the assessing agent returns its items. If you are the agent assessing these criteria, evaluate EVERY item on its merits and never mark an item `not_applicable` because of a gate — your statuses are pre-gating assessments, and self-gating double-applies (or mis-applies) the rules. Note in particular: "**Model format:** spreadsheet only" gates fire only for `deck` / `conversational` formats — `partial` models (incomplete spreadsheets) are evaluated in full.
+
 ## Scoring Formula
 
 - **pass** = 1 point

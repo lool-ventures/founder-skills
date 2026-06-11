@@ -98,7 +98,10 @@ Read `inputs.json` from REVIEW_DIR. Also read
 
 Assess all 46 checklist items: STRUCT_01..09, UNIT_10..19, CASH_20..32,
 METRIC_33..35, BRIDGE_36..38, SECTOR_39..44, OVERALL_45..46.
-Profile-based auto-gating applies by stage/geography/sector/model_format.
+Profile-based auto-gating is applied BY THE PRODUCER SCRIPT after you return —
+assess EVERY item on its merits and never mark an item not_applicable because
+of a stage/geography/sector/model_format gate ("partial" models are evaluated
+in full; only the script decides gating).
 
 Every `fail` and `warn` MUST cite specific evidence. Every `pass` MUST note what
 was checked. Empty evidence produces blank lines in the report.

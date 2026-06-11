@@ -369,7 +369,10 @@ Also read ${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/references/checkli
 
 Assess all 46 checklist items (STRUCT_01..09, UNIT_10..19, CASH_20..32,
 METRIC_33..35, BRIDGE_36..38, SECTOR_39..44, OVERALL_45..46).
-Profile-based auto-gating applies by stage/geography/sector/model_format.
+Profile-based auto-gating is applied BY THE PRODUCER SCRIPT after you return —
+assess EVERY item on its merits and never mark an item not_applicable because
+of a stage/geography/sector/model_format gate ("partial" models are evaluated
+in full; only the script decides gating).
 
 Evidence is MANDATORY for every item: every fail and warn MUST have a non-empty
 evidence string citing specific values from the model. Every pass MUST have
