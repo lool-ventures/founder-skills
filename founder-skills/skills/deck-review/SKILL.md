@@ -20,7 +20,7 @@ Help startup founders strengthen their pitch decks before sending them to invest
 - **Version:** managed in `founder-skills/.claude-plugin/plugin.json`
 - **Compatibility:** Python 3.10+ and `uv` for script execution.
 - **Exports:**
-  - `checklist.json` → `financial-model-review`, `ic-sim`, `fundraise-readiness`
+  - `checklist.json` → `financial-model-review`, `ic-sim`, `fundraise-readiness` (future)
 
 ## Skill Execution Model (READ FIRST)
 
@@ -29,7 +29,7 @@ This skill runs **inline in the main thread** (not as a sub-agent). The main thr
 **Two dispatch contexts for the sub-agent:**
 
 - **Context A — Per-step analytical dispatch (Mitigation 1):** Steps 4 and 5 dispatch the deck-review agent via the `Task` tool. The agent does deep analysis and returns structured JSON. The main thread captures the JSON and pipes it through the producer script (`slide_reviews.py` or `checklist.py`). The sub-agent does NOT write artifacts directly.
-- **Context B — Post-compose coaching dispatch:** Step 7 dispatches the sub-agent after `compose_report.py` writes `report.md`. The sub-agent reads `report.md`, appends `## Coaching Commentary`, verifies all canonical artifacts on disk, and returns a structured success payload.
+- **Context B — Post-compose coaching dispatch:** Step 7 dispatches the sub-agent after `compose_report.py` writes `report.md`. The sub-agent receives the structured `coaching_payload` inlined in its prompt (it does NOT Read the full `report.md`), composes `## Coaching Commentary` from it, Edits it into `report.md` via the per-run uuid insertion marker, verifies all canonical artifacts on disk, and returns a structured success payload.
 
 **Why this model:** In Cowork, sub-agents have a restricted tool allowlist (no Bash). By keeping orchestration in the main thread and dispatching sub-agents only for analytical or post-compose tasks that use only Read/Edit/Glob/Grep, the pipeline works correctly in both Claude Code (CLI) and Cowork.
 
@@ -50,6 +50,11 @@ Accept any format: PDF, PowerPoint (PPTX), markdown, or text descriptions of sli
 
 All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/deck-review/scripts/`:
 
+- **`setup_run.py`** — Resolves `REVIEW_DIR`, detects resume vs. fresh run, cleans stale artifacts (`--clean`)
+- **`deck_inventory.py`** — Producer for `deck_inventory.json` (agent provides JSON via stdin; schema-validated)
+- **`stage_profile.py`** — Producer for `stage_profile.json`; `--rebuild-stage` + `--confidence {high,low}` for founder-corrected stages
+- **`gate_state.py`** — Producer (`emit`) + answer-writer (`answer`) for the stage-confirmation gate
+- **`slide_reviews.py`** — Producer for `slide_reviews.json` (agent provides JSON via stdin; schema-validated)
 - **`checklist.py`** — Scores 35 criteria across 7 categories (pass/fail/warn/not_applicable)
 - **`compose_report.py`** — Assembles artifacts into final report with cross-artifact validation; `--strict` exits 1 on high/medium warnings
 - **`visualize.py`** — Generates self-contained HTML with SVG charts (not JSON)
@@ -99,48 +104,33 @@ SHARED_SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
 ARTIFACTS_ROOT="${ARTIFACTS_ROOT:-$(pwd)/artifacts}"
 mkdir -p "$ARTIFACTS_ROOT"
 
-# Preliminary RUN_ID — used by Step 1 (founder_context init) before slug-aware
-# setup_run.py runs. Will be reused by setup_run via --run-id, OR overwritten
-# by gate_state.json on re-invocation (see below).
+# RUN_ID — used by Step 1 (founder_context init) before slug-aware setup_run.py
+# runs, then passed to setup_run via --run-id. If the caller's task prompt
+# supplied a RUN_ID (resume), keep it; otherwise mint a fresh one.
 RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 ```
 
 If `CLAUDE_PLUGIN_ROOT` is empty OR the path it resolves to does not exist in your environment (in Claude Cowork it substitutes to a host-side path that is not present inside the session VM — test with `ls`), fall back: `Glob` for `**/skills/deck-review/scripts/checklist.py`, strip to get `SCRIPTS`, derive `REFS` and `SHARED_SCRIPTS`. In Claude Cowork this is always the case — don't retry the substituted path; go straight to the Glob fallback. If Glob returns multiple matches, prefer the one under a plugin mount (`.remote-plugins/` or the plugins cache) over any workspace copy. If Glob returns nothing, locate it with Bash: `find / -path '*/skills/deck-review/scripts/checklist.py' 2>/dev/null | head -5`.
 
-After Step 1 (when the slug is known) — call `setup_run.py` to resolve `REVIEW_DIR` and clean stale state in one atomic step. **Re-invocation special case:** if the caller's task prompt indicated this is a resume (it includes `REVIEW_DIR=...` and / or `RUN_ID=...`, or `$REVIEW_DIR/gate_state.json` already exists with a non-empty `answer`), rehydrate `RUN_ID` from `gate_state.json`'s `metadata.run_id` and skip the `--clean` flag:
+After Step 1 (when the slug is known) — call `setup_run.py` to resolve `REVIEW_DIR`, detect whether this is a resume, and clean stale state in one atomic step. **Always** call `setup_run.py` with `--clean` and `--run-id "$RUN_ID"`; do not pre-read `gate_state.json` yourself. `setup_run.py` decides resume vs. fresh by comparing the answered `gate_state.json`'s `run_id` against `--run-id`, and on a fresh (non-resume) run it deletes a stale answered `gate_state.json` so a prior completed run cannot be misread as a resume:
 
 ```bash
-# Resolve REVIEW_DIR (from prompt if provided, else derive)
-if [ -z "$REVIEW_DIR" ]; then
-  REVIEW_DIR="$ARTIFACTS_ROOT/deck-review-$SLUG"
-fi
-mkdir -p "$REVIEW_DIR"
+SETUP_JSON="$(python3 "$SCRIPTS/setup_run.py" \
+  --artifacts-root "$ARTIFACTS_ROOT" \
+  --slug "$SLUG" \
+  --run-id "$RUN_ID" \
+  --clean \
+  --pretty)"
+REVIEW_DIR="$(echo "$SETUP_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["review_dir"])')"
+IS_RESUMING="$(echo "$SETUP_JSON" | python3 -c 'import json,sys;print("1" if json.load(sys.stdin)["resume"] else "")')"
 mkdir -p "$REVIEW_DIR/.staging"   # for ad-hoc sub-agent JSON staging
-
-IS_RESUMING=""
-if [ -f "$REVIEW_DIR/gate_state.json" ]; then
-  GATE_ANSWER="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("answer",""))' "$REVIEW_DIR/gate_state.json")"
-  if [ -n "$GATE_ANSWER" ]; then
-    IS_RESUMING=1
-    RUN_ID="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("metadata",{}).get("run_id",""))' "$REVIEW_DIR/gate_state.json")"
-  fi
-fi
-
-if [ -z "$IS_RESUMING" ]; then
-  SETUP_JSON="$(python3 "$SCRIPTS/setup_run.py" \
-    --artifacts-root "$ARTIFACTS_ROOT" \
-    --slug "$SLUG" \
-    --run-id "$RUN_ID" \
-    --clean \
-    --pretty)"
-  REVIEW_DIR="$(echo "$SETUP_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["review_dir"])')"
-  # RUN_ID stays the preliminary value passed via --run-id; setup_run echoes it back.
-fi
 ```
 
-Pass `RUN_ID` to every producer script via `--run-id`. Producer scripts inject it into `metadata.run_id` automatically. `compose_report.py` enforces that all required artifacts share the same `run_id` and emits a `MISSING_METADATA` (high) warning for any artifact without one. **The rehydration above is what keeps `run_id` stable across the gate** — without it, a fresh `RUN_ID` on re-invocation would mismatch the pre-gate artifacts and trip `STALE_ARTIFACT` in compose.
+To resume across a gate round-trip, the caller's task prompt must supply the prior `RUN_ID` (so `RUN_ID` above is set before this block runs). Then `setup_run.py` sees the answered `gate_state.json` whose `run_id` matches and returns `resume: true` — and because resume is true, `--clean` leaves `gate_state.json` in place.
 
-**On re-invocation (`$IS_RESUMING` is set):** skip Steps 2 and 3 if `deck_inventory.json` and `stage_profile.json` already exist with a matching `metadata.run_id`. They were preserved across `setup_run.py` because that path was skipped, so re-running them would just overwrite identical content.
+Pass `RUN_ID` to every producer script via `--run-id`. Producer scripts inject it into `metadata.run_id` automatically. `compose_report.py` enforces that all required artifacts share the same `run_id` and emits a `MISSING_METADATA` (high) warning for any artifact without one. Keeping `RUN_ID` stable across the gate is what prevents a `STALE_ARTIFACT` mismatch with the pre-gate artifacts.
+
+**On re-invocation (`$IS_RESUMING` is set):** skip Steps 2 and 3 if `deck_inventory.json` and `stage_profile.json` already exist with a `metadata.run_id` matching `$RUN_ID`. They were preserved across `setup_run.py` because resume was true (so `--clean` did not remove them), and re-running them would just overwrite identical content.
 
 ### Step 1: Read or Create Founder Context
 
@@ -220,12 +210,14 @@ PROFILE_EOF
 
 **Sub-agent execution model:** sub-agents in Cowork cannot reliably call `AskUserQuestion`. The gate uses a checkpoint-and-resume pattern — the sub-agent writes a `gate_state.json` to disk and emits a structured `needs_input` payload as its final message. The parent (main thread or invoking agent) calls `AskUserQuestion` *if available* — or otherwise asks the founder via plain text — then writes the answer back into `gate_state.json` via `gate_state.py answer`, then re-invokes this sub-agent. The sub-agent detects re-invocation by checking whether `gate_state.json` already has an `answer` field. (The plain-text round-trip works correctly even without `AskUserQuestion`.)
 
-**How to detect re-invocation:** if `$REVIEW_DIR/gate_state.json` already exists AND has a non-empty `answer` field, you were re-invoked. Skip the gate-emit and read the answer:
+**How to detect re-invocation:** you were re-invoked if `$REVIEW_DIR/gate_state.json` exists, has a non-empty `answer`, AND its `metadata.run_id` matches `$RUN_ID`. The run_id comparison is what distinguishes a genuine gate resume from a stale answered gate left by a *prior* completed run for the same company. (`setup_run.py` already deletes that stale file on a fresh run, but verify here as well.) Skip the gate-emit and read the answer:
 
 ```bash
 GATE_ANSWER=""
 if [ -f "$REVIEW_DIR/gate_state.json" ]; then
-  GATE_ANSWER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("answer",""))' "$REVIEW_DIR/gate_state.json")"
+  GATE_ANSWER="$(python3 -c 'import json,sys
+g=json.load(open(sys.argv[1]))
+print(g.get("answer","") if g.get("metadata",{}).get("run_id","")==sys.argv[2] else "")' "$REVIEW_DIR/gate_state.json" "$RUN_ID")"
 fi
 ```
 
@@ -266,10 +258,28 @@ Then return — as your final assistant message — a JSON object the parent age
 **After the gate (when `gate_state.json` already has an `answer`):** read `$GATE_ANSWER` from the file and branch:
 
 - `Looks right`: proceed to Step 4 with the detected stage.
-- `Different stage`: emit a second gate (gate_id `stage_choice`) via `gate_state.py emit` to ask which stage. Treat this as a fresh gate — return a new `needs_input` payload and let the parent answer it the same way. When that one comes back answered, run `stage_profile.py --rebuild-stage <chosen>` and re-emit the original `stage_confirmation` gate to confirm.
-- `Not sure — proceed anyway`: proceed with detected stage, set `confidence: "low"` via `stage_profile.py --rebuild-stage <detected>`.
+- `Different stage`: emit a second gate (gate_id `stage_choice`) via `gate_state.py emit` to ask which stage. Treat this as a fresh gate — return a new `needs_input` payload and let the parent answer it the same way. When that one comes back answered, rebuild the profile for the chosen stage at **high** confidence (the founder explicitly picked it), then re-emit the original `stage_confirmation` gate to confirm:
+
+  ```bash
+  cp "$REVIEW_DIR/stage_profile.json" "$REVIEW_DIR/.staging/sp.json"
+  cat "$REVIEW_DIR/.staging/sp.json" | python3 "$SCRIPTS/stage_profile.py" \
+    --rebuild-stage <chosen> --confidence high \
+    --run-id "$RUN_ID" -o "$REVIEW_DIR/stage_profile.json"
+  ```
+
+- `Not sure — proceed anyway`: proceed with the detected stage at **low** confidence:
+
+  ```bash
+  cp "$REVIEW_DIR/stage_profile.json" "$REVIEW_DIR/.staging/sp.json"
+  cat "$REVIEW_DIR/.staging/sp.json" | python3 "$SCRIPTS/stage_profile.py" \
+    --rebuild-stage <detected> --confidence low \
+    --run-id "$RUN_ID" -o "$REVIEW_DIR/stage_profile.json"
+  ```
+
 - `Stop review` (out-of-scope): exit. Do not run later steps.
-- `Proceed anyway (best-effort)`: rebuild profile with `--rebuild-stage series_a` and add a low-confidence note.
+- `Proceed anyway (best-effort)`: rebuild the profile at **low** confidence with `--rebuild-stage series_a --confidence low` (same staged-stdin invocation as above).
+
+`stage_profile.py` requires `--run-id` and `-o`, and reads the existing profile from stdin. Stage the current `stage_profile.json` to `.staging/sp.json` first and pipe *that* in — never `cat` and `-o` the same file in one command, which races and truncates it.
 
 ### Sub-agent JSON staging
 
@@ -288,6 +298,8 @@ the session outputs mount (Cowork marks it read-only post-write).
 
 **Dispatch the deck-review sub-agent in Context A (SLIDE_REVIEWS).** Do not do the slide analysis yourself in the main thread — dispatch it via the `Task` tool so the analysis runs in an isolated context with the full deck text and stage profile.
 
+**Before dispatching, substitute placeholders in the template below:** replace every `<REFS>` with the resolved `$REFS` value (the absolute references path from Step 0 — not the literal `${CLAUDE_PLUGIN_ROOT}`, which does not resolve inside the Cowork session VM), `<REVIEW_DIR>` with the absolute review dir, and `<RUN_ID>` with `$RUN_ID`. The sub-agent has no access to your shell variables.
+
 **Dispatch prompt template:**
 
 ```
@@ -299,8 +311,7 @@ You are the deck-review agent dispatched in Context A (SLIDE_REVIEWS). Read
 the deck at <deck file path or attached content> and the stage profile at
 <REVIEW_DIR>/stage_profile.json. Compare each slide against the stage-specific
 framework and non-negotiable principles from
-${CLAUDE_PLUGIN_ROOT}/skills/deck-review/references/deck-best-practices.md
-and references/checklist-criteria.md.
+<REFS>/deck-best-practices.md and <REFS>/checklist-criteria.md.
 
 For each slide: identify strengths, weaknesses, and specific recommendations.
 Map to expected framework. Flag missing expected slides. Every critique must
@@ -331,7 +342,7 @@ REVIEWS_EOF
 
 ### Step 5: Score Checklist -> `checklist.json` (Context A dispatch)
 
-**Dispatch the deck-review sub-agent in Context A (CHECKLIST).** Dispatch via the `Task` tool.
+**Dispatch the deck-review sub-agent in Context A (CHECKLIST).** Dispatch via the `Task` tool. Substitute `<REFS>` with the resolved `$REFS`, `<REVIEW_DIR>` with the absolute review dir, and `<RUN_ID>` with `$RUN_ID` before dispatching (same as SLIDE_REVIEWS).
 
 **Dispatch prompt template:**
 
@@ -341,7 +352,7 @@ REVIEW_DIR: <absolute path to REVIEW_DIR>
 RUN_ID: <RUN_ID>
 
 You are the deck-review agent dispatched in Context A (CHECKLIST). Evaluate all
-35 criteria from ${CLAUDE_PLUGIN_ROOT}/skills/deck-review/references/checklist-criteria.md
+35 criteria from <REFS>/checklist-criteria.md
 using the deck content (read from deck file or from slide_reviews.json for
 reference), the stage profile at <REVIEW_DIR>/stage_profile.json, and the
 deck inventory at <REVIEW_DIR>/deck_inventory.json.
@@ -451,6 +462,10 @@ Copy final deliverables to workspace root: `{Company}_Deck_Review.md`, `.html` (
 
 ```bash
 rm -rf "$REVIEW_DIR/.staging" 2>/dev/null || true
+# Remove the answered gate so a later fresh review of this company is not
+# misread as a resume. setup_run.py --clean also guards this, but clearing it
+# at the end of a completed run keeps the working directory honest.
+rm -f "$REVIEW_DIR/gate_state.json" 2>/dev/null || true
 ```
 
 ## Gotchas

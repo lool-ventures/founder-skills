@@ -66,19 +66,66 @@ def test_setup_run_cleans_existing_artifacts_with_clean_flag() -> None:
             assert not os.path.exists(os.path.join(review_dir, name))
 
 
-def test_setup_run_clean_preserves_gate_state() -> None:
-    """gate_state.json must survive --clean so re-invocation can find the answer (v3)."""
+def _plant_gate(review_dir: str, run_id: str, answer: str | None) -> None:
+    os.makedirs(review_dir, exist_ok=True)
+    body: dict = {"metadata": {"run_id": run_id}}
+    if answer is not None:
+        body["answer"] = answer
+    with open(os.path.join(review_dir, "gate_state.json"), "w") as f:
+        json.dump(body, f)
+
+
+def test_setup_run_resume_answered_matching_run_id_preserves_gate_state() -> None:
+    """Answered gate with run_id matching --run-id -> resume true; --clean keeps gate_state.json."""
     with tempfile.TemporaryDirectory() as d:
         artifacts_root = os.path.join(d, "artifacts")
         review_dir = os.path.join(artifacts_root, "deck-review-acme-corp")
-        os.makedirs(review_dir)
-        with open(os.path.join(review_dir, "gate_state.json"), "w") as f:
-            f.write('{"metadata":{"run_id":"r1"},"answer":"Looks right"}')
-        rc, _, _ = _run(
-            ["--artifacts-root", artifacts_root, "--slug", "acme-corp", "--clean", "--pretty"],
+        _plant_gate(review_dir, "r1", "Looks right")
+        rc, out, _ = _run(
+            ["--artifacts-root", artifacts_root, "--slug", "acme-corp", "--run-id", "r1", "--clean", "--pretty"],
             cwd=d,
         )
         assert rc == 0
+        assert out is not None
+        assert out["resume"] is True
+        assert out["gate_answer"] == "Looks right"
+        assert out["gate_run_id"] == "r1"
+        # resume -> --clean must NOT delete the gate
+        assert os.path.exists(os.path.join(review_dir, "gate_state.json"))
+
+
+def test_setup_run_clean_deletes_stale_answered_gate_on_run_id_mismatch() -> None:
+    """Answered gate from a PRIOR run (run_id mismatch) -> resume false; --clean deletes the stale gate."""
+    with tempfile.TemporaryDirectory() as d:
+        artifacts_root = os.path.join(d, "artifacts")
+        review_dir = os.path.join(artifacts_root, "deck-review-acme-corp")
+        _plant_gate(review_dir, "old-run", "Looks right")
+        rc, out, _ = _run(
+            ["--artifacts-root", artifacts_root, "--slug", "acme-corp", "--run-id", "new-run", "--clean", "--pretty"],
+            cwd=d,
+        )
+        assert rc == 0
+        assert out is not None
+        assert out["resume"] is False
+        # stale answered gate from a completed prior run must be removed
+        assert not os.path.exists(os.path.join(review_dir, "gate_state.json"))
+
+
+def test_setup_run_unanswered_gate_is_not_a_resume_and_preserved_without_clean() -> None:
+    """Gate with no answer -> resume false; without --clean it is preserved."""
+    with tempfile.TemporaryDirectory() as d:
+        artifacts_root = os.path.join(d, "artifacts")
+        review_dir = os.path.join(artifacts_root, "deck-review-acme-corp")
+        _plant_gate(review_dir, "r1", None)
+        rc, out, _ = _run(
+            ["--artifacts-root", artifacts_root, "--slug", "acme-corp", "--run-id", "r1", "--pretty"],
+            cwd=d,
+        )
+        assert rc == 0
+        assert out is not None
+        assert out["resume"] is False
+        assert out["gate_answer"] == ""
+        # no --clean -> nothing is removed
         assert os.path.exists(os.path.join(review_dir, "gate_state.json"))
 
 

@@ -530,7 +530,8 @@ def _section_slide_feedback(reviews: dict[str, Any] | None) -> str:
         "Strengths and weaknesses are the agent's analysis, not investor quotes.*\n"
     )
 
-    for review in _as_list(reviews.get("reviews")):
+    for raw_review in _as_list(reviews.get("reviews")):
+        review = _as_dict(raw_review)
         num = review.get("slide_number", "?")
         maps_to = review.get("maps_to", "unknown")
         lines.append(f"### Slide {num} ({maps_to})\n")
@@ -564,8 +565,9 @@ def _section_slide_feedback(reviews: dict[str, Any] | None) -> str:
     if missing:
         lines.append("### Slides to Add\n")
         lines.append("Investors at your stage will expect these:\n")
-        for m in missing:
-            imp = m.get("importance", "important")
+        for raw_m in missing:
+            m = _as_dict(raw_m)
+            imp = str(m.get("importance", "important"))
             expected = m.get("expected_type", "unknown")
             rec = m.get("recommendation", "")
             lines.append(f"- **[{imp.upper()}]** {expected}: {rec}")
@@ -592,7 +594,8 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
     # Category summary table
     lines.append("| Category | Pass | Fail | Warn | N/A |")
     lines.append("|----------|------|------|------|-----|")
-    for cat, counts in by_cat.items():
+    for cat, raw_counts in by_cat.items():
+        counts = _as_dict(raw_counts)
         lines.append(
             f"| {cat} | {counts.get('pass', 0)} | {counts.get('fail', 0)} "
             f"| {counts.get('warn', 0)} | {counts.get('not_applicable', 0)} |"
@@ -603,7 +606,8 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
     failed = _as_list(summary.get("failed_items"))
     if failed:
         lines.append("### Areas That Need Attention\n")
-        for f in failed:
+        for raw_f in failed:
+            f = _as_dict(raw_f)
             notes = f.get("notes", "")
             evidence = f.get("evidence", "")
             lines.append(f"- **{f.get('label', f.get('id', '?'))}** ({f.get('category', '?')})")
@@ -617,7 +621,8 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
     warned = _as_list(summary.get("warned_items"))
     if warned:
         lines.append("### Items Needing Attention\n")
-        for w in warned:
+        for raw_w in warned:
+            w = _as_dict(raw_w)
             notes = w.get("notes", "")
             lines.append(f"- **{w.get('label', w.get('id', '?'))}** ({w.get('category', '?')})")
             if notes:
@@ -639,7 +644,8 @@ def _section_priority_fixes(
 
     # Draw from failed checklist items (highest priority)
     if checklist is not None and not _is_stub(checklist):
-        for f in _as_list(_as_dict(checklist.get("summary")).get("failed_items")):
+        for raw_f in _as_list(_as_dict(checklist.get("summary")).get("failed_items")):
+            f = _as_dict(raw_f)
             label = f.get("label", f.get("id", "?"))
             notes = f.get("notes", "")
             fix = f"{label}: {notes}" if notes else label
@@ -647,13 +653,15 @@ def _section_priority_fixes(
 
     # Draw from missing slides
     if reviews is not None and not _is_stub(reviews):
-        for m in _as_list(reviews.get("missing_slides")):
+        for raw_m in _as_list(reviews.get("missing_slides")):
+            m = _as_dict(raw_m)
             if m.get("importance") == "critical":
                 fixes.append(f"Add missing {m.get('expected_type', 'slide')}: {m.get('recommendation', '')}")
 
     # Draw from warned items
     if checklist is not None and not _is_stub(checklist):
-        for w in _as_list(_as_dict(checklist.get("summary")).get("warned_items")):
+        for raw_w in _as_list(_as_dict(checklist.get("summary")).get("warned_items")):
+            w = _as_dict(raw_w)
             label = w.get("label", w.get("id", "?"))
             notes = w.get("notes", "")
             fix = f"{label}: {notes}" if notes else label
@@ -674,7 +682,7 @@ def _section_warnings(warnings: list[dict[str, str]]) -> str:
     if not warnings:
         return ""
 
-    sev_icons = {"high": "!!!", "medium": "!!", "acknowledged": "~", "low": "i", "info": "~"}
+    sev_icons = {"high": "!!!", "medium": "!!", "acknowledged": "~", "low": "i"}
     lines = ["## Warnings\n"]
     for w in warnings:
         sev = w.get("severity", "?")
@@ -702,7 +710,8 @@ def _section_full_checklist(checklist: dict[str, Any] | None) -> str:
 
     status_icons = {"pass": "PASS", "fail": "FAIL", "warn": "WARN", "not_applicable": "N/A"}
 
-    for i, item in enumerate(items, 1):
+    for i, raw_item in enumerate(items, 1):
+        item = _as_dict(raw_item)
         cat = item.get("category", "?")
         label = item.get("label", item.get("id", "?"))
         status = status_icons.get(item.get("status", "?"), "?")
@@ -792,8 +801,6 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
                     w["message"] += f" [Accepted: {acc['reason']}]"
                     break
 
-    status = "clean" if not warnings else "warnings"
-
     # Assemble report sections — treat corrupt artifacts as None for rendering
     def _render_safe(data: dict[str, Any] | None) -> dict[str, Any] | None:
         return None if data is _CORRUPT else data
@@ -803,27 +810,29 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     slide_reviews = _render_safe(artifacts.get("slide_reviews.json"))
     checklist_data = _render_safe(artifacts.get("checklist.json"))
 
-    sections = [
+    # Render every section EXCEPT Warnings first, so we can pre-scan the body
+    # for a marker collision and append MARKER_COLLISION before status and the
+    # Warnings section are computed. Otherwise status could read "clean" while
+    # a MARKER_COLLISION warning sits in the warnings list (and is missing from
+    # the rendered Warnings section).
+    body_sections = [
         _section_title(inventory),
         _section_executive_summary(stage_profile, checklist_data, inventory),
         _section_stage_context(stage_profile),
         _section_slide_feedback(slide_reviews),
         _section_checklist(checklist_data),
         _section_priority_fixes(checklist_data, slide_reviews),
-        _section_warnings(warnings),
-        _section_full_checklist(checklist_data),
     ]
-
-    report_markdown = "\n".join(sections)
+    appendix = _section_full_checklist(checklist_data)
+    body_markdown = "\n".join(body_sections)
 
     # v0.4.2 Mitigation 2: per-run uuid marker for Context B's Edit
     marker = f"<!-- COACHING_INSERTION_POINT_{uuid.uuid4().hex[:8]} -->"
 
-    # Pre-scan: check assembled body BEFORE appending the marker (otherwise we
-    # always find our own emission). Agent post-Edit verification uses the
-    # EXACT uuid (per-run), so substring collisions with body content are
-    # informational only — but worth flagging so authors can sanitize.
-    if "<!-- COACHING_INSERTION_POINT_" in report_markdown:
+    # Pre-scan: check the assembled body BEFORE appending the marker (otherwise
+    # we always find our own emission). The appendix is rendered below the
+    # marker but is part of the body content, so include it in the scan.
+    if "<!-- COACHING_INSERTION_POINT_" in (body_markdown + appendix):
         warnings.append(
             _warn(
                 "MARKER_COLLISION",
@@ -834,6 +843,11 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
                 ),
             )
         )
+
+    # Compute status AFTER MARKER_COLLISION can be appended, then splice the
+    # Warnings section (which now reflects the final warnings list) into place.
+    status = "clean" if not warnings else "warnings"
+    report_markdown = "\n".join([body_markdown, _section_warnings(warnings), appendix])
 
     report_markdown += (
         f"\n\n{marker}\n\n---\n"
@@ -848,8 +862,14 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         high = [w for w in warnings if w["severity"] == "high"]
         medium = [w for w in warnings if w["severity"] == "medium"]
         low = [w for w in warnings if w["severity"] == "low"]
-        info = [w for w in warnings if w["severity"] == "info"]
-        print(f"Warnings: {len(high)} high, {len(medium)} medium, {len(low)} low, {len(info)} info", file=sys.stderr)
+        # accepted_warnings re-marks medium warnings as 'acknowledged' — count
+        # them so the summary line totals match the per-warning lines below.
+        # There is no 'info' severity, so no info bucket.
+        acknowledged = [w for w in warnings if w["severity"] == "acknowledged"]
+        print(
+            f"Warnings: {len(high)} high, {len(medium)} medium, {len(low)} low, {len(acknowledged)} acknowledged",
+            file=sys.stderr,
+        )
         for w in warnings:
             print(f"  [{w['severity'].upper()}] {w['code']}: {w['message']}", file=sys.stderr)
     else:

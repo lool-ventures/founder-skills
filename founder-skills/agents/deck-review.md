@@ -8,9 +8,11 @@ description: >
   dispatch. Returns structured JSON that the main thread pipes through the
   producer script. No Bash required.
 
-  Context B (post-compose coaching): reads report.md, appends
-  ## Coaching Commentary, verifies all canonical artifacts on disk, returns
-  structured success payload. No Bash required.
+  Context B (post-compose coaching): receives the structured coaching_payload
+  inlined in the prompt (does NOT Read the full report.md), Edits
+  ## Coaching Commentary into report.md via the per-run insertion marker,
+  verifies all canonical artifacts on disk, returns structured success payload.
+  No Bash required.
 model: inherit
 color: magenta
 tools: ["Read", "Edit", "Glob", "Grep"]

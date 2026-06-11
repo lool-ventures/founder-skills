@@ -77,6 +77,13 @@ def test_validate_rejects_bool_as_integer() -> None:
     assert any("count" in e and "integer" in e and "boolean" in e for e in errors)
 
 
+def test_validate_rejects_bool_as_number() -> None:
+    """bool must NOT satisfy type=number (e.g. score_pct) — bool is an int subclass."""
+    schema = {"type": "object", "properties": {"score_pct": {"type": "number"}}}
+    errors = validate({"score_pct": False}, schema)
+    assert any("score_pct" in e and "number" in e and "boolean" in e for e in errors)
+
+
 def test_validate_reports_unknown_schema_type() -> None:
     """A typo'd type (e.g., 'Object' capitalized) should produce a clear error."""
     schema = {"type": "Object"}

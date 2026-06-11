@@ -43,9 +43,10 @@ def validate(data: Any, schema: dict[str, Any], path: str = "") -> list[str]:
         if py_type is None:
             errors.append(f"{path or '<root>'}: schema has unknown type '{expected_type}'")
             return errors
-        # bool is a subclass of int in Python — disambiguate
-        if expected_type == "integer" and isinstance(data, bool):
-            errors.append(f"{path or '<root>'}: expected integer, got boolean")
+        # bool is a subclass of int in Python — disambiguate so a stray
+        # True/False does not satisfy "integer" or "number" fields.
+        if expected_type in ("integer", "number") and isinstance(data, bool):
+            errors.append(f"{path or '<root>'}: expected {expected_type}, got boolean")
             return errors
         if not isinstance(data, py_type):
             actual = type(data).__name__
