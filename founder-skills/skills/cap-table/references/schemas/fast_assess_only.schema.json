@@ -107,6 +107,11 @@
     "rerun_hint": {
       "type": "string",
       "description": "Human-readable instruction for getting full artifacts."
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Disclosed assumptions the fast-assess path made to keep the directional answer flowing (e.g. defaulting a missing note conversion date to today). Empty when no assumptions were made."
     }
   },
   "additionalProperties": false

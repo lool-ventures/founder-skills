@@ -120,11 +120,18 @@ def _evaluate_date_status(
     if event_date_value is None:
         return "missing_event_date", False, False
 
+    # Near-edge proximity is measured from the audit reference date (`today`,
+    # defaulting to the event_date when no override is supplied) — it answers
+    # "is this rule's window about to open/close relative to when we're
+    # auditing?", which is what the watchlist consumes. The --today CLI override
+    # exists so tests can pin the reference date deterministically.
+    reference = today if today is not None else event_date_value
+
     # Window-bounded
     if start is not None and event_date_value < start:
         # pre_effective; check near_start
-        delta_start = (start - event_date_value).days
-        near_start = delta_start <= near_start_days
+        delta_start = (start - reference).days
+        near_start = 0 <= delta_start <= near_start_days
         return "pre_effective", False, near_start
 
     if end is not None and event_date_value > end:
@@ -133,7 +140,7 @@ def _evaluate_date_status(
     # in_window — check near_end if end exists
     near_end = False
     if end is not None:
-        delta_end = (end - event_date_value).days
+        delta_end = (end - reference).days
         near_end = 0 <= delta_end <= near_end_days
 
     return "in_window", near_end, False
