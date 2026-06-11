@@ -34,16 +34,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import Any
 
-# Rule pack version this script targets. Bumped when math semantics change.
-RULE_PACK_VERSION = "0.4.0"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _emit import add_output_args, emit  # noqa: E402
+from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 
 # Typed error codes (mirror design doc §5.1)
 E_SAFE_REQUIRES_CONVERSION_EVENT = "E_SAFE_REQUIRES_CONVERSION_EVENT"
 E_SAFE_CAP_MISSING_DENOMINATOR = "E_SAFE_CAP_MISSING_DENOMINATOR"
 E_SAFE_CIRCULAR_MFN = "E_SAFE_CIRCULAR_MFN"
+E_SAFE_INVALID_PRICE_INPUT = "E_SAFE_INVALID_PRICE_INPUT"
 E_UNKNOWN_SAFE_FORM = "E_UNKNOWN_SAFE_FORM"
 
 
@@ -280,6 +283,18 @@ def convert_safe_priced_round(
 
     # Discount candidate (rule: safe.discount_rate_semantics)
     if discount_multiplier is not None and equity_financing_price is not None:
+        if discount_multiplier <= 0:
+            return {
+                "branch": "rejected",
+                "error": E_SAFE_INVALID_PRICE_INPUT,
+                "reason": f"discount_multiplier must be > 0; got {discount_multiplier!r}",
+            }
+        if equity_financing_price <= 0:
+            return {
+                "branch": "rejected",
+                "error": E_SAFE_INVALID_PRICE_INPUT,
+                "reason": f"equity_financing_price must be > 0; got {equity_financing_price!r}",
+            }
         discount_price = equity_financing_price * discount_multiplier
         candidate_prices.append(("discount_price", discount_price))
 
@@ -396,7 +411,7 @@ def detect_mfn_cycles(safes: list[dict[str, Any]]) -> list[set[str]]:
 
 def _cli() -> int:
     shared = argparse.ArgumentParser(add_help=False)
-    shared.add_argument("--pretty", action="store_true")
+    add_output_args(shared)
 
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -411,13 +426,32 @@ def _cli() -> int:
     pr.add_argument(
         "--form",
         required=True,
-        choices=["yc_postmoney_cap", "yc_postmoney_discount", "yc_uncapped_mfn", "cap_plus_discount", "other"],
+        choices=[
+            "yc_postmoney_cap",
+            "yc_postmoney_discount",
+            "yc_uncapped_mfn",
+            "cap_plus_discount",
+            "yc_premoney_cap_only",
+            "pre_money_cap_and_discount_legacy",
+        ],
     )
     pr.add_argument("--cap", type=float, default=None)
     pr.add_argument("--discount", type=float, default=None, help="Multiplier form: 0.80 = 20%% discount")
     pr.add_argument("--company-cap", type=float, required=True)
     pr.add_argument("--equity-price", type=float, default=None)
     pr.add_argument("--override", type=float, default=None, help="Conversion price override (counsel-supplied)")
+    pr.add_argument(
+        "--pre-money-cap",
+        type=float,
+        default=None,
+        help="Pre-money valuation cap (legacy pre-money forms)",
+    )
+    pr.add_argument(
+        "--pre-money-fd",
+        type=float,
+        default=None,
+        help="Pre-money fully-diluted denominator (legacy pre-money forms)",
+    )
 
     cycles = sub.add_parser("detect-mfn-cycles", parents=[shared], help="Detect circular MFN chains")
     cycles.add_argument("--instruments", required=True)
@@ -439,6 +473,8 @@ def _cli() -> int:
             company_capitalization=args.company_cap,
             equity_financing_price=args.equity_price,
             conversion_price_override=args.override,
+            pre_money_valuation_cap=args.pre_money_cap,
+            pre_money_fd=args.pre_money_fd,
         )
     else:  # detect-mfn-cycles
         with open(args.instruments, encoding="utf-8") as f:
@@ -449,10 +485,7 @@ def _cli() -> int:
             "error": E_SAFE_CIRCULAR_MFN if cycle_list else None,
         }
 
-    if args.pretty:
-        print(json.dumps(result, indent=2))
-    else:
-        print(json.dumps(result))
+    emit(result, args)
     return 0
 
 

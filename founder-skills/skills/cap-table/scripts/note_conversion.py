@@ -32,14 +32,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import date
 from typing import Any
 
-RULE_PACK_VERSION = "0.4.0"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _emit import add_output_args, emit  # noqa: E402
+from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 
 E_NOTE_NO_CONVERSION_PATH = "E_NOTE_NO_CONVERSION_PATH"
 E_NOTE_OVERRIDE_BRANCH_MISMATCH = "E_NOTE_OVERRIDE_BRANCH_MISMATCH"
+E_NOTE_INVALID_PRICE_INPUT = "E_NOTE_INVALID_PRICE_INPUT"
 
 
 def _parse_date(s: str | None) -> date | None:
@@ -298,6 +302,11 @@ def convert_note(
 
     if branch == "maturity_convert_at_cap" and override is not None:
         # Override branch — bypass rule
+        if override <= 0:
+            base["branch"] = "rejected"
+            base["error"] = E_NOTE_INVALID_PRICE_INPUT
+            base["reason"] = f"maturity_conversion_price_override must be > 0; got {override!r}"
+            return base
         conversion_price = override
         base["conversion_price"] = conversion_price
         base["conversion_shares"] = balance / conversion_price
@@ -333,6 +342,11 @@ def convert_note(
         )
 
     if branch != "maturity_convert_at_cap" and discount is not None and qualified_financing_price is not None:
+        if discount <= 0:
+            base["branch"] = "rejected"
+            base["error"] = E_NOTE_INVALID_PRICE_INPUT
+            base["reason"] = f"discount_multiplier must be > 0; got {discount!r}"
+            return base
         discount_price = qualified_financing_price * discount
         candidate_prices.append(("discount_price", discount_price))
         provenance.append(
@@ -402,7 +416,7 @@ def derive_scenario_completeness(per_note: dict[str, dict[str, Any]]) -> str:
 
 def _cli() -> int:
     shared = argparse.ArgumentParser(add_help=False)
-    shared.add_argument("--pretty", action="store_true")
+    add_output_args(shared)
 
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -439,7 +453,7 @@ def _cli() -> int:
         )
         result = {"accrued_interest": accrued}
 
-    print(json.dumps(result, indent=2 if args.pretty else None))
+    emit(result, args)
     return 0
 
 

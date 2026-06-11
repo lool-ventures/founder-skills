@@ -55,6 +55,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import sys
 from typing import Any
 
@@ -68,7 +69,9 @@ SIGN_FLIP_DAMP_ALPHA = 0.5
 SIGN_FLIP_DETECTION_WINDOW = 3
 
 # Import sibling math producers
-sys.path.insert(0, __file__.rsplit("/", 1)[0])
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _emit import add_output_args, emit  # noqa: E402
+from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 from anti_dilution import (  # noqa: E402
     bbwa_new_conversion_price,
     full_ratchet_new_conversion_price,
@@ -79,9 +82,6 @@ from safe_conversion import (  # noqa: E402
     convert_safe_priced_round,
     detect_mfn_cycles,
 )
-
-RULE_PACK_VERSION = "0.4.0"
-
 
 # ============================================================================
 # Adjuster Protocol — types
@@ -311,10 +311,12 @@ def _preferred_as_converted_total(preferred_series: list[dict[str, Any]]) -> int
         shares = int(s.get("shares", 0))
         ocp = float(s.get("original_conversion_price", s.get("original_issue_price", 1.0)))
         ccp = float(s.get("current_conversion_price", ocp))
-        if ccp == 0:
-            total += shares
-        else:
-            total += int(round(shares * (ocp / ccp)))
+        if ccp <= 0:
+            raise ValueError(
+                f"E_PREFERRED_SERIES_INVALID_PRICE: preferred_series[{s.get('series_id', '?')}]"
+                f".current_conversion_price resolves to {ccp} (must be > 0)."
+            )
+        total += int(round(shares * (ocp / ccp)))
     return total
 
 
@@ -510,6 +512,22 @@ def solve_priced_round(
 
     blockers: list[dict[str, Any]] = []
 
+    # Notes present but no conversion date → structural-only blocker (never
+    # crash). Mirrors run_scenario's note-path E_NOTE_NO_CONVERSION_DATE shape.
+    if notes and not conversion_event_date:
+        return {
+            "completeness": "structural_only",
+            "blockers": [
+                {
+                    "code": "E_NOTE_NO_CONVERSION_DATE",
+                    "instance_id": None,
+                    "remedy": "Provide conversion_event_date when convertible notes are present.",
+                }
+            ],
+            "per_safe": {},
+            "per_note": {},
+        }
+
     # MFN resolution is STRUCTURAL — one-time pre-pass, not per-iter.
     safes = _resolve_mfn_elections(safes)
 
@@ -596,9 +614,11 @@ def solve_priced_round(
     # financing shares and in-connection pool top-ups.
     company_cap_estimate = float(pre_fd)
     aitken_engaged = False
+    aitken_fallback_engaged = False
     damping_engaged = False
     ad_breakdown: list[dict[str, Any]] = []
     ad_warnings: list[dict[str, Any]] = []
+    solver_warnings: list[dict[str, Any]] = []
 
     # Initialize per-iter outputs (used in convergence-loop scope)
     safe_shares: float = 0.0
@@ -649,7 +669,8 @@ def solve_priced_round(
             equity_financing_price=price,
         )
         if notes:
-            assert conversion_event_date, "conversion_event_date required when notes present"
+            # conversion_event_date guaranteed non-None by the structural guard
+            # at the top of solve_priced_round (returns early otherwise).
             note_shares, per_note = _note_shares_at_price(
                 notes,
                 conversion_event_date=conversion_event_date,
@@ -716,6 +737,21 @@ def solve_priced_round(
                         # Apply Aitken projection as the next-iter starting point
                         price = projection
                         history[-1] = price
+                    elif not aitken_fallback_engaged:
+                        # Fence tripped: projected step exceeds the 20× vanilla
+                        # bound. Abort acceleration and revert to vanilla
+                        # iteration; record + warn so the watchlist rule
+                        # anti_dilution.solver_aitken_fallback_engaged can fire.
+                        aitken_fallback_engaged = True
+                        solver_warnings.append(
+                            {
+                                "code": "W_SOLVER_AITKEN_FALLBACK",
+                                "detail": (
+                                    "Aitken acceleration projected a step > 20× the vanilla "
+                                    "step; reverted to unaccelerated fixed-point iteration."
+                                ),
+                            }
+                        )
 
         # Termination
         if rel_change < convergence_threshold and abs_change < DEFAULT_ABS_THRESHOLD:
@@ -760,7 +796,9 @@ def solve_priced_round(
         pre_money_fd=adj_pre_fd,
         equity_financing_price=price,
     )
-    if notes and conversion_event_date:
+    if notes:
+        # conversion_event_date guaranteed non-None by the structural guard
+        # at the top of solve_priced_round (returns early otherwise).
         note_shares, per_note = _note_shares_at_price(
             notes,
             conversion_event_date=conversion_event_date,
@@ -820,11 +858,18 @@ def solve_priced_round(
     # Pre-AD baseline (only meaningful when AD fired)
     if has_ad_protection and ad_breakdown:
         pre_ad_new_money_shares = new_money / pre_pps if pre_pps > 0 else 0.0
+        # Reconstruct the pre-AD FD denominator from the SAME components the
+        # post-AD post_fd uses (via final_ats) so the only difference is the
+        # frozen pre-AD preferred-as-converted. final_ats["common_shares"]
+        # already includes common_batches; warrants_underlying_total is included
+        # in FD per §6.1. Omitting batches/warrants overstates the pre-AD
+        # baseline and corrupts the headline AD delta.
         pre_ad_post_fd = (
-            founders_shares
+            final_ats["common_shares"]
             + pre_ad_preferred_as_converted
             + final_ats["options_outstanding"]
             + final_ats["options_available"]
+            + final_ats.get("warrants_underlying_total", 0)
             + pool_topup_shares
             + safe_shares
             + note_shares
@@ -877,6 +922,11 @@ def solve_priced_round(
         "post_round_fully_diluted_shares": int(round(post_fd)),
         "shares_breakdown": {
             "pre_round_fully_diluted": int(pre_fd),
+            # AD ratcheting mutates CCP, inflating preferred-as-converted; this
+            # is the delta between the pre-AD pre_fd and the AD-adjusted
+            # adj_pre_fd. Without it the breakdown does not reconcile to
+            # post_round_fully_diluted_shares whenever AD fires.
+            "ad_delta": int(round(adj_pre_fd - pre_fd)),
             "safe_converted": int(round(safe_shares)),
             "note_converted": int(round(note_shares)),
             "pool_topup": int(round(pool_topup_shares)),
@@ -918,12 +968,17 @@ def solve_priced_round(
         if ad_warnings:
             result["warnings"] = ad_warnings
 
-    # Convergence diagnostics (emitted when sign-flip damping or Aitken engaged)
-    if aitken_engaged or damping_engaged:
+    # Convergence diagnostics (emitted when sign-flip damping or Aitken/fence engaged)
+    if aitken_engaged or aitken_fallback_engaged or damping_engaged:
         result["convergence_diagnostics"] = {
             "aitken_engaged": aitken_engaged,
+            "aitken_fallback_engaged": aitken_fallback_engaged,
             "damping_engaged": damping_engaged,
         }
+
+    if solver_warnings:
+        result.setdefault("warnings", [])
+        result["warnings"].extend(solver_warnings)
 
     return result
 
@@ -939,7 +994,7 @@ def _cli() -> int:
     p.add_argument("--conversion-date", default=None)
     p.add_argument("--max-iter", type=int, default=DEFAULT_MAX_ITERATIONS)
     p.add_argument("--threshold", type=float, default=DEFAULT_CONVERGENCE_THRESHOLD)
-    p.add_argument("--pretty", action="store_true")
+    add_output_args(p)
     args = p.parse_args()
 
     with open(args.cap_state, encoding="utf-8") as f:
@@ -959,7 +1014,7 @@ def _cli() -> int:
         max_iterations=args.max_iter,
         convergence_threshold=args.threshold,
     )
-    print(json.dumps(result, indent=2 if args.pretty else None, default=str))
+    emit(result, args, default=str)
     return 0
 
 

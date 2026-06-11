@@ -49,14 +49,13 @@ import sys
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 
 _SCHEMA_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "references",
     "schemas",
 )
-
-RULE_PACK_VERSION = "0.4.0"
 
 VALID_LIQ_PREF_TYPES = {"non_participating", "participating", "participating_capped"}
 VALID_ANTI_DILUTION = {

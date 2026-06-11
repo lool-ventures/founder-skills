@@ -44,12 +44,12 @@ import sys
 from typing import Any
 
 # Import sibling math producers
-sys.path.insert(0, __file__.rsplit("/", 1)[0])
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 from cap_state import build_cap_state  # noqa: E402
 from priced_round import solve_priced_round  # noqa: E402
 
 SCHEMA_VERSION = "v0.1.0-cap-table-fast-assess"
-RULE_PACK_VERSION = "0.4.0"
 
 
 def _fingerprint(prompt: str, attached_docs: list[str]) -> dict[str, Any]:
@@ -91,6 +91,7 @@ def quick_assess(
     new_money: float,
     target_pool_percent: float | None,
     target_basis: str,
+    event_date: str | None = None,
     founder_prompt: str = "",
     attached_docs: list[str] | None = None,
     run_id_override: str | None = None,
@@ -110,6 +111,19 @@ def quick_assess(
     }
     cs = build_cap_state(inputs, instruments)
 
+    # When notes are present but no conversion date was supplied, fast-assess
+    # defaults to today's date AND discloses the assumption (the math producer
+    # solve_priced_round NEVER defaults — it returns a structural blocker). This
+    # keeps the directional answer flowing while flagging the assumption.
+    assumptions: list[str] = []
+    resolved_event_date = event_date
+    if (notes or []) and not resolved_event_date:
+        resolved_event_date = _dt.date.today().isoformat()
+        assumptions.append(
+            f"No note conversion date supplied; assumed today ({resolved_event_date}) "
+            f"for convertible-note conversion math."
+        )
+
     solver_result = solve_priced_round(
         cap_state=cs,
         safes=safes,
@@ -118,6 +132,7 @@ def quick_assess(
         new_money=new_money,
         target_pool_percent=target_pool_percent,
         target_basis=target_basis,
+        conversion_event_date=resolved_event_date,
     )
 
     completeness = solver_result.get("completeness", "structural_only")
@@ -174,6 +189,7 @@ def quick_assess(
             "For full structured artifacts (scenarios, counsel packet, anti-dilution, "
             "rule_audit), re-run cap-table without fast-assess mode."
         ),
+        "assumptions": assumptions,
     }
 
     # Founder-facing markdown
@@ -353,6 +369,13 @@ def quick_assess(
     md_lines.append("_Ask for the full review to get all of the above plus the counsel-handoff packet._")
     md_lines.append("")
 
+    if assumptions:
+        md_lines.append("## Assumptions")
+        md_lines.append("")
+        for a in assumptions:
+            md_lines.append(f"- {a}")
+        md_lines.append("")
+
     sentinel["_report_md"] = "\n".join(md_lines)
     return sentinel
 
@@ -373,6 +396,12 @@ def _cli() -> int:
     p.add_argument("--new-money", type=float, required=True)
     p.add_argument("--target-pool-percent", type=float, default=None)
     p.add_argument("--target-basis", default="post_money")
+    p.add_argument(
+        "--event-date",
+        default=None,
+        help="ISO conversion event date for convertible notes. If notes are present and "
+        "this is omitted, fast-assess defaults to today and discloses the assumption.",
+    )
     p.add_argument("--review-dir", required=True, help="Output directory (e.g. cap-table-{slug}-fastassess/)")
     p.add_argument("--founder-prompt", default="")
     p.add_argument("--attached-doc", action="append", default=[])
@@ -407,6 +436,7 @@ def _cli() -> int:
         new_money=args.new_money,
         target_pool_percent=args.target_pool_percent,
         target_basis=args.target_basis,
+        event_date=args.event_date,
         founder_prompt=args.founder_prompt,
         attached_docs=args.attached_doc,
         run_id_override=args.run_id,

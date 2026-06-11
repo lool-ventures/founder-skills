@@ -27,6 +27,7 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact  # noqa: E402
+from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 from flip_scenario import flip_share_for_share  # noqa: E402
 from note_conversion import convert_note, derive_scenario_completeness  # noqa: E402
 from priced_round import solve_priced_round  # noqa: E402
@@ -124,7 +125,7 @@ def run_safe_conversion_scenario(
                     "output_field": "cap_implied_outputs",
                     "source_type": "rule",
                     "rule_id": "safe.post_money_cap_conversion",
-                    "rule_pack_version": "0.3.2",
+                    "rule_pack_version": RULE_PACK_VERSION,
                     "source_ref": None,
                 }
             ],
