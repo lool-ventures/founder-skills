@@ -20,6 +20,7 @@ Security-relevant code in this project includes scripts that process user input:
 - `founder-skills/skills/ic-sim/scripts/` — IC simulation scoring and conflict detection
 - `founder-skills/skills/financial-model-review/scripts/` — financial model extraction, validation, and scoring
 - `founder-skills/skills/competitive-positioning/scripts/` — competitor landscape validation, moat scoring, and positioning analysis
+- `founder-skills/skills/cap-table/scripts/` — instrument and cap-table extraction (PDF/DOCX/XLSX), conversion and dilution math, and counsel-packet assembly
 
 All scripts accept structured input (JSON/CLI arguments) and produce structured output. The primary risk surface is malformed input leading to unexpected behavior.
 

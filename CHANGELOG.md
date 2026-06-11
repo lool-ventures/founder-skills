@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.5.0] - 2026-06-10 — New skill: cap-table; financial-model-review hardening
 
+### Highlights
+
 This release ships the cap-table skill for the first time and completes a pre-distribution hardening
 pass on financial-model-review. Users upgrading from 0.4.7 get both skills in their first-ever
 stable form — neither was available in any prior distributed release.
@@ -176,7 +178,7 @@ Gate 2 no longer blocks publication for profitable or default-alive companies. P
 #### HTML self-containment and escaping
 
 - **Chart.js vendored into `explore.py`.** The explorer previously loaded Chart.js from a CDN. The Cowork iframe sandbox blocks external fetches; offline `file://` viewing also broke. Copied the vendored `chart.min.js` (already used by `competitive-positioning/scripts/explore.py`) into `financial-model-review/scripts/vendor/` and switched to inline embedding.
-- **`</script>` injection hardening.** Founder-document-derived data (company names, LLM-extracted strings) embedded as JSON in `<script>` blocks now has `<` escaped to `<` at every embed site in both `explore.py` and `review_inputs.py`.
+- **`</script>` injection hardening.** Founder-document-derived data (company names, LLM-extracted strings) embedded as JSON in `<script>` blocks now has `<` escaped to `\u003c` at every embed site in both `explore.py` and `review_inputs.py`.
 - **HTML escaping for warning/commentary fields.** Extraction-warning `candidates` and `untraceable[*].role` strings in `review_inputs.py` are now wrapped with `html.escape()`. Commentary fields (`callout`, `highlight`, `watch_out`) in `explore.py` are assigned via `textContent`/`createTextNode` instead of HTML string concatenation.
 - **Scenario labels and banner title escaped** via the shared `_esc()` helper throughout the explorer.
 
@@ -229,6 +231,10 @@ Surfaces-based counsel-packet rendering and tag backfill across the existing ~70
 
 ## [0.4.7] - 2026-05-19
 
+### Highlights
+
+Gives `competitive-positioning`'s research sub-agent the `WebSearch` tool it was always dispatched to use, so competitor research and moat-trajectory evidence are honest rather than guessed from training data.
+
 ### Fixed
 
 - **`competitive-positioning`: sub-agent had no network tools but was dispatched to research competitors.** SKILL.md Steps 4 (LANDSCAPE_RESEARCH), 5a (MOAT_SCORING), and 5b (POSITIONING_SCORING) dispatch the sub-agent with prompts asking for `evidence_source: researched | agent_estimate` (and Step 5a's `trajectory: building/stable/eroding`, which is inherently research-dependent). The agent's `tools:` allowlist was `["Read", "Edit", "Glob", "Grep"]` — no network access — and Step 4 explicitly forbade the main thread from doing the research either. Net effect since the skill shipped: every `evidence_source: "researched"` stamp was a training-cutoff guess wearing a research label. CHECKLIST (Step 6) is unaffected (artifact grading only, no research).
@@ -250,6 +256,10 @@ Surfaces-based counsel-packet rendering and tag backfill across the existing ~70
 
 ## [0.4.6] - 2026-05-13
 
+### Highlights
+
+Fixes a `market-sizing` gap where deck TAM/SAM/SOM figures stated under non-canonical keys silently bypassed deck-vs-computed reconciliation, and adds a narrative escape hatch for deck claims that don't fit the canonical shape.
+
 ### Fixed
 
 - **`market-sizing`: non-canonical `existing_claims` keys silently bypassed deck-vs-computed reconciliation.** When a deck stated TAM/SAM/SOM figures under non-canonical keys (e.g., `SAM_Israel_only`, `TAM_global`), both the `DECK_CLAIM_MISMATCH` warning and the report's provenance section's `deck_claim` / `delta_vs_deck_pct` columns silently returned `None` — `compose_report.py` and `visualize.py` look up `tam`/`sam`/`som` by exact lowercase name via `dict.get()`. The skill produced a complete report with no signal that comparison had been short-circuited, allowing downstream framing to treat a missing deck figure as a wrong deck figure.
@@ -268,6 +278,10 @@ Surfaces-based counsel-packet rendering and tag backfill across the existing ~70
 - `WARNING_SEVERITY` totality test updated 19 → 20 codes.
 
 ## [0.4.5] - 2026-05-10
+
+### Highlights
+
+Adds a skill-quality CI pipeline — contract tests, compose invariants, and a deck-review end-to-end smoke — that runs on every PR and gates releases on tag-push.
 
 ### Added
 
@@ -297,6 +311,10 @@ Surfaces-based counsel-packet rendering and tag backfill across the existing ~70
   The workflow env-injects both `ANTHROPIC_API_KEY_CI` and `CLAUDE_CODE_OAUTH_TOKEN_CI` if set; whichever is present is used. Configure exactly one in repo secrets.
 
 ## [0.4.4] - 2026-05-09
+
+### Highlights
+
+Retires the single-purpose `verify-cowork-clone.sh` in favor of `claude-plugin-doctor`, which diagnoses drift across all cache layers rather than just the marketplace clone HEAD.
 
 ### Removed
 
@@ -329,6 +347,10 @@ Skill, plugin, and dev-workflow alignment with the documented Claude Code v2.1.1
 
 ## [0.4.2] - 2026-05-04
 
+### Highlights
+
+Coaching commentary now reasons from a structured `coaching_payload` block in `report.json` instead of re-reading the full report, saving tokens and aligning producer schemas across skills.
+
 ### Changed
 
 - **Coaching commentary now reads structured data instead of the full report.** Each skill's `compose_report.py` emits a structured `coaching_payload` block in `report.json` (per-skill schema, with summary stats and failed/warned items). The post-compose coaching sub-agent reasons from this payload directly and inserts `## Coaching Commentary` at a per-run marker (`<!-- COACHING_INSERTION_POINT_<8-hex> -->`) via `Edit`, instead of re-reading `report.md`. Empirical: ~9K tokens saved per coaching run on `deck-review`; larger savings expected on `financial-model-review` (its `report.md` is typically ~3× larger).
@@ -343,6 +365,10 @@ Skill, plugin, and dev-workflow alignment with the documented Claude Code v2.1.1
 - Tests covering coaching payload shapes, marker placement and collision handling, severity-sorted truncation, idempotency, and cross-skill dispatch contracts.
 
 ## [0.4.1] - 2026-05-03
+
+### Highlights
+
+Skills now run inline in the main thread so they work end-to-end on Cowork, with heavy analytical steps dispatched to sub-agents and coaching commentary appended via a post-compose dispatch.
 
 ### Changed
 
@@ -362,6 +388,10 @@ Skill, plugin, and dev-workflow alignment with the documented Claude Code v2.1.1
 - Per-skill regression tests for compose-script output verification and tolerant JSON extraction.
 
 ## [0.4.0] - 2026-05-03
+
+### Highlights
+
+Replaces `deck-review`'s heredoc-written JSON with validating Python producer scripts that schema-check every artifact, and moves the stage gate to a checkpoint-and-resume flow.
 
 ### Changed
 
@@ -386,6 +416,10 @@ Hardens `deck-review` against several issues surfaced in real Cowork runs:
 - The "Different stage" path no longer asks the agent to mutate the artifact directly — `stage_profile.py --rebuild-stage` does it.
 
 ## [0.3.1] - 2026-04-29
+
+### Highlights
+
+Gives every founder-skills sub-agent a persistence path (`Write`/`Edit`) that survives Cowork's `Bash` filtering, so sub-agents write their JSON/HTML artifacts instead of degrading to prose narration.
 
 ### Fixed
 

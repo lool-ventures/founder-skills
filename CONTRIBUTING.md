@@ -11,7 +11,7 @@ Questions? Start a thread in [GitHub Discussions](https://github.com/lool-ventur
 git clone https://github.com/<your-username>/founder-skills.git
 cd founder-skills
 
-# Install dependencies (requires Python 3.12+ and uv)
+# Install dependencies (requires Python 3.10+ and uv)
 uv sync --extra dev
 ```
 
@@ -31,6 +31,7 @@ uv sync --extra dev
    uv run mypy founder-skills/skills/ic-sim/scripts/
    uv run mypy founder-skills/skills/financial-model-review/scripts/
    uv run mypy founder-skills/skills/competitive-positioning/scripts/
+   uv run mypy founder-skills/skills/cap-table/scripts/
    uv run mypy founder-skills/tests/
    uv run pytest                                               # tests (e2e auto-skips without auth)
    ```
@@ -78,7 +79,7 @@ founder-skills/
   tests/test_<name>.py    # Regression tests
 ```
 
-Use the existing skills (`market-sizing`, `deck-review`, `ic-sim`, `financial-model-review`, `competitive-positioning`) as templates. Skills and agents are auto-discovered from the directory structure — no registration needed. Key conventions:
+Use the existing skills (`market-sizing`, `deck-review`, `ic-sim`, `financial-model-review`, `competitive-positioning`, `cap-table`) as templates. Skills and agents are auto-discovered from the directory structure — no registration needed. Key conventions:
 
 - **Scripts** output JSON to stdout, warnings/errors to stderr
 - **Scripts** support `--pretty` for human-readable output and `-o <file>` to write to file

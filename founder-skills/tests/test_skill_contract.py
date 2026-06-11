@@ -184,3 +184,32 @@ def test_no_internal_version_refs_in_user_facing_files() -> None:
             if _INTERNAL_VERSION_REF.search(line):
                 offenders.append(f"{path.relative_to(repo)}:{i}: {line.strip()}")
     assert not offenders, "internal version refs in user-facing files:\n" + "\n".join(offenders)
+
+
+# Matches `uv run mypy founder-skills/skills/<skill>/scripts/` invocations in
+# either CLAUDE.md's Type Checking section or ci.yml's typecheck job.
+_MYPY_SKILL_DIR = re.compile(r"uv run mypy (founder-skills/skills/[\w-]+/scripts/)")
+
+
+def _mypy_skill_dirs(text: str) -> set[str]:
+    return set(_MYPY_SKILL_DIR.findall(text))
+
+
+def test_ci_mypy_matrix_matches_claude_md() -> None:
+    """Every skill scripts dir mypy-checked per CLAUDE.md's Type Checking
+    section must also be type-checked in ci.yml's typecheck job. Guards against
+    a new skill being added to the docs but silently omitted from CI (the
+    v0.4.3 bug class, where competitive-positioning was missing from the
+    matrix, and the later recurrence with cap-table)."""
+    claude_md = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    ci_yml = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    documented = _mypy_skill_dirs(claude_md)
+    in_ci = _mypy_skill_dirs(ci_yml)
+    assert documented, "no `uv run mypy founder-skills/skills/.../scripts/` lines found in CLAUDE.md"
+
+    missing = sorted(documented - in_ci)
+    assert not missing, (
+        "CLAUDE.md's Type Checking section lists skill scripts dirs that ci.yml's "
+        "typecheck job does not run mypy on (untypechecked in CI):\n" + "\n".join(missing)
+    )

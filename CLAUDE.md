@@ -31,6 +31,7 @@
 - `founder-skills/skills/cap-table/` — Cap-table skill (SAFE / note conversion, priced rounds, anti-dilution, Israeli ↔ Delaware flips)
 - `founder-skills/agents/cap-table.md` — Cap-table agent definition (Context A extraction + Context B coaching)
 - `founder-skills/tests/test_cap_table.py` — Cap-table regression tests (math producers + 11-gotcha regression suite)
+- `founder-skills/tests/test_visualize_cap_table.py` — Cap-table HTML visualization tests
 - `founder-skills/tests/cowork_async_subagent_filter.py` — Cowork sub-agent tool-name compatibility helper (skill-quality CI; v0.4.0-regression detector)
 - `founder-skills/tests/compose_invocations.py` — Per-skill compose-script invocation registry (skill-quality CI)
 - `founder-skills/tests/test_cowork_async_subagent_filter.py` — Helper unit tests
@@ -175,11 +176,11 @@ uv run pytest founder-skills/tests/ -v -m "not e2e" # explicitly skip the LLM-dr
 
 The deck-review e2e smoke (`tests/test_e2e_deck_review.py`) drives the SDK against a synthetic fixture. Auth options (any one):
 
-- `ANTHROPIC_API_KEY` env var (per-token API; ~$2-5/run)
+- `ANTHROPIC_API_KEY` env var (per-token API; ~$5-15/run)
 - `CLAUDE_CODE_OAUTH_TOKEN` env var (subscription, long-lived token from `claude setup-token`)
 - Local subscription auth: `claude /login` populates the macOS Keychain entry `Claude Code-credentials` (or `~/.claude/.credentials.json` on Linux/Windows)
 
-For live progress during the 60-180s e2e run, add `-s`:
+For live progress during the e2e run (~5-20 min wall time), add `-s`:
 
 ```bash
 uv run pytest founder-skills/tests/test_e2e_deck_review.py -v -m e2e --tb=short -s
@@ -229,7 +230,7 @@ Tag-push triggers `deck-review-e2e-smoke` in `.github/workflows/skill-quality.ym
    - LLM-variance flake: re-run the job from the Actions UI (free retry, same SHA)
 7. **Only after green:** `./scripts/sync-test-repo.sh`
 
-`sync-test-repo.sh` is the actual user-facing distribution event; the tag itself is just a marker. Syncing before green = users pull a broken release.
+`sync-test-repo.sh` is a local, untracked TESTING step — it pushes the working tree to the private test repo (`yaniv-golan/founderskills-test`) so the release can be exercised in Cowork before users see it. It is NOT the user-facing distribution event: users install from the marketplace clone that tracks `main`, so `plugin.json#version` on `main` is what they actually pick up (see VERSIONING.md). Run the test sync only after the release gate is green — syncing a broken build means the test pass exercises a build you'd never ship.
 
 **Already-distributed retag pitfall:** if `sync-test-repo.sh` ran before you noticed the bug, **bump to the next patch version instead of retagging** — Cowork caches by `plugin.json#version`, so retagging the same version will not refresh user caches (`cpd refresh ... --force-fetch -y` is the manual recovery, not always coordinatable across users).
 

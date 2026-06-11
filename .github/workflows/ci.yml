@@ -29,6 +29,7 @@ jobs:
       - run: uv run mypy founder-skills/skills/ic-sim/scripts/
       - run: uv run mypy founder-skills/skills/financial-model-review/scripts/
       - run: uv run mypy founder-skills/skills/competitive-positioning/scripts/
+      - run: uv run mypy founder-skills/skills/cap-table/scripts/
       - run: uv run mypy founder-skills/tests/
 
   test:
