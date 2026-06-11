@@ -12,6 +12,7 @@ All tests use subprocess to exercise the script exactly as agents do.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -22,7 +23,30 @@ SCRIPTS_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "scripts")
 
 
 def run_find(args: list[str], artifacts_root: str | None = None) -> tuple[int, str, str]:
-    """Run find_artifact.py and return (exit_code, stdout, stderr)."""
+    """Run find_artifact.py and return (exit_code, resolved_path, stderr).
+
+    On success stdout is a JSON object {"path": ...}; this helper extracts the
+    path so existing substring/endswith assertions keep working.
+    """
+    cmd = [sys.executable, os.path.join(SCRIPTS_DIR, "find_artifact.py")]
+    cmd.extend(args)
+    if artifacts_root:
+        cmd.extend(["--artifacts-root", artifacts_root])
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    stdout = result.stdout.strip()
+    path = stdout
+    if result.returncode == 0 and stdout:
+        try:
+            parsed = json.loads(stdout)
+            if isinstance(parsed, dict) and "path" in parsed:
+                path = parsed["path"]
+        except json.JSONDecodeError:
+            pass
+    return result.returncode, path, result.stderr
+
+
+def run_find_raw(args: list[str], artifacts_root: str | None = None) -> tuple[int, str, str]:
+    """Run find_artifact.py and return (exit_code, raw_stdout, stderr)."""
     cmd = [sys.executable, os.path.join(SCRIPTS_DIR, "find_artifact.py")]
     cmd.extend(args)
     if artifacts_root:
@@ -241,3 +265,56 @@ def test_no_artifacts_root() -> None:
         artifacts_root="/tmp/nonexistent-dir-xyzzy",
     )
     assert rc == 1
+
+
+def test_success_emits_json_object() -> None:
+    """Default success output is a JSON object {"path": ...} per script convention."""
+    with tempfile.TemporaryDirectory(prefix="test-find-") as root:
+        _make_artifacts(root, {"market-sizing-acme-corp": ["sizing.json"]})
+        rc, raw, stderr = run_find_raw(
+            ["--skill", "market-sizing", "--artifact", "sizing.json", "--slug", "acme-corp"],
+            artifacts_root=root,
+        )
+        assert rc == 0
+        parsed = json.loads(raw)
+        assert isinstance(parsed, dict)
+        assert parsed["path"].endswith("market-sizing-acme-corp/sizing.json")
+
+
+def test_pretty_flag_indents_json() -> None:
+    """--pretty produces indented JSON that still parses to the same path."""
+    with tempfile.TemporaryDirectory(prefix="test-find-") as root:
+        _make_artifacts(root, {"market-sizing-acme-corp": ["sizing.json"]})
+        rc, raw, stderr = run_find_raw(
+            ["--skill", "market-sizing", "--artifact", "sizing.json", "--slug", "acme-corp", "--pretty"],
+            artifacts_root=root,
+        )
+        assert rc == 0
+        assert "\n  " in raw  # indentation present
+        assert json.loads(raw)["path"].endswith("sizing.json")
+
+
+def test_output_flag_writes_file_and_emits_receipt() -> None:
+    """-o writes JSON to file and emits a receipt object on stdout."""
+    with tempfile.TemporaryDirectory(prefix="test-find-") as root:
+        _make_artifacts(root, {"market-sizing-acme-corp": ["sizing.json"]})
+        out_path = os.path.join(root, "result.json")
+        rc, raw, stderr = run_find_raw(
+            [
+                "--skill",
+                "market-sizing",
+                "--artifact",
+                "sizing.json",
+                "--slug",
+                "acme-corp",
+                "-o",
+                out_path,
+            ],
+            artifacts_root=root,
+        )
+        assert rc == 0
+        receipt = json.loads(raw)
+        assert receipt["written"] == out_path
+        with open(out_path, encoding="utf-8") as f:
+            written = json.load(f)
+        assert written["path"].endswith("market-sizing-acme-corp/sizing.json")

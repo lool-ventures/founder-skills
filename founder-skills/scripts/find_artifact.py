@@ -10,8 +10,12 @@ Usage:
     python find_artifact.py --skill market-sizing --artifact sizing.json
     python find_artifact.py --skill market-sizing --artifact sizing.json --max-age-days 7
 
+On success a JSON object {"path": "<resolved path>"} is written to stdout (or to
+the file given by -o, with a receipt object emitted to stdout confirming the
+write). Use --pretty for indented JSON.
+
 Exit codes:
-    0 = found (path on stdout)
+    0 = found (JSON {"path": ...} on stdout)
     1 = not found
     2 = ambiguous (multiple matches, need --slug)
 """
@@ -19,6 +23,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -118,6 +123,8 @@ def parse_args() -> argparse.Namespace:
         default=os.path.join(os.getcwd(), "artifacts"),
         help="Override artifacts directory (default: ./artifacts)",
     )
+    p.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+    p.add_argument("-o", "--output", help="Write output to file instead of stdout")
     return p.parse_args()
 
 
@@ -131,10 +138,26 @@ def main() -> None:
         max_age_days=args.max_age_days,
         prefer_newest=(args.prefer == "newest"),
     )
-    if exit_code == 0:
-        sys.stdout.write(result + "\n")
-    else:
+    if exit_code != 0:
+        # Not-found / ambiguous messages stay on stderr (human-readable).
         print(result, file=sys.stderr)
+        sys.exit(exit_code)
+
+    payload = {"path": result}
+    indent = 2 if args.pretty else None
+    out = json.dumps(payload, indent=indent) + "\n"
+
+    if args.output:
+        abs_path = os.path.abspath(args.output)
+        parent = os.path.dirname(abs_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(abs_path, "w", encoding="utf-8") as f:
+            f.write(out)
+        receipt = {"written": abs_path, "bytes": len(out.encode("utf-8"))}
+        sys.stdout.write(json.dumps(receipt) + "\n")
+    else:
+        sys.stdout.write(out)
     sys.exit(exit_code)
 
 
