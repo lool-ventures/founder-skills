@@ -3275,7 +3275,7 @@ def test_sensitivity_receipt_counts_only_analyzed_params() -> None:
 def _checklist_with_score(score_pct: float) -> dict[str, Any]:
     import copy
 
-    cl = copy.deepcopy(_VALID_CHECKLIST)
+    cl: dict[str, Any] = copy.deepcopy(_VALID_CHECKLIST)
     cl["summary"] = dict(cl["summary"])
     cl["summary"]["score_pct"] = score_pct
     return cl
