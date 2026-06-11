@@ -774,12 +774,15 @@ def test_no_tornado_markup() -> None:
     assert "tornado" not in html.lower() or "tornado" not in html, "No tornado references should remain"
 
 
-def test_self_sustaining_badge() -> None:
-    """Self-sustaining companies show SELF-SUSTAINING badge text in stress test."""
+def test_default_alive_badge() -> None:
+    """default_alive companies show DEFAULT ALIVE badge text, not an
+    overstated profitability label (explore.py's JS engine sets default_alive
+    when cash never runs out; it does not compute became_profitable)."""
     d = _make_artifact_dir()
     rc, html, _ = run_script_raw("explore.py", ["--dir", d])
     assert rc == 0
-    assert "SELF-SUSTAINING" in html, "Badge text for default alive should be SELF-SUSTAINING"
+    assert "DEFAULT ALIVE" in html, "Badge text for default alive should be DEFAULT ALIVE"
+    assert "SELF-SUSTAINING" not in html, "Must not overstate default_alive as self-sustaining"
 
 
 def test_stress_slider_max_adapts() -> None:

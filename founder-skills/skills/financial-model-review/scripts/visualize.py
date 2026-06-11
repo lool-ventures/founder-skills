@@ -935,7 +935,10 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
         if months is not None:
             annotations.append(f"{slabel}: {int(_num(months))} months runway")
         elif s.get("default_alive"):
-            annotations.append(f"{slabel}: on track to profitability")
+            if s.get("became_profitable"):
+                annotations.append(f"{slabel}: on track to profitability")
+            else:
+                annotations.append(f"{slabel}: cash never runs out (default alive)")
     annotation_html = ""
     if annotations:
         items_html = "".join(
@@ -1084,14 +1087,19 @@ def _executive_summary(
             if isinstance(s, dict) and s.get("name") == "base":
                 raw_months = s.get("runway_months")
                 alive = s.get("default_alive", False)
+                profitable = s.get("became_profitable", False)
                 alive_color = _CLR_PASS if alive else _CLR_FAIL
                 runway_display = "∞" if raw_months is None else f"{int(_num(raw_months))} mo"
+                if alive:
+                    alive_label = "On track to profitability" if profitable else "Default alive (cash never runs out)"
+                else:
+                    alive_label = "Cash runs out before profitability"
                 cards.append(
                     f'<div class="summary-card">'
                     f'<div class="label">Base Runway</div>'
                     f'<div class="value" style="color:{_esc(alive_color)}">{runway_display}</div>'
                     f'<div class="label">'
-                    f"{'On track to profitability' if alive else 'Cash runs out before profitability'}"
+                    f"{alive_label}"
                     f"</div>"
                     f"</div>"
                 )
@@ -1180,7 +1188,10 @@ def _key_findings(
                 continue
             if s.get("name") == "base":
                 if s.get("default_alive"):
-                    strong.append("On track to profitability (base case)")
+                    if s.get("became_profitable"):
+                        strong.append("On track to profitability (base case)")
+                    else:
+                        strong.append("Default alive — cash never runs out (base case)")
                 else:
                     months = s.get("runway_months")
                     if months is not None:

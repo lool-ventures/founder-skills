@@ -1065,7 +1065,7 @@ function renderRunway() {{
   var alive = result.default_alive;
   var months = result.runway_months || DATA.engine.max_months + '+';
   var badge = alive
-    ? '<span class="badge strong">SELF-SUSTAINING</span>'
+    ? '<span class="badge strong">DEFAULT ALIVE</span>'
     : '<span class="badge fail">NEEDS FUNDING</span>';
 
   var burn = state.opex0 - DATA.engine.revenue0;
@@ -1371,7 +1371,7 @@ function updateRaisePlannerChart() {{
 
   if (headline && detail && summaryBox) {{
     if (preRaise >= DATA.engine.max_months || (points[0] && projectScenario(getProjectionParams()).default_alive)) {{
-      headline.textContent = 'Already self-sustaining at ' + fmtPct(state.growthRate, 1) + ' MoM growth';
+      headline.textContent = 'Already default alive at ' + fmtPct(state.growthRate, 1) + ' MoM growth';
       detail.textContent = 'Pre-raise runway exceeds ' + DATA.engine.max_months + ' months. '
         + 'Try lowering the growth rate to see when a raise becomes necessary.';
       summaryBox.style.borderColor = '#16a34a';
@@ -1648,7 +1648,7 @@ function renderStressTest() {{
   var alive = result.default_alive;
   var months = alive ? null : (result.runway_months || DATA.engine.max_months);
   var badge = alive
-    ? '<span class="badge strong">SELF-SUSTAINING</span>'
+    ? '<span class="badge strong">DEFAULT ALIVE</span>'
     : '<span class="badge fail">' + months + ' MONTHS</span>';
 
   // Min viable growth from threshold scenario (authoritative)
@@ -1701,7 +1701,7 @@ function renderStressTest() {{
       var gr = s.growth_rate !== null && s.growth_rate !== undefined
         ? fmtPct(s.growth_rate, 1) : 'N/A';
       var status = s.default_alive
-        ? '<span class="badge strong">Self-sustaining</span>'
+        ? '<span class="badge strong">Default alive</span>'
         : '<span class="badge fail">'
           + (s.runway_months || '?') + ' months</span>';
       markup += '<tr><td>' + escHtml(label) + '</td><td>' + gr
