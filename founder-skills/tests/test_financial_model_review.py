@@ -4586,3 +4586,32 @@ def test_compose_fmt_usd_negative_net_cash() -> None:
     md = data["report_markdown"]
     assert "$-1,500,000.00" not in md, "Negative must not fall through to $-.. form"
     assert "-$1.5M" in md, "Negative net cash should render as -$1.5M"
+
+
+# === run_id CLI stamping (alignment with the cross-skill contract) ===
+
+
+def test_checklist_cli_run_id_overrides_stdin() -> None:
+    """checklist.py: --run-id stamps metadata.run_id, overriding stdin (CLI > stdin)."""
+    payload = json.dumps({"items": _make_checklist_items(), "metadata": {"run_id": "STDIN"}})
+    rc, data, stderr = run_script("checklist.py", ["--pretty", "--run-id", "CLI-WINS"], stdin_data=payload)
+    assert rc == 0, stderr
+    assert data is not None and data.get("metadata", {}).get("run_id") == "CLI-WINS"
+
+
+def test_unit_economics_cli_run_id_overrides_stdin() -> None:
+    """unit_economics.py: --run-id overrides stdin-passthrough run_id."""
+    inp = dict(_VALID_INPUTS)
+    inp["metadata"] = {"run_id": "STDIN"}
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty", "--run-id", "CLI-WINS"], stdin_data=json.dumps(inp))
+    assert rc == 0, stderr
+    assert data is not None and data.get("metadata", {}).get("run_id") == "CLI-WINS"
+
+
+def test_runway_cli_run_id_overrides_stdin() -> None:
+    """runway.py: --run-id overrides stdin-passthrough run_id."""
+    inp = dict(_VALID_INPUTS)
+    inp["metadata"] = {"run_id": "STDIN"}
+    rc, data, stderr = run_script("runway.py", ["--pretty", "--run-id", "CLI-WINS"], stdin_data=json.dumps(inp))
+    assert rc == 0, stderr
+    assert data is not None and data.get("metadata", {}).get("run_id") == "CLI-WINS"

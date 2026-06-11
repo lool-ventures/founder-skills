@@ -833,6 +833,11 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Financial model review checklist scorer (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
+    p.add_argument(
+        "--run-id",
+        default=None,
+        help="Stamp metadata.run_id (overrides any run_id from stdin metadata)",
+    )
     return p.parse_args()
 
 
@@ -884,6 +889,8 @@ def main() -> None:
     _input_metadata = data.get("metadata") or (data.get("inputs") or {}).get("metadata")
     if isinstance(_input_metadata, dict) and isinstance(_input_metadata.get("run_id"), str):
         result.setdefault("metadata", {})["run_id"] = _input_metadata["run_id"]
+    if getattr(args, "run_id", None):  # CLI run_id overrides stdin passthrough
+        result.setdefault("metadata", {})["run_id"] = args.run_id
 
     out = json.dumps(result, indent=indent) + "\n"
     s = result["summary"]

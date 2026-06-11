@@ -355,10 +355,26 @@ def score_moats(data: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]
     }, []
 
 
+def _apply_run_id(result: dict, run_id: str | None) -> None:
+    """CLI run_id overrides stdin-passthrough metadata.run_id (CLI > stdin)."""
+    if not run_id:
+        return
+    md = result.get("metadata")
+    if not isinstance(md, dict):
+        md = {}
+    md["run_id"] = run_id
+    result["metadata"] = md
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Moat scorer (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
+    p.add_argument(
+        "--run-id",
+        default=None,
+        help="Stamp metadata.run_id (overrides any run_id from stdin metadata)",
+    )
     return p.parse_args()
 
 
@@ -390,6 +406,7 @@ def main() -> None:
         sys.exit(1)
 
     assert result is not None  # guaranteed by errs check above
+    _apply_run_id(result, args.run_id)
 
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"

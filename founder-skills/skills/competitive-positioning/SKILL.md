@@ -262,7 +262,7 @@ Return JSON only — exactly the shape expected by validate_landscape.py:
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol (see "Skill Execution Model" preamble) to obtain the structured JSON. If `suggested_additions` exist, present them to the founder and ask which to include. Merge approved ones into `competitors[]`. Then pipe through the producer script:
 
 ```bash
-cat <<'LANDSCAPE_EOF' | python3 "$SCRIPTS/validate_landscape.py" --pretty -o "$ANALYSIS_DIR/landscape.json"
+cat <<'LANDSCAPE_EOF' | python3 "$SCRIPTS/validate_landscape.py" --pretty --run-id "$RUN_ID" -o "$ANALYSIS_DIR/landscape.json"
 <JSON extracted from sub-agent reply, with approved additions merged in>
 LANDSCAPE_EOF
 ```
@@ -370,13 +370,13 @@ Return JSON only — exactly the shape expected by score_positioning.py:
 **After both sub-agents return:** apply the tolerant JSON extraction protocol to each. Pipe MOAT_SCORING output through `score_moats.py` and POSITIONING_SCORING output through `score_positioning.py`:
 
 ```bash
-cat <<'MOAT_EOF' | python3 "$SCRIPTS/score_moats.py" --pretty -o "$ANALYSIS_DIR/moat_scores.json"
+cat <<'MOAT_EOF' | python3 "$SCRIPTS/score_moats.py" --pretty --run-id "$RUN_ID" -o "$ANALYSIS_DIR/moat_scores.json"
 <JSON extracted from MOAT_SCORING sub-agent reply>
 MOAT_EOF
 ```
 
 ```bash
-cat <<'POS_EOF' | python3 "$SCRIPTS/score_positioning.py" --pretty -o "$ANALYSIS_DIR/positioning_scores.json"
+cat <<'POS_EOF' | python3 "$SCRIPTS/score_positioning.py" --pretty --run-id "$RUN_ID" -o "$ANALYSIS_DIR/positioning_scores.json"
 <JSON extracted from POSITIONING_SCORING sub-agent reply>
 POS_EOF
 ```

@@ -239,33 +239,34 @@ def test_skill_md_subagent_blocks_have_no_bash(skill_md: Path) -> None:
 
 # Producer pipes that write a pipeline artifact (-o <path>.json).
 _PIPE_WRITES_JSON = re.compile(r'\.py\b[^\n|]*\s-o\s+"?[^"\n]*\.json')
-# Scripts that write JSON but do not mint a run_id (orchestrators / renderers /
-# receipts), exempt from the stamping check.
+# Scripts that write JSON but do not mint a run_id, exempt from the stamping
+# check: orchestrators / renderers / receipts, plus artifacts that are NOT in
+# the Context B run_id-parity set (FMR's model_data / extraction_validation are
+# pre-pipeline extraction outputs, not parity artifacts).
 _RUN_ID_EXEMPT_SCRIPTS = (
     "compose_report.py",  # consumes run_ids, does not mint them
     "visualize.py",
     "explore.py",
     "find_artifact.py",
     "founder_context.py",
+    "extract_model.py",  # model_data.json — not a run_id-parity artifact
+    "validate_extraction.py",  # extraction_validation.json — not parity-checked
 )
-# Two run_id mechanisms both satisfy the Context B run_id-parity check:
-#   - CLI-stamping: producers take --run-id and stamp metadata.run_id (the
-#     reference contract; its ABSENCE deterministically BLOCKED Context B in
-#     the ic-sim / market-sizing regression). Statically checkable here.
-#   - stdin passthrough: producers read metadata.run_id off their stdin input
-#     (inputs.json / heredoc) and propagate it (competitive-positioning, FMR).
-#     Not statically checkable from SKILL.md; covered by per-producer tests.
-_CLI_STAMPING_SKILLS = {"deck-review", "ic-sim", "market-sizing", "cap-table"}
+# All six skills now stamp metadata.run_id from --run-id on the producer CLI.
+# Two mechanisms exist (both satisfy the Context B run_id-parity check) and the
+# pipe must carry --run-id either way:
+#   - CLI-stamping: producer sets metadata.run_id from --run-id.
+#   - stdin passthrough + CLI override: producer propagates stdin metadata.run_id
+#     but --run-id (when passed, as the SKILL.md pipes now do) takes precedence.
+# Its ABSENCE deterministically BLOCKED Context B in the ic-sim / market-sizing
+# regression, so every artifact-writing producer pipe must pass it.
 
 
 @pytest.mark.parametrize("skill_md", SKILL_MD_FILES, ids=lambda p: p.parent.name)
 def test_producer_pipes_carry_run_id(skill_md: Path) -> None:
-    """For CLI-stamping skills, every `... script.py ... -o <artifact>.json`
-    invocation in a SKILL.md bash block must pass --run-id (regression guard for
-    the ic-sim / market-sizing Context B blocker). Passthrough skills are
-    covered by their per-producer metadata-propagation tests instead."""
-    if skill_md.parent.name not in _CLI_STAMPING_SKILLS:
-        pytest.skip(f"{skill_md.parent.name} uses stdin-metadata passthrough, not CLI stamping")
+    """Every `... script.py ... -o <artifact>.json` invocation in a SKILL.md
+    bash block must pass --run-id so the producer stamps metadata.run_id
+    (regression guard for the ic-sim / market-sizing Context B blocker)."""
     text = skill_md.read_text(encoding="utf-8")
     offenders: list[str] = []
     for raw in text.splitlines():

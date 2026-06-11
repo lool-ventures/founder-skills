@@ -3087,3 +3087,34 @@ class TestValidateLandscapeNoStdinFlag:
         # Unknown flag → argparse exit 2 + "unrecognized arguments".
         assert rc == 2
         assert "unrecognized arguments" in stderr or "--stdin" in stderr
+
+
+# === run_id CLI stamping (alignment with the cross-skill contract) ===
+
+
+class TestRunIdStamping:
+    """All three passthrough producers accept --run-id; CLI value is stamped
+    into metadata.run_id and overrides any run_id from stdin metadata
+    (CLI > stdin), so the Context B run_id-parity check holds even when the
+    sub-agent omits or misreports metadata."""
+
+    def test_validate_landscape_cli_run_id_overrides_stdin(self) -> None:
+        payload = _make_valid_landscape()
+        payload["metadata"] = {"run_id": "STDIN"}
+        rc, data, stderr = run_script("validate_landscape.py", ["--run-id", "CLI-WINS"], stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None and data["metadata"]["run_id"] == "CLI-WINS"
+
+    def test_score_moats_cli_run_id_stamped_when_stdin_absent(self) -> None:
+        payload = _make_valid_moat_input()
+        payload.pop("metadata", None)
+        rc, data, stderr = run_script("score_moats.py", ["--run-id", "CLI-ONLY"], stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None and data["metadata"]["run_id"] == "CLI-ONLY"
+
+    def test_score_positioning_cli_run_id_overrides_stdin(self) -> None:
+        payload = _make_valid_positioning_input()
+        payload["metadata"] = {"run_id": "STDIN"}
+        rc, data, stderr = run_script("score_positioning.py", ["--run-id", "CLI-WINS"], stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None and data["metadata"]["run_id"] == "CLI-WINS"

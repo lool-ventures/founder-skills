@@ -372,7 +372,7 @@ Return JSON only — company + metadata + items (producer script computes summar
 **After the sub-agent returns:** apply the tolerant JSON extraction protocol. Pipe through the producer script:
 
 ```bash
-cat <<'CHECKLIST_EOF' | python3 "$SCRIPTS/checklist.py" --pretty -o "$REVIEW_DIR/checklist.json"
+cat <<'CHECKLIST_EOF' | python3 "$SCRIPTS/checklist.py" --pretty --run-id "$RUN_ID" -o "$REVIEW_DIR/checklist.json"
 <JSON extracted from sub-agent reply>
 CHECKLIST_EOF
 ```
@@ -386,8 +386,8 @@ context since the JSON would land in the main thread anyway):
 
 ```bash
 SCRIPTS="${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/scripts"
-cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/unit_economics.py" --pretty -o "$REVIEW_DIR/unit_economics.json"
-cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/runway.py" --pretty -o "$REVIEW_DIR/runway.json"
+cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/unit_economics.py" --pretty --run-id "$RUN_ID" -o "$REVIEW_DIR/unit_economics.json"
+cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/runway.py" --pretty --run-id "$RUN_ID" -o "$REVIEW_DIR/runway.json"
 ```
 
 Both scripts propagate `metadata.run_id` from `inputs.json` into their outputs
