@@ -263,6 +263,13 @@ def _project_scenario(
         # Never runs out within projection window
         decision_point = None
 
+    # Find the first month where net_burn <= 0 (cash-flow breakeven), if any
+    breakeven_month: int | None = None
+    for proj in projections:
+        if proj["net_burn"] <= 0:
+            breakeven_month = proj["month"]
+            break
+
     result: dict[str, Any] = {
         "name": name,
         "growth_rate": growth_rate,
@@ -276,13 +283,17 @@ def _project_scenario(
         "monthly_projections": projections,
     }
     # runway_months: null is ambiguous to a reader of the raw artifact — make
-    # the default-alive meaning explicit alongside the null
+    # the default-alive meaning explicit alongside the null, and name the
+    # projected breakeven month when derivable.
     if runway_months is None and default_alive:
-        result["note"] = (
+        note = (
             "default_alive: projected cash never depletes within the projection "
             "window (revenue covers expenses before cash-out); runway_months is "
             "null by design, not missing data"
         )
+        if breakeven_month is not None:
+            note += f"; projected to reach cash-flow breakeven around month {breakeven_month} of the projection"
+        result["note"] = note
     if cash_direction_warning:
         result["cash_direction_warning"] = cash_direction_warning
     return result

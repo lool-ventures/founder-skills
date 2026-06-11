@@ -578,7 +578,7 @@ def main() -> None:
             _emit({"status": "error", "errors": patch_errors}, args)
             sys.exit(1)
     elif "corrected" in payload:
-        print("Warning: legacy payload format — using 'corrected' object directly", file=sys.stderr)
+        print("Info: corrected-object payload (dispatch shape) — applying directly.", file=sys.stderr)
         corrections = payload.get("corrections", [])
         corrected = payload["corrected"]
         if not isinstance(corrected, dict):

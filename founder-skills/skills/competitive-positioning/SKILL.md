@@ -112,9 +112,18 @@ Keep the founder informed with brief, plain-language updates at each step. Never
 
 ```bash
 SCRIPTS="${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/scripts"
-REFS="${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references"
-SHARED_SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-SHARED_REFS="${CLAUDE_PLUGIN_ROOT}/references"
+# In Cowork, CLAUDE_PLUGIN_ROOT substitutes to a host-side path that does not
+# exist inside the session VM — self-heal by locating the plugin mount:
+if [ ! -d "$SCRIPTS" ]; then
+  SCRIPTS="$(find /sessions -type d -path '*/skills/competitive-positioning/scripts' 2>/dev/null | head -1)"
+fi
+if [ -z "$SCRIPTS" ] || [ ! -d "$SCRIPTS" ]; then
+  SCRIPTS="$(find / -type d -path '*/skills/competitive-positioning/scripts' 2>/dev/null | head -1)"
+fi
+PLUGIN_ROOT="${SCRIPTS%/skills/*}"
+REFS="$PLUGIN_ROOT/skills/competitive-positioning/references"
+SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
+SHARED_REFS="$PLUGIN_ROOT/references"
 if ls "$(pwd)"/mnt/*/ >/dev/null 2>&1; then
   ARTIFACTS_ROOT="$(ls -d "$(pwd)"/mnt/*/ | head -1)artifacts"
 elif ls "$(pwd)"/sessions/*/mnt/*/ >/dev/null 2>&1; then
@@ -124,14 +133,7 @@ else
 fi
 ```
 
-The path setup handles both Claude Code (local filesystem) and Cowork (mounted sessions). In most cases, only the final fallback branch (`./artifacts`) applies; the two `mnt/*/` branches above it are Cowork-only.
-
-If `CLAUDE_PLUGIN_ROOT` is empty OR the path it resolves to does not exist in your environment (in Claude Cowork it substitutes to a host-side path that is not present inside the session VM — test with `ls`), use the appropriate fallback:
-
-- **In Claude Cowork:** go straight to Bash: `find / -path '*/skills/competitive-positioning/scripts/validate_landscape.py' 2>/dev/null | head -5`. The Glob tool searches only the workspace directory tree; the plugin is mounted outside the workspace at `.remote-plugins/`, so Glob will never find it in Cowork.
-- **Outside Cowork (workspace copy):** use `Glob` with pattern `**/skills/competitive-positioning/scripts/validate_landscape.py` as before.
-
-Strip the anchor filename to derive `SCRIPTS`; derive `REFS` and `SHARED_SCRIPTS` from `SCRIPTS`. If the find/Glob returns multiple matches, prefer the one under a plugin mount (`.remote-plugins/` or the plugins cache) over any workspace copy.
+The path setup handles both Claude Code (local filesystem) and Cowork (mounted sessions). The Step 0 block self-heals when `${CLAUDE_PLUGIN_ROOT}` doesn't resolve (Cowork). If it still comes up empty, locate the anchor manually: `find / -path '*/skills/competitive-positioning/scripts/validate_landscape.py' 2>/dev/null | head -5` and derive the variables from it.
 
 **If `ARTIFACTS_ROOT` resolves to `./artifacts` but no `artifacts/` directory exists at `$(pwd)`:** The workspace may not be mounted yet. Use `Glob` with pattern `**/artifacts/founder_context.json` to locate existing artifacts, and derive `ARTIFACTS_ROOT` from the result. If nothing is found, `mkdir -p ./artifacts` and proceed.
 

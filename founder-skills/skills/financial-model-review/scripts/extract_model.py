@@ -181,6 +181,43 @@ def _periodicity_summary(sheets: list[dict[str, Any]]) -> str:
 
 _MAX_HEADER_SCAN = 10  # Scan first N rows for header detection
 
+# Patterns that identify a cell as a DATA value rather than a header label.
+# A row that is predominantly data (numeric or date-like) is not a banner/header;
+# banner rows in real exports are text-dominant ("Acme Summary…", "Assumptions").
+_ISO_MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")  # 2025-01 style
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")  # 2025-01-01 full date
+
+
+def _cell_is_data(val: Any) -> bool:
+    """Return True when a cell looks like a data value, not a column label.
+
+    Numeric values (int/float, not bool) and ISO date/month strings are data.
+    Boolean openpyxl cells are not data here (they're usually labels or flags).
+    """
+    if isinstance(val, bool):
+        return False
+    if isinstance(val, (int, float)):
+        return True
+    if isinstance(val, str):
+        s = val.strip()
+        if _ISO_MONTH_RE.match(s) or _ISO_DATE_RE.match(s):
+            return True
+    return False
+
+
+def _row_is_predominantly_data(row: list[Any]) -> bool:
+    """Return True when the majority of non-null cells in a row are data values.
+
+    A row where most cells are numeric or date-like is a data row, not a header.
+    Used as a disqualification guard in _find_header_row so that leading data rows
+    with period-matching content (e.g. '2025-01') are never chosen as the header.
+    """
+    non_null = [v for v in row if v is not None and str(v).strip()]
+    if not non_null:
+        return False
+    data_count = sum(1 for v in non_null if _cell_is_data(v))
+    return data_count > len(non_null) / 2
+
 
 def _find_header_row(rows: list[list[Any]], max_scan: int = _MAX_HEADER_SCAN) -> int:
     """Find the best header row in the first *max_scan* rows.
@@ -188,6 +225,11 @@ def _find_header_row(rows: list[list[Any]], max_scan: int = _MAX_HEADER_SCAN) ->
     Scores each row by:
     1. Number of cells that match period patterns (quarterly, monthly, annual)
     2. Number of non-null string values (fallback for non-period headers)
+
+    A row is disqualified if it is predominantly numeric/date data — real banner
+    and header rows are text-dominant.  This prevents a leading data row whose
+    first cell happens to be an ISO month (e.g. '2025-01') from outscoring the
+    actual text header row above it.
 
     Returns the row index, or -1 if no row has enough non-null values.
     A row needs at least 2 non-null string values to qualify.
@@ -197,6 +239,11 @@ def _find_header_row(rows: list[list[Any]], max_scan: int = _MAX_HEADER_SCAN) ->
     best_string_score = 0
 
     for i, row in enumerate(rows[:max_scan]):
+        # Skip rows that are predominantly numeric/date — those are data rows,
+        # not banner text or column headers.
+        if _row_is_predominantly_data(row):
+            continue
+
         period_score = 0
         string_score = 0
         for val in row:
@@ -219,8 +266,8 @@ def _find_header_row(rows: list[list[Any]], max_scan: int = _MAX_HEADER_SCAN) ->
             best_string_score = string_score
             best_idx = i
 
-    # If no period headers found but row 0 has strings, use row 0
-    if best_idx == -1 and rows:
+    # If no period headers found but row 0 has strings (and is not data), use row 0
+    if best_idx == -1 and rows and not _row_is_predominantly_data(rows[0]):
         row0_strings = sum(1 for v in rows[0] if v is not None and str(v).strip())
         if row0_strings >= 2:
             best_idx = 0

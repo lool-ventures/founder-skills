@@ -88,6 +88,72 @@ def test_extract_model_xlsx() -> None:
     assert len(data["sheets"]) >= 2  # sample has multiple sheets
 
 
+def test_extract_model_revenue_sheet_first_data_row_not_pre_header() -> None:
+    """Revenue sheet first data row (2025-01, 100, 500, 50000) must land in rows[],
+    not pre_header_rows.
+
+    Regression: _find_header_row scored the data row higher than the text header
+    (Month, Customers, ARPU, MRR) because '2025-01' matched the monthly pattern.
+    Fix: rows predominantly numeric/date are disqualified from header candidacy.
+    """
+    import pytest
+
+    fixture = os.path.join(FIXTURES_DIR, "sample_model.xlsx")
+    if not os.path.exists(fixture):
+        pytest.skip("sample_model.xlsx fixture not yet created")
+    rc, data, stderr = run_script("extract_model.py", ["--file", fixture, "--pretty"])
+    assert rc == 0
+    assert data is not None
+    rev = next((s for s in data["sheets"] if s["name"] == "Revenue"), None)
+    assert rev is not None, "Revenue sheet not found in fixture"
+    # Correct headers are the text labels
+    assert rev["headers"][0] == "Month", (
+        f"Expected first header 'Month', got {rev['headers'][0]!r} — data row classified as header"
+    )
+    # 2025-01 must appear in rows[], not in pre_header_rows
+    row_labels = [str(r[0]) for r in rev["rows"] if r]
+    assert "2025-01" in row_labels, "First data row (2025-01) must appear in rows[], not pre_header_rows"
+    pre_header_labels = [str(r[0]) for r in rev["pre_header_rows"] if r]
+    assert "2025-01" not in pre_header_labels, (
+        "2025-01 must not appear in pre_header_rows — it is a data row, not banner text"
+    )
+
+
+def test_extract_model_banner_rows_still_captured_as_pre_header() -> None:
+    """Text-dominant banner rows before a period header must still go to pre_header_rows.
+
+    Guards against over-correction: a Carta/Pulley export with a company name
+    banner (e.g. 'Acme Corp Financial Summary') before the period columns must
+    still classify the banner as pre-header and the period row as header.
+    """
+    from openpyxl import Workbook
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+        xlsx_path = f.name
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = "P&L"
+    # Row 1: banner text (text-dominant, not data)
+    ws.append(["Acme Corp Financial Summary", None, None, None])
+    # Row 2: period header (text cells that match monthly patterns)
+    ws.append(["Line Item", "Jan 2025", "Feb 2025", "Mar 2025"])
+    # Row 3+: data rows
+    ws.append(["Revenue", 50000, 55000, 60000])
+    wb.save(xlsx_path)
+    wb.close()
+
+    rc, data, stderr = run_script("extract_model.py", ["--file", xlsx_path, "--pretty"])
+    os.unlink(xlsx_path)
+    assert rc == 0
+    sheet = data["sheets"][0]
+    # Banner row must be in pre_header_rows
+    assert sheet["pre_header_rows"], "Banner row should appear in pre_header_rows"
+    assert sheet["pre_header_rows"][0][0] == "Acme Corp Financial Summary"
+    # Period row must be selected as the header
+    assert "Jan 2025" in sheet["headers"], f"Period row should be the header, got headers={sheet['headers']}"
+
+
 def test_extract_model_stdin_passthrough() -> None:
     """Stdin JSON passes through as model_data."""
     input_data = json.dumps({"sheets": [{"name": "Manual", "headers": ["A"], "rows": [[1]]}]})
@@ -864,6 +930,74 @@ def test_checklist_no_model_format_backward_compat() -> None:
     summary = data["summary"]
     assert "business_quality_pct" in summary
     assert "model_maturity_pct" in summary
+
+
+def test_checklist_partial_format_evaluates_all_46_items() -> None:
+    """model_format='partial' must not auto-gate any item due to format gating.
+
+    'partial' = incomplete spreadsheet — structure is still assessable.
+    Documented contract: partial evaluates all 46 items (same as spreadsheet).
+    Only deck/conversational gate STRUCT+CASH items.
+    """
+    company = {
+        "stage": "seed",
+        "geography": "us",
+        "sector": "saas",
+        "sector_type": "saas",
+        "traits": [],
+        "model_format": "partial",
+    }
+    items = _make_checklist_items()
+    payload = json.dumps({"items": items, "company": company})
+    rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    # No item should be not_applicable due to model_format_gate='spreadsheet' gating.
+    # (Profile-based geography/sector gating unrelated to format may still fire.)
+    format_gated = [
+        it
+        for it in data["items"]
+        if it["status"] == "not_applicable" and "model_format_gate" in str(it.get("evidence", "")).lower()
+    ]
+    assert format_gated == [], (
+        f"partial format must not gate any items via model_format_gate, but got: {[it['id'] for it in format_gated]}"
+    )
+    # STRUCT items must be evaluable (pass, not not_applicable via format gating)
+    for i in range(1, 10):
+        item = next(it for it in data["items"] if it["id"] == f"STRUCT_0{i}")
+        assert item["status"] != "not_applicable" or "model_format_gate" not in str(item.get("evidence", "")), (
+            f"STRUCT_0{i} must not be format-gated for partial format"
+        )
+
+
+def test_checklist_deck_format_gates_exactly_22_spreadsheet_items() -> None:
+    """deck format must gate all 22 items with model_format_gate='spreadsheet' (9 STRUCT + 13 CASH).
+
+    Pin: 9 STRUCT_01..09 + CASH_20..32 (13 items) = 22 items total.
+    Geography-gated CASH items (28, 29, 30, 31, 32) have both geo and format gates;
+    with us/saas profile the geo gate fires first, but format gate also applies.
+    """
+    company = {
+        "stage": "seed",
+        "geography": "us",
+        "sector": "saas",
+        "sector_type": "saas",
+        "traits": [],
+        "model_format": "deck",
+    }
+    items = _make_checklist_items()
+    payload = json.dumps({"items": items, "company": company})
+    rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    # All 9 STRUCT items must be not_applicable for deck
+    for i in range(1, 10):
+        item = next(it for it in data["items"] if it["id"] == f"STRUCT_0{i}")
+        assert item["status"] == "not_applicable", f"STRUCT_0{i} should be gated for deck"
+    # All 13 CASH items (20-32) must be not_applicable for deck (format or geo gate)
+    for i in range(20, 33):
+        item = next(it for it in data["items"] if it["id"] == f"CASH_{i}")
+        assert item["status"] == "not_applicable", f"CASH_{i} should be gated for deck"
 
 
 def test_checklist_dispatch_shape_propagates_run_id_and_gates() -> None:
@@ -4724,3 +4858,156 @@ def test_runway_cli_run_id_overrides_stdin() -> None:
     rc, data, stderr = run_script("runway.py", ["--pretty", "--run-id", "CLI-WINS"], stdin_data=json.dumps(inp))
     assert rc == 0, stderr
     assert data is not None and data.get("metadata", {}).get("run_id") == "CLI-WINS"
+
+
+# === Fix C: default-alive note includes projected breakeven month ===
+
+
+def test_runway_default_alive_note_includes_breakeven_month() -> None:
+    """When a scenario is default-alive, its note must include the projected breakeven month.
+
+    The note already explains default_alive semantics; this extends it with
+    '; projected to reach cash-flow breakeven around month N of the projection'.
+    """
+    inputs = {
+        "company": {
+            "company_name": "GrowthCo",
+            "slug": "growthco",
+            "stage": "seed",
+            "sector": "SaaS",
+            "geography": "US",
+        },
+        "revenue": {
+            "mrr": {"value": 50_000, "as_of": "2025-01"},
+            "growth_rate_monthly": 0.20,  # 20% MoM → reaches breakeven within ~3 months
+        },
+        "cash": {
+            "current_balance": 2_000_000,
+            "balance_date": "2025-01",
+            "monthly_net_burn": 100_000,
+        },
+    }
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0, stderr
+    assert data is not None
+    base = next(s for s in data["scenarios"] if s["name"] == "base")
+    assert base["default_alive"] is True
+    note = base.get("note", "")
+    assert "breakeven" in note.lower(), f"default-alive note must include breakeven month; got: {note!r}"
+    # Note must name a specific month number
+    import re as _re
+
+    assert _re.search(r"month \d+", note), f"note must say 'month N' for a specific breakeven month; got: {note!r}"
+
+
+def test_runway_default_alive_note_no_breakeven_when_not_profitable() -> None:
+    """When default-alive via grant (not profitability), no breakeven month in note."""
+    inputs = {
+        "company": {"company_name": "GrantCo", "slug": "grantco", "stage": "seed", "sector": "SaaS", "geography": "IL"},
+        "revenue": {
+            "mrr": {"value": 10_000, "as_of": "2025-01"},
+            "growth_rate_monthly": 0.0,  # zero growth — never reaches breakeven
+        },
+        "cash": {
+            "current_balance": 500_000,
+            "balance_date": "2025-01",
+            "monthly_net_burn": 20_000,
+            "grants": {
+                "iia_approved": 3_000_000,
+                "iia_disbursement_months": 60,
+                "iia_start_month": 1,
+            },
+        },
+    }
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0, stderr
+    assert data is not None
+    base = next(s for s in data["scenarios"] if s["name"] == "base")
+    assert base["default_alive"] is True
+    note = base.get("note", "")
+    # Without profitability, the note should not claim a breakeven month
+    assert "breakeven" not in note.lower() or "month" not in note.lower(), (
+        f"Note should not claim a breakeven month when company never becomes profitable; got: {note!r}"
+    )
+
+
+def test_compose_default_alive_breakeven_month_in_runway_table() -> None:
+    """Infinite runway row in report should include '~month N' when breakeven is derivable."""
+    import copy
+
+    runway_da = copy.deepcopy(_VALID_RUNWAY)
+    # Make base scenario default-alive with null runway_months
+    runway_da["scenarios"][0]["runway_months"] = None
+    runway_da["scenarios"][0]["cash_out_date"] = None
+    runway_da["scenarios"][0]["decision_point"] = None
+    runway_da["scenarios"][0]["default_alive"] = True
+    # Add synthetic projections where month 5 reaches breakeven
+    runway_da["scenarios"][0]["monthly_projections"] = [
+        {
+            "month": i,
+            "cash_balance": 2_000_000,
+            "revenue": 50_000 + i * 20_000,
+            "expenses": 150_000,
+            "net_burn": 150_000 - (50_000 + i * 20_000),
+        }
+        for i in range(1, 10)
+    ]
+    # Month 5: revenue = 50K + 5*20K = 150K, net_burn = 150K - 150K = 0
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": runway_da,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0, stderr
+    assert data is not None
+    md = data["report_markdown"]
+    assert "breakeven" in md.lower() or "~month" in md.lower(), (
+        f"Compose report should include breakeven month for default-alive scenario; got runway section:\n{md}"
+    )
+
+
+# === Fix D: apply_corrections.py neutral informational stderr for corrected payload ===
+
+
+def test_apply_corrections_corrected_payload_no_warning_on_stderr() -> None:
+    """apply_corrections.py must NOT print 'Warning:' or 'legacy' to stderr for the
+    corrected-object payload shape — that is the documented dispatch contract.
+    Instead it emits a neutral informational line.
+    """
+    original: dict[str, Any] = {
+        "company": {"company_name": "TestCo", "stage": "seed"},
+        "cash": {"current_balance": 1_000_000, "monthly_net_burn": 50_000},
+    }
+    # corrected-object shape (the documented dispatch contract)
+    payload = {
+        "corrected": {
+            "company": {"company_name": "TestCo", "stage": "seed"},
+            "cash": {"current_balance": 1_200_000, "monthly_net_burn": 50_000},
+        },
+        "corrections": [{"path": "cash.current_balance", "was": 1_000_000, "now": 1_200_000}],
+    }
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as orig_f:
+        json.dump(original, orig_f)
+        orig_path = orig_f.name
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as corr_f:
+        json.dump(payload, corr_f)
+        corr_path = corr_f.name
+    with tempfile.TemporaryDirectory() as out_dir:
+        rc, data, stderr = run_script(
+            "apply_corrections.py",
+            [corr_path, "--original", orig_path, "--output-dir", out_dir, "--pretty"],
+        )
+    os.unlink(orig_path)
+    os.unlink(corr_path)
+    assert rc == 0, f"apply_corrections failed: {stderr}"
+    # Must NOT contain "Warning:" or "legacy" — that is alarming for a normal run
+    assert "Warning:" not in stderr, f"stderr must not contain 'Warning:' for corrected-payload shape; got: {stderr!r}"
+    assert "legacy" not in stderr.lower(), f"stderr must not say 'legacy' for corrected-payload shape; got: {stderr!r}"
+    # Must contain a neutral informational line
+    assert "Info:" in stderr or "info:" in stderr.lower() or "corrected-object" in stderr.lower(), (
+        f"stderr should contain a neutral informational message; got: {stderr!r}"
+    )

@@ -594,7 +594,9 @@ def _item_applicable(meta: dict[str, Any], company: dict[str, Any]) -> tuple[boo
         gate_value = meta.get(gate_type, "all")
         if not _gate_matches(gate_value, gate_type, company):
             return False, f"{gate_type} '{gate_value}'"
-    # Model format gate: items gated to "spreadsheet" are N/A for deck/conversational
+    # Model format gate: items gated to "spreadsheet" are N/A for deck/conversational.
+    # "partial" = incomplete spreadsheet — structure is still assessable, so it evaluates
+    # all 46 items just like "spreadsheet". Only deck/conversational remain fully gated.
     model_format = company.get("model_format", "spreadsheet")
     mf_gate = meta.get("model_format_gate", "all")
     if mf_gate == "spreadsheet" and model_format in ("deck", "conversational"):

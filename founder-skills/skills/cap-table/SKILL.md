@@ -144,8 +144,17 @@ Keep the founder informed with brief, plain-language updates at each step. Never
 
 ```bash
 SCRIPTS="${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts"
-REFS="${CLAUDE_PLUGIN_ROOT}/skills/cap-table/references"
-SHARED_SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
+# In Cowork, CLAUDE_PLUGIN_ROOT substitutes to a host-side path that does not
+# exist inside the session VM — self-heal by locating the plugin mount:
+if [ ! -d "$SCRIPTS" ]; then
+  SCRIPTS="$(find /sessions -type d -path '*/skills/cap-table/scripts' 2>/dev/null | head -1)"
+fi
+if [ -z "$SCRIPTS" ] || [ ! -d "$SCRIPTS" ]; then
+  SCRIPTS="$(find / -type d -path '*/skills/cap-table/scripts' 2>/dev/null | head -1)"
+fi
+PLUGIN_ROOT="${SCRIPTS%/skills/*}"
+REFS="$PLUGIN_ROOT/skills/cap-table/references"
+SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
 ARTIFACTS_ROOT="${ARTIFACTS_ROOT:-$(pwd)/artifacts}"
 mkdir -p "$ARTIFACTS_ROOT"
 
@@ -154,12 +163,7 @@ mkdir -p "$ARTIFACTS_ROOT"
 RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 ```
 
-If `CLAUDE_PLUGIN_ROOT` is empty OR the path it resolves to does not exist in your environment (in Claude Cowork it substitutes to a host-side path that is not present inside the session VM — test with `ls`), use the appropriate fallback:
-
-- **In Claude Cowork:** go straight to Bash: `find / -path '*/skills/cap-table/scripts/cap_state.py' 2>/dev/null | head -5`. The Glob tool searches only the workspace directory tree; the plugin is mounted outside the workspace at `.remote-plugins/`, so Glob will never find it in Cowork.
-- **Outside Cowork (workspace copy):** use `Glob` for `**/skills/cap-table/scripts/cap_state.py` as before.
-
-Strip the anchor filename to derive `SCRIPTS`; derive `REFS` and `SHARED_SCRIPTS` from `SCRIPTS`. If Bash find returns multiple matches, prefer the one under a plugin mount (`.remote-plugins/` or the plugins cache) over any workspace copy.
+The Step 0 block self-heals when `${CLAUDE_PLUGIN_ROOT}` doesn't resolve (Cowork). If it still comes up empty, locate the anchor manually: `find / -path '*/skills/cap-table/scripts/cap_state.py' 2>/dev/null | head -5` and derive the variables from it.
 
 After Step 1 (when the company slug is known), derive `REVIEW_DIR`. Two modes:
 

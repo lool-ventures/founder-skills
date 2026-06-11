@@ -153,9 +153,15 @@ def _is_stub(data: dict[str, Any] | None) -> bool:
     return isinstance(data, dict) and data.get("skipped") is True
 
 
-def _format_runway_months(months: Any) -> str:
-    """Format runway months, handling None (infinite/profitable) gracefully."""
+def _format_runway_months(months: Any, breakeven_month: int | None = None) -> str:
+    """Format runway months, handling None (infinite/profitable) gracefully.
+
+    When months is None (default-alive scenario) and breakeven_month is derivable
+    from the scenario projections, appends the projected breakeven month.
+    """
     if months is None:
+        if breakeven_month is not None:
+            return f"Infinite — projected breakeven ~month {breakeven_month}"
         return "Infinite (reaches profitability)"
     return f"{months} months"
 
@@ -562,7 +568,16 @@ def _section_runway(runway: dict[str, Any] | None) -> str:
         for s in scenarios:
             name = s.get("name", "?")
             months_raw = s.get("runway_months")
-            months = _format_runway_months(months_raw) if months_raw is None else months_raw
+            if months_raw is None:
+                # Derive breakeven month from projections when available
+                projs = _as_list(s.get("monthly_projections"))
+                be_month: int | None = next(
+                    (p["month"] for p in projs if isinstance(p, dict) and p.get("net_burn", 1) <= 0),
+                    None,
+                )
+                months = _format_runway_months(None, be_month)
+            else:
+                months = months_raw
             cash_out = s.get("cash_out_date", "?")
             decision = s.get("decision_point", "?")
             alive = s.get("default_alive", None)
