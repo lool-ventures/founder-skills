@@ -16,7 +16,10 @@ import re
 
 from extractors.types import ExtractionContext, FieldExtraction, SourceSpan
 
-_AMOUNT = r"(?:US)?\$\s*([\d,]+(?:\.\d+)?)\s*(?:million|M|MM|billion|B|bn)?"
+# Capture the magnitude suffix in its own group so scaling is driven by the
+# matched suffix only — never by stray substrings (e.g. the ' m' inside
+# ' money') elsewhere in the surrounding text.
+_AMOUNT = r"(?:US)?\$\s*([\d,]+(?:\.\d+)?)\s*(million|MM|M|billion|bn|B)?"
 
 # Post-money pattern: "Post-Money Valuation Cap" is $X
 POST_MONEY_PATTERN = re.compile(
@@ -40,7 +43,7 @@ BARE_CAP_PATTERN = re.compile(
 )
 
 
-def _parse_amount(raw: str, suffix_text: str = "") -> int | None:
+def _parse_amount(raw: str, suffix: str | None = None) -> int | None:
     cleaned = raw.replace(",", "").strip()
     if not cleaned:
         return None
@@ -48,10 +51,10 @@ def _parse_amount(raw: str, suffix_text: str = "") -> int | None:
         n = float(cleaned)
     except ValueError:
         return None
-    suffix = suffix_text.lower()
-    if "million" in suffix or " m" in suffix or "mm" in suffix:
+    s = (suffix or "").lower()
+    if s in {"million", "mm", "m"}:
         n *= 1_000_000
-    elif "billion" in suffix or " b" in suffix or "bn" in suffix:
+    elif s in {"billion", "bn", "b"}:
         n *= 1_000_000_000
     return int(n)
 
@@ -85,7 +88,7 @@ def extract(ctx: ExtractionContext) -> list[FieldExtraction]:
     if post_matches:
         # Standard case: "Post-Money Valuation Cap" is $X
         m = post_matches[0]
-        val = _parse_amount(m.group(1), text[m.start() : m.end()])
+        val = _parse_amount(m.group(1), m.group(2))
         amb = None
         if bare_matches:
             amb = (
@@ -111,7 +114,7 @@ def extract(ctx: ExtractionContext) -> list[FieldExtraction]:
         # Take the value from the bare match but classify
         # as post-money on the basis of the formula references.
         m = bare_matches[0]
-        val = _parse_amount(m.group(1), text[m.start() : m.end()])
+        val = _parse_amount(m.group(1), m.group(2))
         out.append(
             FieldExtraction(
                 name="post_money_valuation_cap",
@@ -131,7 +134,7 @@ def extract(ctx: ExtractionContext) -> list[FieldExtraction]:
     elif bare_matches:
         # Pure pre-money: bare "Valuation Cap" with no "Post-Money" anywhere
         m = bare_matches[0]
-        val = _parse_amount(m.group(1), text[m.start() : m.end()])
+        val = _parse_amount(m.group(1), m.group(2))
         out.append(
             FieldExtraction(
                 name="pre_money_valuation_cap",

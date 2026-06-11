@@ -136,8 +136,8 @@ The most important sheet for our skill. Row 5 headers (22 columns; verified):
 | `Maturity Date` | `convertible_notes[].maturity_date` | nullable for SAFEs (use sentinel `9999-12-31`) |
 | `Interest Rate` | `convertible_notes[].annual_interest_rate` | already decimal (0.06 = 6%); leave as-is |
 | `Valuation Cap` | `safes[].post_money_valuation_cap` / `convertible_notes[].valuation_cap` | money; 0 → treat as null |
-| `Conversion Discount` | `safes[].discount_multiplier` / `convertible_notes[].discount_multiplier` | **MUST normalize via `extract_instrument.normalize_discount_multiplier`** — Carta stores percent-as-fraction (0.2 = 20% discount); our canonical form is the multiplier (0.80). Per Gotcha #3. |
-| `Change In Control Percent` | (ignored for v0.1) | |
+| `Conversion Discount` | `safes[].discount_multiplier` / `convertible_notes[].discount_multiplier` | **MUST normalize via `extract_cap_table._normalize_discount`** — Carta stores percent-as-fraction (0.2 = 20% discount); the canonical form is the multiplier (0.80 = 20% discount). Per Gotcha #3. |
+| `Change In Control Percent` | (not modeled) | |
 | `Conversion Trigger` | (informational; usually a money amount for qualified-financing threshold) | |
 | `Note Block Name` | (informational; e.g. `SAFE1 Notes`, `2023 Bridge Notes`) | groups SAFEs by template |
 

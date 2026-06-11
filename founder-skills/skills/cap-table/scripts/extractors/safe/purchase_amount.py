@@ -16,8 +16,9 @@ from extractors.types import ExtractionContext, FieldExtraction, SourceSpan
 
 # `$500,000` or `$500000` or `$5.5M` or `$5,000,000.00`. We deliberately
 # don't accept bare "500000" without a `$` — too noisy on legal docs that
-# reference share counts, dates, etc.
-_AMOUNT_PATTERN = r"\$\s*([\d,]+(?:\.\d{2})?)"
+# reference share counts, dates, etc. An optional K/M/B/MM suffix is captured
+# separately so _amount_to_int can scale it.
+_AMOUNT_PATTERN = r"\$\s*([\d,]+(?:\.\d+)?)\s*(K|M|MM|B|bn)?"
 _QUOTE_OPEN = r"[\"“]"  # ASCII " or U+201C left double quote
 _QUOTE_CLOSE = r"[\"”]"  # ASCII " or U+201D right double quote
 
@@ -30,15 +31,30 @@ PURCHASE_PATTERN = re.compile(
 )
 
 
-def _amount_to_int(raw: str) -> int | None:
-    """Convert '500,000' / '5,000,000.00' / '5.5M' to int dollars."""
+_SUFFIX_MULTIPLIERS = {
+    "k": 1_000,
+    "m": 1_000_000,
+    "mm": 1_000_000,
+    "b": 1_000_000_000,
+    "bn": 1_000_000_000,
+}
+
+
+def _amount_to_int(raw: str, suffix: str | None = None) -> int | None:
+    """Convert '500,000' / '5,000,000.00' / ('5.5', 'M') to int dollars."""
     cleaned = raw.replace(",", "").strip()
     if not cleaned:
         return None
     try:
-        return int(float(cleaned))
+        value = float(cleaned)
     except ValueError:
         return None
+    if suffix:
+        mult = _SUFFIX_MULTIPLIERS.get(suffix.lower())
+        if mult is None:
+            return None
+        value *= mult
+    return int(value)
 
 
 def extract(ctx: ExtractionContext) -> list[FieldExtraction]:
@@ -57,7 +73,7 @@ def extract(ctx: ExtractionContext) -> list[FieldExtraction]:
 
     out: list[FieldExtraction] = []
     for m in matches:
-        amount = _amount_to_int(m.group(1))
+        amount = _amount_to_int(m.group(1), m.group(2))
         if amount is None:
             continue
         # The full evidence quote is the matched span.

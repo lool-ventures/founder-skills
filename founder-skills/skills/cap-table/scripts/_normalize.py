@@ -101,12 +101,19 @@ def numeric_tokens(value: Any) -> list[str]:
         return list(dict.fromkeys(filter(None, out)))
     if isinstance(value, float):
         out = [f"{value:.4f}".rstrip("0").rstrip("."), f"{value:.2f}".rstrip("0").rstrip(".")]
+        # An integer-valued float (e.g. 20000000.0 from JSON) must generate the
+        # same comma / $XM / "X million" variants as the int branch, otherwise a
+        # value_in_doc check against a doc printing "$20,000,000" fails purely on
+        # JSON number formatting (the compact-form fallback is disabled for
+        # numerics in evidence_verifier).
+        if value.is_integer() and abs(value) >= 1000:
+            out.extend(numeric_tokens(int(value)))
         if 0 < value < 1:
             pct = value * 100
             pct_str = f"{pct:.4f}".rstrip("0").rstrip(".")
             out.append(f"{pct_str}%")
             out.append(pct_str)
-        return list(filter(None, out))
+        return list(dict.fromkeys(filter(None, out)))
     return [str(value)]
 
 
