@@ -1012,18 +1012,25 @@ def test_unit_economics_ratings() -> None:
 
 
 def test_unit_economics_burn_multiple_computed_wins() -> None:
-    """When compute inputs are present and values are close, computed burn_multiple is used."""
+    """When compute inputs and provided are close (<2x ratio), computed burn_multiple is used.
+
+    Derivation (period-matched formula):
+      mrr=50000, g=0.08, burn=80000
+      net_new_arr = 50000*0.08*12 = 48000
+      computed = 80000/48000 = 1.67x
+      provided = 1.7; ratio = 1.7/1.67 = 1.02 < 2.0 → computed (1.67) wins
+    """
     inputs = json.loads(json.dumps(_VALID_INPUTS))
-    # Computed: 80000 / (50000 * 0.08) = 20.0x; provided 18.0 is within 2x ratio → computed wins
-    inputs["unit_economics"]["burn_multiple"] = 18.0
+    inputs["unit_economics"]["burn_multiple"] = 1.7
     payload = json.dumps(inputs)
     rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
     assert rc == 0
     assert data is not None
     metrics_by_name = {m["name"]: m for m in data["metrics"]}
     assert "burn_multiple" in metrics_by_name
-    # Computed value (20.0) should be used, not the reported 18.0
-    assert metrics_by_name["burn_multiple"]["value"] != 18.0
+    # Computed value (1.67) should be used, not the reported 1.7
+    assert metrics_by_name["burn_multiple"]["value"] == 1.67
+    assert metrics_by_name["burn_multiple"]["value"] != 1.7
     # burn_multiple_lifetime should NOT exist
     assert "burn_multiple_lifetime" not in metrics_by_name
 
@@ -2932,16 +2939,14 @@ def test_unit_economics_burn_multiple_hyper_growth_contextual() -> None:
 
 def test_unit_economics_burn_multiple_seed_vs_series_a_thresholds() -> None:
     """Seed burn_multiple thresholds (2.0/2.5/3.0) differ from series-a (1.5/2.0/2.5)."""
-    # A burn_mult of 1.8 should be strong for seed but acceptable for series-a
+    # Target BM = 2.0 using period-matched formula: monthly_burn / (mrr * g * 12)
+    # mrr=50000, g=0.08 → net_new_arr = 50000*0.08*12 = 48000
+    # burn = 2.0 * 48000 = 96000 → BM = 96000/48000 = 2.0
+    # Seed (strong<=2.0): 2.0 ≤ 2.0 → "strong"; Series-A (strong<=1.5): 2.0 > 1.5 → "acceptable"
     for stage, expected_rating in [("seed", "strong"), ("series-a", "acceptable")]:
         inputs = json.loads(json.dumps(_VALID_INPUTS))
         inputs["company"]["stage"] = stage
-        # Engineer BM to ~1.8x: burn=80K, net_new_arr = MRR*growth*12 = 50K*0.08*12 = 48K
-        # burn / (net_new_arr/12) = 80K / 4K = 20.0 — too high
-        # Set growth higher: 0.20 → net_new_arr/12 = 50K*0.20 = 10K, burn_mult = 80K/10K = 8
-        # Set burn = 15000, growth = 0.08 → net_new_arr/12 = 4K, burn_mult = 3.75 — hmm
-        # Use: burn=8000, growth=0.08 → 8000/4000 = 2.0
-        inputs["cash"]["monthly_net_burn"] = 8000
+        inputs["cash"]["monthly_net_burn"] = 96000
         inputs["revenue"]["growth_rate_monthly"] = 0.08
         payload = json.dumps(inputs)
         rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
@@ -3089,9 +3094,10 @@ def test_unit_economics_burn_multiple_quarterly_5_entries_full_yoy() -> None:
 def test_unit_economics_burn_multiple_divergence_warning() -> None:
     """When TTM and growth-rate burn multiples diverge >2x, emit BURN_MULTIPLE_DIVERGENCE warning."""
     inputs = json.loads(json.dumps(_VALID_INPUTS))
-    # Monthly time-series with flat ARR (net new ARR = 0 from growth, but big jump in ARR)
     # TTM: arr grows from 200K to 800K → net_new_arr = 600K, burn_mult = (80K*12)/600K = 1.6x
-    # Growth-rate: MRR=50K, growth=0.02 → net_new_arr = 50K*0.02*12 = 12K, burn_mult = 80K/1K = 80x
+    # Growth-rate (period-matched): MRR=50K, growth=0.02 → net_new_arr_monthly = 50K*0.02*12 = 12K
+    #   _gr_burn_mult = 80K / 12K = 6.67x
+    # Ratio = max(1.6, 6.67) / min(1.6, 6.67) = 4.17 > 2.0 → divergence warning fires
     inputs["revenue"]["growth_rate_monthly"] = 0.02  # low stated growth
     inputs["revenue"]["monthly"] = [
         {"month": f"2025-{m:02d}", "arr": 200000 + i * (600000 / 11)} for i, m in enumerate(range(1, 13))
@@ -3113,11 +3119,13 @@ def test_unit_economics_burn_multiple_divergence_warning() -> None:
 def test_unit_economics_burn_multiple_no_divergence_warning() -> None:
     """When TTM and growth-rate burn multiples are close, no BURN_MULTIPLE_DIVERGENCE."""
     inputs = json.loads(json.dumps(_VALID_INPUTS))
-    # Linear ARR growth of ~4K/mo over 12 months → net_new_arr ≈ 44K
-    # growth_rate=0.08, MRR=50K → growth-rate net_new_arr = 50K*0.08*12 = 48K
-    # TTM BM ≈ 21.8x, GR BM ≈ 20.0x → ratio ~1.09 (< 2x threshold)
+    # ARR grows at exactly ΔARR_per_month = mrr*g*12 = 50K*0.08*12 = 48K per month
+    # 12 entries (i=0..11) → ts_net_new_arr = arr[11]-arr[0] = 11 * 48K = 528K
+    # TTM BM = (80K*12) / 528K = 1.82x
+    # GR BM (period-matched) = 80K / (50K*0.08*12) = 80K/48K = 1.67x
+    # Ratio = max(1.82, 1.67) / min(1.82, 1.67) = 1.09 → below 2.0 threshold, no warning
     inputs["revenue"]["monthly"] = [
-        {"month": f"2025-{m:02d}", "total": 50000 + i * 333, "arr": 600000 + i * 4000}
+        {"month": f"2025-{m:02d}", "total": 50000 + i * 4000, "arr": 600000 + i * 48000}
         for i, m in enumerate(range(1, 13))
     ]
     payload = json.dumps(inputs)
@@ -3127,6 +3135,32 @@ def test_unit_economics_burn_multiple_no_divergence_warning() -> None:
     warnings = data.get("warnings", [])
     codes = [w["code"] for w in warnings]
     assert "BURN_MULTIPLE_DIVERGENCE" not in codes
+
+
+def test_unit_economics_burn_multiple_reference_regression() -> None:
+    """Reference regression: mrr=58500, g=0.08, burn=42000 → burn_multiple=0.75, rating='strong'.
+
+    Derivation (period-matched Sacks convention):
+      ΔMRR = 58500 * 0.08 = 4680
+      net_new_arr_per_month = ΔMRR * 12 = 4680 * 12 = 56160
+      burn_multiple = monthly_burn / net_new_arr_per_month = 42000 / 56160 = 0.7479... → round(2) = 0.75
+      Seed benchmark: strong ≤ 2.0 → 0.75 ≤ 2.0 → 'strong'
+    """
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["mrr"] = {"value": 58500, "as_of": "2025-12"}
+    inputs["revenue"]["growth_rate_monthly"] = 0.08
+    inputs["cash"]["monthly_net_burn"] = 42000
+    # Ensure growth-rate fallback is used (no monthly/quarterly time-series)
+    inputs["revenue"].pop("monthly", None)
+    inputs["revenue"].pop("quarterly", None)
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["value"] == 0.75, f"Expected 0.75, got {bm['value']}"
+    assert bm["rating"] == "strong", f"Expected 'strong' (≤ seed threshold 2.0), got {bm['rating']!r}"
 
 
 def test_unit_economics_ai_gross_margin_seed_vs_series_a() -> None:
@@ -3952,8 +3986,15 @@ class TestBurnMultipleProvidedPreference:
         return inp
 
     def test_divergent_prefers_provided(self) -> None:
-        """31x growth-rate vs 3.05x provided → use 3.05x, warn about divergence."""
-        inp = self._make_inputs(0.118, provided_bm=3.05)
+        """15x growth-rate vs 3.05x provided → use 3.05x, warn about divergence.
+
+        Derivation (period-matched formula):
+          mrr=153603, g=0.02, burn=561000
+          net_new_arr = 153603*0.02*12 = 36864.72
+          computed = 561000/36864.72 = 15.22x
+          ratio = max(15.22, 3.05) / min(15.22, 3.05) = 4.99 > 2.0 → prefer provided
+        """
+        inp = self._make_inputs(0.02, provided_bm=3.05)
         rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
         assert rc == 0
         bm = next(m for m in data["metrics"] if m["name"] == "burn_multiple")
@@ -3964,27 +4005,39 @@ class TestBurnMultipleProvidedPreference:
         assert "BURN_MULTIPLE_REPORTED_DIVERGENCE" in codes
 
     def test_close_values_uses_computed(self) -> None:
-        """When growth-rate and provided are close, use computed."""
+        """When growth-rate and provided are close, use computed.
+
+        Derivation (period-matched formula):
+          mrr=100000, g=0.05, burn=50000
+          net_new_arr = 100000*0.05*12 = 60000
+          computed = 50000/60000 = 0.83x
+          provided = 0.85; ratio = 0.85/0.83 = 1.02 < 2.0 → use computed (0.83)
+        """
         inp = {
             "company": {"stage": "series-a", "sector": "B2B SaaS", "revenue_model_type": "saas-sales-led"},
             "revenue": {"mrr": {"value": 100000}, "arr": {"value": 1200000}, "growth_rate_monthly": 0.05},
             "cash": {"current_balance": 5000000, "monthly_net_burn": 50000},
-            "unit_economics": {"gross_margin": 0.75, "burn_multiple": 9.5},
+            "unit_economics": {"gross_margin": 0.75, "burn_multiple": 0.85},
         }
         rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
         assert rc == 0
         bm = next(m for m in data["metrics"] if m["name"] == "burn_multiple")
-        # Computed: 50000 / (100000*0.05) = 10x; provided 9.5; ratio 1.05 < 2 → use computed
-        assert bm["value"] == 10.0
+        assert bm["value"] == 0.83
 
     def test_no_provided_uses_computed(self) -> None:
-        """Without provided burn_multiple, always use computed (existing behavior)."""
+        """Without provided burn_multiple, always use computed (existing behavior).
+
+        Derivation (period-matched formula):
+          mrr=153603, g=0.118, burn=561000
+          net_new_arr = 153603*0.118*12 = 217,571.9
+          computed = 561000/217571.9 = 2.58x
+        """
         inp = self._make_inputs(0.118, provided_bm=None)
         rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
         assert rc == 0
         bm = next(m for m in data["metrics"] if m["name"] == "burn_multiple")
-        # 561000 / (153603 * 0.118) = 30.95
-        assert bm["value"] == 30.95
+        # period-matched: 561000 / (153603*0.118*12) = 2.58
+        assert bm["value"] == 2.58
 
     def test_time_series_path_unaffected_by_divergence_check(self) -> None:
         """Time-series burn multiple path should not be affected by the growth-rate divergence check."""

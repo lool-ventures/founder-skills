@@ -696,11 +696,15 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                         f"Burn multiple of {burn_mult:.1f}x ({_bm_method_label}); no benchmark for stage '{stage}'",
                     )
                 )
-        # Divergence check: if growth-rate method is also available, compare
+        # Divergence check: if growth-rate method is also available, compare.
+        # Period-matched: monthly_burn / (ΔMRR*12) — same convention as the standalone
+        # fallback below. Example (mrr=50K, g=0.08, burn=80K):
+        #   _gr_net_new_arr = 50K*0.08*12 = 48K (ARR added per month)
+        #   _gr_burn_mult = 80K/48K = 1.67x
         if _compute_inputs_present and growth_rate > 0:
             _gr_net_new_arr = mrr * growth_rate * 12
             if _gr_net_new_arr > 0:
-                _gr_burn_mult = round((monthly_burn * 12) / _gr_net_new_arr, 2)
+                _gr_burn_mult = round(monthly_burn / _gr_net_new_arr, 2)
                 ratio = max(burn_mult, _gr_burn_mult) / max(min(burn_mult, _gr_burn_mult), 0.01)
                 if ratio > 2.0:
                     ue_warnings.append(
@@ -716,9 +720,10 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                     )
     elif _compute_inputs_present and growth_rate > 0:
         # Growth-rate fallback (less accurate for enterprise/lumpy growth)
-        net_new_arr = mrr * growth_rate * 12
+        net_new_arr = mrr * growth_rate * 12  # ARR added per month = ΔMRR*12
         if net_new_arr > 0:
-            burn_mult = round(monthly_burn / (net_new_arr / 12), 2)
+            # period-matched: burn for the month ÷ ARR added in the month (ΔMRR×12)
+            burn_mult = round(monthly_burn / net_new_arr, 2)
             # --- divergence check: prefer provided when growth-rate estimate is unreliable ---
             # Only compare positive values; negative burn_mult flows to existing sign-error handler
             provided_bm = _deep_get(unit_econ, "burn_multiple")
