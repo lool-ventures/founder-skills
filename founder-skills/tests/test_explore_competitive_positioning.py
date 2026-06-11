@@ -286,3 +286,47 @@ def test_axis_rationale_in_embedded_data() -> None:
         assert len(data["views"]) >= 1
         v = data["views"][0]
         assert v.get("x_axis", {}).get("rationale"), "View should have x_axis rationale in DATA"
+
+
+# ---------------------------------------------------------------------------
+# Audit regression tests (a4: explore.py)
+# ---------------------------------------------------------------------------
+
+
+def test_non_dict_artifact_does_not_crash() -> None:
+    """A top-level JSON array artifact must degrade to the corrupt path, not
+    crash explore.py with AttributeError (audit cp-scripts-6)."""
+    with _make_artifact_dir(_all_artifacts()) as d:
+        with open(os.path.join(d, "report.json"), "w") as f:
+            f.write('["x"]')
+        rc, stdout, stderr = _run_explore(d)
+        assert "Traceback" not in stderr
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        assert "<html" in stdout.lower()
+
+
+def test_3d_axes_bar_initially_hidden() -> None:
+    """The #3d-axes-bar div must not carry a live 'display: flex' in its static
+    style — the dead duplicate that overrode the intended display:none is removed
+    (audit cp-scripts-8). render3D sets display='flex' at runtime instead."""
+    with _make_artifact_dir(_all_artifacts()) as d:
+        rc, stdout, _stderr = _run_explore(d)
+        assert rc == 0
+        # Isolate the axes-bar div's opening tag.
+        idx = stdout.find('id="3d-axes-bar"')
+        assert idx != -1
+        tag = stdout[idx : stdout.find(">", idx)]
+        assert "display:none" in tag
+        # The static style must not also declare display:flex (that masked the hide).
+        assert "display: flex" not in tag and "display:flex" not in tag
+
+
+def test_docstring_discloses_plotly_cdn() -> None:
+    """The explore.py module docstring must disclose the Plotly CDN dependency
+    for the 3D tab rather than claim blanket 'self-contained' (audit cp-scripts-4)."""
+    with open(SCRIPT, encoding="utf-8") as f:
+        src = f.read()
+    doc_end = src.index('"""', src.index('"""') + 3)
+    docstring = src[:doc_end]
+    assert "3D" in docstring or "Plotly" in docstring
+    assert "CDN" in docstring
