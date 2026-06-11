@@ -2386,6 +2386,29 @@ class TestGotchas:
         assert mult is None
         assert warn is None
 
+    def test_gotcha_3_discount_boundaries(self) -> None:
+        """extraction-5: percent-multiplier vs discount-rate disambiguation.
+
+        d>=50 → percent-multiplier (80→0.80, 50→0.50); 1<d<50 → discount-rate
+        (49→0.51); d<=0 → error.
+        """
+        sys.path.insert(0, SCRIPTS)
+        from extract_instrument import normalize_discount_multiplier  # type: ignore[import-not-found]
+
+        mult, warn = normalize_discount_multiplier(80.0)
+        assert mult == 0.80, mult
+        assert warn is not None
+
+        mult, warn = normalize_discount_multiplier(50.0)
+        assert mult == 0.50, mult
+
+        mult, warn = normalize_discount_multiplier(49.0)
+        assert abs(mult - 0.51) < 1e-9, mult
+
+        mult, warn = normalize_discount_multiplier(0.0)
+        assert mult is None
+        assert warn is not None and "invalid" in warn.lower()
+
     def test_gotcha_4_mfn_cycle_unresolvable(self) -> None:
         safes = [
             {
@@ -3224,7 +3247,9 @@ class TestAoAExtraction:
             )
             assert rc == 0, f"extract_aoa.py failed: rc={rc}, stderr={err}"
             receipt = json.loads(out)
-            assert receipt["status"] == "validated"
+            # After a successful merge the top-level status reflects the merge
+            # outcome (merged), not the pre-merge validation status.
+            assert receipt["status"] == "merged"
             assert receipt["preferred_series_count"] == 1
             assert "merge" in receipt
             assert receipt["merge"]["status"] == "merged"
@@ -5876,3 +5901,147 @@ class TestCapStateAfterRoundNullHistory:
             assert "TypeError" not in err, err
             assert rc == 0, err
             assert json.loads(out)["ok"] is True
+
+
+class TestPdfMissingPdfplumber:
+    """extraction-1: a missing pdfplumber must surface E_MISSING_DEPENDENCY and
+    block, not silently degrade the hallucination gate to a no-op."""
+
+    def test_pdf_missing_pdfplumber_blocks(self) -> None:
+        import builtins
+        import importlib
+
+        sys.path.insert(0, SCRIPTS)
+        ev = importlib.import_module("evidence_verifier")
+
+        real_import = builtins.__import__
+
+        def _fake_import(name, *args, **kwargs):
+            if name == "pdfplumber":
+                raise ImportError("No module named 'pdfplumber'")
+            return real_import(name, *args, **kwargs)
+
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as d:
+            pdf_path = Path(d) / "doc.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4 fake")
+            builtins.__import__ = _fake_import
+            try:
+                with pytest.raises(ev.MissingDependencyError) as exc:
+                    ev._load_doc_text(pdf_path)
+            finally:
+                builtins.__import__ = real_import
+            assert "E_MISSING_DEPENDENCY" in str(exc.value)
+            assert exc.value.dependency == "pdfplumber"
+
+
+class TestAoAMergeMatrix:
+    """extraction-2/3: --replace-existing semantics + missing-inputs handling."""
+
+    @staticmethod
+    def _extraction() -> dict[str, Any]:
+        return {
+            "extraction_type": "articles_of_association",
+            "fields": {
+                "company_name": "Acmecorp Ltd.",
+                "jurisdiction_structure": "israeli",
+                "preferred_series": [
+                    {
+                        "series_name": "Series Seed",
+                        "shares": None,
+                        "original_issue_price": 2.0,
+                        "original_conversion_price": 2.0,
+                        "current_conversion_price": 2.0,
+                        "issuance_date": "2020-01-01",
+                        "liquidation_preference_multiple": 1.0,
+                        "liquidation_preference_type": "non_participating",
+                        "anti_dilution_protection": "broad_based_weighted_average",
+                    }
+                ],
+            },
+            "confidence": {},
+            "ambiguities": [],
+        }
+
+    def _write_inputs(self, d: str, series: list[dict]) -> str:
+        path = os.path.join(d, "inputs.json")
+        with open(path, "w") as f:
+            json.dump(
+                {
+                    "company_name": "Acmecorp Ltd.",
+                    "analysis_date": "2026-05-21",
+                    "mode": "standard",
+                    "preferred_series": series,
+                    "metadata": {"run_id": "test"},
+                },
+                f,
+            )
+        return path
+
+    def test_conflict_without_flag_is_atomic_no_write_exit_2(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            inputs_path = self._write_inputs(
+                d, [{"series_name": "Series Seed", "shares": 1_000_000, "original_issue_price": 1.0}]
+            )
+            with open(inputs_path) as f:
+                before = f.read()
+            rc, out, err = _run(
+                "extract_aoa.py",
+                ["--run-id", "t", "--inputs", inputs_path],
+                stdin_data=json.dumps(self._extraction()),
+            )
+            assert rc == 2, err
+            receipt = json.loads(out)
+            assert receipt["status"] == "conflict"
+            assert receipt["merge"]["added"] == []
+            # Atomic: file unchanged on disk
+            with open(inputs_path) as f:
+                assert f.read() == before
+
+    def test_replace_existing_overwrites_exit_0(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            inputs_path = self._write_inputs(
+                d, [{"series_name": "Series Seed", "shares": 1_000_000, "original_issue_price": 1.0}]
+            )
+            rc, out, err = _run(
+                "extract_aoa.py",
+                ["--run-id", "t", "--inputs", inputs_path, "--source-doc", "/aoa.pdf", "--replace-existing"],
+                stdin_data=json.dumps(self._extraction()),
+            )
+            assert rc == 0, err
+            receipt = json.loads(out)
+            assert receipt["status"] == "merged"
+            assert receipt["merge"]["replaced"] == ["Series Seed"]
+            with open(inputs_path) as f:
+                merged = json.load(f)
+            seeds = [s for s in merged["preferred_series"] if s["series_name"] == "Series Seed"]
+            assert len(seeds) == 1
+            # Replaced in place with the new OIP + fresh provenance
+            assert seeds[0]["original_issue_price"] == 2.0
+            assert "extraction_provenance" in seeds[0]
+
+    def test_missing_inputs_is_merge_failed_exit_1(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            missing = os.path.join(d, "does_not_exist.json")
+            rc, out, err = _run(
+                "extract_aoa.py",
+                ["--run-id", "t", "--inputs", missing],
+                stdin_data=json.dumps(self._extraction()),
+            )
+            assert rc == 1, err
+            receipt = json.loads(out)
+            assert receipt["status"] == "merge_failed"
+
+    def test_no_conflict_appends_exit_0(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            inputs_path = self._write_inputs(d, [])
+            rc, out, err = _run(
+                "extract_aoa.py",
+                ["--run-id", "t", "--inputs", inputs_path, "--source-doc", "/aoa.pdf"],
+                stdin_data=json.dumps(self._extraction()),
+            )
+            assert rc == 0, err
+            receipt = json.loads(out)
+            assert receipt["status"] == "merged"
+            assert receipt["merge"]["added"] == ["Series Seed"]
