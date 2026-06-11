@@ -235,3 +235,48 @@ def test_skill_md_subagent_blocks_have_no_bash(skill_md: Path) -> None:
         "`<!-- skill-quality-ci: bash-after-subagent-ok -->` anywhere "
         "between the cue line and the bash block."
     )
+
+
+# Producer pipes that write a pipeline artifact (-o <path>.json).
+_PIPE_WRITES_JSON = re.compile(r'\.py\b[^\n|]*\s-o\s+"?[^"\n]*\.json')
+# Scripts that write JSON but do not mint a run_id (orchestrators / renderers /
+# receipts), exempt from the stamping check.
+_RUN_ID_EXEMPT_SCRIPTS = (
+    "compose_report.py",  # consumes run_ids, does not mint them
+    "visualize.py",
+    "explore.py",
+    "find_artifact.py",
+    "founder_context.py",
+)
+# Two run_id mechanisms both satisfy the Context B run_id-parity check:
+#   - CLI-stamping: producers take --run-id and stamp metadata.run_id (the
+#     reference contract; its ABSENCE deterministically BLOCKED Context B in
+#     the ic-sim / market-sizing regression). Statically checkable here.
+#   - stdin passthrough: producers read metadata.run_id off their stdin input
+#     (inputs.json / heredoc) and propagate it (competitive-positioning, FMR).
+#     Not statically checkable from SKILL.md; covered by per-producer tests.
+_CLI_STAMPING_SKILLS = {"deck-review", "ic-sim", "market-sizing", "cap-table"}
+
+
+@pytest.mark.parametrize("skill_md", SKILL_MD_FILES, ids=lambda p: p.parent.name)
+def test_producer_pipes_carry_run_id(skill_md: Path) -> None:
+    """For CLI-stamping skills, every `... script.py ... -o <artifact>.json`
+    invocation in a SKILL.md bash block must pass --run-id (regression guard for
+    the ic-sim / market-sizing Context B blocker). Passthrough skills are
+    covered by their per-producer metadata-propagation tests instead."""
+    if skill_md.parent.name not in _CLI_STAMPING_SKILLS:
+        pytest.skip(f"{skill_md.parent.name} uses stdin-metadata passthrough, not CLI stamping")
+    text = skill_md.read_text(encoding="utf-8")
+    offenders: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not _PIPE_WRITES_JSON.search(line):
+            continue
+        if any(exempt in line for exempt in _RUN_ID_EXEMPT_SCRIPTS):
+            continue
+        if "--run-id" not in line:
+            offenders.append(line[:100])
+    assert not offenders, (
+        f"{skill_md.relative_to(REPO_ROOT)}: artifact-writing producer pipe(s) "
+        f"missing --run-id (Context B run_id-parity will BLOCK):\n" + "\n".join(f"  {o}" for o in offenders)
+    )
