@@ -5666,9 +5666,19 @@ class TestPreAdBaselineDenominator:
             new_money=500_000,
         )
         agg = r["aggregate_ownership_by_class"]
-        # When AD fires, pre-AD baseline must be present and bounded by 100%.
-        if "founders_pct_pre_anti_dilution" in agg:
-            assert 0.0 < agg["founders_pct_pre_anti_dilution"] <= 1.0
+        # Pre-AD baseline derivation:
+        #   pre_pps = pre_money / pre_fd = 1_000_000 / 2_500_000 = 0.40 (frozen)
+        #   pre_ad_new_money_shares = 500_000 / 0.40 = 1_250_000
+        #   pre_ad_post_fd = common_shares(2_000_000) + preferred_pre_ad(250_000)
+        #                  + options(0) + warrants(250_000) + pool_topup(0)
+        #                  + safe_shares(0) + note_shares(0)
+        #                  + pre_ad_new_money_shares(1_250_000) = 3_750_000
+        #   founders numerator = 1_500_000 (founders list only, not batches)
+        #   expected = 1_500_000 / 3_750_000 = 0.40
+        # Old denominator (omitting batches 500_000 + warrants 250_000 = 750_000):
+        #   old_denom = 3_000_000 → old_value = 0.50 — delta 0.10 exceeds 1e-6 tolerance.
+        assert "founders_pct_pre_anti_dilution" in agg
+        assert abs(agg["founders_pct_pre_anti_dilution"] - 0.40) < 1e-6
 
 
 class TestVisualize:
@@ -5709,6 +5719,104 @@ class TestVisualize:
         # negative delta should never create a wedge
         assert "founders pct pre anti dilution" not in legend
         assert svg  # renders without error
+
+
+class TestExploreDonutExclusion:
+    """math-5: explore.py filters AD meta keys and non-numeric values from
+    the donut/legend data path before embedding into JS."""
+
+    def _make_explorer_html(self, agg: dict) -> str:
+        import explore  # type: ignore[import-not-found]
+
+        inputs = {"company_name": "TestCo", "mode": "standard", "analysis_date": "2026-01-01"}
+        cap_state_data: dict = {
+            "as_of_date": "2026-01-01",
+            "as_converted_totals": {
+                "fully_diluted_shares": 10_000_000,
+                "common_shares": 8_000_000,
+                "preferred_shares_as_converted": 1_000_000,
+                "options_outstanding": 500_000,
+                "options_available": 500_000,
+                "warrants_underlying_total": 0,
+            },
+            "founders": [{"name": "Alice", "founder_id": "alice", "common_shares": 8_000_000}],
+        }
+        scenarios_doc: dict = {
+            "scenarios": [
+                {
+                    "scenario_id": "s1",
+                    "label": "Test Scenario",
+                    "type": "priced_round",
+                    "computed_outputs": {
+                        "completeness": "full",
+                        "aggregate_ownership_by_class": agg,
+                        "equity_financing_price": 1.0,
+                        "post_round_fully_diluted_shares": 12_000_000,
+                        "shares_breakdown": {},
+                        "founder_impact": None,
+                    },
+                    "parameters": {},
+                }
+            ]
+        }
+        counsel_packet: dict = {"items": []}
+        return explore.render_explorer_html(
+            inputs=inputs,
+            cap_state=cap_state_data,
+            scenarios_doc=scenarios_doc,
+            counsel_packet=counsel_packet,
+        )
+
+    def test_ad_meta_keys_absent_from_embedded_donut_data(self) -> None:
+        """AD meta keys must not appear in the donut/legend data path."""
+        agg = {
+            "founders_pct": 0.50,
+            "preferred_pct": 0.10,
+            "option_pool_pct": 0.05,
+            "new_money_pct": 0.15,
+            "warrants_pct": 0.05,
+            "founders_by_class": {"class_a": 0.50},
+            "founders_pct_pre_anti_dilution": 0.60,
+            "preferred_pct_pre_anti_dilution": 0.12,
+            "anti_dilution_delta_pct_points": -10.0,
+        }
+        html = self._make_explorer_html(agg)
+        # The aggregate object that JS iterates must not contain the meta keys.
+        # They are embedded as JSON inside the DATA constant — assert they are
+        # absent from the aggregate sub-object in the embedded payload.
+        assert '"founders_pct_pre_anti_dilution"' not in html
+        assert '"preferred_pct_pre_anti_dilution"' not in html
+        assert '"anti_dilution_delta_pct_points"' not in html
+        # Non-numeric founders_by_class dict must also be excluded.
+        assert '"founders_by_class"' not in html
+
+    def test_real_ownership_keys_present(self) -> None:
+        """Real ownership slices survive the filter."""
+        agg = {
+            "founders_pct": 0.50,
+            "preferred_pct": 0.20,
+            "option_pool_pct": 0.10,
+            "new_money_pct": 0.20,
+            "founders_by_class": {"class_a": 0.50},
+            "founders_pct_pre_anti_dilution": 0.60,
+            "anti_dilution_delta_pct_points": -10.0,
+        }
+        html = self._make_explorer_html(agg)
+        assert '"founders_pct"' in html
+        assert '"preferred_pct"' in html
+        assert '"option_pool_pct"' in html
+        assert '"new_money_pct"' in html
+
+    def test_warrants_in_palette(self) -> None:
+        """warrants color is defined in the JS PALETTE."""
+        agg = {
+            "founders_pct": 0.80,
+            "warrants_pct": 0.05,
+            "new_money_pct": 0.15,
+        }
+        html = self._make_explorer_html(agg)
+        # The JS PALETTE object must contain a warrants entry.
+        assert "warrants:" in html or '"warrants"' in html
 
 
 class TestComposeSummaryCounts:

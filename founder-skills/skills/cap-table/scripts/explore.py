@@ -36,6 +36,22 @@ from typing import Any
 
 _VENDOR_DIR = Path(__file__).resolve().parent / "vendor"
 
+# Pre-AD / delta narrative fields that aggregate_ownership_by_class carries.
+# They are not ownership wedges — the donut and legend must exclude them.
+# Mirrors visualize.py EXCLUDED_OWNERSHIP_KEYS.
+_EXCLUDED_OWNERSHIP_KEYS: frozenset[str] = frozenset(
+    {
+        "founders_pct_pre_anti_dilution",
+        "preferred_pct_pre_anti_dilution",
+        "anti_dilution_delta_pct_points",
+    }
+)
+
+
+def _filter_agg(agg: dict[str, Any]) -> dict[str, float]:
+    """Return only numeric ownership slices — exclude AD meta keys and dicts."""
+    return {k: v for k, v in agg.items() if k not in _EXCLUDED_OWNERSHIP_KEYS and isinstance(v, (int, float))}
+
 
 def _esc(s: Any) -> str:
     return html.escape(str(s) if s is not None else "", quote=True)
@@ -85,7 +101,7 @@ def render_explorer_html(
                 "completeness": s["computed_outputs"].get("completeness", "structural_only"),
                 "cap_implied_only": s["computed_outputs"].get("cap_implied_only", False),
                 "blockers": s["computed_outputs"].get("blockers", []),
-                "aggregate": s["computed_outputs"].get("aggregate_ownership_by_class") or {},
+                "aggregate": _filter_agg(s["computed_outputs"].get("aggregate_ownership_by_class") or {}),
                 "equity_financing_price": s["computed_outputs"].get("equity_financing_price"),
                 "shares_breakdown": s["computed_outputs"].get("shares_breakdown", {}),
                 "post_round_fd": s["computed_outputs"].get("post_round_fully_diluted_shares"),
@@ -249,6 +265,7 @@ const PALETTE = {{
   safe: "#DC2626",
   note: "#EA580C",
   new_money: "#059669",
+  warrants: "#CA8A04",
 }};
 
 let _chartInstance = null;

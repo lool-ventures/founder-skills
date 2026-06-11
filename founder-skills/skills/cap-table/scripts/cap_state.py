@@ -467,6 +467,8 @@ def build_cap_state(
             "current_conversion_price": float(
                 s.get(
                     "current_conversion_price",
+                    # Third slot (ocp alias) is unreachable: OCP > 0 is
+                    # validated above before this dict is built.
                     s.get("original_conversion_price", s.get("ocp", 0)),
                 )
             ),

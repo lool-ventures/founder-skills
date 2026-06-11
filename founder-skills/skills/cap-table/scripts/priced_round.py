@@ -584,11 +584,14 @@ def solve_priced_round(
     # Without freezing, AntiDilutionAdjuster would read the iter-mutated CCP
     # and apply AD on top of itself (ratchet-on-ratchet — a future extension).
     preferred_series = working_cap_state.get("preferred_series", [])
+    # cap_state guarantees current_conversion_price is always written (fallback
+    # chain current → original_conversion_price), so the second slot is
+    # unreachable in practice; it exists only as a defensive guard.
     pre_financing_cp1_snapshots: dict[str, float] = {
         s["series_id"]: float(
             s.get(
                 "current_conversion_price",
-                s.get("original_conversion_price", s.get("original_issue_price", 1.0)),
+                s.get("original_conversion_price", 1.0),
             )
         )
         for s in preferred_series
@@ -862,6 +865,7 @@ def solve_priced_round(
 
     # Pre-AD baseline (only meaningful when AD fired)
     if has_ad_protection and ad_breakdown:
+        # pre_pps is the iteration-0 price estimate, not the converged PPS — the pre-AD baseline is an illustrative counterfactual, accurate to ~tenths of a pp.
         pre_ad_new_money_shares = new_money / pre_pps if pre_pps > 0 else 0.0
         # Reconstruct the pre-AD FD denominator from the SAME components the
         # post-AD post_fd uses (via final_ats) so the only difference is the
