@@ -34,10 +34,11 @@ We follow [SemVer 2.0.0](https://semver.org/).
 - Reference material updates
 - Documentation improvements that ship inside the plugin
 
-These are bumps by *policy*. Note that the CI path filter (below) only mechanically
-*forces* a bump for non-markdown files under `founder-skills/` (and `pyproject.toml`):
-because the filter exempts all `*.md`, SKILL.md / reference-doc / agent-prompt rewrites
-are not caught automatically. Bump them anyway — the filter is a backstop, not the rule.
+These are bumps by *policy*, and the CI path filter (below) enforces them: it
+forces a bump for any non-test file under `founder-skills/` — including in-plugin
+Markdown (`skills/*/SKILL.md`, `skills/*/references/*.md`, `agents/*.md`) — and for
+`pyproject.toml`. Only repository-level Markdown (README, CONTRIBUTING, `docs/`) is
+exempt.
 
 ### No Version Bump Needed
 
