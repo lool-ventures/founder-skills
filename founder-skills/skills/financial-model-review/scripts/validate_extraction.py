@@ -13,7 +13,9 @@ Checks that agent-produced inputs.json values are traceable to the raw
 extraction in model_data.json.  High-confidence checks only — skips when
 ambiguous.
 
-Output: {"status": "pass"|"warn", "checks": [...], "summary": {...}, "correction_hints": [...]}
+Output: {"status": "pass"|"warn"|"skip", "checks": [...], "summary": {...}, "correction_hints": [...]}
+    ("skip" is returned with summary.skip_reason when model_data is missing,
+     has no sheets, is a stub, or model_format is conversational/deck.)
 """
 
 from __future__ import annotations
@@ -61,11 +63,14 @@ def _fuzzy_match(a: str, b: str) -> bool:
     na, nb = _normalize(a), _normalize(b)
     if not na or not nb:
         return False
-    if na in nb or nb in na:
+    # Minimum-length floor: a 1-2 char cell ('-', a currency symbol, 'Q1')
+    # that happens to be a substring of the company name must not pass this
+    # anti-hallucination gate. Mirror the len(s) > 2 candidate filter.
+    if (na in nb or nb in na) and min(len(na), len(nb)) > 2:
         return True
     # First-word match (e.g. "Acme" vs "Acme Corp Ltd")
     wa, wb = na.split()[0], nb.split()[0]
-    return wa == wb
+    return wa == wb and len(wa) > 2
 
 
 def _close_enough(a: float, b: float, tolerance: float = 0.05) -> bool:
@@ -73,6 +78,19 @@ def _close_enough(a: float, b: float, tolerance: float = 0.05) -> bool:
     if b == 0:
         return a == 0
     return abs(a - b) / abs(b) <= tolerance
+
+
+def _num(x: Any, default: float) -> float:
+    """Coerce x to a numeric value, falling back to default for null/non-numeric.
+
+    The dict.get() default only applies to missing keys, not to keys present
+    with an explicit JSON null (produced by the corrections coercion layer).
+    """
+    if isinstance(x, bool):
+        return default
+    if isinstance(x, (int, float)):
+        return x
+    return default
 
 
 def _all_numeric_values(model_data: dict[str, Any]) -> list[float]:
@@ -467,7 +485,7 @@ def _check_scale_plausibility(inputs: dict[str, Any], model_data: dict[str, Any]
     cash = inputs.get("cash", {}).get("current_balance")
     burn = inputs.get("cash", {}).get("monthly_net_burn")
     headcount_entries = inputs.get("expenses", {}).get("headcount", [])
-    total_headcount = sum(h.get("count", 0) for h in headcount_entries if isinstance(h, dict))
+    total_headcount = sum(_num(h.get("count", 0), 0) for h in headcount_entries if isinstance(h, dict))
 
     # If scale correction was already applied, verify values are now plausible
     scale_correction = inputs.get("metadata", {}).get("scale_correction")

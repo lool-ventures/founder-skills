@@ -1571,9 +1571,14 @@ def _extraction_warnings_html(ew: dict[str, Any]) -> str:
 def _write_static(inputs: dict[str, Any], output_path: str, extraction_warnings: dict[str, Any] | None = None) -> None:
     """Write self-contained HTML to a file, print JSON status to stdout."""
     html = _build_html(inputs, extraction_warnings=extraction_warnings)
-    with open(output_path, "w") as f:
-        f.write(html)
     abs_path = os.path.abspath(output_path)
+    parent = os.path.dirname(abs_path)
+    if parent == "/":
+        print(f"Error: output path resolves to root directory: {output_path}", file=sys.stderr)
+        sys.exit(1)
+    os.makedirs(parent, exist_ok=True)
+    with open(abs_path, "w", encoding="utf-8") as f:
+        f.write(html)
     print(json.dumps({"ok": True, "mode": "static", "path": abs_path, "bytes": len(html.encode("utf-8"))}))
 
 
@@ -1977,8 +1982,8 @@ class _Handler(BaseHTTPRequestHandler):
             validation = validate_inputs.validate(state)
             all_errors.extend(validation.get("errors", []))
             warnings = validation.get("warnings", [])
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[review_inputs] /api/check validate_inputs failed: {exc!r}", file=sys.stderr)
 
         # Step 5: Compute sanity metrics
         sanity: dict[str, Any] = {}
@@ -1992,8 +1997,8 @@ class _Handler(BaseHTTPRequestHandler):
             for m in ue_result.get("metrics", []):
                 if m.get("id") == "burn_multiple" and m.get("value") is not None:
                     sanity["burn_multiple"] = m["value"]
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[review_inputs] /api/check unit_economics failed: {exc!r}", file=sys.stderr)
 
         try:
             if _scripts_dir not in sys.path:
@@ -2006,8 +2011,8 @@ class _Handler(BaseHTTPRequestHandler):
                     if s.get("name") == "base" and s.get("runway_months") is not None:
                         sanity["runway_months"] = s["runway_months"]
                         break
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[review_inputs] /api/check runway failed: {exc!r}", file=sys.stderr)
 
         # ARPU check
         mrr = _deep_get_by_path(state, "revenue.mrr.value")

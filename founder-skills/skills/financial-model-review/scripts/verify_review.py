@@ -94,7 +94,7 @@ _ALWAYS_REQUIRED = [
 _OPTIONAL = ["model_data.json", "report.html", "explore.html"]
 
 
-def _check_existence(dir_path: str, gate: int, model_format: str | None) -> dict[str, dict[str, Any]]:
+def _check_existence(dir_path: str, gate: int) -> dict[str, dict[str, Any]]:
     """Check artifact existence. Returns per-artifact status dicts."""
     results: dict[str, dict[str, Any]] = {}
 
@@ -406,12 +406,8 @@ def _check_cross_consistency(
 
 def verify(dir_path: str, gate: int = 2) -> dict[str, Any]:
     """Run all verification checks and return the result dict."""
-    # First, try to load inputs.json to get model_format (needed for existence checks)
-    inputs_data, inputs_valid, inputs_corrupt = _load_artifact(dir_path, "inputs.json")
-    model_format = _deep_get(inputs_data, "company", "model_format") if inputs_data else None
-
     # Tier 1: existence
-    artifacts = _check_existence(dir_path, gate, model_format)
+    artifacts = _check_existence(dir_path, gate)
 
     # Tier 2: quality checks on valid, non-skipped artifacts
     for name, check_fn in _QUALITY_CHECKS.items():
@@ -504,9 +500,17 @@ def main() -> None:
     output = json.dumps(result, indent=indent)
 
     if args.output_file:
-        with open(args.output_file, "w") as f:
+        abs_path = os.path.abspath(args.output_file)
+        parent = os.path.dirname(abs_path)
+        if parent == "/":
+            print(f"Error: output path resolves to root directory: {args.output_file}", file=sys.stderr)
+            sys.exit(1)
+        os.makedirs(parent, exist_ok=True)
+        with open(abs_path, "w", encoding="utf-8") as f:
             f.write(output)
             f.write("\n")
+        receipt = {"ok": True, "path": abs_path, "bytes": len((output + "\n").encode("utf-8"))}
+        sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     else:
         print(output)
 

@@ -808,3 +808,52 @@ class TestMixedPeriodicity:
         assert mod._find_numeric_in_model(30_000, model_data, periodicity_aware=True), (
             "_find_numeric_in_model should find 30_000 via x12 in an 'unknown' model"
         )
+
+
+# ---------------------------------------------------------------------------
+# Null-coercion + anti-hallucination regressions
+# ---------------------------------------------------------------------------
+
+
+def test_null_headcount_count_does_not_crash() -> None:
+    """validate_extraction.py must not raise on a headcount entry with count: null
+    in the scale-plausibility headcount sum."""
+    inputs = {
+        "company": {"name": "TestCo", "stage": "seed"},
+        "cash": {"current_balance": 1_000_000, "monthly_net_burn": 100_000},
+        "expenses": {"headcount": [{"role": "eng", "count": None}]},
+    }
+    model_data = {
+        "sheets": [
+            {
+                "name": "S",
+                "headers": ["a"],
+                "rows": [["TestCo"]],
+                "detected_type": None,
+                "periodicity": None,
+                "row_count": 1,
+                "col_count": 1,
+                "pre_header_rows": [],
+                "cell_refs": [],
+            }
+        ],
+        "source_format": "xlsx",
+        "source_file": "x.xlsx",
+        "periodicity_summary": "unknown",
+    }
+    rc, data, stderr = _run(inputs, model_data)
+    assert rc in (0, 1), f"unexpected exit on null count: {stderr}"
+    assert data, f"validate_extraction emitted no JSON (likely crashed): {stderr}"
+
+
+def test_fuzzy_match_rejects_short_substring() -> None:
+    """A 1-2 char cell that is a substring of the company name must NOT fuzzy-
+    match — otherwise the COMPANY_NAME anti-hallucination gate false-passes."""
+    mod = _load_validate_extraction_module()
+    # '-' is a substring of any hyphenated name; must not match.
+    assert mod._fuzzy_match("-", "Acme-Corp Industries") is False
+    # 2-char fragment must not match.
+    assert mod._fuzzy_match("Ac", "Acme Corp") is False
+    # Legitimate full / first-word match still passes.
+    assert mod._fuzzy_match("Acme", "Acme Corp Ltd") is True
+    assert mod._fuzzy_match("Acme Corp", "Acme Corp Ltd Inc") is True

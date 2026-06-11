@@ -12,10 +12,11 @@ When a pipeline step is skipped (e.g., insufficient data for unit economics), de
 |-------|------|----------|-------------|
 | `skipped` | boolean | yes | Always `true` |
 | `reason` | string | yes | Human-readable explanation |
+| `metadata` | object | yes | Must carry `metadata.run_id` matching the run's other artifacts (run_id-parity exempts the stub from the value check but still requires the key to be present) |
 
 Example:
 
-    {"skipped": true, "reason": "Insufficient quantitative data for unit economics computation"}
+    {"skipped": true, "reason": "Insufficient quantitative data for unit economics computation", "metadata": {"run_id": "<RUN_ID>"}}
 
 `compose_report.py` detects stubs via `_is_stub()` and renders them as informational notes in the report. Stubs are valid for: `unit_economics.json`, `runway.json`, `model_data.json`.
 
@@ -23,7 +24,7 @@ Example:
 
 ## inputs.json
 
-**Producer:** Agent (heredoc, Step 3)
+**Producer:** Context A dispatch (INPUTS_REVIEW) → `apply_corrections.py` → promoted to `inputs.json`. A direct heredoc write of `inputs.json` is the last-resort fallback only.
 
 Canonical structured input for all downstream scripts. The `company` block is required; all other blocks are optional and populated based on what the model contains.
 

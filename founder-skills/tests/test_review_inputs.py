@@ -803,3 +803,26 @@ def test_static_receipt_has_ok_and_bytes() -> None:
     assert receipt["ok"] is True
     assert receipt["mode"] == "static"
     assert receipt["bytes"] > 0
+
+
+def test_static_creates_missing_parent_dirs() -> None:
+    """Static mode must create not-yet-existing parent directories (every other
+    output writer in the skill runs os.makedirs first) and emit the receipt,
+    not a raw FileNotFoundError."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        inputs_path = os.path.join(tmpdir, "inputs.json")
+        with open(inputs_path, "w") as f:
+            json.dump(_FULL_INPUTS, f)
+        # Parent subdir does NOT exist yet.
+        output_path = os.path.join(tmpdir, "nested", "subdir", "review.html")
+        result = subprocess.run(
+            [sys.executable, _SCRIPT, inputs_path, "--static", output_path],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "Traceback" not in result.stderr
+        assert os.path.exists(output_path)
+        receipt = json.loads(result.stdout)
+        assert receipt["ok"] is True
+        assert receipt["mode"] == "static"

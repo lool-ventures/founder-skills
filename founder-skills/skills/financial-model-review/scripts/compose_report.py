@@ -34,11 +34,11 @@ WARNING_SEVERITY: dict[str, str] = {
     "CORRUPT_ARTIFACT": "high",
     "MISSING_ARTIFACT": "high",
     "STALE_ARTIFACT": "high",
-    # Checklist failures are review findings, not data errors — present, don't block
-    "CHECKLIST_FAILURES": "medium",
     # Low severity -- informational
     "MISSING_OPTIONAL_ARTIFACT": "low",
     # Medium severity -- include in Warnings section of report
+    # Checklist failures are review findings, not data errors — present, don't block
+    "CHECKLIST_FAILURES": "medium",
     "CHECKLIST_INCOMPLETE": "medium",
     "RUNWAY_INCONSISTENCY": "medium",
     "METRICS_GAPS": "medium",
@@ -92,6 +92,8 @@ def _fmt_number(value: Any) -> str:
 
 def _fmt_usd(value: float | int) -> str:
     """Format a number as USD currency string."""
+    if value < 0:
+        return "-" + _fmt_usd(-value)
     if value >= 1_000_000_000:
         return f"${value / 1_000_000_000:,.1f}B"
     if value >= 1_000_000:
@@ -318,14 +320,6 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                     f"Unit economics computed only {computed} metrics (recommend 2+)",
                 )
             )
-
-    # Downgrade CHECKLIST_FAILURES severity for non-spreadsheet formats
-    if _usable(inputs):
-        model_format = _as_dict(inputs.get("company")).get("model_format", "spreadsheet")
-        if model_format in ("deck", "conversational"):
-            for w in warnings:
-                if w["code"] == "CHECKLIST_FAILURES":
-                    w["severity"] = "medium"
 
     return warnings
 
@@ -818,9 +812,6 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # Run validation
     warnings = validate_artifacts(artifacts)
 
-    # Determine status
-    status = "clean" if not warnings else "warnings"
-
     # Assemble report -- treat corrupt artifacts as None for rendering
     def _render_safe(data: dict[str, Any] | None) -> dict[str, Any] | None:
         return None if data is _CORRUPT else data
@@ -830,6 +821,9 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     unit_economics = _render_safe(artifacts.get("unit_economics.json"))
     runway = _render_safe(artifacts.get("runway.json"))
 
+    # Render every section EXCEPT the Warnings section first; the Warnings
+    # section is spliced in after the marker pre-scan so MARKER_COLLISION (which
+    # is itself a warning) is reflected in both the status and the report body.
     sections = [
         _section_title(inputs),
         _section_executive_summary(inputs, checklist, unit_economics, runway),
@@ -838,10 +832,9 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         _section_unit_economics(unit_economics),
         _section_runway(runway),
         _section_overrides(inputs),
-        _section_warnings(warnings),
     ]
 
-    report_markdown = "\n".join(sections)
+    body_without_warnings = "\n".join(sections)
 
     # v0.4.2 Mitigation 2: per-run uuid marker for Context B's Edit
     marker = f"<!-- COACHING_INSERTION_POINT_{uuid.uuid4().hex[:8]} -->"
@@ -850,7 +843,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # always find our own emission). Agent post-Edit verification uses the
     # EXACT uuid (per-run), so substring collisions with body content are
     # informational only — but worth flagging so authors can sanitize.
-    if "<!-- COACHING_INSERTION_POINT_" in report_markdown:
+    if "<!-- COACHING_INSERTION_POINT_" in body_without_warnings:
         warnings.append(
             _warn(
                 "MARKER_COLLISION",
@@ -861,6 +854,13 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
                 ),
             )
         )
+
+    # Determine status AFTER the MARKER_COLLISION pre-scan so status and the
+    # rendered Warnings section stay consistent with validation.warnings.
+    status = "clean" if not warnings else "warnings"
+
+    # Splice the Warnings section in now that the warnings list is final.
+    report_markdown = body_without_warnings + "\n" + _section_warnings(warnings)
 
     report_markdown += (
         f"\n\n{marker}\n\n---\n"

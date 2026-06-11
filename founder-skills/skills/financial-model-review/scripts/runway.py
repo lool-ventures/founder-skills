@@ -56,6 +56,20 @@ def _deep_get(data: dict[str, Any], *keys: str, default: Any = None) -> Any:
     return current
 
 
+def _num(x: Any, default: float) -> float:
+    """Coerce x to a numeric value, falling back to default for null/non-numeric.
+
+    The dict.get() default only applies to missing keys, not to keys present
+    with an explicit JSON null. Blank/cleared fields are coerced to None by the
+    corrections layers, so numeric reads must guard against None explicitly.
+    """
+    if isinstance(x, bool):
+        return default
+    if isinstance(x, (int, float)):
+        return x
+    return default
+
+
 # ---------------------------------------------------------------------------
 # Date helpers
 # ---------------------------------------------------------------------------
@@ -555,7 +569,7 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
         }
 
     # --- Derive baselines ---
-    debt = cash_data.get("debt", 0)
+    debt = _num(cash_data.get("debt", 0), 0)
     cash0 = current_balance - debt
 
     # Revenue
@@ -605,9 +619,9 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
 
     # --- IIA grant disbursement ---
     grants = cash_data.get("grants", {})
-    iia_approved = grants.get("iia_approved", 0) or 0
-    iia_disburse_months = grants.get("iia_disbursement_months", 12)
-    iia_start = grants.get("iia_start_month", 1)
+    iia_approved = _num(grants.get("iia_approved", 0), 0)
+    iia_disburse_months = int(_num(grants.get("iia_disbursement_months", 12), 12))
+    iia_start = int(_num(grants.get("iia_start_month", 1), 1))
     if iia_approved > 0 and iia_disburse_months > 0:
         grant_monthly = iia_approved / iia_disburse_months
         grant_end_month = iia_start + iia_disburse_months - 1
@@ -618,7 +632,7 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
     # --- FX exposure ---
     israel = inputs.get("israel_specific", {})
     fx_rate = israel.get("fx_rate_ils_usd")
-    ils_fraction = israel.get("ils_expense_fraction", 0.5) if fx_rate is not None else 0.0
+    ils_fraction = _num(israel.get("ils_expense_fraction", 0.5), 0.5) if fx_rate is not None else 0.0
     has_fx = fx_rate is not None
 
     # --- Build & run scenarios ---
@@ -664,7 +678,7 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
     fundraising = cash_data.get("fundraising", {})
     target_raise = fundraising.get("target_raise")
     bridge = inputs.get("bridge", {})
-    runway_target = bridge.get("runway_target_months", 24)
+    runway_target = _num(bridge.get("runway_target_months", 24), 24)
     post_raise: dict[str, Any] | None = None
 
     if target_raise is not None and target_raise > 0:

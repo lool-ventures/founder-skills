@@ -290,3 +290,37 @@ def test_fix_clean_passthrough() -> None:
     assert result["valid"]
     assert len(result["auto_fixes"]) == 0
     assert len(result["errors"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# Null-coercion regression: the validator must REPORT bad input, not crash.
+# ---------------------------------------------------------------------------
+
+
+def test_null_headcount_count_reported_not_crashed() -> None:
+    """A headcount entry with count: null must produce a TYPE_ERROR rather than
+    raising a TypeError out of the Layer-3 sanity arithmetic."""
+    inputs = _base_inputs(expenses={"headcount": [{"role": "eng", "count": None, "salary_annual": 150000}]})
+    result = validate(inputs)
+    codes = [e["code"] for e in result["errors"]]
+    assert "TYPE_ERROR" in codes
+    fields = [e["field"] for e in result["errors"] if e["code"] == "TYPE_ERROR"]
+    assert any("headcount[0].count" in f for f in fields)
+
+
+def test_null_headcount_salary_reported() -> None:
+    """A headcount entry with salary_annual: null must produce a TYPE_ERROR."""
+    inputs = _base_inputs(expenses={"headcount": [{"role": "eng", "count": 5, "salary_annual": None}]})
+    result = validate(inputs)
+    fields = [e["field"] for e in result["errors"] if e["code"] == "TYPE_ERROR"]
+    assert any("headcount[0].salary_annual" in f for f in fields)
+
+
+def test_metadata_null_does_not_crash() -> None:
+    """validate() must guard metadata == null instead of raising AttributeError
+    on inputs.get('metadata', {}).get(...)."""
+    inputs = _base_inputs(metadata=None)
+    result = validate(inputs)
+    # Should return a structured result, not raise.
+    assert "errors" in result
+    assert "warnings" in result

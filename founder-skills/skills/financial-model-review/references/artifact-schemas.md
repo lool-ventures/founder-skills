@@ -42,7 +42,9 @@ Structured extraction of the spreadsheet contents for downstream analysis.
       "detected_type": "assumptions",
       "periodicity": "monthly",
       "row_count": 45,
-      "col_count": 4
+      "col_count": 4,
+      "pre_header_rows": [["Acmecorp Financial Model"]],
+      "cell_refs": [{"row_index": 0, "label": "Monthly churn", "cols": {"Value": "B3"}}]
     }
   ],
   "source_format": "xlsx",
@@ -65,8 +67,10 @@ Structured extraction of the spreadsheet contents for downstream analysis.
     "stage": "seed",
     "geography": "israel",
     "sector": "saas",
+    "revenue_model_type": "saas-plg",
     "traits": ["multi-currency", "multi-entity"]
   },
+  "metadata": {"run_id": "<RUN_ID>"},
   "items": [
     {
       "id": "STRUCT_01",
@@ -78,7 +82,7 @@ Structured extraction of the spreadsheet contents for downstream analysis.
 }
 ```
 
-The `company` block is used for gate evaluation. Items whose gate doesn't match the company profile are auto-scored as `not_applicable` regardless of the agent's assessment.
+The `company` block is used for gate evaluation. Items whose gate doesn't match the company profile are auto-scored as `not_applicable` regardless of the agent's assessment. `revenue_model_type` drives sector-type gating (omitting it emits a "sector gates may not match" warning). `metadata.run_id` is propagated into `checklist.json` for the run_id-parity / stale-artifact check; a missing run_id blocks Context B.
 
 ### Output format
 
@@ -226,6 +230,24 @@ Assembled report from all artifacts with cross-artifact validation.
 |-------|------|----------|-------------|
 | `report_markdown` | string | yes | Complete review report in markdown format |
 | `validation` | object | yes | Cross-artifact validation results |
+| `coaching_payload` | object | yes | Structured payload the Context B coaching dispatch consumes (Step 8c reads `data["coaching_payload"]`). See below. |
+
+### coaching_payload
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `schema_version` | string | yes | Coaching-payload schema version |
+| `summary` | object | yes | `score_pct`, `overall_status`, `total`, `pass`, `fail`, `warn`, `not_applicable` |
+| `failed_items` | object[] | yes | Failed checklist items (top 30 by severity when `truncated`) |
+| `warned_items` | object[] | yes | Warned checklist items (subject to the same truncation) |
+| `high_severity_warnings` | string[] | yes | High-severity validation warning codes |
+| `company_name` | string | yes | Company name |
+| `runway_months` | number \| null | yes | Base-case runway months (`null` when not computed) |
+| `review_dir` | string | yes | Absolute review directory path |
+| `report_path` | string | yes | Absolute `report.md` path |
+| `insertion_marker` | string | yes | The exact per-run uuid marker compose emitted into `report.md` |
+| `truncated` | boolean | yes | `true` when `failed_items`/`warned_items` were truncated to the top 30 |
+| `truncated_count` | number | yes | Count of dropped entries when `truncated` is `true` |
 
 ### validation
 
