@@ -128,6 +128,13 @@ def main() -> int:
         choices=sorted(_STAGE_TABLE.keys()),
         help="Rebuild for a founder-corrected stage; framework/benchmarks come from internal table",
     )
+    p.add_argument(
+        "--confidence",
+        choices=["high", "low"],
+        default="high",
+        help="Confidence to record on a --rebuild-stage (high when founder picked a different "
+        "stage; low when they were unsure / proceeding best-effort)",
+    )
     args = p.parse_args()
 
     raw = sys.stdin.read()
@@ -144,9 +151,12 @@ def main() -> int:
     if args.rebuild_stage:
         original_stage = data.get("detected_stage", "unknown")
         data["detected_stage"] = args.rebuild_stage
-        data["confidence"] = "high"
+        data["confidence"] = args.confidence
         evidence = list(data.get("evidence", []))
-        evidence.append(f"Founder corrected stage from {original_stage} to {args.rebuild_stage}")
+        if args.confidence == "low" and args.rebuild_stage == original_stage:
+            evidence.append("Founder unsure; proceeding with detected stage at low confidence")
+        else:
+            evidence.append(f"Founder corrected stage from {original_stage} to {args.rebuild_stage}")
         data["evidence"] = evidence
         data["expected_framework"] = list(_STAGE_TABLE[args.rebuild_stage]["expected_framework"])
         data["stage_benchmarks"] = dict(_STAGE_TABLE[args.rebuild_stage]["stage_benchmarks"])
