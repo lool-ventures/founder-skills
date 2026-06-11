@@ -5717,7 +5717,7 @@ class TestComposeSummaryCounts:
     def test_passed_never_negative_with_multi_blocker_scenario(self) -> None:
         import compose_report  # type: ignore[import-not-found]
 
-        scenarios = [
+        scenarios: list[dict[str, Any]] = [
             {
                 "scenario_id": "s1",
                 "type": "priced_round",
@@ -5864,7 +5864,7 @@ class TestCapStateAfterRoundNullHistory:
 
     def test_null_history_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as d:
-            pre = {
+            pre: dict[str, Any] = {
                 "as_converted_totals": {
                     "common_shares": 1000,
                     "preferred_shares_as_converted": 0,
@@ -5916,7 +5916,7 @@ class TestPdfMissingPdfplumber:
 
         real_import = builtins.__import__
 
-        def _fake_import(name, *args, **kwargs):
+        def _fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
             if name == "pdfplumber":
                 raise ImportError("No module named 'pdfplumber'")
             return real_import(name, *args, **kwargs)

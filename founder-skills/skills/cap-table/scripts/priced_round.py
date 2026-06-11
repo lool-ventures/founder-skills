@@ -528,6 +528,11 @@ def solve_priced_round(
             "per_note": {},
         }
 
+    # After the guard above, conversion_event_date is non-None whenever notes
+    # are present. Narrow to a non-Optional local for the note-conversion calls
+    # (the bare assert is avoided so -O cannot strip note conversions).
+    note_conversion_date: str = conversion_event_date or ""
+
     # MFN resolution is STRUCTURAL — one-time pre-pass, not per-iter.
     safes = _resolve_mfn_elections(safes)
 
@@ -673,7 +678,7 @@ def solve_priced_round(
             # at the top of solve_priced_round (returns early otherwise).
             note_shares, per_note = _note_shares_at_price(
                 notes,
-                conversion_event_date=conversion_event_date,
+                conversion_event_date=note_conversion_date,
                 priced_round_new_money=new_money,
                 qualified_financing_price=price,
             )
@@ -801,7 +806,7 @@ def solve_priced_round(
         # at the top of solve_priced_round (returns early otherwise).
         note_shares, per_note = _note_shares_at_price(
             notes,
-            conversion_event_date=conversion_event_date,
+            conversion_event_date=note_conversion_date,
             priced_round_new_money=new_money,
             qualified_financing_price=price,
         )
