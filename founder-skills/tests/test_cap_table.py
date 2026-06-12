@@ -6848,3 +6848,338 @@ class TestGridMode:
         empty_sheet = receipt["sheets"].get("Empty", {})
         rows = empty_sheet.get("rows", [])
         assert isinstance(rows, list)
+
+
+# ===========================================================================
+# Warrants in nvca_broad A denominator (NVCA §4.4.4 "Options
+# outstanding" where Option expressly includes warrants)
+# ===========================================================================
+
+
+class TestWarrantsInNvcaBroadABasis:
+    """NVCA §4.4.4 defines 'A' to include 'Options outstanding' where the
+    NVCA definition of 'Option' expressly includes warrants.  The nvca_broad
+    basis must therefore include warrants_underlying_total from cap_state.
+
+    The test verifies the mechanism (A includes warrants) not the CP2 direction
+    in the full coupled system.  In the coupled solver, adding warrants to FD
+    also lowers PPS (by inflating the denominator), which deepens the down-round
+    and can dominate the moderating effect of a larger A.  The correct invariant
+    is structural: the A field in the breakdown must grow by exactly the warrant
+    count when warrants are present.
+
+    Hand derivation of A values:
+      Without warrants:
+        A = common + preferred_as_conv + options_outstanding + options_available
+          = 8_000_000 + 2_000_000 + 500_000 + 500_000
+          = 11_000_000
+
+      With 300_000 warrant underlying:
+        A = 8_000_000 + 2_000_000 + 500_000 + 500_000 + 300_000
+          = 11_300_000
+
+      Difference = 300_000  (the warrant count).
+
+    Isolated BBWA test (analytic verification of CP2 direction holding A fixed,
+    varying PPS slightly):
+      CP1 = 1.00, A = 11_000_000, consideration = 5_000_000, new_pps = 0.42
+      B = 5_000_000 / 1.00 = 5_000_000
+      C = 5_000_000 / 0.42 ≈ 11_904_762
+
+      CP2_narrow_A  = 1.00 × (11_000_000 + 5_000_000) / (11_000_000 + 11_904_762)
+                    = 1.00 × 16_000_000 / 22_904_762 ≈ 0.6986
+
+      CP2_broader_A = 1.00 × (11_300_000 + 5_000_000) / (11_300_000 + 11_904_762)
+                    = 1.00 × 16_300_000 / 23_204_762 ≈ 0.7024   > 0.6986
+
+      So HOLDING PPS CONSTANT, adding warrants to A does raise CP2.  The
+      reason the full-coupled scenario shows the reverse is that adding warrants
+      to fully_diluted_shares also lowers PPS (denominator grows), worsening
+      the down-round.  We test the mechanism via the isolated analytic, and test
+      the structural property (A grows by warrant count) via the coupled solver.
+    """
+
+    def _make_cap_state(self, warrants_underlying: int) -> dict[str, Any]:
+        """Build a minimal cap_state with configurable warrant underlying.
+
+        Note: fully_diluted_shares includes warrants so the coupled solver
+        correctly initialises PPS = pre_money / FD.
+        """
+        return {
+            "founders": [{"name": "Founder", "common_shares": 8_000_000}],
+            "preferred_series": [
+                {
+                    "series_id": "series_seed",
+                    "shares": 2_000_000,
+                    "original_issue_price": 1.00,
+                    "original_conversion_price": 1.00,
+                    "current_conversion_price": 1.00,
+                    "anti_dilution_protection": "broad_based_weighted_average",
+                }
+            ],
+            "as_converted_totals": {
+                "common_shares": 8_000_000,
+                "preferred_shares_as_converted": 2_000_000,
+                "options_outstanding": 500_000,
+                "options_available": 500_000,
+                "warrants_underlying_total": warrants_underlying,
+                "fully_diluted_shares": 8_000_000 + 2_000_000 + 500_000 + 500_000 + warrants_underlying,
+            },
+            "option_pool": {
+                "plan_type": "iso",
+                "authorized": 1_000_000,
+                "issued_and_outstanding": 500_000,
+                "available_for_grant": 500_000,
+            },
+            "cap_table_history": [],
+        }
+
+    def _run_solver(self, warrants_underlying: int) -> dict[str, Any]:
+        cs = self._make_cap_state(warrants_underlying)
+        result: dict[str, Any] = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=[],
+            notes=[],
+            pre_money=5_000_000.0,  # down round: PPS ~ 5M / 11.5M ≈ 0.43
+            new_money=5_000_000.0,
+        )
+        return result
+
+    def test_warrants_reflected_in_breakdown_A_field(self) -> None:
+        """The A field in the breakdown must differ by exactly the warrant count.
+
+        Direct structural test: warrants_underlying_total
+        is added to the nvca_broad A components, so the frozen pre-financing A
+        snapshot grows by the warrant count.
+        """
+        r_no = self._run_solver(warrants_underlying=0)
+        r_with = self._run_solver(warrants_underlying=300_000)
+
+        assert r_no["converged"], r_no.get("blockers")
+        assert r_with["converged"], r_with.get("blockers")
+
+        A_no = r_no["anti_dilution_breakdown"][0]["A"]
+        A_with = r_with["anti_dilution_breakdown"][0]["A"]
+
+        assert math.isclose(A_with - A_no, 300_000, abs_tol=1), (
+            f"A difference should be 300_000 (the warrant underlying added), "
+            f"got A_no={A_no}, A_with={A_with}, diff={A_with - A_no}.  "
+            f"warrants_underlying_total is not being included in nvca_broad A."
+        )
+
+    def test_isolated_bbwa_warrants_in_A_raises_cp2(self) -> None:
+        """Isolated BBWA: holding PPS constant, adding warrants to A raises CP2.
+
+        Hand derivation:
+          CP1 = 1.00, consideration = 5_000_000, new_pps = 0.42 (fixed)
+
+          B = 5_000_000 / 1.00 = 5_000_000
+          C = 5_000_000 / 0.42 ≈ 11_904_762
+
+          A_no_warrants  = 11_000_000
+          A_with_warrants= 11_300_000
+
+          CP2_no  = 1.00 × (11_000_000 + 5_000_000) / (11_000_000 + 11_904_762) ≈ 0.6986
+          CP2_yes = 1.00 × (11_300_000 + 5_000_000) / (11_300_000 + 11_904_762) ≈ 0.7024
+
+          CP2_yes > CP2_no  (warrants in A moderate the downward BBWA adjustment)
+        """
+        cp1 = 1.00
+        consideration = 5_000_000.0
+        new_pps = 0.42
+
+        r_no = anti_dilution.bbwa_new_conversion_price(
+            current_conversion_price=cp1,
+            pre_issuance_share_count_A=11_000_000.0,
+            consideration_received=consideration,
+            new_issue_price=new_pps,
+        )
+        r_with = anti_dilution.bbwa_new_conversion_price(
+            current_conversion_price=cp1,
+            pre_issuance_share_count_A=11_300_000.0,  # +300k warrants
+            consideration_received=consideration,
+            new_issue_price=new_pps,
+        )
+
+        cp2_no = r_no["new_conversion_price"]
+        cp2_with = r_with["new_conversion_price"]
+
+        # Verify hand math
+        B = consideration / cp1
+        C = consideration / new_pps
+        expected_no = cp1 * (11_000_000 + B) / (11_000_000 + C)
+        expected_with = cp1 * (11_300_000 + B) / (11_300_000 + C)
+        assert math.isclose(cp2_no, expected_no, rel_tol=1e-9)
+        assert math.isclose(cp2_with, expected_with, rel_tol=1e-9)
+        assert cp2_with > cp2_no, (
+            f"Holding PPS constant, adding warrants to A must raise CP2: CP2_no={cp2_no:.6f}, CP2_with={cp2_with:.6f}"
+        )
+
+    def test_warrants_not_in_narrow_basis(self) -> None:
+        """nvca_narrow must NOT include warrants (narrow excludes options/warrants
+        per the NVCA footnote; only common + preferred-as-converted)."""
+        cs = self._make_cap_state(warrants_underlying=300_000)
+        # Flip series to narrow protection
+        cs["preferred_series"][0]["anti_dilution_protection"] = "narrow_based_weighted_average"
+
+        r: dict[str, Any] = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=[],
+            notes=[],
+            pre_money=5_000_000.0,
+            new_money=5_000_000.0,
+        )
+        assert r["converged"]
+        bd = r["anti_dilution_breakdown"][0]
+        # For narrow: A = common + preferred_as_converted = 8M + 2M = 10M
+        # (no options, no warrants)
+        assert math.isclose(bd["A"], 10_000_000, abs_tol=1), (
+            f"nvca_narrow A should be 10_000_000 (common+preferred only), got {bd['A']}"
+        )
+
+
+# ===========================================================================
+# Full-ratchet zero-consideration guard (NVCA §4.4.4 proviso)
+# ===========================================================================
+
+
+class TestFullRatchetZeroConsiderationFloor:
+    """NVCA §4.4.4 proviso: 'if such issuance…was without consideration, then
+    the Corporation shall be deemed to have received an aggregate of [$.001]
+    of consideration.'
+
+    full_ratchet_new_conversion_price must not set CP2=0 for zero-price
+    issuance; it must floor to $.001 of deemed aggregate consideration.
+    Because full-ratchet sets CP2 = new_issue_price directly, the $.001
+    deemed consideration applies as a minimum price floor: CP2 = max(new_price,
+    DEEMED_MIN_PRICE) where DEEMED_MIN_PRICE corresponds to the $.001 aggregate
+    deemed consideration per share.  The implementation should accept the shares
+    count and compute per-share floor, OR more simply floor the per-share price
+    at some positive epsilon.
+
+    Implementation note: the NVCA proviso is in the form of aggregate
+    consideration ($.001), not a per-share floor.  Because the full-ratchet
+    formula sets CP2 = new_issue_price, and a zero new_issue_price would give
+    CP2=0 (an invalid conversion price that would crash downstream),  we
+    implement a minimum price floor via FULL_RATCHET_DEEMED_MIN_PRICE = 0.001.
+    This matches the NVCA spirit (any price below the floor is floored to the
+    lowest representable non-zero consideration).
+    """
+
+    def test_zero_price_returns_deemed_floor_not_zero(self) -> None:
+        """CP2 for a zero-consideration issuance must be > 0 (NVCA proviso)."""
+        r = anti_dilution.full_ratchet_new_conversion_price(
+            current_conversion_price=1.00,
+            new_issue_price=0.0,  # without-consideration issuance
+        )
+        assert r["triggered"] is True
+        assert r["new_conversion_price"] > 0, (
+            "CP2 must not be zero for a without-consideration issuance "
+            "(NVCA §4.4.4 proviso: deemed consideration = $.001 aggregate)"
+        )
+        # Floor should be at least 0.001 (NVCA deemed aggregate) expressed as price
+        assert r["new_conversion_price"] >= 0.001, (
+            f"CP2={r['new_conversion_price']} is below the 0.001 deemed-consideration floor"
+        )
+        # Must emit a warning indicating the floor was applied
+        assert r.get("deemed_consideration_floor_applied") is True, (
+            "Result must set deemed_consideration_floor_applied=True when floor is invoked"
+        )
+
+    def test_very_low_price_below_floor_also_floored(self) -> None:
+        """A non-zero price below 0.001 should also be floored."""
+        r = anti_dilution.full_ratchet_new_conversion_price(
+            current_conversion_price=1.00,
+            new_issue_price=0.0001,  # below the $.001 floor
+        )
+        assert r["triggered"] is True
+        assert r["new_conversion_price"] >= 0.001
+
+    def test_normal_low_price_above_floor_passes_through(self) -> None:
+        """A price already above the floor must pass through unchanged."""
+        r = anti_dilution.full_ratchet_new_conversion_price(
+            current_conversion_price=1.00,
+            new_issue_price=0.50,
+        )
+        assert r["triggered"] is True
+        assert math.isclose(r["new_conversion_price"], 0.50, rel_tol=1e-9)
+        assert not r.get("deemed_consideration_floor_applied")
+
+
+# ===========================================================================
+# Note maturity silent default disclosure
+# ===========================================================================
+
+
+class TestNoteMaturityDefaultWarning:
+    """note_conversion.py must emit a warning when maturity_default_treatment
+    was absent from the note and the default 'convert_at_cap' was applied.
+
+    Standard note forms (Fenwick) default to repayment on majority-holder
+    demand — the convert_at_cap default is unsourced and must be disclosed.
+    """
+
+    _BASE_NOTE: dict[str, Any] = {
+        "id": "note_w",
+        "investor_name": "Test",
+        "principal": 100_000,
+        "annual_interest_rate": 0.06,
+        "day_count_basis": 365,
+        "compounding_periods_per_year": None,
+        "interest_converts_to_shares": True,
+        "issuance_date": "2025-01-01",
+        "last_interest_event_date": None,
+        "valuation_cap": 8_000_000,
+        "discount_multiplier": None,
+        "capitalization_denominator": 10_000_000,
+        "capitalization_denominator_policy": "pre-money fully diluted",
+        "qualified_financing_threshold": 1_000_000,
+        "maturity_date": "2027-01-01",
+        "maturity_conversion_price_override": None,
+        "non_qualified_financing_treatment": None,
+        "source_document": None,
+        "extraction_confidence": "high",
+    }
+
+    def test_absent_maturity_treatment_emits_warning(self) -> None:
+        """When maturity_default_treatment key is absent, a warning must appear."""
+        note = {k: v for k, v in self._BASE_NOTE.items() if k != "maturity_default_treatment"}
+        assert "maturity_default_treatment" not in note
+
+        # Use maturity path: no priced-round inputs
+        result = note_conversion.convert_note(
+            note,
+            conversion_event_date="2027-01-01",
+        )
+        warnings = result.get("warnings", [])
+        codes = [w["code"] for w in warnings]
+        assert "maturity_default_treatment_defaulted" in codes, (
+            f"Expected 'maturity_default_treatment_defaulted' warning when field is absent, got warning codes: {codes}"
+        )
+
+    def test_explicit_maturity_treatment_no_default_warning(self) -> None:
+        """When maturity_default_treatment is explicitly set, no default warning."""
+        note = dict(self._BASE_NOTE)
+        note["maturity_default_treatment"] = "convert_at_cap"
+
+        result = note_conversion.convert_note(
+            note,
+            conversion_event_date="2027-01-01",
+        )
+        warnings = result.get("warnings", [])
+        codes = [w["code"] for w in warnings]
+        assert "maturity_default_treatment_defaulted" not in codes, (
+            f"'maturity_default_treatment_defaulted' warning should NOT appear when "
+            f"field is explicitly set, got: {codes}"
+        )
+
+    def test_absent_maturity_treatment_still_routes_to_convert_at_cap(self) -> None:
+        """The warning must not break the conversion branch routing."""
+        note = {k: v for k, v in self._BASE_NOTE.items() if k != "maturity_default_treatment"}
+        result = note_conversion.convert_note(
+            note,
+            conversion_event_date="2027-01-01",
+        )
+        assert result["branch"] == "maturity_convert_at_cap", (
+            f"Branch should still be maturity_convert_at_cap, got {result['branch']!r}"
+        )

@@ -168,7 +168,13 @@ def _compute_a_denominator(components: dict[str, int], basis: str) -> float:
     """Compute A from frozen pre-financing components per NVCA §4.4.4.
 
     nvca_broad: common + preferred-as-converted + options outstanding + options reserved
-    nvca_narrow: common + preferred-as-converted only
+                + warrants_underlying_total.
+                NVCA §4.4.4 includes "Options outstanding" in A, and the NVCA
+                definition of "Option" expressly includes warrants ("rights,
+                options or warrants to purchase shares of Common Stock").
+                Outstanding warrants therefore belong in the broad basis.
+    nvca_narrow: common + preferred-as-converted only (excludes options and
+                warrants per the NVCA footnote's narrow-variant description).
     """
     if basis == "nvca_broad":
         return float(
@@ -176,6 +182,7 @@ def _compute_a_denominator(components: dict[str, int], basis: str) -> float:
             + components["preferred_shares_as_converted"]
             + components["options_outstanding"]
             + components["options_available"]
+            + components.get("warrants_underlying_total", 0)
         )
     elif basis == "nvca_narrow":
         return float(components["common_shares"] + components["preferred_shares_as_converted"])
@@ -579,12 +586,15 @@ def solve_priced_round(
         }
 
     # IMMUTABLE A SNAPSHOT — frozen at iteration zero per NVCA §4.4.4
+    # "immediately prior to such issue."  Includes warrants_underlying_total
+    # per NVCA's Option definition (which expressly includes warrants).
     pre_ats = working_cap_state["as_converted_totals"]
     pre_financing_a_components = {
         "common_shares": int(pre_ats["common_shares"]),
         "preferred_shares_as_converted": int(pre_ats["preferred_shares_as_converted"]),
         "options_outstanding": int(pre_ats["options_outstanding"]),
         "options_available": int(pre_ats["options_available"]),
+        "warrants_underlying_total": int(pre_ats.get("warrants_underlying_total", 0)),
     }
 
     # IMMUTABLE CP1 SNAPSHOTS — frozen at iter 0 per AD-protected series.

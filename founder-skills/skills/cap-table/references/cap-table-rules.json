@@ -1426,8 +1426,49 @@
         "rule_id": "anti_dilution.trigger_basis_original_issue_price",
         "domain": "anti_dilution",
         "behavior_target": "validation_rule",
-        "title": "NVCA-default AD trigger threshold is the series' OIP",
-        "summary": "Per NVCA §4.4.4(b), the dilutive-issuance trigger price is the series' original_issue_price (OIP), not its current_conversion_price (CCP). For a series that has not previously experienced an AD adjustment, OIP == CCP; for a series with prior AD, OIP > CCP, so OIP is the stricter (higher) threshold. Defaults to OIP per NVCA.",
+        "title": "OIP-based AD trigger threshold (term-sheet variant)",
+        "summary": "The NVCA Model COI §4.4.4 trigger compares the new issuance price against 'the Series A Conversion Price in effect immediately prior to such issuance' (= the current conversion price CP1). Some term sheets and charters instead trigger on the series' original_issue_price (OIP). When OIP == CP1 (no prior AD) the two are equivalent; when a prior AD round has already reduced CP1 below OIP, the OIP basis fires on a wider window of down-rounds (any price below OIP, including prices above CP1). This implementation defaults ad_trigger_basis to 'original_issue_price' as a conservative charter-specific variant. Note: the BBWA formula's B-divisor and the inner new_pps >= CP1 guard both use CP1 regardless of this trigger flag, so the computed CP2 is always anchored to CP1; the trigger flag only governs whether AD fires at all for a given new_pps.",
+        "implementation_action": "parameterize",
+        "confidence": "medium",
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
+        "source_basis": "primary",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; charter-specific",
+        "applies_when": "Use when the founder's charter specifies an OIP-based trigger. Not the NVCA model default — the NVCA model text triggers on the Conversion Price in effect immediately prior (CP1). Counsel should confirm the actual trigger language.",
+        "warnings": [
+          "This is NOT the NVCA model default. NVCA §4.4.4 triggers on the Conversion Price in effect immediately prior (CP1). OIP-based triggers are a charter-level variant.",
+          "When OIP == CP1 (no prior AD adjustments) the two trigger bases produce identical results. Divergence only appears after a prior AD round has reduced CP1 below OIP.",
+          "The B-divisor in the BBWA formula and the internal new_pps >= CP1 guard both use CP1 regardless of this flag. The trigger_basis flag governs only the fire/no-fire decision, not the CP2 math."
+        ]
+      },
+      {
+        "rule_id": "anti_dilution.trigger_basis_current_conversion_price",
+        "domain": "anti_dilution",
+        "behavior_target": "validation_rule",
+        "title": "NVCA-model AD trigger threshold: Conversion Price in effect immediately prior (CP1)",
+        "summary": "NVCA Model COI §4.4.4 triggers anti-dilution when shares are issued 'for a consideration per share less than the Series A Conversion Price in effect immediately prior to such issuance' — that is, the current conversion price (CP1), not the original issue price (OIP). Per-series ad_trigger_basis=current_conversion_price implements this NVCA model trigger. When CCP < OIP (post-prior-AD state), the CP1 trigger fires on a narrower window than the OIP trigger: only prices below CP1 (not merely below OIP) trigger AD. This is the stricter (less founder-dilutive) trigger from the investor's perspective in a multi-round context.",
+        "implementation_action": "parameterize",
+        "confidence": "high",
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
+        "source_basis": "primary",
+        "counsel_review": true,
+        "jurisdiction": "US startup market; NVCA-form COIs",
+        "applies_when": "Use when the founder's charter follows the NVCA model text. The NVCA default trigger is CP1. Counsel should confirm whether the charter adopts the NVCA model language or a charter-specific variant.",
+        "warnings": [
+          "When CCP == OIP (no prior AD), this trigger and the OIP trigger are equivalent.",
+          "When CCP < OIP (post-prior-AD), this trigger fires on a narrower set of new-issuance prices (only prices below CP1), producing fewer AD adjustments than the OIP trigger across a series of down rounds."
+        ]
+      },
+      {
+        "rule_id": "anti_dilution.a_denominator_nvca_broad",
+        "domain": "anti_dilution",
+        "behavior_target": "validation_rule",
+        "title": "Broad-based A denominator components (NVCA §4.4.4 core + market broad variant)",
+        "summary": "This implementation's nvca_broad A = common stock outstanding + preferred stock outstanding (as-converted) + options and warrants outstanding + shares reserved but unissued under equity plans (the option pool). The NVCA Model COI §4.4.4 A definition includes 'shares of Common Stock outstanding immediately prior' treating as outstanding all shares issuable upon exercise of 'Options outstanding' (where Option is defined to include warrants) and upon conversion of 'Convertible Securities (including the Series A Preferred Stock) outstanding'. A NVCA §4.4.4 footnote describes including 'all shares reserved under stock plans, whether or not subject to outstanding options' as 'an even broader formula' beyond the model text. This implementation adopts the footnote's broader variant by including the unallocated pool. Default when anti_dilution_protection=broad_based_weighted_average.",
         "implementation_action": "parameterize",
         "confidence": "high",
         "source_ids": [
@@ -1436,57 +1477,24 @@
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; NVCA-form COIs",
-        "applies_when": "Use as the default ad_trigger_basis when documents do not specify otherwise."
-      },
-      {
-        "rule_id": "anti_dilution.trigger_basis_current_conversion_price",
-        "domain": "anti_dilution",
-        "behavior_target": "validation_rule",
-        "title": "Non-NVCA AD trigger threshold using current CCP",
-        "summary": "Some custom charters trigger AD based on the current conversion price (CCP) rather than OIP. This produces a looser trigger when CCP < OIP (post-prior-AD state). Per-series ad_trigger_basis=current_conversion_price enables this variant.",
-        "implementation_action": "parameterize",
-        "confidence": "medium",
-        "source_ids": [
-          "NVCA-CERT-OF-INC"
-        ],
-        "source_basis": "primary",
-        "counsel_review": true,
-        "jurisdiction": "US startup market; charter-specific",
-        "applies_when": "Use when the founder's actual charter specifies a CCP-based trigger threshold (rare; counsel must verify).",
-        "warnings": [
-          "Counsel verifies the founder's charter language explicitly elects CCP-based trigger; NVCA-form COIs default to OIP."
-        ]
-      },
-      {
-        "rule_id": "anti_dilution.a_denominator_nvca_broad",
-        "domain": "anti_dilution",
-        "behavior_target": "validation_rule",
-        "title": "Broad-based A denominator components per NVCA §4.4.4(a)(i)-(v)",
-        "summary": "Broad-based weighted-average A = common stock + preferred-as-converted + options outstanding + options reserved (and other deemed-issued convertibles). Per NVCA Model COI §4.4.4(a)(i)-(v). Default when anti_dilution_protection=broad_based_weighted_average.",
-        "implementation_action": "parameterize",
-        "confidence": "high",
-        "source_ids": [
-          "NVCA-CERT-OF-INC"
-        ],
-        "source_basis": "primary",
-        "counsel_review": false,
-        "jurisdiction": "US startup market; NVCA-form COIs"
+        "notes": "The NVCA §4.4.4 model text (core) covers outstanding common, outstanding options and warrants (via the Option definition), and as-converted preferred. The reserved-but-unallocated pool inclusion is the 'even broader' market variant described in the NVCA footnote. Counsel should verify whether the founder's charter matches the model text or the broader variant. The enum value is retained for interface stability."
       },
       {
         "rule_id": "anti_dilution.a_denominator_nvca_narrow",
         "domain": "anti_dilution",
         "behavior_target": "validation_rule",
-        "title": "Narrow-based A denominator components",
-        "summary": "Narrow-based weighted-average A = common stock + preferred-as-converted only. Excludes options outstanding, options reserved, and other deemed-issued convertibles. Per NVCA §4.4.4 the broad-vs-narrow scope is a charter-level election. Default when anti_dilution_protection=narrow_based_weighted_average.",
+        "title": "Narrow-based A denominator components (NVCA footnote narrow variant)",
+        "summary": "This implementation's nvca_narrow A = common stock outstanding + preferred stock outstanding (as-converted) only. Excludes options, warrants, and reserved-pool shares. The NVCA §4.4.4 footnote describes a 'narrower formula' that 'might include…only those shares of Common Stock that are actually outstanding (i.e., excluding shares…issuable on conversion of options, warrants and, potentially, even the Preferred Stock itself)'. This implementation includes as-converted preferred (a moderate narrow variant that excludes options and warrants). Default when anti_dilution_protection=narrow_based_weighted_average.",
         "implementation_action": "parameterize",
-        "confidence": "high",
+        "confidence": "medium",
         "source_ids": [
           "NVCA-CERT-OF-INC",
           "COOLEY-ANTI-DILUTION"
         ],
         "source_basis": "mixed",
         "counsel_review": false,
-        "jurisdiction": "US startup market; charter-specific"
+        "jurisdiction": "US startup market; charter-specific",
+        "notes": "The NVCA footnote sketches the narrowest variant as common-only (excluding even the preferred as-converted). This implementation uses common + as-converted preferred as the narrow variant, which is narrower than the broad model formula but wider than the footnote's narrowest example. Counsel verifies the founder's charter definition."
       },
       {
         "rule_id": "anti_dilution.cp2_floor_applicable",

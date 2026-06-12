@@ -77,7 +77,7 @@ Insert this block before `option_pool`:
 
 ### Why three price fields
 
-- `original_issue_price` (OIP) — per-share consideration investors paid. Used as the anti-dilution **trigger threshold** by NVCA default (per §4.4.4(b)).
+- `original_issue_price` (OIP) — per-share consideration investors paid. The NVCA model trigger is the conversion price in effect immediately prior (CP1); the OIP trigger is a charter-specific variant this pipeline uses as its soft default — counsel confirms which the charter adopts.
 - `original_conversion_price` (OCP) — drives the as-converted ratio. `preferred_shares_as_converted = shares × OCP / CCP` in `cap_state.py:_compute_as_converted_totals`.
 - `current_conversion_price` (CCP) — the present conversion price. Equals OCP unless anti-dilution has previously triggered (CCP then < OCP).
 

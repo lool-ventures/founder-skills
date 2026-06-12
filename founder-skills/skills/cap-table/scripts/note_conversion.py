@@ -94,12 +94,15 @@ def _classify_branch(
     *,
     priced_round_new_money: float | None,
     qualified_financing_price: float | None,
-) -> str:
+) -> tuple[str, bool]:
     """Decide which branch this note falls into based on inputs.
 
     Order matters: maturity_* branches take precedence when no priced-round
     inputs are supplied. Priced-round branches only fire when both new_money
     and the resolved qualified_financing_price are present.
+
+    Returns (branch_name, maturity_default_treatment_was_absent) so the
+    caller can emit a disclosure warning when the field was defaulted.
     """
     cap = note.get("valuation_cap")
     denom = note.get("capitalization_denominator")
@@ -107,49 +110,50 @@ def _classify_branch(
     threshold = note.get("qualified_financing_threshold")
     nqft = note.get("non_qualified_financing_treatment")
     override = note.get("maturity_conversion_price_override")
+    mdt_absent = "maturity_default_treatment" not in note
     mdt = note.get("maturity_default_treatment", "convert_at_cap")
 
-    # Priced-round path
+    # Priced-round path — mdt_absent is irrelevant here (maturity path not taken)
     if priced_round_new_money is not None and qualified_financing_price is not None:
         if threshold is not None and priced_round_new_money < threshold:
             if nqft == "convert_anyway":
                 # Threshold bypassed by counsel; fall through to cap/discount path
                 pass
             elif nqft == "do_not_convert":
-                return "maturity_extend"  # treats as extension past financing
+                return "maturity_extend", False
             elif nqft == "negotiate":
-                return "maturity_counsel_review"
+                return "maturity_counsel_review", False
             else:  # null
-                return "threshold_not_met"
+                return "threshold_not_met", False
 
         # Threshold met or bypassed — pick cap_conversion vs discount_only
         if cap is not None and denom is not None and denom > 0:
-            return "cap_conversion"
+            return "cap_conversion", False
         if cap is None and discount is not None:
-            return "discount_only"
+            return "discount_only", False
         # Otherwise we'll be flagged as no-path below
 
-    # Maturity path
+    # Maturity path — mdt_absent is relevant when we enter this path
     if mdt == "convert_at_cap":
         if override is not None:
-            return "maturity_convert_at_cap"  # override branch (same label)
+            return "maturity_convert_at_cap", mdt_absent
         if cap is not None and denom is not None and denom > 0:
-            return "maturity_convert_at_cap"
+            return "maturity_convert_at_cap", mdt_absent
         # cap missing + no override → error caller handles
-        return "no_conversion_path"
+        return "no_conversion_path", mdt_absent
     if mdt == "repay":
         if override is not None:
-            return "override_mismatch"
-        return "maturity_repay"
+            return "override_mismatch", mdt_absent
+        return "maturity_repay", mdt_absent
     if mdt == "extend":
         if override is not None:
-            return "override_mismatch"
-        return "maturity_extend"
+            return "override_mismatch", mdt_absent
+        return "maturity_extend", mdt_absent
     if mdt == "counsel_review":
         if override is not None:
-            return "override_mismatch"
-        return "maturity_counsel_review"
-    return "no_conversion_path"
+            return "override_mismatch", mdt_absent
+        return "maturity_counsel_review", mdt_absent
+    return "no_conversion_path", mdt_absent
 
 
 # Default proxy rate for statutory ITA Section 3(j) when no
@@ -236,11 +240,32 @@ def convert_note(
     )
     balance = _conversion_balance(note, accrued)
 
-    branch = _classify_branch(
+    branch, mdt_was_absent = _classify_branch(
         note,
         priced_round_new_money=priced_round_new_money,
         qualified_financing_price=qualified_financing_price,
     )
+
+    # Disclosure warning when maturity_default_treatment was absent and the
+    # maturity path was entered via the default ("convert_at_cap").  Standard
+    # note forms (e.g. Fenwick seed-stage template) default to repayment on
+    # majority-holder demand at maturity; the convert_at_cap default is an
+    # unsourced convention.  Founders must confirm the actual note text.
+    if mdt_was_absent:
+        warnings.append(
+            {
+                "code": "maturity_default_treatment_defaulted",
+                "severity": "medium",
+                "message": (
+                    "maturity_default_treatment was not specified in this note's "
+                    "inputs; the math producer defaulted to 'convert_at_cap'. "
+                    "Standard note forms (e.g. Fenwick seed-stage template) "
+                    "commonly default to repayment on majority-holder demand at "
+                    "maturity — the note text must be confirmed before relying on "
+                    "the convert_at_cap path."
+                ),
+            }
+        )
 
     base: dict[str, Any] = {
         "note_id": note["id"],

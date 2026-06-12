@@ -83,12 +83,27 @@ def bbwa_new_conversion_price(
     }
 
 
+# NVCA §4.4.4 proviso: a without-consideration issuance is deemed to have
+# received $.001 aggregate consideration.  Full-ratchet sets CP2 = new_issue_price,
+# so a zero (or sub-floor) price would produce CP2=0, an invalid conversion price.
+# FULL_RATCHET_DEEMED_MIN_PRICE is a pragmatic per-share epsilon consistent with the NVCA
+# $.001 deemed aggregate consideration.  It prevents CP2 from reaching zero.
+FULL_RATCHET_DEEMED_MIN_PRICE: float = 0.001
+
+
 def full_ratchet_new_conversion_price(
     *,
     current_conversion_price: float,
     new_issue_price: float,
 ) -> dict[str, Any]:
-    """Full-ratchet: CP2 = new_issue_price if new < current; else no change."""
+    """Full-ratchet: CP2 = new_issue_price if new < current; else no change.
+
+    NVCA §4.4.4 proviso: a without-consideration (zero-price) issuance is
+    deemed to have received $.001 of aggregate consideration.  Any
+    new_issue_price below FULL_RATCHET_DEEMED_MIN_PRICE (0.001) is floored
+    to that value and deemed_consideration_floor_applied=True is set in the
+    result so callers can surface the NVCA proviso to founders/counsel.
+    """
     if new_issue_price >= current_conversion_price:
         return {
             "triggered": False,
@@ -96,9 +111,13 @@ def full_ratchet_new_conversion_price(
             "reason": "new_issue_price >= current_conversion_price; no adjustment",
             "math_provenance": [],
         }
-    return {
+
+    floor_applied = new_issue_price < FULL_RATCHET_DEEMED_MIN_PRICE
+    cp2 = max(new_issue_price, FULL_RATCHET_DEEMED_MIN_PRICE)
+
+    result: dict[str, Any] = {
         "triggered": True,
-        "new_conversion_price": new_issue_price,
+        "new_conversion_price": cp2,
         "math_provenance": [
             {
                 "output_field": "new_conversion_price",
@@ -109,6 +128,11 @@ def full_ratchet_new_conversion_price(
             }
         ],
     }
+    if floor_applied:
+        result["deemed_consideration_floor_applied"] = True
+        result["deemed_consideration_floor"] = FULL_RATCHET_DEEMED_MIN_PRICE
+        result["raw_new_issue_price"] = new_issue_price
+    return result
 
 
 def _cli() -> int:
