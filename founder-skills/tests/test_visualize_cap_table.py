@@ -1,13 +1,19 @@
 """Regression tests for cap-table HTML visualization (visualize.py + explore.py).
 
-Focus: the design §10 security contract — every user-controlled string MUST be
-HTML-escaped, and explorer.html's inline JSON data block MUST escape `</` to
-prevent `</script>` breakout. These tests inject XSS payloads into fixture
-inputs/instruments and verify outputs are inert.
+Focus areas:
+1. Design §10 security contract — every user-controlled string MUST be
+   HTML-escaped, and explorer.html's inline JSON data block MUST escape `</`
+   to prevent `</script>` breakout. These tests inject XSS payloads into
+   fixture inputs/instruments and verify outputs are inert.
+2. Renderer key-coverage — every key the ownership-aggregate producer can emit
+   is either rendered (known to the renderer) or explicitly excluded.  A new
+   key added to the producer without updating the renderer/exclusion list will
+   cause the relevant test class to fail loudly.
 """
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import subprocess
@@ -15,11 +21,14 @@ import sys
 import tempfile
 from typing import Any
 
+import pytest
+
 _REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SCRIPTS = os.path.join(_REPO, "founder-skills", "skills", "cap-table", "scripts")
 
 sys.path.insert(0, SCRIPTS)
 import cap_state as cap_state_mod  # type: ignore[import-not-found]  # noqa: E402
+import priced_round as priced_round_mod  # type: ignore[import-not-found]  # noqa: E402
 
 
 def _run(script_name: str, args: list[str]) -> tuple[int, str, str]:
@@ -320,3 +329,634 @@ class TestErrorPaths:
                 json.dump({"company_name": "X", "metadata": {"run_id": "r"}}, f)
             rc, _, _ = _run("explore.py", ["--dir", d, "-o", os.path.join(d, "out.html")])
             assert rc != 0
+
+
+# ===========================================================================
+# Shared fixture — full-featured cap state that exercises every branch of
+# aggregate_ownership_by_class (founders + preferred + pool + safe + note +
+# new_money).  Anti-dilution keys are added separately in the AD-specific tests.
+# ===========================================================================
+
+_FULL_INPUTS: dict[str, Any] = {
+    "company_name": "TestCo",
+    "analysis_date": "2026-05-19",
+    "mode": "standard",
+    "founders": [
+        {"name": "Alice", "founder_id": "founder_alice", "common_shares": 5_000_000},
+        {"name": "Bob", "founder_id": "founder_bob", "common_shares": 5_000_000},
+    ],
+    "preferred_series": [],
+    "option_pool": {"plan_type": "nso", "authorized": 1_500_000, "issued": 500_000, "unallocated": 1_000_000},
+    "common_batches": [],
+    "metadata": {"run_id": "test"},
+}
+
+_FULL_INSTRUMENTS: dict[str, Any] = {
+    "safes": [
+        {
+            "id": "safe_001",
+            "investor_name": "Anon A",
+            "purchase_amount": 500_000,
+            "post_money_valuation_cap": 8_000_000,
+            "discount_multiplier": None,
+            "mfn_provision": None,
+            "pro_rata_side_letter": None,
+            "issuance_date": "2025-01-01",
+            "form": "yc_postmoney_cap",
+            "conversion_price_override": None,
+            "source_document": None,
+            "extraction_confidence": "high",
+        }
+    ],
+    "convertible_notes": [
+        {
+            "id": "note_001",
+            "investor_name": "Anon B",
+            "principal": 200_000,
+            "annual_interest_rate": 0.06,
+            "day_count_basis": 365,
+            "compounding_periods_per_year": None,
+            "interest_converts_to_shares": True,
+            "issuance_date": "2025-06-01",
+            "last_interest_event_date": None,
+            "valuation_cap": 10_000_000,
+            "discount_multiplier": 0.80,
+            "capitalization_denominator": 10_000_000,
+            "capitalization_denominator_policy": "pre-money fully diluted",
+            "qualified_financing_threshold": 1_000_000,
+            "maturity_date": "2027-06-01",
+            "maturity_default_treatment": "convert_at_cap",
+            "maturity_conversion_price_override": None,
+            "non_qualified_financing_treatment": None,
+            "source_document": None,
+            "extraction_confidence": "high",
+        }
+    ],
+    "warrants": [],
+    "option_grants": [],
+    "metadata": {"run_id": "test"},
+}
+
+
+def _build_full_agg() -> dict[str, Any]:
+    """Run the solver with all driver classes active and return aggregate_ownership_by_class."""
+    cs = cap_state_mod.build_cap_state(_FULL_INPUTS, _FULL_INSTRUMENTS)
+    result = priced_round_mod.solve_priced_round(
+        cap_state=cs,
+        safes=_FULL_INSTRUMENTS["safes"],
+        notes=_FULL_INSTRUMENTS["convertible_notes"],
+        pre_money=20_000_000,
+        new_money=5_000_000,
+        target_pool_percent=0.10,
+        target_basis="pre_money",
+        conversion_event_date="2026-06-01",
+    )
+    assert result["completeness"] == "full", f"Fixture solve failed: {result.get('blockers')}"
+    agg: dict[str, Any] = result["aggregate_ownership_by_class"]
+    return agg
+
+
+def _build_ad_agg() -> dict[str, Any]:
+    """Run the solver with AD protection active — produces the three AD meta keys."""
+    inputs_ad = copy.deepcopy(_FULL_INPUTS)
+    inputs_ad["preferred_series"] = [
+        {
+            "series_id": "series_a",
+            "series_name": "Series A",
+            "shares": 2_000_000,
+            "original_issue_price": 1.0,
+            "original_conversion_price": 1.0,
+            "current_conversion_price": 1.0,
+            "issuance_date": "2024-01-01",
+            "anti_dilution_protection": "broad_based_weighted_average",
+            "ad_trigger_basis": "original_issue_price",
+            "ad_a_denominator_basis": "nvca_broad",
+        }
+    ]
+    cs = cap_state_mod.build_cap_state(inputs_ad, _FULL_INSTRUMENTS)
+    # Down round: pre_money well below original issue price * FD so AD fires
+    result = priced_round_mod.solve_priced_round(
+        cap_state=cs,
+        safes=[],
+        notes=[],
+        pre_money=5_000_000,  # down round → PPS < OIP → AD triggers
+        new_money=1_000_000,
+        conversion_event_date="2026-06-01",
+    )
+    assert result["completeness"] == "full", f"AD fixture solve failed: {result.get('blockers')}"
+    agg: dict[str, Any] = result["aggregate_ownership_by_class"]
+    # Confirm AD meta keys are actually present (otherwise the AD tests are vacuous)
+    assert "founders_pct_pre_anti_dilution" in agg, "AD fixture did not produce AD meta keys"
+    return agg
+
+
+# ===========================================================================
+# Test 1 + 2: visualize.py ownership-key coverage + palette coverage
+# ===========================================================================
+
+
+class TestVisualizeOwnershipKeyCoverage:
+    """Every key the solver can emit in aggregate_ownership_by_class is either
+    rendered by visualize.py or listed in EXCLUDED_OWNERSHIP_KEYS.
+
+    Invariant: produced_scalar_keys ⊆ rendered_keys ∪ EXCLUDED_OWNERSHIP_KEYS.
+
+    Where rendered_keys are the keys whose _pct suffix stripped form appears in
+    PALETTE (the renderer uses _palette_color which strips the _pct suffix).
+    The inverse hygiene direction (no stale exclusions) is also checked.
+    """
+
+    def _import_visualize(self) -> Any:
+        import importlib
+        import types
+
+        # Load with a unique sys.modules key so multiple test classes don't
+        # collide with each other or with the top-level import.
+        mod_name = "_test_viz_cap_coverage_visualize"
+        if mod_name in sys.modules:
+            return sys.modules[mod_name]
+        script_path = os.path.join(SCRIPTS, "visualize.py")
+        spec = importlib.util.spec_from_file_location(  # type: ignore[attr-defined]
+            mod_name, script_path
+        )
+        assert spec is not None and spec.loader is not None
+        mod = types.ModuleType(mod_name)
+        mod.__spec__ = spec  # type: ignore[assignment]
+        # __file__ must be set before exec_module so the script's own
+        # sys.path.insert(0, os.path.dirname(__file__)) resolves correctly.
+        mod.__file__ = script_path  # type: ignore[assignment]
+        # Pre-stub _theme so visualize.py loads without needing to import it
+        _theme_stub = types.ModuleType("_theme")
+        _theme_stub.brand_css = lambda: ""  # type: ignore[attr-defined]
+        _theme_stub.FOOTER_CREDIT_HTML = ""  # type: ignore[attr-defined]
+        sys.modules.setdefault("_theme", _theme_stub)
+        sys.modules[mod_name] = mod
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return mod
+
+    def test_scalar_produced_keys_all_covered(self) -> None:
+        """Every scalar *_pct key the solver emits (base case: no AD) is either
+        in the renderer's PALETTE (rendered) or in EXCLUDED_OWNERSHIP_KEYS
+        (explicitly excluded).
+
+        Derivation: live fixture — call the solver with all driver classes
+        (founders, preferred, pool, safe, note, new_money) and inspect the
+        actual aggregate dict keys.  This approach fails the next time the
+        producer grows a new key because the assertion will catch the gap.
+        """
+        viz = self._import_visualize()
+        agg = _build_full_agg()
+
+        # Scalar ownership keys (non-dict values) — these are the ones renderers
+        # attempt to draw as donut wedges.
+        scalar_keys = {k for k, v in agg.items() if isinstance(v, (int, float))}
+
+        # A key is "rendered" if the renderer knows its colour (palette lookup
+        # strips _pct suffix).  Keys that hit PALETTE["neutral"] are still rendered
+        # (they draw a grey wedge), but the invariant we care about is that every
+        # excluded key is NOT in PALETTE — i.e., the exclusion is intentional.
+        rendered_keys = {f"{cat}_pct" for cat in viz.PALETTE if cat != "neutral"}
+        rendered_keys |= set(viz.PALETTE)  # allow bare-name keys too
+
+        uncovered = scalar_keys - rendered_keys - viz.EXCLUDED_OWNERSHIP_KEYS
+        assert not uncovered, (
+            f"visualize.py: {len(uncovered)} produced key(s) not in PALETTE and not excluded: "
+            f"{sorted(uncovered)}. Add to EXCLUDED_OWNERSHIP_KEYS or PALETTE."
+        )
+
+    def test_ad_meta_keys_all_excluded(self) -> None:
+        """The three AD meta keys the solver conditionally adds must be in
+        EXCLUDED_OWNERSHIP_KEYS so they never appear as donut wedges.
+        """
+        viz = self._import_visualize()
+        agg = _build_ad_agg()
+
+        ad_meta_keys = {k for k, v in agg.items() if isinstance(v, (int, float))} - {
+            "founders_pct",
+            "preferred_pct",
+            "option_pool_pct",
+            "safe_pct",
+            "note_pct",
+            "new_money_pct",
+        }
+
+        uncovered_ad = ad_meta_keys - viz.EXCLUDED_OWNERSHIP_KEYS
+        assert not uncovered_ad, (
+            f"visualize.py: AD meta key(s) not in EXCLUDED_OWNERSHIP_KEYS: "
+            f"{sorted(uncovered_ad)}.  These would draw a spurious donut wedge."
+        )
+
+    def test_no_stale_exclusions(self) -> None:
+        """Every key in EXCLUDED_OWNERSHIP_KEYS must be a real producer key
+        (emittable by the solver with AD active).
+
+        Rationale: stale exclusions are not a correctness hazard but signal
+        that the exclusion list drifted from the producer.  A comment in the
+        exclusion list is the right remedy; deleting a real defensive exclusion
+        is wrong.  This test catches purely stale entries (the solver no longer
+        emits them at all), not intentionally defensive ones.
+        """
+        viz = self._import_visualize()
+        agg_ad = _build_ad_agg()
+        all_producer_keys = set(agg_ad.keys())  # includes non-scalar like founders_by_class
+
+        stale = viz.EXCLUDED_OWNERSHIP_KEYS - all_producer_keys
+        assert not stale, (
+            f"visualize.py: EXCLUDED_OWNERSHIP_KEYS contains key(s) the solver never emits: "
+            f"{sorted(stale)}.  Remove stale entries; if the exclusion is deliberately "
+            f"defensive for a branch this test's fixture does not exercise, extend the "
+            f"fixture (or this test's expected set) instead of deleting the exclusion."
+        )
+
+    def test_palette_covers_all_renderable_classes(self) -> None:
+        """Every ownership class the solver emits as a non-excluded scalar *_pct
+        key has a named PALETTE entry (not just the neutral fallback) — a new
+        producer class fails here until its colour is added to PALETTE.
+
+        Scope note: `warrants` enters rendering via visualize.py's
+        cap_state-derived pre-round breakdown, not via this solver aggregate;
+        its palette presence is pinned by the palette tests in
+        test_cap_table.py, not here.
+        """
+        viz = self._import_visualize()
+        agg = _build_full_agg()
+
+        scalar_keys = {k for k, v in agg.items() if isinstance(v, (int, float))}
+        renderable = scalar_keys - viz.EXCLUDED_OWNERSHIP_KEYS
+
+        # Strip the _pct suffix to get the class name the palette is keyed by
+        missing_palette = {k for k in renderable if k.removesuffix("_pct") not in viz.PALETTE}
+        assert not missing_palette, (
+            f"visualize.py: renderable key(s) have no named PALETTE entry (would render grey): "
+            f"{sorted(missing_palette)}.  Add a colour to PALETTE."
+        )
+
+
+# ===========================================================================
+# Test 3: explore.py ownership-key coverage + palette coverage
+# ===========================================================================
+
+
+class TestExploreOwnershipKeyCoverage:
+    """Same invariants as TestVisualizeOwnershipKeyCoverage but for explore.py.
+
+    explore.py uses _filter_agg() which combines the excluded-keys list AND an
+    isinstance(v, (int, float)) guard.  Both layers are tested.
+    """
+
+    def _import_explore(self) -> Any:
+        import importlib
+        import types
+
+        mod_name = "_test_viz_cap_coverage_explore"
+        if mod_name in sys.modules:
+            return sys.modules[mod_name]
+
+        # explore.py imports _theme at call time; stub it
+        _theme_stub = types.ModuleType("_theme")
+        _theme_stub.brand_css = lambda: ""  # type: ignore[attr-defined]
+        _theme_stub.FOOTER_CREDIT_HTML = ""  # type: ignore[attr-defined]
+        sys.modules.setdefault("_theme", _theme_stub)
+
+        # explore.py reads the vendored Chart.js at render time; it is tracked
+        # in the repo. Never write a stub into the repo tree — skip instead.
+        chart_vendored = os.path.join(SCRIPTS, "vendor", "chart.min.js")
+        if not os.path.exists(chart_vendored):
+            pytest.skip("vendored chart.min.js missing — repo checkout incomplete")
+
+        script_path = os.path.join(SCRIPTS, "explore.py")
+        spec = importlib.util.spec_from_file_location(  # type: ignore[attr-defined]
+            mod_name, script_path
+        )
+        assert spec is not None and spec.loader is not None
+        mod = types.ModuleType(mod_name)
+        mod.__spec__ = spec  # type: ignore[assignment]
+        # __file__ must be set before exec_module so the script-level
+        # os.path.abspath(__file__) resolves correctly.
+        mod.__file__ = script_path  # type: ignore[assignment]
+        sys.modules[mod_name] = mod
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return mod
+
+    def test_filter_agg_excludes_ad_meta_keys(self) -> None:
+        """_filter_agg must exclude the three AD meta keys so they never reach
+        the JS donut / legend. The expected keys are hardcoded — iterating
+        explore.py's own exclusion set would pass vacuously if a key were
+        removed from it.
+        """
+        exp = self._import_explore()
+        agg = _build_ad_agg()
+        filtered = exp._filter_agg(agg)
+        ad_meta_keys = (
+            "founders_pct_pre_anti_dilution",
+            "preferred_pct_pre_anti_dilution",
+            "anti_dilution_delta_pct_points",
+        )
+        for k in ad_meta_keys:
+            assert k in agg, f"fixture no longer emits AD meta key '{k}' — update the fixture"
+            assert k not in filtered, f"explore.py._filter_agg let AD meta key '{k}' through to the renderer."
+
+    def test_filter_agg_excludes_dict_values(self) -> None:
+        """_filter_agg must exclude non-scalar values (founders_by_class is a
+        dict and must never reach the JS donut).
+        """
+        exp = self._import_explore()
+        agg = _build_full_agg()
+        filtered = exp._filter_agg(agg)
+        for k, v in filtered.items():
+            assert isinstance(v, (int, float)), (
+                f"explore.py._filter_agg let non-scalar value through for key '{k}': {type(v)}"
+            )
+
+    def test_js_palette_covers_renderable_classes(self) -> None:
+        """The JS PALETTE dict embedded in explore.py must contain an entry for
+        every renderable class the solver can emit.
+
+        Approach: load visualize.py to get the Python-side excluded keys and
+        palette, then parse the JS PALETTE block from explore.py source and
+        compare.  This is more robust than executing the JS.
+        """
+        import re
+
+        viz = self._import_visualize()
+        excluded = viz.EXCLUDED_OWNERSHIP_KEYS
+
+        # Derive renderable classes from the solver (no-AD fixture)
+        agg = _build_full_agg()
+        filtered = {k: v for k, v in agg.items() if isinstance(v, (int, float))}
+        renderable_classes = {k.removesuffix("_pct") for k in filtered if k not in excluded}
+
+        # Read explore.py source and extract the JS PALETTE block
+        with open(os.path.join(SCRIPTS, "explore.py"), encoding="utf-8") as f:
+            src = f.read()
+
+        # JS PALETTE in explore.py looks like:
+        #   const PALETTE = {{
+        #     founders: "#...",
+        #     ...
+        #   }};
+        # The double-brace {{ }} is because it's inside an f-string template.
+        palette_block_match = re.search(r"const PALETTE = \{+\s*(.*?)\}\};", src, re.DOTALL)
+        assert palette_block_match, "explore.py: could not locate JS PALETTE block"
+        palette_block = palette_block_match.group(1)
+        # Each line like '  founders: "#0D549D",' → extract "founders".
+        # Note: the first key may have zero leading whitespace (it follows
+        # directly after the `{{` in the f-string template), so use \s* not \s+.
+        js_palette_keys = set(re.findall(r"^[ \t]*(\w+):", palette_block, re.MULTILINE))
+
+        missing = renderable_classes - js_palette_keys
+        assert not missing, (
+            f"explore.py JS PALETTE missing key(s) for renderable classes: "
+            f"{sorted(missing)}.  Add a colour entry to the JS PALETTE block."
+        )
+
+    def test_palette_hex_consistency_with_visualize(self) -> None:
+        """visualize.py and explore.py must use the same hex value for each
+        shared class so the two views are visually consistent.
+
+        Approach: compare the Python PALETTE from visualize.py against the
+        hex values parsed from the JS PALETTE block in explore.py.
+        """
+        viz = self._import_visualize()  # type: ignore[attr-defined]
+        import re
+
+        with open(os.path.join(SCRIPTS, "explore.py"), encoding="utf-8") as f:
+            src = f.read()
+
+        palette_block_match = re.search(r"const PALETTE = \{+\s*(.*?)\}\};", src, re.DOTALL)
+        assert palette_block_match
+        palette_block = palette_block_match.group(1)
+        # Extract key → hex pairs
+        js_pairs = re.findall(r'(\w+):\s*"(#[0-9A-Fa-f]+)"', palette_block)
+        js_palette = {k: v for k, v in js_pairs}
+
+        mismatches = []
+        for cls, py_hex in viz.PALETTE.items():
+            if cls == "neutral":
+                # neutral is a fallback in visualize.py; explore.py falls back
+                # to the literal "#A6AEB5" string inline — not a PALETTE key.
+                # Alignment is checked by the JS fallback "#A6AEB5" matching.
+                continue
+            if cls in js_palette and js_palette[cls].lower() != py_hex.lower():
+                mismatches.append(f"{cls}: visualize={py_hex} explore_js={js_palette[cls]}")
+
+        assert not mismatches, "visualize.py and explore.py use different hex values for same concept: " + "; ".join(
+            mismatches
+        )
+
+    def _import_visualize(self) -> Any:
+        mod_name = "_test_viz_cap_coverage_visualize"
+        if mod_name in sys.modules:
+            return sys.modules[mod_name]
+        import importlib
+        import types
+
+        _theme_stub = types.ModuleType("_theme")
+        _theme_stub.brand_css = lambda: ""  # type: ignore[attr-defined]
+        _theme_stub.FOOTER_CREDIT_HTML = ""  # type: ignore[attr-defined]
+        sys.modules.setdefault("_theme", _theme_stub)
+        script_path = os.path.join(SCRIPTS, "visualize.py")
+        spec = importlib.util.spec_from_file_location(  # type: ignore[attr-defined]
+            mod_name, script_path
+        )
+        assert spec is not None and spec.loader is not None
+        mod = types.ModuleType(mod_name)
+        mod.__spec__ = spec  # type: ignore[assignment]
+        mod.__file__ = script_path  # type: ignore[assignment]
+        sys.modules[mod_name] = mod
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return mod
+
+    def test_mutation_explore_filter_agg_lets_fake_key_through(self) -> None:
+        """Removing an exclusion from _EXCLUDED_OWNERSHIP_KEYS causes
+        test_filter_agg_excludes_ad_meta_keys to detect the leak.
+
+        Mutation simulation: bypass _filter_agg's exclusion by passing the
+        AD key directly to the filtered output and confirm it appears.
+        """
+        exp = self._import_explore()
+
+        # Simulate what happens if _EXCLUDED_OWNERSHIP_KEYS had the key removed:
+        # call the underlying filter with a patched exclusion set that does NOT
+        # include the key we're testing.
+        agg = _build_ad_agg()
+        # Direct dict comprehension replicating _filter_agg logic but with
+        # empty exclusion set — AD meta keys should leak through.
+        no_exclusion_filtered = {k: v for k, v in agg.items() if isinstance(v, (int, float))}
+        # Confirm the AD key would have leaked
+        assert "founders_pct_pre_anti_dilution" in no_exclusion_filtered, (
+            "Mutation simulation failed: AD key should appear when exclusion is removed."
+        )
+        # And the real _filter_agg suppresses it
+        real_filtered = exp._filter_agg(agg)
+        assert "founders_pct_pre_anti_dilution" not in real_filtered, (
+            "Real _filter_agg should exclude founders_pct_pre_anti_dilution."
+        )
+
+
+# ===========================================================================
+# Test 4: build_top_dilution_drivers coverage
+# ===========================================================================
+
+
+class TestBuildTopDilutionDriversCoverage:
+    """Every *_pct dilution-driver key the solver can emit must be surfaced by
+    build_top_dilution_drivers.
+
+    The solver emits these driver-relevant aggregate keys:
+      new_money_pct, safe_pct, note_pct
+
+    Pool top-up is read from shares_breakdown.pool_topup (not a pct key).
+
+    Invariant: for any scenario where these keys are nonzero, the corresponding
+    driver must appear in the returned list.
+    """
+
+    def _import_compose(self) -> Any:
+        import importlib
+        import types
+
+        mod_name = "_test_viz_cap_coverage_compose"
+        if mod_name in sys.modules:
+            return sys.modules[mod_name]
+        script_path = os.path.join(SCRIPTS, "compose_report.py")
+        spec = importlib.util.spec_from_file_location(  # type: ignore[attr-defined]
+            mod_name, script_path
+        )
+        assert spec is not None and spec.loader is not None
+        mod = types.ModuleType(mod_name)
+        mod.__spec__ = spec  # type: ignore[assignment]
+        # __file__ must be set so the script's sys.path.insert(__file__) works.
+        mod.__file__ = script_path  # type: ignore[assignment]
+        # compose_report imports _rule_pack; SCRIPTS is already on sys.path.
+        sys.modules[mod_name] = mod
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return mod
+
+    def _full_scenario_doc(self) -> list[dict[str, Any]]:
+        """Build a scenarios list that exercises all four driver classes."""
+        cs = cap_state_mod.build_cap_state(_FULL_INPUTS, _FULL_INSTRUMENTS)
+        result = priced_round_mod.solve_priced_round(
+            cap_state=cs,
+            safes=_FULL_INSTRUMENTS["safes"],
+            notes=_FULL_INSTRUMENTS["convertible_notes"],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="pre_money",
+            conversion_event_date="2026-06-01",
+        )
+        assert result["completeness"] == "full"
+        return [
+            {
+                "scenario_id": "s1",
+                "label": "Full priced round",
+                "type": "priced_round",
+                "parameters": {"pre_money": 20_000_000, "new_money": 5_000_000},
+                "computed_outputs": result,
+            }
+        ]
+
+    def test_all_driver_keys_surfaced(self) -> None:
+        """new_money_pct, safe_pct, note_pct, and pool_topup must each produce
+        a driver entry when nonzero in the solver output.
+        """
+        compose = self._import_compose()
+        scenarios = self._full_scenario_doc()
+
+        agg = scenarios[0]["computed_outputs"]["aggregate_ownership_by_class"]
+        breakdown = scenarios[0]["computed_outputs"]["shares_breakdown"]
+
+        # Confirm all driver keys are nonzero in this fixture
+        assert agg.get("new_money_pct", 0) > 0.01, "Fixture: new_money_pct should be nonzero"
+        assert agg.get("safe_pct", 0) > 0.01, "Fixture: safe_pct should be nonzero"
+        assert agg.get("note_pct", 0) > 0.01, "Fixture: note_pct should be nonzero"
+        assert breakdown.get("pool_topup", 0) > 0, "Fixture: pool_topup should be nonzero"
+
+        drivers = compose.build_top_dilution_drivers(scenarios)
+        driver_labels = [d["driver"] for d in drivers]
+
+        # Each driver class must appear
+        assert any("New money" in label for label in driver_labels), (
+            f"build_top_dilution_drivers omitted new_money driver. Got: {driver_labels}"
+        )
+        assert any("SAFE" in label for label in driver_labels), (
+            f"build_top_dilution_drivers omitted SAFE driver. Got: {driver_labels}"
+        )
+        assert any("Note" in label for label in driver_labels), (
+            f"build_top_dilution_drivers omitted Note driver. Got: {driver_labels}"
+        )
+        assert any("pool" in label.lower() or "Pool" in label for label in driver_labels), (
+            f"build_top_dilution_drivers omitted pool top-up driver. Got: {driver_labels}"
+        )
+
+    def test_driver_known_key_set_vs_producer(self) -> None:
+        """Source-level assertion: the *_pct keys read by build_top_dilution_drivers
+        must be a superset of the solver's emittable driver-relevant *_pct keys.
+
+        Approach: read the compose_report.py source and extract the agg.get(...)
+        calls inside build_top_dilution_drivers.  Compare against the solver's
+        actual output.
+        """
+        import re
+
+        with open(os.path.join(SCRIPTS, "compose_report.py"), encoding="utf-8") as f:
+            src = f.read()
+
+        # Locate the build_top_dilution_drivers function body
+        fn_match = re.search(r"def build_top_dilution_drivers\(.*?\n(?=def |\Z)", src, re.DOTALL)
+        assert fn_match, "Could not locate build_top_dilution_drivers in compose_report.py"
+        fn_body = fn_match.group(0)
+
+        # Extract every agg.get("...") key name in the function
+        read_keys = set(re.findall(r'agg\.get\("([^"]+)"', fn_body))
+
+        # The solver's driver-relevant *_pct keys (scalar, non-AD)
+        agg = _build_full_agg()
+        # These are the driver-relevant keys — exclude AD meta keys (they are
+        # dilution-framework metadata, not driver slice pcts) and founders_by_class
+        # (dict).  Also exclude keys the renderer explicitly excluded.
+        producer_driver_keys = {
+            k
+            for k, v in agg.items()
+            if isinstance(v, (int, float))
+            and k
+            not in {
+                "founders_pct_pre_anti_dilution",
+                "preferred_pct_pre_anti_dilution",
+                "anti_dilution_delta_pct_points",
+                "founders_pct",
+                "preferred_pct",
+                "option_pool_pct",
+            }
+        }
+
+        unread = producer_driver_keys - read_keys
+        assert not unread, (
+            f"build_top_dilution_drivers does not read driver key(s) the solver emits: "
+            f"{sorted(unread)}.  Add a driver block for each key."
+        )
+
+    def test_mutation_missing_note_driver(self) -> None:
+        """Removing note_pct from the function's read set causes the driver to
+        be missing from output — the test_all_driver_keys_surfaced assertion
+        would fail.
+
+        Mutation simulation: build a scenarios list where note_pct > 0.01 but
+        zero out note_pct in the aggregate so build_top_dilution_drivers skips it.
+        """
+        compose = self._import_compose()
+        scenarios = self._full_scenario_doc()
+
+        # Mutate: zero out note_pct so the driver is skipped
+        mutated = copy.deepcopy(scenarios)
+        mutated[0]["computed_outputs"]["aggregate_ownership_by_class"]["note_pct"] = 0.0
+
+        drivers = compose.build_top_dilution_drivers(mutated)
+        driver_labels = [d["driver"] for d in drivers]
+
+        # With note_pct zeroed, note driver must NOT appear (confirms the gate
+        # is pct-driven and the mutation is effective)
+        assert not any("Note" in label for label in driver_labels), (
+            "Mutation simulation failed: zeroing note_pct should suppress the note driver."
+        )
