@@ -78,21 +78,33 @@ def main() -> int:
     # completed run (different run_id) is stale and must NOT trigger a resume —
     # otherwise a fresh review of the same company reuses the old run's
     # artifacts.
+    #
+    # Preservation contract: when resume is true, artifacts from _CLEANABLE_NAMES
+    # are same-run checkpoints (Steps 2-3 already ran for this run_id).  --clean
+    # must NOT delete them — skipping re-runs avoids redundant LLM calls on gate
+    # round-trips.  compose_report.py's run_id parity check is the safety net
+    # against stale content from a different run.  On a fresh (non-resume) run
+    # _CLEANABLE_NAMES are deleted unconditionally so no prior run's artifacts
+    # pollute the new run.
     gate_answer, gate_run_id = _read_gate_state(review_dir)
     resume = bool(gate_answer) and gate_run_id == run_id
 
-    if args.clean:
+    if args.clean and not resume:
+        # Fresh run: remove all cleanable pipeline artifacts so no stale
+        # content from a prior run contaminates this invocation.
         for name in _CLEANABLE_NAMES:
             path = os.path.join(review_dir, name)
             if os.path.isfile(path):
                 os.remove(path)
-        # Delete a stale answered gate_state.json on a fresh (non-resume) run
-        # so it cannot be misread as a resume signal on a later invocation.
-        if not resume:
-            gate_path = os.path.join(review_dir, _GATE_STATE_NAME)
-            if os.path.isfile(gate_path):
-                os.remove(gate_path)
-                gate_answer, gate_run_id, resume = "", "", False
+        # Also remove a stale answered gate_state.json so it cannot be
+        # misread as a resume signal on a later invocation.
+        gate_path = os.path.join(review_dir, _GATE_STATE_NAME)
+        if os.path.isfile(gate_path):
+            os.remove(gate_path)
+            gate_answer, gate_run_id, resume = "", "", False
+    # resume is true: _CLEANABLE_NAMES artifacts are same-run checkpoints —
+    # leave them intact.  gate_state.json is also preserved (it holds the
+    # founder's answer that enabled resume detection).
 
     out = {
         "review_dir": review_dir,

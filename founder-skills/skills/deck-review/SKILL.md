@@ -138,11 +138,11 @@ Read `review_dir`, `run_id`, `resume`, and `gate_answer` from the JSON printed b
 mkdir -p "$REVIEW_DIR/.staging"   # for ad-hoc sub-agent JSON staging
 ```
 
-To resume across a gate round-trip, the caller's task prompt must supply the prior `RUN_ID` (so `RUN_ID` above is set before this block runs). Then `setup_run.py` sees the answered `gate_state.json` whose `run_id` matches and returns `resume: true` — and because resume is true, `--clean` leaves `gate_state.json` in place.
+To resume across a gate round-trip, the caller's task prompt must supply the prior `RUN_ID` (so `RUN_ID` above is set before this block runs). Then `setup_run.py` sees the answered `gate_state.json` whose `run_id` matches and returns `resume: true` — and because resume is true, `--clean` leaves `gate_state.json`, `deck_inventory.json`, and `stage_profile.json` in place (they are same-run checkpoints for this `RUN_ID`).
 
 Pass `RUN_ID` to every producer script via `--run-id`. Producer scripts inject it into `metadata.run_id` automatically. `compose_report.py` enforces that all required artifacts share the same `run_id` and emits a `MISSING_METADATA` (high) warning for any artifact without one. Keeping `RUN_ID` stable across the gate is what prevents a `STALE_ARTIFACT` mismatch with the pre-gate artifacts.
 
-**On re-invocation (`$IS_RESUMING` is set):** only `gate_state.json` (the founder's answer) survives the resume — `--clean` removes the pre-gate artifacts (`deck_inventory.json`, `stage_profile.json`) unconditionally. Re-run Steps 2 and 3 with the same `RUN_ID` before continuing past the gate.
+**On re-invocation (`$IS_RESUMING` is set):** `gate_state.json`, `deck_inventory.json`, and `stage_profile.json` all survive `--clean` (same-run artifacts are preserved on resume). Skip Steps 2 and 3 if both `deck_inventory.json` and `stage_profile.json` exist and their `metadata.run_id` matches `$RUN_ID`; otherwise re-run them with the same `RUN_ID`.
 
 ### Step 1: Read or Create Founder Context
 

@@ -158,3 +158,83 @@ def test_setup_run_takes_override_run_id() -> None:
         assert rc == 0
         assert out is not None
         assert out["run_id"] == "20260101T000000Z"
+
+
+# ---------------------------------------------------------------------------
+# New: resume preserves same-run pipeline artifacts under --clean
+# ---------------------------------------------------------------------------
+
+
+def test_resume_with_clean_preserves_pre_gate_pipeline_artifacts() -> None:
+    """On a valid resume (answered gate whose run_id matches --run-id), --clean
+    must NOT delete deck_inventory.json or stage_profile.json.  They are
+    same-run checkpoints; re-running Steps 2-3 is only necessary when they are
+    absent or carry a different run_id.  compose_report.py's run_id parity check
+    is the safety net against stale content.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        artifacts_root = os.path.join(d, "artifacts")
+        review_dir = os.path.join(artifacts_root, "deck-review-acme-corp")
+        _plant_gate(review_dir, "r1", "Looks right")
+        # Plant same-run pipeline artifacts
+        for name in ("deck_inventory.json", "stage_profile.json"):
+            with open(os.path.join(review_dir, name), "w") as f:
+                f.write("same-run-content")
+        rc, out, _ = _run(
+            ["--artifacts-root", artifacts_root, "--slug", "acme-corp", "--run-id", "r1", "--clean", "--pretty"],
+            cwd=d,
+        )
+        assert rc == 0
+        assert out is not None
+        assert out["resume"] is True
+        # All three artifacts must survive --clean on a resume
+        for name in ("deck_inventory.json", "stage_profile.json", "gate_state.json"):
+            path = os.path.join(review_dir, name)
+            assert os.path.exists(path), f"{name} was deleted by --clean during a resume (must be preserved)"
+
+
+def test_fresh_run_with_clean_still_deletes_pre_gate_pipeline_artifacts() -> None:
+    """A fresh (non-resume) run with --clean must delete deck_inventory.json and
+    stage_profile.json even when they are present from a previous run.
+    resume must be False in the JSON output.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        artifacts_root = os.path.join(d, "artifacts")
+        review_dir = os.path.join(artifacts_root, "deck-review-acme-corp")
+        os.makedirs(review_dir)
+        for name in ("deck_inventory.json", "stage_profile.json", "report.md"):
+            with open(os.path.join(review_dir, name), "w") as f:
+                f.write("stale")
+        rc, out, _ = _run(
+            ["--artifacts-root", artifacts_root, "--slug", "acme-corp", "--run-id", "new-run", "--clean", "--pretty"],
+            cwd=d,
+        )
+        assert rc == 0
+        assert out is not None
+        assert out["resume"] is False
+        for name in ("deck_inventory.json", "stage_profile.json", "report.md"):
+            assert not os.path.exists(os.path.join(review_dir, name)), f"{name} should be deleted on a fresh run"
+
+
+def test_stale_gate_run_id_mismatch_with_clean_deletes_pipeline_artifacts() -> None:
+    """Answered gate from a PRIOR run (run_id mismatch) -> resume is False.
+    --clean must delete deck_inventory.json, stage_profile.json, AND gate_state.json.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        artifacts_root = os.path.join(d, "artifacts")
+        review_dir = os.path.join(artifacts_root, "deck-review-acme-corp")
+        _plant_gate(review_dir, "old-run", "Looks right")
+        for name in ("deck_inventory.json", "stage_profile.json"):
+            with open(os.path.join(review_dir, name), "w") as f:
+                f.write("old-run-content")
+        rc, out, _ = _run(
+            ["--artifacts-root", artifacts_root, "--slug", "acme-corp", "--run-id", "new-run", "--clean", "--pretty"],
+            cwd=d,
+        )
+        assert rc == 0
+        assert out is not None
+        assert out["resume"] is False
+        for name in ("deck_inventory.json", "stage_profile.json", "gate_state.json"):
+            assert not os.path.exists(os.path.join(review_dir, name)), (
+                f"{name} should be deleted when run_id mismatches (stale prior run)"
+            )
