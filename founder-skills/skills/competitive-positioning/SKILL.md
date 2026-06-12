@@ -472,12 +472,16 @@ python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --strict --pretty \
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash
-COACHING_PAYLOAD="$(python3 -c '
+python3 -c '
 import json, sys
 data = json.load(open(sys.argv[1]))
 print(json.dumps(data["coaching_payload"], indent=2))
-' "$ANALYSIS_DIR/report.json")"
+' "$ANALYSIS_DIR/report.json"
 ```
+
+The payload prints to stdout — copy it from the tool result into the dispatch
+prompt below. (Never capture it into a shell variable: each Bash call runs in a
+fresh shell, so the variable would be unreadable and gone.)
 
 **Dispatch prompt template:**
 
@@ -489,7 +493,7 @@ You are dispatched to add coaching commentary to a competitive positioning revie
 The compose_report.py script has finished. The structured `coaching_payload`
 from report.json is:
 
-<paste $COACHING_PAYLOAD JSON here verbatim>
+<paste the coaching_payload JSON printed by the previous Bash command here verbatim>
 
 Follow your agent body's Context B procedure
 (POST_COMPOSE_COACHING):

@@ -15,7 +15,7 @@ Overall score = `(pass_count + 0.5 * warn_count) / (total - na_count) * 100`
 
 ## Mode Gating Table
 
-Items are auto-gated to `not_applicable` based on `input_mode` (from `landscape.json`). The agent should not waste effort assessing gated items.
+Items are auto-gated to `not_applicable` based on `input_mode`. The main thread passes the mode via `--input-mode` flag to `checklist.py`; the script falls back to the `input_mode` field in stdin JSON, then to `conversation`. The agent should not waste effort assessing gated items.
 
 | ID | Label | `deck` | `conversation` | `document` |
 |----|-------|--------|----------------|------------|
