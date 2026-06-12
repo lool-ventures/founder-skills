@@ -727,7 +727,7 @@ def _section_methodology(methodology: dict[str, Any] | None) -> str:
 
 
 def _section_analysis_checklist(checklist: dict[str, Any] | None, artifacts_found: list[str]) -> str:
-    """Analysis checklist."""
+    """Analysis checklist with compact 22-row appendix."""
     lines = ["## Analysis Checklist\n"]
     lines.append(f"- Artifacts produced: {', '.join(artifacts_found)}")
     if checklist is not None and not _is_stub(checklist):
@@ -736,6 +736,31 @@ def _section_analysis_checklist(checklist: dict[str, Any] | None, artifacts_foun
         fail_ct = summary.get("fail", 0)
         na_ct = summary.get("not_applicable", 0)
         lines.append(f"- Self-check: {pass_ct} pass, {fail_ct} fail, {na_ct} N/A")
+
+        # Failed items detail
+        failed_items = _as_list(summary.get("failed_items"))
+        if failed_items:
+            lines.append("\n**Items that failed:**")
+            for raw_f in failed_items:
+                f = _as_dict(raw_f)
+                label = f.get("label", f.get("id", "?"))
+                notes = f.get("notes", "")
+                lines.append(f"- **{label}**: {notes}" if notes else f"- **{label}**")
+
+        # Compact 22-row appendix table
+        items = _as_list(checklist.get("items"))
+        if items:
+            lines.append("\n### Appendix: Full Self-Check\n")
+            lines.append("| # | Criterion | Status | Notes |")
+            lines.append("|---|-----------|--------|-------|")
+            status_icons = {"pass": "PASS", "fail": "FAIL", "not_applicable": "N/A"}
+            for i, raw_item in enumerate(items, 1):
+                item = _as_dict(raw_item)
+                label = _md_safe(item.get("label", item.get("id", "?")))
+                status = status_icons.get(item.get("status", "?"), "?")
+                notes = _md_safe(item.get("notes", "") or "")
+                lines.append(f"| {i} | {label} | {status} | {notes} |")
+
     return "\n".join(lines) + "\n"
 
 
@@ -927,18 +952,52 @@ def _section_sensitivity(sensitivity: dict[str, Any] | None) -> str:
 
     lines = [
         "## Sensitivity Analysis\n",
-        "The table below shows how SOM changes when each assumption moves between"
+        "The table below shows how each market tier changes when each assumption moves between"
         " its low and high estimate. Parameters tagged *Estimate* have wider ranges"
         " because they lack external sourcing — they tend to dominate the sensitivity,"
         " which highlights exactly where better data would most strengthen the analysis.\n",
     ]
     has_approach_used = any(isinstance(s, dict) and s.get("approach_used") for s in scenarios)
+
+    # Check whether TAM/SAM fields are present in any scenario (real sensitivity.py output)
+    has_tam_sam = any(
+        isinstance(s, dict) and ("tam" in s.get("low", {}) or "tam" in s.get("base", {})) for s in scenarios
+    )
+
     if has_approach_used:
-        lines.append("| Parameter | Approach | Confidence | Low SOM | Base SOM | High SOM | Range |")
-        lines.append("|-----------|----------|------------|---------|----------|----------|-------|")
+        if has_tam_sam:
+            lines.append(
+                "| Parameter | Approach | Confidence | Low Value | Base Value | High Value"
+                " | Low TAM | Base TAM | High TAM"
+                " | Low SAM | Base SAM | High SAM"
+                " | Low SOM | Base SOM | High SOM | Range |"
+            )
+            lines.append(
+                "|-----------|----------|------------|-----------|------------|----------"
+                "|---------|----------|----------"
+                "|---------|----------|----------"
+                "|---------|----------|----------|-------|"
+            )
+        else:
+            lines.append("| Parameter | Approach | Confidence | Low SOM | Base SOM | High SOM | Range |")
+            lines.append("|-----------|----------|------------|---------|----------|----------|-------|")
     else:
-        lines.append("| Parameter | Confidence | Low SOM | Base SOM | High SOM | Range |")
-        lines.append("|-----------|------------|---------|----------|----------|-------|")
+        if has_tam_sam:
+            lines.append(
+                "| Parameter | Confidence | Low Value | Base Value | High Value"
+                " | Low TAM | Base TAM | High TAM"
+                " | Low SAM | Base SAM | High SAM"
+                " | Low SOM | Base SOM | High SOM | Range |"
+            )
+            lines.append(
+                "|-----------|------------|-----------|------------|----------"
+                "|---------|----------|----------"
+                "|---------|----------|----------"
+                "|---------|----------|----------|-------|"
+            )
+        else:
+            lines.append("| Parameter | Confidence | Low SOM | Base SOM | High SOM | Range |")
+            lines.append("|-----------|------------|---------|----------|----------|-------|")
 
     conf_labels = {"sourced": "Sourced", "derived": "Derived", "agent_estimate": "Estimate"}
     for s in scenarios:
@@ -946,20 +1005,66 @@ def _section_sensitivity(sensitivity: dict[str, Any] | None) -> str:
             continue
         param = _humanize_param(s.get("parameter", "?"))
         conf = conf_labels.get(s.get("confidence", "sourced"), s.get("confidence", "sourced"))
-        low_som = _fmt_usd(s.get("low", {}).get("som", 0))
-        base_som = _fmt_usd(s.get("base", {}).get("som", 0))
-        high_som = _fmt_usd(s.get("high", {}).get("som", 0))
+        low_d = _as_dict(s.get("low"))
+        base_d = _as_dict(s.get("base"))
+        high_d = _as_dict(s.get("high"))
+        low_som = _fmt_usd(low_d.get("som", 0))
+        base_som = _fmt_usd(base_d.get("som", 0))
+        high_som = _fmt_usd(high_d.get("som", 0))
         eff = _as_dict(s.get("effective_range"))
         range_str = f"[{eff.get('low_pct', 0)}%, +{eff.get('high_pct', 0)}%]"
         widened = " (widened)" if s.get("range_widened") else ""
+
+        # Parameter value columns (low/base/high parameter value, not market size)
+        base_val = s.get("base_value")
+        low_val_raw = low_d.get("value")
+        high_val_raw = high_d.get("value")
+        if base_val is not None and isinstance(base_val, (int, float)):
+            low_val_str = _fmt_usd(float(low_val_raw)) if isinstance(low_val_raw, (int, float)) else "—"
+            base_val_str = _fmt_number(base_val)
+            high_val_str = _fmt_usd(float(high_val_raw)) if isinstance(high_val_raw, (int, float)) else "—"
+        else:
+            low_val_str = base_val_str = high_val_str = "—"
+
         if has_approach_used:
             approach_labels = {"top_down": "Top-down", "bottom_up": "Bottom-up"}
             approach_used = approach_labels.get(s.get("approach_used", "?"), s.get("approach_used", "?"))
-            lines.append(
-                f"| {param} | {approach_used} | {conf} | {low_som} | {base_som} | {high_som} | {range_str}{widened} |"
-            )
+            if has_tam_sam:
+                low_tam = _fmt_usd(low_d.get("tam", 0))
+                base_tam = _fmt_usd(base_d.get("tam", 0))
+                high_tam = _fmt_usd(high_d.get("tam", 0))
+                low_sam = _fmt_usd(low_d.get("sam", 0))
+                base_sam = _fmt_usd(base_d.get("sam", 0))
+                high_sam = _fmt_usd(high_d.get("sam", 0))
+                lines.append(
+                    f"| {param} | {approach_used} | {conf}"
+                    f" | {low_val_str} | {base_val_str} | {high_val_str}"
+                    f" | {low_tam} | {base_tam} | {high_tam}"
+                    f" | {low_sam} | {base_sam} | {high_sam}"
+                    f" | {low_som} | {base_som} | {high_som} | {range_str}{widened} |"
+                )
+            else:
+                lines.append(
+                    f"| {param} | {approach_used} | {conf}"
+                    f" | {low_som} | {base_som} | {high_som} | {range_str}{widened} |"
+                )
         else:
-            lines.append(f"| {param} | {conf} | {low_som} | {base_som} | {high_som} | {range_str}{widened} |")
+            if has_tam_sam:
+                low_tam = _fmt_usd(low_d.get("tam", 0))
+                base_tam = _fmt_usd(base_d.get("tam", 0))
+                high_tam = _fmt_usd(high_d.get("tam", 0))
+                low_sam = _fmt_usd(low_d.get("sam", 0))
+                base_sam = _fmt_usd(base_d.get("sam", 0))
+                high_sam = _fmt_usd(high_d.get("sam", 0))
+                lines.append(
+                    f"| {param} | {conf}"
+                    f" | {low_val_str} | {base_val_str} | {high_val_str}"
+                    f" | {low_tam} | {base_tam} | {high_tam}"
+                    f" | {low_sam} | {base_sam} | {high_sam}"
+                    f" | {low_som} | {base_som} | {high_som} | {range_str}{widened} |"
+                )
+            else:
+                lines.append(f"| {param} | {conf} | {low_som} | {base_som} | {high_som} | {range_str}{widened} |")
 
     ranking = _as_list(sensitivity.get("sensitivity_ranking"))
     if ranking:

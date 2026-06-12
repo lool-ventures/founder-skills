@@ -3392,3 +3392,150 @@ def test_compose_survives_malformed_list_elements() -> None:
     rc, data, err = _run_compose(d)
     assert rc in (0, 2), f"compose crashed on malformed list elements: rc={rc}, stderr={err}"
     assert "Traceback" not in err and "AttributeError" not in err
+
+
+# ============================================================
+# Artifact self-sufficiency fixes (items 6-8)
+# ============================================================
+
+
+_VALID_SENSITIVITY_WITH_ALL_TIERS = {
+    "approach": "bottom_up",
+    "base_result": {"tam": 67500000000, "sam": 23625000000, "som": 118125000},
+    "scenarios": [
+        {
+            "parameter": "customer_count",
+            "confidence": "sourced",
+            "original_range": {"low_pct": -30, "high_pct": 20},
+            "effective_range": {"low_pct": -30, "high_pct": 20},
+            "range_widened": False,
+            "base_value": 4500000,
+            "low": {"value": 3150000, "tam": 47250000000, "sam": 16537500000, "som": 82687500},
+            "base": {"tam": 67500000000, "sam": 23625000000, "som": 118125000},
+            "high": {"value": 5400000, "tam": 81000000000, "sam": 28350000000, "som": 141750000},
+        },
+        {
+            "parameter": "arpu",
+            "confidence": "agent_estimate",
+            "original_range": {"low_pct": -50, "high_pct": 100},
+            "effective_range": {"low_pct": -50, "high_pct": 100},
+            "range_widened": False,
+            "base_value": 15000,
+            "low": {"value": 7500, "tam": 33750000000, "sam": 11812500000, "som": 59062500},
+            "base": {"tam": 67500000000, "sam": 23625000000, "som": 118125000},
+            "high": {"value": 30000, "tam": 135000000000, "sam": 47250000000, "som": 236250000},
+        },
+    ],
+    "sensitivity_ranking": [{"parameter": "arpu", "som_swing_pct": 150.0}],
+    "most_sensitive": "arpu",
+}
+
+
+def _make_all_artifacts(**overrides: Any) -> dict[str, Any]:
+    base = {
+        "inputs.json": _VALID_INPUTS,
+        "methodology.json": _VALID_METHODOLOGY,
+        "validation.json": _VALID_VALIDATION,
+        "sizing.json": _VALID_SIZING,
+        "sensitivity.json": _VALID_SENSITIVITY,
+        "checklist.json": _VALID_CHECKLIST,
+    }
+    base.update(overrides)
+    return base  # type: ignore[return-value]
+
+
+def test_compose_sensitivity_shows_tam_sam_when_present() -> None:
+    """When sensitivity has tam/sam fields, the table includes TAM and SAM columns."""
+    d = _make_artifact_dir(_make_all_artifacts(**{"sensitivity.json": _VALID_SENSITIVITY_WITH_ALL_TIERS}))
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    sens_section = md.split("## Sensitivity Analysis")[1].split("##")[0]
+    # TAM and SAM columns must appear
+    assert "| Low TAM |" in sens_section or "Low TAM" in sens_section
+    assert "| Low SAM |" in sens_section or "Low SAM" in sens_section
+    assert "| Low SOM |" in sens_section or "Low SOM" in sens_section
+
+
+def test_compose_sensitivity_shows_value_columns_when_present() -> None:
+    """When base_value / low.value / high.value are present, a Value column appears."""
+    d = _make_artifact_dir(_make_all_artifacts(**{"sensitivity.json": _VALID_SENSITIVITY_WITH_ALL_TIERS}))
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    sens_section = md.split("## Sensitivity Analysis")[1].split("##")[0]
+    # Value columns must appear
+    assert "| Low Value |" in sens_section or "Low Value" in sens_section
+
+
+def test_compose_sensitivity_falls_back_without_tam_sam() -> None:
+    """When sensitivity only has som fields, table stays SOM-only (backward compat)."""
+    d = _make_artifact_dir(_make_all_artifacts(**{"sensitivity.json": _VALID_SENSITIVITY}))
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    sens_section = md.split("## Sensitivity Analysis")[1].split("##")[0]
+    # Low TAM should NOT appear when not in fixture
+    assert "Low TAM" not in sens_section
+
+
+def test_compose_analysis_checklist_shows_failed_labels() -> None:
+    """When checklist has failed items, they appear labeled below the count line."""
+    checklist_with_fails = {
+        "items": [
+            {"id": cid, "category": "Test", "label": "Test", "status": "pass", "notes": None} for cid in _CHECKLIST_IDS
+        ],
+        "summary": {
+            "total": 22,
+            "pass": 20,
+            "fail": 2,
+            "not_applicable": 0,
+            "overall_status": "pass",
+            "failed_items": [
+                {
+                    "id": "tam_matches_product_scope",
+                    "category": "TAM Scoping",
+                    "label": "TAM matches product scope",
+                    "notes": "TAM appears 10x too large",
+                },
+                {
+                    "id": "som_share_defensible",
+                    "category": "SOM Realism",
+                    "label": "SOM share is defensible",
+                    "notes": "No GTM justification",
+                },
+            ],
+        },
+    }
+    d = _make_artifact_dir(_make_all_artifacts(**{"checklist.json": checklist_with_fails}))
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    checklist_section = md.split("## Analysis Checklist")[1].split("##")[0]
+    assert "TAM matches product scope" in checklist_section
+    assert "TAM appears 10x too large" in checklist_section
+    assert "SOM share is defensible" in checklist_section
+
+
+def test_compose_analysis_checklist_appendix_table_present() -> None:
+    """Analysis checklist section includes a 22-row appendix table."""
+    d = _make_artifact_dir(_make_all_artifacts(**{"checklist.json": _VALID_CHECKLIST}))
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    # Appendix header must exist
+    assert "### Appendix: Full Self-Check" in md
+    # Extract only the appendix table (between ### Appendix: Full Self-Check and the next section)
+    appendix_section = md.split("### Appendix: Full Self-Check")[1].split("##")[0]
+    # Count table rows (pipe-separated, excluding header and separator)
+    table_rows = [
+        line
+        for line in appendix_section.splitlines()
+        if line.startswith("| ") and not line.startswith("| #") and "---" not in line
+    ]
+    assert len(table_rows) == 22, f"expected 22 appendix rows, got {len(table_rows)}"

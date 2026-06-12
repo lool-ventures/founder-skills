@@ -2789,3 +2789,191 @@ def test_compose_tolerates_non_dict_archetype_and_counts() -> None:
     assert rc == 0, err
     assert data is not None
     assert "Traceback" not in err
+
+
+# ============================================================
+# Artifact self-sufficiency fixes (items 10-14)
+# ============================================================
+
+
+def _all_required_with_rich_partners() -> dict[str, dict]:
+    """Required artifacts plus all 3 rich partner assessments."""
+    arts = _all_required_artifacts()
+    arts["partner_assessment_visionary.json"] = {
+        "partner": "visionary",
+        "verdict": "invest",
+        "rationale": "Large market with clear timing and strong founder-market fit",
+        "conviction_points": ["Big TAM with clear timing", "Founder has 10yr domain experience"],
+        "key_concerns": ["No enterprise references yet"],
+        "questions_for_founders": [
+            "What's the 10-year vision?",
+            "How do you think about competition from incumbents?",
+        ],
+        "diligence_requirements": ["Reference calls"],
+    }
+    arts["partner_assessment_operator.json"] = {
+        "partner": "operator",
+        "verdict": "more_diligence",
+        "rationale": "Strong PMF indicators but GTM motion is unclear and uncosted",
+        "conviction_points": ["Good retention (NRR >110%)", "Short sales cycle"],
+        "key_concerns": ["No channel economics", "AE capacity unclear"],
+        "questions_for_founders": [
+            "Walk me through last 5 customer wins",
+            "What's your CAC payback period?",
+        ],
+        "diligence_requirements": ["Channel CAC analysis"],
+    }
+    arts["partner_assessment_analyst.json"] = {
+        "partner": "analyst",
+        "verdict": "more_diligence",
+        "rationale": "Unit economics are emerging but need cohort data to confirm",
+        "conviction_points": ["Growing revenue", "Improving margins"],
+        "key_concerns": ["No cohort data", "LTV assumptions aggressive"],
+        "questions_for_founders": [
+            "Show me retention curves",
+            "What's the assumed LTV and why?",
+        ],
+        "diligence_requirements": ["Cohort retention data"],
+    }
+    return arts
+
+
+def test_compose_scorecard_has_evidence_column() -> None:
+    """Dimension scorecard includes an Evidence column with truncated text."""
+    arts = _all_required_artifacts()
+    # Give one item long evidence to test truncation
+    score = json.loads(json.dumps(_VALID_SCORE))
+    score["items"][0]["evidence"] = "A" * 200  # 200-char evidence string
+    arts["score_dimensions.json"] = score
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    scorecard = md.split("## Dimension Scorecard")[1].split("##")[0]
+    # Evidence column header must appear
+    assert "| Evidence |" in scorecard
+    # Truncated evidence must end with ellipsis
+    assert "..." in scorecard
+
+
+def test_compose_scorecard_evidence_empty_safe() -> None:
+    """Scorecard renders cleanly when evidence is None."""
+    arts = _all_required_artifacts()
+    score = json.loads(json.dumps(_VALID_SCORE))
+    for item in score["items"]:
+        item["evidence"] = None
+    arts["score_dimensions.json"] = score
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    assert "## Dimension Scorecard" in data["report_markdown"]
+
+
+def test_compose_scorecard_committee_note() -> None:
+    """Scorecard section includes the committee-scored note."""
+    arts = _all_required_artifacts()
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    assert "scored once by the committee as a whole" in md
+
+
+def test_compose_exec_summary_conviction_footnote() -> None:
+    """Executive summary includes the conviction score formula footnote."""
+    arts = _all_required_artifacts()
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    assert "Conviction score = (strong" in md or "strong × 1.0" in md
+    assert "hard_pass" in md
+    assert "applicable dimensions" in md
+
+
+def test_compose_partner_questions_rendered() -> None:
+    """Partner assessments produce a 'Questions the Partners Would Ask You' section."""
+    arts = _all_required_with_rich_partners()
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    assert "## Questions the Partners Would Ask You" in md
+    # Partner names rendered
+    assert "Visionary" in md or "visionary" in md.lower()
+    assert "Operator" in md or "operator" in md.lower()
+    # Conviction points, concerns, questions rendered
+    assert "Big TAM with clear timing" in md
+    assert "No channel economics" in md
+    assert "Walk me through last 5 customer wins" in md
+
+
+def test_compose_partner_questions_graceful_when_absent() -> None:
+    """When no partner assessments are present, the section is omitted gracefully."""
+    arts = _all_required_artifacts()  # no partner assessment files
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    # Section must NOT appear when assessments missing
+    assert "## Questions the Partners Would Ask You" not in md
+
+
+def test_compose_discussion_key_concerns_rendered() -> None:
+    """discussion.json key_concerns are rendered in the Discussion section."""
+    arts = _all_required_artifacts()
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    # Extract the content from Discussion Summary up to (not including) the next top-level ## section
+    import re
+
+    discussion_match = re.search(r"## Discussion Summary\n(.*?)(?=\n## )", md, re.DOTALL)
+    assert discussion_match is not None, "Discussion Summary section not found"
+    discussion_section = discussion_match.group(1)
+    # _VALID_DISCUSSION has key_concerns: ["GTM unclear", "Need cohort data"]
+    assert "GTM unclear" in discussion_section
+    assert "Need cohort data" in discussion_section
+
+
+def test_compose_concerns_include_evidence() -> None:
+    """Dealbreakers and key concerns in Concerns section include evidence as Basis line."""
+    arts = _all_required_artifacts()
+    score = json.loads(json.dumps(_VALID_SCORE))
+    # Add a dealbreaker with evidence
+    score["items"][0] = {
+        "id": _DIMENSION_IDS[0],
+        "category": "Team",
+        "label": "Founder Market Fit",
+        "status": "dealbreaker",
+        "evidence": "No relevant domain experience found",
+        "notes": "Fatal — domain experience is non-negotiable",
+    }
+    score["summary"]["verdict"] = "hard_pass"
+    score["summary"]["dealbreaker"] = 1
+    score["summary"]["strong_conviction"] = 27
+    score["summary"]["dealbreakers"] = [
+        {
+            "id": _DIMENSION_IDS[0],
+            "category": "Team",
+            "label": "Founder Market Fit",
+            "evidence": "No relevant domain experience found",
+            "notes": "Fatal — domain experience is non-negotiable",
+        }
+    ]
+    arts["score_dimensions.json"] = score
+    d = _make_artifact_dir(arts)
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    # Evidence must appear as Basis line in Concerns section
+    assert "*Basis: No relevant domain experience found*" in md

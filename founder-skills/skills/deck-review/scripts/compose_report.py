@@ -168,6 +168,11 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _md_safe(text: Any) -> str:
+    """Escape text for safe markdown table cell interpolation."""
+    return str(text).replace("|", "\\|").replace("\n", " ")
+
+
 def _warn(code: str, message: str) -> dict[str, str]:
     """Create a warning dict with code, message, and severity."""
     return {
@@ -481,6 +486,15 @@ def _section_executive_summary(
         lines.append(f"**Overall Score:** {score}% — {status_label}")
         lines.append(f"**Breakdown:** {pass_c} pass, {fail_c} fail, {warn_c} warn, {na_c} N/A")
 
+        # Scoring footnote: formula + score-if-all-fixed
+        applicable = summary.get("total", 0) - na_c
+        if applicable > 0:
+            score_if_fixed = round((pass_c + fail_c + warn_c) / applicable * 100, 1)
+            lines.append(
+                f"\n*Score = pass ÷ applicable (warn and fail earn no credit). "
+                f"If all fixable items were resolved: {score_if_fixed}%.*"
+            )
+
     return "\n".join(lines) + "\n"
 
 
@@ -519,10 +533,20 @@ def _section_stage_context(profile: dict[str, Any] | None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _section_slide_feedback(reviews: dict[str, Any] | None) -> str:
+def _section_slide_feedback(reviews: dict[str, Any] | None, inventory: dict[str, Any] | None = None) -> str:
     """Per-slide feedback with strengths, areas to improve, and recommendations."""
     if reviews is None or _is_stub(reviews):
         return "## Slide-by-Slide Feedback\n\n*No slide reviews available.*\n"
+
+    # Build slide-number → headline lookup from inventory
+    headline_by_num: dict[int, str] = {}
+    if inventory is not None and not _is_stub(inventory):
+        for slide in _as_list(inventory.get("slides")):
+            if isinstance(slide, dict):
+                n = slide.get("number")
+                h = slide.get("headline", "")
+                if isinstance(n, int) and h:
+                    headline_by_num[n] = str(h)
 
     lines = ["## Slide-by-Slide Feedback\n"]
     lines.append(
@@ -534,7 +558,11 @@ def _section_slide_feedback(reviews: dict[str, Any] | None) -> str:
         review = _as_dict(raw_review)
         num = review.get("slide_number", "?")
         maps_to = review.get("maps_to", "unknown")
-        lines.append(f"### Slide {num} ({maps_to})\n")
+        headline = headline_by_num.get(num) if isinstance(num, int) else None
+        if headline:
+            lines.append(f'### Slide {num}: "{headline}" ({maps_to})\n')
+        else:
+            lines.append(f"### Slide {num} ({maps_to})\n")
 
         strengths = _as_list(review.get("strengths"))
         if strengths:
@@ -624,9 +652,12 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
         for raw_w in warned:
             w = _as_dict(raw_w)
             notes = w.get("notes", "")
+            evidence = w.get("evidence", "")
             lines.append(f"- **{w.get('label', w.get('id', '?'))}** ({w.get('category', '?')})")
             if notes:
                 lines.append(f"  - {notes}")
+            if evidence:
+                lines.append(f"  - *Basis: {evidence}*")
         lines.append("")
 
     return "\n".join(lines) + "\n"
@@ -705,8 +736,8 @@ def _section_full_checklist(checklist: dict[str, Any] | None) -> str:
         return ""
 
     lines = ["## Appendix: Full Checklist\n"]
-    lines.append("| # | Category | Criterion | Status |")
-    lines.append("|---|----------|-----------|--------|")
+    lines.append("| # | Category | Criterion | Status | Evidence |")
+    lines.append("|---|----------|-----------|--------|----------|")
 
     status_icons = {"pass": "PASS", "fail": "FAIL", "warn": "WARN", "not_applicable": "N/A"}
 
@@ -715,7 +746,8 @@ def _section_full_checklist(checklist: dict[str, Any] | None) -> str:
         cat = item.get("category", "?")
         label = item.get("label", item.get("id", "?"))
         status = status_icons.get(item.get("status", "?"), "?")
-        lines.append(f"| {i} | {cat} | {label} | {status} |")
+        evidence = _md_safe(item.get("evidence", "") or "")
+        lines.append(f"| {i} | {cat} | {label} | {status} | {evidence} |")
 
     return "\n".join(lines) + "\n"
 
@@ -819,7 +851,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         _section_title(inventory),
         _section_executive_summary(stage_profile, checklist_data, inventory),
         _section_stage_context(stage_profile),
-        _section_slide_feedback(slide_reviews),
+        _section_slide_feedback(slide_reviews, inventory),
         _section_checklist(checklist_data),
         _section_priority_fixes(checklist_data, slide_reviews),
     ]

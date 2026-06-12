@@ -633,3 +633,7 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 - Each of 22 items: pass / fail / not_applicable
 - `score_pct` = pass / (total - not_applicable) x 100
 - compose_report.py validates cross-artifact consistency (assumption coverage, sensitivity ranges)
+
+## What-If Recomputation Rule
+
+If the founder asks "what if [parameter] were [value]": re-run `market_sizing.py` and/or `sensitivity.py` with the modified input and present the script's output. Never recompute TAM/SAM/SOM by hand — the compound formula (customer count × ARPU × serviceable % × target %) makes mental arithmetic error-prone and the script output is the authoritative source.

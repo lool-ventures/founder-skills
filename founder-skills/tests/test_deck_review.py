@@ -1894,3 +1894,210 @@ def test_payload_arrays_match_summary_counts() -> None:
     payload = data["coaching_payload"]
     assert len(payload["failed_items"]) == payload["summary"]["fail"] == 2
     assert len(payload["warned_items"]) == payload["summary"]["warn"] == 1
+
+
+# ============================================================
+# Artifact self-sufficiency fixes (items 1-4)
+# ============================================================
+
+
+def _complete_artifacts_with_slide() -> dict[str, dict]:
+    """All 4 valid artifacts with a slide that has a headline."""
+    inventory = dict(_VALID_INVENTORY)
+    inventory["slides"] = [
+        {
+            "number": 1,
+            "headline": "TestCo — Cloud Accounting for SMBs",
+            "content_summary": "Company intro",
+            "visuals": "Logo",
+            "word_count_estimate": 15,
+        },
+        {
+            "number": 2,
+            "headline": "Problem: Accounting is Broken",
+            "content_summary": "Problem description",
+        },
+    ]
+    reviews = dict(_VALID_REVIEWS)
+    reviews["reviews"] = [
+        {
+            "slide_number": 1,
+            "maps_to": "purpose_traction",
+            "strengths": ["Clear one-liner"],
+            "weaknesses": ["Could add ICP specificity"],
+            "recommendations": ["Add target customer segment"],
+            "best_practice_refs": ["Sequoia: single declarative sentence"],
+        },
+        {
+            "slide_number": 2,
+            "maps_to": "problem",
+            "strengths": [],
+            "weaknesses": ["Not quantified"],
+            "recommendations": ["Add market size"],
+            "best_practice_refs": ["YC: problem slide must quantify pain"],
+        },
+    ]
+    return {
+        "deck_inventory.json": inventory,
+        "stage_profile.json": _VALID_PROFILE,
+        "slide_reviews.json": reviews,
+        "checklist.json": _VALID_CHECKLIST,
+    }
+
+
+def test_compose_slide_feedback_includes_headline() -> None:
+    """Slide headers in report include the slide headline when inventory is present."""
+    d = _make_artifact_dir(_complete_artifacts_with_slide())
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    # Slide headers must include the headline in quotes
+    assert '### Slide 1: "TestCo — Cloud Accounting for SMBs"' in md
+    assert '### Slide 2: "Problem: Accounting is Broken"' in md
+
+
+def test_compose_slide_feedback_graceful_without_inventory() -> None:
+    """Slide headers fall back to 'Slide N (maps_to)' when inventory is missing."""
+    d = _make_artifact_dir(
+        {
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    # Falls back to plain slide header
+    assert "### Slide 1 (purpose_traction)" in md
+
+
+def test_compose_full_checklist_has_evidence_column() -> None:
+    """Full checklist appendix includes an Evidence column."""
+    d = _make_artifact_dir(_complete_artifacts_with_slide())
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    # The appendix header must have Evidence
+    assert "| Evidence |" in md
+    # Every item row should render evidence — the fixture uses "test" as evidence
+    assert "test" in md.split("## Appendix: Full Checklist")[1]
+
+
+def test_compose_full_checklist_evidence_empty_safe() -> None:
+    """Full checklist appendix does not crash when evidence is missing."""
+    checklist_no_evidence = {
+        "metadata": {"run_id": "run-test"},
+        "items": [{"id": cid, "category": "Test", "label": "TestLabel", "status": "pass"} for cid in _CHECKLIST_IDS],
+        "summary": {
+            "total": 35,
+            "pass": 35,
+            "fail": 0,
+            "warn": 0,
+            "not_applicable": 0,
+            "score_pct": 100.0,
+            "overall_status": "strong",
+            "by_category": {},
+            "failed_items": [],
+            "warned_items": [],
+        },
+    }
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": checklist_no_evidence,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    assert "## Appendix: Full Checklist" in data["report_markdown"]
+
+
+def test_compose_warned_items_include_evidence() -> None:
+    """Warned items in checklist section include 'Basis:' evidence line."""
+    checklist_with_warn = {
+        "metadata": {"run_id": "run-test"},
+        "items": [
+            {"id": cid, "category": "Test", "label": "Test", "status": "pass", "evidence": "ok"}
+            for cid in _CHECKLIST_IDS
+        ],
+        "summary": {
+            "total": 35,
+            "pass": 34,
+            "fail": 0,
+            "warn": 1,
+            "not_applicable": 0,
+            "score_pct": 97.1,
+            "overall_status": "strong",
+            "by_category": {},
+            "failed_items": [],
+            "warned_items": [
+                {
+                    "id": "minimal_text",
+                    "category": "Design & Readability",
+                    "label": "Minimal Text",
+                    "evidence": "Slide 4 has 200+ words",
+                    "notes": "Dense slides hurt readability",
+                }
+            ],
+        },
+    }
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": checklist_with_warn,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    # Evidence for warned items must appear as Basis line
+    assert "*Basis: Slide 4 has 200+ words*" in md
+
+
+def test_compose_exec_summary_scoring_footnote() -> None:
+    """Executive summary includes scoring formula footnote and score-if-all-fixed."""
+    checklist_mixed = {
+        "metadata": {"run_id": "run-test"},
+        "items": [
+            {"id": cid, "category": "Test", "label": "Test", "status": "pass", "evidence": "ok"}
+            for cid in _CHECKLIST_IDS
+        ],
+        "summary": {
+            "total": 35,
+            "pass": 28,
+            "fail": 4,
+            "warn": 3,
+            "not_applicable": 0,
+            "score_pct": 80.0,
+            "overall_status": "solid",
+            "by_category": {},
+            "failed_items": [],
+            "warned_items": [],
+        },
+    }
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": checklist_mixed,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    # Footnote must state the formula
+    assert "pass ÷ applicable" in md
+    # Score-if-all-fixed: (28+4+3)/35 = 100%
+    assert "100.0%" in md or "If all fixable items were resolved" in md

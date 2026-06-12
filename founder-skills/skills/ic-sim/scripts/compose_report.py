@@ -745,6 +745,10 @@ def _section_executive_summary(
 
         lines.append(f"**Conviction Score:** {score}% — {verdict_label}")
         lines.append(f"**Breakdown:** {strong} strong, {moderate} moderate, {concern} concern, {db} dealbreaker")
+        lines.append(
+            "\n*Conviction score = (strong × 1.0 + moderate × 0.5) ÷ applicable dimensions × 100. "
+            "Concerns and N/A earn no credit. Any dealbreaker forces hard_pass regardless of score.*"
+        )
 
     if discussion is not None and not _is_stub(discussion):
         partner_verdicts = _as_list(discussion.get("partner_verdicts"))
@@ -848,6 +852,17 @@ def _section_discussion(discussion: dict[str, Any] | None) -> str:
         if rationale:
             lines.append(f"\n{rationale}")
 
+    # Key concerns from discussion (item 14 — collected but previously dropped)
+    key_concerns = _as_list(discussion.get("key_concerns"))
+    if key_concerns:
+        lines.append("\n### Key Concerns\n")
+        for concern in key_concerns:
+            if isinstance(concern, str) and concern.strip():
+                lines.append(f"- {concern}")
+            elif isinstance(concern, dict) and concern.get("concern"):
+                lines.append(f"- {concern['concern']}")
+        lines.append("")
+
     # Debate sections
     debate = _as_list(discussion.get("debate_sections"))
     if debate:
@@ -894,6 +909,8 @@ def _section_scorecard(score_dims: dict[str, Any] | None) -> str:
         )
     lines.append("")
 
+    lines.append("\n*Dimensions are scored once by the committee as a whole, not per partner.*\n")
+
     # Full item table
     status_icons = {
         "strong_conviction": "STRONG",
@@ -903,15 +920,20 @@ def _section_scorecard(score_dims: dict[str, Any] | None) -> str:
         "not_applicable": "N/A",
     }
 
-    lines.append("| # | Category | Dimension | Status |")
-    lines.append("|---|----------|-----------|--------|")
+    lines.append("| # | Category | Dimension | Status | Evidence |")
+    lines.append("|---|----------|-----------|--------|----------|")
     for i, item in enumerate(items, 1):
         if not isinstance(item, dict):
             continue
         cat = item.get("category", "?")
         label = item.get("label", item.get("id", "?"))
         status = status_icons.get(item.get("status", "?"), "?")
-        lines.append(f"| {i} | {cat} | {label} | {status} |")
+        raw_evidence = item.get("evidence") or ""
+        evidence = str(raw_evidence)
+        if len(evidence) > 120:
+            evidence = evidence[:117] + "..."
+        evidence = evidence.replace("|", "\\|").replace("\n", " ")
+        lines.append(f"| {i} | {cat} | {label} | {status} | {evidence} |")
 
     return "\n".join(lines) + "\n"
 
@@ -936,6 +958,8 @@ def _section_concerns(score_dims: dict[str, Any] | None) -> str:
             lines.append(f"- **{db.get('label', db.get('id', '?'))}** ({db.get('category', '?')})")
             if db.get("notes"):
                 lines.append(f"  - {db['notes']}")
+            if db.get("evidence"):
+                lines.append(f"  - *Basis: {db['evidence']}*")
         lines.append("")
 
     if concerns:
@@ -944,7 +968,49 @@ def _section_concerns(score_dims: dict[str, Any] | None) -> str:
             lines.append(f"- **{c.get('label', c.get('id', '?'))}** ({c.get('category', '?')})")
             if c.get("notes"):
                 lines.append(f"  - {c['notes']}")
+            if c.get("evidence"):
+                lines.append(f"  - *Basis: {c['evidence']}*")
         lines.append("")
+
+    return "\n".join(lines) + "\n"
+
+
+def _section_partner_questions(partner_assessments: list[dict[str, Any] | None]) -> str:
+    """Questions the Partners Would Ask You — rendered from partner_assessment_*.json artifacts."""
+    usable = [pa for pa in partner_assessments if _usable(pa)]
+    if not usable:
+        return ""
+
+    lines = ["## Questions the Partners Would Ask You\n"]
+    lines.append(
+        "*These questions come from each partner's individual assessment. "
+        "They are generated based on archetype personas — use them to stress-test your narrative.*\n"
+    )
+
+    for pa in usable:
+        partner = (pa.get("partner") or "unknown").title()
+        lines.append(f"### {partner}\n")
+
+        conviction_points = _as_list(pa.get("conviction_points"))
+        if conviction_points:
+            lines.append("**What I like:**")
+            for cp in conviction_points:
+                lines.append(f"- {cp}")
+            lines.append("")
+
+        key_concerns = _as_list(pa.get("key_concerns"))
+        if key_concerns:
+            lines.append("**What gives me pause:**")
+            for kc in key_concerns:
+                lines.append(f"- {kc}")
+            lines.append("")
+
+        questions = _as_list(pa.get("questions_for_founders"))
+        if questions:
+            lines.append("**Questions I would ask:**")
+            for q in questions:
+                lines.append(f"- {q}")
+            lines.append("")
 
     return "\n".join(lines) + "\n"
 
@@ -1132,6 +1198,11 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     discussion = _render_safe(artifacts.get("discussion.json"))
     score_dims = _render_safe(artifacts.get("score_dimensions.json"))
 
+    # Partner assessment artifacts (optional — degrade gracefully when absent)
+    partner_assessments: list[dict[str, Any] | None] = [
+        _render_safe(artifacts.get(pa_file)) for pa_file in PARTNER_ASSESSMENT_FILES
+    ]
+
     # Render every section EXCEPT Warnings first; the Warnings section, status,
     # validation.warnings, and coaching_payload must all observe the SAME final
     # warnings list — including any MARKER_COLLISION discovered by scanning the body.
@@ -1143,6 +1214,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         _section_discussion(discussion),
         _section_scorecard(score_dims),
         _section_concerns(score_dims),
+        _section_partner_questions(partner_assessments),
         _section_diligence(discussion),
     ]
     body_markdown = "\n".join(s for s in pre_warning_sections if s)

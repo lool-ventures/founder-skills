@@ -552,6 +552,10 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 - Verdicts: `invest` (>=75%), `more_diligence` (>=50%), `pass` (<50%), `hard_pass` (any dealbreaker)
 - One dealbreaker forces `hard_pass` regardless of score
 
+## What-If Recomputation Rule
+
+If the founder asks "what if [dimension] changed to [status]": re-run `score_dimensions.py` with the updated item statuses and present the script's output. Never recompute the conviction score by hand — the formula (strong×1.0 + moderate×0.5) ÷ applicable × 100 interacts with dealbreaker override logic in non-obvious ways, and the script is the authoritative source.
+
 ## Cross-Agent Integration
 
 This skill imports artifacts from prior market-sizing and deck-review analyses. Imported artifacts are recorded with dates. Imports older than 7 days are flagged as `STALE_IMPORT`.
