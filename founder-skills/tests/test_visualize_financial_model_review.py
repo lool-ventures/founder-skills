@@ -527,3 +527,386 @@ def test_fmt_usd_negative_values() -> None:
     assert mod._fmt_usd(-200_000) == "-$200.0K"
     assert mod._fmt_usd(-10_000_000) == "-$10.0M"
     assert mod._fmt_usd(1_500_000) == "$1.5M"  # positive path unchanged
+
+
+# ===========================================================================
+# Key-coverage tests: producer output keys ⊆ renderer known sets
+# ===========================================================================
+#
+# Invariant: when unit_economics.py adds a new metric name, visualize.py's
+# _METRIC_LABELS must gain a matching entry; when runway.py adds a new
+# scenario name, _SCENARIO_COLORS / _SCENARIO_LABELS must cover it.
+# These tests pin the current complete sets so any new emitted key causes
+# a loud failure with the offending name listed.
+# ===========================================================================
+
+
+def _load_fmr_visualize() -> types.ModuleType:
+    """Import FMR visualize.py with a unique sys.modules key (no _theme needed at module level)."""
+    key = "_fmr_keycov_visualize"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    spec = importlib.util.spec_from_file_location(key, _VISUALIZE_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = _VISUALIZE_SCRIPT  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+# ---------------------------------------------------------------------------
+# Test A: unit_economics metric names → visualize._METRIC_LABELS coverage
+# ---------------------------------------------------------------------------
+
+
+class TestUnitEconMetricLabelCoverage:
+    """Every metric name that unit_economics.py can emit must appear in
+    visualize.py's _METRIC_LABELS so the dashboard shows the curated label
+    (the fallback is a mechanical title-cased name, e.g. "Ltv Cac Ratio").
+
+    Derived from: the 11 canonical metric IDs hardcoded by _compute_metrics
+    (cac, ltv, ltv_cac_ratio, cac_payback, burn_multiple, magic_number,
+    gross_margin, nrr, grr, rule_of_40, arr_per_fte).  These are the only
+    names ever written to the `name` field of a metrics[] entry.
+    """
+
+    # All metric names emitted by unit_economics._compute_metrics.
+    # Derived directly from the 11 _metric() calls in that function.
+    PRODUCER_METRIC_NAMES: set[str] = {
+        "cac",
+        "ltv",
+        "ltv_cac_ratio",
+        "cac_payback",
+        "burn_multiple",
+        "magic_number",
+        "gross_margin",
+        "nrr",
+        "grr",
+        "rule_of_40",
+        "arr_per_fte",
+    }
+
+    def test_all_producer_metric_names_in_metric_labels(self) -> None:
+        """Every metric name the producer emits must have a display label."""
+        viz = _load_fmr_visualize()
+        label_keys: set[str] = set(viz._METRIC_LABELS.keys())
+
+        missing = self.PRODUCER_METRIC_NAMES - label_keys
+        assert not missing, (
+            f"visualize._METRIC_LABELS is missing a display label for metric name(s) "
+            f"emitted by unit_economics.py: {sorted(missing)}. "
+            f"Add entries to _METRIC_LABELS for each."
+        )
+
+    def test_producer_metric_names_min_count(self) -> None:
+        """Guard against vacuous tests: producer set must have the expected 11 names."""
+        assert len(self.PRODUCER_METRIC_NAMES) == 11, (
+            f"PRODUCER_METRIC_NAMES expected 11 entries, got {len(self.PRODUCER_METRIC_NAMES)}. "
+            f"Update the test fixture when unit_economics.py adds or removes a metric."
+        )
+
+    def test_metric_labels_min_count(self) -> None:
+        """_METRIC_LABELS must cover at least the 11 producer names (extras are fine)."""
+        viz = _load_fmr_visualize()
+        label_keys: set[str] = set(viz._METRIC_LABELS.keys())
+        assert len(label_keys) >= 11, f"visualize._METRIC_LABELS has only {len(label_keys)} entries; expected >= 11."
+
+    def test_live_producer_output_metric_names_subset_of_labels(self) -> None:
+        """Live unit_economics.py output metric names must all appear in _METRIC_LABELS.
+
+        Runs unit_economics.py on a full SaaS inputs fixture that exercises every
+        non-not_applicable metric branch (all 11 metrics attempt computation).
+        """
+        full_saas_inputs = {
+            "company": {
+                "company_name": "TestCo",
+                "stage": "seed",
+                "sector": "B2B SaaS",
+                "geography": "US",
+                "revenue_model_type": "saas-sales-led",
+            },
+            "revenue": {
+                "arr": {"value": 600_000, "as_of": "2025-12"},
+                "mrr": {"value": 50_000, "as_of": "2025-12"},
+                "growth_rate_monthly": 0.08,
+                "churn_monthly": 0.03,
+                "nrr": 1.10,
+                "grr": 0.90,
+            },
+            "cash": {"current_balance": 2_000_000, "monthly_net_burn": 80_000},
+            "unit_economics": {
+                "cac": {"total": 1_500, "fully_loaded": True},
+                "ltv": {"value": 6_000, "method": "formula", "observed_vs_assumed": "assumed"},
+                "payback_months": 10,
+                "gross_margin": 0.75,
+            },
+            "expenses": {"headcount": [{"role": "sales", "count": 2, "salary_annual": 80_000, "burden_pct": 0.20}]},
+        }
+        import subprocess as _sp
+
+        ue_script = os.path.join(FMR_SCRIPTS_DIR, "unit_economics.py")
+        result = _sp.run(
+            [sys.executable, ue_script],
+            input=json.dumps(full_saas_inputs),
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"unit_economics.py failed: {result.stderr}"
+        ue_data = json.loads(result.stdout)
+
+        live_names = {m["name"] for m in ue_data.get("metrics", []) if isinstance(m, dict) and "name" in m}
+        assert len(live_names) >= 11, (
+            f"Expected >= 11 metric names from live producer, got {len(live_names)}: {sorted(live_names)}"
+        )
+
+        viz = _load_fmr_visualize()
+        label_keys: set[str] = set(viz._METRIC_LABELS.keys())
+
+        missing = live_names - label_keys
+        assert not missing, (
+            f"visualize._METRIC_LABELS is missing a display label for live-produced metric(s): "
+            f"{sorted(missing)}. Add entries to _METRIC_LABELS for each."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test B: unit_economics rating values → visualize._RATING_COLORS coverage
+# ---------------------------------------------------------------------------
+
+
+class TestUnitEconRatingColorCoverage:
+    """Every rating value that unit_economics.py can write to a metric's
+    'rating' field must have a colour entry in visualize._RATING_COLORS
+    OR be one of the known no-bar ratings (not_rated, not_applicable,
+    contextual) that the chart renders using the primary colour fallback.
+
+    Derived from the _metric() helper: ratings come from _rate_metric(),
+    which returns 'strong'|'acceptable'|'warning'|'fail', or are hardcoded
+    as 'not_rated', 'not_applicable', 'contextual'.
+    """
+
+    # Ratings that must have an explicit colour entry in _RATING_COLORS.
+    MUST_HAVE_COLOR: set[str] = {"strong", "acceptable", "warning", "fail"}
+
+    # Ratings where the chart intentionally falls back to _CLR_PRIMARY.
+    EXPLICIT_FALLBACK: set[str] = {"not_rated", "not_applicable", "contextual"}
+
+    def test_rated_values_have_color_entries(self) -> None:
+        """strong/acceptable/warning/fail must each map to a colour."""
+        viz = _load_fmr_visualize()
+        missing = self.MUST_HAVE_COLOR - set(viz._RATING_COLORS.keys())
+        assert not missing, (
+            f"visualize._RATING_COLORS missing entry for rating(s): {sorted(missing)}. "
+            f"Add a colour for each rating value that unit_economics.py can emit."
+        )
+
+    def test_fallback_ratings_not_required_in_color_map(self) -> None:
+        """not_rated/not_applicable/contextual should NOT be in _RATING_COLORS
+        (they are displayed using the primary-colour fallback, not a distinct colour).
+
+        If this test fails it means a colour was added for a fallback rating —
+        fine intentionally, but this test pins the current design.
+        """
+        viz = _load_fmr_visualize()
+        unexpectedly_present = self.EXPLICIT_FALLBACK & set(viz._RATING_COLORS.keys())
+        assert not unexpectedly_present, (
+            f"visualize._RATING_COLORS unexpectedly contains fallback rating(s): "
+            f"{sorted(unexpectedly_present)}. If this is intentional, remove them from "
+            f"EXPLICIT_FALLBACK and add to MUST_HAVE_COLOR."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test C: runway scenario names → visualize._SCENARIO_COLORS / _SCENARIO_LABELS
+# ---------------------------------------------------------------------------
+
+
+class TestRunwayScenarioNameCoverage:
+    """Every scenario name that runway.py can emit must appear in both
+    visualize._SCENARIO_COLORS and visualize._SCENARIO_LABELS so the chart
+    draws a coloured line and the legend shows a human label.
+
+    Producer emits: 'base', 'slow', 'crisis' (auto-generated), 'threshold'
+    (minimum-viable-growth result), plus user-defined names from inputs.scenarios.
+    The first four are canonical; user-defined names fall back to _CLR_PRIMARY
+    and name.title(), which is intentional — this test only pins the canonical
+    four that must always be explicitly covered.
+    """
+
+    # Canonical scenario names runway.py always emits when inputs allow.
+    CANONICAL_SCENARIO_NAMES: set[str] = {"base", "slow", "crisis", "threshold"}
+
+    def test_canonical_names_in_scenario_colors(self) -> None:
+        """All four canonical scenario names must have a colour entry."""
+        viz = _load_fmr_visualize()
+        missing = self.CANONICAL_SCENARIO_NAMES - set(viz._SCENARIO_COLORS.keys())
+        assert not missing, (
+            f"visualize._SCENARIO_COLORS missing entry for canonical scenario name(s): "
+            f"{sorted(missing)}. Add a colour for each name that runway.py can emit."
+        )
+
+    def test_canonical_names_in_scenario_labels(self) -> None:
+        """All four canonical scenario names must have a human-readable label."""
+        viz = _load_fmr_visualize()
+        missing = self.CANONICAL_SCENARIO_NAMES - set(viz._SCENARIO_LABELS.keys())
+        assert not missing, (
+            f"visualize._SCENARIO_LABELS missing entry for canonical scenario name(s): "
+            f"{sorted(missing)}. Add a label for each name that runway.py can emit."
+        )
+
+    def test_scenario_colors_and_labels_consistent(self) -> None:
+        """Every key in _SCENARIO_COLORS should also be in _SCENARIO_LABELS
+        (same set — a scenario with a colour but no label produces a blank legend item)."""
+        viz = _load_fmr_visualize()
+        color_keys = set(viz._SCENARIO_COLORS.keys())
+        label_keys = set(viz._SCENARIO_LABELS.keys())
+        color_only = color_keys - label_keys
+        label_only = label_keys - color_keys
+        assert not color_only, (
+            f"Scenario name(s) have a colour but no label in _SCENARIO_LABELS: "
+            f"{sorted(color_only)}. Add matching entries to _SCENARIO_LABELS."
+        )
+        assert not label_only, (
+            f"Scenario name(s) have a label but no colour in _SCENARIO_COLORS: "
+            f"{sorted(label_only)}. Add matching entries to _SCENARIO_COLORS."
+        )
+
+    def test_live_producer_scenario_names_covered(self) -> None:
+        """Live runway.py output scenario names must all appear in _SCENARIO_COLORS.
+
+        Runs runway.py on a full fixture that triggers all four canonical scenarios
+        (base/slow/crisis auto-generated + threshold from minimum-viable-growth search).
+        """
+        import subprocess as _sp
+
+        full_inputs = {
+            "company": {"company_name": "TestCo", "stage": "seed"},
+            "revenue": {
+                "arr": {"value": 600_000, "as_of": "2025-12"},
+                "mrr": {"value": 50_000, "as_of": "2025-12"},
+                "growth_rate_monthly": 0.08,
+            },
+            "cash": {"current_balance": 2_000_000, "monthly_net_burn": 80_000},
+        }
+        runway_script = os.path.join(FMR_SCRIPTS_DIR, "runway.py")
+        result = _sp.run(
+            [sys.executable, runway_script],
+            input=json.dumps(full_inputs),
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"runway.py failed: {result.stderr}"
+        runway_data = json.loads(result.stdout)
+
+        live_names = {s["name"] for s in runway_data.get("scenarios", []) if isinstance(s, dict) and "name" in s}
+        assert len(live_names) >= 4, (
+            f"Expected >= 4 scenario names from live producer, got {len(live_names)}: {sorted(live_names)}"
+        )
+
+        viz = _load_fmr_visualize()
+        color_keys = set(viz._SCENARIO_COLORS.keys())
+
+        missing = live_names - color_keys
+        assert not missing, (
+            f"visualize._SCENARIO_COLORS is missing an entry for live-produced scenario(s): "
+            f"{sorted(missing)}. Add a colour for each scenario name that runway.py can emit."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test D: runway scenario keys → explore._build_data_payload scenarios pass-through
+# ---------------------------------------------------------------------------
+
+
+def _load_fmr_explore() -> types.ModuleType:
+    """Import FMR explore.py with a unique sys.modules key.
+
+    explore.py inserts FMR_SCRIPTS_DIR into sys.path at module level and
+    imports from unit_economics.py.  _theme is only imported inside
+    _build_html_string(), so module-level import is safe without a stub.
+    """
+    key = "_fmr_keycov_explore"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    explore_script = os.path.join(FMR_SCRIPTS_DIR, "explore.py")
+    spec = importlib.util.spec_from_file_location(key, explore_script)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = explore_script  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+class TestExploreLensDataCoverage:
+    """explore._build_data_payload passes scenario objects through to the JS
+    DATA payload unmodified.  The JS engine reads specific fields from each
+    scenario object; if the payload builder starts filtering scenarios, the
+    fields the JS consumes must survive.
+    """
+
+    # Fields the explore.py JS actually reads from each scenario object
+    # (grep the embedded JS for `s.name` / `scenario.<field>` accesses before
+    # extending this set — pinning fields the JS does not read would mislead
+    # a maintainer slimming the payload).
+    JS_READS_FROM_SCENARIO: set[str] = {
+        "name",
+        "runway_months",
+        "default_alive",
+    }
+
+    def test_scenario_fields_pass_through_payload(self) -> None:
+        """_build_data_payload must carry JS-required scenario fields through
+        to the data payload without dropping them."""
+        explore = _load_fmr_explore()
+
+        # Minimal inputs + runway with a single scenario that has all fields
+        inputs: dict[str, Any] = {
+            "company": {"company_name": "TestCo", "stage": "seed"},
+            "revenue": {"mrr": {"value": 50_000}, "growth_rate_monthly": 0.08},
+            "cash": {"current_balance": 2_000_000, "monthly_net_burn": 80_000},
+        }
+        runway: dict[str, Any] = {
+            "company": {"name": "TestCo"},
+            "baseline": {"net_cash": 2_000_000, "monthly_burn": 80_000, "monthly_revenue": 50_000},
+            "scenarios": [
+                {
+                    "name": "base",
+                    "runway_months": 25,
+                    "cash_out_date": "2028-01",
+                    "decision_point": "2027-01",
+                    "default_alive": True,
+                    "monthly_projections": [{"month": 1, "cash_balance": 1_950_000}],
+                    "became_profitable": False,
+                    "growth_rate": 0.08,
+                    "burn_change": 0.0,
+                    "note": None,
+                }
+            ],
+            "risk_assessment": "OK",
+            "limitations": [],
+            "warnings": [],
+        }
+
+        payload = explore._build_data_payload(
+            inputs,
+            runway,
+            None,  # ue
+            None,  # checklist
+            None,  # commentary
+            stub_reasons={},
+        )
+
+        scenarios = payload.get("scenarios", [])
+        assert len(scenarios) >= 1, "Payload must contain at least one scenario."
+
+        scenario = scenarios[0]
+        present = set(scenario.keys())
+        missing = self.JS_READS_FROM_SCENARIO - present
+        assert not missing, (
+            f"explore._build_data_payload dropped scenario field(s) that the JS engine reads: "
+            f"{sorted(missing)}. The payload builder must pass these fields through unchanged."
+        )

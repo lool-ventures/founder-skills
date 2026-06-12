@@ -5011,3 +5011,291 @@ def test_apply_corrections_corrected_payload_no_warning_on_stderr() -> None:
     assert "Info:" in stderr or "info:" in stderr.lower() or "corrected-object" in stderr.lower(), (
         f"stderr should contain a neutral informational message; got: {stderr!r}"
     )
+
+
+# ===========================================================================
+# Key-coverage tests: compose_report.py summary key reads vs. producer output
+# ===========================================================================
+#
+# Invariant: every key the producer writes to a summary block must either be
+# read by compose_report's section renderer OR appear in an explicit
+# exclusion list (with a documented reason for skipping).
+#
+# Direction tested: produced ⊆ read ∪ explicitly-excluded.
+# A new key added to checklist.py or unit_economics.py summary that the
+# renderer silently ignores will fail with the offending key listed.
+# ===========================================================================
+
+
+def _load_compose_report_module() -> Any:
+    """Import compose_report.py as a module with a unique sys.modules key."""
+    import importlib.util
+    import types
+
+    key = "_fmr_keycov_compose_report"
+    if key in sys.modules:
+        return sys.modules[key]
+    script_path = os.path.join(FMR_SCRIPTS_DIR, "compose_report.py")
+    spec = importlib.util.spec_from_file_location(key, script_path)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = script_path  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+class TestChecklistSummaryKeysCoverage:
+    """compose_report._section_checklist must read every key that checklist.py
+    writes to the summary block, OR the key must be in the explicit exclusion set.
+
+    Producer (checklist.py) summary block keys:
+        total, pass, fail, warn, not_applicable, score_pct,
+        business_quality_pct, model_maturity_pct, overall_status,
+        by_category, failed_items, warned_items
+
+    Renderer (_section_checklist) reads via summary.get(...):
+        score_pct, total, pass, fail, warn, not_applicable,
+        overall_status, failed_items, warned_items, by_category
+
+    Additionally _section_executive_summary reads:
+        overall_status, score_pct, model_maturity_pct, business_quality_pct
+
+    Explicit exclusions (not rendered by _section_checklist but used
+    elsewhere or intentionally omitted from the Markdown section):
+        business_quality_pct — rendered in _section_executive_summary only
+                               (deck-only score; not a checklist-section concern)
+        model_maturity_pct  — rendered in _section_executive_summary only
+                               (structure sub-score; not a checklist-section concern)
+    """
+
+    # Keys checklist.py writes to summary{}.
+    PRODUCED_SUMMARY_KEYS: set[str] = {
+        "total",
+        "pass",
+        "fail",
+        "warn",
+        "not_applicable",
+        "score_pct",
+        "business_quality_pct",
+        "model_maturity_pct",
+        "overall_status",
+        "by_category",
+        "failed_items",
+        "warned_items",
+    }
+
+    # Keys intentionally NOT rendered in _section_checklist but consumed
+    # by _section_executive_summary (documented design split).
+    EXCLUDED_FROM_CHECKLIST_SECTION: set[str] = {
+        "business_quality_pct",
+        "model_maturity_pct",
+    }
+
+    def test_produced_keys_rendered_or_excluded(self) -> None:
+        """Every checklist summary key must be read by _section_checklist or
+        appear in EXCLUDED_FROM_CHECKLIST_SECTION."""
+        import re
+
+        compose_script = os.path.join(FMR_SCRIPTS_DIR, "compose_report.py")
+        with open(compose_script, encoding="utf-8") as fh:
+            src = fh.read()
+
+        # Locate _section_checklist function body
+        fn_match = re.search(r"def _section_checklist\(.*?\n(?=def |\Z)", src, re.DOTALL)
+        assert fn_match, "Could not locate _section_checklist in compose_report.py"
+        fn_body = fn_match.group(0)
+
+        # Extract every summary.get("...") key read in the function
+        read_keys = set(re.findall(r'summary\.get\("([^"]+)"', fn_body))
+        assert len(read_keys) >= 5, (
+            f"Expected at least 5 summary.get() calls in _section_checklist, got {len(read_keys)}: {sorted(read_keys)}"
+        )
+
+        unread_and_not_excluded = self.PRODUCED_SUMMARY_KEYS - read_keys - self.EXCLUDED_FROM_CHECKLIST_SECTION
+        assert not unread_and_not_excluded, (
+            f"compose_report._section_checklist silently ignores checklist summary key(s): "
+            f"{sorted(unread_and_not_excluded)}. Either read and render each key or add it to "
+            f"EXCLUDED_FROM_CHECKLIST_SECTION with a documented reason."
+        )
+
+    def test_excluded_keys_read_by_executive_summary(self) -> None:
+        """Keys excluded from _section_checklist must be read by
+        _section_executive_summary (confirming they are rendered somewhere
+        and the exclusion is not a silent drop)."""
+        import re
+
+        compose_script = os.path.join(FMR_SCRIPTS_DIR, "compose_report.py")
+        with open(compose_script, encoding="utf-8") as fh:
+            src = fh.read()
+
+        fn_match = re.search(r"def _section_executive_summary\(.*?\n(?=def |\Z)", src, re.DOTALL)
+        assert fn_match, "Could not locate _section_executive_summary in compose_report.py"
+        fn_body = fn_match.group(0)
+
+        exec_read_keys = set(re.findall(r'summary\.get\("([^"]+)"', fn_body))
+
+        not_rendered_anywhere = self.EXCLUDED_FROM_CHECKLIST_SECTION - exec_read_keys
+        assert not not_rendered_anywhere, (
+            f"Checklist summary key(s) excluded from _section_checklist are ALSO not rendered "
+            f"by _section_executive_summary: {sorted(not_rendered_anywhere)}. "
+            f"Either render them somewhere or remove from PRODUCED_SUMMARY_KEYS."
+        )
+
+    def test_produced_summary_keys_min_count(self) -> None:
+        """Guard against vacuous tests: producer summary must have >= 12 keys."""
+        assert len(self.PRODUCED_SUMMARY_KEYS) >= 12, (
+            f"PRODUCED_SUMMARY_KEYS expected >= 12 entries, got {len(self.PRODUCED_SUMMARY_KEYS)}. "
+            f"Update when checklist.py changes its summary schema."
+        )
+
+    def test_live_producer_summary_keys_all_rendered_or_excluded(self) -> None:
+        """Live checklist.py output summary keys must all appear in the read set
+        or exclusion list.  Runs checklist.py on the existing _VALID_CHECKLIST fixture."""
+        import re
+
+        checklist_input = {
+            "items": _VALID_CHECKLIST["items"],
+            "company": {
+                "company_name": "TestCo",
+                "stage": "seed",
+                "geography": "US",
+                "revenue_model_type": "saas-sales-led",
+            },
+        }
+        rc, data, stderr = run_script("checklist.py", stdin_data=json.dumps(checklist_input))
+        assert rc == 0, f"checklist.py failed: {stderr}"
+        assert isinstance(data, dict) and "summary" in data, "checklist.py output missing 'summary'"
+
+        live_summary_keys = set(k for k, v in data["summary"].items() if v is not None)
+        assert len(live_summary_keys) >= 8, (
+            f"Expected >= 8 non-None summary keys from live checklist producer, got {live_summary_keys}"
+        )
+
+        compose_script = os.path.join(FMR_SCRIPTS_DIR, "compose_report.py")
+        with open(compose_script, encoding="utf-8") as fh:
+            src = fh.read()
+        fn_match = re.search(r"def _section_checklist\(.*?\n(?=def |\Z)", src, re.DOTALL)
+        assert fn_match
+        read_keys = set(re.findall(r'summary\.get\("([^"]+)"', fn_match.group(0)))
+
+        fn_exec_match = re.search(r"def _section_executive_summary\(.*?\n(?=def |\Z)", src, re.DOTALL)
+        assert fn_exec_match
+        exec_read_keys = set(re.findall(r'summary\.get\("([^"]+)"', fn_exec_match.group(0)))
+
+        all_rendered = read_keys | exec_read_keys
+        unrendered = live_summary_keys - all_rendered - self.EXCLUDED_FROM_CHECKLIST_SECTION
+        assert not unrendered, (
+            f"Live checklist.py summary key(s) not rendered by any compose_report section "
+            f"and not in exclusion list: {sorted(unrendered)}."
+        )
+
+
+class TestUnitEconSummaryKeysCoverage:
+    """compose_report._section_unit_economics must read every key that
+    unit_economics.py writes to the summary block, OR the key must be in
+    the explicit exclusion set.
+
+    Producer (unit_economics.py) summary block keys:
+        computed, strong, acceptable, warning, fail,
+        not_rated, contextual, not_applicable
+
+    Renderer (_section_unit_economics) reads:
+        strong, acceptable, warning, fail
+
+    Explicit exclusions (informational / display only):
+        computed      — number of metrics that returned a non-None value;
+                        used in visualize.py executive summary, not in the
+                        Markdown section text.
+        not_rated     — count of metrics with no benchmark; informational.
+        contextual    — count of metrics rated contextual; informational.
+        not_applicable — count of metrics that don't apply (SaaS-only, etc.);
+                         informational.
+    """
+
+    PRODUCED_SUMMARY_KEYS: set[str] = {
+        "computed",
+        "strong",
+        "acceptable",
+        "warning",
+        "fail",
+        "not_rated",
+        "contextual",
+        "not_applicable",
+    }
+
+    # Keys the Markdown section doesn't render because they are informational
+    # counts that don't affect the coaching narrative.
+    EXCLUDED_INFORMATIONAL: set[str] = {
+        "computed",
+        "not_rated",
+        "contextual",
+        "not_applicable",
+    }
+
+    def test_produced_keys_rendered_or_excluded(self) -> None:
+        """Every unit-economics summary key must be read by _section_unit_economics
+        or appear in EXCLUDED_INFORMATIONAL."""
+        import re
+
+        compose_script = os.path.join(FMR_SCRIPTS_DIR, "compose_report.py")
+        with open(compose_script, encoding="utf-8") as fh:
+            src = fh.read()
+
+        fn_match = re.search(r"def _section_unit_economics\(.*?\n(?=def |\Z)", src, re.DOTALL)
+        assert fn_match, "Could not locate _section_unit_economics in compose_report.py"
+        fn_body = fn_match.group(0)
+
+        read_keys = set(re.findall(r'ue_summary\.get\("([^"]+)"', fn_body))
+        assert len(read_keys) >= 4, (
+            f"Expected >= 4 ue_summary.get() calls in _section_unit_economics, "
+            f"got {len(read_keys)}: {sorted(read_keys)}"
+        )
+
+        unread_and_not_excluded = self.PRODUCED_SUMMARY_KEYS - read_keys - self.EXCLUDED_INFORMATIONAL
+        assert not unread_and_not_excluded, (
+            f"compose_report._section_unit_economics silently ignores unit-economics "
+            f"summary key(s): {sorted(unread_and_not_excluded)}. Either render each key "
+            f"or add it to EXCLUDED_INFORMATIONAL with a documented reason."
+        )
+
+    def test_excluded_keys_are_genuinely_informational(self) -> None:
+        """Excluded keys must actually exist in the producer's output (not phantom).
+
+        Verifies each excluded key appears in a live unit_economics.py run so
+        the exclusion list doesn't silently mask producer renames.
+        """
+        full_saas_inputs = {
+            "company": {
+                "company_name": "TestCo",
+                "stage": "seed",
+                "revenue_model_type": "saas-sales-led",
+            },
+            "revenue": {
+                "arr": {"value": 600_000, "as_of": "2025-12"},
+                "mrr": {"value": 50_000, "as_of": "2025-12"},
+                "growth_rate_monthly": 0.08,
+            },
+            "cash": {"current_balance": 2_000_000, "monthly_net_burn": 80_000},
+            "unit_economics": {
+                "cac": {"total": 1_500, "fully_loaded": True},
+                "gross_margin": 0.75,
+            },
+        }
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(full_saas_inputs))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+        assert isinstance(data, dict) and "summary" in data
+
+        live_summary_keys = set(data["summary"].keys())
+        phantom_exclusions = self.EXCLUDED_INFORMATIONAL - live_summary_keys
+        assert not phantom_exclusions, (
+            f"EXCLUDED_INFORMATIONAL contains key(s) that unit_economics.py does NOT actually "
+            f"emit: {sorted(phantom_exclusions)}. Remove phantom entries from the exclusion list."
+        )
+
+    def test_produced_summary_keys_min_count(self) -> None:
+        """Guard against vacuous tests: producer summary must have >= 8 keys."""
+        assert len(self.PRODUCED_SUMMARY_KEYS) >= 8, (
+            f"PRODUCED_SUMMARY_KEYS expected >= 8 entries, got {len(self.PRODUCED_SUMMARY_KEYS)}."
+        )
