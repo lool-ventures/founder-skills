@@ -24,14 +24,14 @@ from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 
 # Color palette — see design §10
 PALETTE = {
-    "founders": "#2563EB",
-    "preferred": "#7C3AED",
-    "option_pool": "#0891B2",
-    "safe": "#DC2626",
-    "note": "#EA580C",
-    "new_money": "#059669",
-    "warrants": "#CA8A04",
-    "neutral": "#6B7280",
+    "founders": "#0D549D",
+    "preferred": "#365A8A",
+    "option_pool": "#6CCDFF",
+    "safe": "#21A2E3",
+    "note": "#C9892B",
+    "new_money": "#2F8A56",
+    "warrants": "#48B4EA",
+    "neutral": "#A6AEB5",
 }
 
 # Pre-AD / delta line-items that aggregate_ownership_by_class may carry. They
@@ -86,7 +86,7 @@ def render_donut(
     slices = {k: v for k, v in breakdown.items() if k not in EXCLUDED_OWNERSHIP_KEYS}
     total = sum(slices.values())
     if total <= 0:
-        return f'<svg width="{size}" height="{size}"><circle cx="{cx}" cy="{cy}" r="{r_outer}" fill="#eee"/></svg>'
+        return f'<svg width="{size}" height="{size}"><circle cx="{cx}" cy="{cy}" r="{r_outer}" fill="#F1F4F4"/></svg>'
 
     paths = []
     start_angle = -math.pi / 2  # 12 o'clock
@@ -113,7 +113,9 @@ def render_donut(
 
     label_svg = ""
     if label:
-        label_svg = f'<text x="{cx}" y="{cy + 5}" text-anchor="middle" font-size="12" fill="#111">{_esc(label)}</text>'
+        label_svg = (
+            f'<text x="{cx}" y="{cy + 5}" text-anchor="middle" font-size="12" fill="#374B65">{_esc(label)}</text>'
+        )
     return f'<svg width="{size}" height="{size}">{"".join(paths)}{label_svg}</svg>'
 
 
@@ -260,7 +262,9 @@ def render_report_html(
                     sign = "−" if delta < 0 else "+"
                     ad_summary_parts.append(f"<strong>AD impact:</strong> {sign}{abs(delta):.2f} pp")
                 details += (
-                    '<p style="margin-top:8px;font-size:13px;color:#374151;">' + " | ".join(ad_summary_parts) + "</p>"
+                    '<p style="margin-top:8px;font-size:13px;color:var(--lool-slate);">'
+                    + " | ".join(ad_summary_parts)
+                    + "</p>"
                 )
                 # Per-series AD rows
                 series_rows = []
@@ -271,9 +275,13 @@ def render_report_html(
                     ca = bd.get("ccp_after", 0)
                     floor_note = " <em>(floor clamped)</em>" if bd.get("floor_applied") else ""
                     series_rows.append(f"<li>{sid} ({ptype}): CCP ${cb:.4f} → ${ca:.4f}{floor_note}</li>")
-                details += '<ul style="font-size:12px;color:#4b5563;margin-top:6px;">' + "".join(series_rows) + "</ul>"
+                details += (
+                    '<ul style="font-size:12px;color:var(--lool-mute);margin-top:6px;">'
+                    + "".join(series_rows)
+                    + "</ul>"
+                )
         else:
-            donut = '<div style="width:180px;height:180px;display:flex;align-items:center;justify-content:center;background:#f3f4f6;border-radius:50%;font-size:12px;color:#6b7280;">Pending</div>'
+            donut = '<div style="width:180px;height:180px;display:flex;align-items:center;justify-content:center;background:var(--lool-paper-2);border-radius:50%;font-size:12px;color:var(--lool-mute);">Pending</div>'
             details = "<em>No resolved ownership yet — see blockers.</em>"
             impact_line = ""
         blockers_html = ""
@@ -298,6 +306,13 @@ def render_report_html(
 </div>
 """)
 
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _theme
+
+    brand_css = _theme.brand_css()
+
     counsel_html = ""
     if counsel_packet.get("items"):
         items_html = []
@@ -321,28 +336,33 @@ def render_report_html(
 <meta charset="utf-8">
 <title>Cap Table — {company}</title>
 <style>
+{brand_css}
   :root {{
-    --bg: #ffffff;
-    --fg: #111111;
-    --muted: #6b7280;
-    --border: #e5e7eb;
-    --accent: #2563EB;
+    --bg: var(--lool-white);
+    --fg: var(--lool-ink);
+    --muted: var(--lool-mute);
+    --border: var(--lool-line-2);
+    --accent: var(--lool-azure);
   }}
-  body {{ font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-         color: var(--fg); background: var(--bg); margin: 0; padding: 24px; line-height: 1.5; }}
-  h1 {{ font-size: 32px; margin: 0 0 12px; }}
-  h2 {{ font-size: 20px; margin: 32px 0 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }}
-  h3 {{ font-size: 16px; margin: 16px 0 8px; }}
+  body {{ font-family: var(--font-body);
+         color: var(--fg); background: var(--bg); margin: 0; padding: 24px; line-height: 1.5;
+         -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }}
+  h1 {{ font-size: 32px; margin: 0 0 12px; font-weight: 400; color: var(--lool-blue); letter-spacing: -0.01em; }}
+  h2 {{ font-size: 20px; margin: 32px 0 8px; font-weight: 500; color: var(--lool-royal);
+        border-bottom: 1px solid var(--border); padding-bottom: 4px; }}
+  h3 {{ font-size: 16px; margin: 16px 0 8px; font-weight: 500; color: var(--lool-royal); }}
   .header-row {{ display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }}
   .meta {{ color: var(--muted); font-size: 14px; }}
-  .card {{ border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin: 12px 0; }}
+  .card {{ border: 1px solid var(--lool-line-2); border-radius: 0; padding: 16px; margin: 12px 0;
+           background: var(--lool-paper); }}
   .card-body {{ display: flex; gap: 20px; align-items: flex-start; }}
-  code {{ background: #f3f4f6; padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }}
+  code {{ background: var(--lool-paper-2); padding: 1px 4px; border-radius: var(--r-input);
+          font-size: 0.9em; font-family: var(--font-mono); }}
   table {{ border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 14px; }}
-  th, td {{ border: 1px solid var(--border); padding: 6px 10px; text-align: left; }}
-  th {{ background: #f9fafb; }}
+  th, td {{ border: 1px solid var(--lool-line-2); padding: 6px 10px; text-align: left; }}
+  th {{ background: var(--lool-paper); }}
   .num {{ text-align: right; }}
-  .footer {{ margin-top: 40px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--border); padding-top: 12px; }}
+  .footer {{ margin-top: 40px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--lool-line-2); padding-top: 12px; }}
 </style>
 </head>
 <body>
@@ -383,6 +403,7 @@ def render_report_html(
 <div class="footer">
   Report generated by cap-table skill. Rule pack v{RULE_PACK_VERSION}.
 </div>
+{_theme.FOOTER_CREDIT_HTML}
 </body>
 </html>
 """

@@ -291,9 +291,16 @@ class TestStaticHTML:
         assert "changes" in html
 
     def test_light_theme_colors(self) -> None:
-        """Uses light theme palette."""
+        """Uses the brand light palette with token CSS and embedded webfont."""
         rc, html, stderr = _generate_static(_FULL_INPUTS)
-        assert any(c in html for c in ["#0d549d", "#0071e3", "#f9fafb", "#1f2937"])
+        assert "--lool-blue: #0D549D" in html
+        assert "var(--lool-blue)" in html
+        assert "font-family: 'Sora'" in html
+
+    def test_footer_credit(self) -> None:
+        """Subtle provenance footer present."""
+        rc, html, stderr = _generate_static(_FULL_INPUTS)
+        assert "founder-skills by lool ventures" in html
 
     def test_stage_badge(self) -> None:
         """Stage badge rendered."""

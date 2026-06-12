@@ -74,6 +74,13 @@ def render_explorer_html(
     scenarios_doc: dict[str, Any],
     counsel_packet: dict[str, Any],
 ) -> str:
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _theme
+
+    brand_css = _theme.brand_css()
+
     company = _esc(inputs.get("company_name", "Company"))
 
     # Build data payload for client-side JS. Includes pre-financing baseline
@@ -123,43 +130,54 @@ def render_explorer_html(
 <meta charset="utf-8">
 <title>Cap Table Explorer — {company}</title>
 <style>
+{brand_css}
   :root {{
-    --bg: #ffffff; --fg: #111111; --muted: #6b7280; --border: #e5e7eb;
-    --surface: #fafafa; --surface-2: #f3f4f6; --accent-bg: #eff6ff;
-    --founders: #2563EB; --preferred: #7C3AED; --pool: #0891B2;
-    --safe: #DC2626; --note: #EA580C; --new-money: #059669;
+    --bg: var(--lool-white); --fg: var(--lool-ink); --muted: var(--lool-mute);
+    --border: var(--lool-line-2);
+    --surface: var(--lool-paper); --surface-2: var(--lool-paper-2);
+    --accent-bg: var(--lool-line-2);
+    --heading: var(--lool-blue); --heading-2: var(--lool-royal);
+    --label: var(--lool-subtle);
+    --founders: #0D549D; --preferred: #365A8A; --pool: #6CCDFF;
+    --safe: #21A2E3; --note: #C9892B; --new-money: #2F8A56;
   }}
   [data-theme="dark"] {{
-    --bg: #0f172a; --fg: #f1f5f9; --muted: #94a3b8; --border: #334155;
-    --surface: #1e293b; --surface-2: #334155; --accent-bg: #1e3a8a;
+    --bg: #0E1B2C; --fg: #F1F4F4; --muted: #A6AEB5; --border: #2A3B52;
+    --surface: #16263B; --surface-2: #1E3048; --accent-bg: #173A5E;
+    --heading: #6CCDFF; --heading-2: #48B4EA;
+    --label: #A6AEB5;
   }}
   * {{ box-sizing: border-box; }}
-  body {{ font-family: -apple-system, system-ui, sans-serif; margin: 0;
+  body {{ font-family: var(--font-body); margin: 0;
          background: var(--bg); color: var(--fg);
+         -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
          transition: background 0.2s, color 0.2s; }}
   header {{ display: flex; justify-content: space-between; align-items: center;
              padding: 16px 24px; border-bottom: 1px solid var(--border); }}
   .title-block {{ display: flex; flex-direction: column; gap: 4px; }}
-  h1 {{ font-size: 22px; margin: 0; font-weight: 600; }}
+  h1 {{ font-size: 22px; margin: 0; font-weight: 400; color: var(--heading);
+        letter-spacing: -0.01em; }}
+  h2, h3 {{ font-weight: 500; color: var(--heading-2); }}
   .meta {{ color: var(--muted); font-size: 13px; }}
   .controls {{ display: flex; gap: 8px; align-items: center; }}
-  .btn {{ padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px;
+  .btn {{ padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--r-input);
           background: var(--bg); color: var(--fg); font-size: 13px; cursor: pointer;
+          font-family: var(--font-body);
           transition: all 0.15s; }}
-  .btn:hover {{ border-color: var(--founders); }}
-  .btn.primary {{ background: var(--founders); color: white; border-color: var(--founders); }}
-  .btn.primary:hover {{ background: #1d4ed8; }}
+  .btn:hover {{ border-color: var(--lool-azure); }}
+  .btn.primary {{ background: var(--lool-blue); color: white; border-color: var(--lool-blue); }}
+  .btn.primary:hover {{ background: var(--lool-blue-deep); }}
   .layout {{ display: grid; grid-template-columns: 240px 1fr 280px;
              min-height: calc(100vh - 65px); }}
   aside {{ padding: 16px; border-right: 1px solid var(--border); background: var(--surface); }}
-  .section-label {{ font-size: 11px; color: var(--muted); margin-bottom: 8px;
-                     text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }}
+  .section-label {{ font-size: 11px; color: var(--label); margin-bottom: 8px;
+                     text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }}
   .scenario-pill {{ display: block; width: 100%; text-align: left;
                      padding: 10px 12px; margin-bottom: 6px; border: 1px solid var(--border);
-                     border-radius: 6px; background: var(--bg); color: var(--fg); cursor: pointer;
-                     font-size: 14px; transition: all .12s ease; }}
-  .scenario-pill:hover {{ border-color: var(--founders); }}
-  .scenario-pill.active {{ border-color: var(--founders); background: var(--accent-bg); font-weight: 600; }}
+                     border-radius: var(--r-input); background: var(--bg); color: var(--fg); cursor: pointer;
+                     font-size: 14px; font-family: var(--font-body); transition: all .12s ease; }}
+  .scenario-pill:hover {{ border-color: var(--lool-azure); }}
+  .scenario-pill.active {{ border-color: var(--lool-blue); background: var(--accent-bg); font-weight: 600; }}
   .scenario-pill.pinned::after {{ content: "📌"; margin-left: 6px; font-size: 11px; }}
   main {{ padding: 24px; overflow-y: auto; }}
   .right-rail {{ padding: 16px; border-left: 1px solid var(--border); background: var(--surface);
@@ -171,52 +189,55 @@ def render_explorer_html(
   .legend li {{ display: flex; align-items: center; gap: 8px; padding: 4px 0;
                  transition: opacity 0.2s; }}
   .legend li.dimmed {{ opacity: 0.35; }}
-  .swatch {{ width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }}
+  .swatch {{ width: 14px; height: 14px; border-radius: 0; flex-shrink: 0; }}
   table {{ border-collapse: collapse; width: 100%; font-size: 13px; margin: 12px 0; }}
   th, td {{ border: 1px solid var(--border); padding: 6px 10px; text-align: left; }}
   th {{ background: var(--surface); font-weight: 600; }}
   .num {{ text-align: right; font-variant-numeric: tabular-nums; }}
-  .badge {{ display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px;
-            font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }}
-  .badge.full {{ background: #d1fae5; color: #065f46; }}
-  .badge.structural_only {{ background: #fef3c7; color: #92400e; }}
-  .badge.repay_only {{ background: #fed7aa; color: #9a3412; }}
-  .badge.mixed {{ background: #ddd6fe; color: #5b21b6; }}
-  .blocker {{ background: #fee2e2; border-left: 3px solid #dc2626; padding: 8px 12px;
-              margin: 8px 0; border-radius: 4px; font-size: 13px; color: #7f1d1d; }}
+  .badge {{ display: inline-block; padding: 2px 8px; border-radius: var(--r-pill); font-size: 11px;
+            font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }}
+  .badge.full {{ background: var(--lool-success-tint); color: var(--lool-success); }}
+  .badge.structural_only {{ background: var(--lool-warning-tint); color: var(--lool-warning); }}
+  .badge.repay_only {{ background: var(--lool-paper-2); color: var(--lool-slate); }}
+  .badge.mixed {{ background: var(--lool-line-2); color: var(--lool-royal); }}
+  .blocker {{ background: var(--lool-danger-tint); border-left: 3px solid var(--lool-danger); padding: 8px 12px;
+              margin: 8px 0; border-radius: 0; font-size: 13px; color: var(--lool-danger); }}
   .blocker code {{ font-weight: 600; }}
-  code {{ background: var(--surface-2); padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }}
+  code {{ background: var(--surface-2); padding: 1px 4px; border-radius: var(--r-input);
+          font-size: 0.9em; font-family: var(--font-mono); }}
   details {{ margin: 8px 0; background: var(--bg); border: 1px solid var(--border);
-              border-radius: 6px; padding: 8px 12px; }}
+              border-radius: 0; padding: 8px 12px; }}
   summary {{ cursor: pointer; font-weight: 600; padding: 4px 0; user-select: none; }}
-  .impact-callout {{ background: var(--accent-bg); border-radius: 8px; padding: 16px;
-                      margin: 16px 0; border-left: 4px solid var(--founders);
+  .impact-callout {{ background: var(--accent-bg); border-radius: 0; padding: 16px;
+                      margin: 16px 0; border-left: 4px solid var(--lool-blue);
                       font-size: 14px; line-height: 1.5; }}
   .number-display {{ font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums;
-                      color: var(--founders); }}
+                      color: var(--heading); }}
   .number-label {{ font-size: 12px; color: var(--muted); text-transform: uppercase;
-                    letter-spacing: 0.05em; margin-top: 2px; }}
+                    letter-spacing: 0.06em; margin-top: 2px; }}
   .metric-row {{ display: flex; gap: 24px; margin: 16px 0; }}
-  .metric {{ flex: 1; padding: 12px 16px; background: var(--surface); border-radius: 6px;
+  .metric {{ flex: 1; padding: 12px 16px; background: var(--surface); border-radius: 0;
               border: 1px solid var(--border); }}
-  .compare-banner {{ background: #fef3c7; color: #92400e; padding: 10px 16px;
-                      border-radius: 6px; margin: 12px 0; font-size: 13px;
+  .compare-banner {{ background: var(--lool-warning-tint); color: var(--lool-ink); padding: 10px 16px;
+                      border-radius: 0; border-left: 3px solid var(--lool-warning);
+                      margin: 12px 0; font-size: 13px;
                       display: flex; justify-content: space-between; align-items: center; }}
-  .compare-banner button {{ background: transparent; border: 1px solid #92400e;
-                              color: #92400e; padding: 4px 8px; border-radius: 4px; cursor: pointer; }}
+  .compare-banner button {{ background: transparent; border: 1px solid var(--lool-warning);
+                              color: var(--lool-warning); padding: 4px 8px; border-radius: var(--r-input);
+                              font-family: var(--font-body); cursor: pointer; }}
   .walkthrough-toast {{ position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
                           background: var(--fg); color: var(--bg); padding: 14px 20px;
-                          border-radius: 8px; font-size: 14px; max-width: 600px; z-index: 1000;
-                          box-shadow: 0 4px 20px rgba(0,0,0,0.25); opacity: 0;
+                          border-radius: var(--r-input); font-size: 14px; max-width: 600px; z-index: 1000;
+                          box-shadow: var(--shadow-soft); opacity: 0;
                           transition: opacity 0.3s, transform 0.3s; }}
   .walkthrough-toast.visible {{ opacity: 1; transform: translateX(-50%) translateY(-4px); }}
-  .sankey-container {{ margin: 24px 0; border: 1px solid var(--border); border-radius: 6px;
+  .sankey-container {{ margin: 24px 0; border: 1px solid var(--border); border-radius: 0;
                         padding: 16px; background: var(--surface); }}
-  .sankey-container h3 {{ margin: 0 0 12px; font-size: 14px; color: var(--muted);
-                            text-transform: uppercase; letter-spacing: 0.05em; }}
+  .sankey-container h3 {{ margin: 0 0 12px; font-size: 14px; color: var(--label);
+                            text-transform: uppercase; letter-spacing: 0.06em; }}
   .sankey-path {{ transition: opacity 0.2s; }}
   .sankey-path:hover {{ opacity: 0.7; cursor: pointer; }}
-  .sankey-label {{ font-size: 11px; fill: var(--fg); font-family: -apple-system, system-ui, sans-serif; }}
+  .sankey-label {{ font-size: 11px; fill: var(--fg); font-family: var(--font-body); }}
   .sankey-block {{ stroke: var(--bg); stroke-width: 1; }}
 </style>
 </head>
@@ -259,13 +280,13 @@ def render_explorer_html(
 const DATA = {data_json};
 
 const PALETTE = {{
-  founders: "#2563EB",
-  preferred: "#7C3AED",
-  option_pool: "#0891B2",
-  safe: "#DC2626",
-  note: "#EA580C",
-  new_money: "#059669",
-  warrants: "#CA8A04",
+  founders: "#0D549D",
+  preferred: "#365A8A",
+  option_pool: "#6CCDFF",
+  safe: "#21A2E3",
+  note: "#C9892B",
+  new_money: "#2F8A56",
+  warrants: "#48B4EA",
 }};
 
 let _chartInstance = null;
@@ -424,7 +445,7 @@ function renderDonut(canvasEl, breakdown) {{
     if (frac <= 0) continue;
     labels.push(cat.replace(/_/g, " "));
     data.push(frac * 100);
-    colors.push(PALETTE[cat] || "#6b7280");
+    colors.push(PALETTE[cat] || "#A6AEB5");
   }}
   _chartInstance = new Chart(canvasEl, {{
     type: "doughnut",
@@ -486,7 +507,7 @@ function selectScenario(idx) {{
     body += `<ul class="legend">`;
     for (const [cat, frac] of Object.entries(agg)) {{
       if (frac <= 0) continue;
-      const c = PALETTE[cat] || "#6b7280";
+      const c = PALETTE[cat] || "#A6AEB5";
       body += `<li><span class="swatch" style="background:${{c}};"></span>${{escape(cat.replace(/_/g, ' '))}}: <strong style="margin-left:auto;">${{pct(frac)}}</strong></li>`;
     }}
     body += `</ul></div>`;
@@ -671,6 +692,7 @@ document.addEventListener("keydown", e => {{
 renderScenarioList();
 renderCounsel();
 </script>
+{_theme.FOOTER_CREDIT_HTML}
 </body>
 </html>
 """

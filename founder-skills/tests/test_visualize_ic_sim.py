@@ -501,8 +501,8 @@ def test_dealbreaker_verdict() -> None:
     assert rc == 0, f"exit {rc}, stderr={stderr}"
     # Should show "Hard Pass" text
     assert "Hard Pass" in stdout
-    # hard_pass color (#ef4444) should appear
-    assert "#ef4444" in stdout
+    # hard_pass color (#92301F) should appear
+    assert "#92301F" in stdout
 
 
 def test_malformed_list_elements() -> None:
@@ -561,8 +561,8 @@ def test_verdict_color_case_insensitive() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, _stderr = _run_visualize(d)
     assert rc == 0
-    # Invest -> green (#10b981), not gray fallback (#9ca3af)
-    assert "#10b981" in stdout, "Invest verdict should map to green color"
+    # Invest -> green (#2F8A56), not gray fallback (#A6AEB5)
+    assert "#2F8A56" in stdout, "Invest verdict should map to green color"
 
 
 def test_severity_color_case_insensitive() -> None:
@@ -582,8 +582,8 @@ def test_severity_color_case_insensitive() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, _stderr = _run_visualize(d)
     assert rc == 0
-    # Blocking -> red (#ef4444), not gray fallback
-    assert "#ef4444" in stdout, "Blocking severity should map to red color"
+    # Blocking -> red (#C0392B), not gray fallback
+    assert "#C0392B" in stdout, "Blocking severity should map to red color"
 
 
 def test_empty_partner_role_skipped() -> None:
@@ -616,7 +616,7 @@ def test_visualize_partner_disclaimer() -> None:
 
 
 def test_dealbreaker_color_visible() -> None:
-    """Dealbreaker bars use visible color (#b91c1c), not near-invisible #7f1d1d."""
+    """Dealbreaker bars use visible color (#92301F), not near-invisible #7f1d1d."""
     arts = _all_required_artifacts()
     # Create a score with dealbreakers to trigger bar rendering
     score = dict(_VALID_SCORE)
@@ -635,7 +635,7 @@ def test_dealbreaker_color_visible() -> None:
     rc, stdout, stderr = _run_visualize(d)
     assert rc == 0, f"exit {rc}, stderr={stderr}"
     # New visible color should appear; old invisible color should not
-    assert "#b91c1c" in stdout, "Dealbreaker should use visible #b91c1c"
+    assert "#92301F" in stdout, "Dealbreaker should use visible #92301F"
     assert "#7f1d1d" not in stdout, "Old invisible dealbreaker color should be gone"
 
 
@@ -758,7 +758,7 @@ def test_svg_scales_on_mobile() -> None:
 
 
 def test_h2_border_visible_in_chart_box() -> None:
-    """h2 inside chart-box should use visible border color (#334155), not bg color."""
+    """h2 inside chart-box should use a visible border color, not a bg-matching one."""
     d = _make_artifact_dir(_all_required_artifacts())
     rc, stdout, stderr = _run_visualize(d)
     assert rc == 0, f"exit {rc}, stderr={stderr}"
@@ -766,7 +766,7 @@ def test_h2_border_visible_in_chart_box() -> None:
     match = re.search(r"\.chart-box h2\s*\{([^}]+)\}", stdout)
     assert match, ".chart-box h2 CSS rule not found"
     rule_body = match.group(1)
-    assert "#334155" in rule_body, "h2 border should use visible #334155, not bg-matching #1e293b"
+    assert "var(--lool-line-2)" in rule_body, "h2 border should use visible var(--lool-line-2), not bg-matching #1e293b"
 
 
 def test_rationale_truncation_respects_sentences() -> None:

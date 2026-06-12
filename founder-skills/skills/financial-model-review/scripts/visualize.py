@@ -134,12 +134,12 @@ def _fmt_pct(value: float | int) -> str:
 # Color scheme
 # ---------------------------------------------------------------------------
 
-_CLR_PRIMARY = "#0d549d"
-_CLR_ACCENT = "#21a2e3"
-_CLR_PASS = "#10b981"
-_CLR_WARN = "#f59e0b"
-_CLR_FAIL = "#ef4444"
-_CLR_NA = "#9ca3af"
+_CLR_PRIMARY = "#0D549D"
+_CLR_ACCENT = "#21A2E3"
+_CLR_PASS = "#2F8A56"
+_CLR_WARN = "#C9892B"
+_CLR_FAIL = "#C0392B"
+_CLR_NA = "#A6AEB5"
 
 _STATUS_COLORS: dict[str, str] = {
     "pass": _CLR_PASS,
@@ -206,15 +206,15 @@ _STATUS_ICONS: dict[str, str] = {
 
 _RATING_COLORS: dict[str, str] = {
     "strong": _CLR_PASS,
-    "acceptable": "#3b82f6",
+    "acceptable": "#21A2E3",
     "warning": _CLR_WARN,
     "fail": _CLR_FAIL,
 }
 
 _SCENARIO_COLORS: dict[str, str] = {
-    "base": "#3b82f6",
-    "slow": "#f59e0b",
-    "crisis": "#ef4444",
+    "base": "#0D549D",
+    "slow": "#C9892B",
+    "crisis": "#C0392B",
     "threshold": "#8b5cf6",
 }
 
@@ -237,8 +237,8 @@ def _tooltip_js() -> str:
         "<script>\n"
         "document.addEventListener('DOMContentLoaded', function() {\n"
         "    var tip = document.createElement('div');\n"
-        "    tip.style.cssText = 'position:fixed;padding:8px 12px;background:#1f2937;color:#fff;'\n"
-        "        + 'border-radius:6px;font-size:12px;max-width:300px;pointer-events:none;'\n"
+        "    tip.style.cssText = 'position:fixed;padding:8px 12px;background:#374B65;color:#fff;'\n"
+        "        + 'border-radius:4px;font-size:12px;max-width:300px;pointer-events:none;'\n"
         "        + 'z-index:1000;display:none;line-height:1.4;white-space:pre-line;'\n"
         "        + 'box-shadow:0 2px 8px rgba(0,0,0,0.15)';\n"
         "    document.body.appendChild(tip);\n"
@@ -296,40 +296,43 @@ def _css() -> str:
     return f"""
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-                         Helvetica, Arial, sans-serif;
+            font-family: var(--font-body);
             line-height: 1.6;
-            color: #1f2937;
-            background: #f9fafb;
+            color: var(--lool-ink);
+            background: var(--lool-white);
             padding: 2rem;
             max-width: 960px;
             margin: 0 auto;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }}
         header {{
-            border-bottom: 3px solid {_CLR_PRIMARY};
+            border-bottom: 3px solid var(--lool-blue);
             padding-bottom: 1rem;
             margin-bottom: 2rem;
         }}
         header h1 {{
-            color: {_CLR_PRIMARY};
+            color: var(--lool-blue);
+            font-weight: 400;
             font-size: 1.75rem;
         }}
         header p {{
-            color: #6b7280;
+            color: var(--lool-mute);
             font-size: 0.875rem;
         }}
         main section {{
-            background: #ffffff;
-            border: 1px solid #e5e7eb;
-            border-radius: 0.5rem;
+            background: var(--lool-paper);
+            border: 1px solid var(--lool-line-2);
+            border-radius: 0;
             padding: 1.5rem;
             margin-bottom: 1.5rem;
         }}
         main section h2 {{
-            color: {_CLR_PRIMARY};
+            color: var(--lool-royal);
+            font-weight: 500;
             font-size: 1.25rem;
             margin-bottom: 1rem;
-            border-bottom: 1px solid #e5e7eb;
+            border-bottom: 1px solid var(--lool-line-2);
             padding-bottom: 0.5rem;
         }}
         .chart-container {{
@@ -341,11 +344,11 @@ def _css() -> str:
         }}
         .placeholder {{
             text-align: center;
-            color: #9ca3af;
+            color: var(--lool-faint);
             font-style: italic;
             padding: 2rem;
-            background: #f3f4f6;
-            border-radius: 0.25rem;
+            background: var(--lool-paper-2);
+            border-radius: 0;
         }}
         .legend {{
             display: flex;
@@ -363,7 +366,7 @@ def _css() -> str:
         .legend-swatch {{
             width: 14px;
             height: 14px;
-            border-radius: 3px;
+            border-radius: 0;
             display: inline-block;
         }}
         .summary-grid {{
@@ -373,32 +376,32 @@ def _css() -> str:
             margin-bottom: 1.5rem;
         }}
         .summary-card {{
-            background: #f9fafb;
-            border: 1px solid #e5e7eb;
-            border-radius: 0.5rem;
+            background: var(--lool-paper);
+            border: 1px solid var(--lool-line-2);
+            border-radius: 0;
             padding: 1rem;
             text-align: center;
         }}
         .summary-card .label {{
             font-size: 0.75rem;
-            color: #6b7280;
+            color: var(--lool-subtle);
             text-transform: uppercase;
-            letter-spacing: 0.05em;
+            letter-spacing: 0.06em;
         }}
         .summary-card .value {{
             font-size: 1.5rem;
             font-weight: bold;
-            color: #1f2937;
+            color: var(--lool-ink);
         }}
         footer {{
             text-align: center;
-            color: #9ca3af;
+            color: var(--lool-faint);
             font-size: 0.75rem;
             padding-top: 1rem;
-            border-top: 1px solid #e5e7eb;
+            border-top: 1px solid var(--lool-line-2);
         }}
-        footer a, header a {{ color: {_CLR_ACCENT}; text-decoration: none; }}
-        footer a:hover, header a:hover {{ text-decoration: underline; }}
+        footer a, header a {{ color: var(--lool-azure); text-decoration: none; }}
+        footer a:hover, header a:hover {{ color: var(--lool-azure-deep); text-decoration: underline; }}
         .collapsible-toggle {{
             cursor: pointer;
             user-select: none;
@@ -407,19 +410,19 @@ def _css() -> str:
             gap: 0.5rem;
             padding: 0.5rem 0;
         }}
-        .collapsible-toggle:hover {{ background: #f3f4f6; border-radius: 0.25rem; }}
+        .collapsible-toggle:hover {{ background: var(--lool-paper-2); }}
         .chevron {{
             display: inline-block;
             transition: transform 0.2s;
             font-size: 0.75rem;
-            color: #9ca3af;
+            color: var(--lool-faint);
         }}
         .collapsible-content {{ padding-left: 1.5rem; }}
         .finding-item {{
             padding: 0.75rem;
-            border-left: 3px solid #e5e7eb;
+            border-left: 3px solid var(--lool-line);
             margin-bottom: 0.5rem;
-            border-radius: 0 0.25rem 0.25rem 0;
+            border-radius: 0;
         }}
         .finding-strong {{ border-left-color: {_CLR_PASS}; }}
         .finding-attention {{ border-left-color: {_CLR_FAIL}; }}
@@ -427,7 +430,7 @@ def _css() -> str:
         .findings-subsection {{ margin-bottom: 1rem; }}
         .findings-subsection h3 {{
             font-size: 0.9rem;
-            color: #374151;
+            color: var(--lool-slate);
             margin-bottom: 0.5rem;
         }}
         @media print {{
@@ -524,14 +527,16 @@ def _chart_checklist_heatmap(checklist: dict[str, Any] | None) -> str:
             evidence = str(item.get("evidence") or item.get("notes") or "")
             parts.append(
                 f'<div style="display:flex;align-items:flex-start;gap:0.5rem;'
-                f'padding:0.35rem 0;border-bottom:1px solid #f3f4f6;">'
+                f'padding:0.35rem 0;border-bottom:1px solid var(--lool-line-2);">'
                 f'<span style="color:{_esc(color)};font-weight:bold;min-width:1.2rem;">'
                 f"{_esc(icon)}</span>"
                 f"<div>"
                 f'<span style="font-size:0.85rem;">{_esc(label)}</span>'
             )
             if evidence:
-                parts.append(f'<div style="font-size:0.75rem;color:#6b7280;margin-top:0.15rem;">{_esc(evidence)}</div>')
+                parts.append(
+                    f'<div style="font-size:0.75rem;color:var(--lool-mute);margin-top:0.15rem;">{_esc(evidence)}</div>'
+                )
             parts.append("</div></div>")
         parts.append("</div></div>")
 
@@ -643,11 +648,11 @@ def _chart_unit_economics(unit_economics: dict[str, Any] | None) -> str:
             f'style="vertical-align:middle;" data-tooltip="{_esc(tooltip)}">'
         )
         # Background track
-        svg += f'<rect x="0" y="0" width="{bar_width}" height="{bar_height}" fill="#f3f4f6" rx="3" />'
+        svg += f'<rect x="0" y="0" width="{bar_width}" height="{bar_height}" fill="#F1F4F4" rx="3" />'
         # Benchmark target zone (if available)
         if target > 0:
             target_x = min(target / scale_max * bar_width, bar_width)
-            svg += f'<rect x="0" y="2" width="{target_x:.1f}" height="{bar_height - 4}" fill="#e5e7eb" rx="2" />'
+            svg += f'<rect x="0" y="2" width="{target_x:.1f}" height="{bar_height - 4}" fill="#D7DBE0" rx="2" />'
         # Value bar
         bar_w = max(min(abs(value) / scale_max * bar_width, bar_width), 2.0)
         svg += f'<rect x="0" y="3" width="{bar_w:.1f}" height="{bar_height - 6}" fill="{_esc(color)}" rx="2" />'
@@ -656,15 +661,15 @@ def _chart_unit_economics(unit_economics: dict[str, Any] | None) -> str:
             marker_x = min(target / scale_max * bar_width, bar_width - 1)
             svg += (
                 f'<line x1="{marker_x:.1f}" y1="0" x2="{marker_x:.1f}" y2="{bar_height}" '
-                f'stroke="#374151" stroke-width="2" />'
+                f'stroke="#374B65" stroke-width="2" />'
             )
         svg += "</svg>"
 
         parts.append(
             f'<div style="display:flex;align-items:center;gap:0.75rem;'
-            f'padding:0.4rem 0;border-bottom:1px solid #f3f4f6;">'
+            f'padding:0.4rem 0;border-bottom:1px solid var(--lool-line-2);">'
             f'<span style="min-width:140px;font-size:0.85rem;font-weight:600;'
-            f'color:#1f2937;">{_esc(display_name)}</span>'
+            f'color:var(--lool-ink);">{_esc(display_name)}</span>'
             f"{svg}"
             f'<span style="min-width:120px;font-size:0.8rem;color:{_esc(color)};">'
             f"{_esc(val_str)} — {_esc(rating_label)}</span>"
@@ -675,7 +680,7 @@ def _chart_unit_economics(unit_economics: dict[str, Any] | None) -> str:
     legend_items: list[str] = []
     for rating, color in [
         ("Strong", _CLR_PASS),
-        ("Acceptable", "#3b82f6"),
+        ("Acceptable", "#21A2E3"),
         ("Needs improvement", _CLR_WARN),
         ("Below target", _CLR_FAIL),
     ]:
@@ -789,13 +794,13 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
         parts.append(
             f'<text x="{_num(margin_left - 8):.2f}" y="{y:.2f}" '
             f'text-anchor="end" dominant-baseline="central" '
-            f'font-size="9" fill="#9ca3af">{_esc(_fmt_usd(cash_val))}</text>'
+            f'font-size="9" fill="#7D90A3">{_esc(_fmt_usd(cash_val))}</text>'
         )
         # Grid line
         parts.append(
             f'<line x1="{_num(margin_left):.2f}" y1="{y:.2f}" '
             f'x2="{_num(margin_left + chart_width):.2f}" y2="{y:.2f}" '
-            f'stroke="#e5e7eb" stroke-width="1" />'
+            f'stroke="#D7DBE0" stroke-width="1" />'
         )
 
     # Zero line (if visible)
@@ -804,18 +809,18 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
         parts.append(
             f'<line x1="{_num(margin_left):.2f}" y1="{zero_y:.2f}" '
             f'x2="{_num(margin_left + chart_width):.2f}" y2="{zero_y:.2f}" '
-            f'stroke="#ef4444" stroke-width="1.5" stroke-dasharray="4,3" />'
+            f'stroke="{_CLR_FAIL}" stroke-width="1.5" stroke-dasharray="4,3" />'
         )
         parts.append(
             f'<text x="{_num(margin_left + chart_width + 5):.2f}" y="{zero_y:.2f}" '
-            f'dominant-baseline="central" font-size="9" fill="#ef4444">$0</text>'
+            f'dominant-baseline="central" font-size="9" fill="{_CLR_FAIL}">$0</text>'
         )
 
     # X-axis label
     parts.append(
         f'<text x="{_num(margin_left + chart_width / 2):.2f}" '
         f'y="{_num(svg_h - 5):.2f}" text-anchor="middle" '
-        f'font-size="10" fill="#6b7280">Months</text>'
+        f'font-size="10" fill="#7D90A3">Months</text>'
     )
 
     # Plot each scenario as a polyline
@@ -995,7 +1000,7 @@ def _chart_revenue_waterfall(inputs: dict[str, Any] | None) -> str:
     # Value label above bar
     parts.append(
         f'<text x="{_num(bar_x + bar_width / 2):.2f}" y="{_num(bar_y - 8):.2f}" '
-        f'text-anchor="middle" font-size="14" fill="#1f2937" font-weight="bold">'
+        f'text-anchor="middle" font-size="14" fill="#374B65" font-weight="bold">'
         f"{_esc(_fmt_usd(arr_value))}</text>"
     )
 
@@ -1005,7 +1010,7 @@ def _chart_revenue_waterfall(inputs: dict[str, Any] | None) -> str:
         label = f"ARR (as of {arr_as_of})"
     parts.append(
         f'<text x="{_num(bar_x + bar_width / 2):.2f}" y="{_num(margin_top + chart_height + 18):.2f}" '
-        f'text-anchor="middle" font-size="11" fill="#6b7280">{_esc(label)}</text>'
+        f'text-anchor="middle" font-size="11" fill="#7D90A3">{_esc(label)}</text>'
     )
 
     parts.append("</svg>")
@@ -1236,6 +1241,11 @@ def _key_findings(
 
 def compose_html(dir_path: str) -> str:
     """Load artifacts and compose full HTML report."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _theme
+
     all_names = REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS
     artifacts: dict[str, dict[str, Any] | None] = {}
     for name in all_names:
@@ -1283,13 +1293,15 @@ def compose_html(dir_path: str) -> str:
             {revenue_html}
         </section>"""
 
+    brand_css = _theme.brand_css()
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Financial Model Review: {_esc(company_name)}</title>
-    <style>{_css()}</style>
+    <style>{brand_css}{_css()}</style>
 </head>
 <body>
     <header>
@@ -1321,6 +1333,7 @@ def compose_html(dir_path: str) -> str:
     </footer>
     {_tooltip_js()}
     {_collapsible_js()}
+    {_theme.FOOTER_CREDIT_HTML}
 </body>
 </html>
 """

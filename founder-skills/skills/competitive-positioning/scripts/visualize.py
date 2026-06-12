@@ -170,9 +170,9 @@ _STATUS_SCORE: dict[str, float] = {
 }
 
 _DEFENSIBILITY_COLORS: dict[str, str] = {
-    "high": "#10b981",
-    "moderate": "#f59e0b",
-    "low": "#ef4444",
+    "high": "#2F8A56",
+    "moderate": "#C9892B",
+    "low": "#C0392B",
 }
 
 _TRAJECTORY_ARROWS: dict[str, str] = {
@@ -181,15 +181,15 @@ _TRAJECTORY_ARROWS: dict[str, str] = {
     "eroding": "\u2193",  # down arrow
 }
 
-_CLR_PRIMARY = "#0d549d"
-_CLR_ACCENT = "#21a2e3"
+_CLR_PRIMARY = "#0D549D"
+_CLR_ACCENT = "#21A2E3"
 _CLR_STARTUP = "#e11d48"  # distinct rose/red for startup
 
 _CATEGORY_COLORS: dict[str, str] = {
     "_startup": "#e11d48",  # rose/red (matches _CLR_STARTUP)
-    "direct": "#1e40af",  # dark blue
-    "adjacent": "#ea580c",  # orange (NOT #f59e0b — avoids collision with _DEFENSIBILITY_COLORS moderate)
-    "do_nothing": "#9ca3af",  # gray
+    "direct": "#0D549D",  # dark blue
+    "adjacent": "#ea580c",  # orange (avoids collision with _DEFENSIBILITY_COLORS moderate amber)
+    "do_nothing": "#A6AEB5",  # gray
     "emerging": "#8b5cf6",  # purple
     "custom": "#14b8a6",  # teal
 }
@@ -239,7 +239,7 @@ def _build_point_style_lookup(
 
         base_radius = _DEFENSIBILITY_RADII.get(defensibility, 5.0)
         radius = max(base_radius, _STARTUP_MIN_RADIUS) if is_startup else base_radius
-        color = _CATEGORY_COLORS.get(category, _CATEGORY_COLORS.get("direct", "#1e40af"))
+        color = _CATEGORY_COLORS.get(category, _CATEGORY_COLORS.get("direct", "#0D549D"))
 
         lookup[slug] = {
             "category": category,
@@ -256,62 +256,73 @@ def _build_point_style_lookup(
 # ---------------------------------------------------------------------------
 
 
-def _css() -> str:
+def _css(brand_css: str) -> str:
     """Return the full CSS block for the report."""
-    return """
-    <style>
+    return (
+        "\n    <style>\n"
+        + brand_css
+        + """
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-                         "Helvetica Neue", Arial, sans-serif;
-            background: #f9fafb; color: #1f2937; line-height: 1.6;
+            font-family: var(--font-body);
+            background: var(--lool-white); color: var(--lool-ink); line-height: 1.6;
             padding: 2rem; max-width: 1100px; margin: 0 auto;
+            -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
         }
-        h1 { color: #0d549d; font-size: 1.8rem; margin-bottom: 0.25rem; }
+        a { color: var(--lool-azure); }
+        a:hover { color: var(--lool-azure-deep); }
+        h1 { color: var(--lool-blue); font-size: 1.8rem; font-weight: 400; margin-bottom: 0.25rem; }
         h2 {
-            color: #0d549d; font-size: 1.2rem; margin: 2rem 0 1rem;
-            border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem;
+            color: var(--lool-royal); font-size: 1.2rem; font-weight: 500; margin: 2rem 0 1rem;
+            border-bottom: 1px solid var(--lool-line-2); padding-bottom: 0.5rem;
         }
-        .subtitle { color: #6b7280; font-size: 0.9rem; margin-bottom: 0.5rem; }
+        .subtitle { color: var(--lool-mute); font-size: 0.9rem; margin-bottom: 0.5rem; }
         .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
         .chart-box {
-            background: #ffffff; border-radius: 12px; padding: 1.5rem;
-            border: 1px solid #e5e7eb;
+            background: var(--lool-paper); padding: 1.5rem;
+            border: 1px solid var(--lool-line-2);
         }
         .chart-box.full { grid-column: 1 / -1; }
-        .chart-box h2 { border-bottom-color: #334155; margin-top: 0; }
+        .chart-box h2 { border-bottom-color: var(--lool-line-2); margin-top: 0; }
         .badge {
-            display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px;
+            display: inline-block; padding: 0.25rem 0.75rem; border-radius: var(--r-pill);
             font-size: 0.8rem; font-weight: 600; color: #fff;
         }
         .comp-table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.85rem; }
-        .comp-table th { text-align: left; color: #6b7280; padding: 0.5rem; border-bottom: 2px solid #e5e7eb; }
-        .comp-table td { padding: 0.5rem; border-bottom: 1px solid #f3f4f6; }
-        .placeholder { color: #6b7280; font-style: italic; padding: 2rem; text-align: center; }
+        .comp-table th {
+            text-align: left; color: var(--lool-subtle); letter-spacing: 0.06em;
+            padding: 0.5rem; border-bottom: 2px solid var(--lool-line-2);
+        }
+        .comp-table td { padding: 0.5rem; border-bottom: 1px solid var(--lool-line-2); }
+        .placeholder { color: var(--lool-mute); font-style: italic; padding: 2rem; text-align: center; }
         .score-bar {
             display: inline-block; height: 8px; border-radius: 4px;
-            background: #e5e7eb; width: 80px; vertical-align: middle;
+            background: var(--lool-line-2); width: 80px; vertical-align: middle;
         }
         .score-fill { display: block; height: 100%; border-radius: 4px; }
-        .legend { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem; font-size: 0.8rem; color: #6b7280; }
+        .legend {
+            display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem;
+            font-size: 0.8rem; color: var(--lool-mute);
+        }
         .legend-item { display: flex; align-items: center; gap: 0.25rem; }
         .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
         .footer {
             margin-top: 3rem; padding-top: 1rem;
-            border-top: 1px solid #e5e7eb; color: #9ca3af;
+            border-top: 1px solid var(--lool-line-2); color: var(--lool-faint);
             font-size: 0.75rem; text-align: center;
         }
-        .footer a { color: #21a2e3; text-decoration: none; }
+        .footer a { color: var(--lool-azure); text-decoration: none; }
+        .footer a:hover { color: var(--lool-azure-deep); }
         .vanity-warning {
-            color: #f59e0b; font-size: 0.75rem; font-style: italic;
+            color: var(--lool-warning); font-size: 0.75rem; font-style: italic;
             margin-top: 0.25rem;
         }
         .axis-rationale {
-            font-size: 0.75rem; color: #64748b; background: #f8fafc;
-            border: 1px solid #e5e7eb; border-radius: 6px;
+            font-size: 0.75rem; color: var(--lool-mute); background: var(--lool-paper);
+            border: 1px solid var(--lool-line-2);
             padding: 0.75rem; margin-top: 0.5rem; line-height: 1.5;
         }
-        .axis-rationale strong { color: #374151; }
+        .axis-rationale strong { color: var(--lool-slate); }
         svg { max-width: 100%; height: auto; }
         @media (max-width: 768px) {
             body { padding: 1rem; }
@@ -319,10 +330,11 @@ def _css() -> str:
         }
         @media print {
             body { background: #fff; padding: 0; }
-            .chart-box { break-inside: avoid; border: 1px solid #d1d5db; }
+            .chart-box { break-inside: avoid; border: 1px solid var(--lool-line); }
         }
     </style>
 """
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -377,7 +389,9 @@ def _section_header(
         scoring = _as_dict(report.get("scoring_summary"))
         checklist_pct = _num(scoring.get("checklist_score_pct"), -1)
         if checklist_pct >= 0:
-            badges.append(f'<span class="badge" style="background:#6b7280;">Checklist: {checklist_pct:.0f}%</span>')
+            badges.append(
+                f'<span class="badge" style="background:var(--lool-slate-blue);">Checklist: {checklist_pct:.0f}%</span>'
+            )
 
     if _usable(positioning_scores):
         diff = _num(positioning_scores.get("overall_differentiation"), -1)
@@ -387,7 +401,7 @@ def _section_header(
     if _usable(moat_scores):
         startup_data = _as_dict(_as_dict(moat_scores.get("companies")).get("_startup"))
         defensibility = str(startup_data.get("overall_defensibility", "")).lower()
-        color = _DEFENSIBILITY_COLORS.get(defensibility, "#9ca3af")
+        color = _DEFENSIBILITY_COLORS.get(defensibility, "#A6AEB5")
         if defensibility:
             badges.append(
                 f'<span class="badge" style="background:{_esc(color)};">'
@@ -457,23 +471,23 @@ def _chart_positioning_map(
         gy = pad_top + (1.0 - frac) * plot_h
         svg.append(
             f'<line x1="{pad_left:.0f}" y1="{gy:.1f}" x2="{pad_left + plot_w:.0f}" y2="{gy:.1f}" '
-            f'stroke="#e5e7eb" stroke-width="0.5"/>'
+            f'stroke="#D7DBE0" stroke-width="0.5"/>'
         )
         svg.append(
             f'<line x1="{gx:.1f}" y1="{pad_top:.0f}" x2="{gx:.1f}" y2="{pad_top + plot_h:.0f}" '
-            f'stroke="#e5e7eb" stroke-width="0.5"/>'
+            f'stroke="#D7DBE0" stroke-width="0.5"/>'
         )
 
     # Axes
     svg.append(
         f'<line x1="{pad_left:.0f}" y1="{pad_top + plot_h:.0f}" '
         f'x2="{pad_left + plot_w:.0f}" y2="{pad_top + plot_h:.0f}" '
-        f'stroke="#374151" stroke-width="1.5"/>'
+        f'stroke="#374B65" stroke-width="1.5"/>'
     )
     svg.append(
         f'<line x1="{pad_left:.0f}" y1="{pad_top:.0f}" '
         f'x2="{pad_left:.0f}" y2="{pad_top + plot_h:.0f}" '
-        f'stroke="#374151" stroke-width="1.5"/>'
+        f'stroke="#374B65" stroke-width="1.5"/>'
     )
 
     # Vanity indicators — dashed overlay on axis
@@ -481,30 +495,30 @@ def _chart_positioning_map(
         svg.append(
             f'<line x1="{pad_left:.0f}" y1="{pad_top + plot_h + 2:.0f}" '
             f'x2="{pad_left + plot_w:.0f}" y2="{pad_top + plot_h + 2:.0f}" '
-            f'stroke="#f59e0b" stroke-width="2" stroke-dasharray="6,4"/>'
+            f'stroke="#C9892B" stroke-width="2" stroke-dasharray="6,4"/>'
         )
     if y_vanity:
         svg.append(
             f'<line x1="{pad_left - 2:.0f}" y1="{pad_top:.0f}" '
             f'x2="{pad_left - 2:.0f}" y2="{pad_top + plot_h:.0f}" '
-            f'stroke="#f59e0b" stroke-width="2" stroke-dasharray="6,4"/>'
+            f'stroke="#C9892B" stroke-width="2" stroke-dasharray="6,4"/>'
         )
 
     # Axis labels
     x_label = _esc(x_name)
     y_label = _esc(y_name)
     if x_vanity:
-        x_label += ' <tspan fill="#f59e0b" font-size="9">(vanity warning)</tspan>'
+        x_label += ' <tspan fill="#C9892B" font-size="9">(vanity warning)</tspan>'
     if y_vanity:
-        y_label += ' <tspan fill="#f59e0b" font-size="9">(vanity warning)</tspan>'
+        y_label += ' <tspan fill="#C9892B" font-size="9">(vanity warning)</tspan>'
 
     svg.append(
         f'<text x="{pad_left + plot_w / 2:.0f}" y="{svg_h - 5:.0f}" '
-        f'text-anchor="middle" font-size="11" fill="#374151">{x_label}</text>'
+        f'text-anchor="middle" font-size="11" fill="#7D90A3">{x_label}</text>'
     )
     svg.append(
         f'<text x="14" y="{pad_top + plot_h / 2:.0f}" '
-        f'text-anchor="middle" font-size="11" fill="#374151" '
+        f'text-anchor="middle" font-size="11" fill="#7D90A3" '
         f'transform="rotate(-90, 14, {pad_top + plot_h / 2:.0f})">{y_label}</text>'
     )
 
@@ -551,7 +565,7 @@ def _chart_positioning_map(
         label_y = cy - radius - 4
         svg.append(
             f'<text x="{cx:.1f}" y="{label_y:.1f}" text-anchor="middle" '
-            f'font-size="9" font-weight="{font_weight}" fill="#374151" '
+            f'font-size="9" font-weight="{font_weight}" fill="#374B65" '
             f'stroke="rgba(255,255,255,0.7)" stroke-width="2" paint-order="stroke">{label}</text>'
         )
 
@@ -592,20 +606,24 @@ def _chart_legends(point_styles: dict[str, dict[str, Any]] | None) -> str:
 
     # Size legend — uses CSS border-radius spans, NOT <svg><circle>, so tests can distinguish from chart
     parts.append('<div class="chart-box" style="padding: 1rem;">')
-    parts.append('<h3 style="margin: 0 0 0.5rem; font-size: 0.85rem; color: #374151;">Size = Defensibility</h3>')
+    parts.append(
+        '<h3 style="margin: 0 0 0.5rem; font-size: 0.85rem; color: var(--lool-slate);">Size = Defensibility</h3>'
+    )
     parts.append('<div class="size-legend" style="display: flex; gap: 1.5rem; align-items: center;">')
     for label, radius in [("Low", 5), ("Moderate", 8), ("High", 12)]:
         d = radius * 2
         parts.append(
             f'<span style="display: flex; align-items: center; gap: 4px;">'
-            f'<span style="width:{d}px;height:{d}px;border-radius:50%;background:#9ca3af;'
-            f'border:1px solid #e5e7eb;display:inline-block;"></span>'
-            f'<span style="font-size: 0.75rem; color: #6b7280;">{label}</span></span>'
+            f'<span style="width:{d}px;height:{d}px;border-radius:50%;background:#A6AEB5;'
+            f'border:1px solid var(--lool-line);display:inline-block;"></span>'
+            f'<span style="font-size: 0.75rem; color: var(--lool-mute);">{label}</span></span>'
         )
     parts.append("</div>")
 
     # Color legend
-    parts.append('<h3 style="margin: 1rem 0 0.5rem; font-size: 0.85rem; color: #374151;">Color = Category</h3>')
+    parts.append(
+        '<h3 style="margin: 1rem 0 0.5rem; font-size: 0.85rem; color: var(--lool-slate);">Color = Category</h3>'
+    )
     parts.append('<div class="color-legend" style="display: flex; flex-wrap: wrap; gap: 1rem;">')
     legend_items = [
         ("Your Company", _CATEGORY_COLORS["_startup"]),
@@ -620,7 +638,7 @@ def _chart_legends(point_styles: dict[str, dict[str, Any]] | None) -> str:
             f'<span style="display: flex; align-items: center; gap: 4px;">'
             f'<span style="width:12px;height:12px;border-radius:50%;'
             f'background:{color};display:inline-block;"></span>'
-            f'<span style="font-size: 0.75rem; color: #6b7280;">{label}</span></span>'
+            f'<span style="font-size: 0.75rem; color: var(--lool-mute);">{label}</span></span>'
         )
     parts.append("</div></div>")
 
@@ -702,7 +720,7 @@ def _chart_moat_radar(moat_scores: dict[str, Any] | None) -> str:
             px = cx + ring_r * math.cos(a)
             py = cy + ring_r * math.sin(a)
             ring_pts.append(f"{px:.2f},{py:.2f}")
-        svg.append(f'<polygon points="{" ".join(ring_pts)}" fill="none" stroke="#d1d5db" stroke-width="0.5"/>')
+        svg.append(f'<polygon points="{" ".join(ring_pts)}" fill="none" stroke="#D7DBE0" stroke-width="0.5"/>')
 
     # Axis spokes
     for i in range(n):
@@ -710,7 +728,7 @@ def _chart_moat_radar(moat_scores: dict[str, Any] | None) -> str:
         ex = cx + max_r * math.cos(a)
         ey = cy + max_r * math.sin(a)
         svg.append(
-            f'<line x1="{cx:.2f}" y1="{cy:.2f}" x2="{ex:.2f}" y2="{ey:.2f}" stroke="#d1d5db" stroke-width="0.5"/>'
+            f'<line x1="{cx:.2f}" y1="{cy:.2f}" x2="{ex:.2f}" y2="{ey:.2f}" stroke="#D7DBE0" stroke-width="0.5"/>'
         )
 
     # Competitor overlay polygon (if available)
@@ -755,7 +773,7 @@ def _chart_moat_radar(moat_scores: dict[str, Any] | None) -> str:
             anchor = "end"
         label = _MOAT_DIM_LABELS.get(dims[i], dims[i].replace("_", " ").title())
         svg.append(
-            f'<text x="{lx:.2f}" y="{ly:.2f}" text-anchor="{anchor}" font-size="10" fill="#6b7280">{_esc(label)}</text>'
+            f'<text x="{lx:.2f}" y="{ly:.2f}" text-anchor="{anchor}" font-size="10" fill="#7D90A3">{_esc(label)}</text>'
         )
 
     svg.append("</svg>")
@@ -809,7 +827,7 @@ def _section_competitor_table(
 
         comp_data = _as_dict(companies.get(slug))
         defensibility = str(comp_data.get("overall_defensibility", "unknown")).lower()
-        def_color = _DEFENSIBILITY_COLORS.get(defensibility, "#9ca3af")
+        def_color = _DEFENSIBILITY_COLORS.get(defensibility, "#A6AEB5")
         def_label = _esc(defensibility.title())
 
         sort_key = order.get(defensibility, 3)
@@ -874,9 +892,9 @@ def _section_defensibility_timeline(
     svg: list[str] = [f'<svg viewBox="0 0 {svg_w:.0f} {svg_h:.0f}" xmlns="http://www.w3.org/2000/svg">']
 
     trajectory_colors = {
-        "building": "#10b981",
-        "stable": "#6b7280",
-        "eroding": "#ef4444",
+        "building": "#2F8A56",
+        "stable": "#A6AEB5",
+        "eroding": "#C0392B",
     }
 
     for i, dim_id in enumerate(_CANONICAL_MOAT_DIMS):
@@ -893,17 +911,17 @@ def _section_defensibility_timeline(
                 break
 
         arrow = _TRAJECTORY_ARROWS.get(trajectory, "\u2192")
-        color = trajectory_colors.get(trajectory, "#6b7280")
+        color = trajectory_colors.get(trajectory, "#A6AEB5")
         score = _STATUS_SCORE.get(status, 0.0)
 
         # Label
         svg.append(
             f'<text x="{label_w - 8:.0f}" y="{y + 4:.0f}" text-anchor="end" '
-            f'font-size="10" fill="#374151">{_esc(label)}</text>'
+            f'font-size="10" fill="#374B65">{_esc(label)}</text>'
         )
 
         # Bar background
-        svg.append(f'<rect x="{label_w:.0f}" y="{y - 6:.0f}" width="{bar_w:.0f}" height="12" rx="6" fill="#e5e7eb"/>')
+        svg.append(f'<rect x="{label_w:.0f}" y="{y - 6:.0f}" width="{bar_w:.0f}" height="12" rx="6" fill="#D7DBE0"/>')
 
         # Bar fill
         fill_w = max(4, score * bar_w)
@@ -919,7 +937,7 @@ def _section_defensibility_timeline(
         # Trajectory label
         svg.append(
             f'<text x="{label_w + bar_w + 30:.0f}" y="{y + 3:.0f}" '
-            f'font-size="9" fill="#6b7280">{_esc(_humanize(trajectory))}</text>'
+            f'font-size="9" fill="#7D90A3">{_esc(_humanize(trajectory))}</text>'
         )
 
     svg.append("</svg>")
@@ -934,6 +952,13 @@ def _section_defensibility_timeline(
 
 def compose_html(dir_path: str) -> str:
     """Load artifacts and compose the full HTML document."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _theme
+
+    brand_css = _theme.brand_css()
+
     all_names = REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS
     artifacts: dict[str, dict[str, Any] | None] = {}
     for name in all_names:
@@ -1018,10 +1043,11 @@ def compose_html(dir_path: str) -> str:
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>{page_title}</title>
-{_css()}
+{_css(brand_css)}
 </head>
 <body>
 {body}
+{_theme.FOOTER_CREDIT_HTML}
 </body>
 </html>
 """

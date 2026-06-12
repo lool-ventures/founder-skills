@@ -330,8 +330,8 @@ def test_bubble_color_by_category() -> None:
         circles = re.findall(r"<circle[^>]*>", svg_content)
         startup_circles = [c for c in circles if 'stroke="#fff"' in c]
         assert all("#e11d48" in c for c in startup_circles), "_startup circles should be rose/red"
-        assert any("#1e40af" in c for c in circles), "direct competitors should be dark blue"
-        assert any("#9ca3af" in c for c in circles), "do_nothing should be gray"
+        assert any("#0D549D" in c for c in circles), "direct competitors should be dark blue"
+        assert any("#A6AEB5" in c for c in circles), "do_nothing should be gray"
 
 
 def test_startup_minimum_radius() -> None:

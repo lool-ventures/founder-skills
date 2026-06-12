@@ -467,23 +467,30 @@ def _build_html_string(
     chartjs_source: str,
 ) -> str:
     """Build the full HTML document string."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _theme
+
     # CSS built as list to keep lines under 120 chars
     css_lines = [
         "* { margin: 0; padding: 0; box-sizing: border-box; }",
         "body {",
-        "  font-family: -apple-system, BlinkMacSystemFont,",
-        "    'Segoe UI', Roboto, sans-serif;",
-        "  background: #f5f5f7; color: #1d1d1f; padding: 1rem;",
+        "  font-family: var(--font-body);",
+        "  background: var(--lool-white); color: var(--lool-ink); padding: 1rem;",
+        "  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;",
         "}",
         ".header {",
-        "  background: #fff; border-radius: 12px;",
+        "  background: var(--lool-paper); border: 1px solid var(--lool-line-2);",
         "  padding: 1.5rem; margin-bottom: 1rem;",
-        "  box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
         "}",
-        ".header h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }",
-        ".header .meta { color: #86868b; font-size: 0.875rem; }",
+        ".header h1 {",
+        "  font-size: 1.5rem; margin-bottom: 0.25rem;",
+        "  color: var(--lool-blue); font-weight: 400;",
+        "}",
+        ".header .meta { color: var(--lool-mute); font-size: 0.875rem; }",
         ".header .headline {",
-        "  margin-top: 0.75rem; color: #1d1d1f;",
+        "  margin-top: 0.75rem; color: var(--lool-ink);",
         "  font-size: 1rem; line-height: 1.5;",
         "}",
         ".tab-bar {",
@@ -491,23 +498,27 @@ def _build_html_string(
         "  margin-bottom: 1rem; flex-wrap: wrap;",
         "}",
         ".tab {",
-        "  padding: 0.5rem 1rem; border: 1px solid #d2d2d7;",
-        "  border-radius: 8px; background: #fff;",
+        "  padding: 0.5rem 1rem; border: 1px solid var(--lool-line-form);",
+        "  border-radius: var(--r-input); background: var(--lool-white);",
+        "  font-family: var(--font-body); color: var(--lool-ink);",
         "  cursor: pointer; font-size: 0.875rem;",
         "  transition: all 0.2s;",
         "}",
-        ".tab:hover:not(.disabled) { background: #e8e8ed; }",
+        ".tab:hover:not(.disabled) { background: var(--lool-paper-2); }",
         ".tab.active {",
-        "  background: #0071e3; color: #fff; border-color: #0071e3;",
+        "  background: var(--lool-blue); color: var(--lool-white);",
+        "  border-color: var(--lool-blue);",
         "}",
+        ".tab.active:hover:not(.disabled) { background: var(--lool-blue-deep); }",
         ".tab.disabled {",
-        "  opacity: 0.4; cursor: not-allowed; background: #f5f5f7;",
+        "  opacity: 0.4; cursor: not-allowed; background: var(--lool-paper);",
         "}",
         ".content {",
-        "  background: #fff; border-radius: 12px;",
+        "  background: var(--lool-paper); border: 1px solid var(--lool-line-2);",
         "  padding: 1.5rem; min-height: 400px;",
-        "  box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
         "}",
+        ".content h2 { color: var(--lool-royal); font-weight: 500; }",
+        ".content h3 { color: var(--lool-royal); font-weight: 500; }",
         ".lens-panel { display: none; }",
         ".lens-panel.active { display: block; }",
         ".slider-group { margin: 1rem 0; }",
@@ -517,57 +528,68 @@ def _build_html_string(
         ".slider-row { display: flex; gap: 8px; align-items: center; }",
         '.slider-row input[type="range"] { flex: 1; }',
         ".slider-edit {",
-        "  width: 80px; padding: 2px 6px; border: 1px solid #d1d5db; border-radius: 4px;",
-        "  font-family: inherit; font-size: 0.85rem; text-align: right;",
-        "  background: #f9fafb; color: #1d1d1f;",
+        "  width: 80px; padding: 2px 6px; border: 1px solid var(--lool-line-form);",
+        "  border-radius: var(--r-input);",
+        "  font-family: var(--font-mono); font-size: 0.85rem; text-align: right;",
+        "  background: var(--lool-white); color: var(--lool-ink);",
         "}",
-        ".slider-edit:focus { outline: none; border-color: #0071e3; background: #fff; }",
-        ".slider-unit { font-size: 0.8rem; color: #86868b; min-width: 24px; }",
-        ".slider-value { font-size: 0.875rem; color: #86868b; }",
+        ".slider-edit:focus {",
+        "  outline: none; border-color: var(--lool-azure);",
+        "  background: var(--lool-white);",
+        "}",
+        ".slider-unit { font-size: 0.8rem; color: var(--lool-mute); min-width: 24px; }",
+        ".slider-value { font-size: 0.875rem; color: var(--lool-mute); }",
         ".badge {",
         "  display: inline-block; padding: 0.125rem 0.5rem;",
-        "  border-radius: 4px; font-size: 0.75rem; font-weight: 600;",
+        "  border-radius: var(--r-input); font-size: 0.75rem; font-weight: 600;",
         "}",
-        ".badge.strong { background: #d1fae5; color: #065f46; }",
-        ".badge.acceptable { background: #fef3c7; color: #92400e; }",
-        ".badge.warning { background: #fed7aa; color: #9a3412; }",
-        ".badge.fail { background: #fecaca; color: #991b1b; }",
+        ".badge.strong { background: var(--lool-success-tint); color: var(--lool-success); }",
+        ".badge.acceptable { background: var(--lool-line-2); color: var(--lool-royal); }",
+        ".badge.warning { background: var(--lool-warning-tint); color: var(--lool-warning); }",
+        ".badge.fail { background: var(--lool-danger-tint); color: var(--lool-danger); }",
         ".chart-container {",
         "  position: relative; height: 300px; margin: 1rem 0;",
         "}",
         ".commentary-box {",
-        "  background: #f0f4ff; border-left: 4px solid #0071e3;",
-        "  padding: 1rem; border-radius: 0 8px 8px 0; margin: 1rem 0;",
+        "  background: var(--lool-line-2); border-left: 3px solid var(--lool-azure);",
+        "  padding: 1rem; margin: 1rem 0;",
         "}",
         ".stub-reason {",
-        "  background: #fef3c7; border-left: 4px solid #f59e0b;",
-        "  padding: 0.75rem; border-radius: 0 8px 8px 0;",
+        "  background: var(--lool-warning-tint); border-left: 3px solid var(--lool-warning);",
+        "  padding: 0.75rem;",
         "  margin: 0.5rem 0; font-size: 0.875rem;",
         "}",
         ".reset-btn {",
-        "  padding: 0.5rem 1rem; border: 1px solid #d2d2d7;",
-        "  border-radius: 8px; background: #fff;",
+        "  padding: 0.5rem 1rem; border: 1px solid var(--lool-line-form);",
+        "  border-radius: var(--r-input); background: var(--lool-white);",
+        "  font-family: var(--font-body); color: var(--lool-ink);",
         "  cursor: pointer; font-size: 0.875rem;",
         "}",
-        ".reset-btn:hover { background: #e8e8ed; }",
+        ".reset-btn:hover { background: var(--lool-paper-2); }",
         ".metrics-strip {",
         "  display: flex; align-items: center; gap: 0.5rem;",
         "  flex-wrap: wrap; margin: 0.75rem 0;",
         "}",
         ".metrics-table th, .metrics-table td {",
         "  text-align: left; padding: 0.5rem 0.75rem;",
-        "  border-bottom: 1px solid #e8e8ed;",
+        "  border-bottom: 1px solid var(--lool-line-2);",
         "}",
-        ".metrics-table th { font-weight: 600; color: #86868b; }",
+        ".metrics-table th {",
+        "  font-weight: 600; color: var(--lool-subtle);",
+        "  text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.06em;",
+        "}",
         ".scenario-table th, .scenario-table td {",
         "  text-align: left; padding: 0.5rem 0.75rem;",
-        "  border-bottom: 1px solid #e8e8ed;",
+        "  border-bottom: 1px solid var(--lool-line-2);",
         "}",
-        ".scenario-table th { font-weight: 600; color: #86868b; }",
-        ".clickable:hover { background: #f5f5f7; }",
-        ".clickable.active { background: #e8f0fe; }",
+        ".scenario-table th {",
+        "  font-weight: 600; color: var(--lool-subtle);",
+        "  text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.06em;",
+        "}",
+        ".clickable:hover { background: var(--lool-paper-2); }",
+        ".clickable.active { background: var(--lool-line-2); }",
     ]
-    css = "\n".join(css_lines)
+    css = _theme.brand_css() + "\n" + "\n".join(css_lines)
 
     hl_div = "<div class='headline'>" + headline + "</div>" if headline else ""
 
@@ -1031,9 +1053,10 @@ function commentaryBox(lensKey) {{
   var parts = [];
   if (c.callout) parts.push('<div class="commentary-box">' + escHtml(c.callout) + '</div>');
   if (c.highlight) parts.push('<div class="commentary-box"'
-    + ' style="border-color:#86868b;background:#f9f9fb">' + escHtml(c.highlight) + '</div>');
+    + ' style="border-color:var(--lool-faint);background:var(--lool-paper-2)">' + escHtml(c.highlight) + '</div>');
   if (c.watch_out) parts.push('<div class="commentary-box"'
-    + ' style="border-color:#f59e0b;background:#fffbeb">' + escHtml(c.watch_out) + '</div>');
+    + ' style="border-color:var(--lool-warning);background:var(--lool-warning-tint)">'
+    + escHtml(c.watch_out) + '</div>');
   return parts.join('');
 }}
 
@@ -1082,8 +1105,9 @@ function renderRunway() {{
     ' <span style="margin-left:12px">Runway: <strong>' + months + ' months</strong></span>' +
     mvgSpan + '</div>';
   if (DATA.engine.growth_rate_missing) {{
-    markup += '<div style="background:#fef3c7;color:#92400e;padding:8px 12px;'
-      + 'border-radius:6px;font-size:0.85rem;margin:8px 0">'
+    markup += '<div style="background:var(--lool-warning-tint);color:var(--lool-ink);'
+      + 'border-left:3px solid var(--lool-warning);padding:8px 12px;'
+      + 'font-size:0.85rem;margin:8px 0">'
       + 'Growth rate not provided \u2014 adjust the slider to explore scenarios.</div>';
   }}
   markup += commentaryBox('runway');
@@ -1164,15 +1188,15 @@ function renderRunwayChart(result) {{
         {{
           label: 'Cash Balance',
           data: cashData,
-          borderColor: '#0071e3',
-          backgroundColor: 'rgba(0,113,227,0.1)',
+          borderColor: '#0D549D',
+          backgroundColor: 'rgba(13,84,157,0.1)',
           fill: true,
           tension: 0.2
         }},
         {{
           label: 'Revenue',
           data: revData,
-          borderColor: '#34c759',
+          borderColor: '#2F8A56',
           borderDash: [5, 5],
           fill: false,
           tension: 0.2
@@ -1214,10 +1238,10 @@ function renderRaisePlanner() {{
 
   var target = state.targetRunway;
   var markup = '<h2>Raise Planner</h2>';
-  markup += '<div id="raise-summary" style="background:#f0f7ff;border-left:4px solid #2563eb;'
-    + 'padding:12px 16px;border-radius:4px;margin-bottom:16px;">'
-    + '<div id="raise-headline" style="font-size:0.95rem;font-weight:600;color:#1e40af;"></div>'
-    + '<div id="raise-detail" style="font-size:0.8rem;color:#3b82f6;margin-top:4px;"></div>'
+  markup += '<div id="raise-summary" style="background:#E5EEF8;border-left:3px solid #0D549D;'
+    + 'padding:12px 16px;margin-bottom:16px;">'
+    + '<div id="raise-headline" style="font-size:0.95rem;font-weight:600;color:#0D549D;"></div>'
+    + '<div id="raise-detail" style="font-size:0.8rem;color:#365A8A;margin-top:4px;"></div>'
     + '</div>';
   markup += commentaryBox('raise_planner');
   markup += '<div class="chart-container"><canvas id="chart-raise"></canvas></div>';
@@ -1265,8 +1289,8 @@ function renderRaisePlanner() {{
         {{
           label: 'Runway (months)',
           data: [],
-          borderColor: '#16a34a',
-          backgroundColor: 'rgba(22, 163, 106, 0.08)',
+          borderColor: '#2F8A56',
+          backgroundColor: 'rgba(47, 138, 86, 0.08)',
           fill: true,
           tension: 0.3,
           pointRadius: 0,
@@ -1276,7 +1300,7 @@ function renderRaisePlanner() {{
         {{
           label: 'Target',
           data: [],
-          borderColor: '#2563eb',
+          borderColor: '#0D549D',
           borderDash: [6, 3],
           borderWidth: 1.5,
           pointRadius: 0,
@@ -1309,20 +1333,20 @@ function renderRaisePlanner() {{
       scales: {{
         x: {{
           type: 'linear',
-          title: {{ display: true, text: 'Raise Amount', font: {{ size: 12, weight: '600' }}, color: '#6b7280' }},
+          title: {{ display: true, text: 'Raise Amount', font: {{ size: 12, weight: '600' }}, color: '#7D90A3' }},
           ticks: {{
             callback: function(v) {{ return '$' + (v / 1e6).toFixed(0) + 'M'; }},
             stepSize: 2000000,
-            color: '#9ca3af'
+            color: '#A6AEB5'
           }},
-          grid: {{ color: '#f3f4f6' }},
+          grid: {{ color: '#D7DBE0' }},
           min: 0,
           max: maxRaise
         }},
         y: {{
-          title: {{ display: true, text: 'Runway (months)', font: {{ size: 12, weight: '600' }}, color: '#6b7280' }},
-          ticks: {{ color: '#9ca3af' }},
-          grid: {{ color: '#f3f4f6' }},
+          title: {{ display: true, text: 'Runway (months)', font: {{ size: 12, weight: '600' }}, color: '#7D90A3' }},
+          ticks: {{ color: '#A6AEB5' }},
+          grid: {{ color: '#D7DBE0' }},
           min: 0,
           max: 65
         }}
@@ -1374,20 +1398,20 @@ function updateRaisePlannerChart() {{
       headline.textContent = 'Already default alive at ' + fmtPct(state.growthRate, 1) + ' MoM growth';
       detail.textContent = 'Pre-raise runway exceeds ' + DATA.engine.max_months + ' months. '
         + 'Try lowering the growth rate to see when a raise becomes necessary.';
-      summaryBox.style.borderColor = '#16a34a';
-      summaryBox.style.background = '#f0fdf4';
+      summaryBox.style.borderColor = '#2F8A56';
+      summaryBox.style.background = '#EAF4EE';
     }} else if (minViable !== null) {{
       headline.textContent = 'Minimum viable raise: $'
         + (minViable / 1e6).toFixed(1) + 'M (reaches ' + target + '-month target)';
       detail.textContent = 'Pre-raise runway: ' + preRaise
         + ' months at ' + fmtPct(state.growthRate, 1) + ' MoM growth.';
-      summaryBox.style.borderColor = '#2563eb';
-      summaryBox.style.background = '#f0f7ff';
+      summaryBox.style.borderColor = '#0D549D';
+      summaryBox.style.background = '#E5EEF8';
     }} else {{
       headline.textContent = 'No raise amount in range reaches ' + target + '-month target';
       detail.textContent = 'Pre-raise runway: ' + preRaise + ' months. Consider reducing burn or increasing growth.';
-      summaryBox.style.borderColor = '#dc2626';
-      summaryBox.style.background = '#fef2f2';
+      summaryBox.style.borderColor = '#C0392B';
+      summaryBox.style.background = '#FAECEA';
     }}
   }}
 
@@ -1399,7 +1423,7 @@ function updateRaisePlannerChart() {{
   charts.raise.data.datasets[0].segment = {{
     borderColor: function(ctx2) {{
       var y = ctx2.p1.parsed.y;
-      return y >= target ? '#16a34a' : '#dc2626';
+      return y >= target ? '#2F8A56' : '#C0392B';
     }}
   }};
 
@@ -1439,7 +1463,7 @@ function renderUnitEconomics() {{
     explorable[m.id] = !!METRIC_FORMULAS[m.id];
   }});
 
-  markup += '<p style="font-size:0.8rem;color:#86868b;margin-bottom:0.5rem">'
+  markup += '<p style="font-size:0.8rem;color:var(--lool-mute);margin-bottom:0.5rem">'
     + 'Click a metric with \u25b6 to explore what-if scenarios</p>';
   markup += '<table class="metrics-table" style="width:100%;border-collapse:collapse;font-size:0.875rem">';
   markup += '<tr><th></th><th>Metric</th><th>Value</th><th>Rating</th><th>Benchmark</th></tr>';
@@ -1472,9 +1496,9 @@ function renderUnitEconomics() {{
     }}
 
     var ratingCell = rating === 'not_rated'
-      ? '<td style="color:#86868b">\u2014</td>'
+      ? '<td style="color:var(--lool-mute)">\u2014</td>'
       : '<td><span class="badge ' + rating + '">' + icon + ' ' + rating + '</span></td>';
-    var arrow = canExplore ? '<td style="color:#0071e3;font-size:0.7rem">\u25b6</td>' : '<td></td>';
+    var arrow = canExplore ? '<td style="color:var(--lool-azure);font-size:0.7rem">\u25b6</td>' : '<td></td>';
     var trAttr = canExplore
       ? ' id="ue-row-' + m.id + '" class="clickable"'
         + ' onclick="selectMetric(\\x27' + m.id + '\\x27)" style="cursor:pointer"'
@@ -1555,7 +1579,7 @@ function selectMetric(metricId) {{
     var icon = ratingIcon(rating);
     var valStr = newVal !== null ? fmt(newVal) : 'N/A';
     var badgeHtml = rating === 'not_rated'
-      ? '<span style="color:#86868b;font-size:0.85rem;margin-left:8px">no benchmark</span>'
+      ? '<span style="color:var(--lool-mute);font-size:0.85rem;margin-left:8px">no benchmark</span>'
       : ' <span class="badge ' + rating + '">' + icon + ' ' + rating + '</span>';
     var ueEl = document.getElementById('ue-result');
     if (ueEl) setContent(ueEl,
@@ -1672,8 +1696,9 @@ function renderStressTest() {{
   if (mvgText) markup += ' <span style="margin-left:12px">' + mvgText + '</span>';
   markup += '</div>';
   if (DATA.engine.growth_rate_missing) {{
-    markup += '<div style="background:#fef3c7;color:#92400e;padding:8px 12px;'
-      + 'border-radius:6px;font-size:0.85rem;margin:8px 0">'
+    markup += '<div style="background:var(--lool-warning-tint);color:var(--lool-ink);'
+      + 'border-left:3px solid var(--lool-warning);padding:8px 12px;'
+      + 'font-size:0.85rem;margin:8px 0">'
       + 'Growth rate not provided \u2014 adjust the slider to explore scenarios.</div>';
   }}
 
@@ -1681,7 +1706,7 @@ function renderStressTest() {{
   markup += '<div class="chart-container"><canvas id="chart-stress"></canvas></div>';
 
   // Disclaimer
-  markup += '<p style="font-size:0.75rem;color:#86868b;margin:4px 0 12px">'
+  markup += '<p style="font-size:0.75rem;color:var(--lool-mute);margin:4px 0 12px">'
     + 'Interactive projection is approximate &mdash; '
     + 'scenario table below reflects the full review</p>';
 
@@ -1746,15 +1771,15 @@ function renderStressChart(result) {{
         {{
           label: 'Cash balance',
           data: cashData,
-          borderColor: '#0071e3',
-          backgroundColor: 'rgba(0, 113, 227, 0.1)',
+          borderColor: '#0D549D',
+          backgroundColor: 'rgba(13, 84, 157, 0.1)',
           fill: true,
           tension: 0.2
         }},
         {{
           label: '$0',
           data: zeroLine,
-          borderColor: '#86868b',
+          borderColor: '#A6AEB5',
           borderDash: [5, 5],
           pointRadius: 0,
           fill: false
@@ -1799,6 +1824,7 @@ function renderStressChart(result) {{
   }}
 }})();
 </script>
+{_theme.FOOTER_CREDIT_HTML}
 </body>
 </html>"""
 

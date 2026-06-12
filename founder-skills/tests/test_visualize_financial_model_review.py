@@ -333,6 +333,16 @@ def test_complete_artifacts() -> None:
     assert "TestCo" in stdout
 
 
+def test_brand_theme_present() -> None:
+    """Output carries the brand tokens, embedded font, and footer credit."""
+    d = _make_artifact_dir()
+    rc, stdout, _stderr = run_script_raw("visualize.py", ["--dir", d])
+    assert rc == 0
+    assert "--lool-blue: #0D549D" in stdout
+    assert "font-family: 'Sora'" in stdout
+    assert "founder-skills by lool ventures" in stdout
+
+
 def test_missing_optional_artifact() -> None:
     """Missing runway.json (optional for viz) -- HTML renders with placeholder, exit 0."""
     d = _make_artifact_dir(overrides={"runway.json": None})

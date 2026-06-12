@@ -449,8 +449,8 @@ def test_slide_map_diverging_bars() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, _ = _run_viz(d)
     assert rc == 0
-    assert "#10b981" in stdout, "Expected green (strength) bars"
-    assert "#ef4444" in stdout, "Expected red (weakness) bars"
+    assert "#2F8A56" in stdout, "Expected green (strength) bars"
+    assert "#C0392B" in stdout, "Expected red (weakness) bars"
     assert "Purpose" in stdout
     assert "Problem" in stdout
     assert "Solution" in stdout
@@ -514,8 +514,8 @@ def test_slide_map_legend_missing_color_matches_chart() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, _ = _run_viz(d)
     assert rc == 0
-    # The missing-slide dashed lines use stroke #9ca3af; the legend swatch must too.
-    assert "#9ca3af" in stdout
+    # The missing-slide dashed lines use stroke #A6AEB5; the legend swatch must too.
+    assert "#A6AEB5" in stdout
     assert "#52525b" not in stdout
 
 
@@ -551,9 +551,9 @@ def test_duplicate_slide_number_keeps_first() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, _ = _run_viz(d)
     assert rc == 0
-    # First entry: 2 strengths, 0 weaknesses -> green (#10b981)
+    # First entry: 2 strengths, 0 weaknesses -> green (#2F8A56)
     # If second entry overwrote: 0 strengths, 3 weaknesses -> red
-    assert "#10b981" in stdout, "First slide entry (green) should be kept"
+    assert "#2F8A56" in stdout, "First slide entry (green) should be kept"
 
 
 # ---------------------------------------------------------------------------
