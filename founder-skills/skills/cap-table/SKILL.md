@@ -65,7 +65,7 @@ Each lane produces normalized `instruments.json` and/or `cap_state.json` plus an
 
 - **Lane 1 — Single instrument (PDF / DOCX).** Typical: 5–15 page SAFE, term sheet, convertible note, option plan, **or Articles of Association**. Main thread reads via the Read tool (native PDF support, up to 20 pages per call; longer docs use `pages` parameter). For SAFEs/notes/term-sheets/option-plans: dispatch Context A `INSTRUMENT_EXTRACTION`; pipe returned JSON through `extract_instrument.py`. For AoAs: dispatch Context A `ARTICLES_OF_ASSOCIATION_EXTRACTION`; pipe returned JSON through `extract_aoa.py` which validates + merges preferred-series terms into `inputs.json.preferred_series[]`. User confirmation via `AskUserQuestion` before math runs.
 - **Lane 2 — Carta XLSX export.** Typical: multi-sheet XLSX (Securities, Convertibles, Stakeholders). `extract_cap_table.py --mode=carta` reads the sheet-name fingerprint and maps known columns → canonical schema. User confirms ambiguous mappings. See `references/carta-pulley-mapping.md` for the column-mapping table. Pulley is not yet supported end-to-end (`--mode=pulley` is a stub that returns a structured blocker pointing to `--mode=freeform`); restore when a real Pulley XLSX is available to verify against. **Carta exports carry no founder identities or pool structure — Lane 2 writes `instruments.json` + `extraction_audit.json` ONLY; always build `inputs.json` from founder answers (one batched `AskUserQuestion`: founders + share counts, pool authorized/issued/unallocated).**
-- **Lane 3 — Freeform spreadsheet (founder's Excel).** Arbitrary structure. `extract_cap_table.py --mode=freeform` extracts cells + sheet structure. Dispatches Context A `SPREADSHEET_STRUCTURE_DETECTION` to identify cell semantics. Validation gate enforces per-field confidence before commit.
+- **Lane 3 — Freeform spreadsheet (founder's Excel).** Arbitrary structure. `extract_cap_table.py --mode=auto` confirms the workbook is freeform (prints `detected_format` + sheet names; exits non-zero for freeform by design). The main thread reads the cell grid itself (openpyxl snippet in `references/lanes/lane-3-freeform.md`), dispatches Context A `SPREADSHEET_STRUCTURE_DETECTION` to identify cell semantics, then pipes the returned blocks through `extract_cap_table.py --mode=freeform` for validation. Validation gate enforces per-field confidence before commit.
 - **Lane 4 — Structured JSON paste / conversational.** Founder pastes pre-built JSON or describes their cap-table in chat. Direct heredoc into `inputs.json` / `instruments.json`; still flows through `extract_cap_table.py --mode=validate` for schema enforcement.
 
 ## Available Scripts
@@ -283,7 +283,7 @@ cat <<'EXTRACT_EOF' | python3 "$SCRIPTS/extract_instrument.py" \
 EXTRACT_EOF
 ```
 
-`extract_instrument.py` reads the sub-agent JSON from **stdin** and updates `--instruments` **in place** — there is no `-o` flag. If the id already exists in the target array you'll get `E_DUPLICATE_INSTRUMENT_ID`; re-run with `--replace` to overwrite the existing entry instead.
+`extract_instrument.py` reads the sub-agent JSON from **stdin** and updates `--instruments` **in place**. The `-o/--output` flag writes a JSON receipt confirming the write (does not change where instruments are stored). If the id already exists in the target array you'll get `E_DUPLICATE_INSTRUMENT_ID`; re-run with `--replace` to overwrite the existing entry instead.
 
 **Dispatch independence rule (CRITICAL):** the sub-agent dispatch prompt for `INSTRUMENT_EXTRACTION` contains the document text and the GENERIC extraction rules only. NEVER include per-document hints, expected values, or pre-decided classifications in the dispatch prompt (e.g. "this doc's form is cap_plus_discount", "use issuance_date 2024-01-15") — the sub-agent's reading must be independent. The verification stack (`evidence_verifier.py` → `invariant_checker.py` → `cross_checker.py`) exists to catch divergence; a led witness cannot diverge. Generic normalization rules (e.g. '"Discount Rate is 80%" means multiplier 0.80') are field semantics, not per-document answers — those belong in the dispatch prompt.
 
@@ -473,12 +473,16 @@ python3 "$SCRIPTS/explore.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/explorer.html"
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash
-COACHING_PAYLOAD="$(python3 -c '
+python3 -c '
 import json, sys
 data = json.load(open(sys.argv[1]))
 print(json.dumps(data["coaching_payload"], indent=2))
-' "$REVIEW_DIR/report.json")"
+' "$REVIEW_DIR/report.json"
 ```
+
+The payload prints to stdout — copy it from the tool result into the dispatch
+prompt below. (Never capture it into a shell variable: each Bash call runs in a
+fresh shell, so the variable would be unreadable and gone.)
 
 **Dispatch prompt template:**
 
@@ -490,7 +494,7 @@ You are dispatched to add coaching commentary to a cap-table report.
 The compose_report.py script has finished. The structured `coaching_payload`
 from report.json is:
 
-<paste $COACHING_PAYLOAD JSON here verbatim>
+<paste the coaching_payload JSON printed by the previous Bash command here verbatim>
 
 Follow your agent body's Context B procedure (POST_COMPOSE_COACHING):
 

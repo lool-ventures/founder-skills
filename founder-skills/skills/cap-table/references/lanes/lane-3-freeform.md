@@ -2,16 +2,38 @@
 
 Typical input: a founder's own Excel file with arbitrary structure — not Carta, not Pulley, no fixed schema.
 
-## Extract the cell grid
+## Confirm the format, then extract the cell grid
 
-The Python helper reads the workbook and emits the cell grid + sheet structure:
+First confirm the workbook really is freeform (not a Carta/Pulley export that should take Lane 2):
 
 ```bash
-python3 "$SCRIPTS/extract_cap_table.py" --mode=freeform_extract --xlsx "$XLSX_PATH" \
-  -o "$REVIEW_DIR/.staging/cell_grid.json" --pretty
+python3 "$SCRIPTS/extract_cap_table.py" --mode=auto --xlsx "$XLSX_PATH" || true
 ```
 
-The grid contains, per sheet: sheet name, dimensions, cell values per row, and any merged-cell ranges.
+For a freeform workbook this prints `{"ok": false, "detected_format": "freeform", "sheet_names": [...]}` and exits non-zero — that is the expected confirmation, not an error (the `|| true` keeps the expected exit code from reading as a failure). It does not write any artifact. (If it detects Carta or Pulley, switch to Lane 2.)
+
+The script has no grid-dump mode, so the main thread reads the cell grid itself:
+
+```bash
+python3 - "$XLSX_PATH" <<'GRID_EOF'
+import json, sys
+
+import openpyxl
+
+wb = openpyxl.load_workbook(sys.argv[1], data_only=True)
+grid = {}
+for ws in wb.worksheets:
+    rows = [list(row) for row in ws.iter_rows(values_only=True)]
+    grid[ws.title] = {
+        "dimensions": ws.dimensions,
+        "rows": rows,
+        "merged_ranges": [str(r) for r in ws.merged_cells.ranges],
+    }
+print(json.dumps(grid, default=str))
+GRID_EOF
+```
+
+The printed grid contains, per sheet: sheet name, dimensions, cell values per row, and any merged-cell ranges. Paste it into the dispatch prompt below.
 
 ## Dispatch Context A — `SPREADSHEET_STRUCTURE_DETECTION`
 
