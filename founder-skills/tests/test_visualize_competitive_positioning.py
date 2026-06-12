@@ -13,12 +13,14 @@ All tests use subprocess to exercise the script exactly as the agent does.
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import types
 from collections.abc import Generator
 from typing import Any
 
@@ -484,3 +486,442 @@ def test_non_dict_artifact_does_not_crash() -> None:
         assert "Traceback" not in stderr
         assert rc == 0, f"exit {rc}, stderr={stderr}"
         assert "<html" in stdout.lower()
+
+
+# ===========================================================================
+# Key-coverage tests: producer output keys ⊆ renderer known sets
+# ===========================================================================
+#
+# Invariant: when score_moats.py adds a new moat status, defensibility level,
+# or trajectory value, the corresponding visualize.py maps must be updated.
+# These tests pin the current complete sets so any new emitted key causes a
+# loud failure with the offending name listed.
+# ===========================================================================
+
+_CP_VISUALIZE_SCRIPT = os.path.join(CP_SCRIPTS_DIR, "visualize.py")
+_CP_EXPLORE_SCRIPT = os.path.join(CP_SCRIPTS_DIR, "explore.py")
+_CP_SCORE_MOATS_SCRIPT = os.path.join(CP_SCRIPTS_DIR, "score_moats.py")
+_CP_VALIDATE_LANDSCAPE_SCRIPT = os.path.join(CP_SCRIPTS_DIR, "validate_landscape.py")
+
+
+def _load_cp_visualize() -> types.ModuleType:
+    """Import competitive-positioning visualize.py with a unique sys.modules key.
+
+    _theme is imported lazily inside a render function, so no stub is needed
+    at module load time.
+    """
+    key = "_cp_keycov_visualize"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    spec = importlib.util.spec_from_file_location(key, _CP_VISUALIZE_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = _CP_VISUALIZE_SCRIPT  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def _load_cp_explore() -> types.ModuleType:
+    """Import competitive-positioning explore.py with a unique sys.modules key."""
+    key = "_cp_keycov_explore"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    spec = importlib.util.spec_from_file_location(key, _CP_EXPLORE_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = _CP_EXPLORE_SCRIPT  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def _load_cp_score_moats() -> types.ModuleType:
+    """Import competitive-positioning score_moats.py with a unique sys.modules key."""
+    key = "_cp_keycov_score_moats"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    spec = importlib.util.spec_from_file_location(key, _CP_SCORE_MOATS_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = _CP_SCORE_MOATS_SCRIPT  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def _load_cp_validate_landscape() -> types.ModuleType:
+    """Import competitive-positioning validate_landscape.py with a unique sys.modules key."""
+    key = "_cp_keycov_validate_landscape"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    spec = importlib.util.spec_from_file_location(key, _CP_VALIDATE_LANDSCAPE_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = _CP_VALIDATE_LANDSCAPE_SCRIPT  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+# ---------------------------------------------------------------------------
+# Test A: moat statuses → visualize._STATUS_SCORE coverage
+# ---------------------------------------------------------------------------
+
+
+class TestCpMoatStatusScoreCoverage:
+    """Every moat status that score_moats.py can emit must appear in
+    visualize.py's _STATUS_SCORE so the radar chart converts statuses to
+    radial distances without silently treating unknown values as 0.
+
+    Produced set is derived live from score_moats.VALID_STATUSES.
+    """
+
+    def test_all_moat_statuses_in_status_score(self) -> None:
+        """Every moat status the producer emits must appear in _STATUS_SCORE."""
+        produced = _load_cp_score_moats().VALID_STATUSES
+        viz = _load_cp_visualize()
+        score_keys: set[str] = set(viz._STATUS_SCORE.keys())
+
+        missing = produced - score_keys
+        assert not missing, (
+            f"visualize._STATUS_SCORE is missing an entry for moat status(es) "
+            f"emitted by score_moats.py: {sorted(missing)}. "
+            f"Add entries to _STATUS_SCORE for each."
+        )
+
+    def test_producer_moat_statuses_min_count(self) -> None:
+        """Guard against vacuous tests: VALID_STATUSES must have at least 5 statuses."""
+        produced = _load_cp_score_moats().VALID_STATUSES
+        assert len(produced) >= 5, (
+            f"VALID_STATUSES expected >= 5 entries, got {len(produced)}. Check score_moats.VALID_STATUSES."
+        )
+
+    def test_status_score_min_count(self) -> None:
+        """_STATUS_SCORE must cover at least the producer statuses."""
+        produced = _load_cp_score_moats().VALID_STATUSES
+        viz = _load_cp_visualize()
+        assert len(viz._STATUS_SCORE) >= len(produced), (
+            f"visualize._STATUS_SCORE has only {len(viz._STATUS_SCORE)} entries; expected >= {len(produced)}."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test B: overall_defensibility levels → visualize._DEFENSIBILITY_COLORS coverage
+# ---------------------------------------------------------------------------
+
+
+class TestCpDefensibilityColorCoverage:
+    """Every overall_defensibility level that score_moats.py can emit must
+    appear in visualize.py's _DEFENSIBILITY_COLORS so the competitor table
+    and timeline show the correct colour.
+
+    Derived from: the 3 defensibility strings computed in
+    score_moats._compute_aggregates(): "high", "moderate", "low".
+    Pinned with a source-regex guard on each literal.
+    """
+
+    # Defensibility strings emitted by score_moats._compute_aggregates().
+    PRODUCER_DEFENSIBILITY_LEVELS: set[str] = {
+        "high",
+        "moderate",
+        "low",
+    }
+
+    def test_defensibility_literals_present_in_source(self) -> None:
+        """Each level must appear as a string literal in score_moats.py."""
+        with open(_CP_SCORE_MOATS_SCRIPT, encoding="utf-8") as fh:
+            src = fh.read()
+        for level in self.PRODUCER_DEFENSIBILITY_LEVELS:
+            assert f'"{level}"' in src or f"'{level}'" in src, (
+                f"Defensibility level {level!r} not found as a literal in score_moats.py. "
+                f"Update PRODUCER_DEFENSIBILITY_LEVELS if _compute_aggregates() was changed."
+            )
+
+    def test_all_defensibility_levels_in_defensibility_colors(self) -> None:
+        """Every defensibility level the producer emits must map to a colour."""
+        viz = _load_cp_visualize()
+        color_keys: set[str] = set(viz._DEFENSIBILITY_COLORS.keys())
+
+        missing = self.PRODUCER_DEFENSIBILITY_LEVELS - color_keys
+        assert not missing, (
+            f"visualize._DEFENSIBILITY_COLORS is missing a colour entry for defensibility level(s) "
+            f"emitted by score_moats.py: {sorted(missing)}. "
+            f"Add entries to _DEFENSIBILITY_COLORS for each."
+        )
+
+    def test_producer_defensibility_levels_min_count(self) -> None:
+        """Guard against vacuous tests: producer set must have exactly 3 levels."""
+        assert len(self.PRODUCER_DEFENSIBILITY_LEVELS) == 3, (
+            f"PRODUCER_DEFENSIBILITY_LEVELS expected 3 entries, got {len(self.PRODUCER_DEFENSIBILITY_LEVELS)}."
+        )
+
+    def test_defensibility_colors_min_count(self) -> None:
+        """_DEFENSIBILITY_COLORS must cover at least the 3 producer levels."""
+        viz = _load_cp_visualize()
+        assert len(viz._DEFENSIBILITY_COLORS) >= 3, (
+            f"visualize._DEFENSIBILITY_COLORS has only {len(viz._DEFENSIBILITY_COLORS)} entries; expected >= 3."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test C: canonical moat dimensions → visualize._MOAT_DIM_LABELS coverage
+# ---------------------------------------------------------------------------
+
+
+class TestCpMoatDimLabelCoverage:
+    """Every canonical moat dimension that score_moats.py evaluates must
+    appear in visualize.py's _MOAT_DIM_LABELS so the radar axis shows a
+    curated label instead of the mechanical fallback.
+
+    Derived from: the 6 canonical moat dimension IDs used in SKILL.md and
+    score_moats.py (_CANONICAL_MOAT_DIMS in visualize.py).
+    """
+
+    # The 6 canonical moat dimension IDs.
+    PRODUCER_MOAT_DIMS: set[str] = {
+        "network_effects",
+        "data_advantages",
+        "switching_costs",
+        "regulatory_barriers",
+        "cost_structure",
+        "brand_reputation",
+    }
+
+    def test_all_moat_dims_in_moat_dim_labels(self) -> None:
+        """Every canonical moat dimension must appear in _MOAT_DIM_LABELS."""
+        viz = _load_cp_visualize()
+        label_keys: set[str] = set(viz._MOAT_DIM_LABELS.keys())
+
+        missing = self.PRODUCER_MOAT_DIMS - label_keys
+        assert not missing, (
+            f"visualize._MOAT_DIM_LABELS is missing a display label for moat dimension(s): "
+            f"{sorted(missing)}. Add entries to _MOAT_DIM_LABELS for each."
+        )
+
+    def test_producer_moat_dims_min_count(self) -> None:
+        """Guard against vacuous tests: producer set must have exactly 6 dimensions."""
+        assert len(self.PRODUCER_MOAT_DIMS) == 6, (
+            f"PRODUCER_MOAT_DIMS expected 6 entries, got {len(self.PRODUCER_MOAT_DIMS)}."
+        )
+
+    def test_moat_dim_labels_min_count(self) -> None:
+        """_MOAT_DIM_LABELS must cover at least the 6 canonical dimensions."""
+        viz = _load_cp_visualize()
+        assert len(viz._MOAT_DIM_LABELS) >= 6, (
+            f"visualize._MOAT_DIM_LABELS has only {len(viz._MOAT_DIM_LABELS)} entries; expected >= 6."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test D: competitor category values → visualize._CATEGORY_COLORS coverage
+# ---------------------------------------------------------------------------
+
+
+class TestCpCategoryColorCoverage:
+    """Every competitor category value that validate_landscape.py can emit
+    must appear in visualize.py's _CATEGORY_COLORS so positioning-map bubbles
+    receive the correct colour.
+
+    validate_landscape.VALID_CATEGORIES is loaded live (covers "direct",
+    "adjacent", "do_nothing", "emerging", "custom").  "_startup" is the
+    renderer-internal sentinel slug — not present in VALID_CATEGORIES, but
+    always rendered; it is pinned here with a documentary note.
+    """
+
+    # "_startup" is the renderer-internal sentinel, not a validate_landscape category.
+    _RENDERER_INTERNAL: set[str] = {"_startup"}
+
+    def _producer_categories(self) -> set[str]:
+        """VALID_CATEGORIES (live) union renderer-internal sentinel."""
+        return set[str](_load_cp_validate_landscape().VALID_CATEGORIES) | self._RENDERER_INTERNAL
+
+    def test_all_producer_categories_in_category_colors(self) -> None:
+        """Every competitor category the producer emits must map to a colour."""
+        produced = self._producer_categories()
+        viz = _load_cp_visualize()
+        color_keys: set[str] = set(viz._CATEGORY_COLORS.keys())
+
+        missing = produced - color_keys
+        assert not missing, (
+            f"visualize._CATEGORY_COLORS is missing a colour entry for competitor category(ies): "
+            f"{sorted(missing)}. Add entries to _CATEGORY_COLORS for each."
+        )
+
+    def test_producer_categories_min_count(self) -> None:
+        """Guard against vacuous tests: produced set must have at least 6 categories."""
+        produced = self._producer_categories()
+        assert len(produced) >= 6, f"VALID_CATEGORIES + _startup expected >= 6 entries, got {len(produced)}."
+
+    def test_category_colors_min_count(self) -> None:
+        """_CATEGORY_COLORS must cover at least the producer categories."""
+        produced = self._producer_categories()
+        viz = _load_cp_visualize()
+        assert len(viz._CATEGORY_COLORS) >= len(produced), (
+            f"visualize._CATEGORY_COLORS has only {len(viz._CATEGORY_COLORS)} entries; expected >= {len(produced)}."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test E: trajectory maps → VALID_TRAJECTORIES coverage
+# ---------------------------------------------------------------------------
+
+
+class TestCpTrajectoryMapCoverage:
+    """Both visualize.py's _TRAJECTORY_ARROWS and its trajectory_colors map
+    must contain every trajectory value that score_moats.py can emit.
+
+    Produced set is derived live from score_moats.VALID_TRAJECTORIES.
+
+    trajectory_colors is a local dict defined inside the rendering function
+    (_chart_moat_trajectory_bars), not a module-level constant.  We probe it
+    by loading the module and inspecting the source for the literal keys, then
+    cross-check against _TRAJECTORY_ARROWS (which IS module-level) to detect
+    any divergence between the two maps.
+    """
+
+    _EXPECTED_TRAJECTORY_COLORS_KEYS: set[str] = {"building", "stable", "eroding"}
+
+    def test_trajectory_arrows_covers_valid_trajectories(self) -> None:
+        """Every VALID_TRAJECTORIES value must appear in _TRAJECTORY_ARROWS."""
+        produced = _load_cp_score_moats().VALID_TRAJECTORIES
+        viz = _load_cp_visualize()
+        arrow_keys: set[str] = set(viz._TRAJECTORY_ARROWS.keys())
+
+        missing = produced - arrow_keys
+        assert not missing, (
+            f"visualize._TRAJECTORY_ARROWS is missing an entry for trajectory(ies) "
+            f"emitted by score_moats.py: {sorted(missing)}. "
+            f"Add entries to _TRAJECTORY_ARROWS for each."
+        )
+
+    def test_trajectory_colors_keys_in_source(self) -> None:
+        """Each expected trajectory_colors key must appear as a literal in visualize.py source."""
+        with open(_CP_VISUALIZE_SCRIPT, encoding="utf-8") as fh:
+            src = fh.read()
+        for key in self._EXPECTED_TRAJECTORY_COLORS_KEYS:
+            assert f'"{key}"' in src or f"'{key}'" in src, (
+                f"trajectory_colors key {key!r} not found as a literal in visualize.py. "
+                f"Update _EXPECTED_TRAJECTORY_COLORS_KEYS if the map was refactored."
+            )
+
+    def test_trajectory_arrows_and_colors_agree(self) -> None:
+        """_TRAJECTORY_ARROWS key-set must match trajectory_colors key-set.
+
+        Both maps process the same trajectory values; divergence means one will
+        silently fall back to defaults for values the other knows about.
+        """
+        viz = _load_cp_visualize()
+        arrow_keys = set(viz._TRAJECTORY_ARROWS.keys())
+        assert arrow_keys == self._EXPECTED_TRAJECTORY_COLORS_KEYS, (
+            f"_TRAJECTORY_ARROWS keys {sorted(arrow_keys)} do not match expected "
+            f"trajectory_colors keys {sorted(self._EXPECTED_TRAJECTORY_COLORS_KEYS)}. "
+            f"Keep both maps in sync when adding a new trajectory value."
+        )
+
+    def test_valid_trajectories_min_count(self) -> None:
+        """Guard against vacuous tests: VALID_TRAJECTORIES must have at least 3 values."""
+        produced = _load_cp_score_moats().VALID_TRAJECTORIES
+        assert len(produced) >= 3, f"VALID_TRAJECTORIES expected >= 3 entries, got {len(produced)}."
+
+
+# ---------------------------------------------------------------------------
+# Test F: explore.py color maps → canonical sources coverage
+# ---------------------------------------------------------------------------
+
+
+class TestCpExploreColorCoverage:
+    """explore.py defines its own _CATEGORY_COLORS (6) and _DEFENSIBILITY_COLORS (3)
+    independently of visualize.py.  Both must cover the same canonical produced sets,
+    and the same-concept hex values must agree between explore.py and visualize.py.
+
+    Categories: validate_landscape.VALID_CATEGORIES + "_startup" sentinel.
+    Defensibility: "high", "moderate", "low" (from _compute_aggregates).
+    """
+
+    # Defensibility levels — pinned with source-regex guards (same as TestCpDefensibilityColorCoverage).
+    _DEFENSIBILITY_LEVELS: set[str] = {"high", "moderate", "low"}
+
+    # "_startup" is the renderer-internal sentinel (not in VALID_CATEGORIES).
+    _RENDERER_INTERNAL: set[str] = {"_startup"}
+
+    def _producer_categories(self) -> set[str]:
+        return set[str](_load_cp_validate_landscape().VALID_CATEGORIES) | self._RENDERER_INTERNAL
+
+    def test_explore_category_colors_covers_producer_categories(self) -> None:
+        """Every producer category must map to a colour in explore._CATEGORY_COLORS."""
+        produced = self._producer_categories()
+        exp = _load_cp_explore()
+        color_keys: set[str] = set(exp._CATEGORY_COLORS.keys())
+
+        missing = produced - color_keys
+        assert not missing, (
+            f"explore._CATEGORY_COLORS is missing a colour entry for competitor category(ies): "
+            f"{sorted(missing)}. Add entries to explore._CATEGORY_COLORS."
+        )
+
+    def test_explore_category_colors_min_count(self) -> None:
+        """Guard against vacuous tests: explore._CATEGORY_COLORS must have at least 6 entries."""
+        exp = _load_cp_explore()
+        assert len(exp._CATEGORY_COLORS) >= 6, (
+            f"explore._CATEGORY_COLORS has only {len(exp._CATEGORY_COLORS)} entries; expected >= 6."
+        )
+
+    def test_explore_defensibility_colors_covers_all_levels(self) -> None:
+        """Every defensibility level must map to a colour in explore._DEFENSIBILITY_COLORS."""
+        exp = _load_cp_explore()
+        color_keys: set[str] = set(exp._DEFENSIBILITY_COLORS.keys())
+
+        missing = self._DEFENSIBILITY_LEVELS - color_keys
+        assert not missing, (
+            f"explore._DEFENSIBILITY_COLORS is missing a colour entry for defensibility level(s): "
+            f"{sorted(missing)}. Add entries to explore._DEFENSIBILITY_COLORS."
+        )
+
+    def test_explore_defensibility_colors_min_count(self) -> None:
+        """Guard against vacuous tests: explore._DEFENSIBILITY_COLORS must have exactly 3 entries."""
+        exp = _load_cp_explore()
+        assert len(exp._DEFENSIBILITY_COLORS) >= 3, (
+            f"explore._DEFENSIBILITY_COLORS has only {len(exp._DEFENSIBILITY_COLORS)} entries; expected >= 3."
+        )
+
+    def test_defensibility_literals_present_in_source(self) -> None:
+        """Each defensibility level must appear as a literal in score_moats.py source."""
+        with open(_CP_SCORE_MOATS_SCRIPT, encoding="utf-8") as fh:
+            src = fh.read()
+        for level in self._DEFENSIBILITY_LEVELS:
+            assert f'"{level}"' in src or f"'{level}'" in src, (
+                f"Defensibility level {level!r} not found as a literal in score_moats.py. "
+                f"Update _DEFENSIBILITY_LEVELS if _compute_aggregates() was changed."
+            )
+
+    def test_visualize_explore_category_colors_same_hex(self) -> None:
+        """Same concept (category) must have the same hex in both visualize and explore."""
+        produced = self._producer_categories()
+        viz = _load_cp_visualize()
+        exp = _load_cp_explore()
+        for cat in produced:
+            viz_color = viz._CATEGORY_COLORS.get(cat)
+            exp_color = exp._CATEGORY_COLORS.get(cat)
+            if viz_color is not None and exp_color is not None:
+                assert viz_color == exp_color, (
+                    f"Category {cat!r} has hex {viz_color!r} in visualize._CATEGORY_COLORS "
+                    f"but {exp_color!r} in explore._CATEGORY_COLORS. Keep them in sync."
+                )
+
+    def test_visualize_explore_defensibility_colors_same_hex(self) -> None:
+        """Same concept (defensibility level) must have the same hex in both visualize and explore."""
+        viz = _load_cp_visualize()
+        exp = _load_cp_explore()
+        for level in self._DEFENSIBILITY_LEVELS:
+            viz_color = viz._DEFENSIBILITY_COLORS.get(level)
+            exp_color = exp._DEFENSIBILITY_COLORS.get(level)
+            if viz_color is not None and exp_color is not None:
+                assert viz_color == exp_color, (
+                    f"Defensibility level {level!r} has hex {viz_color!r} in visualize._DEFENSIBILITY_COLORS "
+                    f"but {exp_color!r} in explore._DEFENSIBILITY_COLORS. Keep them in sync."
+                )

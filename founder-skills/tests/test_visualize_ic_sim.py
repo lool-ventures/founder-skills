@@ -12,12 +12,14 @@ All tests use subprocess to exercise the script exactly as the agent does.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import types
 from typing import Any
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -923,3 +925,296 @@ def test_key_findings_distinguishes_mixed_strong_from_all_strong() -> None:
     assert "Team scores all strong conviction" not in stdout
     # a purely-strong category still uses the original phrasing
     assert "Market scores all strong conviction" in stdout
+
+
+# ===========================================================================
+# Key-coverage tests: producer output keys ⊆ renderer known sets
+# ===========================================================================
+#
+# Invariant: when score_dimensions.py / detect_conflicts.py adds a new
+# status, verdict, or severity value, the corresponding visualize.py color
+# map must be updated. These tests pin the current complete sets so any new
+# emitted key causes a loud failure with the offending name listed.
+# ===========================================================================
+
+_IC_SIM_VISUALIZE_SCRIPT = os.path.join(IC_SIM_DIR, "visualize.py")
+_IC_SIM_SCORE_DIMENSIONS_SCRIPT = os.path.join(IC_SIM_DIR, "score_dimensions.py")
+_IC_SIM_DETECT_CONFLICTS_SCRIPT = os.path.join(IC_SIM_DIR, "detect_conflicts.py")
+
+
+def _load_ic_sim_visualize() -> types.ModuleType:
+    """Import ic-sim visualize.py with a unique sys.modules key.
+
+    _theme is imported lazily inside a render function, so no stub is needed
+    at module load time.
+    """
+    key = "_ic_sim_keycov_visualize"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    spec = importlib.util.spec_from_file_location(key, _IC_SIM_VISUALIZE_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = _IC_SIM_VISUALIZE_SCRIPT  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def _load_ic_sim_score_dimensions() -> types.ModuleType:
+    """Import ic-sim score_dimensions.py with a unique sys.modules key."""
+    key = "_ic_sim_keycov_score_dimensions"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    spec = importlib.util.spec_from_file_location(key, _IC_SIM_SCORE_DIMENSIONS_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = _IC_SIM_SCORE_DIMENSIONS_SCRIPT  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def _load_ic_sim_detect_conflicts() -> types.ModuleType:
+    """Import ic-sim detect_conflicts.py with a unique sys.modules key."""
+    key = "_ic_sim_keycov_detect_conflicts"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    spec = importlib.util.spec_from_file_location(key, _IC_SIM_DETECT_CONFLICTS_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = _IC_SIM_DETECT_CONFLICTS_SCRIPT  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+# ---------------------------------------------------------------------------
+# Test A: dimension statuses → visualize._STATUS_COLORS coverage
+# ---------------------------------------------------------------------------
+
+
+class TestIcSimDimensionStatusColorCoverage:
+    """Every dimension status that score_dimensions.py can emit must appear
+    in visualize.py's _STATUS_COLORS so category bars receive the correct colour.
+
+    Produced set is derived live from score_dimensions.VALID_STATUSES.
+    """
+
+    def test_all_dimension_statuses_in_status_colors(self) -> None:
+        """Every dimension status the producer emits must map to a colour."""
+        produced = _load_ic_sim_score_dimensions().VALID_STATUSES
+        viz = _load_ic_sim_visualize()
+        color_keys: set[str] = set(viz._STATUS_COLORS.keys())
+
+        missing = produced - color_keys
+        assert not missing, (
+            f"visualize._STATUS_COLORS is missing a colour entry for dimension status(es) "
+            f"emitted by score_dimensions.py: {sorted(missing)}. "
+            f"Add entries to _STATUS_COLORS for each."
+        )
+
+    def test_producer_dimension_statuses_min_count(self) -> None:
+        """Guard against vacuous tests: VALID_STATUSES must have at least 5 statuses."""
+        produced = _load_ic_sim_score_dimensions().VALID_STATUSES
+        assert len(produced) >= 5, (
+            f"VALID_STATUSES expected >= 5 entries, got {len(produced)}. Check score_dimensions.VALID_STATUSES."
+        )
+
+    def test_status_colors_min_count(self) -> None:
+        """_STATUS_COLORS must cover at least the producer statuses."""
+        produced = _load_ic_sim_score_dimensions().VALID_STATUSES
+        viz = _load_ic_sim_visualize()
+        assert len(viz._STATUS_COLORS) >= len(produced), (
+            f"visualize._STATUS_COLORS has only {len(viz._STATUS_COLORS)} entries; expected >= {len(produced)}."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test B: partner verdict values → visualize._VERDICT_COLORS coverage
+# ---------------------------------------------------------------------------
+
+
+class TestIcSimPartnerVerdictColorCoverage:
+    """Every verdict value that score_dimensions.py's summary can emit must
+    appear in visualize.py's _VERDICT_COLORS so the conviction gauge shows
+    the correct colour instead of the neutral fallback.
+
+    The 4 verdicts come from _summarize() branches in score_dimensions.py —
+    there is no exported constant, so they are pinned here. A source-grep
+    guard ensures each literal is still present in the source so a rename
+    fails loudly.
+    """
+
+    # Verdict strings emitted by score_dimensions._summarize() branches.
+    PRODUCER_VERDICTS: set[str] = {
+        "invest",
+        "more_diligence",
+        "pass",
+        "hard_pass",
+    }
+
+    def test_verdict_literals_present_in_source(self) -> None:
+        """Each hardcoded verdict must appear as a string literal in score_dimensions.py.
+
+        Guards against silent renames: if a verdict string is removed from the
+        source, this test fails before any runtime path needs to exercise it.
+        """
+        with open(_IC_SIM_SCORE_DIMENSIONS_SCRIPT, encoding="utf-8") as fh:
+            src = fh.read()
+        for verdict in self.PRODUCER_VERDICTS:
+            assert f'"{verdict}"' in src or f"'{verdict}'" in src, (
+                f"Verdict string {verdict!r} not found as a literal in score_dimensions.py. "
+                f"Update PRODUCER_VERDICTS if _summarize() was changed."
+            )
+
+    def test_all_verdicts_in_verdict_colors(self) -> None:
+        """Every verdict the producer emits must map to a colour."""
+        viz = _load_ic_sim_visualize()
+        color_keys: set[str] = set(viz._VERDICT_COLORS.keys())
+
+        missing = self.PRODUCER_VERDICTS - color_keys
+        assert not missing, (
+            f"visualize._VERDICT_COLORS is missing a colour entry for verdict(s) "
+            f"emitted by score_dimensions.py: {sorted(missing)}. "
+            f"Add entries to _VERDICT_COLORS for each."
+        )
+
+    def test_producer_verdicts_min_count(self) -> None:
+        """Guard against vacuous tests: producer set must have exactly 4 verdicts."""
+        assert len(self.PRODUCER_VERDICTS) == 4, (
+            f"PRODUCER_VERDICTS expected 4 entries, got {len(self.PRODUCER_VERDICTS)}."
+        )
+
+    def test_verdict_colors_min_count(self) -> None:
+        """_VERDICT_COLORS must cover at least the 4 producer verdicts."""
+        viz = _load_ic_sim_visualize()
+        assert len(viz._VERDICT_COLORS) >= 4, (
+            f"visualize._VERDICT_COLORS has only {len(viz._VERDICT_COLORS)} entries; expected >= 4."
+        )
+
+    def test_verdict_colors_pairwise_distinct(self) -> None:
+        """Each producer verdict must have a colour distinct from every other
+        verdict's colour — in particular hard_pass must NOT share pass's colour,
+        or the gauge cannot distinguish the two most severe outcomes.
+        """
+        viz = _load_ic_sim_visualize()
+        colors = {v: viz._VERDICT_COLORS.get(v) for v in self.PRODUCER_VERDICTS}
+        seen: dict[str, str] = {}
+        for verdict, color in sorted(colors.items()):
+            assert color is not None, f"_VERDICT_COLORS missing entry for {verdict!r}."
+            assert color not in seen, (
+                f"_VERDICT_COLORS gives {verdict!r} the same colour {color!r} as {seen[color]!r}. "
+                f"Each verdict on the spectrum needs a visually distinct colour."
+            )
+            seen[color] = verdict
+
+
+# ---------------------------------------------------------------------------
+# Test C: conflict severity values → visualize._SEVERITY_COLORS coverage
+# ---------------------------------------------------------------------------
+
+
+class TestIcSimConflictSeverityColorCoverage:
+    """Every conflict severity value that detect_conflicts.py can emit must
+    appear in visualize.py's _SEVERITY_COLORS so the conflict summary chart
+    shows the correct colour instead of the neutral fallback.
+
+    VALID_SEVERITIES ({"blocking", "manageable"}) is loaded live.
+    "clear" is not in VALID_SEVERITIES (it is computed in overall_severity
+    when no conflicts exist); it is pinned here with a source-grep guard.
+    """
+
+    # "clear" is emitted in detect_conflicts.py but is not in VALID_SEVERITIES.
+    _HARDCODED_EXTRA: set[str] = {"clear"}
+
+    def _producer_severities(self) -> set[str]:
+        """VALID_SEVERITIES union hardcoded extras."""
+        return set[str](_load_ic_sim_detect_conflicts().VALID_SEVERITIES) | self._HARDCODED_EXTRA
+
+    def test_clear_literal_present_in_source(self) -> None:
+        """'clear' must appear as a string literal in detect_conflicts.py source."""
+        with open(_IC_SIM_DETECT_CONFLICTS_SCRIPT, encoding="utf-8") as fh:
+            src = fh.read()
+        assert '"clear"' in src or "'clear'" in src, (
+            "'clear' not found as a literal in detect_conflicts.py. "
+            "Update _HARDCODED_EXTRA if the severity was renamed."
+        )
+
+    def test_all_severities_in_severity_colors(self) -> None:
+        """Every conflict severity the producer emits must map to a colour."""
+        produced = self._producer_severities()
+        viz = _load_ic_sim_visualize()
+        color_keys: set[str] = set(viz._SEVERITY_COLORS.keys())
+
+        missing = produced - color_keys
+        assert not missing, (
+            f"visualize._SEVERITY_COLORS is missing a colour entry for severity value(s) "
+            f"emitted by detect_conflicts.py: {sorted(missing)}. "
+            f"Add entries to _SEVERITY_COLORS for each."
+        )
+
+    def test_producer_severities_min_count(self) -> None:
+        """Guard against vacuous tests: produced set must have at least 3 severities."""
+        produced = self._producer_severities()
+        assert len(produced) >= 3, f"VALID_SEVERITIES + extras expected >= 3 entries, got {len(produced)}."
+
+    def test_severity_colors_min_count(self) -> None:
+        """_SEVERITY_COLORS must cover at least the producer severities."""
+        produced = self._producer_severities()
+        viz = _load_ic_sim_visualize()
+        assert len(viz._SEVERITY_COLORS) >= len(produced), (
+            f"visualize._SEVERITY_COLORS has only {len(viz._SEVERITY_COLORS)} entries; expected >= {len(produced)}."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test D: score_dimensions categories → visualize._CANONICAL_CATEGORIES coverage
+# ---------------------------------------------------------------------------
+
+
+class TestIcSimCategoryCoverage:
+    """Every category name that score_dimensions.py can emit must appear in
+    visualize.py's _CANONICAL_CATEGORIES so radar and bar charts include all
+    spokes/bars in the correct order.
+
+    Produced set is derived live from score_dimensions.DIMENSION_ITEMS.
+    """
+
+    @staticmethod
+    def _producer_categories() -> set[str]:
+        """Derive emittable category names live from DIMENSION_ITEMS."""
+        sd = _load_ic_sim_score_dimensions()
+        return {item["category"] for item in sd.DIMENSION_ITEMS}
+
+    def test_all_producer_categories_in_canonical_list(self) -> None:
+        """Every category the score producer emits must appear in _CANONICAL_CATEGORIES."""
+        produced = self._producer_categories()
+        viz = _load_ic_sim_visualize()
+        canonical: set[str] = set(viz._CANONICAL_CATEGORIES)
+
+        missing = produced - canonical
+        assert not missing, (
+            f"visualize._CANONICAL_CATEGORIES is missing category(ies) "
+            f"emitted by score_dimensions.py: {sorted(missing)}. "
+            f"Add them to _CANONICAL_CATEGORIES in the correct order."
+        )
+
+    def test_producer_categories_min_count(self) -> None:
+        """Guard against vacuous tests: produced set must have at least 7 categories."""
+        produced = self._producer_categories()
+        assert len(produced) >= 7, (
+            f"DIMENSION_ITEMS expected >= 7 distinct categories, got {len(produced)}. "
+            f"Check score_dimensions.DIMENSION_ITEMS."
+        )
+
+    def test_canonical_categories_min_count(self) -> None:
+        """_CANONICAL_CATEGORIES must list at least the producer categories."""
+        produced = self._producer_categories()
+        viz = _load_ic_sim_visualize()
+        assert len(viz._CANONICAL_CATEGORIES) >= len(produced), (
+            f"visualize._CANONICAL_CATEGORIES has only {len(viz._CANONICAL_CATEGORIES)} entries; "
+            f"expected >= {len(produced)}."
+        )

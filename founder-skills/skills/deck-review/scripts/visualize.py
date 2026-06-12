@@ -124,11 +124,15 @@ _COLOR_NA = "#A6AEB5"
 # ---------------------------------------------------------------------------
 
 _FRAMEWORK_LABELS: dict[str, str] = {
+    "purpose": "Purpose",
     "purpose_traction": "Purpose",
     "problem": "Problem",
     "why_now": "Why Now",
     "solution_product": "Solution",
+    "early_signals": "Early Signals",
     "traction_kpis": "Traction",
+    "cohort_data": "Cohort Data",
+    "ltv_cac": "LTV / CAC",
     "market": "Market",
     "competition": "Competition",
     "business_model_pricing": "Business Model",
