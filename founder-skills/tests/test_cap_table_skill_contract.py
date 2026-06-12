@@ -225,32 +225,34 @@ def _lane_docs_with_dispatch_templates() -> list[Path]:
 
 
 def test_rule_id_references_exist_in_rules_json() -> None:
-    """Every rule_id cited in SKILL.md must exist in cap-table-rules.json —
-    a phantom rule_id means the rule was renamed or deleted and the prose is
-    referencing a dead identifier. The population is built independently of
-    the canonical set so a deleted rule cannot silently vanish from the check.
-    The agent body uses prose references, not backtick-quoted rule_ids, so
-    this check covers SKILL.md only."""
+    """Every rule_id cited in SKILL.md or a lane reference doc must exist in
+    cap-table-rules.json — a phantom rule_id means the rule was renamed or
+    deleted and the prose is referencing a dead identifier. The population is
+    built independently of the canonical set so a deleted rule cannot silently
+    vanish from the check. The agent body uses prose references, not
+    backtick-quoted rule_ids, so it is not scanned."""
     all_ids = _load_all_rule_ids()
     domains = _load_domain_names()
 
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
-    cited = _extract_backtick_rule_id_candidates(skill_text, domains)
+    docs = [SKILL_MD, *sorted(LANES_DIR.glob("*.md"))]
+    for doc in docs:
+        cited = _extract_backtick_rule_id_candidates(doc.read_text(encoding="utf-8"), domains)
 
-    # Sanity: SKILL.md must cite at least a few rule_ids.
-    # Known citations: safe.discount_rate_semantics,
-    # safe.company_capitalization_yc_post_money, safe.post_money_cap_conversion,
-    # option_pool.pre_money_topup, anti_dilution.* rules.
-    assert len(cited) >= 4, (
-        f"{SKILL_MD.name} has fewer than 4 backtick-quoted rule_id references — "
-        f"regex may have silently stopped matching (got {sorted(cited)})"
-    )
+        if doc is SKILL_MD:
+            # Sanity: SKILL.md must cite at least a few rule_ids.
+            # Known citations: safe.discount_rate_semantics,
+            # safe.company_capitalization_yc_post_money, safe.post_money_cap_conversion,
+            # option_pool.pre_money_topup, anti_dilution.* rules.
+            assert len(cited) >= 4, (
+                f"{doc.name} has fewer than 4 backtick-quoted rule_id references — "
+                f"regex may have silently stopped matching (got {sorted(cited)})"
+            )
 
-    phantom = cited - all_ids
-    assert not phantom, (
-        f"{SKILL_MD.name} cites rule_ids not present in cap-table-rules.json "
-        f"(renamed or deleted rule): {sorted(phantom)}"
-    )
+        phantom = cited - all_ids
+        assert not phantom, (
+            f"{doc.name} cites rule_ids not present in cap-table-rules.json "
+            f"(renamed or deleted rule): {sorted(phantom)}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +398,81 @@ def test_aoa_extraction_return_shape_keys() -> None:
         "extract_aoa.py does not reference 'extraction_type' key — "
         "AoA extraction contract may have drifted from the agent body template"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 5b: AoA dispatch template in lane-1-pdf-docx.md — shape + no-write
+# ---------------------------------------------------------------------------
+
+
+def test_lane_aoa_dispatch_template_keys_and_no_write() -> None:
+    """The ARTICLES_OF_ASSOCIATION_EXTRACTION dispatch template in lane-1-pdf-docx.md
+    must carry the same top-level keys as extract_aoa.py reads from stdin, and must
+    include the no-write instruction.
+
+    Mutation targets:
+    - Drop a required key from the template JSON → test fails (key not found).
+    - Remove 'Do not write artifacts to disk' → test_lane_dispatch_templates_contain_no_write_instruction fails.
+    """
+    lane_doc = LANES_DIR / "lane-1-pdf-docx.md"
+    assert lane_doc.exists(), f"{lane_doc} not found"
+    text = lane_doc.read_text(encoding="utf-8")
+
+    # Anchor on the AoA dispatch template section header.
+    # The AoA flow spans multiple ## sub-sections (dispatch template, pipe-through bash,
+    # error handling, counsel items) — read from the anchor to end of file so all
+    # sub-sections are included in the check.
+    anchor = "## Dispatch Context A — `ARTICLES_OF_ASSOCIATION_EXTRACTION`"
+    start = text.find(anchor)
+    assert start != -1, (
+        f"{lane_doc.name} has no '{anchor}' section — "
+        f"dispatch template for ARTICLES_OF_ASSOCIATION_EXTRACTION is missing"
+    )
+    section = text[start:]
+
+    # 1. Top-level return-shape keys (same set as extract_aoa.py reads from stdin)
+    for key in ("extraction_type", "fields", "confidence", "ambiguities"):
+        assert f'"{key}"' in section, (
+            f"{lane_doc.name} AoA dispatch template is missing return-shape key '{key}' "
+            f"— extract_aoa.py reads it from stdin; template↔script drift detected"
+        )
+
+    # 2. preferred_series must appear inside the fields example
+    assert "preferred_series" in section, (
+        f"{lane_doc.name} AoA dispatch template return-shape example "
+        f"must include 'preferred_series' (the primary extraction target)"
+    )
+
+    # 3. extraction_type value must be "articles_of_association"
+    assert '"articles_of_association"' in section, (
+        f"{lane_doc.name} AoA dispatch template must show "
+        f'"extraction_type": "articles_of_association" — the script rejects any other value'
+    )
+
+    # 4. CONTEXT header must appear in the dispatch prompt block
+    assert "CONTEXT: ARTICLES_OF_ASSOCIATION_EXTRACTION" in section, (
+        f"{lane_doc.name} AoA dispatch template is missing the "
+        f"'CONTEXT: ARTICLES_OF_ASSOCIATION_EXTRACTION' header line"
+    )
+
+    # 5. No-write instruction (caught redundantly by test_lane_dispatch_templates_contain_no_write_instruction,
+    #    but pin it here too for an explicit, named failure message)
+    assert "Do not write" in section or "do not write" in section, (
+        f"{lane_doc.name} AoA dispatch template is missing the 'Do not write artifacts to disk' instruction"
+    )
+
+    # 6. extract_aoa.py bash invocation must be present with required flags
+    assert "extract_aoa.py" in section, f"{lane_doc.name} AoA section must include a bash invocation of extract_aoa.py"
+    assert "--run-id" in section, f"{lane_doc.name} AoA extract_aoa.py invocation is missing required --run-id flag"
+    assert "--inputs" in section, (
+        f"{lane_doc.name} AoA extract_aoa.py invocation is missing --inputs flag "
+        f"(merge mode; required for preferred_series to land in inputs.json)"
+    )
+
+    # 7. Cross-check: every key in the template's JSON block is a key extract_aoa.py reads
+    aoa_src = (SCRIPTS_DIR / "extract_aoa.py").read_text(encoding="utf-8")
+    for key in ("extraction_type", "fields", "preferred_series"):
+        assert key in aoa_src, f"extract_aoa.py does not reference '{key}' — lane-doc template↔script drift"
 
 
 # ---------------------------------------------------------------------------

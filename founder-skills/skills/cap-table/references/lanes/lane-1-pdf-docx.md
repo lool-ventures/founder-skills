@@ -135,3 +135,116 @@ cat /tmp/bv_responses.json | python3 "$SCRIPTS/backward_verifier.py" --phase=sco
 Backward verification is **informational (WARN-mode)** by default — disagreements between original and re-extracted values surface in the report but do NOT block. Present disagreements to the founder via `AskUserQuestion`. Calibration found ~7% disagreement rate on the canonical eval set, dominated by genuinely ambiguous form-classification cases (pre-money vs post-money) — too noisy for auto-rejection but valuable as a confirmation prompt.
 
 **Recommended trigger:** run backward verification on high-stakes extractions — priced rounds, $1M+ investments, or when forward verification was marginal (high `fuzzy_ratio`, many `unverifiable` fields).
+
+## Dispatch Context A — `ARTICLES_OF_ASSOCIATION_EXTRACTION`
+
+For AoA documents, dispatch the cap-table sub-agent via the `Task` tool using the template below instead of the `INSTRUMENT_EXTRACTION` template above. AoAs define preferred-series structural terms (OIP, liquidation preference, anti-dilution), not investment instruments — they use a dedicated sub-context and route through `extract_aoa.py`, not `extract_instrument.py`.
+
+```
+CONTEXT: ARTICLES_OF_ASSOCIATION_EXTRACTION
+REVIEW_DIR: <absolute path to REVIEW_DIR>
+RUN_ID: <RUN_ID>
+
+You are the cap-table agent dispatched in Context A (ARTICLES_OF_ASSOCIATION_EXTRACTION).
+The main thread has provided the Articles of Association document content below. Extract
+the per-preferred-series structural terms per your agent body's Context A specification.
+
+Document content:
+<paste the document text — for PDFs, this is what the Read tool returned>
+
+Return JSON only — exactly the {extraction_type, fields, confidence, ambiguities}
+shape. Do not write artifacts to disk. Do not invoke producer scripts.
+```
+
+After the sub-agent returns, apply the [tolerant JSON extraction protocol](../../SKILL.md#skill-execution-model-read-first) to obtain the structured JSON.
+
+### Sub-agent response shape (load-bearing — `extract_aoa.py` won't accept other shapes)
+
+```json
+{
+  "extraction_type": "articles_of_association",
+  "fields": {
+    "company_name": "Acme Technologies Ltd",
+    "jurisdiction_structure": "israeli",
+    "section_102_plan_reference": false,
+    "drag_along_threshold_pct": 0.66,
+    "preferred_series": [
+      {
+        "series_name": "Series Seed",
+        "shares": null,
+        "original_issue_price": 1.175,
+        "original_conversion_price": 1.175,
+        "current_conversion_price": 1.175,
+        "issuance_date": "2015-09-01",
+        "liquidation_preference_multiple": 1.0,
+        "liquidation_preference_type": "non_participating",
+        "participation_cap_multiple": null,
+        "anti_dilution_protection": "broad_based_weighted_average",
+        "dividend_rate_percent": 0.08,
+        "dividend_cumulative": true,
+        "pro_rata_rights": true
+      }
+    ]
+  },
+  "confidence": {
+    "preferred_series[Series Seed].original_issue_price": {
+      "level": "high",
+      "evidence_quote": "\"Series Seed Original Issue Price\" means ... US$ 1.1750000",
+      "document_location": "page 2, Definitions"
+    },
+    "drag_along_threshold_pct": {
+      "level": "high",
+      "evidence_quote": "holders of at least sixty-six percent (66%) of the issued Preferred Shares",
+      "document_location": "page 8, Drag-Along"
+    }
+  },
+  "ambiguities": []
+}
+```
+
+Notes the dispatcher MUST honor:
+
+- **`extraction_type` is the routing key.** Must be `"articles_of_association"` exactly. `extract_aoa.py` rejects any other value.
+- **`fields.preferred_series` is the primary extraction target.** Per-series required fields at extraction time (non-null): `series_name`, `original_issue_price`, `original_conversion_price`, `current_conversion_price`. `shares` is always `null` at extraction — populated from cap-table data at ingest.
+- **`liquidation_preference_type` enum**: `non_participating | participating | participating_capped`. `participating_capped` requires a non-null `participation_cap_multiple`.
+- **`anti_dilution_protection` enum**: `none | broad_based_weighted_average | narrow_based_weighted_average | full_ratchet`.
+- **`jurisdiction_structure` enum**: `israeli | delaware`.
+- **`confidence` is keyed by dotted path**, not flat field name. Per-series fields use `preferred_series[<series_name>].<field>` (e.g. `preferred_series[Series Seed].original_issue_price`). Top-level fields use the bare field name (e.g. `drag_along_threshold_pct`). Each value is a `{level, evidence_quote, document_location?}` object; `level` ∈ `high | medium | low | absent`.
+- **`shares` is intentionally null.** Do not populate it from the document — it comes from the cap table at ingest.
+- **`issuance_date` is optional at extraction.** Restatement AoAs commonly amend prior series without reciting the original issuance date; leave null rather than fabricating.
+- **Form-template / blank documents** — set fields to `null` and add an `ambiguities` entry; do not fabricate values.
+
+## Pipe through `extract_aoa.py`
+
+The validation script enforces schema, detects Israeli-AoA counsel-review items, and (when `--inputs` is passed) merges the validated `preferred_series` block into `inputs.json`:
+
+```bash
+cat <<'EXTRACT_EOF' | python3 "$SCRIPTS/extract_aoa.py" \
+  --run-id "$RUN_ID" \
+  --inputs "$REVIEW_DIR/inputs.json" \
+  --source-doc "$DOC_PATH" \
+  --pretty
+<JSON extracted from sub-agent reply>
+EXTRACT_EOF
+```
+
+`--inputs` is required whenever you want the validated `preferred_series[]` merged into `inputs.json`. Omit `--inputs` to validate-only (receipt still lists counsel items). Use `--replace-existing` if a same-named series is already present in `inputs.preferred_series[]` and you want to overwrite it in place.
+
+## Handling non-zero exit from `extract_aoa.py`
+
+- **Validation errors** (exit 1, `status: "validation_failed"`, `errors` array in stdout): per-field schema violations (wrong enum value, missing required field, OIP ≤ 0, etc.). Show via `AskUserQuestion` and re-extract.
+- **Merge conflict** (exit 2, `status: "conflict"`): a series with the same `series_name` already exists in `inputs.preferred_series[]`. Re-run with `--replace-existing` after confirming with the founder, or instruct the sub-agent to rename the conflicting series.
+- **Merge failed** (exit 1, `status: "merge_failed"`): `inputs.json` missing or unreadable. Verify `$REVIEW_DIR/inputs.json` exists before re-running.
+
+## Counsel-review items in the receipt
+
+`extract_aoa.py` detects four Israeli-AoA surfaces and emits them in `counsel_review_items[]` in the receipt:
+
+- **`israeli_aoa.drag_along_threshold_below_75_percent`** — drag-along threshold < 75%; Israeli courts have flagged sub-75% thresholds. Severity: `high`.
+- **`israeli_aoa.section_102_plan_absent`** — AoA does not reference a §102 plan; company may not yet have the trustee-track plan required before the first employee grant. Severity: `medium`.
+- **`israeli_aoa.liquidation_preference_above_1x`** — per-series; explicit multiple > 1.0. Severity: `medium`.
+- **`israeli_aoa.full_ratchet_anti_dilution`** — per-series; full-ratchet AD protection. Severity: `high`.
+
+Pay-to-play detection (`anti_dilution.pay_to_play_provision_detected`) is also run at extraction time; if triggered it is persisted into `inputs.json.aoa_findings` and surfaces in `rule_audit.py --phase=post_math`.
+
+After the script exits zero, present any `counsel_review_items` to the founder via `AskUserQuestion` and batch any low-confidence or ambiguous fields into a single confirmation prompt before proceeding to math.
