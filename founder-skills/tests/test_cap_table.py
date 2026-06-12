@@ -1663,25 +1663,22 @@ class TestStackedPostMoneySAFEsGolden:
 class TestLegacyPreMoneySAFEs:
     """Golden-value regression for YC PRE-MONEY (legacy, pre-Oct-2018) SAFE math.
 
-    Two distinct YC SAFE forms exist:
+    Two distinct YC SAFE families exist:
     - **Post-money** (current): each SAFE locks `purchase / cap` of POST-money FD.
       Covered by TestStackedPostMoneySAFEsGolden.
-    - **Pre-money** (legacy): SAFE shares = `purchase / (cap / pre_money_FD)` =
-      `purchase × pre_money_FD / cap`. The SAFE's % of post-money is NOT fixed;
-      pre-money SAFEs dilute alongside founders when new money + pool refresh land.
+    - **Pre-money** (legacy): conversion branch selected by §(a)(1)/(a)(2) of the
+      YC pre-money SAFE document:
+        §(a)(1): pre_money_valuation ≤ cap → investor converts at ROUND price
+                 (Standard Preferred Stock price per share).
+        §(a)(2): pre_money_valuation > cap → investor converts at SAFE price
+                 = cap / Company Capitalization, where Company Capitalization
+                 includes the in-connection pool top-up per the Company Capitalization clause.
+      The SAFE's % of post-money is NOT fixed; pre-money SAFEs dilute alongside
+      founders when new money + pool refresh land.
 
-    Commit #4 (post-J audit): the J fix corrected post-money math but broke
-    pre-money — convert_safe_priced_round was applying a single denominator
-    (the iterating post-money FD) to ALL forms. Fix: route on `form` to use
-    pre_money_fd for pre-money forms; keep company_capitalization (post-money FD)
-    for post-money forms.
-
-    Golden values derived from independent first-principles triangulation by an
-    opus subagent against the YC pre-money SAFE primer. Scenario chosen so
-    fractions resolve to exact integers:
+    Base fixture:
     - 10M founders common + 1M unallocated pool → pre_money_FD = 11M
     - SAFE: $500k purchase, $5M pre-money cap, no discount
-    - Series A: $5M new money at $5M pre (post-money $10M), no pool refresh
     """
 
     EVAL_PREMONEY_INPUTS = {
@@ -1732,53 +1729,64 @@ class TestLegacyPreMoneySAFEs:
             "metadata": {"run_id": "test"},
         }
 
-    def test_legacy_premoney_cap_only_uses_pre_fd_denominator(self) -> None:
-        """Single-SAFE pre-money scenario; golden answer locked by triangulation.
+    def test_legacy_premoney_at_cap_uses_round_price(self) -> None:
+        """Single-SAFE pre-money scenario; round pre_money == cap → §(a)(1) applies.
 
-        Expected (per first-principles derivation):
-        - safe_price = $5M / 11M = $5/11 ≈ $0.4545
-        - safe_shares = $500k × 11M / $5M = 1,100,000 (exact integer)
-        - PPS = $5M / 12.1M = $50/121 ≈ $0.4132
-        - new_money_shares = 12,100,000 (exact integer)
-        - total_post_money_FD = 24,200,000
-        - founders_pct = 10/24.2 ≈ 41.32%
-        - safe_pct = 1.1/24.2 ≈ 4.55% (NOT 10% — pre-money SAFE dilutes)
-        - new_money_pct = 50% (by construction)
+        Per YC pre-money SAFE §(a)(1): when pre_money_valuation ≤ cap, the investor
+        receives shares at the Standard Preferred (round) price, NOT the cap price.
+        The round price itself depends on safe_shares (coupled system):
+          PPS × (11M + safe_shares) = 5M   AND   safe_shares = 500k / PPS
+          → PPS × 11M + 500k = 5M  → PPS = 4.5M / 11M = 9/22 ≈ 0.40909
+          → safe_shares = 500k / (9/22) = 500k × 22/9 = 11M/9 ≈ 1,222,222
+          → new_money_shares = 5M / (9/22) = 110M/9 ≈ 12,222,222
+          → post_fd = 11M + 11M/9 + 110M/9 = 220M/9 ≈ 24,444,444
+          → safe_pct  = (11M/9) / (220M/9) = 11/220 = 5.0%
+          → founders_pct = 10M / (220M/9) = 90/220 = 9/22 ≈ 40.909%
+          → new_money_pct = (110M/9) / (220M/9) = 50% ✓
         """
         cs = cap_state_mod.build_cap_state(self.EVAL_PREMONEY_INPUTS, self._instruments([self.EVAL_PREMONEY_SAFE]))
         r = priced_round.solve_priced_round(
             cap_state=cs,
             safes=[self.EVAL_PREMONEY_SAFE],
             notes=[],
-            pre_money=5_000_000,
+            pre_money=5_000_000,  # equals cap → §(a)(1) branch
             new_money=5_000_000,
             target_pool_percent=None,  # no pool refresh
             target_basis="post_money",
         )
         assert r["completeness"] == "full", f"blockers: {r.get('blockers')}"
 
-        # PPS = $50/121 ≈ $0.4132
-        assert math.isclose(r["equity_financing_price"], 50 / 121, rel_tol=1e-4), (
-            f"PPS: got {r['equity_financing_price']:.6f}, expected {50 / 121:.6f}"
+        # PPS = 9/22 ≈ 0.40909
+        assert math.isclose(r["equity_financing_price"], 9 / 22, rel_tol=1e-4), (
+            f"PPS: got {r['equity_financing_price']:.6f}, expected {9 / 22:.6f}"
         )
-        # Total post-money FD = 24.2M
-        assert math.isclose(r["post_round_fully_diluted_shares"], 24_200_000, rel_tol=1e-4)
+        # Total post-money FD = 220M/9 ≈ 24,444,444
+        assert math.isclose(r["post_round_fully_diluted_shares"], 220_000_000 / 9, rel_tol=1e-4)
 
-        # safe_pct ≈ 4.55%, NOT 10% (would be 10% under post-money form)
-        agg = r["aggregate_ownership_by_class"]
-        assert math.isclose(agg["safe_pct"], 1.1 / 24.2, abs_tol=1e-4), (
-            f"safe_pct: got {agg['safe_pct']:.6f}, expected {1.1 / 24.2:.6f} (4.55%, not 10%)"
+        # safe_shares = 11M/9 ≈ 1,222,222
+        assert math.isclose(r["per_safe"]["safe_pre_1"]["conversion_shares"], 11_000_000 / 9, rel_tol=1e-4), (
+            f"safe_shares: got {r['per_safe']['safe_pre_1']['conversion_shares']:.0f}, expected {11_000_000 / 9:.0f}"
         )
-        # Founders ≈ 41.32%, NOT the post-money-SAFE value of ~36.36%
-        assert math.isclose(agg["founders_pct"], 10 / 24.2, abs_tol=1e-4)
-        # New money 50% (holds in both forms)
+        # SAFE converted at round_price_branch, not cap_branch
+        assert r["per_safe"]["safe_pre_1"]["branch"] == "round_price_branch", (
+            f"expected round_price_branch, got {r['per_safe']['safe_pre_1']['branch']}"
+        )
+
+        # safe_pct = 11/220 = 5.0%, NOT 10% (would be 10% under post-money form)
+        agg = r["aggregate_ownership_by_class"]
+        assert math.isclose(agg["safe_pct"], 11 / 220, abs_tol=1e-4), (
+            f"safe_pct: got {agg['safe_pct']:.6f}, expected {11 / 220:.6f} (5.0%)"
+        )
+        # founders_pct = 9/22 ≈ 40.909%
+        assert math.isclose(agg["founders_pct"], 9 / 22, abs_tol=1e-4)
+        # New money 50% (holds by construction)
         assert math.isclose(agg["new_money_pct"], 0.50, abs_tol=1e-4)
 
     def test_legacy_premoney_safe_pct_differs_from_post_money_safe_pct(self) -> None:
         """Smoke test: pre-money SAFE math MUST produce different ownership than
         post-money SAFE math under identical inputs. If the solver collapses both
         forms to the same formula (the regression we're guarding against), this
-        fails. safe_pct=10% would be the post-money answer; pre-money is ~4.55%.
+        fails. safe_pct=10% would be the post-money answer; at-cap pre-money is 5.0%.
         """
         cs = cap_state_mod.build_cap_state(self.EVAL_PREMONEY_INPUTS, self._instruments([self.EVAL_PREMONEY_SAFE]))
         r = priced_round.solve_priced_round(
@@ -1793,30 +1801,30 @@ class TestLegacyPreMoneySAFEs:
         agg = r["aggregate_ownership_by_class"]
         # The post-money YC SAFE identity `safe_pct = purchase/cap = 10%` MUST NOT
         # hold for a pre-money SAFE. If it does, the solver routed the wrong form.
+        # At-cap (§(a)(1)) gives 5.0%; above-cap (§(a)(2)) gives ~4.96% — both < 8%.
         assert agg["safe_pct"] < 0.08, (
             f"safe_pct {agg['safe_pct']:.4f} is too close to the post-money value "
-            f"0.10; pre-money SAFE should dilute to ~0.0455. Form dispatch likely broken."
+            f"0.10; pre-money SAFE should dilute (at-cap: 5.0%, above-cap: ~4.96%). "
+            "Form dispatch likely broken."
         )
 
     def test_mixed_legacy_premoney_and_post_money_safes(self) -> None:
         """Mixed-form scenario: one post-money SAFE + one pre-money SAFE in the
-        same priced round. Solver must route each form to its own denominator.
+        same priced round. Solver must route each form to its correct branch.
 
-        Expected (YC post-money convention — company_cap excludes new money):
-        - safe_B (pre-money $500k @ $5M cap): shares = $500k × 11M / $5M = 1,100,000 (constant)
-        - safe_A (post-money $500k @ $5M cap): locks 10% of company_cap C
-          where C = adj_pre_fd + safe_A_shares + safe_B_shares
-              = 11M + C/10 + 1.1M → 9C/10 = 12.1M → C = 121M/9 ≈ 13,444,444
-          safe_A_shares = C/10 = 121M/90 ≈ 1,344,444
-        - denom = C = 13,444,444 (no pool top-up)
-        - PPS = $5M / (121M/9) = 45/121 ≈ $0.37190
-        - new_shares = $5M / PPS = 5M × 121/45 = 605M/45 = 121M/9 ≈ 13,444,444
-        - T = denom + new_shares = 2 × 121M/9 = 242M/9 ≈ 26,888,889
-        - founders_pct = 10M/T = 10M × 9/242M = 90/242 = 45/121 ≈ 37.19%
-        - safe_A_pct = (121M/90) / (242M/9) = (121M/90) × (9/242M) = 1/20 = 5%
-        - safe_B_pct = 1.1M / T = 1.1M × 9/242M = 9.9/242 = 99/2420 ≈ 4.09%
-        - total_safe_pct = (1.344M + 1.1M) / T ≈ 9.09%
-        - new_money_pct = 50%
+        Round pre_money = $5M = safe_B cap → §(a)(1) applies for safe_B (round price).
+        safe_A (post-money): locks 10% of company_cap C.
+        safe_B (pre-money, §(a)(1)): safe_B_shares = 500k / PPS = 500k / (5M/C) = C/10
+
+        System: C = 11M + safe_A + safe_B = 11M + C/10 + C/10 = 11M + C/5
+          → 4C/5 = 11M → C = 55M/4 = 13,750,000
+          → safe_A_shares = safe_B_shares = C/10 = 55M/40 = 11M/8 = 1,375,000 (exact)
+          → PPS = 5M / C = 5M / (55M/4) = 4/11 ≈ 0.36364
+          → new_money_shares = 5M / PPS = 5M × 11/4 = 55M/4 = 13,750,000
+          → T = C + 13.75M = 55M/4 + 55M/4 = 55M/2 = 27,500,000 (exact)
+          → safe_pct  = (1.375M + 1.375M) / 27.5M = 2.75/27.5 = 10.0%
+          → founders_pct = 10M / 27.5M = 4/11 ≈ 36.36%
+          → new_money_pct = 13.75M / 27.5M = 50% ✓
         """
         safe_a_post = {
             "id": "safe_a",
@@ -1846,26 +1854,167 @@ class TestLegacyPreMoneySAFEs:
         )
         assert r["completeness"] == "full", f"blockers: {r.get('blockers')}"
 
-        # T = 242M/9 ≈ 26,888,889
-        _T = 242_000_000 / 9
+        # T = 55M/2 = 27,500,000 (exact)
+        _T = 27_500_000
         assert math.isclose(r["post_round_fully_diluted_shares"], _T, rel_tol=1e-3), (
-            f"total_fd: got {r['post_round_fully_diluted_shares']}, expected {_T:.0f}"
+            f"total_fd: got {r['post_round_fully_diluted_shares']}, expected {_T}"
         )
 
-        # safe_A (post-money) shares = 121M/90 ≈ 1,344,444
-        assert math.isclose(r["per_safe"]["safe_a"]["conversion_shares"], 121_000_000 / 90, rel_tol=1e-3)
-        # safe_B (pre-money) shares = 1.1M (constant)
-        assert math.isclose(r["per_safe"]["safe_pre_1"]["conversion_shares"], 1_100_000, rel_tol=1e-3)
+        # safe_A (post-money) shares = 11M/8 = 1,375,000 (exact)
+        assert math.isclose(r["per_safe"]["safe_a"]["conversion_shares"], 11_000_000 / 8, rel_tol=1e-3)
+        # safe_B (pre-money, §(a)(1)) shares = 11M/8 = 1,375,000 (exact, same as safe_A)
+        assert math.isclose(r["per_safe"]["safe_pre_1"]["conversion_shares"], 11_000_000 / 8, rel_tol=1e-3)
+        assert r["per_safe"]["safe_pre_1"]["branch"] == "round_price_branch"
 
         agg = r["aggregate_ownership_by_class"]
-        # Combined safe_pct = (121M/90 + 1.1M) / T
-        _safe_a = 121_000_000 / 90
-        _safe_b = 1_100_000
-        assert math.isclose(agg["safe_pct"], (_safe_a + _safe_b) / _T, abs_tol=1e-4)
-        # Founders 10M / T = 90/242 = 45/121 ≈ 37.19%
-        assert math.isclose(agg["founders_pct"], 45 / 121, abs_tol=1e-4)
-        # New money 50% (holds: PPS × new_shares = 5M = new_money; T × PPS = 10M = post_money)
+        # Combined safe_pct = 2 × 1.375M / 27.5M = 10.0%
+        assert math.isclose(agg["safe_pct"], 0.10, abs_tol=1e-4)
+        # Founders = 4/11 ≈ 36.36%
+        assert math.isclose(agg["founders_pct"], 4 / 11, abs_tol=1e-4)
+        # New money = 50%
         assert math.isclose(agg["new_money_pct"], 0.50, abs_tol=1e-3)
+
+    def test_legacy_premoney_above_cap_uses_cap_price(self) -> None:
+        """Single-SAFE pre-money scenario; round pre_money > cap → §(a)(2) applies.
+
+        Per YC pre-money SAFE §(a)(2): when pre_money_valuation > cap, the investor
+        receives shares at the SAFE price = cap / Company Capitalization (cap price).
+
+        Fixture: pre_fd=11M, SAFE $500k at $5M cap, round pre_money=$6M (> cap).
+          safe_price = 5M / 11M = 5/11
+          safe_shares = 500k / (5/11) = 500k × 11/5 = 1,100,000 (constant, non-iterative)
+          PPS = 6M / (11M + 1.1M) = 6M / 12.1M = 60/121 ≈ 0.49587
+          new_money_shares = 5M / (60/121) = 5M × 121/60 = 605M/60 ≈ 10,083,333
+          post_fd = 12.1M + 10.083M = 22.183M (not an integer — use rel_tol)
+          safe_pct ≈ 1.1M / 22.183M ≈ 4.96%
+        """
+        safe_above_cap = dict(self.EVAL_PREMONEY_SAFE)
+        # cap = 5M, round pre_money = 6M → strictly above cap
+        cs = cap_state_mod.build_cap_state(self.EVAL_PREMONEY_INPUTS, self._instruments([safe_above_cap]))
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=[safe_above_cap],
+            notes=[],
+            pre_money=6_000_000,  # strictly above $5M cap → §(a)(2)
+            new_money=5_000_000,
+            target_pool_percent=None,
+            target_basis="post_money",
+        )
+        assert r["completeness"] == "full", f"blockers: {r.get('blockers')}"
+
+        # safe_shares = 1,100,000 (cap price branch; non-iterative since pre-money forms
+        # use a constant denominator in §(a)(2))
+        assert math.isclose(r["per_safe"]["safe_pre_1"]["conversion_shares"], 1_100_000, rel_tol=1e-4)
+        assert r["per_safe"]["safe_pre_1"]["branch"] == "cap_branch"
+
+        # PPS = 60/121 ≈ 0.49587
+        assert math.isclose(r["equity_financing_price"], 60 / 121, rel_tol=1e-4), (
+            f"PPS: got {r['equity_financing_price']:.6f}, expected {60 / 121:.6f}"
+        )
+
+        # safe_pct: 1.1M / (12.1M + 5M × 121/60)  < 5% (below at-cap case)
+        agg = r["aggregate_ownership_by_class"]
+        assert agg["safe_pct"] < 0.05, f"safe_pct={agg['safe_pct']:.4f} should be < 0.05 in above-cap §(a)(2) branch"
+        # new_money_pct = new_money / (pre_money + new_money) = 5/11 ≈ 45.45%
+        assert math.isclose(agg["new_money_pct"], 5 / 11, abs_tol=1e-4)
+
+    def test_legacy_premoney_pool_topup_in_denominator(self) -> None:
+        """Pre-money SAFE §(a)(2): Company Capitalization includes in-connection pool top-up.
+
+        Per the YC pre-money SAFE "Company Capitalization" definition, the denominator
+        for the SAFE price INCLUDES "all shares of Common Stock reserved and available
+        for future grant under any equity incentive or similar plan to be created or
+        increased in connection with the Equity Financing."
+
+        Fixture: 10M founders, 0 existing pool → pre_fd = 10M
+          SAFE: $500k, $12M cap (pre_money=$20M > cap → §(a)(2))
+          Round: pre_money=$20M, new_money=$5M, target_pool=10% pre_money basis
+          existing_unallocated = 0
+
+        Correct (YC pre-money SAFE) denominator includes pool top-up:
+          safe_shares = P*(pre_fd + topup)/cap  AND  topup = (pre_fd + safe_shares)/9
+          Solving: safe_shares*(9C - P) = 10*P*pre_fd
+            → safe_shares = 10*P*pre_fd/(9C-P) = 10*500k*10M/(9*12M-500k) = 50T/107.5M = 20M/43
+          topup = (10M + 20M/43)/9 = (430M/43 + 20M/43)/9 = (450M/43)/9 = 50M/43
+          cap_price = 12M/(10M + 50M/43) = 12M*43/(430M+50M) = 516M/480M = 43/40 = 1.075
+
+        Buggy (pre-fix) denominator excludes pool top-up:
+          safe_shares = P*pre_fd/cap = 500k*10M/12M = 25M/60 ≈ 416,667  (fewer shares)
+
+        The investor gets MORE shares when the pool top-up is correctly included.
+        P=500k, F=10M, C=12M, target=10% pre_money.
+        """
+        inputs_no_pool = {
+            "company_name": "TestCo",
+            "analysis_date": "2026-05-21",
+            "mode": "standard",
+            "jurisdiction": {
+                "structure": "delaware",
+                "incorporated_date": "2024-06-01",
+                "iia_grants_history": {"has_grants": False, "grant_details": []},
+            },
+            "founders": [
+                {"name": "Founder", "founder_id": "founder_1", "common_shares": 10_000_000},
+            ],
+            "preferred_series": [],
+            "option_pool": {
+                "plan_type": "nso",
+                "authorized": 0,
+                "issued": 0,
+                "unallocated": 0,  # no pre-existing pool
+            },
+            "common_batches": [],
+            "metadata": {"run_id": "test"},
+        }
+        safe_above = {
+            "id": "safe_pool_test",
+            "investor_name": "Angel (pool test)",
+            "purchase_amount": 500_000,
+            "post_money_valuation_cap": None,
+            "pre_money_valuation_cap": 12_000_000,  # cap; pre_money=20M > cap → §(a)(2)
+            "discount_multiplier": None,
+            "mfn_provision": None,
+            "pro_rata_side_letter": None,
+            "issuance_date": "2017-09-01",
+            "form": "yc_premoney_cap_only",
+            "conversion_price_override": None,
+            "source_document": None,
+            "extraction_confidence": "high",
+        }
+        instruments = {
+            "safes": [safe_above],
+            "convertible_notes": [],
+            "warrants": [],
+            "option_grants": [],
+            "metadata": {"run_id": "test"},
+        }
+        cs = cap_state_mod.build_cap_state(inputs_no_pool, instruments)
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=[safe_above],
+            notes=[],
+            pre_money=20_000_000,  # > cap → §(a)(2); exercises the pool-top-up denominator term
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="pre_money",
+        )
+        assert r["completeness"] == "full", f"blockers: {r.get('blockers')}"
+
+        # With the top-up in the denominator: safe_shares = 20M/43 ≈ 465,116
+        # Buggy value (pre-fix): 500k*10M/12M = 416,667 (denominator excludes pool topup)
+        # The test checks the LOWER bound to confirm the fix:
+        expected_fixed = 20_000_000 / 43  # ≈ 465,116
+        expected_buggy = 500_000 * 10_000_000 / 12_000_000  # ≈ 416,667
+        safe_shares = r["per_safe"]["safe_pool_test"]["conversion_shares"]
+        assert safe_shares > expected_buggy + 1000, (
+            f"safe_shares={safe_shares:.0f} should be well above the buggy value "
+            f"{expected_buggy:.0f}; expected ≈{expected_fixed:.0f} (pool top-up included in denominator)"
+        )
+        assert math.isclose(safe_shares, expected_fixed, rel_tol=1e-3), (
+            f"safe_shares={safe_shares:.2f}, expected 20M/43={expected_fixed:.2f} "
+            "(pool top-up = 50M/43 included in cap-price denominator)"
+        )
+        assert r["per_safe"]["safe_pool_test"]["branch"] == "cap_branch"
 
 
 # ===========================================================================

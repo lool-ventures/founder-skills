@@ -149,6 +149,7 @@ def convert_safe_priced_round(
     conversion_price_override: float | None = None,
     pre_money_valuation_cap: float | None = None,
     pre_money_fd: float | None = None,
+    pre_money_valuation: float | None = None,
 ) -> dict[str, Any]:
     """Post-financing output set (requires a real conversion event).
 
@@ -158,14 +159,24 @@ def convert_safe_priced_round(
         * cap_plus_discount → min(cap_price, discount_price)
         * yc_postmoney_discount → discount branch only
         * yc_uncapped_mfn → REJECTED (caller must resolve MFN trigger first)
-        * yc_premoney_cap_only → cap branch (pre-money denominator)
-        * pre_money_cap_and_discount_legacy → min(cap_price[pre-money], discount_price)
+        * yc_premoney_cap_only → Standard-Preferred branch (round price) when
+          pre_money_valuation ≤ pre_money_valuation_cap per YC pre-money SAFE
+          §(a)(1); cap branch (pre-money denominator) when > cap per §(a)(2).
+        * pre_money_cap_and_discount_legacy → same §(a)(1)/§(a)(2) branch
+          selection, then min(winning_price, discount_price).
 
     Denominator routing: post-money forms use `company_capitalization`
     (= Company Capitalization immediately prior to the equity financing:
     adj_pre_fd + converting securities, EXCLUDING new-money shares and
     in-connection pool top-ups); pre-money forms use `pre_money_fd`
-    (= pre-financing FD constant). See `POST_MONEY_FORMS` / `PRE_MONEY_FORMS`.
+    (= pre-financing FD including in-connection pool increase, per the YC
+    pre-money SAFE "Company Capitalization" definition). See `POST_MONEY_FORMS`
+    / `PRE_MONEY_FORMS`.
+
+    `pre_money_valuation` (the round's pre-money valuation) is required for
+    pre-money forms when a priced round is known; without it the §(a)(1) ≤-cap
+    branch cannot be selected. When absent the cap-price path is used as a
+    conservative fallback and a note is emitted.
 
     Caller is responsible for resolving MFN cherry-pick BEFORE calling this
     function (yc_uncapped_mfn with a trigger should be re-presented as if
@@ -245,41 +256,81 @@ def convert_safe_priced_round(
         }
 
     candidate_prices: list[tuple[str, float]] = []
+    notes: list[str] = []
 
     # Cap candidate — route denominator on form.
     # Post-money forms use the iterating post-money FD as denominator
-    # (`company_capitalization`); pre-money forms use the constant pre-financing
-    # FD (`pre_money_fd`). This is the load-bearing distinction between the two
-    # SAFE families.
-    cap_value: float | None = None
-    cap_denom: float | None = None
+    # (`company_capitalization`); pre-money forms use `pre_money_fd` which
+    # includes the in-connection pool increase per the YC pre-money SAFE
+    # "Company Capitalization" definition. This is the load-bearing distinction
+    # between the two SAFE families.
     cap_provenance_rule_id: str = "safe.post_money_cap_conversion"
 
     if form in POST_MONEY_FORMS and post_money_valuation_cap is not None and post_money_valuation_cap > 0:
-        cap_value = post_money_valuation_cap
-        cap_denom = company_capitalization
-        cap_provenance_rule_id = "safe.post_money_cap_conversion"
-    elif form in PRE_MONEY_FORMS and pre_money_valuation_cap is not None and pre_money_valuation_cap > 0:
-        cap_value = pre_money_valuation_cap
-        cap_denom = pre_money_fd
-        # Pre-money SAFE math is the LEGACY YC SAFE conversion (pre-Oct-2018).
-        # The rule pack rule `safe.pre_money_cap_conversion` (added in v0.3.0)
-        # documents this branch.
-        cap_provenance_rule_id = "safe.pre_money_cap_conversion"
-
-    if cap_value is not None:
-        if cap_denom is None or cap_denom <= 0:
+        if company_capitalization is None or company_capitalization <= 0:
             return {
                 "branch": "rejected",
                 "error": E_SAFE_CAP_MISSING_DENOMINATOR,
                 "reason": (
-                    f"cap branch requires non-zero denominator "
-                    f"({'pre_money_fd' if form in PRE_MONEY_FORMS else 'company_capitalization'}); "
-                    f"got {cap_denom!r}"
+                    f"cap branch requires non-zero denominator (company_capitalization); got {company_capitalization!r}"
                 ),
             }
-        cap_price = cap_value / cap_denom
+        cap_price = post_money_valuation_cap / company_capitalization
         candidate_prices.append(("cap_price", cap_price))
+        cap_provenance_rule_id = "safe.post_money_cap_conversion"
+
+    elif form in PRE_MONEY_FORMS and pre_money_valuation_cap is not None and pre_money_valuation_cap > 0:
+        # YC pre-money SAFE §(a): branch on whether round pre-money valuation
+        # is ≤ cap or > cap.
+        #   §(a)(1): pre_money_valuation ≤ cap → Standard Preferred (round price)
+        #   §(a)(2): pre_money_valuation > cap → Safe Preferred (cap price)
+        # When pre_money_valuation is unknown the cap-price path is used as a
+        # conservative fallback (investor gets fewer shares — conservative for
+        # the founder-side; counsel should confirm branch when at/below-cap).
+        cap_provenance_rule_id = "safe.pre_money_cap_conversion"
+        if (
+            pre_money_valuation is not None
+            and pre_money_valuation <= pre_money_valuation_cap
+            and equity_financing_price is not None
+            and equity_financing_price > 0
+        ):
+            # §(a)(1): round price applies; cap price is disregarded.
+            # The investor gets purchase / round_price shares.
+            # The discount candidate (if any) still competes — investor
+            # always gets the more favorable (more shares) price.
+            candidate_prices.append(("round_price", equity_financing_price))
+        else:
+            # §(a)(2): pre_money_valuation > cap, OR round context not available.
+            if pre_money_valuation is None and equity_financing_price is not None:
+                # No valuation supplied; emit an informational note.
+                notes.append(
+                    "pre_money_valuation not provided; cap-price path used as conservative "
+                    "fallback. If the round pre-money valuation is ≤ the SAFE cap, §(a)(1) "
+                    "of the YC pre-money SAFE applies and the investor converts at the round "
+                    "price instead (more investor-favorable)."
+                )
+            elif (
+                pre_money_valuation is not None
+                and pre_money_valuation <= pre_money_valuation_cap
+                and (equity_financing_price is None or equity_financing_price <= 0)
+            ):
+                # §(a)(1) is KNOWN to apply (valuation ≤ cap) but no round price is
+                # available to price it — the cap-branch numbers below are the
+                # wrong branch and must not be presented as the document's answer.
+                notes.append(
+                    "pre_money_valuation ≤ cap, so §(a)(1) of the YC pre-money SAFE applies "
+                    "(round-price conversion) — but no round price per share was provided. "
+                    "The cap-price figures below are placeholders from the wrong branch; "
+                    "re-run with the round price to get the document's answer."
+                )
+            if pre_money_fd is None or pre_money_fd <= 0:
+                return {
+                    "branch": "rejected",
+                    "error": E_SAFE_CAP_MISSING_DENOMINATOR,
+                    "reason": (f"cap branch requires non-zero denominator (pre_money_fd); got {pre_money_fd!r}"),
+                }
+            cap_price = pre_money_valuation_cap / pre_money_fd
+            candidate_prices.append(("cap_price", cap_price))
 
     # Discount candidate (rule: safe.discount_rate_semantics)
     if discount_multiplier is not None and equity_financing_price is not None:
@@ -309,12 +360,25 @@ def convert_safe_priced_round(
     winning_label, conversion_price = min(candidate_prices, key=lambda kv: kv[1])
     shares = purchase_amount / conversion_price
 
-    branch = "cap_branch" if winning_label == "cap_price" else "discount_branch"
-    if len(candidate_prices) == 2:
-        branch = "cap_and_discount_branch"
+    labels = {label for label, _ in candidate_prices}
+    if len(candidate_prices) == 1:
+        if winning_label == "cap_price":
+            branch = "cap_branch"
+        elif winning_label == "round_price":
+            branch = "round_price_branch"
+        else:
+            branch = "discount_branch"
+    else:
+        # Two candidates: name the combination
+        if "cap_price" in labels and "discount_price" in labels:
+            branch = "cap_and_discount_branch"
+        elif "round_price" in labels and "discount_price" in labels:
+            branch = "round_price_and_discount_branch"
+        else:
+            branch = "cap_and_discount_branch"  # fallback
 
     provenance = []
-    if any(label == "cap_price" for label, _ in candidate_prices):
+    if "cap_price" in labels:
         provenance.append(
             {
                 "output_field": "cap_price",
@@ -324,7 +388,17 @@ def convert_safe_priced_round(
                 "source_ref": None,
             }
         )
-    if any(label == "discount_price" for label, _ in candidate_prices):
+    if "round_price" in labels:
+        provenance.append(
+            {
+                "output_field": "round_price",
+                "source_type": "rule",
+                "rule_id": cap_provenance_rule_id,
+                "rule_pack_version": RULE_PACK_VERSION,
+                "source_ref": None,
+            }
+        )
+    if "discount_price" in labels:
         provenance.append(
             {
                 "output_field": "discount_price",
@@ -353,13 +427,16 @@ def convert_safe_priced_round(
         }
     )
 
-    return {
+    result: dict[str, Any] = {
         "branch": branch,
         "candidates": dict(candidate_prices),
         "conversion_price": conversion_price,
         "conversion_shares": shares,
         "math_provenance": provenance,
     }
+    if notes:
+        result["notes"] = notes
+    return result
 
 
 def detect_mfn_cycles(safes: list[dict[str, Any]]) -> list[set[str]]:

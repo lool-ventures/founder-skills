@@ -415,6 +415,7 @@ def _safe_shares_at_price(
     company_capitalization: float,
     pre_money_fd: float,
     equity_financing_price: float,
+    pre_money_valuation: float | None = None,
 ) -> tuple[float, dict[str, dict[str, Any]]]:
     """Sum SAFE shares at a given (candidate) equity_financing_price.
 
@@ -422,8 +423,13 @@ def _safe_shares_at_price(
     immediately prior to the equity financing = adj_pre_fd + converting
     securities, EXCLUDING new-money shares and in-connection pool top-ups; per
     rule `safe.company_capitalization_yc_post_money`) AND `pre_money_fd`
-    (pre-financing FD, constant). The math producer routes on form: post-money
-    forms use company_capitalization; pre-money (legacy) forms use pre_money_fd.
+    (pre-financing FD including in-connection pool top-up for pre-money forms,
+    per the YC pre-money SAFE "Company Capitalization" definition). The math
+    producer routes on form: post-money forms use company_capitalization;
+    pre-money (legacy) forms use pre_money_fd.
+
+    `pre_money_valuation` is forwarded to `convert_safe_priced_round` so the
+    §(a)(1)/§(a)(2) branch selection can fire for pre-money SAFE forms.
     """
     total = 0.0
     per_safe: dict[str, dict[str, Any]] = {}
@@ -438,6 +444,7 @@ def _safe_shares_at_price(
             pre_money_fd=pre_money_fd,
             equity_financing_price=equity_financing_price,
             conversion_price_override=s.get("conversion_price_override"),
+            pre_money_valuation=pre_money_valuation,
         )
         if s.get("_mfn_inherited_from"):
             r["_mfn_inherited_from"] = s["_mfn_inherited_from"]
@@ -621,6 +628,11 @@ def solve_priced_round(
     # `safe.company_capitalization_yc_post_money`, this EXCLUDES new-money
     # financing shares and in-connection pool top-ups.
     company_cap_estimate = float(pre_fd)
+    # pm_pre_money_fd_estimate tracks the denominator for pre-money SAFE forms:
+    # per the YC pre-money SAFE "Company Capitalization" clause, this INCLUDES
+    # the in-connection pool top-up. Initialised to pre_fd (0 topup at iteration 0);
+    # updated at the end of each iteration once pool_topup_shares is known.
+    pm_pre_money_fd_estimate = float(pre_fd)
     aitken_engaged = False
     aitken_fallback_engaged = False
     damping_engaged = False
@@ -670,11 +682,16 @@ def solve_priced_round(
         # SAFE definition. The fixed-point loop self-consistently resolves the
         # circular dependency (converting securities appear in both the numerator
         # share count and the denominator they convert against).
+        # pm_pre_money_fd_estimate is the denominator for pre-money SAFE forms:
+        # adj_pre_fd + pool_topup_shares from the previous iteration, per the YC
+        # pre-money SAFE "Company Capitalization" clause (includes in-connection
+        # pool increase; rule `safe.pre_money_cap_conversion`).
         safe_shares, per_safe = _safe_shares_at_price(
             safes,
             company_capitalization=company_cap_estimate,
-            pre_money_fd=adj_pre_fd,
+            pre_money_fd=pm_pre_money_fd_estimate,
             equity_financing_price=price,
+            pre_money_valuation=pre_money,
         )
         if notes:
             # conversion_event_date guaranteed non-None by the structural guard
@@ -718,6 +735,11 @@ def solve_priced_round(
         # in-connection pool top-up per the YC post-money SAFE definition
         # (rule `safe.company_capitalization_yc_post_money`).
         company_cap_estimate = adj_pre_fd + safe_shares + note_shares
+        # Update pm_pre_money_fd_estimate for the next iteration: adj_pre_fd +
+        # the in-connection pool top-up just computed. Per the YC pre-money SAFE
+        # "Company Capitalization" clause, the pool increase in connection with
+        # the equity financing IS included in the denominator for pre-money SAFEs.
+        pm_pre_money_fd_estimate = adj_pre_fd + pool_topup_shares
 
         rel_change = abs(new_price - price) / max(price, 1e-12)
         abs_change = abs(new_price - price)
@@ -801,8 +823,9 @@ def solve_priced_round(
     safe_shares, per_safe = _safe_shares_at_price(
         safes,
         company_capitalization=company_cap_estimate,
-        pre_money_fd=adj_pre_fd,
+        pre_money_fd=pm_pre_money_fd_estimate,
         equity_financing_price=price,
+        pre_money_valuation=pre_money,
     )
     if notes:
         # conversion_event_date guaranteed non-None by the structural guard
