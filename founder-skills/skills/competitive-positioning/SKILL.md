@@ -553,6 +553,11 @@ rm -rf "$ANALYSIS_DIR/.staging" 2>/dev/null || true
 
 Where `COMPANY_NAME` is the company name with spaces replaced by underscores (e.g., "Acme Corp" -> "Acme_Corp"). Present the file paths to the user.
 
+**Presenting the report to the founder:**
+- Answer placement and moat questions **from the points/evidence tables in report.md** — never re-derive or restate coordinates from memory.
+- If the founder disputes a coordinate (e.g., "we're faster than you placed us"), use the **founder coordinate-override flow** (Step 5): update the specific point in `positioning.json` with `x_evidence_source: "founder_override"` and re-run `score_positioning.py` to refresh `positioning_scores.json`, then re-run `compose_report.py`. Do NOT re-explain a placement from chat context.
+- For what-if competitive scenarios (e.g., "what if we added this moat?"), note the gap and invite the founder to re-run the full skill after updating the relevant data.
+
 ## Scoring
 
 ### Moat Scoring

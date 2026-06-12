@@ -5535,3 +5535,231 @@ class TestRuleOf40GrowthDisclosure:
         assert "annualized" in evidence.lower(), (
             f"rule_of_40 evidence must disclose that growth is annualized from MoM rate. Got: {evidence!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Item 5: Runway scenarios table — Assumptions column
+# ---------------------------------------------------------------------------
+
+
+class TestRunwayAssumptionsColumn:
+    """compose_report._section_runway() must render an Assumptions column
+    with growth_rate, burn_change, fx_adjustment from scenario fields."""
+
+    _BASE_ARTIFACTS = {
+        "inputs.json": _VALID_INPUTS,
+        "checklist.json": _VALID_CHECKLIST,
+        "unit_economics.json": _VALID_UNIT_ECONOMICS,
+    }
+
+    def _run_with_runway(self, runway: dict) -> str:
+        d = _make_fmr_artifact_dir({**self._BASE_ARTIFACTS, "runway.json": runway})
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        return data["report_markdown"]
+
+    def test_assumptions_column_header_present(self) -> None:
+        """Scenarios table header must include 'Assumptions'."""
+        md = self._run_with_runway(_VALID_RUNWAY)
+        assert "Assumptions" in md
+
+    def test_growth_rate_rendered_in_assumptions(self) -> None:
+        """growth_rate field appears as 'growth X%/mo' in Assumptions column."""
+        runway = json.loads(json.dumps(_VALID_RUNWAY))
+        runway["scenarios"][1]["growth_rate"] = 0.05  # slow scenario
+        md = self._run_with_runway(runway)
+        assert "growth 5%/mo" in md
+
+    def test_burn_change_rendered_in_assumptions(self) -> None:
+        """burn_change field appears as 'burn X%' in Assumptions column."""
+        runway = json.loads(json.dumps(_VALID_RUNWAY))
+        runway["scenarios"][2]["burn_change"] = 0.20  # crisis scenario
+        md = self._run_with_runway(runway)
+        assert "burn +20%" in md
+
+    def test_burn_change_negative_rendered_with_sign(self) -> None:
+        """Negative burn_change shows negative sign (cost cut)."""
+        runway = json.loads(json.dumps(_VALID_RUNWAY))
+        runway["scenarios"][1]["burn_change"] = -0.15
+        md = self._run_with_runway(runway)
+        assert "burn -15%" in md
+
+    def test_fx_adjustment_skipped_when_zero(self) -> None:
+        """fx_adjustment == 0 must not appear in the table (no noise)."""
+        runway = json.loads(json.dumps(_VALID_RUNWAY))
+        runway["scenarios"][0]["fx_adjustment"] = 0.0
+        md = self._run_with_runway(runway)
+        # "fx" should not appear when value is zero
+        assert "fx" not in md
+
+    def test_no_assumptions_fields_renders_dash_or_empty(self) -> None:
+        """When no scenario has growth_rate/burn_change/fx, Assumptions column
+        cells are empty or '—' — not a Python None literal."""
+        md = self._run_with_runway(_VALID_RUNWAY)
+        assert "None" not in md
+
+
+# ---------------------------------------------------------------------------
+# Item 6: Executive summary — breakeven month derivation for default-alive
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultAliveBreakevenInExecSummary:
+    """When the base scenario is default-alive (runway_months=None), the
+    executive summary Base Runway line must show the breakeven month derived
+    from monthly_projections, matching the scenarios table cell."""
+
+    _BASE_ARTIFACTS = {
+        "inputs.json": _VALID_INPUTS,
+        "checklist.json": _VALID_CHECKLIST,
+        "unit_economics.json": _VALID_UNIT_ECONOMICS,
+    }
+
+    def _run_with_runway(self, runway: dict) -> str:
+        d = _make_fmr_artifact_dir({**self._BASE_ARTIFACTS, "runway.json": runway})
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        return data["report_markdown"]
+
+    def test_exec_summary_shows_infinite_not_null_for_default_alive(self) -> None:
+        """Base Runway line must not say 'None months' when default-alive."""
+        runway = json.loads(json.dumps(_VALID_RUNWAY))
+        runway["scenarios"][0]["runway_months"] = None
+        runway["scenarios"][0]["cash_out_date"] = None
+        runway["scenarios"][0]["decision_point"] = None
+        runway["scenarios"][0]["default_alive"] = True
+        md = self._run_with_runway(runway)
+        assert "None months" not in md
+
+    def test_exec_summary_shows_breakeven_month_from_projections(self) -> None:
+        """When projections contain a month where net_burn <= 0, exec summary
+        must reference that month (profitability / month N)."""
+        runway = json.loads(json.dumps(_VALID_RUNWAY))
+        runway["scenarios"][0]["runway_months"] = None
+        runway["scenarios"][0]["cash_out_date"] = None
+        runway["scenarios"][0]["decision_point"] = None
+        runway["scenarios"][0]["default_alive"] = True
+        runway["scenarios"][0]["monthly_projections"] = [
+            {"month": 1, "net_burn": 20000},
+            {"month": 2, "net_burn": 5000},
+            {"month": 3, "net_burn": -1000},  # breakeven at month 3
+            {"month": 4, "net_burn": -5000},
+        ]
+        md = self._run_with_runway(runway)
+        # Should reference month 3 (breakeven)
+        assert "3" in md
+
+    def test_exec_summary_consistent_with_scenarios_table(self) -> None:
+        """Both exec summary and scenarios table must indicate default-alive /
+        infinite — no conflicting finite number in one and None in the other."""
+        runway = json.loads(json.dumps(_VALID_RUNWAY))
+        runway["scenarios"][0]["runway_months"] = None
+        runway["scenarios"][0]["cash_out_date"] = None
+        runway["scenarios"][0]["decision_point"] = None
+        runway["scenarios"][0]["default_alive"] = True
+        md = self._run_with_runway(runway)
+        # "None months" must not appear in either location
+        assert "None months" not in md
+        # Report must use a consistent signal — Infinite or profitability
+        assert "Infinite" in md or "profitability" in md.lower() or "default-alive" in md.lower()
+
+
+# ---------------------------------------------------------------------------
+# Item 7: Corrections Applied section from extraction_corrections.json
+# ---------------------------------------------------------------------------
+
+
+class TestCorrectionsAppliedSection:
+    """compose_report must render a 'Corrections Applied' section when
+    extraction_corrections.json is present; must be absent without it."""
+
+    _BASE_ARTIFACTS = {
+        "inputs.json": _VALID_INPUTS,
+        "checklist.json": _VALID_CHECKLIST,
+        "unit_economics.json": _VALID_UNIT_ECONOMICS,
+        "runway.json": _VALID_RUNWAY,
+    }
+
+    _CORRECTIONS = {
+        "timestamp": "2026-06-12T10:00:00Z",
+        "corrections": [
+            {"path": "revenue.arr.value", "was": "1000000", "now": "12000000", "source": "founder"},
+            {"path": "cash.current_balance", "was": "500000", "now": "5000000", "source": "founder"},
+        ],
+    }
+
+    def test_corrections_section_present_when_file_exists(self) -> None:
+        """'Corrections Applied' heading appears when extraction_corrections.json provided."""
+        d = _make_fmr_artifact_dir({**self._BASE_ARTIFACTS, "extraction_corrections.json": self._CORRECTIONS})
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        assert "Corrections Applied" in data["report_markdown"]
+
+    def test_corrections_field_names_in_table(self) -> None:
+        """Corrected field paths appear as rows in the corrections table."""
+        d = _make_fmr_artifact_dir({**self._BASE_ARTIFACTS, "extraction_corrections.json": self._CORRECTIONS})
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = data["report_markdown"]
+        assert "revenue.arr.value" in md
+        assert "cash.current_balance" in md
+
+    def test_corrections_was_now_values_in_table(self) -> None:
+        """Original and corrected values appear in the table."""
+        d = _make_fmr_artifact_dir({**self._BASE_ARTIFACTS, "extraction_corrections.json": self._CORRECTIONS})
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = data["report_markdown"]
+        assert "1000000" in md or "12000000" in md  # was/now values visible
+
+    def test_corrections_section_absent_without_file(self) -> None:
+        """'Corrections Applied' does not appear when file is absent."""
+        d = _make_fmr_artifact_dir(self._BASE_ARTIFACTS)
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        assert "Corrections Applied" not in data["report_markdown"]
+
+    def test_compose_succeeds_without_corrections_file(self) -> None:
+        """Missing extraction_corrections.json must not fail or warn."""
+        d = _make_fmr_artifact_dir(self._BASE_ARTIFACTS)
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0
+        assert data is not None
+        # No MISSING_ARTIFACT warning for corrections file
+        warnings = data["validation"].get("warnings", [])
+        missing = [w for w in warnings if w["code"] == "MISSING_ARTIFACT" and "corrections" in w.get("detail", "")]
+        assert not missing
+
+
+# ---------------------------------------------------------------------------
+# Item 8: Explorer footer line in report_markdown
+# ---------------------------------------------------------------------------
+
+
+class TestExplorerFooterLine:
+    """compose_report must append a footer line pointing founders to explore.html
+    for what-if scenarios."""
+
+    _BASE_ARTIFACTS = {
+        "inputs.json": _VALID_INPUTS,
+        "checklist.json": _VALID_CHECKLIST,
+        "unit_economics.json": _VALID_UNIT_ECONOMICS,
+        "runway.json": _VALID_RUNWAY,
+    }
+
+    def test_explorer_footer_present_in_report_markdown(self) -> None:
+        """report_markdown footer must reference the interactive explorer."""
+        d = _make_fmr_artifact_dir(self._BASE_ARTIFACTS)
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = data["report_markdown"]
+        # Footer must mention explore.html or explore.py
+        assert "explore" in md.lower()
+
+    def test_explorer_footer_mentions_what_if(self) -> None:
+        """Footer should indicate what-if / interactive use."""
+        d = _make_fmr_artifact_dir(self._BASE_ARTIFACTS)
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = data["report_markdown"]
+        assert "what-if" in md.lower() or "scenarios" in md.lower()

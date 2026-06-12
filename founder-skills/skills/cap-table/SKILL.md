@@ -375,6 +375,12 @@ Inputs are built from the founder's conversational description via `AskUserQuest
 
 **Read `report_fast_assess.md` and present its numbers verbatim to the founder — never re-derive or reconstruct the ownership table in chat.** If you computed preliminary estimates while gathering inputs, discard them in favour of the script output. The script is the authoritative source; hand-reconstructed math will diverge from the fixed-point solver result. This includes the dilution explanation — use the share counts from the report; never re-derive top-up or conversion shares by hand. For what-if follow-ups (e.g. "what if we top up the pool to 10%?"), re-run `quick_assess.py` with the changed flag and present the new report — never estimate the answer by hand.
 
+**Full-pipeline what-ifs (applies to both fast-assess and full reviews):** the `explorer.html` displays only precomputed scenarios. For any scenario not yet modeled, write a new scenario request and re-run the full pipeline:
+1. Add the new scenario to `scenario_requests.json`
+2. Re-run `run_scenario.py` → `rule_audit.py --phase=post_math` → `compose_report.py`
+3. Present the updated `report.md` numbers verbatim
+Never hand-estimate a new scenario in chat.
+
 Total wall-clock: under 60 seconds. Then jump to **Step 12: Deliver Artifacts** with the fast-assess deliverable. Offer the founder a follow-up: "I gave you the directional answer — want the full review with counsel packet and interactive explorer?"
 
 ### Step 5: Determine Scenarios + Run Math → `scenarios.json`
@@ -414,7 +420,7 @@ python3 "$SCRIPTS/run_scenario.py" \
 
 `run_scenario.py` dispatches to the right math producer per scenario type and consumes the gating block from Step 4.5. After this completes, share a one-sentence finding per scenario with the founder (e.g., "Series A drops your stake from 87% to 64%; the 10% pool top-up costs you ~3pp").
 
-**`scenarios.json` ownership shape:** per-holder ownership percentages live in `scenarios.json` → `scenarios[n].computed_outputs.aggregate_ownership_by_class` (an object keyed by class, e.g. `{"founders": 0.64, "preferred": 0.26, "option_pool": 0.10}`). Per-holder share counts and full ownership tables are rendered in `report.md`'s tables by `compose_report.py`. There is no `post_financing_table.rows` field in `scenarios.json` — do not look for one there.
+**`scenarios.json` ownership shape:** per-holder ownership percentages live in `scenarios.json` → `scenarios[n].computed_outputs.aggregate_ownership_by_class` (an object keyed by class, e.g. `{"founders": 0.64, "preferred": 0.26, "option_pool": 0.10}`). Per-holder share counts and full ownership tables are always rendered in `report.md`'s Current Cap State section by `compose_report.py`: individual founders appear by name with share counts and pre-round % in both single-class and dual-class engagements. There is no `post_financing_table.rows` field in `scenarios.json` — do not look for one there.
 
 ### Step 6: Post-Math Rule Audit → `rule_audit.json` (watchlist + counsel items)
 

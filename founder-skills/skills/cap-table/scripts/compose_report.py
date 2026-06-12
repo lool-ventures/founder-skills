@@ -656,19 +656,33 @@ def render_report_markdown(
             "counsel item for investor-objection considerations at later rounds._"
         )
     else:
-        # Single-class engagement: keep the v0.4.x aggregate FD table.
-        lines.append("| Holder class | Shares (as-converted) | % of FD |")
+        # Single-class engagement: aggregate FD table + per-founder rows.
+        # Per-founder rows so founders see their own share counts by name.
+        lines.append("| Holder | Shares (as-converted) | % of FD |")
         lines.append("|---|---:|---:|")
-        pcts = {
-            "Founders (common)": cap_state["as_converted_totals"]["common_shares"],
+        # Per-founder rows (name, shares)
+        for f in founders_list:
+            fname = f.get("name") or "Founder"
+            fshares = int(f.get("common_shares") or 0)
+            fpct = fshares / fd if fd else 0.0
+            lines.append(f"| {fname} | {fshares:,} | {_percent(fpct)} |")
+        # Common batches (other common holders besides named founders)
+        for b in common_batches_list:
+            blabel = f"Batch {b.get('batch_id') or b.get('holder_id', '?')}"
+            bshares = int(b.get("shares") or 0)
+            bpct = bshares / fd if fd else 0.0
+            lines.append(f"| {blabel} | {bshares:,} | {_percent(bpct)} |")
+        # Aggregate remaining classes
+        aggregate_classes = {
             "Preferred (as-converted)": cap_state["as_converted_totals"]["preferred_shares_as_converted"],
             "Options outstanding": cap_state["as_converted_totals"]["options_outstanding"],
             "Options available": cap_state["as_converted_totals"]["options_available"],
             "Warrants outstanding (vested)": cap_state["as_converted_totals"].get("warrants_underlying_total", 0),
         }
-        for label, shares in pcts.items():
-            pct = shares / fd if fd else 0.0
-            lines.append(f"| {label} | {shares:,} | {_percent(pct)} |")
+        for label, shares in aggregate_classes.items():
+            if shares:
+                pct = shares / fd if fd else 0.0
+                lines.append(f"| {label} | {shares:,} | {_percent(pct)} |")
         lines.append(f"| **Total fully-diluted** | **{fd:,}** | **100.0%** |")
     lines.append("")
     safes = cap_state.get("outstanding_safes", [])
@@ -857,13 +871,50 @@ def render_report_markdown(
             lines.append(f"**Cash repayment:** {_money(co['aggregate_cash_repayment'])}")
             lines.append("")
 
-        # Per-instrument narrative for note_conversion + safe_conversion
-        # scenarios. Founders reading report.md for a note conversion need to
-        # see branch, accrued_interest, conversion_price, and
-        # conversion_shares — without these, the report only shows
-        # "completeness=full" and inputs.
+        # Shares breakdown (post-round composition table): pre-round FD → + converted
+        # SAFEs → + pool top-up → + new money → = post-FD. Rendered when available.
+        shares_breakdown = co.get("shares_breakdown") or {}
+        if shares_breakdown and isinstance(shares_breakdown, dict):
+            pre_fd = shares_breakdown.get("pre_round_fd")
+            safe_shares = shares_breakdown.get("safe_converted_shares") or shares_breakdown.get("safe_shares")
+            note_shares = shares_breakdown.get("note_converted_shares") or shares_breakdown.get("note_shares")
+            pool_shares = shares_breakdown.get("pool_topup_shares") or shares_breakdown.get("option_pool_shares")
+            new_money_shares = shares_breakdown.get("new_money_shares") or shares_breakdown.get("investor_shares")
+            post_fd = shares_breakdown.get("post_round_fd") or shares_breakdown.get("post_fd")
+            if pre_fd is not None or post_fd is not None:
+                lines.append("**Post-round share composition:**")
+                lines.append("")
+                lines.append("| Component | Shares | Post-round % |")
+                lines.append("|-----------|-------:|-------------:|")
+                _total_denom = post_fd if post_fd else None
+
+                def _pct(n: int | float | None, denom: int | float | None) -> str:
+                    if n is None or denom is None or denom == 0:
+                        return "—"
+                    return f"{n / denom * 100:.1f}%"
+
+                if pre_fd is not None:
+                    lines.append(f"| Pre-round FD | {int(pre_fd):,} | {_pct(pre_fd, _total_denom)} |")
+                if safe_shares:
+                    lines.append(f"| + SAFE converted | {int(safe_shares):,} | {_pct(safe_shares, _total_denom)} |")
+                if note_shares:
+                    lines.append(f"| + Notes converted | {int(note_shares):,} | {_pct(note_shares, _total_denom)} |")
+                if pool_shares:
+                    lines.append(f"| + Pool top-up | {int(pool_shares):,} | {_pct(pool_shares, _total_denom)} |")
+                if new_money_shares:
+                    lines.append(
+                        f"| + New money (investors) | {int(new_money_shares):,} | {_pct(new_money_shares, _total_denom)} |"
+                    )
+                if post_fd is not None:
+                    lines.append(f"| **= Post-round FD** | **{int(post_fd):,}** | **100.0%** |")
+                lines.append("")
+
+        # Per-instrument narrative — keyed on non-empty per_note/per_safe rather
+        # than scenario type so priced_round scenarios that populate these fields
+        # (fully-coupled solver produces per_safe/per_note for every instrument
+        # that participates in the round) also get the conversion-math tables.
         per_note = co.get("per_note") or {}
-        if s.get("type") == "note_conversion" and per_note:
+        if per_note:
             lines.append("**Per-note conversion math:**")
             lines.append("")
             lines.append("| Note | Branch | Accrued interest | Conversion price | Conversion shares |")
@@ -881,19 +932,26 @@ def render_report_markdown(
                 )
             lines.append("")
         per_safe = co.get("per_safe") or {}
-        if s.get("type") == "safe_conversion" and per_safe:
+        # Render only when there are rows that are NOT the cap_implied_only snapshot
+        per_safe_rows = {sid: r for sid, r in per_safe.items() if "cap_implied_ownership" not in r}
+        if per_safe_rows:
             lines.append("**Per-SAFE conversion math:**")
             lines.append("")
-            lines.append("| SAFE | Branch | Conversion price | Conversion shares |")
-            lines.append("|---|---|---:|---:|")
-            for sid, r in per_safe.items():
-                if "cap_implied_ownership" in r:
-                    continue  # already rendered above for cap_implied_only
+            lines.append("| SAFE | Branch | Purchase ÷ Cap | Conversion price | Conversion shares |")
+            lines.append("|---|---|---|---:|---:|")
+            for sid, r in per_safe_rows.items():
                 branch = r.get("branch", "—")
                 cp = r.get("conversion_price")
                 shares = r.get("conversion_shares")
+                # Derivation sentence: purchase ÷ cap = % → shares
+                purchase = r.get("purchase_amount")
+                cap = r.get("post_money_cap") or r.get("valuation_cap")
+                deriv = "—"
+                if purchase is not None and cap is not None and cap > 0:
+                    pct_of_cap = purchase / cap
+                    deriv = f"{_money(purchase)} ÷ {_money(cap)} = {pct_of_cap * 100:.2f}%"
                 lines.append(
-                    f"| `{sid}` | `{branch}` | "
+                    f"| `{sid}` | `{branch}` | {deriv} | "
                     f"{('$' + format(cp, '.4f')) if cp is not None else '—'} | "
                     f"{(f'{int(shares):,}') if shares is not None else '—'} |"
                 )

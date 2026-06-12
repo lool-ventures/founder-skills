@@ -174,6 +174,18 @@ def _humanize(value: str) -> str:
     return _LABELS.get(value, value.replace("_", " ").title() if value else "?")
 
 
+def _md_escape(text: str) -> str:
+    """Escape text for safe markdown table cell interpolation."""
+    return text.replace("|", "\\|").replace("\n", " ")
+
+
+def _truncate_evidence(text: str, max_len: int = 120) -> str:
+    """Truncate long evidence strings for table cells."""
+    if not text or len(text) <= max_len:
+        return text
+    return text[:max_len].rstrip() + "…"
+
+
 def _warn(code: str, message: str) -> dict[str, Any]:
     """Create a warning dict with code, message, and severity."""
     return {
@@ -701,8 +713,9 @@ def _section_competitor_landscape(landscape: dict[str, Any] | None) -> str:
 
 def _section_positioning(
     positioning_scores: dict[str, Any] | None,
+    positioning: dict[str, Any] | None = None,
 ) -> str:
-    """Positioning analysis with per-view details."""
+    """Positioning analysis with per-view details and evidence points table."""
     if positioning_scores is None or _is_stub(positioning_scores):
         return "## Positioning Analysis\n\n*No positioning scores available.*\n"
 
@@ -711,9 +724,19 @@ def _section_positioning(
     if overall is not None:
         lines.append(f"**Overall Differentiation:** {overall}%\n")
 
+    # Build a lookup: view_id → points list from positioning.json
+    pos_views_by_id: dict[str, list[dict[str, Any]]] = {}
+    if _usable(positioning):
+        for pv in _as_list(positioning.get("views")):
+            pv = _as_dict(pv)
+            vid_key = str(pv.get("id", ""))
+            if vid_key:
+                pos_views_by_id[vid_key] = _as_list(pv.get("points"))
+
     for view in _as_list(positioning_scores.get("views")):
         view = _as_dict(view)
         vid = str(view.get("view_id", "?")).title()
+        vid_key = str(view.get("view_id", ""))
         lines.append(f"### {vid} View\n")
         lines.append(f"- **X-Axis:** {view.get('x_axis_name', '?')}")
         lines.append(f"  - Rationale: {view.get('x_axis_rationale', '?')}")
@@ -731,11 +754,31 @@ def _section_positioning(
         )
         lines.append("")
 
+        # Points evidence table (from positioning.json views[].points[])
+        points = pos_views_by_id.get(vid_key, [])
+        if points:
+            x_name = view.get("x_axis_name", "X")
+            y_name = view.get("y_axis_name", "Y")
+            lines.append(
+                f"| Company | {_md_escape(x_name)} | {_md_escape(y_name)} "
+                f"| {_md_escape(x_name)} evidence | {_md_escape(y_name)} evidence |"
+            )
+            lines.append("|---------|------|------|------------|------------|")
+            for pt in points:
+                pt = _as_dict(pt)
+                slug = pt.get("competitor", "?")
+                x_val = pt.get("x", "?")
+                y_val = pt.get("y", "?")
+                x_ev = _md_escape(_truncate_evidence(str(pt.get("x_evidence", ""))))
+                y_ev = _md_escape(_truncate_evidence(str(pt.get("y_evidence", ""))))
+                lines.append(f"| {_md_escape(slug)} | {x_val} | {y_val} | {x_ev} | {y_ev} |")
+            lines.append("")
+
     return "\n".join(lines) + "\n"
 
 
 def _section_moat_assessment(moat_scores: dict[str, Any] | None) -> str:
-    """Moat assessment section."""
+    """Moat assessment section with evidence, leader context, and per-dimension matrix."""
     if moat_scores is None or _is_stub(moat_scores):
         return "## Moat Assessment\n\n*No moat scores available.*\n"
 
@@ -743,6 +786,8 @@ def _section_moat_assessment(moat_scores: dict[str, Any] | None) -> str:
 
     companies = _as_dict(moat_scores.get("companies"))
     startup = _as_dict(companies.get("_startup"))
+    # Competitor slugs (exclude _startup for leader lookup)
+    competitor_slugs = [k for k in companies if k != "_startup"]
 
     if startup:
         defensibility = _humanize(str(startup.get("overall_defensibility", "?")))
@@ -751,9 +796,10 @@ def _section_moat_assessment(moat_scores: dict[str, Any] | None) -> str:
         lines.append(f"**Strongest Moat:** {strongest}")
         lines.append("")
 
-        # Moat table for _startup
+        # Moat table for _startup — with evidence text as a bullet under each row
         lines.append("| Moat | Status | Trajectory | Evidence Source |")
         lines.append("|------|--------|------------|----------------|")
+        moat_evidence_pairs: list[tuple[str, str]] = []
         for moat in _as_list(startup.get("moats")):
             moat = _as_dict(moat)
             mid = _humanize(str(moat.get("id", "?")))
@@ -761,16 +807,77 @@ def _section_moat_assessment(moat_scores: dict[str, Any] | None) -> str:
             traj = _humanize(str(moat.get("trajectory", "?")))
             src = _humanize(str(moat.get("evidence_source", "?")))
             lines.append(f"| {mid} | {status} | {traj} | {src} |")
+            evidence_text = str(moat.get("evidence", "")).strip()
+            if evidence_text:
+                moat_evidence_pairs.append((mid, evidence_text))
         lines.append("")
 
-    # Comparison highlights
+        # Evidence bullets under the table
+        if moat_evidence_pairs:
+            lines.append("**Evidence:**")
+            for mid, ev in moat_evidence_pairs:
+                lines.append(f"- **{mid}:** {_truncate_evidence(ev, 200)}")
+            lines.append("")
+
+    # Comparison highlights — with leader context appended
     comparison = _as_dict(moat_scores.get("comparison"))
     startup_rank = _as_dict(comparison.get("startup_rank"))
+    by_dimension = _as_dict(comparison.get("by_dimension"))
     if startup_rank:
         lines.append("### Startup Ranking by Moat Dimension\n")
         for dim, rank_info in startup_rank.items():
             ri = _as_dict(rank_info)
-            lines.append(f"- **{_humanize(dim)}:** Rank {ri.get('rank', '?')} of {ri.get('total', '?')}")
+            rank_val = ri.get("rank", "?")
+            total_val = ri.get("total", "?")
+            # Identify the leader: competitor with the strongest status in this dimension
+            leader_name: str | None = None
+            leader_status: str | None = None
+            _status_order = {"strong": 0, "moderate": 1, "weak": 2, "absent": 3, "not_applicable": 4}
+            dim_scores = _as_dict(by_dimension.get(dim))
+            for slug in competitor_slugs:
+                s = dim_scores.get(slug, "absent")
+                if leader_name is None or _status_order.get(s, 99) < _status_order.get(leader_status or "absent", 99):
+                    leader_name = slug
+                    leader_status = s
+            leader_note = ""
+            if leader_name and leader_status and rank_val != 1:
+                leader_note = f" — leader: {leader_name} ({_humanize(leader_status)})"
+            lines.append(f"- **{_humanize(dim)}:** Rank {rank_val} of {total_val}{leader_note}")
+        lines.append("")
+
+    # Per-dimension comparison matrix (rows=companies, cols=6 canonical moat dimensions)
+    canonical_dims = [
+        "network_effects",
+        "data_advantages",
+        "switching_costs",
+        "regulatory_barriers",
+        "cost_structure",
+        "brand_reputation",
+    ]
+    _status_short = {
+        "strong": "S",
+        "moderate": "M",
+        "weak": "W",
+        "absent": "—",
+        "not_applicable": "N/A",
+    }
+    # Collect all company slugs including _startup
+    all_slugs = ["_startup"] + competitor_slugs
+    if all_slugs and by_dimension:
+        lines.append("### Moat Dimension Comparison Matrix\n")
+        header_dims = " | ".join(_humanize(d)[:12] for d in canonical_dims)
+        lines.append(f"| Company | {header_dims} |")
+        lines.append("|---------|" + "|".join(["-------"] * len(canonical_dims)) + "|")
+        for slug in all_slugs:
+            row_data = []
+            for dim in canonical_dims:
+                dim_map = _as_dict(by_dimension.get(dim))
+                val = dim_map.get(slug, "—")
+                row_data.append(_status_short.get(val, val[:3] if isinstance(val, str) else "—"))
+            display = "_startup_" if slug == "_startup" else slug
+            lines.append(f"| {display} | " + " | ".join(row_data) + " |")
+        lines.append("")
+        lines.append("_Legend: S=Strong, M=Moderate, W=Weak, —=Absent, N/A=Not Applicable_")
         lines.append("")
 
     return "\n".join(lines) + "\n"
@@ -1028,7 +1135,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         _section_title(product_profile, landscape),
         _section_executive_summary(product_profile, positioning_scores, moat_scores, checklist),
         _section_competitor_landscape(landscape),
-        _section_positioning(positioning_scores),
+        _section_positioning(positioning_scores, positioning_safe),
         _section_moat_assessment(moat_scores),
         _section_stress_test(positioning_scores),
         _section_key_findings(positioning_scores, moat_scores, checklist),

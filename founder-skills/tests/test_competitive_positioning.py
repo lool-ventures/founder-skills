@@ -3118,3 +3118,194 @@ class TestRunIdStamping:
         rc, data, stderr = run_script("score_positioning.py", ["--run-id", "CLI-WINS"], stdin_data=json.dumps(payload))
         assert rc == 0, stderr
         assert data is not None and data["metadata"]["run_id"] == "CLI-WINS"
+
+
+# ===========================================================================
+# Artifact self-sufficiency — items 1, 2, 3
+# ===========================================================================
+
+
+class TestComposePositioningPointsTable:
+    """compose_report.py _section_positioning renders per-view points evidence table (item 1)."""
+
+    def test_points_table_rendered_in_positioning_section(self) -> None:
+        """Evidence coordinates from positioning.json views[].points appear in the report.
+
+        Column headers come from positioning_scores.json (x_axis_name / y_axis_name);
+        the points evidence text comes from positioning.json views[].points.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            # positioning.json: provide evidence-rich points under the "primary" view
+            views_with_evidence = [
+                {
+                    "id": "primary",
+                    "x_axis": {
+                        "name": "Deployment Speed",
+                        "description": "How fast",
+                        "rationale": "Key differentiator",
+                    },
+                    "y_axis": {
+                        "name": "Detection Accuracy",
+                        "description": "Accuracy",
+                        "rationale": "Table-stakes",
+                    },
+                    "points": [
+                        {
+                            "competitor": "_startup",
+                            "x": 90,
+                            "y": 85,
+                            "x_evidence": "Deploys in under 5 minutes per benchmark",
+                            "y_evidence": "All data stored on-prem per architecture docs",
+                            "x_evidence_source": "researched",
+                            "y_evidence_source": "researched",
+                        },
+                        {
+                            "competitor": "alpha-corp",
+                            "x": 60,
+                            "y": 40,
+                            "x_evidence": "Alpha Corp requires 2-day setup",
+                            "y_evidence": "Alpha Corp uses cloud storage",
+                            "x_evidence_source": "researched",
+                            "y_evidence_source": "researched",
+                        },
+                    ],
+                }
+            ]
+            _make_artifact_dir(tmp, positioning_overrides={"views": views_with_evidence})
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"compose failed: {stderr}"
+            assert data is not None
+            md = data["report_markdown"]
+            # Column headers come from positioning_scores.json axis names (fixture defaults)
+            assert "Deployment Speed" in md, "x-axis name should appear in points table header"
+            assert "Detection Accuracy" in md, "y-axis name should appear in points table header"
+            # Evidence text for at least one point
+            assert "Deploys in under 5 minutes" in md or "alpha-corp" in md, (
+                "Evidence text or competitor slug should appear in points table"
+            )
+            # x/y coordinates
+            assert "90" in md and "85" in md, "Coordinate values should appear in points table"
+
+    def test_points_table_not_rendered_without_positioning(self) -> None:
+        """No crash when positioning.json is absent."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp, include_positioning=False)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert "Traceback" not in stderr
+            assert data is not None
+
+    def test_evidence_truncated_at_120_chars(self) -> None:
+        """Evidence strings longer than 120 chars are truncated in the table."""
+        with tempfile.TemporaryDirectory() as tmp:
+            long_evidence = "A" * 200 + " end"
+            views_with_long = [
+                {
+                    "id": "primary",
+                    "x_axis": {"name": "Speed", "description": "d", "rationale": "r"},
+                    "y_axis": {"name": "Privacy", "description": "d", "rationale": "r"},
+                    "points": [
+                        {
+                            "competitor": "_startup",
+                            "x": 90,
+                            "y": 85,
+                            "x_evidence": long_evidence,
+                            "y_evidence": "short",
+                            "x_evidence_source": "researched",
+                            "y_evidence_source": "researched",
+                        },
+                    ],
+                }
+            ]
+            _make_artifact_dir(tmp, positioning_overrides={"views": views_with_long})
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            md = data["report_markdown"]  # type: ignore[index]
+            # The " end" suffix beyond 120 chars should NOT appear
+            assert " end" not in md, "Evidence beyond 120 chars should be truncated"
+            # But some of the evidence should appear
+            assert "AAAA" in md, "Truncated evidence prefix should appear"
+
+
+class TestComposeMoatEvidenceAndLeader:
+    """compose_report.py _section_moat_assessment renders evidence text and leader context (items 2-3)."""
+
+    def test_moat_evidence_text_appears_in_report(self) -> None:
+        """Moat evidence text appears as bullets under the moat table."""
+        with tempfile.TemporaryDirectory() as tmp:
+            # Build moat_scores with evidence on the _startup moats
+            ms = _make_moat_scores_artifact()
+            ms["companies"]["_startup"]["moats"] = [
+                {
+                    "id": "network_effects",
+                    "status": "strong",
+                    "evidence": "Has 50K active users sharing data; network value grows with square of users",
+                    "evidence_source": "researched",
+                    "trajectory": "building",
+                },
+                {
+                    "id": "switching_costs",
+                    "status": "moderate",
+                    "evidence": "Integration depth locks in enterprise workflows",
+                    "evidence_source": "researched",
+                    "trajectory": "stable",
+                },
+            ]
+            # Add other moats missing from CANONICAL to avoid MISSING_CANONICAL warnings failing the test
+            for m_id in ["data_advantages", "regulatory_barriers", "cost_structure", "brand_reputation"]:
+                ms["companies"]["_startup"]["moats"].append(
+                    {
+                        "id": m_id,
+                        "status": "weak",
+                        "evidence": "Limited.",
+                        "evidence_source": "agent_estimate",
+                        "trajectory": "stable",
+                    }
+                )
+            _make_artifact_dir(tmp, moat_scores_overrides=ms)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"compose failed: {stderr}"
+            md = data["report_markdown"]  # type: ignore[index]
+            assert "50K active users" in md, "Moat evidence text should appear in report"
+            assert "Integration depth" in md, "Second moat evidence text should appear in report"
+
+    def test_moat_ranking_shows_leader_context(self) -> None:
+        """Leader name and status appear in the startup ranking section."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ms = _make_moat_scores_artifact()
+            # alpha-corp is stronger in network_effects → _startup is rank 2
+            _make_artifact_dir(tmp, moat_scores_overrides=ms)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            md = data["report_markdown"]  # type: ignore[index]
+            # Rank line must mention the leader when _startup is not rank 1
+            assert "leader:" in md or "alpha-corp" in md, "Leader context should appear in moat ranking section"
+
+    def test_moat_dimension_matrix_rendered(self) -> None:
+        """Per-dimension comparison matrix with company rows appears in report."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            md = data["report_markdown"]  # type: ignore[index]
+            # Matrix section header
+            assert "Moat Dimension Comparison Matrix" in md, "Matrix section should appear"
+            # Legend
+            assert "S=Strong" in md, "Legend line should appear"
+            # _startup row marker
+            assert "_startup_" in md, "_startup row should appear in matrix"
+
+    def test_moat_matrix_uses_status_initials(self) -> None:
+        """Status initials (S/M/W/—) appear in the matrix rows."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ms = _make_moat_scores_artifact()
+            # Give _startup a 'strong' data_advantages so S appears
+            for moat in ms["companies"]["_startup"]["moats"]:
+                if moat["id"] == "data_advantages":
+                    moat["status"] = "strong"
+            _make_artifact_dir(tmp, moat_scores_overrides=ms)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            md = data["report_markdown"]  # type: ignore[index]
+            assert " S " in md or "| S " in md or " S|" in md, (
+                "Status initial 'S' should appear in the matrix for strong moat"
+            )

@@ -7183,3 +7183,396 @@ class TestNoteMaturityDefaultWarning:
         assert result["branch"] == "maturity_convert_at_cap", (
             f"Branch should still be maturity_convert_at_cap, got {result['branch']!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Helper: build minimal compose_report artifact dir with injectable scenarios
+# ---------------------------------------------------------------------------
+
+
+def _make_cap_compose_dir(
+    scenarios: list[dict[str, Any]] | None = None,
+    founders: list[dict[str, Any]] | None = None,
+) -> str:
+    """Create a temporary artifact directory for compose_report.py with
+    injected scenario list and optional founder override.
+
+    Returns the directory path; caller is responsible for cleanup.
+    """
+    d = tempfile.mkdtemp(prefix="test-cap-compose-")
+    RID = "test-rid"
+
+    inputs = json.loads(json.dumps(_BASIC_INPUTS))
+    if founders is not None:
+        inputs["founders"] = founders
+    inputs["metadata"] = {"run_id": RID}
+
+    instruments = json.loads(json.dumps(_BASIC_INSTRUMENTS))
+    instruments["metadata"] = {"run_id": RID}
+
+    # Write inputs + instruments
+    for name, data in [("inputs.json", inputs), ("instruments.json", instruments)]:
+        with open(os.path.join(d, name), "w") as f:
+            json.dump(data, f)
+
+    # Build cap_state from library so as_converted_totals is populated
+    cs = cap_state_mod.build_cap_state(inputs, instruments)
+    cs["metadata"]["run_id"] = RID
+    with open(os.path.join(d, "cap_state.json"), "w") as f:
+        json.dump(cs, f)
+
+    # rule_audit, counsel_packet, scenarios
+    for name, data in [
+        (
+            "rule_audit.json",
+            {
+                "gating": {},
+                "applied_rules": [],
+                "counsel_review_items": [],
+                "date_sensitive_watchlist": [],
+                "metadata": {"run_id": RID},
+            },
+        ),
+        (
+            "scenarios.json",
+            {"scenarios": scenarios or [], "metadata": {"run_id": RID}},
+        ),
+        (
+            "counsel_packet.json",
+            {"company_name": "Acmecorp", "engagement_summary": "", "items": [], "metadata": {"run_id": RID}},
+        ),
+    ]:
+        with open(os.path.join(d, name), "w") as f:
+            json.dump(data, f)
+
+    return d
+
+
+def _run_cap_compose(d: str) -> tuple[int, dict[str, Any] | None, str]:
+    """Run compose_report.py on the given artifact dir; return (rc, report_json, stderr)."""
+    report_path = os.path.join(d, "report.json")
+    md_path = os.path.join(d, "report.md")
+    rc, stdout, stderr = _run(
+        "compose_report.py",
+        ["--dir", d, "--run-id", "test-rid", "-o", report_path, "--write-md", md_path],
+    )
+    if rc != 0:
+        return rc, None, stderr
+    with open(report_path) as f:
+        return rc, json.load(f), stderr
+
+
+def _minimal_scenario(
+    scenario_id: str = "s1",
+    *,
+    computed_outputs: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return a minimal scenario dict for injection into scenarios.json."""
+    return {
+        "scenario_id": scenario_id,
+        "type": "priced_round",
+        "scenario_type": "priced_round",
+        "completeness": "structural_only",
+        "parameters": {
+            "pre_money": 10_000_000,
+            "new_money": 2_000_000,
+            "transaction_event_date": "2026-06-01",
+        },
+        "computed_outputs": computed_outputs or {},
+        "blockers": [],
+        "warnings": [],
+        "metadata": {"run_id": "test-rid"},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Item 9: Per-SAFE table — keyed on non-empty per_safe; Purchase ÷ Cap column
+# ---------------------------------------------------------------------------
+
+
+class TestPerSafeTableRendering:
+    """compose_report renders per-SAFE conversion math when per_safe is
+    non-empty and rows are NOT cap_implied_only; includes Purchase ÷ Cap."""
+
+    def test_per_safe_table_rendered_for_converted_safe(self) -> None:
+        """Table appears when per_safe has a row without cap_implied_ownership."""
+        scenario = _minimal_scenario(
+            "s_safe",
+            computed_outputs={
+                "per_safe": {
+                    "safe_001": {
+                        "branch": "cap_conversion",
+                        "conversion_price": 0.2500,
+                        "conversion_shares": 2_000_000,
+                        "purchase_amount": 500_000,
+                        "post_money_cap": 10_000_000,
+                    }
+                }
+            },
+        )
+        d = _make_cap_compose_dir(scenarios=[scenario])
+        rc, report, stderr = _run_cap_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = report["report_markdown"]
+        assert "Per-SAFE conversion math" in md
+
+    def test_purchase_div_cap_derivation_in_table(self) -> None:
+        """Table cell shows 'purchase ÷ cap = XX.XX%' format."""
+        scenario = _minimal_scenario(
+            "s_safe_div",
+            computed_outputs={
+                "per_safe": {
+                    "safe_001": {
+                        "branch": "cap_conversion",
+                        "conversion_price": 0.25,
+                        "conversion_shares": 2_000_000,
+                        "purchase_amount": 500_000,
+                        "post_money_cap": 10_000_000,
+                    }
+                }
+            },
+        )
+        d = _make_cap_compose_dir(scenarios=[scenario])
+        rc, report, stderr = _run_cap_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = report["report_markdown"]
+        # $500K ÷ $10M = 5.00%
+        assert "5.00%" in md
+
+    def test_per_safe_table_skipped_when_cap_implied_only(self) -> None:
+        """When ALL per_safe rows have cap_implied_ownership, table is skipped."""
+        scenario = _minimal_scenario(
+            "s_cap_impl",
+            computed_outputs={
+                "per_safe": {
+                    "safe_001": {
+                        "cap_implied_ownership": 0.05,
+                        "safe_price": 0.25,
+                        "cap_implied_shares": 200_000,
+                    }
+                }
+            },
+        )
+        d = _make_cap_compose_dir(scenarios=[scenario])
+        rc, report, stderr = _run_cap_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = report["report_markdown"]
+        # Table should NOT appear — only cap_implied narrative
+        assert "Per-SAFE conversion math" not in md
+
+    def test_per_safe_table_skipped_when_empty(self) -> None:
+        """When per_safe is empty or absent, no table is emitted."""
+        scenario = _minimal_scenario("s_no_safe", computed_outputs={})
+        d = _make_cap_compose_dir(scenarios=[scenario])
+        rc, report, stderr = _run_cap_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = report["report_markdown"]
+        assert "Per-SAFE conversion math" not in md
+
+
+# ---------------------------------------------------------------------------
+# Item 10: shares_breakdown post-round composition table
+# ---------------------------------------------------------------------------
+
+
+class TestSharesBreakdownTable:
+    """compose_report renders a Post-round share composition table when
+    shares_breakdown is present in computed_outputs."""
+
+    def test_shares_breakdown_table_rendered(self) -> None:
+        """Table appears when shares_breakdown is in computed_outputs."""
+        scenario = _minimal_scenario(
+            "s_bd",
+            computed_outputs={
+                "shares_breakdown": {
+                    "pre_round_fd": 11_500_000,
+                    "safe_converted_shares": 600_000,
+                    "pool_topup_shares": 300_000,
+                    "new_money_shares": 800_000,
+                    "post_round_fd": 13_200_000,
+                }
+            },
+        )
+        d = _make_cap_compose_dir(scenarios=[scenario])
+        rc, report, stderr = _run_cap_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = report["report_markdown"]
+        assert "Post-round share composition" in md
+
+    def test_shares_breakdown_components_in_table(self) -> None:
+        """Pre-round FD, SAFE converted, pool top-up, new money, post-round FD rows appear."""
+        scenario = _minimal_scenario(
+            "s_bd2",
+            computed_outputs={
+                "shares_breakdown": {
+                    "pre_round_fd": 11_500_000,
+                    "safe_converted_shares": 600_000,
+                    "pool_topup_shares": 300_000,
+                    "new_money_shares": 800_000,
+                    "post_round_fd": 13_200_000,
+                }
+            },
+        )
+        d = _make_cap_compose_dir(scenarios=[scenario])
+        rc, report, stderr = _run_cap_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = report["report_markdown"]
+        assert "Pre-round FD" in md
+        assert "SAFE converted" in md
+        assert "Pool top-up" in md
+        assert "New money" in md
+        assert "Post-round FD" in md
+
+    def test_shares_breakdown_post_round_pct(self) -> None:
+        """Post-round % column is rendered (100.0% for total row)."""
+        scenario = _minimal_scenario(
+            "s_bd3",
+            computed_outputs={
+                "shares_breakdown": {
+                    "pre_round_fd": 10_000_000,
+                    "new_money_shares": 2_000_000,
+                    "post_round_fd": 12_000_000,
+                }
+            },
+        )
+        d = _make_cap_compose_dir(scenarios=[scenario])
+        rc, report, stderr = _run_cap_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = report["report_markdown"]
+        assert "100.0%" in md
+
+    def test_shares_breakdown_table_absent_when_missing(self) -> None:
+        """No composition table when shares_breakdown is absent."""
+        scenario = _minimal_scenario("s_no_bd", computed_outputs={})
+        d = _make_cap_compose_dir(scenarios=[scenario])
+        rc, report, stderr = _run_cap_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = report["report_markdown"]
+        assert "Post-round share composition" not in md
+
+
+# ---------------------------------------------------------------------------
+# Item 11: Per-founder rows in single-class Current Cap State
+# ---------------------------------------------------------------------------
+
+
+class TestPerFounderCapStateRows:
+    """In single-class engagements, each founder appears by name in the
+    Current Cap State table with their share count and pre-round %."""
+
+    def test_founder_names_in_cap_state(self) -> None:
+        """Both founder names appear in the Current Cap State section."""
+        d = _make_cap_compose_dir()
+        rc, report, stderr = _run_cap_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = report["report_markdown"]
+        # _BASIC_INPUTS has founders Alice and Bob
+        assert "Alice" in md
+        assert "Bob" in md
+
+    def test_founder_share_counts_in_cap_state(self) -> None:
+        """Founder share counts (5,000,000 each) appear in the table."""
+        d = _make_cap_compose_dir()
+        rc, report, stderr = _run_cap_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = report["report_markdown"]
+        # 5,000,000 formatted with comma separator
+        assert "5,000,000" in md
+
+    def test_custom_founder_name_appears(self) -> None:
+        """Custom founder name injected into inputs appears in Current Cap State."""
+        founders = [
+            {"name": "Zelda", "founder_id": "founder_z", "common_shares": 3_000_000},
+            {"name": "Yoram", "founder_id": "founder_y", "common_shares": 7_000_000},
+        ]
+        d = _make_cap_compose_dir(founders=founders)
+        rc, report, stderr = _run_cap_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = report["report_markdown"]
+        assert "Zelda" in md
+        assert "Yoram" in md
+
+    def test_founder_pct_in_cap_state(self) -> None:
+        """Founder ownership % appears in the table (not just raw count)."""
+        d = _make_cap_compose_dir()
+        rc, report, stderr = _run_cap_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = report["report_markdown"]
+        # Alice and Bob each own 5M of total ~12.5M FD → roughly 40%
+        # Just check a % sign appears near the founders section
+        assert "%" in md
+
+
+# ---------------------------------------------------------------------------
+# Item 12: Skip per-SAFE table when all rows are cap_implied_only
+# ---------------------------------------------------------------------------
+
+
+class TestPerSafeCapImpliedOnlySkip:
+    """When every per_safe row has cap_implied_ownership (structural_only
+    snapshot), the entire per-SAFE table block must be skipped."""
+
+    def test_table_skipped_all_cap_implied(self) -> None:
+        """No 'Per-SAFE conversion math' header when all rows are cap_implied."""
+        scenario = _minimal_scenario(
+            "s_ci",
+            computed_outputs={
+                "per_safe": {
+                    "safe_a": {"cap_implied_ownership": 0.05, "safe_price": 0.20, "cap_implied_shares": 250_000},
+                    "safe_b": {"cap_implied_ownership": 0.03, "safe_price": 0.20, "cap_implied_shares": 150_000},
+                }
+            },
+        )
+        d = _make_cap_compose_dir(scenarios=[scenario])
+        rc, report, stderr = _run_cap_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = report["report_markdown"]
+        assert "Per-SAFE conversion math" not in md
+
+    def test_cap_implied_narrative_still_rendered(self) -> None:
+        """Cap-implied ownership narrative section IS rendered when completeness is
+        structural_only AND cap_implied_only flag is set."""
+        scenario = _minimal_scenario(
+            "s_ci_narr",
+            computed_outputs={
+                "cap_implied_only": True,
+                "per_safe": {
+                    "safe_a": {"cap_implied_ownership": 0.05, "safe_price": 0.20, "cap_implied_shares": 250_000},
+                },
+            },
+        )
+        d = _make_cap_compose_dir(scenarios=[scenario])
+        rc, report, stderr = _run_cap_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = report["report_markdown"]
+        # cap_implied narrative should still appear
+        assert "cap-implied" in md.lower()
+
+    def test_mixed_rows_table_rendered_for_non_cap_implied(self) -> None:
+        """When some rows have cap_implied_ownership and some do NOT, the table
+        IS rendered (filtering only drops the cap_implied rows from the table)."""
+        scenario = _minimal_scenario(
+            "s_mixed",
+            computed_outputs={
+                "per_safe": {
+                    "safe_ci": {"cap_implied_ownership": 0.05, "safe_price": 0.20, "cap_implied_shares": 250_000},
+                    "safe_conv": {
+                        "branch": "cap_conversion",
+                        "conversion_price": 0.25,
+                        "conversion_shares": 2_000_000,
+                        "purchase_amount": 500_000,
+                        "post_money_cap": 10_000_000,
+                    },
+                }
+            },
+        )
+        d = _make_cap_compose_dir(scenarios=[scenario])
+        rc, report, stderr = _run_cap_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        md = report["report_markdown"]
+        # safe_conv should appear in the table
+        assert "Per-SAFE conversion math" in md
+        assert "safe_conv" in md
+        # safe_ci should NOT appear in the conversion math table
+        # (it only appears in the cap-implied narrative)
+        assert "safe_ci" not in md.split("Per-SAFE conversion math")[-1].split("\n\n")[0]

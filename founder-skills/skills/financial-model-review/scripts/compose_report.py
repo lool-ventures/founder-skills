@@ -47,7 +47,7 @@ WARNING_SEVERITY: dict[str, str] = {
 }
 
 REQUIRED_ARTIFACTS = ["inputs.json", "checklist.json", "unit_economics.json", "runway.json"]
-OPTIONAL_ARTIFACTS = ["model_data.json"]
+OPTIONAL_ARTIFACTS = ["model_data.json", "extraction_corrections.json"]
 
 # Human-readable warning code labels
 WARNING_LABELS: dict[str, str] = {
@@ -400,10 +400,20 @@ def _section_executive_summary(
         scenarios = _as_list(runway.get("scenarios"))
         base = next((s for s in scenarios if s.get("name") == "base"), None)
         if base:
-            months = base.get("runway_months", "?")
+            months_raw = base.get("runway_months")
             alive = base.get("default_alive", None)
             alive_str = "Yes" if alive else "No" if alive is not None else "Unknown"
-            lines.append(f"**Base Runway:** {_format_runway_months(months)} (Default Alive: {alive_str})  ")
+            # Derive breakeven month when base scenario is default-alive (months_raw is None)
+            be_month_exec: int | None = None
+            if months_raw is None:
+                projs_exec = _as_list(base.get("monthly_projections"))
+                be_month_exec = next(
+                    (p["month"] for p in projs_exec if isinstance(p, dict) and p.get("net_burn", 1) <= 0),
+                    None,
+                )
+            lines.append(
+                f"**Base Runway:** {_format_runway_months(months_raw, be_month_exec)} (Default Alive: {alive_str})  "
+            )
 
     return "\n".join(lines) + "\n"
 
@@ -563,8 +573,8 @@ def _section_runway(runway: dict[str, Any] | None) -> str:
     scenarios = _as_list(runway.get("scenarios"))
     if scenarios:
         lines.append("### Scenarios\n")
-        lines.append("| Scenario | Runway (months) | Cash-Out Date | Decision Point | Default Alive |")
-        lines.append("|----------|----------------|---------------|----------------|---------------|")
+        lines.append("| Scenario | Runway (months) | Cash-Out Date | Decision Point | Default Alive | Assumptions |")
+        lines.append("|----------|----------------|---------------|----------------|---------------|-------------|")
         for s in scenarios:
             name = s.get("name", "?")
             months_raw = s.get("runway_months")
@@ -582,7 +592,21 @@ def _section_runway(runway: dict[str, Any] | None) -> str:
             decision = s.get("decision_point", "?")
             alive = s.get("default_alive", None)
             alive_str = "Yes" if alive else "No" if alive is not None else "?"
-            lines.append(f"| {name} | {months} | {cash_out} | {decision} | {alive_str} |")
+            # Build assumptions string from scenario parameters
+            assumption_parts: list[str] = []
+            growth_rate = s.get("growth_rate")
+            if growth_rate is not None:
+                assumption_parts.append(f"growth {growth_rate * 100:.0f}%/mo")
+            burn_change = s.get("burn_change")
+            if burn_change is not None:
+                sign = "+" if burn_change >= 0 else ""
+                assumption_parts.append(f"burn {sign}{burn_change * 100:.0f}%")
+            fx_adjustment = s.get("fx_adjustment")
+            if fx_adjustment is not None and fx_adjustment != 0:
+                sign = "+" if fx_adjustment >= 0 else ""
+                assumption_parts.append(f"fx {sign}{fx_adjustment * 100:.0f}%")
+            assumptions_str = _md_safe(", ".join(assumption_parts)) if assumption_parts else "—"
+            lines.append(f"| {name} | {months} | {cash_out} | {decision} | {alive_str} | {assumptions_str} |")
         lines.append("")
 
     # Post-raise
@@ -694,6 +718,37 @@ def _section_overrides(inputs: dict[str, Any] | None) -> str:
             lines.append(f"- **{_humanize_warning(code)}** (`{code}`): {_md_safe(reason)} *(founder-reported)*")
 
     return "\n".join(lines) + "\n" if lines else ""
+
+
+def _section_corrections(extraction_corrections: dict[str, Any] | None) -> str:
+    """Optional 'Corrections Applied' subsection from extraction_corrections.json.
+
+    Only rendered when the artifact exists (most runs won't have it).
+    Shape: {corrections: [{path, was, now}, ...], timestamp, ...}
+    """
+    if extraction_corrections is None or _is_stub(extraction_corrections):
+        return ""
+
+    corrections = _as_list(extraction_corrections.get("corrections"))
+    if not corrections:
+        return ""
+
+    lines = ["## Corrections Applied\n"]
+    lines.append("_The following fields were corrected by the founder during the extraction review._\n")
+    lines.append("| Field | Original | Corrected |")
+    lines.append("|-------|----------|-----------|")
+    for c in corrections:
+        field = _md_safe(str(c.get("path", c.get("field", "?"))))
+        was = _md_safe(str(c.get("was", c.get("original", "?"))))
+        now = _md_safe(str(c.get("now", c.get("corrected", "?"))))
+        lines.append(f"| {field} | {was} | {now} |")
+
+    # Timestamp if present
+    ts = extraction_corrections.get("timestamp")
+    if ts:
+        lines.append(f"\n_Applied: {ts}_")
+
+    return "\n".join(lines) + "\n"
 
 
 def _section_warnings(warnings: list[dict[str, str]]) -> str:
@@ -850,6 +905,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     checklist = _render_safe(artifacts.get("checklist.json"))
     unit_economics = _render_safe(artifacts.get("unit_economics.json"))
     runway = _render_safe(artifacts.get("runway.json"))
+    extraction_corrections = _render_safe(artifacts.get("extraction_corrections.json"))
 
     # Render every section EXCEPT the Warnings section first; the Warnings
     # section is spliced in after the marker pre-scan so MARKER_COLLISION (which
@@ -861,6 +917,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         _section_model_completeness(inputs, checklist),
         _section_unit_economics(unit_economics),
         _section_runway(runway),
+        _section_corrections(extraction_corrections),
         _section_overrides(inputs),
     ]
 
@@ -896,7 +953,9 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         f"\n\n{marker}\n\n---\n"
         "*Generated by [founder skills](https://github.com/lool-ventures/founder-skills)"
         " by [lool ventures](https://lool.vc)"
-        " — Financial Model Review Agent*\n"
+        " — Financial Model Review Agent*  \n"
+        "*For what-if scenarios (burn cuts, growth rate changes), generate the interactive explorer: "
+        "`explore.py --dir <review_dir> -o explore.html`*\n"
     )
 
     # Stderr summary
