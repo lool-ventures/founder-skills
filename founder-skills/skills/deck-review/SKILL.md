@@ -121,17 +121,20 @@ RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 
 The Step 0 block self-heals when `${CLAUDE_PLUGIN_ROOT}` doesn't resolve (Cowork). If it still comes up empty, locate the anchor manually: `find / -path '*/skills/deck-review/scripts/checklist.py' 2>/dev/null | head -5` and derive the variables from it.
 
-After Step 1 (when the slug is known) — call `setup_run.py` to resolve `REVIEW_DIR`, detect whether this is a resume, and clean stale state in one atomic step. **Always** call `setup_run.py` with `--clean` and `--run-id "$RUN_ID"`; do not pre-read `gate_state.json` yourself. `setup_run.py` decides resume vs. fresh by comparing the answered `gate_state.json`'s `run_id` against `--run-id`, and on a fresh (non-resume) run it deletes a stale answered `gate_state.json` so a prior completed run cannot be misread as a resume:
+After Step 1 (when the slug is known) — substitute `$SLUG` below with the company slug from Step 1's printed JSON, then call `setup_run.py` to resolve `REVIEW_DIR`, detect whether this is a resume, and clean stale state in one atomic step. **Always** call `setup_run.py` with `--clean` and `--run-id "$RUN_ID"`; do not pre-read `gate_state.json` yourself. `setup_run.py` decides resume vs. fresh by comparing the answered `gate_state.json`'s `run_id` against `--run-id`, and on a fresh (non-resume) run it deletes a stale answered `gate_state.json` so a prior completed run cannot be misread as a resume:
 
 ```bash
-SETUP_JSON="$(python3 "$SCRIPTS/setup_run.py" \
+python3 "$SCRIPTS/setup_run.py" \
   --artifacts-root "$ARTIFACTS_ROOT" \
   --slug "$SLUG" \
   --run-id "$RUN_ID" \
   --clean \
-  --pretty)"
-REVIEW_DIR="$(echo "$SETUP_JSON" | python3 -c 'import json,sys;print(json.load(sys.stdin)["review_dir"])')"
-IS_RESUMING="$(echo "$SETUP_JSON" | python3 -c 'import json,sys;print("1" if json.load(sys.stdin)["resume"] else "")')"
+  --pretty
+```
+
+Read `review_dir`, `run_id`, `resume`, and `gate_answer` from the JSON printed by the previous Bash command. Substitute `REVIEW_DIR` with the `review_dir` value, `RUN_ID` with the `run_id` value, and `IS_RESUMING` with `1` if `resume` is true, else empty, in every subsequent bash block. Then:
+
+```bash
 mkdir -p "$REVIEW_DIR/.staging"   # for ad-hoc sub-agent JSON staging
 ```
 
@@ -139,7 +142,7 @@ To resume across a gate round-trip, the caller's task prompt must supply the pri
 
 Pass `RUN_ID` to every producer script via `--run-id`. Producer scripts inject it into `metadata.run_id` automatically. `compose_report.py` enforces that all required artifacts share the same `run_id` and emits a `MISSING_METADATA` (high) warning for any artifact without one. Keeping `RUN_ID` stable across the gate is what prevents a `STALE_ARTIFACT` mismatch with the pre-gate artifacts.
 
-**On re-invocation (`$IS_RESUMING` is set):** skip Steps 2 and 3 if `deck_inventory.json` and `stage_profile.json` already exist with a `metadata.run_id` matching `$RUN_ID`. They were preserved across `setup_run.py` because resume was true (so `--clean` did not remove them), and re-running them would just overwrite identical content.
+**On re-invocation (`$IS_RESUMING` is set):** only `gate_state.json` (the founder's answer) survives the resume — `--clean` removes the pre-gate artifacts (`deck_inventory.json`, `stage_profile.json`) unconditionally. Re-run Steps 2 and 3 with the same `RUN_ID` before continuing past the gate.
 
 ### Step 1: Read or Create Founder Context
 
@@ -222,15 +225,12 @@ PROFILE_EOF
 **How to detect re-invocation:** you were re-invoked if `$REVIEW_DIR/gate_state.json` exists, has a non-empty `answer`, AND its `metadata.run_id` matches `$RUN_ID`. The run_id comparison is what distinguishes a genuine gate resume from a stale answered gate left by a *prior* completed run for the same company. (`setup_run.py` already deletes that stale file on a fresh run, but verify here as well.) Skip the gate-emit and read the answer:
 
 ```bash
-GATE_ANSWER=""
-if [ -f "$REVIEW_DIR/gate_state.json" ]; then
-  GATE_ANSWER="$(python3 -c 'import json,sys
+python3 -c 'import json,sys
 g=json.load(open(sys.argv[1]))
-print(g.get("answer","") if g.get("metadata",{}).get("run_id","")==sys.argv[2] else "")' "$REVIEW_DIR/gate_state.json" "$RUN_ID")"
-fi
+print(g.get("answer","") if g.get("metadata",{}).get("run_id","")==sys.argv[2] else "")' "$REVIEW_DIR/gate_state.json" "$RUN_ID" 2>/dev/null || true
 ```
 
-If `$GATE_ANSWER` is set and non-empty, jump to "After the gate" below.
+If the previous Bash command printed a non-empty value, that is the gate answer — jump to "After the gate" below.
 
 **Otherwise, write `gate_state.json` via the producer script and emit a needs_input payload:**
 
@@ -264,7 +264,7 @@ Then return — as your final assistant message — a JSON object the parent age
 
 **For out-of-scope stages (series_b, growth):** use `gate_id: "out_of_scope_choice"`, question `"This looks out of scope. What should I do?"`, options `["Stop review", "Different stage", "Proceed anyway (best-effort)"]`.
 
-**After the gate (when `gate_state.json` already has an `answer`):** read `$GATE_ANSWER` from the file and branch:
+**After the gate (when the gate-check Bash command printed a non-empty answer):** branch on the printed value:
 
 - `Looks right`: proceed to Step 4 with the detected stage.
 - `Different stage`: emit a second gate (gate_id `stage_choice`) via `gate_state.py emit` to ask which stage. Treat this as a fresh gate — return a new `needs_input` payload and let the parent answer it the same way. When that one comes back answered, rebuild the profile for the chosen stage at **high** confidence (the founder explicitly picked it), then re-emit the original `stage_confirmation` gate to confirm:
@@ -412,12 +412,16 @@ Fix high-severity warnings and re-run. Use `--strict` to enforce a clean report.
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash
-COACHING_PAYLOAD="$(python3 -c '
+python3 -c '
 import json, sys
 data = json.load(open(sys.argv[1]))
 print(json.dumps(data["coaching_payload"], indent=2))
-' "$REVIEW_DIR/report.json")"
+' "$REVIEW_DIR/report.json"
 ```
+
+The payload prints to stdout — copy it from the tool result into the dispatch
+prompt below. (Never capture it into a shell variable: each Bash call runs in a
+fresh shell, so the variable would be unreadable and gone.)
 
 **Dispatch prompt template:**
 
@@ -429,7 +433,7 @@ You are dispatched to add coaching commentary to a deck review.
 The compose_report.py script has finished. The structured `coaching_payload`
 from report.json is:
 
-<paste $COACHING_PAYLOAD JSON here verbatim>
+<paste the coaching_payload JSON printed by the previous Bash command here verbatim>
 
 Follow your agent body's Context B procedure
 (POST_COMPOSE_COACHING):
@@ -495,7 +499,7 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 - The structured success payload from the Context B sub-agent (Step 7): `{status, review_dir, report_path, score_pct, overall_status, high_severity_warnings}`.
 - Optionally: the HTML report path from Step 8.
 
-**Do NOT inline `report_markdown` in the assistant message.** The founder reads the file via the path. (Closes issue #13: ~25 KB of markdown was previously round-tripped through the parent context.)
+**Do NOT inline `report_markdown` in the assistant message.** The founder reads the file via the path — inlining round-trips ~25 KB of markdown through the parent context for no benefit.
 
 ## Scoring
 
