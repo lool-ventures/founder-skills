@@ -146,7 +146,7 @@ mkdir -p "$ANALYSIS_DIR/.staging"   # for ad-hoc sub-agent JSON staging
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
-Pass `RUN_ID` to all sub-agents. Every artifact must include `"metadata": {"run_id": "$RUN_ID"}`. `compose_report.py` checks run_id consistency — a mismatch triggers `STALE_ARTIFACT`.
+Pass `RUN_ID` to all sub-agents. Every artifact must include `"metadata": {"run_id": "$RUN_ID"}`. `compose_report.py` checks run_id consistency — a mismatch triggers `STALE_ARTIFACT`. Its sibling integrity checks emit `CORRUPT_ARTIFACT` (artifact file is not valid JSON) and `UNVALIDATED_ARTIFACT` (artifact exists but was written directly instead of through its producer script — the `_produced_by` stamp is missing or wrong). All three are high-severity: fix the artifact by re-running the producer; never hand-edit it to silence the warning.
 
 If `ANALYSIS_DIR` already contains artifacts from a previous run, remove them before starting:
 
@@ -450,7 +450,7 @@ python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --pretty \
 
 `compose_report.py` writes both `report.json` and `report.md` deterministically. **Do NOT** read `report_markdown` out of `report.json` and re-write it via heredoc.
 
-Inspect the warnings in the output. Fix any high-severity warnings (missing artifacts, stale run_id) and re-run Pass 1.
+Inspect the warnings in the output. Fix any high-severity warnings (missing artifacts, stale run_id, corrupt JSON, artifacts not written by their producer script) and re-run Pass 1.
 
 **Pass 2 (with acceptances):** If any medium-severity warnings should be accepted, add `accepted_warnings` to `positioning.json` with the warning code, match pattern, and reason. Then re-run with `--strict`:
 

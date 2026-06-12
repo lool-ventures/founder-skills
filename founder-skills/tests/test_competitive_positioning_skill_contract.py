@@ -1374,13 +1374,13 @@ def test_warning_severity_high_codes_are_present() -> None:
         f"(expected >=7); a silent deletion may have occurred"
     )
 
-    # Spot-check that STALE_ARTIFACT is mentioned in SKILL.md or agent body.
-    # (STALE_ARTIFACT drives the run_id-parity instruction in SKILL.md.)
-    # Note: CORRUPT_ARTIFACT is a high-severity code that compose_report.py can emit
-    # but is not currently mentioned in the main-thread docs — that is an open finding,
-    # not a contract test failure, since the test owns contracts not completeness.
+    # The three artifact-integrity codes drive main-thread remediation
+    # instructions in SKILL.md (run_id parity, re-running producers instead of
+    # hand-editing artifacts) — each must be named in the prose so the
+    # executing model can map a compose warning back to its fix.
     combined = SKILL_MD.read_text(encoding="utf-8") + "\n" + AGENT_MD.read_text(encoding="utf-8")
-    assert "STALE_ARTIFACT" in combined, (
-        "Neither SKILL.md nor agent body mentions high-severity code 'STALE_ARTIFACT' — "
-        "this code drives the run_id-parity instruction in SKILL.md"
-    )
+    for code in ("STALE_ARTIFACT", "CORRUPT_ARTIFACT", "UNVALIDATED_ARTIFACT"):
+        assert code in combined, (
+            f"Neither SKILL.md nor agent body mentions high-severity code {code!r} — "
+            f"the executing model cannot map this compose warning to its remediation"
+        )
