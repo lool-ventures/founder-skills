@@ -778,7 +778,9 @@ function calcBurnMultiple(inputs) {{
   var monthly_burn = inputs.monthly_burn;
   if (!growth_rate || !mrr || monthly_burn <= 0) return null;
   var burn = Math.max(0, monthly_burn);
-  return burn / (mrr * growth_rate);
+  var netNewArr = mrr * growth_rate * 12;  // ΔMRR × 12 = monthly net-new ARR
+  if (netNewArr <= 0) return null;
+  return burn / netNewArr;
 }}
 
 function calcLTV(inputs) {{

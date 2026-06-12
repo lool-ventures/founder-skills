@@ -453,8 +453,8 @@ function computeSanity() {
   var arpuInput = getByPath(state, "unit_economics.ltv.inputs.arpu_monthly");
 
   var runway = burn > 0 ? Math.round(cash / burn * 10) / 10 : null;
-  var monthlyNewArr = mrr * growthRate * 12;
-  var burnMultiple = monthlyNewArr > 0 ? Math.round(burn / (monthlyNewArr / 12) * 10) / 10 : null;
+  var monthlyNewArr = mrr * growthRate * 12;  // ΔMRR × 12 = monthly net-new ARR
+  var burnMultiple = monthlyNewArr > 0 ? Math.round(burn / monthlyNewArr * 10) / 10 : null;
   var arpu = customers > 0 ? Math.round(mrr / customers * 100) / 100 : null;
 
   var hc = getByPath(state, "expenses.headcount") || [];

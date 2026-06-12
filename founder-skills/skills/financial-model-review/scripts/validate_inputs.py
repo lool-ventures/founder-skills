@@ -571,6 +571,24 @@ def _validate_sanity(inputs: dict[str, Any]) -> list[dict[str, Any]]:
                 }
             )
 
+    # GRR > 1.0 is impossible by definition: gross revenue retention nets out churn
+    # and downgrades but does not include expansion, so it is bounded by 1.0.
+    grr_val = _deep_get(inputs, "revenue", "grr")
+    if isinstance(grr_val, (int, float)) and grr_val > 1.0:
+        warnings.append(
+            {
+                "code": "GRR_ABOVE_ONE",
+                "message": (
+                    f"GRR ({grr_val:.2%}) exceeds 100% — impossible by definition. "
+                    "GRR only nets out churn and downgrades; it cannot include expansion revenue. "
+                    "Check whether NRR was entered instead of GRR."
+                ),
+                "field": "revenue.grr",
+                "layer": 3,
+                "critical": True,
+            }
+        )
+
     # Burn multiple sanity (data-error detector — checklist scores the metric)
     # Prefer time-series net new ARR over growth-rate shortcut to avoid
     # false positives for enterprise SaaS with lumpy deal flow.
@@ -623,7 +641,10 @@ def _validate_sanity(inputs: dict[str, Any]) -> list[dict[str, Any]]:
         if _ts_net_new_arr is not None and _ts_net_new_arr > 0:
             net_new_arr = _ts_net_new_arr
         elif isinstance(mrr, (int, float)) and isinstance(growth, (int, float)) and growth > 0 and mrr > 0:
-            net_new_arr = mrr * growth * 12
+            # The divisor below is annual burn, so the estimate must be ANNUAL
+            # net-new ARR: ΔMRR per month (mrr*growth) adds 12x that to ARR each
+            # month, sustained over 12 months.
+            net_new_arr = mrr * growth * 12 * 12
             _bm_method = "growth-rate estimate"
         if net_new_arr is not None and net_new_arr > 0:
             burn_multiple = (burn * 12) / net_new_arr

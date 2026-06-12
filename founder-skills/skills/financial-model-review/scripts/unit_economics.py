@@ -49,7 +49,7 @@ STAGE_BENCHMARKS: dict[str, dict[str, dict[str, Any]]] = {
             "strong": 3.0,
             "acceptable": 4.0,
             "warning": 5.0,
-            "source": "CFO Advisors 2025",
+            "source": "CFO Advisors 2025 / best-practices resolution (extrapolated to pre-seed)",
             "as_of": "2025-Q1",
         },
         "gross_margin": {
@@ -100,7 +100,7 @@ STAGE_BENCHMARKS: dict[str, dict[str, dict[str, Any]]] = {
             "strong": 40,
             "acceptable": 30,
             "warning": 20,
-            "source": "Bessemer 2024",
+            "source": "commonly cited R40 tiers; see references/benchmarks.md",
             "as_of": "2024-Q4",
         },
     },
@@ -144,7 +144,7 @@ STAGE_BENCHMARKS: dict[str, dict[str, dict[str, Any]]] = {
             "strong": 40,
             "acceptable": 30,
             "warning": 20,
-            "source": "Bessemer 2024",
+            "source": "commonly cited R40 tiers; see references/benchmarks.md",
             "as_of": "2024-Q4",
         },
     },
@@ -837,12 +837,16 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                 sm_spend_annual += count * salary * (1 + burden)
 
         if mrr is not None and growth_rate is not None and growth_rate > 0 and sm_spend_annual > 0:
-            net_new_arr = mrr * growth_rate * 12
-            magic = round(net_new_arr / sm_spend_annual, 2)
+            net_new_arr = mrr * growth_rate * 12  # ΔMRR × 12 = monthly net-new ARR
+            sm_spend_monthly = sm_spend_annual / 12
+            magic = round(net_new_arr / sm_spend_monthly, 2)
             bench = benchmarks.get("magic_number")
             if bench:
                 rating = _rate_higher_is_better(magic, bench)
-                evidence = f"Magic number of {magic:.2f}; stage benchmark strong >= {bench['strong']}"
+                evidence = (
+                    f"Magic number of {magic:.2f} (monthly net-new ARR ÷ monthly S&M); "
+                    f"stage benchmark strong >= {bench['strong']}"
+                )
                 metrics.append(
                     _metric(
                         "magic_number",
@@ -860,7 +864,8 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                         "magic_number",
                         magic,
                         "not_rated",
-                        f"Magic number of {magic:.2f}; no benchmark for stage '{stage}'",
+                        f"Magic number of {magic:.2f} (monthly net-new ARR ÷ monthly S&M); "
+                        f"no benchmark for stage '{stage}'",
                     )
                 )
         else:
@@ -1038,7 +1043,8 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                             r40,
                             "contextual",
                             f"Rule of 40 score: {r40:.0f} "
-                            f"(growth {growth_annualized:.0f}% + {margin_label} margin {margin_value:.0%}); "
+                            f"(growth {growth_annualized:.0f}% annualized from current MoM rate"
+                            f" + {margin_label} margin {margin_value:.0%}); "
                             f"score is inflated by hyper-early growth and not comparable "
                             f"to the >= 40 benchmark used for scaled companies",
                         )
@@ -1050,7 +1056,8 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                             r40,
                             "contextual",
                             f"Rule of 40 score: {r40:.0f} "
-                            f"(growth {growth_annualized:.0f}% + gross margin {margin_value:.0%}); "
+                            f"(growth {growth_annualized:.0f}% annualized from current MoM rate"
+                            f" + gross margin {margin_value:.0%}); "
                             f"using gross margin as proxy — overstates R40 vs. FCF-based standard",
                         )
                     )
@@ -1060,7 +1067,8 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                             "rule_of_40",
                             r40,
                             "contextual",
-                            f"Rule of 40: components — growth {growth_annualized:.0f}%, "
+                            f"Rule of 40: components — "
+                            f"growth {growth_annualized:.0f}% (annualized from current MoM rate), "
                             f"{margin_label} margin {margin_value:.0%} "
                             f"(composite {r40:.0f}); "
                             f"not benchmark-compared below $5M ARR",
@@ -1070,7 +1078,8 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                     rating = _rate_higher_is_better(r40, bench)
                     evidence = (
                         f"Rule of 40 score: {r40:.0f} "
-                        f"(growth {growth_annualized:.0f}% + operating margin (burn-derived) {margin_value:.0%}); "
+                        f"(growth {growth_annualized:.0f}% annualized from current MoM rate"
+                        f" + operating margin (burn-derived) {margin_value:.0%}); "
                         f"benchmark strong >= {bench['strong']}"
                     )
                     metrics.append(
@@ -1091,7 +1100,8 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                             r40,
                             "not_rated",
                             f"Rule of 40 score: {r40:.0f} "
-                            f"(using operating margin (burn-derived)); no benchmark for stage '{stage}'",
+                            f"(growth annualized from current MoM rate; "
+                            f"operating margin (burn-derived)); no benchmark for stage '{stage}'",
                         )
                     )
         else:

@@ -833,3 +833,69 @@ def test_static_creates_missing_parent_dirs() -> None:
         receipt = json.loads(result.stdout)
         assert receipt["ok"] is True
         assert receipt["mode"] == "static"
+
+
+# ---------------------------------------------------------------------------
+# review_inputs.py JS burn-multiple formula: must not ÷ 12 twice
+# ---------------------------------------------------------------------------
+#
+# Source: David Sacks, "The Burn Multiple"
+#   "Burn Multiple = Net Burn / Net New ARR" — period-matched.
+# Net New ARR (monthly) = ΔMRR × 12 = mrr × growthRate × 12.
+#
+# The JS already computes monthlyNewArr = mrr * growthRate * 12 (correct).
+# It must then divide burn by monthlyNewArr directly, NOT by (monthlyNewArr / 12)
+# — the latter reverts to ΔMRR in the denominator and overstates by 12x.
+#
+# Worked example: burn=80K, MRR=50K, growth=8%
+#   monthlyNewArr = 50K × 0.08 × 12 = 48K
+#   correct = 80K / 48K ≈ 1.67
+#   old bug  = 80K / (48K / 12) = 80K / 4K = 20.0  (12x overstated)
+#
+# This is a source-pin test: reads review_inputs.py and checks the
+# burnMultiple formula does not divide monthlyNewArr by 12.
+# ---------------------------------------------------------------------------
+
+
+class TestReviewInputsBurnMultipleFormula:
+    """review_inputs.py JS burnMultiple must not divide monthly net-new ARR by 12."""
+
+    def test_burn_multiple_not_divides_monthly_new_arr_by_12(self) -> None:
+        """burnMultiple JS must use monthlyNewArr directly, not monthlyNewArr / 12.
+
+        Pattern 'monthlyNewArr / 12' re-converts net-new ARR back to ΔMRR,
+        making burn multiple 12x too high.
+        """
+        import re as _re
+
+        with open(_SCRIPT) as f:
+            source = f.read()
+
+        # Look for the offending pattern: burn / (monthlyNewArr / 12)
+        # Allow for whitespace variation
+        bad_pattern = _re.compile(
+            r"burn\s*/\s*\(\s*monthlyNewArr\s*/\s*12\s*\)",
+            _re.DOTALL,
+        )
+        assert not bad_pattern.search(source), (
+            "review_inputs.py burnMultiple divides monthlyNewArr by 12 — this reverts "
+            "net-new ARR back to ΔMRR and overstates burn multiple by 12x. "
+            "Fix: use 'burn / monthlyNewArr' directly."
+        )
+
+    def test_burn_multiple_uses_monthly_new_arr(self) -> None:
+        """burnMultiple JS formula must reference monthlyNewArr as divisor."""
+        import re as _re
+
+        with open(_SCRIPT) as f:
+            source = f.read()
+
+        # Acceptable patterns: burn / monthlyNewArr or monthlyNewArr > 0 guard then burn / monthlyNewArr
+        good_pattern = _re.compile(
+            r"burn\s*/\s*monthlyNewArr\b",
+            _re.DOTALL,
+        )
+        assert good_pattern.search(source), (
+            "review_inputs.py burnMultiple formula not found or does not use 'burn / monthlyNewArr'. "
+            "Expected: burnMultiple = burn / monthlyNewArr (period-matched: monthly burn ÷ monthly net-new ARR)."
+        )

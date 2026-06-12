@@ -910,3 +910,52 @@ class TestExploreLensDataCoverage:
             f"explore._build_data_payload dropped scenario field(s) that the JS engine reads: "
             f"{sorted(missing)}. The payload builder must pass these fields through unchanged."
         )
+
+
+# ---------------------------------------------------------------------------
+# explore.py JS burn-multiple formula: must annualize ΔMRR
+# ---------------------------------------------------------------------------
+#
+# Source: David Sacks, "The Burn Multiple"
+#   "Burn Multiple = Net Burn / Net New ARR" — period-matched.
+# Net New ARR (monthly) = ΔMRR × 12 = mrr × growth_rate × 12.
+# The JS must divide monthly burn by (mrr × growth_rate × 12), NOT by
+# (mrr × growth_rate) alone — the latter overstates by 12x.
+#
+# Worked example: burn=80K, MRR=50K, growth=8%
+#   correct = 80K / (50K × 0.08 × 12) = 80K / 48K ≈ 1.67
+#   old bug  = 80K / (50K × 0.08)     = 80K / 4K  = 20.0  (12x overstated)
+#
+# This is a source-pin test: it reads the explore.py source and asserts
+# the annualisation factor (* 12 or equivalent) is present in the
+# calcBurnMultiple function body.
+# ---------------------------------------------------------------------------
+
+
+class TestExploreBurnMultipleFormula:
+    """explore.py JS calcBurnMultiple must annualise ΔMRR (× 12)."""
+
+    def test_calc_burn_multiple_annualises_delta_mrr(self) -> None:
+        """calcBurnMultiple JS body must contain '* 12' (or '* 12.0') to annualise ΔMRR.
+
+        Without annualisation the denominator is monthly ΔMRR, not net-new ARR,
+        making the result 12x too high.
+        """
+        explore_script = os.path.join(FMR_SCRIPTS_DIR, "explore.py")
+        with open(explore_script) as f:
+            source = f.read()
+
+        # Isolate the calcBurnMultiple function body
+        import re as _re
+
+        m = _re.search(r"function calcBurnMultiple\([^)]*\)\s*\{(.+?)\}", source, _re.DOTALL)
+        assert m is not None, "calcBurnMultiple function not found in explore.py"
+        body = m.group(1)
+
+        # The denominator must include annualisation: mrr * growth_rate * 12
+        # Accept either literal '* 12' or '* 12.0'
+        assert _re.search(r"\*\s*12(?:\.0)?\b", body), (
+            f"calcBurnMultiple in explore.py must multiply ΔMRR by 12 to get net-new ARR. "
+            f"Found body:\n{body}\n"
+            f"Expected pattern: 'mrr * growth_rate * 12' or equivalent."
+        )

@@ -3463,9 +3463,9 @@ def test_validate_burn_revenue_zero_mrr_no_trigger() -> None:
 
 def test_validate_burn_multiple_suspect() -> None:
     """Extreme burn multiple (> 10x) triggers BURN_MULTIPLE_SUSPECT."""
-    # burn=1.44M, MRR=170K, growth=10% → net_new_ARR = 170K * 0.10 * 12 = 204K
-    # burn_multiple = (1.44M * 12) / 204K ≈ 84x
-    inputs = _make_inputs(stage="series-a", mrr=170_000, burn=1_440_000, growth=0.10)
+    # burn=1.44M/mo, MRR=170K, growth=1% → monthly net-new ARR = 170K * 0.01 * 12
+    # = 20.4K; annual ≈ 244.8K; burn_multiple = (1.44M * 12) / 244.8K ≈ 71x
+    inputs = _make_inputs(stage="series-a", mrr=170_000, burn=1_440_000, growth=0.01)
     rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
     assert rc == 0
     assert data is not None
@@ -3476,8 +3476,8 @@ def test_validate_burn_multiple_suspect() -> None:
 
 def test_validate_burn_multiple_suspect_ttm_overrides_growth_rate() -> None:
     """Time-series burn multiple should prevent false positive from growth-rate shortcut."""
-    # Growth-rate shortcut: burn=150K, MRR=50K, growth=2% → net_new_arr = 50K*0.02*12 = 12K
-    # burn_multiple = (150K*12)/12K = 150x → would trigger BURN_MULTIPLE_SUSPECT
+    # Growth-rate shortcut: burn=150K, MRR=50K, growth=2% → monthly net-new ARR
+    # = 50K*0.02*12 = 12K → burn_multiple = 150K/12K = 12.5x → would trigger
     # But TTM time-series: ARR grew from 400K to 1.4M → net_new_arr = 1M
     # burn_multiple = (150K*12)/1M = 1.8x → should NOT trigger
     inputs = _make_inputs(stage="series-a", mrr=50_000, burn=150_000, growth=0.02)
@@ -5298,4 +5298,240 @@ class TestUnitEconSummaryKeysCoverage:
         """Guard against vacuous tests: producer summary must have >= 8 keys."""
         assert len(self.PRODUCED_SUMMARY_KEYS) >= 8, (
             f"PRODUCED_SUMMARY_KEYS expected >= 8 entries, got {len(self.PRODUCED_SUMMARY_KEYS)}."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Magic number: period-matched formula
+# ---------------------------------------------------------------------------
+#
+# Source: Scale Venture Partners, "Magic Number Math"
+#   "Take the change in subscription revenue between two quarters, annualize it
+#    (multiply by four), and divide the result by the sales and marketing spend
+#    for the earlier of the two quarters."
+# Period-matched monthly equivalent: net-new ARR (ΔMRR × 12) ÷ monthly S&M.
+#
+# Worked example: MRR $100K, 5% MoM (ΔMRR $5K), S&M $600K/yr ($50K/mo)
+#   correct = (5K × 12) / 50K = 60K / 50K = 1.2
+#   old bug = 60K / 600K = 0.1  (divided by annual instead of monthly)
+# ---------------------------------------------------------------------------
+
+
+class TestMagicNumberFormula:
+    """unit_economics.py magic number must divide net-new ARR by monthly S&M."""
+
+    _SAAS_INPUTS_TEMPLATE: dict[str, Any] = {
+        "company": {
+            "company_name": "TestCo",
+            "stage": "seed",
+            "sector": "B2B SaaS",
+            "geography": "US",
+            "revenue_model_type": "saas-sales-led",
+        },
+        "revenue": {
+            "arr": {"value": 1_200_000, "as_of": "2025-12"},
+            "mrr": {"value": 100_000, "as_of": "2025-12"},
+            "growth_rate_monthly": 0.05,
+        },
+        "cash": {"current_balance": 2_000_000, "monthly_net_burn": 80_000},
+        "expenses": {
+            "headcount": [
+                {
+                    "role": "sales",
+                    "count": 1,
+                    "salary_annual": 600_000,
+                    "burden_pct": 0.0,
+                }
+            ]
+        },
+    }
+
+    def test_magic_number_period_matched(self) -> None:
+        """Magic number ≈ 1.2 for MRR=100K, growth=5%, S&M=600K/yr (50K/mo).
+
+        Derivation:
+          net_new_ARR = ΔMRR × 12 = (100K × 0.05) × 12 = 60K
+          monthly_sm  = 600K / 12 = 50K
+          magic       = 60K / 50K = 1.2
+
+        Period-mismatch (old bug) gives 60K / 600K = 0.1 — 12x understated.
+        """
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(self._SAAS_INPUTS_TEMPLATE))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        magic = metrics.get("magic_number")
+        assert magic is not None, "magic_number metric missing from output"
+        assert magic["value"] is not None, "magic_number value is null"
+
+        # Period-matched result ≈ 1.2; old bug gives 0.1
+        assert abs(magic["value"] - 1.2) < 0.05, (
+            f"magic_number expected ≈ 1.2 (period-matched), got {magic['value']:.4f}. "
+            f"Verify net-new ARR (ΔMRR×12) is divided by monthly S&M."
+        )
+
+    def test_magic_number_not_12x_understated(self) -> None:
+        """Magic number must NOT be 12x smaller than the correct value."""
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(self._SAAS_INPUTS_TEMPLATE))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        magic = metrics.get("magic_number")
+        assert magic is not None
+        if magic["value"] is not None:
+            assert magic["value"] > 0.5, (
+                f"magic_number = {magic['value']:.4f} is suspiciously low. "
+                f"Expected ≈ 1.2 for the test fixture. Old bug gives 0.1."
+            )
+
+
+# ---------------------------------------------------------------------------
+# GRR sanity: GRR > 1.0 is impossible by definition
+# ---------------------------------------------------------------------------
+#
+# Source: Bessemer, "Gross Dollar Retention"
+#   "GDR nets out the revenue from customers who turned off or downgraded…
+#    but does not account for any expansion."
+# Therefore GDR (GRR) ≤ 100% by definition — a value > 1.0 is a data error.
+# ---------------------------------------------------------------------------
+
+
+class TestGRRSanity:
+    """validate_inputs.py Layer 3 must flag GRR > 1.0 as impossible."""
+
+    def _make_grr_inputs(self, grr: float) -> dict[str, Any]:
+        return {
+            "company": {
+                "company_name": "TestCo",
+                "stage": "seed",
+                "sector": "B2B SaaS",
+                "geography": "US",
+                "revenue_model_type": "saas-sales-led",
+            },
+            "revenue": {
+                "mrr": {"value": 50_000, "as_of": "2025-12"},
+                "grr": grr,
+            },
+            "cash": {"current_balance": 1_000_000, "monthly_net_burn": 80_000},
+        }
+
+    def test_grr_above_one_flagged(self) -> None:
+        """GRR = 1.05 (105%) must trigger GRR_ABOVE_ONE in Layer 3."""
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(self._make_grr_inputs(1.05)))
+        assert rc == 0
+        codes = [w["code"] for w in data.get("warnings", [])]
+        assert "GRR_ABOVE_ONE" in codes, f"Expected GRR_ABOVE_ONE warning for grr=1.05. Got: {codes}"
+
+    def test_grr_exactly_one_not_flagged(self) -> None:
+        """GRR = 1.0 (100%) is at the boundary; no impossible-value flag."""
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(self._make_grr_inputs(1.0)))
+        assert rc == 0
+        codes = [w["code"] for w in data.get("warnings", [])]
+        assert "GRR_ABOVE_ONE" not in codes, f"GRR = 1.0 (100%) should not trigger GRR_ABOVE_ONE. Got: {codes}"
+
+    def test_grr_normal_not_flagged(self) -> None:
+        """GRR = 0.90 (90%) is valid; no impossible-value flag."""
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(self._make_grr_inputs(0.90)))
+        assert rc == 0
+        codes = [w["code"] for w in data.get("warnings", [])]
+        assert "GRR_ABOVE_ONE" not in codes
+
+    def test_grr_above_one_is_critical(self) -> None:
+        """GRR_ABOVE_ONE must be marked critical (impossible value, not just unusual)."""
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(self._make_grr_inputs(1.1)))
+        assert rc == 0
+        suspects = [w for w in data.get("warnings", []) if w["code"] == "GRR_ABOVE_ONE"]
+        assert suspects, "GRR_ABOVE_ONE warning not raised"
+        assert suspects[0].get("critical") is True, (
+            f"GRR_ABOVE_ONE must be marked critical (impossible value). Got: {suspects[0]}"
+        )
+
+
+class TestBurnMultipleSuspectPeriodMatch:
+    """The BURN_MULTIPLE_SUSPECT growth-rate fallback divides ANNUAL burn, so
+    its net-new-ARR estimate must also be annual (monthly net-new ARR x 12).
+    A period mismatch overstates the multiple 12x and false-flags healthy
+    companies as data errors."""
+
+    def _make_inputs(self, mrr: float, growth: float, burn: float) -> dict[str, Any]:
+        return {
+            "company": {
+                "company_name": "TestCo",
+                "stage": "seed",
+                "sector": "B2B SaaS",
+                "geography": "US",
+                "revenue_model_type": "saas-sales-led",
+            },
+            "revenue": {
+                "mrr": {"value": mrr, "as_of": "2025-12"},
+                "growth_rate_monthly": growth,
+            },
+            "cash": {"current_balance": 1_000_000, "monthly_net_burn": burn},
+        }
+
+    def test_healthy_burn_multiple_not_flagged(self) -> None:
+        """Burn 80K / MRR 50K / 8% MoM is a 1.67x burn multiple — no flag."""
+        rc, data, _ = run_script(
+            "validate_inputs.py", ["--pretty"], stdin_data=json.dumps(self._make_inputs(50_000, 0.08, 80_000))
+        )
+        assert rc == 0
+        codes = [w["code"] for w in data.get("warnings", [])]
+        assert "BURN_MULTIPLE_SUSPECT" not in codes, f"1.67x burn multiple must not be flagged as suspect. Got: {codes}"
+
+    def test_extreme_burn_multiple_flagged(self) -> None:
+        """Burn 200K / MRR 100K / 0.1% MoM is a ~167x burn multiple — flagged."""
+        rc, data, _ = run_script(
+            "validate_inputs.py", ["--pretty"], stdin_data=json.dumps(self._make_inputs(100_000, 0.001, 200_000))
+        )
+        assert rc == 0
+        codes = [w["code"] for w in data.get("warnings", [])]
+        assert "BURN_MULTIPLE_SUSPECT" in codes, f"~167x burn multiple must be flagged as suspect. Got: {codes}"
+
+
+# ---------------------------------------------------------------------------
+# Rule of 40 growth-basis disclosure
+# ---------------------------------------------------------------------------
+#
+# unit_economics.py annualizes the current MoM growth rate using
+# (1+g)^12 - 1 — a forward annualization, not realized YoY.
+# The evidence string must disclose this to avoid misleading readers.
+# ---------------------------------------------------------------------------
+
+
+class TestRuleOf40GrowthDisclosure:
+    """Rule of 40 evidence string must disclose that growth is annualized from MoM."""
+
+    _SAAS_INPUTS: dict[str, Any] = {
+        "company": {
+            "company_name": "TestCo",
+            "stage": "series-a",
+            "sector": "B2B SaaS",
+            "geography": "US",
+            "revenue_model_type": "saas-sales-led",
+        },
+        "revenue": {
+            "arr": {"value": 6_000_000, "as_of": "2025-12"},
+            "mrr": {"value": 500_000, "as_of": "2025-12"},
+            "growth_rate_monthly": 0.08,
+        },
+        "cash": {"current_balance": 5_000_000, "monthly_net_burn": 300_000},
+        "unit_economics": {"gross_margin": 0.75},
+    }
+
+    def test_r40_evidence_discloses_annualized_growth(self) -> None:
+        """Rule of 40 evidence must include 'annualized' to signal forward projection."""
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(self._SAAS_INPUTS))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        r40 = metrics.get("rule_of_40")
+        assert r40 is not None, "rule_of_40 metric missing"
+        assert r40.get("rating") not in (
+            "not_applicable",
+            None,
+        ), f"rule_of_40 not computed: {r40}"
+
+        evidence = r40.get("evidence", "") or ""
+        assert "annualized" in evidence.lower(), (
+            f"rule_of_40 evidence must disclose that growth is annualized from MoM rate. Got: {evidence!r}"
         )
