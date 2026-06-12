@@ -6520,3 +6520,182 @@ class TestNoteNoConversionPathReason:
         # Must contain an action word pointing to a human source
         action_present = any(kw in reason.lower() for kw in ("ask", "founder", "note text", "confirm"))
         assert action_present, f"reason must direct agent to ask/confirm; got: {reason!r}"
+
+
+# ---------------------------------------------------------------------------
+# extract_cap_table.py --mode=grid tests
+# ---------------------------------------------------------------------------
+
+
+def _make_grid_xlsx(tmp_path: str) -> str:
+    """Build a small two-sheet XLSX with values, a date, a None cell, and a
+    merged range. Returns absolute path to the saved file."""
+    import datetime
+
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws1 = wb.active
+    assert ws1 is not None
+    ws1.title = "Cap Table"
+    ws1["A1"] = "Acmecorp"
+    ws1["B1"] = 10_000_000
+    ws1["C1"] = None  # explicit null cell
+    ws1["A2"] = datetime.date(2026, 6, 12)
+    ws1["B2"] = 500_000.0
+    ws1.merge_cells("A4:C4")  # merged range
+
+    ws2 = wb.create_sheet("ESOP")
+    ws2["A1"] = "Option Pool"
+    ws2["B1"] = 1_500_000
+
+    path = os.path.join(tmp_path, "acme_freeform.xlsx")
+    wb.save(path)
+    return path
+
+
+class TestGridMode:
+    """Tests for extract_cap_table.py --mode=grid (cell-grid dump for Lane 3)."""
+
+    def test_grid_happy_path_structure(self, tmp_path: Any) -> None:
+        """--mode=grid emits {"ok": true, "mode": "grid", "sheets": {...}}."""
+        xlsx = _make_grid_xlsx(str(tmp_path))
+        rc, stdout, stderr = _run("extract_cap_table.py", ["--mode", "grid", "--xlsx", xlsx])
+        assert rc == 0, f"expected exit 0; stderr={stderr!r}"
+        receipt = json.loads(stdout)
+        assert receipt["ok"] is True
+        assert receipt["mode"] == "grid"
+        assert "sheets" in receipt
+        assert "Cap Table" in receipt["sheets"]
+        assert "ESOP" in receipt["sheets"]
+
+    def test_grid_dimensions_present(self, tmp_path: Any) -> None:
+        """Each sheet entry has 'dimensions', 'rows', and 'merged_ranges' keys."""
+        xlsx = _make_grid_xlsx(str(tmp_path))
+        rc, stdout, _ = _run("extract_cap_table.py", ["--mode", "grid", "--xlsx", xlsx])
+        assert rc == 0
+        receipt = json.loads(stdout)
+        sheet = receipt["sheets"]["Cap Table"]
+        assert "dimensions" in sheet
+        assert "rows" in sheet
+        assert "merged_ranges" in sheet
+        assert isinstance(sheet["rows"], list)
+        assert isinstance(sheet["merged_ranges"], list)
+
+    def test_grid_values_correct(self, tmp_path: Any) -> None:
+        """Cell values are present; numeric and string cells round-trip correctly."""
+        xlsx = _make_grid_xlsx(str(tmp_path))
+        rc, stdout, _ = _run("extract_cap_table.py", ["--mode", "grid", "--xlsx", xlsx])
+        assert rc == 0
+        receipt = json.loads(stdout)
+        rows = receipt["sheets"]["Cap Table"]["rows"]
+        # Row 0 (A1:C1): "Acmecorp", 10000000, null
+        assert rows[0][0] == "Acmecorp"
+        assert rows[0][1] == 10_000_000
+        assert rows[0][2] is None
+
+    def test_grid_date_serialized_as_string(self, tmp_path: Any) -> None:
+        """Date cells serialize to a string (ISO or str()), not as a datetime object."""
+        xlsx = _make_grid_xlsx(str(tmp_path))
+        rc, stdout, _ = _run("extract_cap_table.py", ["--mode", "grid", "--xlsx", xlsx])
+        assert rc == 0
+        receipt = json.loads(stdout)
+        rows = receipt["sheets"]["Cap Table"]["rows"]
+        # Row 1 (A2): date(2026, 6, 12) — must be a string, not crash JSON
+        assert isinstance(rows[1][0], str)
+
+    def test_grid_merged_ranges(self, tmp_path: Any) -> None:
+        """Merged ranges are reported as strings like 'A4:C4'."""
+        xlsx = _make_grid_xlsx(str(tmp_path))
+        rc, stdout, _ = _run("extract_cap_table.py", ["--mode", "grid", "--xlsx", xlsx])
+        assert rc == 0
+        receipt = json.loads(stdout)
+        merged = receipt["sheets"]["Cap Table"]["merged_ranges"]
+        assert len(merged) >= 1
+        assert any("A4" in m and "C4" in m for m in merged)
+
+    def test_grid_multi_sheet(self, tmp_path: Any) -> None:
+        """Both sheets are present with correct values."""
+        xlsx = _make_grid_xlsx(str(tmp_path))
+        rc, stdout, _ = _run("extract_cap_table.py", ["--mode", "grid", "--xlsx", xlsx])
+        assert rc == 0
+        receipt = json.loads(stdout)
+        esop_rows = receipt["sheets"]["ESOP"]["rows"]
+        assert esop_rows[0][0] == "Option Pool"
+        assert esop_rows[0][1] == 1_500_000
+
+    def test_grid_output_flag_writes_file_and_receipt(self, tmp_path: Any) -> None:
+        """-o writes the grid JSON to a file; stdout is the standard JSON receipt."""
+        xlsx = _make_grid_xlsx(str(tmp_path))
+        out_path = os.path.join(str(tmp_path), "cell_grid.json")
+        rc, stdout, _ = _run("extract_cap_table.py", ["--mode", "grid", "--xlsx", xlsx, "-o", out_path])
+        assert rc == 0
+        # File must exist and be valid JSON with sheets
+        assert os.path.exists(out_path)
+        with open(out_path) as f:
+            file_data = json.load(f)
+        assert file_data["ok"] is True
+        assert "sheets" in file_data
+        # stdout is the receipt confirming the write
+        receipt = json.loads(stdout)
+        assert receipt["ok"] is True
+        assert "written_to" in receipt
+
+    def test_grid_pretty_flag(self, tmp_path: Any) -> None:
+        """--pretty produces indented JSON (newlines in stdout)."""
+        xlsx = _make_grid_xlsx(str(tmp_path))
+        rc, stdout, _ = _run("extract_cap_table.py", ["--mode", "grid", "--xlsx", xlsx, "--pretty"])
+        assert rc == 0
+        assert "\n" in stdout  # indented JSON has newlines
+
+    def test_grid_missing_file_error(self, tmp_path: Any) -> None:
+        """Missing --xlsx exits non-zero with structured error JSON on stdout."""
+        missing = os.path.join(str(tmp_path), "nonexistent.xlsx")
+        rc, stdout, _ = _run("extract_cap_table.py", ["--mode", "grid", "--xlsx", missing])
+        assert rc != 0
+        receipt = json.loads(stdout)
+        assert receipt.get("ok") is False
+        assert receipt.get("mode") == "grid"
+        assert receipt.get("blocker")
+
+    def test_grid_time_and_timedelta_cells_serialize(self, tmp_path: Any) -> None:
+        """datetime.time and timedelta cells serialize to strings, not crash."""
+        import datetime as dt
+
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.title = "Times"
+        ws["A1"] = dt.time(14, 30, 5)
+        ws["B1"] = dt.timedelta(hours=2)
+        path = os.path.join(str(tmp_path), "times.xlsx")
+        wb.save(path)
+
+        rc, stdout, stderr = _run("extract_cap_table.py", ["--mode", "grid", "--xlsx", path])
+        assert rc == 0, f"expected exit 0; stderr={stderr!r}"
+        receipt = json.loads(stdout)
+        row = receipt["sheets"]["Times"]["rows"][0]
+        assert isinstance(row[0], str)
+        assert isinstance(row[1], str)
+
+    def test_grid_empty_sheet(self, tmp_path: Any) -> None:
+        """An empty sheet produces an empty rows list without crashing."""
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.title = "Empty"
+        # leave all cells blank
+        path = os.path.join(str(tmp_path), "empty_sheet.xlsx")
+        wb.save(path)
+
+        rc, stdout, _ = _run("extract_cap_table.py", ["--mode", "grid", "--xlsx", path])
+        assert rc == 0
+        receipt = json.loads(stdout)
+        assert receipt["ok"] is True
+        empty_sheet = receipt["sheets"].get("Empty", {})
+        rows = empty_sheet.get("rows", [])
+        assert isinstance(rows, list)

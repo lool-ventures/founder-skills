@@ -12,28 +12,13 @@ python3 "$SCRIPTS/extract_cap_table.py" --mode=auto --xlsx "$XLSX_PATH" || true
 
 For a freeform workbook this prints `{"ok": false, "detected_format": "freeform", "sheet_names": [...]}` and exits non-zero — that is the expected confirmation, not an error (the `|| true` keeps the expected exit code from reading as a failure). It does not write any artifact. (If it detects Carta or Pulley, switch to Lane 2.)
 
-The script has no grid-dump mode, so the main thread reads the cell grid itself:
+Then read the cell grid — per sheet: sheet name, dimensions, cell values per row, and any merged-cell ranges:
 
 ```bash
-python3 - "$XLSX_PATH" <<'GRID_EOF'
-import json, sys
-
-import openpyxl
-
-wb = openpyxl.load_workbook(sys.argv[1], data_only=True)
-grid = {}
-for ws in wb.worksheets:
-    rows = [list(row) for row in ws.iter_rows(values_only=True)]
-    grid[ws.title] = {
-        "dimensions": ws.dimensions,
-        "rows": rows,
-        "merged_ranges": [str(r) for r in ws.merged_cells.ranges],
-    }
-print(json.dumps(grid, default=str))
-GRID_EOF
+python3 "$SCRIPTS/extract_cap_table.py" --mode=grid --xlsx "$XLSX_PATH"
 ```
 
-The printed grid contains, per sheet: sheet name, dimensions, cell values per row, and any merged-cell ranges. Paste it into the dispatch prompt below.
+The output is JSON to stdout (`{"ok": true, "mode": "grid", "sheets": {...}}`). Paste the full JSON into the dispatch prompt below.
 
 ## Dispatch Context A — `SPREADSHEET_STRUCTURE_DETECTION`
 

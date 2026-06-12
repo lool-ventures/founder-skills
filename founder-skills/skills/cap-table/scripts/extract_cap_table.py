@@ -591,6 +591,99 @@ def _mode_pulley_stub(args: argparse.Namespace) -> int:
     return 1
 
 
+def _serialize_cell(value: Any) -> Any:
+    """Convert a cell value to a JSON-serializable form.
+
+    openpyxl data_only=True returns computed values, which may include
+    datetime.datetime / datetime.date / datetime.time objects (none of which
+    are JSON-serializable) and datetime.timedelta for duration-formatted
+    cells. Convert datetimes/times to ISO strings and timedeltas to their
+    string form; leave everything else as-is.
+    """
+    import datetime
+
+    if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
+        return value.isoformat()
+    if isinstance(value, datetime.timedelta):
+        return str(value)
+    return value
+
+
+def _mode_grid(args: argparse.Namespace) -> int:
+    """Dump every sheet of --xlsx as a cell-value grid for Lane-3 dispatch.
+
+    Output shape (to stdout):
+      {"ok": true, "mode": "grid",
+       "sheets": {
+         "<sheet_name>": {
+           "dimensions": "<str>",
+           "rows": [[...], ...],       // values_only; None for blank cells
+           "merged_ranges": ["A4:C4", ...]
+         }, ...
+       }}
+
+    With -o/--output the full JSON is written to the file and a compact
+    receipt is emitted to stdout confirming the write path.
+    """
+    if not args.xlsx:
+        sys.stderr.write("--xlsx required for --mode=grid\n")
+        return 1
+    if not os.path.exists(args.xlsx):
+        err: dict[str, Any] = {
+            "ok": False,
+            "mode": "grid",
+            "blocker": "file_not_found",
+            "error": f"file not found: {args.xlsx}",
+        }
+        print(json.dumps(err))
+        return 1
+
+    try:
+        wb = _open_xlsx(args.xlsx)
+    except Exception as e:
+        err = {
+            "ok": False,
+            "mode": "grid",
+            "blocker": "load_failed",
+            "error": f"{type(e).__name__}: {e}",
+        }
+        print(json.dumps(err))
+        return 1
+
+    sheets: dict[str, Any] = {}
+    for ws in wb.worksheets:
+        rows = [[_serialize_cell(cell) for cell in row] for row in ws.iter_rows(values_only=True)]
+        merged = [str(r) for r in ws.merged_cells.ranges]
+        sheets[ws.title] = {
+            "dimensions": ws.dimensions,
+            "rows": rows,
+            "merged_ranges": merged,
+        }
+
+    payload: dict[str, Any] = {
+        "ok": True,
+        "mode": "grid",
+        "sheets": sheets,
+    }
+
+    if args.output:
+        out = os.path.abspath(args.output)
+        os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2 if args.pretty else None)
+        receipt: dict[str, Any] = {
+            "ok": True,
+            "mode": "grid",
+            "written_to": out,
+            "sheet_count": len(sheets),
+        }
+        print(json.dumps(receipt, indent=2 if args.pretty else None))
+    else:
+        print(json.dumps(payload, indent=2 if args.pretty else None))
+
+    return 0
+
+
 def _mode_freeform_validate(args: argparse.Namespace) -> int:
     """Validate Context-A sub-agent output for spreadsheet structure detection.
 
@@ -677,12 +770,13 @@ def main() -> int:
     p.add_argument(
         "--mode",
         required=True,
-        choices=["validate", "carta", "pulley", "freeform", "auto"],
+        choices=["validate", "carta", "pulley", "freeform", "auto", "grid"],
         help=(
             "validate: schema-check existing JSON in --dir; carta: extract from "
             "Carta XLSX (--xlsx); pulley: stub; freeform: validate Context-A "
             "sub-agent output (stdin); auto: sniff sheet fingerprint of --xlsx "
-            "and dispatch to carta/pulley/freeform."
+            "and dispatch to carta/pulley/freeform; grid: dump all sheets as "
+            "a cell-value grid for Lane-3 SPREADSHEET_STRUCTURE_DETECTION dispatch."
         ),
     )
     p.add_argument("--dir", help="Required for --mode=validate")
@@ -751,6 +845,8 @@ def main() -> int:
         return _mode_carta(args)
     if args.mode == "pulley":
         return _mode_pulley_stub(args)
+    if args.mode == "grid":
+        return _mode_grid(args)
     return _mode_freeform_validate(args)
 
 
