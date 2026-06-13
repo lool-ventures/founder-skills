@@ -138,6 +138,16 @@
       "notes": "Benchmark dataset for US seed/post-seed note terms. Source-of-truth for conversion-trigger prevalence, maturity ranges, interest-rate distributions, and qualified-financing thresholds. Companion quarterly PDFs at https://www.wsgr.com/a/web/oFpGWcMXTLsUML5oSHyxfm/entrepreneurs-report-q2-2025.pdf and https://ecvc.wsgr.com/a/web/vgnKwoeAkUKT6MTc96jYem/entrepreneurs-report-q1-2025.pdf."
     },
     {
+      "source_id": "ITA-SAFE-2025-PRIMARY",
+      "title": "Income Tax Authority procedures 290125 — SAFE taxation guidance (Hebrew)",
+      "publisher": "Israel Tax Authority (gov.il)",
+      "url": "https://www.gov.il/BlobFolder/policy/procedures-290125/he/IncomeTax_procedures-290125.pdf",
+      "source_type": "primary",
+      "publication_date": "2025-01-29",
+      "accessed_date": "2026-06-13",
+      "notes": "Primary ITA circular (Hebrew, gov.il-hosted PDF dated 29 Jan 2025; content-type application/pdf, verified reachable 2026-06-13). Applies to SAFEs signed Jan 1 2025 through Dec 31 2026 unless superseded; sets the safe-harbor conditions (advance-payment-for-shares treatment when the instrument is not titled/structured as debt, and a 12-month-from-signing or 9-month-from-allocation holding period). English law-firm summaries Herzog (ITA-SAFE-2025-HERZOG) and Pearl Cohen (PEARLCOHEN-SAFE-2025) corroborate. Hebrew text controls; use counsel review before implementation."
+    },
+    {
       "source_id": "ITA-SAFE-2025-HERZOG",
       "title": "The ITA Publishes an Updated Version of Its Guidance and Safe Harbor for SAFEs",
       "publisher": "Herzog Law",
@@ -268,7 +278,7 @@
       "source_type": "benchmark_dataset",
       "publication_date": "2026",
       "accessed_date": "2026-05-18",
-      "notes": "Founder ownership benchmark dataset through IPO and by stage. carta.com returns 403 to automated fetchers; cited as benchmark-only/observational (no hardcoded figure relies on it); in-browser verification by the maintainer still pending."
+      "notes": "Founder ownership benchmark dataset by stage and sector. carta.com 403-blocks automated fetchers; verified live in-browser 2026-06-13 — the 2026 report states median founder ownership ~56% at seed and ~36% at Series A (rounds raised 2021-2025), and at Series B 27.3% for AI vs 21.8% for non-AI founding teams. Cited as benchmark-only/observational; no hardcoded figure relies on it."
     },
     {
       "source_id": "CARTA-FOUNDER-2025",
@@ -278,7 +288,7 @@
       "source_type": "benchmark_dataset",
       "publication_date": "2025",
       "accessed_date": "2026-05-18",
-      "notes": "Earlier founder ownership benchmark dataset used for trend comparison. carta.com returns 403 to automated fetchers; cited as benchmark-only/observational (no hardcoded figure relies on it); in-browser verification by the maintainer still pending."
+      "notes": "Earlier founder ownership benchmark dataset used for trend comparison. carta.com 403-blocks automated fetchers; verified live in-browser 2026-06-13 — the 2025 report (>45,000 startups incorporated 2015-2024) states the median founding team owns 56.2% after seed, 36.1% after Series A, and 23% after Series B. Cited as benchmark-only/observational; no hardcoded figure relies on it."
     },
     {
       "source_id": "F2-ISRAEL-2024",
@@ -725,14 +735,15 @@
         "domain": "safe",
         "behavior_target": "counsel_review_flag",
         "title": "Israel 2025 SAFE temporary guidance",
-        "summary": "English law-firm summaries report that the January 2025 ITA SAFE guidance applies to qualifying Israeli-company SAFEs during 2025-2026 and uses quantitative conditions such as investment caps, ownership limits, minimum discounts, and conversion timing constraints.",
+        "summary": "The January 2025 ITA SAFE circular (gov.il primary, corroborated by Herzog and Pearl Cohen) applies to qualifying Israeli-company SAFEs signed during 2025-2026 and uses quantitative conditions such as investment caps, ownership limits, minimum discounts, and conversion timing constraints.",
         "implementation_action": "counsel_review",
         "confidence": "medium",
         "source_ids": [
+          "ITA-SAFE-2025-PRIMARY",
           "ITA-SAFE-2025-HERZOG",
           "PEARLCOHEN-SAFE-2025"
         ],
-        "source_basis": "strong_secondary",
+        "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "Israel",
         "applies_when": "Use only as a preliminary checklist for Israeli-company SAFEs; require Israeli tax counsel before tax classification, reporting, or withholding conclusions.",
@@ -753,14 +764,15 @@
         "domain": "safe",
         "behavior_target": "counsel_review_flag",
         "title": "Non-qualifying Israeli SAFE facts-and-circumstances review",
-        "summary": "If a SAFE does not satisfy the reported 2025 ITA guidance conditions, the instrument remains facts-and-circumstances dependent and may be treated as debt, equity, or another instrument for tax purposes.",
+        "summary": "If a SAFE does not satisfy the January 2025 ITA SAFE circular's conditions (gov.il primary), the instrument remains facts-and-circumstances dependent and may be treated as debt, equity, or another instrument for tax purposes.",
         "implementation_action": "counsel_review",
         "confidence": "medium",
         "source_ids": [
+          "ITA-SAFE-2025-PRIMARY",
           "ITA-SAFE-2025-HERZOG",
           "PEARLCOHEN-SAFE-2025"
         ],
-        "source_basis": "strong_secondary",
+        "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "Israel",
         "applies_when": "Use when any reported Israeli SAFE safe-harbor condition is missing, unclear, or breached.",

@@ -129,7 +129,9 @@ The following rule IDs must be evaluated against event dates:
 
 `ISRAEL-COMPANIES-LAW` - ICNL library copy, “Companies Law, 5759-1999,” https://www.icnl.org/wp-content/uploads/Israel_CompaniesLaw.pdf
 
-`ITA-SAFE-2025-HERZOG` - Herzog Fox & Neeman, “The ITA Publishes an Updated Version of its Guidance and Safe Harbor for SAFEs,” https://herzoglaw.co.il/en/news-and-insights/the-ita-publishes-an-updated-version-of-its-guidance-and-safe-harbor-for-safes/ (states the guidance applies to SAFEs signed Jan 1 2025–Dec 31 2026, unless revised earlier; corroborated by Arnon Tadmor-Levy, https://arnontl.com/news/updated-guidelines-israel-tax-authority-regarding-safe-transactions/). Replaces a former Maslaw summary whose URL now redirects to a spam domain.
+`ITA-SAFE-2025-PRIMARY` - Israel Tax Authority, Income Tax procedures 290125 (Hebrew, gov.il), https://www.gov.il/BlobFolder/policy/procedures-290125/he/IncomeTax_procedures-290125.pdf — primary ITA SAFE circular (29 Jan 2025); applies to SAFEs signed Jan 1 2025–Dec 31 2026 unless superseded. Hebrew text controls.
+
+`ITA-SAFE-2025-HERZOG` - Herzog Fox & Neeman, “The ITA Publishes an Updated Version of its Guidance and Safe Harbor for SAFEs,” https://herzoglaw.co.il/en/news-and-insights/the-ita-publishes-an-updated-version-of-its-guidance-and-safe-harbor-for-safes/ (English summary corroborating the gov.il primary; corroborated in turn by Arnon Tadmor-Levy, https://arnontl.com/news/updated-guidelines-israel-tax-authority-regarding-safe-transactions/). Replaces a former Maslaw summary whose URL now redirects to a spam domain.
 
 `KPMG-RD-CENTER-2025` - KPMG, “Israel: Final guidance for local R&D centers related to IP valuations,” https://kpmg.com/us/en/taxnewsflash/news/2025/11/israel-final-guidance-local-r-and-d-centers-ip-valuations.html
 
