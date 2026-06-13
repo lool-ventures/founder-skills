@@ -159,28 +159,28 @@ CAC_PAYBACK_BY_ACV: dict[str, dict[str, Any]] = {
         "strong": 6,
         "acceptable": 9,
         "warning": 15,
-        "source": "Mosaic 2023 / KeyBanc 2024",
+        "source": "Benchmarkit 2025 (ACV-segmented payback) / KeyBanc Sapphire 2024",
         "as_of": "2024-Q4",
     },
     "mid-market": {
         "strong": 12,
         "acceptable": 15,
         "warning": 21,
-        "source": "Mosaic 2023 / KeyBanc 2024",
+        "source": "Benchmarkit 2025 (ACV-segmented payback) / KeyBanc Sapphire 2024",
         "as_of": "2024-Q4",
     },
     "enterprise": {
         "strong": 15,
         "acceptable": 20,
         "warning": 30,
-        "source": "Mosaic 2023 / KeyBanc 2024",
+        "source": "Benchmarkit 2025 (ACV-segmented payback) / KeyBanc Sapphire 2024",
         "as_of": "2024-Q4",
     },
     "large-ent": {
         "strong": 18,
         "acceptable": 24,
         "warning": 36,
-        "source": "Mosaic 2023 / KeyBanc 2024",
+        "source": "Benchmarkit 2025 (ACV-segmented payback) / KeyBanc Sapphire 2024",
         "as_of": "2024-Q4",
     },
     "default": {
@@ -203,6 +203,22 @@ _AI_SECTORS = {"ai-native", "ai", "ai native"}
 
 # Lower-is-better metrics (for rating direction)
 _LOWER_IS_BETTER = {"burn_multiple", "cac_payback", "cac"}
+
+# opex_monthly categories counted in the S&M denominator for magic number.
+# Source: Scale VP "Magic Number Math" — denominator is ALL S&M spend.
+SM_OPEX_CATEGORIES: frozenset[str] = frozenset(
+    {
+        "marketing",
+        "ads",
+        "advertising",
+        "demand gen",
+        "demand generation",
+        "growth",
+        "s&m",
+        "sales & marketing",
+        "sales and marketing",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -371,6 +387,60 @@ def _net_new_arr_from_quarterly(entries: list[dict[str, Any]]) -> float | None:
         return None
     net_new = latest_arr - earliest_arr
     return net_new if net_new > 0 else None
+
+
+def _realized_yoy_growth_pct_from_monthly(entries: list[dict[str, Any]]) -> float | None:
+    """Compute realized YoY revenue growth % from monthly time-series (≥12 entries).
+
+    Source: Brad Feld canonical R40 — growth = "year-over-year growth rate".
+    Uses the same lookback logic as ``_net_new_arr_from_monthly``.
+    Returns None if fewer than 12 entries or if year-ago ARR is zero/None.
+    """
+    if len(entries) < 12:
+        return None
+    sorted_entries = sorted(entries, key=lambda e: e.get("month", ""))
+
+    def _arr_value(entry: dict[str, Any]) -> float | None:
+        arr = entry.get("arr")
+        if isinstance(arr, (int, float)):
+            return float(arr)
+        total = entry.get("total")
+        if isinstance(total, (int, float)):
+            return float(total) * 12
+        return None
+
+    latest_arr = _arr_value(sorted_entries[-1])
+    lookback_idx = -13 if len(sorted_entries) >= 13 else 0
+    year_ago_arr = _arr_value(sorted_entries[lookback_idx])
+    if latest_arr is None or year_ago_arr is None or year_ago_arr == 0:
+        return None
+    return (latest_arr - year_ago_arr) / year_ago_arr * 100
+
+
+def _realized_yoy_growth_pct_from_quarterly(entries: list[dict[str, Any]]) -> float | None:
+    """Compute realized YoY revenue growth % from quarterly time-series (≥5 entries).
+
+    Uses the same lookback logic as ``_net_new_arr_from_quarterly`` (true 4-quarter window
+    when ≥5 entries exist). Returns None if fewer than 5 entries or if year-ago ARR is zero/None.
+    """
+    if len(entries) < 5:
+        return None
+    sorted_entries = sorted(entries, key=lambda e: e.get("quarter", ""))
+
+    def _arr_value(entry: dict[str, Any]) -> float | None:
+        arr = entry.get("arr")
+        if isinstance(arr, (int, float)):
+            return float(arr)
+        total = entry.get("total")
+        if isinstance(total, (int, float)):
+            return float(total) * 4
+        return None
+
+    latest_arr = _arr_value(sorted_entries[-1])
+    year_ago_arr = _arr_value(sorted_entries[-5])
+    if latest_arr is None or year_ago_arr is None or year_ago_arr == 0:
+        return None
+    return (latest_arr - year_ago_arr) / year_ago_arr * 100
 
 
 # ---------------------------------------------------------------------------
@@ -582,7 +652,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                 ltv_cac,
                 rating,
                 evidence,
-                "Mosaic 2023 / KeyBanc 2024",
+                "KeyBanc/Sapphire 2024",
                 "2024-Q4",
                 bench=ltv_cac_bench,
             )
@@ -822,29 +892,42 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
         )
 
     # 6. Magic number (SaaS only)
+    # Source: Scale VP "Magic Number Math" — denominator is ALL S&M (headcount + marketing opex).
     if saas:
-        # Magic number = net new ARR (annualized QoQ delta) / S&M spend
-        # Simplified: net new ARR = MRR * growth_rate * 12
-        # S&M spend: sum of sales headcount costs
+        # S&M headcount spend
         headcount = _deep_get(expenses, "headcount", default=[])
-        sm_spend_annual = 0.0
+        sm_hc_annual = 0.0
         for person in headcount:
             role = str(person.get("role", "")).lower()
             if role in ("sales", "marketing", "sales & marketing", "s&m", "growth"):
                 count = _num(person.get("count", 0), 0)
                 salary = _num(person.get("salary_annual", 0), 0)
                 burden = _num(person.get("burden_pct", 0.0), 0.0)
-                sm_spend_annual += count * salary * (1 + burden)
+                sm_hc_annual += count * salary * (1 + burden)
+
+        # Non-headcount marketing/S&M opex (opex_monthly.amount is monthly → × 12)
+        opex_monthly_entries = _deep_get(expenses, "opex_monthly", default=[]) or []
+        sm_opex_annual = 0.0
+        for entry in opex_monthly_entries:
+            cat = str(entry.get("category", "")).lower().strip()
+            if cat in SM_OPEX_CATEGORIES:
+                sm_opex_annual += _num(entry.get("amount", 0), 0) * 12
+
+        sm_spend_annual = sm_hc_annual + sm_opex_annual
 
         if mrr is not None and growth_rate is not None and growth_rate > 0 and sm_spend_annual > 0:
             net_new_arr = mrr * growth_rate * 12  # ΔMRR × 12 = monthly net-new ARR
             sm_spend_monthly = sm_spend_annual / 12
             magic = round(net_new_arr / sm_spend_monthly, 2)
             bench = benchmarks.get("magic_number")
+            _sm_base_desc = (
+                "sales/marketing headcount + marketing opex" if sm_opex_annual > 0 else "sales/marketing headcount"
+            )
             if bench:
                 rating = _rate_higher_is_better(magic, bench)
                 evidence = (
-                    f"Magic number of {magic:.2f} (monthly net-new ARR ÷ monthly S&M); "
+                    f"Magic number of {magic:.2f} "
+                    f"(monthly net-new ARR ÷ monthly S&M ({_sm_base_desc})); "
                     f"stage benchmark strong >= {bench['strong']}"
                 )
                 metrics.append(
@@ -864,7 +947,8 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                         "magic_number",
                         magic,
                         "not_rated",
-                        f"Magic number of {magic:.2f} (monthly net-new ARR ÷ monthly S&M); "
+                        f"Magic number of {magic:.2f} "
+                        f"(monthly net-new ARR ÷ monthly S&M ({_sm_base_desc})); "
                         f"no benchmark for stage '{stage}'",
                     )
                 )
@@ -991,8 +1075,21 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
         elif growth_rate is not None and (
             gm is not None or (monthly_burn_raw is not None and mrr is not None and mrr > 0)
         ):
-            # Annualize monthly growth rate
-            growth_annualized = ((1 + growth_rate) ** 12 - 1) * 100
+            # Growth basis: use realized YoY when ≥12 monthly (or ≥5 quarterly) entries exist;
+            # fall back to annualized-MoM (forward annualization of current growth_rate).
+            # Source: Brad Feld canonical R40 — growth = "year-over-year growth rate".
+            _r40_yoy: float | None = None
+            _r40_growth_basis: str = "annualized from current MoM rate"
+            if isinstance(monthly_entries, list):
+                _r40_yoy = _realized_yoy_growth_pct_from_monthly(monthly_entries)
+                if _r40_yoy is not None:
+                    _r40_growth_basis = "realized YoY"
+            if _r40_yoy is None and isinstance(quarterly_entries, list):
+                _r40_yoy = _realized_yoy_growth_pct_from_quarterly(quarterly_entries)
+                if _r40_yoy is not None:
+                    _r40_growth_basis = "realized YoY"
+
+            growth_annualized = _r40_yoy if _r40_yoy is not None else ((1 + growth_rate) ** 12 - 1) * 100
 
             # Prefer operating margin (burn-derived, closer to FCF margin)
             if monthly_burn_raw is not None and mrr is not None and mrr > 0:
@@ -1043,7 +1140,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                             r40,
                             "contextual",
                             f"Rule of 40 score: {r40:.0f} "
-                            f"(growth {growth_annualized:.0f}% annualized from current MoM rate"
+                            f"(growth {growth_annualized:.0f}% {_r40_growth_basis}"
                             f" + {margin_label} margin {margin_value:.0%}); "
                             f"score is inflated by hyper-early growth and not comparable "
                             f"to the >= 40 benchmark used for scaled companies",
@@ -1056,7 +1153,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                             r40,
                             "contextual",
                             f"Rule of 40 score: {r40:.0f} "
-                            f"(growth {growth_annualized:.0f}% annualized from current MoM rate"
+                            f"(growth {growth_annualized:.0f}% {_r40_growth_basis}"
                             f" + gross margin {margin_value:.0%}); "
                             f"using gross margin as proxy — overstates R40 vs. FCF-based standard",
                         )
@@ -1068,7 +1165,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                             r40,
                             "contextual",
                             f"Rule of 40: components — "
-                            f"growth {growth_annualized:.0f}% (annualized from current MoM rate), "
+                            f"growth {growth_annualized:.0f}% ({_r40_growth_basis}), "
                             f"{margin_label} margin {margin_value:.0%} "
                             f"(composite {r40:.0f}); "
                             f"not benchmark-compared below $5M ARR",
@@ -1078,7 +1175,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                     rating = _rate_higher_is_better(r40, bench)
                     evidence = (
                         f"Rule of 40 score: {r40:.0f} "
-                        f"(growth {growth_annualized:.0f}% annualized from current MoM rate"
+                        f"(growth {growth_annualized:.0f}% {_r40_growth_basis}"
                         f" + operating margin (burn-derived) {margin_value:.0%}); "
                         f"benchmark strong >= {bench['strong']}"
                     )
@@ -1100,7 +1197,7 @@ def _compute_metrics(inputs: dict[str, Any]) -> dict[str, Any]:
                             r40,
                             "not_rated",
                             f"Rule of 40 score: {r40:.0f} "
-                            f"(growth annualized from current MoM rate; "
+                            f"(growth {_r40_growth_basis}; "
                             f"operating margin (burn-derived)); no benchmark for stage '{stage}'",
                         )
                     )

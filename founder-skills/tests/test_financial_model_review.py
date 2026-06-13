@@ -5763,3 +5763,407 @@ class TestExplorerFooterLine:
         assert rc == 0, f"compose failed: {stderr}"
         md = data["report_markdown"]
         assert "what-if" in md.lower() or "scenarios" in md.lower()
+
+
+# ---------------------------------------------------------------------------
+# Change 1: Magic number includes non-headcount marketing opex
+# ---------------------------------------------------------------------------
+#
+# Source: Scale Venture Partners, "Magic Number Math"
+#   The denominator is "sales and marketing spend for the earlier of the two
+#   quarters" — i.e. ALL S&M, not just headcount.
+#
+# Non-headcount marketing lives in expenses.opex_monthly[] entries whose
+# category (case-insensitive) matches the SM_OPEX_CATEGORIES frozenset.
+# opex_monthly.amount is MONTHLY, so the annual base adds amount * 12.
+#
+# Worked examples:
+#   A) Only marketing opex, no sales HC:
+#      MRR=100K, growth=5%, marketing_opex=$50K/mo → $600K/yr
+#      net_new_ARR = 100K * 0.05 * 12 = 60K
+#      monthly_sm  = 600K / 12 = 50K
+#      magic       = 60K / 50K = 1.2
+#      (old code: no HC → not_rated; new code: should compute)
+#
+#   B) Sales HC + marketing opex:
+#      MRR=100K, growth=5%
+#      sales_HC_annual = 600K, marketing_opex = $20K/mo = $240K/yr
+#      combined_annual = 600K + 240K = 840K
+#      monthly_sm  = 840K / 12 = 70K
+#      net_new_ARR = 60K
+#      magic       = 60K / 70K ≈ 0.857  (old: 60K/50K = 1.2 — too optimistic)
+# ---------------------------------------------------------------------------
+
+
+class TestMagicNumberWithMarketingOpex:
+    """Magic number denominator must include non-headcount marketing opex."""
+
+    _BASE_COMPANY: dict[str, Any] = {
+        "company_name": "TestCo",
+        "stage": "seed",
+        "sector": "B2B SaaS",
+        "geography": "US",
+        "revenue_model_type": "saas-sales-led",
+    }
+    _BASE_REVENUE: dict[str, Any] = {
+        "arr": {"value": 1_200_000, "as_of": "2025-12"},
+        "mrr": {"value": 100_000, "as_of": "2025-12"},
+        "growth_rate_monthly": 0.05,
+    }
+    _BASE_CASH: dict[str, Any] = {
+        "current_balance": 2_000_000,
+        "monthly_net_burn": 80_000,
+    }
+
+    def test_magic_number_opex_only_marketing_computes(self) -> None:
+        """Marketing opex alone (no sales HC) should now produce a magic number.
+
+        Derivation (example A):
+          net_new_ARR  = 100K * 0.05 * 12 = 60K
+          opex_monthly = $50K/mo → annual = $600K → monthly = $50K
+          magic        = 60K / 50K = 1.2
+        Old behaviour: no headcount → sm_spend_annual = 0 → not_rated
+        New behaviour: marketing opex included → magic = 1.2
+        """
+        inputs: dict[str, Any] = {
+            "company": self._BASE_COMPANY,
+            "revenue": self._BASE_REVENUE,
+            "cash": self._BASE_CASH,
+            "expenses": {
+                "opex_monthly": [
+                    {"category": "marketing", "amount": 50_000, "start_month": "2025-01"},
+                ]
+            },
+        }
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(inputs))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        magic = metrics.get("magic_number")
+        assert magic is not None, "magic_number metric missing"
+        assert magic["value"] is not None, (
+            "magic_number value is null — marketing opex alone must be sufficient to compute"
+        )
+        assert magic["rating"] != "not_rated", (
+            f"magic_number should not be not_rated when marketing opex is present. Got: {magic}"
+        )
+        # net_new_ARR=60K, monthly_sm=50K → magic=1.2
+        assert abs(magic["value"] - 1.2) < 0.05, (
+            f"Expected magic_number ≈ 1.2 (marketing opex $50K/mo), got {magic['value']:.4f}"
+        )
+
+    def test_magic_number_combined_base_lower_than_headcount_only(self) -> None:
+        """Adding marketing opex to existing sales HC lowers the magic number.
+
+        Derivation (example B):
+          net_new_ARR       = 100K * 0.05 * 12 = 60K
+          sales_HC_annual   = $600K  → monthly = $50K
+          marketing_opex    = $20K/mo → annual = $240K
+          combined_annual   = $840K  → combined_monthly = $70K
+          magic_combined    = 60K / 70K ≈ 0.857
+          magic_HC_only     = 60K / 50K = 1.2
+        Adding opex must lower the magic number (more conservative, matches definition).
+        """
+        inputs_hc_only: dict[str, Any] = {
+            "company": self._BASE_COMPANY,
+            "revenue": self._BASE_REVENUE,
+            "cash": self._BASE_CASH,
+            "expenses": {
+                "headcount": [
+                    {
+                        "role": "sales",
+                        "count": 1,
+                        "salary_annual": 600_000,
+                        "burden_pct": 0.0,
+                    }
+                ]
+            },
+        }
+        inputs_combined: dict[str, Any] = {
+            "company": self._BASE_COMPANY,
+            "revenue": self._BASE_REVENUE,
+            "cash": self._BASE_CASH,
+            "expenses": {
+                "headcount": [
+                    {
+                        "role": "sales",
+                        "count": 1,
+                        "salary_annual": 600_000,
+                        "burden_pct": 0.0,
+                    }
+                ],
+                "opex_monthly": [
+                    {"category": "marketing", "amount": 20_000, "start_month": "2025-01"},
+                ],
+            },
+        }
+        rc1, data1, _ = run_script("unit_economics.py", stdin_data=json.dumps(inputs_hc_only))
+        rc2, data2, _ = run_script("unit_economics.py", stdin_data=json.dumps(inputs_combined))
+        assert rc1 == 0 and rc2 == 0
+
+        magic_hc = {m["name"]: m for m in data1.get("metrics", [])}["magic_number"]
+        magic_combined = {m["name"]: m for m in data2.get("metrics", [])}["magic_number"]
+
+        assert magic_hc["value"] is not None and magic_combined["value"] is not None
+        assert magic_combined["value"] < magic_hc["value"], (
+            f"Combined base must lower magic number: "
+            f"hc-only={magic_hc['value']:.4f}, combined={magic_combined['value']:.4f}"
+        )
+        # Spot-check combined value ≈ 0.857 (60K / 70K)
+        assert abs(magic_combined["value"] - round(60_000 / 70_000, 2)) < 0.05, (
+            f"Expected magic_number ≈ {round(60_000 / 70_000, 2):.4f} for combined base, "
+            f"got {magic_combined['value']:.4f}"
+        )
+
+    def test_magic_number_evidence_names_headcount_and_opex(self) -> None:
+        """Evidence string must honestly name the combined base when both are present."""
+        inputs: dict[str, Any] = {
+            "company": self._BASE_COMPANY,
+            "revenue": self._BASE_REVENUE,
+            "cash": self._BASE_CASH,
+            "expenses": {
+                "headcount": [{"role": "marketing", "count": 1, "salary_annual": 120_000, "burden_pct": 0.0}],
+                "opex_monthly": [
+                    {"category": "ads", "amount": 10_000, "start_month": "2025-01"},
+                ],
+            },
+        }
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(inputs))
+        assert rc == 0, f"failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        magic = metrics.get("magic_number")
+        assert magic is not None and magic["value"] is not None
+        evidence = magic.get("evidence", "")
+        # Evidence must mention the opex component in the base description
+        assert "opex" in evidence.lower() or "marketing" in evidence.lower(), (
+            f"Evidence should name the opex base component. Got: {evidence!r}"
+        )
+
+    def test_magic_number_category_case_insensitive(self) -> None:
+        """Category matching must be case-insensitive ('Advertising', 'DEMAND GEN', etc.)."""
+        for cat in ("Advertising", "DEMAND GEN", "Demand Generation", "S&M", "Sales & Marketing"):
+            inputs: dict[str, Any] = {
+                "company": self._BASE_COMPANY,
+                "revenue": self._BASE_REVENUE,
+                "cash": self._BASE_CASH,
+                "expenses": {
+                    "opex_monthly": [
+                        {"category": cat, "amount": 50_000, "start_month": "2025-01"},
+                    ]
+                },
+            }
+            rc, data, _ = run_script("unit_economics.py", stdin_data=json.dumps(inputs))
+            assert rc == 0
+            metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+            magic = metrics["magic_number"]
+            assert magic["value"] is not None, f"Category '{cat}' not matched — magic_number should compute"
+
+    def test_magic_number_non_sm_opex_excluded(self) -> None:
+        """Cloud/engineering opex must NOT be counted in the S&M base."""
+        inputs_no_sm: dict[str, Any] = {
+            "company": self._BASE_COMPANY,
+            "revenue": self._BASE_REVENUE,
+            "cash": self._BASE_CASH,
+            "expenses": {
+                "opex_monthly": [
+                    {"category": "cloud", "amount": 50_000, "start_month": "2025-01"},
+                    {"category": "engineering tools", "amount": 20_000, "start_month": "2025-01"},
+                ]
+            },
+        }
+        rc, data, _ = run_script("unit_economics.py", stdin_data=json.dumps(inputs_no_sm))
+        assert rc == 0
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        magic = metrics["magic_number"]
+        # No S&M in opex → should still be not_rated (cloud/tools are not S&M)
+        assert magic["value"] is None, f"Non-S&M opex categories must not trigger magic_number. Got: {magic}"
+
+
+# ---------------------------------------------------------------------------
+# Change 2: Rule of 40 uses realized YoY growth when revenue history exists
+# ---------------------------------------------------------------------------
+#
+# Source: Brad Feld (canonical R40): growth = "year-over-year growth rate"
+# of revenue.  When ≥12 monthly entries (or ≥5 quarterly) exist, use the
+# realized YoY rate; otherwise fall back to annualized-MoM with disclosure.
+#
+# Realized YoY derivation using monthly time-series:
+#   latest_arr    = ARR at final month entry
+#   year_ago_arr  = ARR 12 months earlier (index -13 if 13 entries, else index 0)
+#   yoy_growth_%  = (latest_arr - year_ago_arr) / year_ago_arr * 100
+#
+# Worked example — 13 monthly entries, ARR grows from 400K to 1M:
+#   yoy_growth = (1000K - 400K) / 400K * 100 = 150.0%
+#   op_margin  = -monthly_burn / mrr = -30K / 83.3K ≈ -36% → let's use gross for simplicity
+#   gross_margin = 0.75 → R40 = 150 + 75 = 225
+#   (annualized-MoM from growth_rate_monthly=0.08: (1.08^12-1)*100 ≈ 151.8% — very close
+#    but would differ for non-constant-growth companies)
+#
+# Worked example (fallback, no monthly history):
+#   growth_rate_monthly=0.08 → annualized = (1.08^12-1)*100 ≈ 151.8%
+#   evidence must include "annualized from current MoM rate"
+# ---------------------------------------------------------------------------
+
+
+class TestRuleOf40RealizedYoY:
+    """Rule of 40 uses realized YoY when ≥12 months of history exist."""
+
+    _BASE_COMPANY: dict[str, Any] = {
+        "company_name": "TestCo",
+        "stage": "series-a",
+        "sector": "B2B SaaS",
+        "geography": "US",
+        "revenue_model_type": "saas-sales-led",
+    }
+
+    def _make_inputs_with_monthly(
+        self,
+        n_months: int,
+        arr_start: float,
+        arr_end: float,
+        mrr_current: float,
+        burn: float,
+    ) -> dict[str, Any]:
+        """Build inputs with n_months of monthly ARR history, linear progression."""
+        step = (arr_end - arr_start) / max(n_months - 1, 1)
+        monthly = [
+            {
+                "month": f"2025-{i + 1:02d}" if i < 12 else f"2026-{i - 11:02d}",
+                "arr": round(arr_start + step * i),
+            }
+            for i in range(n_months)
+        ]
+        return {
+            "company": self._BASE_COMPANY,
+            "revenue": {
+                "arr": {"value": arr_end, "as_of": "2025-12"},
+                "mrr": {"value": mrr_current, "as_of": "2025-12"},
+                "growth_rate_monthly": 0.08,  # also present — should NOT be used for growth
+                "monthly": monthly,
+            },
+            "cash": {"current_balance": 5_000_000, "monthly_net_burn": burn},
+            "unit_economics": {"gross_margin": 0.75},
+        }
+
+    def test_r40_realized_yoy_with_12_monthly_entries(self) -> None:
+        """With 12 monthly entries, R40 uses realized YoY growth (not annualized MoM).
+
+        Derivation (12 entries, arr 400K→1M, index-lookback is index 0 = 400K):
+          year_ago_arr = 400K (entry[0])
+          latest_arr   = 1M  (entry[-1])
+          yoy_growth   = (1M - 400K) / 400K * 100 = 150.0%
+          gross_margin = 0.75 → margin_pct = 75
+          r40          = 150.0 + 75 = 225.0
+          (annualized-MoM at 8% would give ≈151.8 — deliberately close but not identical
+           for clean testing; see fallback test for the MoM path)
+        The evidence must say "realized YoY" (not "annualized from current MoM rate").
+        """
+        inputs = self._make_inputs_with_monthly(
+            n_months=12, arr_start=400_000, arr_end=1_000_000, mrr_current=83_333, burn=100_000
+        )
+        # Force gross-margin path: remove monthly_net_burn  → op_margin unavailable
+        del inputs["cash"]["monthly_net_burn"]
+
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(inputs))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        r40 = metrics.get("rule_of_40")
+        assert r40 is not None, "rule_of_40 missing"
+        assert r40["value"] is not None, f"rule_of_40 not computed: {r40}"
+
+        evidence = r40.get("evidence", "")
+        assert "realized yoy" in evidence.lower(), (
+            f"Evidence must say 'realized YoY' when monthly history is present. Got: {evidence!r}"
+        )
+        assert "annualized from current mom" not in evidence.lower(), (
+            f"Evidence must NOT say annualized-from-MoM when history is present. Got: {evidence!r}"
+        )
+
+    def test_r40_no_history_falls_back_to_annualized_mom(self) -> None:
+        """Without monthly history, R40 falls back to annualized-MoM with disclosure.
+
+        This test ensures the fallback path still carries the 'annualized from current MoM rate'
+        disclosure required by TestRuleOf40GrowthDisclosure.
+        """
+        inputs: dict[str, Any] = {
+            "company": self._BASE_COMPANY,
+            "revenue": {
+                "arr": {"value": 6_000_000, "as_of": "2025-12"},
+                "mrr": {"value": 500_000, "as_of": "2025-12"},
+                "growth_rate_monthly": 0.08,
+                # No "monthly" or "quarterly" entries
+            },
+            "cash": {"current_balance": 5_000_000, "monthly_net_burn": 300_000},
+            "unit_economics": {"gross_margin": 0.75},
+        }
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(inputs))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        r40 = metrics.get("rule_of_40")
+        assert r40 is not None and r40["value"] is not None, f"r40 not computed: {r40}"
+
+        evidence = r40.get("evidence", "")
+        assert "annualized" in evidence.lower(), (
+            f"Fallback evidence must say 'annualized' (from MoM rate). Got: {evidence!r}"
+        )
+
+    def test_r40_realized_yoy_with_5_quarterly_entries(self) -> None:
+        """With 5 quarterly entries (full YoY window), R40 uses realized YoY.
+
+        Derivation:
+          entry 0: arr=400K (year_ago)
+          entry 4: arr=1M  (latest)
+          yoy_growth = (1M - 400K) / 400K * 100 = 150.0%
+          gross_margin = 0.75 → r40 = 225.0
+        Evidence must say 'realized YoY'.
+        """
+        inputs: dict[str, Any] = {
+            "company": self._BASE_COMPANY,
+            "revenue": {
+                "arr": {"value": 1_000_000, "as_of": "2025-Q4"},
+                "mrr": {"value": 83_333, "as_of": "2025-Q4"},
+                "growth_rate_monthly": 0.08,
+                "quarterly": [
+                    {"quarter": "2024-Q4", "arr": 400_000},
+                    {"quarter": "2025-Q1", "arr": 600_000},
+                    {"quarter": "2025-Q2", "arr": 700_000},
+                    {"quarter": "2025-Q3", "arr": 850_000},
+                    {"quarter": "2025-Q4", "arr": 1_000_000},
+                ],
+            },
+            "cash": {"current_balance": 5_000_000},  # no monthly_net_burn → gross path
+            "unit_economics": {"gross_margin": 0.75},
+        }
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(inputs))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        r40 = metrics.get("rule_of_40")
+        assert r40 is not None and r40["value"] is not None, f"r40 not computed: {r40}"
+
+        evidence = r40.get("evidence", "")
+        assert "realized yoy" in evidence.lower(), (
+            f"Evidence must say 'realized YoY' for 5-quarter window. Got: {evidence!r}"
+        )
+
+    def test_r40_fewer_than_12_monthly_falls_back_to_mom(self) -> None:
+        """With only 11 monthly entries (< 12), fall back to annualized-MoM."""
+        inputs = self._make_inputs_with_monthly(
+            n_months=11, arr_start=400_000, arr_end=1_000_000, mrr_current=83_333, burn=100_000
+        )
+        del inputs["cash"]["monthly_net_burn"]
+
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(inputs))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        r40 = metrics.get("rule_of_40")
+        assert r40 is not None and r40["value"] is not None
+
+        evidence = r40.get("evidence", "")
+        assert "annualized" in evidence.lower(), (
+            f"With < 12 monthly entries, evidence must say 'annualized'. Got: {evidence!r}"
+        )
