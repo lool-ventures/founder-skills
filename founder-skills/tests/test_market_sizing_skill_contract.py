@@ -1308,6 +1308,72 @@ def test_webfetch_before_dispatch_ordering_in_agent_body() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Test 12b: CHECKLIST dispatch template enumerates ALL canonical IDs
+#
+# Note: FMR (financial-model-review) and competitive-positioning enumerate via
+# systematic PREFIX_NN ranges and are covered by their own range-expansion
+# checks — the asymmetry here (explicit list vs. range) is intentional.
+# ---------------------------------------------------------------------------
+
+
+def test_checklist_dispatch_template_enumerates_all_canonical_ids() -> None:
+    """The CHECKLIST dispatch template in SKILL.md must enumerate every canonical
+    checklist ID as a JSON ``"id"`` field value — no omissions, no phantoms.
+
+    Set-equality test (both directions):
+    - Template IDs ⊆ canonical: no invented IDs accepted by the template.
+    - Canonical IDs ⊆ template IDs: no ID silently absent from the template.
+
+    Search region: bounded within the CHECKLIST dispatch template fence so only
+    the enumerated list (not surrounding prose) satisfies the check.
+
+    Count guard: exactly 22 ``"id"`` values must appear in the template.
+
+    Mutation-check: rename any id in the template → phantom check fails;
+    restore → passes.
+    """
+    mod = _load_checklist_module()
+    canonical_ids: set[str] = set(mod.VALID_IDS)  # type: ignore[attr-defined]
+    assert len(canonical_ids) == 22, (
+        f"checklist.py VALID_IDS has {len(canonical_ids)} items (expected 22) — "
+        f"update this test if the canonical set genuinely changed"
+    )
+
+    skill_text = SKILL_MD.read_text(encoding="utf-8")
+
+    # Bound search to the CHECKLIST dispatch template fence
+    anchor = "#### CHECKLIST dispatch prompt template"
+    start = skill_text.find(anchor)
+    assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
+    open_fence = skill_text.find("\n```\n", start)
+    assert open_fence != -1, f"{SKILL_MD.name} CHECKLIST: no opening fence after section anchor"
+    close_fence = skill_text.find("\n```\n", open_fence + 4)
+    assert close_fence != -1, f"{SKILL_MD.name} CHECKLIST: no closing fence"
+    template_body = skill_text[open_fence:close_fence]
+
+    # Extract all "id": "some_id" values from the template body
+    template_ids = set(re.findall(r'"id"\s*:\s*"([a-z][a-z0-9_]+)"', template_body))
+
+    assert len(template_ids) == 22, (
+        f"{SKILL_MD.name} CHECKLIST dispatch template enumerates {len(template_ids)} ids "
+        f"(expected 22); count guard catches omissions or duplicates.\n"
+        f"  found: {sorted(template_ids)}"
+    )
+
+    phantom = template_ids - canonical_ids
+    missing = canonical_ids - template_ids
+
+    assert not phantom, (
+        f"{SKILL_MD.name} CHECKLIST dispatch template contains ids not in "
+        f"checklist.py VALID_IDS (phantom — invented or renamed): {sorted(phantom)}"
+    )
+    assert not missing, (
+        f"{SKILL_MD.name} CHECKLIST dispatch template is missing ids from "
+        f"checklist.py VALID_IDS (missing — sub-agent will invent them): {sorted(missing)}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Test 13: Checklist VALID_STATUSES — no 'warn' status in market-sizing
 # ---------------------------------------------------------------------------
 

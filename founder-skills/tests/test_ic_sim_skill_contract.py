@@ -608,29 +608,46 @@ def test_context_a_dispatch_templates_contain_no_write_instruction() -> None:
     forbid artifact writes — a sub-agent that writes files directly bypasses
     schema validation and run_id stamping.
 
-    DETECT_CONFLICTS and SCORE_DIMENSIONS: anchored on 'CONTEXT: <X>' with a
-    2000-char window (both templates are short).
+    All three templates are fence-bounded to ensure no-write instruction is
+    checked within the template body itself regardless of template length.
 
+    DETECT_CONFLICTS: 'CONTEXT: DETECT_CONFLICTS' anchor, fence-bounded.
+    SCORE_DIMENSIONS: 'CONTEXT: SCORE_DIMENSIONS' anchor, fence-bounded
+      (template grew when full ID enumeration was added — fixed-window check
+      was replaced with fence-bounded to remain robust to template growth).
     PARTNER_ANALYSIS: anchored on 'Full dispatch prompt template (used for each
-    archetype' — the full template heading — rather than the first 'CONTEXT:
-    PARTNER_ANALYSIS' occurrence (which appears inside a pseudocode block ~500 chars
-    earlier and shifts the window). The full-template anchor keeps the no-write
-    instruction in range as the template grows.
+      archetype' — the full template heading — rather than the first 'CONTEXT:
+      PARTNER_ANALYSIS' occurrence (which appears inside a pseudocode block).
     """
     skill_text = SKILL_MD.read_text(encoding="utf-8")
 
-    # DETECT_CONFLICTS and SCORE_DIMENSIONS: short templates, 'CONTEXT:' anchor suffices
-    for context, anchor in (
-        ("DETECT_CONFLICTS", "CONTEXT: DETECT_CONFLICTS"),
-        ("SCORE_DIMENSIONS", "CONTEXT: SCORE_DIMENSIONS"),
-    ):
-        start = skill_text.find(anchor)
-        assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
-        section = skill_text[start : start + 2000]
-        assert "Do NOT write" in section or "do not write" in section.lower(), (
-            f"{SKILL_MD.name} {context} dispatch template must explicitly forbid "
-            f"artifact writes (schema gate bypass risk)"
-        )
+    # DETECT_CONFLICTS: fence-bounded search
+    dc_anchor = "CONTEXT: DETECT_CONFLICTS"
+    dc_start = skill_text.find(dc_anchor)
+    assert dc_start != -1, f"{SKILL_MD.name} has no '{dc_anchor}' section"
+    dc_open_fence = skill_text.rfind("\n```\n", 0, dc_start)
+    assert dc_open_fence != -1, f"{SKILL_MD.name} DETECT_CONFLICTS: no opening fence before CONTEXT: line"
+    dc_close_fence = skill_text.find("\n```\n", dc_start)
+    assert dc_close_fence != -1, f"{SKILL_MD.name} DETECT_CONFLICTS: no closing fence"
+    dc_section = skill_text[dc_open_fence:dc_close_fence]
+    assert "Do NOT write" in dc_section or "do not write" in dc_section.lower(), (
+        f"{SKILL_MD.name} DETECT_CONFLICTS dispatch template must explicitly forbid "
+        f"artifact writes (schema gate bypass risk)"
+    )
+
+    # SCORE_DIMENSIONS: fence-bounded search (template now enumerates all 28 ids)
+    sd_anchor = "CONTEXT: SCORE_DIMENSIONS"
+    sd_start = skill_text.find(sd_anchor)
+    assert sd_start != -1, f"{SKILL_MD.name} has no '{sd_anchor}' section"
+    sd_open_fence = skill_text.rfind("\n```\n", 0, sd_start)
+    assert sd_open_fence != -1, f"{SKILL_MD.name} SCORE_DIMENSIONS: no opening fence before CONTEXT: line"
+    sd_close_fence = skill_text.find("\n```\n", sd_start)
+    assert sd_close_fence != -1, f"{SKILL_MD.name} SCORE_DIMENSIONS: no closing fence"
+    sd_section = skill_text[sd_open_fence:sd_close_fence]
+    assert "Do NOT write" in sd_section or "do not write" in sd_section.lower(), (
+        f"{SKILL_MD.name} SCORE_DIMENSIONS dispatch template must explicitly forbid "
+        f"artifact writes (schema gate bypass risk)"
+    )
 
     # PARTNER_ANALYSIS: anchor on the full-template heading so template growth
     # cannot push the no-write line outside the search window.
@@ -1128,6 +1145,75 @@ def test_agent_body_run_id_parity_artifact_list_matches_required_artifacts() -> 
     assert not missing, (
         f"{AGENT_MD.name} run_id parity section is missing producer artifacts "
         f"(missing from parity check): {sorted(missing)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 8b: SCORE_DIMENSIONS dispatch template enumerates ALL canonical ids
+#
+# Note: FMR (financial-model-review) and competitive-positioning enumerate via
+# systematic PREFIX_NN ranges and are covered by their own range-expansion
+# checks — the asymmetry here (explicit list vs. range) is intentional.
+# ---------------------------------------------------------------------------
+
+
+def test_score_dimensions_dispatch_template_enumerates_all_canonical_ids() -> None:
+    """The SCORE_DIMENSIONS dispatch template in SKILL.md must enumerate every
+    canonical dimension ID as a JSON ``"id"`` field value — no omissions, no phantoms.
+
+    Set-equality test (both directions):
+    - Template IDs ⊆ canonical: no invented IDs in the template.
+    - Canonical IDs ⊆ template IDs: no ID silently absent from the template.
+
+    Search region: bounded within the SCORE_DIMENSIONS dispatch template fence
+    (from the 'CONTEXT: SCORE_DIMENSIONS' block) so only the enumerated list
+    satisfies the check, not surrounding prose.
+
+    Count guard: exactly 28 ``"id"`` values must appear in the template.
+
+    Mutation-check: rename any id in the template → phantom check fails;
+    restore → passes.
+    """
+    mod = _load_score_dimensions_module()
+    canonical_ids: set[str] = set(mod.VALID_IDS)  # type: ignore[attr-defined]
+    assert len(canonical_ids) == 28, (
+        f"score_dimensions.py VALID_IDS has {len(canonical_ids)} items (expected 28) — "
+        f"update this test if the canonical set genuinely changed"
+    )
+
+    skill_text = SKILL_MD.read_text(encoding="utf-8")
+
+    # Bound search to the SCORE_DIMENSIONS dispatch template fence
+    anchor = "CONTEXT: SCORE_DIMENSIONS"
+    start = skill_text.find(anchor)
+    assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
+    # The anchor is inside the fence; find the opening fence that precedes it
+    # by searching backwards from the anchor for the nearest \n```\n
+    open_fence_pos = skill_text.rfind("\n```\n", 0, start)
+    assert open_fence_pos != -1, f"{SKILL_MD.name} SCORE_DIMENSIONS: no opening fence before CONTEXT: line"
+    close_fence = skill_text.find("\n```\n", start)
+    assert close_fence != -1, f"{SKILL_MD.name} SCORE_DIMENSIONS: no closing fence after CONTEXT: line"
+    template_body = skill_text[open_fence_pos:close_fence]
+
+    # Extract all "id": "some_id" values from the template body
+    template_ids = set(re.findall(r'"id"\s*:\s*"([a-z][a-z0-9_]+)"', template_body))
+
+    assert len(template_ids) == 28, (
+        f"{SKILL_MD.name} SCORE_DIMENSIONS dispatch template enumerates {len(template_ids)} ids "
+        f"(expected 28); count guard catches omissions or duplicates.\n"
+        f"  found: {sorted(template_ids)}"
+    )
+
+    phantom = template_ids - canonical_ids
+    missing = canonical_ids - template_ids
+
+    assert not phantom, (
+        f"{SKILL_MD.name} SCORE_DIMENSIONS dispatch template contains ids not in "
+        f"score_dimensions.py VALID_IDS (phantom — invented or renamed): {sorted(phantom)}"
+    )
+    assert not missing, (
+        f"{SKILL_MD.name} SCORE_DIMENSIONS dispatch template is missing ids from "
+        f"score_dimensions.py VALID_IDS (missing — sub-agent will invent them): {sorted(missing)}"
     )
 
 

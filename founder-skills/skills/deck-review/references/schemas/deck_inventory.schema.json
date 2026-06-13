@@ -20,6 +20,10 @@
     "claimed_stage": {"type": "string"},
     "claimed_raise": {"type": "string"},
     "input_quality": {"type": "string", "enum": ["good", "image_only", "partial"]},
+    "is_ai_company": {
+      "type": ["boolean", "null"],
+      "description": "True only if model training or inference is core to the product value proposition. False if the product is not ML-driven despite marketing language. Null/absent if indeterminate from the deck."
+    },
     "slides": {
       "type": "array",
       "items": {

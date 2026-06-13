@@ -324,7 +324,9 @@ framework and non-negotiable principles from
 
 For each slide: identify strengths, weaknesses, and specific recommendations.
 Map to expected framework. Flag missing expected slides. Every critique must
-cite a specific best-practice principle.
+cite a specific best-practice principle. When you reference deck figures, quote
+them verbatim from the deck content — do not paraphrase or round numbers,
+percentages, dates, or named metrics.
 
 Return JSON only — exactly the shape expected by slide_reviews.py (no metadata
 block; the producer script adds it):
@@ -375,6 +377,56 @@ Evidence quality rules:
 - Every fail and warn MUST cite a specific best-practice principle or benchmark.
 - Every pass MUST note what was checked.
 - not_applicable items MUST include a reason.
+
+Evaluate every one of these 35 criteria — one item per id, no omissions, no
+invented ids. Grouped by category:
+
+Narrative Flow:
+  - purpose_clear
+  - headlines_carry_story
+  - narrative_arc_present
+  - strongest_proof_early
+  - story_stands_alone
+Slide Content:
+  - problem_quantified
+  - solution_shows_workflow
+  - why_now_has_catalyst
+  - market_bottom_up
+  - competition_honest
+  - business_model_clear
+  - gtm_has_proof
+  - team_has_depth
+Stage Fit:
+  - stage_appropriate_structure
+  - stage_appropriate_traction
+  - stage_appropriate_financials
+  - ask_ties_to_milestones
+  - round_size_realistic
+Design & Readability:
+  - one_idea_per_slide
+  - minimal_text
+  - slide_count_appropriate
+  - consistent_design
+  - mobile_readable
+Common Mistakes:
+  - no_vague_purpose
+  - no_nice_to_have_problem
+  - no_hype_without_proof
+  - no_features_over_outcomes
+  - no_dodged_competition
+AI Company (mark not_applicable for non-AI companies — is_ai_company: false):
+  - ai_retention_rebased
+  - ai_cost_to_serve_shown
+  - ai_defensibility_beyond_model
+  - ai_responsible_controls
+Diligence Readiness:
+  - numbers_consistent
+  - data_room_ready
+  - contact_info_present
+
+When you cite deck figures in evidence, quote them verbatim from the deck
+content — do not paraphrase or round numbers, percentages, dates, or named
+metrics.
 
 Return JSON only — the items array without a summary (the producer script
 computes the summary):

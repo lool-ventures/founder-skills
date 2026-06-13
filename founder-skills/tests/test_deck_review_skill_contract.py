@@ -255,6 +255,65 @@ def test_checklist_id_enumeration_population_is_independent() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Test 1a: CHECKLIST dispatch template enumerates ALL 35 canonical IDs (set-equality)
+# ---------------------------------------------------------------------------
+
+
+def test_checklist_dispatch_template_enumerates_all_canonical_ids() -> None:
+    """The CHECKLIST dispatch template in SKILL.md must enumerate all 35 canonical
+    checklist IDs explicitly, grouped by category.
+
+    Extraction anchors on the CONTEXT: CHECKLIST section and reads IDs from lines
+    matching ``  - id_name`` (two-space indent, dash, snake_case id). This is the
+    format written into the template by Fix A.
+
+    Set-equality check (both directions):
+    - Phantom: an ID in the template not in checklist.py VALID_IDS → bad ID.
+    - Missing: an ID in VALID_IDS not in the template → sub-agent won't see it.
+
+    Mutation check contract:
+    - Renaming an ID in the template: phantom check fails.
+    - Dropping an ID: missing check fails.
+    - Adding a spurious ID: phantom check fails.
+    """
+    mod = _load_checklist_module()
+    valid_ids: set[str] = set(mod.VALID_IDS)  # type: ignore[attr-defined]
+
+    skill_text = SKILL_MD.read_text(encoding="utf-8")
+    anchor = "CONTEXT: CHECKLIST"
+    start = skill_text.find(anchor)
+    assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
+    # The CHECKLIST section ends at the next ```  fence after the dispatch block
+    # Find the end of the full dispatch prompt block (closing ```)
+    # Use a generous window: 4000 chars covers the 35-ID list + instructions
+    section = skill_text[start : start + 4000]
+
+    # Extract IDs from lines of the form: ``  - snake_case_id``
+    # (two-space indent, dash, a valid snake_case identifier)
+    enumerated_ids = set(re.findall(r"^  - ([a-z][a-z0-9_]+)$", section, re.MULTILINE))
+
+    # Vacuity guard: must find all 35 (not just some)
+    assert len(enumerated_ids) == 35, (
+        f"{SKILL_MD.name} CHECKLIST dispatch template enumerates {len(enumerated_ids)} IDs "
+        f"(expected 35). "
+        f"Found: {sorted(enumerated_ids)}. "
+        f"Missing from template: {sorted(valid_ids - enumerated_ids)}"
+    )
+
+    # Set-equality (both directions)
+    phantom = enumerated_ids - valid_ids
+    missing = valid_ids - enumerated_ids
+    assert not phantom, (
+        f"{SKILL_MD.name} CHECKLIST template lists IDs not in checklist.py VALID_IDS "
+        f"(phantom — rename or remove): {sorted(phantom)}"
+    )
+    assert not missing, (
+        f"{SKILL_MD.name} CHECKLIST template is missing IDs from checklist.py VALID_IDS "
+        f"(missing — add them): {sorted(missing)}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Test 1b: checklist-criteria.md header IDs must equal VALID_IDS exactly
 # ---------------------------------------------------------------------------
 
@@ -307,15 +366,14 @@ def test_ai_criteria_ids_in_skill_md_and_agent_match_checklist_py() -> None:
     checklist_items: list[dict[str, str]] = mod.CHECKLIST_ITEMS  # type: ignore[attr-defined]
     ai_ids_in_script = frozenset(i["id"] for i in checklist_items if i.get("category") == "AI Company")
 
-    # Deck-review SKILL.md CHECKLIST template names AI-criteria IDs in a parenthetical:
-    # "(ai_retention_rebased, ai_cost_to_serve_shown, ai_defensibility_beyond_model,
-    # ai_responsible_controls)"
-    # Extract all ai_* snake_case tokens from the CHECKLIST section.
+    # Deck-review SKILL.md CHECKLIST template now enumerates all 35 IDs in a grouped
+    # list including the 4 AI-criteria IDs. Use a 3000-char window to cover the
+    # full enumerated-ID block.
     skill_text = SKILL_MD.read_text(encoding="utf-8")
     anchor = "CONTEXT: CHECKLIST"
     start = skill_text.find(anchor)
     assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
-    section = skill_text[start : start + 1500]
+    section = skill_text[start : start + 3000]
 
     # Independent extraction: find any token of the form ai_<word> that is not
     # inside a backtick-quoted file path (those end in .json/.md/.py). This
@@ -398,12 +456,14 @@ def test_checklist_dispatch_return_shape_keys() -> None:
     (the only top-level key checklist.py reads from stdin), and the agent body
     must show the same shape.
     """
-    # SKILL.md: the return shape appears in the CONTEXT: CHECKLIST section
+    # SKILL.md: the return shape appears in the CONTEXT: CHECKLIST section.
+    # Use a 3000-char window to cover the full enumerated-ID block (35 IDs added
+    # in Fix A push "items" beyond the old 1500-char limit).
     skill_text = SKILL_MD.read_text(encoding="utf-8")
     anchor = "CONTEXT: CHECKLIST"
     start = skill_text.find(anchor)
     assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
-    section = skill_text[start : start + 1500]
+    section = skill_text[start : start + 3000]
     assert '"items"' in section, (
         f"{SKILL_MD.name} CHECKLIST return shape must include 'items' key (checklist.py reads data['items'] from stdin)"
     )
@@ -521,7 +581,9 @@ def test_context_a_dispatch_templates_contain_no_write_instruction() -> None:
     ):
         start = skill_text.find(anchor)
         assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
-        section = skill_text[start : start + 1500]
+        # Use 3000-char window: the CHECKLIST section now includes the 35-ID enumerated
+        # list (Fix A), which pushes "Do NOT write" beyond the old 1500-char limit.
+        section = skill_text[start : start + 3000]
         assert "Do NOT write" in section or "do not write" in section, (
             f"{SKILL_MD.name} {context} dispatch template must explicitly forbid "
             f"artifact writes (schema gate bypass risk)"

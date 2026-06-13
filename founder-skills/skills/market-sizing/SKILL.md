@@ -484,13 +484,46 @@ You are the market-sizing agent dispatched in Context A (CHECKLIST). Read:
 Assess all 22 items with status (pass/fail/not_applicable) and notes.
 
 Return JSON only — the items array without a summary (the producer script
-computes the summary):
+computes the summary). Each item has this shape:
 {
   "items": [
-    {"id": "structural_tam_gt_sam_gt_som", "status": "pass", "notes": null},
-    ...all 22 items...
+    {"id": "structural_tam_gt_sam_gt_som", "status": "pass", "notes": null}
   ]
 }
+status is one of: pass, fail, not_applicable.
+
+Assess every one of these 22 items — one item per id, no omissions, no invented
+ids. The 22 ids, grouped by category:
+Structural Checks:
+    {"id": "structural_tam_gt_sam_gt_som"}
+    {"id": "structural_definitions_correct"}
+TAM Scoping:
+    {"id": "tam_matches_product_scope"}
+    {"id": "source_segments_match"}
+SOM Realism:
+    {"id": "som_share_defensible"}
+    {"id": "som_backed_by_gtm"}
+    {"id": "som_consistent_with_projections"}
+Data Quality:
+    {"id": "data_current"}
+    {"id": "sources_reputable"}
+    {"id": "figures_triangulated"}
+    {"id": "unsupported_figures_flagged"}
+    {"id": "validated_used_precisely"}
+    {"id": "assumptions_categorized"}
+Methodology:
+    {"id": "both_approaches_used"}
+    {"id": "approaches_reconciled"}
+    {"id": "growth_dynamics_considered"}
+Market Understanding:
+    {"id": "market_properly_segmented"}
+    {"id": "competitive_landscape_acknowledged"}
+    {"id": "sam_expansion_path_noted"}
+Presentation:
+    {"id": "assumptions_explicit"}
+    {"id": "formulas_shown"}
+    {"id": "sources_cited"}
+
 Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 

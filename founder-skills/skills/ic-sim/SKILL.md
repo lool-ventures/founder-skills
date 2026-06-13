@@ -420,7 +420,8 @@ Score all 28 dimensions based on the evidence from the startup materials and
 the partner assessments. Ensure scoring reflects the discussion conclusions —
 if a dimension was debated as a dealbreaker, the score must reflect that.
 
-Return JSON only — the items array without summary (producer script computes summary):
+Return JSON only — the items array without summary (producer script computes
+summary). Each item has this shape:
 {
   "items": [
     {
@@ -429,10 +430,48 @@ Return JSON only — the items array without summary (producer script computes s
       "status": "strong_conviction|moderate_conviction|concern|dealbreaker|not_applicable",
       "evidence": "<specific evidence from startup materials>",
       "notes": "<optional explanation>"
-    },
-    ...all 28 dimensions...
+    }
   ]
 }
+
+Score every one of these 28 dimensions — one item per id, no omissions, no
+invented ids. The 28 dimension ids, grouped by category:
+Team:
+    {"id": "team_founder_market_fit"}
+    {"id": "team_complementary_skills"}
+    {"id": "team_execution_speed"}
+    {"id": "team_coachability"}
+Market:
+    {"id": "market_size_credibility"}
+    {"id": "market_timing"}
+    {"id": "market_growth_trajectory"}
+    {"id": "market_entry_barriers"}
+Product:
+    {"id": "product_differentiation"}
+    {"id": "product_traction_evidence"}
+    {"id": "product_technical_moat"}
+    {"id": "product_user_love"}
+Business Model:
+    {"id": "biz_unit_economics"}
+    {"id": "biz_pricing_power"}
+    {"id": "biz_scalability"}
+    {"id": "biz_gross_margins"}
+Financials:
+    {"id": "fin_capital_efficiency"}
+    {"id": "fin_runway_plan"}
+    {"id": "fin_path_to_next_round"}
+    {"id": "fin_revenue_quality"}
+Risk:
+    {"id": "risk_single_point_failure"}
+    {"id": "risk_regulatory"}
+    {"id": "risk_competitive_response"}
+    {"id": "risk_customer_concentration"}
+Fund Fit:
+    {"id": "fit_thesis_alignment"}
+    {"id": "fit_portfolio_conflict"}
+    {"id": "fit_stage_match"}
+    {"id": "fit_value_add"}
+
 Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 

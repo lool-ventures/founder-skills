@@ -85,6 +85,7 @@ def cmd_answer(args: argparse.Namespace) -> int:
 
     gate["answer"] = args.answer
 
+    pretty = getattr(args, "pretty", True)
     schema = load_schema(_schema_path())
     try:
         receipt = write_artifact(
@@ -92,7 +93,7 @@ def cmd_answer(args: argparse.Namespace) -> int:
             schema=schema,
             run_id=gate.get("metadata", {}).get("run_id", ""),
             output_path=args.file,
-            pretty=True,
+            pretty=pretty,
         )
     except ArtifactValidationError as e:
         print(f"Error: gate_state validation failed after answer: {e}", file=sys.stderr)
@@ -114,6 +115,7 @@ def main() -> int:
     sp_ans = sub.add_parser("answer", help="Set the founder's answer on an existing gate_state.json")
     sp_ans.add_argument("--file", required=True)
     sp_ans.add_argument("--answer", required=True)
+    sp_ans.add_argument("--pretty", action="store_true", help="Pretty-print the artifact JSON")
     sp_ans.set_defaults(func=cmd_answer)
 
     args = p.parse_args()

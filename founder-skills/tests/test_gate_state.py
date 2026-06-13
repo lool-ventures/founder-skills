@@ -99,6 +99,35 @@ def test_gate_state_answer_rejects_non_dict_json() -> None:
         assert "Traceback" not in err
 
 
+def test_gate_state_answer_pretty_exits_0_and_emits_indented_json() -> None:
+    """gate_state.py answer --pretty must exit 0 and emit indented (pretty) JSON receipt."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "gate_state.json")
+        with open(path, "w") as f:
+            json.dump(
+                {
+                    "metadata": {"run_id": "r1"},
+                    "gate_id": "stage_confirmation",
+                    "question": "?",
+                    "options": ["Looks right", "Different stage"],
+                    "context_summary": "x",
+                },
+                f,
+            )
+        rc, stdout, err = _run(["answer", "--file", path, "--answer", "Looks right", "--pretty"])
+        assert rc == 0, err
+        # stdout is the receipt; it must be valid JSON
+        receipt = json.loads(stdout)
+        assert receipt.get("ok") is True
+        # The gate_state.json file itself must be written with indentation
+        with open(path) as f:
+            raw = f.read()
+        assert "\n" in raw and "  " in raw, "answer --pretty should write indented JSON to the artifact file"
+        with open(path) as f:
+            written = json.load(f)
+        assert written["answer"] == "Looks right"
+
+
 def test_gate_state_answer_rejects_answer_not_in_options() -> None:
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "gate_state.json")
