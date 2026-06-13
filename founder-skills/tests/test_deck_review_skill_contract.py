@@ -496,7 +496,7 @@ def test_post_compose_coaching_dispatch_includes_coaching_payload_keys() -> None
         "warned_items",
         "high_severity_warnings",
         "stage",
-        "is_ai_company",
+        "ai_company_status",
         "insertion_marker",
         "report_path",
         "review_dir",

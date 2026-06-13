@@ -22,6 +22,8 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
 | `total_slides` | integer | yes | Total number of slides |
 | `claimed_stage` | string | no | Stage claimed in deck (if any) |
 | `claimed_raise` | string | no | Fundraising amount claimed (if any) |
+| `ai_company_status` | string | **yes** | One of: `"ai_core"`, `"ai_claimed_unverified"`, `"not_ai"` |
+| `ai_evidence` | string | no | Evidence or claim found; recommended when status is not `not_ai` |
 | `slides` | object[] | yes | Per-slide extraction |
 
 ### slides[] entry
@@ -43,6 +45,8 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
   "total_slides": 12,
   "claimed_stage": "seed",
   "claimed_raise": "$4M",
+  "ai_company_status": "ai_claimed_unverified",
+  "ai_evidence": "Deck says 'AI-powered bookkeeping' but no ML model, inference costs, or AI-specific retention metrics are present.",
   "slides": [
     {
       "number": 1,

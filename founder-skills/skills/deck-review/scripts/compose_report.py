@@ -77,6 +77,8 @@ WARNING_SEVERITY: dict[str, str] = {
     "NAME_DRIFT": "medium",
     # v0.4.2 Mitigation 2 — informational only (uuid is per-run, won't collide)
     "MARKER_COLLISION": "low",
+    # AI classification quality
+    "UNSUBSTANTIATED_AI_CLAIM": "medium",
 }
 
 ACCEPTIBLE_SEVERITIES = {"medium"}
@@ -100,6 +102,7 @@ WARNING_LABELS: dict[str, str] = {
     "CHECKLIST_VALIDATION_FAILED": "Checklist Validation Failed",
     "NAME_DRIFT": "Company Name Drift",
     "MARKER_COLLISION": "Marker Collision",
+    "UNSUBSTANTIATED_AI_CLAIM": "Unsubstantiated AI Claim",
 }
 
 
@@ -321,17 +324,27 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 )
 
     # 8. AI_CRITERIA_SKIPPED — AI company detected but AI criteria all not_applicable
-    if _usable(profile) and _usable(checklist):
-        is_ai = profile.get("is_ai_company", False)
-        if is_ai:
-            ai_ids = {
-                "ai_retention_rebased",
-                "ai_cost_to_serve_shown",
-                "ai_defensibility_beyond_model",
-                "ai_responsible_controls",
-            }
-            items = _as_list(checklist.get("items"))
-            ai_items = [i for i in items if i.get("id") in ai_ids]
+    # Read ai_company_status from deck_inventory.json (the authoritative source).
+    # Falls back to profile's is_ai_company for backward compatibility when inventory is absent.
+    _ai_ids = {
+        "ai_retention_rebased",
+        "ai_cost_to_serve_shown",
+        "ai_defensibility_beyond_model",
+        "ai_responsible_controls",
+    }
+    _ai_status = None
+    if _usable(inventory):
+        _ai_status = inventory.get("ai_company_status")
+    if _ai_status is None and _usable(profile):
+        # Backward-compat: if inventory has no ai_company_status, use profile boolean.
+        _profile_is_ai = profile.get("is_ai_company", False)
+        _ai_status = "ai_core" if _profile_is_ai else "not_ai"
+
+    if _usable(checklist) and _ai_status is not None:
+        is_ai_for_check = _ai_status in ("ai_core", "ai_claimed_unverified")
+        items = _as_list(checklist.get("items"))
+        ai_items = [i for i in items if i.get("id") in _ai_ids]
+        if is_ai_for_check:
             if len(ai_items) < 4:
                 warnings.append(
                     _warn(
@@ -346,19 +359,8 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                         "Company detected as AI-first but all AI criteria marked not_applicable",
                     )
                 )
-
-    # 8b. AI_CRITERIA_ON_NON_AI — non-AI company penalized on AI-specific criteria
-    if _usable(profile) and _usable(checklist):
-        is_ai = profile.get("is_ai_company", False)
-        if not is_ai:
-            ai_ids = {
-                "ai_retention_rebased",
-                "ai_cost_to_serve_shown",
-                "ai_defensibility_beyond_model",
-                "ai_responsible_controls",
-            }
-            items = _as_list(checklist.get("items"))
-            ai_items = [i for i in items if i.get("id") in ai_ids]
+        else:
+            # 8b. AI_CRITERIA_ON_NON_AI — not_ai company penalized on AI criteria
             penalized = [i.get("id", "?") for i in ai_items if i.get("status") in ("fail", "warn")]
             if penalized:
                 ids_str = ", ".join(penalized)
@@ -395,6 +397,20 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 _warn(
                     "CHECKLIST_VALIDATION_FAILED",
                     f"Checklist validation status is '{val_status}' — checklist data may be unreliable",
+                )
+            )
+
+    # 11b. UNSUBSTANTIATED_AI_CLAIM — deck claims AI but shows no AI-core evidence
+    if _usable(inventory):
+        ai_status = inventory.get("ai_company_status", "")
+        if ai_status == "ai_claimed_unverified":
+            warnings.append(
+                _warn(
+                    "UNSUBSTANTIATED_AI_CLAIM",
+                    (
+                        "Deck positions as AI but shows no AI-core evidence (ai_claimed_unverified) "
+                        "— substantiate the AI claim or reframe; investors will probe it."
+                    ),
                 )
             )
 
@@ -458,10 +474,7 @@ def _section_executive_summary(
     if profile is not None and not _is_stub(profile):
         stage = (profile.get("detected_stage") or "unknown").replace("_", " ").title()
         confidence = profile.get("confidence", "unknown")
-        is_ai = profile.get("is_ai_company", False)
         lines.append(f"**Stage:** {stage} (confidence: {confidence})")
-        if is_ai:
-            lines.append("**AI Company:** Yes")
 
     if inventory is not None and not _is_stub(inventory):
         total = inventory.get("total_slides", "?")
@@ -781,7 +794,7 @@ def _emit_coaching_payload(
         "warned_items": summary.get("warned_items", []),
         "high_severity_warnings": [w["code"] for w in validation_warnings if w.get("severity") == "high"],
         "stage": stage_profile.get("detected_stage") or inventory.get("claimed_stage"),
-        "is_ai_company": stage_profile.get("is_ai_company", False),
+        "ai_company_status": inventory.get("ai_company_status"),
         "company_name": inventory.get("company_name"),
         "review_dir": review_dir,
         "report_path": report_path,

@@ -43,6 +43,8 @@ _VALID_INVENTORY = {
     "total_slides": 11,
     "claimed_stage": "seed",
     "claimed_raise": "$4M",
+    "ai_company_status": "not_ai",
+    "ai_evidence": "No AI claim.",
     "slides": [
         {
             "number": 1,

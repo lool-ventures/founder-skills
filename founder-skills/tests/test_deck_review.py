@@ -384,6 +384,8 @@ _VALID_INVENTORY = {
     "total_slides": 11,
     "claimed_stage": "seed",
     "claimed_raise": "$4M",
+    "ai_company_status": "not_ai",
+    "ai_evidence": "No AI claim and not AI.",
     "slides": [
         {
             "number": 1,
@@ -586,6 +588,10 @@ def test_compose_uncited_critique() -> None:
 
 def test_compose_ai_criteria_skipped() -> None:
     """AI company detected but all AI criteria not_applicable -> AI_CRITERIA_SKIPPED."""
+    # ai_company_status drives the check; profile.is_ai_company is secondary (backward-compat).
+    inventory = dict(_VALID_INVENTORY)
+    inventory["ai_company_status"] = "ai_core"
+    inventory["ai_evidence"] = "ML model in core value prop."
     profile = dict(_VALID_PROFILE)
     profile["is_ai_company"] = True
     # Checklist with AI items as not_applicable
@@ -636,7 +642,7 @@ def test_compose_ai_criteria_skipped() -> None:
     }
     d = _make_artifact_dir(
         {
-            "deck_inventory.json": _VALID_INVENTORY,
+            "deck_inventory.json": inventory,
             "stage_profile.json": profile,
             "slide_reviews.json": _VALID_REVIEWS,
             "checklist.json": checklist,
@@ -798,6 +804,7 @@ def test_compose_severity_map_complete() -> None:
         "AI_CRITERIA_MISSING",
         "NAME_DRIFT",
         "MARKER_COLLISION",
+        "UNSUBSTANTIATED_AI_CLAIM",
     ]
     assert len(sev_map) == len(expected), f"expected {len(expected)} codes, got {len(sev_map)}"
     for code in expected:
@@ -1261,6 +1268,7 @@ def test_compose_emits_schema_violation_for_malformed_checklist(tmp_path: Path) 
                 "review_date": "2026-05-03",
                 "input_format": "pdf",
                 "total_slides": 1,
+                "ai_company_status": "not_ai",
                 "slides": [{"number": 1, "headline": "h", "content_summary": "s"}],
             }
         )
@@ -1324,7 +1332,8 @@ def test_compose_emits_schema_violation_for_malformed_checklist(tmp_path: Path) 
 def test_compose_emits_missing_metadata_for_artifact_without_run_id(tmp_path: Path) -> None:
     review_dir = tmp_path / "deck-review-acme"
     review_dir.mkdir()
-    # Inventory with NO metadata block (issue #1 shape)
+    # Inventory with NO metadata block (issue #1 shape) — note: missing metadata means
+    # MISSING_METADATA fires; the inventory loads and ai_company_status is readable.
     (review_dir / "deck_inventory.json").write_text(
         json.dumps(
             {
@@ -1332,6 +1341,7 @@ def test_compose_emits_missing_metadata_for_artifact_without_run_id(tmp_path: Pa
                 "review_date": "2026-05-03",
                 "input_format": "pdf",
                 "total_slides": 1,
+                "ai_company_status": "not_ai",
                 "slides": [{"number": 1, "headline": "h", "content_summary": "s"}],
             }
         )
@@ -1399,6 +1409,7 @@ def test_compose_writes_report_md_directly(tmp_path: Path) -> None:
                 "review_date": "2026-05-03",
                 "input_format": "pdf",
                 "total_slides": 1,
+                "ai_company_status": "not_ai",
                 "slides": [{"number": 1, "headline": "h", "content_summary": "s"}],
             }
         )
@@ -1480,6 +1491,7 @@ def test_compose_emits_name_drift_when_report_contains_close_variant(tmp_path: P
                 "review_date": "2026-05-03",
                 "input_format": "pdf",
                 "total_slides": 1,
+                "ai_company_status": "not_ai",
                 "slides": [
                     {
                         "number": 1,
@@ -1551,6 +1563,7 @@ def _make_full_review_dir(review_dir: Path) -> None:
                 "review_date": "2026-05-03",
                 "input_format": "pdf",
                 "total_slides": 1,
+                "ai_company_status": "not_ai",
                 "slides": [{"number": 1, "headline": "h", "content_summary": "s"}],
             }
         )
@@ -1738,7 +1751,7 @@ def test_compose_emits_coaching_payload() -> None:
         "warned_items",
         "high_severity_warnings",
         "stage",
-        "is_ai_company",
+        "ai_company_status",
         "company_name",
         "review_dir",
         "report_path",
@@ -1753,7 +1766,7 @@ def test_compose_emits_coaching_payload() -> None:
 
     # Stage / company / ai surfaced from artifacts
     assert payload["stage"] == "seed"
-    assert payload["is_ai_company"] is False
+    assert payload["ai_company_status"] == "not_ai"
     assert payload["company_name"] == "TestCo"
 
     # Insertion marker matches uuid format
@@ -2101,3 +2114,306 @@ def test_compose_exec_summary_scoring_footnote() -> None:
     assert "pass ÷ applicable" in md
     # Score-if-all-fixed: (28+4+3)/35 = 100%
     assert "100.0%" in md or "If all fixable items were resolved" in md
+
+
+# ---------------------------------------------------------------------------
+# ai_company_status gating tests (TDD — new feature)
+# ---------------------------------------------------------------------------
+
+
+_AI_CRITERIA_IDS = [
+    "ai_retention_rebased",
+    "ai_cost_to_serve_shown",
+    "ai_defensibility_beyond_model",
+    "ai_responsible_controls",
+]
+
+
+def _make_all_evaluated_checklist_items() -> list[dict]:
+    """All 35 items evaluated (the sub-agent assesses all — producer does gating)."""
+    overrides = {
+        cid: {"status": "fail", "evidence": "No evidence of this in the deck.", "notes": "Evaluated."}
+        for cid in _AI_CRITERIA_IDS
+    }
+    return _make_checklist_items(overrides=overrides)
+
+
+def test_checklist_gating_not_ai_forces_ai_criteria_not_applicable(tmp_path: Path) -> None:
+    """When --inventory ai_company_status=not_ai, the 4 AI criteria are forced to
+    not_applicable with the Auto-gated evidence prefix — regardless of sub-agent status."""
+    inv_path = tmp_path / "deck_inventory.json"
+    inv_path.write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "company_name": "TestCo",
+                "review_date": "2026-06-01",
+                "input_format": "pdf",
+                "total_slides": 10,
+                "ai_company_status": "not_ai",
+                "ai_evidence": "No AI claim.",
+                "slides": [{"number": 1, "headline": "h", "content_summary": "s"}],
+            }
+        )
+    )
+    out_path = str(tmp_path / "checklist.json")
+    payload = json.dumps({"items": _make_all_evaluated_checklist_items()})
+
+    rc, stdout, stderr = run_script_raw(
+        "checklist.py",
+        ["--run-id", "r1", "--inventory", str(inv_path), "--pretty", "-o", out_path],
+        stdin_data=payload,
+    )
+    assert rc == 0, stderr
+    with open(out_path) as f:
+        data = json.load(f)
+
+    items_by_id = {i["id"]: i for i in data["items"]}
+    for ai_id in _AI_CRITERIA_IDS:
+        item = items_by_id[ai_id]
+        assert item["status"] == "not_applicable", f"{ai_id} should be not_applicable for not_ai, got {item['status']}"
+        assert item.get("evidence", "").startswith("Auto-gated:"), (
+            f"{ai_id} evidence should start with 'Auto-gated:', got: {item.get('evidence')}"
+        )
+        assert "not_ai" in item.get("evidence", ""), f"{ai_id} evidence should mention not_ai"
+
+    # Summary must reflect 4 N/A
+    summary = data["summary"]
+    assert summary["not_applicable"] == 4, f"expected 4 N/A, got {summary['not_applicable']}"
+
+
+def test_checklist_gating_ai_core_keeps_sub_agent_statuses(tmp_path: Path) -> None:
+    """When --inventory ai_company_status=ai_core, the 4 AI criteria are kept as-is (scored)."""
+    inv_path = tmp_path / "deck_inventory.json"
+    inv_path.write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "company_name": "TestCo",
+                "review_date": "2026-06-01",
+                "input_format": "pdf",
+                "total_slides": 10,
+                "ai_company_status": "ai_core",
+                "ai_evidence": "ML model in core value prop.",
+                "slides": [{"number": 1, "headline": "h", "content_summary": "s"}],
+            }
+        )
+    )
+    out_path = str(tmp_path / "checklist.json")
+    payload = json.dumps({"items": _make_all_evaluated_checklist_items()})
+
+    rc, stdout, stderr = run_script_raw(
+        "checklist.py",
+        ["--run-id", "r1", "--inventory", str(inv_path), "--pretty", "-o", out_path],
+        stdin_data=payload,
+    )
+    assert rc == 0, stderr
+    with open(out_path) as f:
+        data = json.load(f)
+
+    items_by_id = {i["id"]: i for i in data["items"]}
+    for ai_id in _AI_CRITERIA_IDS:
+        item = items_by_id[ai_id]
+        # Sub-agent set them to fail; ai_core keeps them scored (not forced N/A)
+        assert item["status"] == "fail", f"{ai_id} should remain 'fail' for ai_core, got {item['status']}"
+        assert not item.get("evidence", "").startswith("Auto-gated:"), (
+            f"{ai_id} evidence should NOT be Auto-gated for ai_core"
+        )
+
+
+def test_checklist_gating_ai_claimed_unverified_keeps_sub_agent_statuses(tmp_path: Path) -> None:
+    """When --inventory ai_company_status=ai_claimed_unverified, the 4 AI criteria are kept
+    as-is (scored — bar is relevant because they claim it)."""
+    inv_path = tmp_path / "deck_inventory.json"
+    inv_path.write_text(
+        json.dumps(
+            {
+                "metadata": {"run_id": "r1"},
+                "company_name": "TestCo",
+                "review_date": "2026-06-01",
+                "input_format": "pdf",
+                "total_slides": 10,
+                "ai_company_status": "ai_claimed_unverified",
+                "ai_evidence": "Deck says 'AI-powered' but no core-AI signals.",
+                "slides": [{"number": 1, "headline": "h", "content_summary": "s"}],
+            }
+        )
+    )
+    out_path = str(tmp_path / "checklist.json")
+    payload = json.dumps({"items": _make_all_evaluated_checklist_items()})
+
+    rc, stdout, stderr = run_script_raw(
+        "checklist.py",
+        ["--run-id", "r1", "--inventory", str(inv_path), "--pretty", "-o", out_path],
+        stdin_data=payload,
+    )
+    assert rc == 0, stderr
+    with open(out_path) as f:
+        data = json.load(f)
+
+    items_by_id = {i["id"]: i for i in data["items"]}
+    for ai_id in _AI_CRITERIA_IDS:
+        item = items_by_id[ai_id]
+        # Sub-agent set them to fail; ai_claimed_unverified keeps them scored
+        assert item["status"] == "fail", f"{ai_id} should remain 'fail' for ai_claimed_unverified, got {item['status']}"
+        assert not item.get("evidence", "").startswith("Auto-gated:"), (
+            f"{ai_id} evidence should NOT be Auto-gated for ai_claimed_unverified"
+        )
+
+
+def test_checklist_gating_absent_inventory_no_gating(tmp_path: Path) -> None:
+    """When --inventory is NOT provided, no gating is applied — backward-compatible."""
+    out_path = str(tmp_path / "checklist.json")
+    payload = json.dumps({"items": _make_all_evaluated_checklist_items()})
+
+    rc, stdout, stderr = run_script_raw(
+        "checklist.py",
+        ["--run-id", "r1", "--pretty", "-o", out_path],
+        stdin_data=payload,
+    )
+    assert rc == 0, stderr
+    with open(out_path) as f:
+        data = json.load(f)
+
+    items_by_id = {i["id"]: i for i in data["items"]}
+    for ai_id in _AI_CRITERIA_IDS:
+        item = items_by_id[ai_id]
+        # No --inventory: sub-agent's fail status unchanged
+        assert item["status"] == "fail", f"{ai_id} should remain 'fail' when no --inventory, got {item['status']}"
+
+
+# ---------------------------------------------------------------------------
+# UNSUBSTANTIATED_AI_CLAIM compose warning tests (TDD)
+# ---------------------------------------------------------------------------
+
+
+def test_compose_unsubstantiated_ai_claim_warning_for_ai_claimed_unverified(tmp_path: Path) -> None:
+    """ai_company_status=ai_claimed_unverified -> UNSUBSTANTIATED_AI_CLAIM warning (medium)."""
+    inventory = dict(_VALID_INVENTORY)
+    inventory["ai_company_status"] = "ai_claimed_unverified"
+    inventory["ai_evidence"] = "Deck says 'AI-powered' but no core-AI signals."
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": inventory,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "UNSUBSTANTIATED_AI_CLAIM" in codes
+    w = next(w for w in data["validation"]["warnings"] if w["code"] == "UNSUBSTANTIATED_AI_CLAIM")
+    assert w["severity"] == "medium"
+    assert "ai_claimed_unverified" in w["message"]
+
+
+def test_compose_no_unsubstantiated_ai_claim_for_ai_core(tmp_path: Path) -> None:
+    """ai_company_status=ai_core -> no UNSUBSTANTIATED_AI_CLAIM warning."""
+    inventory = dict(_VALID_INVENTORY)
+    inventory["ai_company_status"] = "ai_core"
+    inventory["ai_evidence"] = "ML model in core value prop."
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": inventory,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "UNSUBSTANTIATED_AI_CLAIM" not in codes
+
+
+def test_compose_no_unsubstantiated_ai_claim_for_not_ai(tmp_path: Path) -> None:
+    """ai_company_status=not_ai -> no UNSUBSTANTIATED_AI_CLAIM warning."""
+    inventory = dict(_VALID_INVENTORY)
+    inventory["ai_company_status"] = "not_ai"
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": inventory,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "UNSUBSTANTIATED_AI_CLAIM" not in codes
+
+
+def test_compose_ai_company_status_in_coaching_payload(tmp_path: Path) -> None:
+    """coaching_payload carries ai_company_status from inventory (not is_ai_company from profile)."""
+    inventory = dict(_VALID_INVENTORY)
+    inventory["ai_company_status"] = "ai_claimed_unverified"
+    inventory["ai_evidence"] = "Claims AI."
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": inventory,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    payload = data["coaching_payload"]
+    assert "ai_company_status" in payload
+    assert payload["ai_company_status"] == "ai_claimed_unverified"
+    assert "is_ai_company" not in payload, "coaching_payload must not include old 'is_ai_company' key"
+
+
+def test_deck_inventory_schema_requires_ai_company_status(tmp_path: Path) -> None:
+    """deck_inventory.py rejects JSON missing ai_company_status (required field)."""
+    import subprocess as _sp
+
+    script = os.path.join(DECK_REVIEW_DIR, "deck_inventory.py")
+    bad_input = {
+        "company_name": "TestCo",
+        "review_date": "2026-06-01",
+        "input_format": "pdf",
+        "total_slides": 1,
+        # ai_company_status intentionally missing
+        "slides": [{"number": 1, "headline": "h", "content_summary": "s"}],
+    }
+    out_path = str(tmp_path / "out.json")
+    result = _sp.run(
+        [sys.executable, script, "--run-id", "r1", "-o", out_path],
+        input=json.dumps(bad_input),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0, "deck_inventory.py should reject missing ai_company_status"
+    assert not os.path.exists(out_path), "no artifact should be written on validation failure"
+
+
+def test_deck_inventory_schema_rejects_invalid_ai_company_status(tmp_path: Path) -> None:
+    """deck_inventory.py rejects ai_company_status with an invalid enum value."""
+    import subprocess as _sp
+
+    script = os.path.join(DECK_REVIEW_DIR, "deck_inventory.py")
+    bad_input = {
+        "company_name": "TestCo",
+        "review_date": "2026-06-01",
+        "input_format": "pdf",
+        "total_slides": 1,
+        "ai_company_status": "yes_ai",  # invalid enum value
+        "slides": [{"number": 1, "headline": "h", "content_summary": "s"}],
+    }
+    out_path = str(tmp_path / "out.json")
+    result = _sp.run(
+        [sys.executable, script, "--run-id", "r1", "-o", out_path],
+        input=json.dumps(bad_input),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0, "deck_inventory.py should reject invalid ai_company_status enum"
+    assert not os.path.exists(out_path)

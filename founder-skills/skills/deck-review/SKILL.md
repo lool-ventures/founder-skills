@@ -173,7 +173,18 @@ python3 "$SHARED_SCRIPTS/founder_context.py" init \
 4. **Partial decks:** Deck has fewer than 5 slides or is clearly a subset. Proceed but set `confidence: "low"` in stage_profile and note the limitation. Missing-slides detection still runs normally.
 5. **Wrong file type:** File named `.pdf` but is actually a Word doc or image. If Read fails, try alternate format before asking the founder for a re-upload.
 
-Read the provided deck. For each slide, extract: headline, content summary, visuals description, word count estimate. Then write the inventory through the producer script:
+Read the provided deck. For each slide, extract: headline, content summary, visuals description, word count estimate. Also determine `ai_company_status` using the two sub-questions below. Then write the inventory through the producer script:
+
+**AI company classification (mandatory — field is required):** Answer two sub-questions:
+1. Does the deck make an AI claim? (tagline, "AI-native"/"AI-powered" positioning, or AI in the product description)
+2. Is there evidence AI is core? Use ALL FOUR signals: ML in value prop / inference-or-training in COGS / foundation-model or fine-tuning mentions / AI-specific retention metrics.
+
+Map to `ai_company_status`:
+- Evidence present (any core-AI signal) → `"ai_core"`
+- AI claim but no core-AI evidence → `"ai_claimed_unverified"`
+- No AI claim and not AI → `"not_ai"`
+
+Record what evidence or claim was found in `ai_evidence` (required for `ai_core` and `ai_claimed_unverified`; brief for `not_ai`).
 
 ```bash
 cat <<'INVENTORY_EOF' | python3 "$SCRIPTS/deck_inventory.py" --run-id "$RUN_ID" -o "$REVIEW_DIR/deck_inventory.json" --pretty
@@ -184,6 +195,8 @@ cat <<'INVENTORY_EOF' | python3 "$SCRIPTS/deck_inventory.py" --run-id "$RUN_ID" 
   "total_slides": 12,
   "claimed_stage": "...",
   "claimed_raise": "...",
+  "ai_company_status": "...",
+  "ai_evidence": "...",
   "slides": [
     {"number": 1, "headline": "...", "content_summary": "...", "visuals": "...", "word_count_estimate": 15}
   ]
@@ -199,7 +212,7 @@ Determine pre-seed/seed/series-a from signals in the deck. Read `references/deck
 
 **Stage signals:** Pre-seed: no revenue, LOIs/waitlist, prototype, <$2.5M ask. Seed: early ARR, paying customers, <$6M ask. Series A: $1M+ ARR, cohort data, repeatable GTM, $10M+ ask. Later-stage: set detected_stage to `"series_b"` or `"growth"` — use the Gate below. Do not ask outside the gate.
 
-**AI company detection signals:** The company is AI-first if ANY of: (1) core product uses ML/AI for its primary value proposition, (2) inference or training costs appear in COGS or margins, (3) deck mentions foundation models, fine-tuning, or AI infrastructure as product components, (4) retention or engagement metrics reference AI-specific patterns (usage retention vs. seat retention). Set `is_ai_company: true` and record the evidence in `ai_evidence`. When in doubt, flag it — the gate will let the founder correct.
+**AI company note:** `ai_company_status` was determined in Step 2 (deck inventory) and is already in `deck_inventory.json`. Set `is_ai_company` in `stage_profile.json` to `true` if `ai_company_status` is `"ai_core"` or `"ai_claimed_unverified"`, otherwise `false`. Record the same evidence in `ai_evidence`.
 
 Then write the profile through the producer script:
 
@@ -369,9 +382,9 @@ using the deck content (read from deck file or from slide_reviews.json for
 reference), the stage profile at <REVIEW_DIR>/stage_profile.json, and the
 deck inventory at <REVIEW_DIR>/deck_inventory.json.
 
-For non-AI companies (is_ai_company: false), mark the 4 AI criteria
-(ai_retention_rebased, ai_cost_to_serve_shown, ai_defensibility_beyond_model,
-ai_responsible_controls) as not_applicable.
+Assess ALL 35 criteria including the 4 AI criteria — do NOT self-gate.
+`checklist.py` applies deterministic AI-criteria gating from `deck_inventory.json`
+after you return — assess every criterion.
 
 Evidence quality rules:
 - Every fail and warn MUST cite a specific best-practice principle or benchmark.
@@ -414,7 +427,7 @@ Common Mistakes:
   - no_hype_without_proof
   - no_features_over_outcomes
   - no_dodged_competition
-AI Company (mark not_applicable for non-AI companies — is_ai_company: false):
+AI Company (score all 4; the producer script gates them after you return):
   - ai_retention_rebased
   - ai_cost_to_serve_shown
   - ai_defensibility_beyond_model
@@ -434,10 +447,12 @@ computes the summary):
 Do NOT write, edit, or create ANY files — your ONLY output is the JSON in your final assistant message. Files you write directly would bypass schema validation and run_id stamping and will be overwritten.
 ```
 
-**After the sub-agent returns:** apply the tolerant JSON extraction protocol to obtain the structured JSON. Then pipe through the producer script:
+**After the sub-agent returns:** apply the tolerant JSON extraction protocol to obtain the structured JSON. Then pipe through the producer script (with `--inventory` so the producer applies deterministic AI-criteria gating from `deck_inventory.json`):
 
 ```bash
-cat <<'CHECKLIST_EOF' | python3 "$SCRIPTS/checklist.py" --run-id "$RUN_ID" --pretty -o "$REVIEW_DIR/checklist.json"
+cat <<'CHECKLIST_EOF' | python3 "$SCRIPTS/checklist.py" --run-id "$RUN_ID" --pretty \
+  --inventory "$REVIEW_DIR/deck_inventory.json" \
+  -o "$REVIEW_DIR/checklist.json"
 <JSON extracted from sub-agent reply>
 CHECKLIST_EOF
 ```
@@ -494,7 +509,7 @@ Follow your agent body's Context B procedure
    and Grep the EXACT coaching_payload.insertion_marker (output_mode:count)
    on coaching_payload.report_path. Apply the 6-state decision matrix.
 2. Compose commentary from the inlined coaching_payload (failed_items,
-   warned_items, summary, high_severity_warnings, stage, is_ai_company).
+   warned_items, summary, high_severity_warnings, stage, ai_company_status).
    Do NOT Read the full report.md.
 3. edit_via_marker — single Edit on coaching_payload.report_path:
      old_string = coaching_payload.insertion_marker  (EXACT uuid string)

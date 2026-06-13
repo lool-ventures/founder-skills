@@ -150,6 +150,123 @@ VALID_IDS = {item["id"] for item in CHECKLIST_ITEMS}
 VALID_STATUSES = {"pass", "fail", "warn", "not_applicable"}
 ITEM_LOOKUP = {item["id"]: item for item in CHECKLIST_ITEMS}
 
+# The 4 AI-criteria IDs that are gated by ai_company_status.
+_AI_CRITERIA_IDS = frozenset(
+    {
+        "ai_retention_rebased",
+        "ai_cost_to_serve_shown",
+        "ai_defensibility_beyond_model",
+        "ai_responsible_controls",
+    }
+)
+
+
+def _apply_ai_gating(result: dict[str, Any], ai_company_status: str) -> dict[str, Any]:
+    """Apply deterministic AI-criteria gating based on ai_company_status.
+
+    Rules:
+    - not_ai: force the 4 AI criteria to not_applicable with Auto-gated evidence.
+    - ai_core: keep sub-agent statuses (scored).
+    - ai_claimed_unverified: keep sub-agent statuses (scored; they will likely
+      fail for lack of evidence — the bar is relevant because they claim it).
+
+    Evidence prefix 'Auto-gated:' distinguishes producer gating from sub-agent phrasing.
+    """
+    if ai_company_status not in ("not_ai",):
+        # ai_core and ai_claimed_unverified: keep sub-agent statuses unchanged.
+        return result
+
+    auto_evidence = "Auto-gated: not_applicable — ai_company_status=not_ai"
+
+    items: list[dict[str, Any]] = result.get("items", [])
+    for item in items:
+        if item.get("id") in _AI_CRITERIA_IDS:
+            item["status"] = "not_applicable"
+            item["evidence"] = auto_evidence
+            # Remove notes if present to avoid stale sub-agent phrasing
+            item.pop("notes", None)
+
+    # Recompute summary from the (now-gated) items list.
+    summary = result.get("summary")
+    if summary is None:
+        return result
+
+    pass_count = 0
+    fail_count = 0
+    warn_count = 0
+    na_count = 0
+    failed_items: list[dict[str, Any]] = []
+    warned_items: list[dict[str, Any]] = []
+    categories: dict[str, dict[str, int]] = {}
+
+    for item in items:
+        status = item["status"]
+        item_id = item["id"]
+        meta = ITEM_LOOKUP.get(item_id, {})
+        category = item.get("category", meta.get("category", "Unknown"))
+        evidence = item.get("evidence")
+        notes = item.get("notes")
+
+        if category not in categories:
+            categories[category] = {"pass": 0, "fail": 0, "warn": 0, "not_applicable": 0}
+
+        if status == "pass":
+            pass_count += 1
+            categories[category]["pass"] += 1
+        elif status == "fail":
+            fail_count += 1
+            categories[category]["fail"] += 1
+            failed_items.append(
+                {
+                    "id": item_id,
+                    "category": category,
+                    "label": item.get("label", ""),
+                    "evidence": evidence,
+                    "notes": notes,
+                }
+            )
+        elif status == "warn":
+            warn_count += 1
+            categories[category]["warn"] += 1
+            warned_items.append(
+                {
+                    "id": item_id,
+                    "category": category,
+                    "label": item.get("label", ""),
+                    "evidence": evidence,
+                    "notes": notes,
+                }
+            )
+        elif status == "not_applicable":
+            na_count += 1
+            categories[category]["not_applicable"] += 1
+
+    applicable = len(CHECKLIST_ITEMS) - na_count
+    score_pct = round((pass_count / applicable) * 100, 1) if applicable > 0 else 0.0
+
+    if score_pct >= 85:
+        overall_status = "strong"
+    elif score_pct >= 70:
+        overall_status = "solid"
+    elif score_pct >= 50:
+        overall_status = "needs_work"
+    else:
+        overall_status = "major_revision"
+
+    result["summary"] = {
+        "total": len(CHECKLIST_ITEMS),
+        "pass": pass_count,
+        "fail": fail_count,
+        "warn": warn_count,
+        "not_applicable": na_count,
+        "score_pct": score_pct,
+        "overall_status": overall_status,
+        "by_category": categories,
+        "failed_items": failed_items,
+        "warned_items": warned_items,
+    }
+    return result
+
 
 def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], list[str]]:
     """Validate checklist input and produce scored summary. Returns (result, errors)."""
@@ -299,6 +416,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
     p.add_argument("--run-id", required=True, help="Inject metadata.run_id into output")
+    p.add_argument(
+        "--inventory",
+        help=(
+            "Path to deck_inventory.json; when provided, applies deterministic"
+            " AI-criteria gating from ai_company_status"
+        ),
+    )
     return p.parse_args()
 
 
@@ -353,6 +477,25 @@ def main() -> None:
 
     result["validation"] = {"status": "valid", "errors": []}
     result["metadata"] = {"run_id": args.run_id}
+
+    # Apply deterministic AI-criteria gating when --inventory is provided.
+    # Gating belongs to the producer, not the sub-agent; the sub-agent scores all
+    # 35 criteria and does not self-gate.
+    if args.inventory:
+        try:
+            with open(args.inventory, encoding="utf-8") as inv_f:
+                inventory_data = json.load(inv_f)
+            ai_company_status = inventory_data.get("ai_company_status", "")
+            if ai_company_status in ("not_ai", "ai_core", "ai_claimed_unverified"):
+                result = _apply_ai_gating(result, ai_company_status)
+            else:
+                print(
+                    f"Warning: --inventory ai_company_status '{ai_company_status}'"
+                    " is not a recognised value — gating skipped",
+                    file=sys.stderr,
+                )
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"Warning: could not read --inventory file: {e} — gating skipped", file=sys.stderr)
 
     out = json.dumps(result, indent=indent) + "\n"
     s = result["summary"]

@@ -95,7 +95,7 @@ keys (do not refetch from disk):
   not_applicable)
 - `failed_items`, `warned_items`
 - `high_severity_warnings` (codes only)
-- `stage`, `is_ai_company`, `company_name`
+- `stage`, `ai_company_status`, `company_name`
 - `review_dir`, `report_path`
 - `insertion_marker` — the EXACT per-run uuid-bearing string compose
   emitted into `report.md` (e.g.
@@ -130,7 +130,7 @@ diagnostic string for blocked states):
 #### 2. Compose commentary from `coaching_payload`
 
 Reason from the structured fields (`failed_items`, `warned_items`,
-`summary`, `high_severity_warnings`, `stage`, `is_ai_company`,
+`summary`, `high_severity_warnings`, `stage`, `ai_company_status`,
 `company_name`). The commentary should answer:
 
 - What are the 2-3 things the founder should feel good about?
