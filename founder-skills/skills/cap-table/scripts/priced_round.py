@@ -67,6 +67,12 @@ AITKEN_TRIGGER_CONTRACTION = 0.9
 AITKEN_FALLBACK_STEP_RATIO = 20.0
 SIGN_FLIP_DAMP_ALPHA = 0.5
 SIGN_FLIP_DETECTION_WINDOW = 3
+# PPS sanity floor: a converged price below this value has no valid economic
+# interpretation.  Any realistic instrument conversion results in a PPS of at
+# least a fraction of a cent ($0.000001); sub-floor values indicate the
+# iteration collapsed toward zero because the instruments collectively demand
+# ≥100% of the company (purchase amounts exceed caps / combined fractions ≥ 1).
+PPS_SANITY_FLOOR = 1e-6
 
 # Import sibling math producers
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -923,6 +929,47 @@ def solve_priced_round(
         aggregate["preferred_pct_pre_anti_dilution"] = preferred_pct_pre_ad
         aggregate["anti_dilution_delta_pct_points"] = (aggregate["founders_pct"] - founder_pct_pre_ad) * 100
 
+    # Post-convergence economic-validity guard.
+    #
+    # The fixed-point iteration terminates when |Δp/p| < 1e-6 AND |Δp| < 1e-9.
+    # When instruments collectively demand ≥100% of the company (e.g. a post-money
+    # SAFE whose purchase_amount exceeds its post_money_cap), the iteration drives
+    # PPS toward zero.  At near-zero PPS both thresholds pass trivially (abs_change
+    # is tiny because the price is tiny; rel_change divides by max(price,1e-12)).
+    # The function then falsely reports converged=True / completeness="full" with
+    # astronomically large share counts.
+    #
+    # Guard conditions (any one is sufficient):
+    #   1. Converged PPS < PPS_SANITY_FLOOR — a price below a fraction of a cent
+    #      across any realistic cap has no valid economic interpretation; it can only
+    #      arise when the iteration collapsed toward zero.
+    #   2. founders_pct ≤ 0 — the pre-existing shareholders have been completely
+    #      displaced, which is algebraically impossible for a finite instrument set.
+    #   3. Any ownership fraction outside (0, 1) — sanity check against negative
+    #      or >100% individual-class fractions that indicate a degenerate solution.
+    _fraction_fields = ("founders_pct", "preferred_pct", "safe_pct", "note_pct", "new_money_pct")
+    _degenerate = (
+        price < PPS_SANITY_FLOOR
+        or aggregate["founders_pct"] <= 0.0
+        or any(not (0.0 <= aggregate[k] <= 1.0) for k in _fraction_fields)
+    )
+    if _degenerate:
+        converged = False
+        blockers.append(
+            {
+                "code": "E_SOLVER_NO_VALID_FIXED_POINT",
+                "instance_id": None,
+                "remedy": (
+                    "The round as specified has no valid economic solution: the instruments "
+                    "and/or new money collectively demand ≥100% of the company (purchase "
+                    "amounts exceed post-money caps, or combined cap fractions ≥ 1). "
+                    "Verify that each SAFE's purchase_amount < post_money_cap and that the "
+                    "aggregate SAFE fractions (Σ purchase_i/cap_i) leave room for founders "
+                    "and new investors. Counsel or the cap-table model should be reviewed."
+                ),
+            }
+        )
+
     # Determine scenario completeness — bucket rejected SAFEs by error code so
     # E_UNKNOWN_SAFE_FORM surfaces a clear blocker (not the generic fallback).
     rejected_safes = {s: r for s, r in per_safe.items() if r.get("branch") == "rejected"}
@@ -961,20 +1008,6 @@ def solve_priced_round(
         "equity_financing_price": price,
         "iterations": iterations,
         "converged": converged,
-        "post_round_fully_diluted_shares": int(round(post_fd)),
-        "shares_breakdown": {
-            "pre_round_fully_diluted": int(pre_fd),
-            # AD ratcheting mutates CCP, inflating preferred-as-converted; this
-            # is the delta between the pre-AD pre_fd and the AD-adjusted
-            # adj_pre_fd. Without it the breakdown does not reconcile to
-            # post_round_fully_diluted_shares whenever AD fires.
-            "ad_delta": int(round(adj_pre_fd - pre_fd)),
-            "safe_converted": int(round(safe_shares)),
-            "note_converted": int(round(note_shares)),
-            "pool_topup": int(round(pool_topup_shares)),
-            "new_money": int(round(new_money_shares)),
-        },
-        "aggregate_ownership_by_class": aggregate,
         "per_safe": per_safe,
         "per_note": per_note,
         "convergence_history": history,
@@ -988,6 +1021,26 @@ def solve_priced_round(
             },
         ],
     }
+
+    # Quantitative share-count fields are omitted when the economic-validity
+    # guard fired: the computed values are degenerate (astronomically large)
+    # and emitting them would propagate garbage to downstream consumers.
+    # Callers should inspect completeness / blockers before reading share counts.
+    if not _degenerate:
+        result["post_round_fully_diluted_shares"] = int(round(post_fd))
+        result["shares_breakdown"] = {
+            "pre_round_fully_diluted": int(pre_fd),
+            # AD ratcheting mutates CCP, inflating preferred-as-converted; this
+            # is the delta between the pre-AD pre_fd and the AD-adjusted
+            # adj_pre_fd. Without it the breakdown does not reconcile to
+            # post_round_fully_diluted_shares whenever AD fires.
+            "ad_delta": int(round(adj_pre_fd - pre_fd)),
+            "safe_converted": int(round(safe_shares)),
+            "note_converted": int(round(note_shares)),
+            "pool_topup": int(round(pool_topup_shares)),
+            "new_money": int(round(new_money_shares)),
+        }
+        result["aggregate_ownership_by_class"] = aggregate
 
     # Additive AD outputs (emitted whenever ≥1 series carries AD protection,
     # so callers can inspect CCP state regardless of whether AD triggered)

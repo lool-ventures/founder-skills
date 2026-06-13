@@ -938,6 +938,156 @@ class TestPricedRound:
         )
         assert r["completeness"] == "structural_only"
 
+    # --- E_SOLVER_NO_VALID_FIXED_POINT guard ---
+
+    def test_solver_degenerate_purchase_exceeds_cap(self) -> None:
+        """When a YC post-money SAFE's purchase_amount >> post_money_cap the
+        solver previously drove PPS toward ~1e-19 and falsely reported full/
+        converged with multi-e26 share counts.  After the fix it must return
+        structural_only + E_SOLVER_NO_VALID_FIXED_POINT and NOT claim converged.
+
+        Arithmetic: purchase/cap = 10M/5M = 2.0 (200% of company_cap).
+        No real fixed point exists; any solution implies founders_pct ≤ 0.
+        """
+        cs = cap_state_mod.build_cap_state(_BASIC_INPUTS, _BASIC_INSTRUMENTS)
+        bad_safe = {
+            "id": "safe_bad",
+            "investor_name": "Pathological Fund",
+            "purchase_amount": 10_000_000,  # purchase far exceeds cap
+            "post_money_valuation_cap": 5_000_000,  # post-money cap = $5M
+            "discount_multiplier": None,
+            "mfn_provision": None,
+            "pro_rata_side_letter": None,
+            "issuance_date": "2025-01-01",
+            "form": "yc_postmoney_cap",
+            "conversion_price_override": None,
+            "source_document": None,
+            "extraction_confidence": "high",
+        }
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=[bad_safe],
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+        )
+        assert r["completeness"] == "structural_only", (
+            f"Expected structural_only for purchase >> cap; got {r['completeness']!r}. "
+            f"PPS={r.get('equity_financing_price')}, "
+            f"founders_pct={r.get('aggregate_ownership_by_class', {}).get('founders_pct')}"
+        )
+        assert not r.get("converged", True), "converged must be False alongside E_SOLVER_NO_VALID_FIXED_POINT"
+        codes = [b["code"] for b in r.get("blockers", [])]
+        assert "E_SOLVER_NO_VALID_FIXED_POINT" in codes, (
+            f"Expected E_SOLVER_NO_VALID_FIXED_POINT in blockers; got {codes}"
+        )
+        # Share counts must not be astronomically large
+        if "post_round_fully_diluted_shares" in r:
+            assert r["post_round_fully_diluted_shares"] < 10**15, (
+                f"Absurd share count leaked: {r['post_round_fully_diluted_shares']}"
+            )
+
+    def test_solver_degenerate_multi_safe_collective_overflow(self) -> None:
+        """Two YC post-money SAFEs whose collective purchase/cap fractions
+        sum to 137% (> 100%) must also trigger E_SOLVER_NO_VALID_FIXED_POINT.
+
+        safe_1: purchase=4M / cap=5M  → 80% of company_cap
+        safe_2: purchase=4M / cap=7M  → ~57% of company_cap
+        sum = ~137%; no valid fixed point.
+        """
+        cs = cap_state_mod.build_cap_state(_BASIC_INPUTS, _BASIC_INSTRUMENTS)
+        safe_1 = {
+            "id": "safe_1",
+            "investor_name": "Fund A",
+            "purchase_amount": 4_000_000,
+            "post_money_valuation_cap": 5_000_000,
+            "discount_multiplier": None,
+            "mfn_provision": None,
+            "pro_rata_side_letter": None,
+            "issuance_date": "2025-01-01",
+            "form": "yc_postmoney_cap",
+            "conversion_price_override": None,
+            "source_document": None,
+            "extraction_confidence": "high",
+        }
+        safe_2 = {
+            "id": "safe_2",
+            "investor_name": "Fund B",
+            "purchase_amount": 4_000_000,
+            "post_money_valuation_cap": 7_000_000,
+            "discount_multiplier": None,
+            "mfn_provision": None,
+            "pro_rata_side_letter": None,
+            "issuance_date": "2025-01-01",
+            "form": "yc_postmoney_cap",
+            "conversion_price_override": None,
+            "source_document": None,
+            "extraction_confidence": "high",
+        }
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=[safe_1, safe_2],
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+        )
+        assert r["completeness"] == "structural_only", (
+            f"Expected structural_only for collective 137% overflow; got {r['completeness']!r}"
+        )
+        codes = [b["code"] for b in r.get("blockers", [])]
+        assert "E_SOLVER_NO_VALID_FIXED_POINT" in codes, (
+            f"Expected E_SOLVER_NO_VALID_FIXED_POINT in blockers; got {codes}"
+        )
+
+    def test_solver_valid_high_dilution_round_converges(self) -> None:
+        """A legitimately high-dilution round (SAFE takes ~64% of company_cap,
+        founders retain ~14%) must still converge and report completeness=full.
+
+        Arithmetic: purchase=4M, post_money_cap=5M → SAFE fraction = 80% of
+        company_cap.  With pre_fd=11M, the SAFE fraction is of company_cap
+        (not of total post-money FD), so:
+          company_cap = 11M / (1 - 0.80) = 55M
+          safe_shares = 0.80 × 55M = 44M
+          PPS = 20M / 55M ≈ 0.3636
+          new_money_shares = 5M / PPS ≈ 13.75M
+          post_fd = 55M + 13.75M = 68.75M
+          founders_pct = 10M / 68.75M ≈ 14.5%   ← positive and valid
+        """
+        cs = cap_state_mod.build_cap_state(_BASIC_INPUTS, _BASIC_INSTRUMENTS)
+        valid_high_dil_safe = {
+            "id": "safe_high_dil",
+            "investor_name": "Large Fund",
+            "purchase_amount": 4_000_000,  # purchase/cap = 0.80 of company_cap
+            "post_money_valuation_cap": 5_000_000,
+            "discount_multiplier": None,
+            "mfn_provision": None,
+            "pro_rata_side_letter": None,
+            "issuance_date": "2025-01-01",
+            "form": "yc_postmoney_cap",
+            "conversion_price_override": None,
+            "source_document": None,
+            "extraction_confidence": "high",
+        }
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=[valid_high_dil_safe],
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+        )
+        assert r["completeness"] == "full", (
+            f"Valid high-dilution round should be 'full'; got {r['completeness']!r}. blockers={r.get('blockers')}"
+        )
+        assert r["converged"] is True
+        agg = r["aggregate_ownership_by_class"]
+        # Founders must retain a positive and meaningful fraction (~14.5%)
+        assert agg["founders_pct"] > 0.05, (
+            f"founders_pct={agg['founders_pct']:.4f} should be ~14.5% for valid 80%-safe round"
+        )
+        # Guard must NOT fire on a legitimate round
+        codes = [b["code"] for b in r.get("blockers", [])]
+        assert "E_SOLVER_NO_VALID_FIXED_POINT" not in codes, "Guard incorrectly fired on a valid high-dilution round"
+
 
 class TestStackedPostMoneySAFEsGolden:
     """Golden-value regression for YC post-money cap SAFE math.
