@@ -138,14 +138,14 @@
       "notes": "Benchmark dataset for US seed/post-seed note terms. Source-of-truth for conversion-trigger prevalence, maturity ranges, interest-rate distributions, and qualified-financing thresholds. Companion quarterly PDFs at https://www.wsgr.com/a/web/oFpGWcMXTLsUML5oSHyxfm/entrepreneurs-report-q2-2025.pdf and https://ecvc.wsgr.com/a/web/vgnKwoeAkUKT6MTc96jYem/entrepreneurs-report-q1-2025.pdf."
     },
     {
-      "source_id": "ITA-SAFE-2025-MASLAW",
-      "title": "Israeli Tax Authority Issues New Guidelines on SAFE",
-      "publisher": "Maslaw",
-      "url": "https://www.maslaw.co.il/wp-content/uploads/2025/02/Israeli-Tax-Authority-Issues-New-Guidelines-on-SAFE.pdf",
+      "source_id": "ITA-SAFE-2025-HERZOG",
+      "title": "The ITA Publishes an Updated Version of Its Guidance and Safe Harbor for SAFEs",
+      "publisher": "Herzog Law",
+      "url": "https://herzoglaw.co.il/en/news-and-insights/the-ita-publishes-an-updated-version-of-its-guidance-and-safe-harbor-for-safes/",
       "source_type": "strong_secondary",
       "publication_date": "2025-02",
-      "accessed_date": "2026-05-18",
-      "notes": "English law-firm summary of the January 2025 ITA SAFE guidance. Use counsel review before implementation."
+      "accessed_date": "2026-06-12",
+      "notes": "English law-firm summary of the January 2025 ITA SAFE guidance. Verbatim: 'The Updated Guidance applies to SAFEs signed between January 1, 2025, and December 31, 2026, unless revised guidance is issued prior to that date.' Corroborated by Arnon Tadmor-Levy (https://arnontl.com/news/updated-guidelines-israel-tax-authority-regarding-safe-transactions/): '...from January 1, 2025, to December 31, 2026, or until the publication of a new directive...whichever is earlier.' Use counsel review before implementation."
     },
     {
       "source_id": "PEARLCOHEN-SAFE-2025",
@@ -268,7 +268,7 @@
       "source_type": "benchmark_dataset",
       "publication_date": "2026",
       "accessed_date": "2026-05-18",
-      "notes": "Founder ownership benchmark dataset through IPO and by stage."
+      "notes": "Founder ownership benchmark dataset through IPO and by stage. carta.com returns 403 to automated fetchers; cited as benchmark-only/observational (no hardcoded figure relies on it); in-browser verification by the maintainer still pending."
     },
     {
       "source_id": "CARTA-FOUNDER-2025",
@@ -278,7 +278,7 @@
       "source_type": "benchmark_dataset",
       "publication_date": "2025",
       "accessed_date": "2026-05-18",
-      "notes": "Earlier founder ownership benchmark dataset used for trend comparison."
+      "notes": "Earlier founder ownership benchmark dataset used for trend comparison. carta.com returns 403 to automated fetchers; cited as benchmark-only/observational (no hardcoded figure relies on it); in-browser verification by the maintainer still pending."
     },
     {
       "source_id": "F2-ISRAEL-2024",
@@ -729,7 +729,7 @@
         "implementation_action": "counsel_review",
         "confidence": "medium",
         "source_ids": [
-          "ITA-SAFE-2025-MASLAW",
+          "ITA-SAFE-2025-HERZOG",
           "PEARLCOHEN-SAFE-2025"
         ],
         "source_basis": "strong_secondary",
@@ -740,7 +740,7 @@
           "start": "2025-01-01",
           "end": "2026-12-31",
           "event_date_field": "safe_investment_date",
-          "notes": "Temporary ITA guidance period as summarized by law firms."
+          "notes": "Temporary ITA guidance period ending 2026-12-31 or until earlier publication of new ITA directive, whichever is earlier (per Herzog and Arnon Tadmor-Levy)."
         },
         "warnings": [
           "Counsel review required before treating a SAFE as equity-like for Israeli tax purposes.",
@@ -757,7 +757,7 @@
         "implementation_action": "counsel_review",
         "confidence": "medium",
         "source_ids": [
-          "ITA-SAFE-2025-MASLAW",
+          "ITA-SAFE-2025-HERZOG",
           "PEARLCOHEN-SAFE-2025"
         ],
         "source_basis": "strong_secondary",
@@ -768,7 +768,7 @@
           "start": "2025-01-01",
           "end": "2026-12-31",
           "event_date_field": "safe_investment_date",
-          "notes": "Temporary guidance period; check for later ITA updates."
+          "notes": "Temporary guidance period ending 2026-12-31 or until earlier publication of new ITA directive, whichever is earlier (per Herzog and Arnon Tadmor-Levy); check for later ITA updates."
         },
         "warnings": [
           "Escalate to Israeli tax counsel before modeling tax, withholding, or financial-statement treatment."
