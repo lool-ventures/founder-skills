@@ -239,7 +239,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development workflow.
 
 ## Privacy
 
-This plugin runs entirely inside your local Claude session. No data is collected, transmitted, or shared with lool ventures.
+This plugin runs entirely inside your local Claude session. No data is collected, transmitted, or shared with lool ventures. Feedback is opt-in and user-initiated: `/founder-skills:feedback` drafts a message and hands you a link to submit yourself — nothing is sent automatically.
 
 ## Contributing
 
@@ -247,8 +247,10 @@ We welcome contributions — new skills, improvements to existing ones, and bug 
 
 ## Contact
 
+- **In-session feedback** — run `/founder-skills:feedback` while using the plugin (report a bug, suggest an idea, ask for help, or share a win)
 - **Bug reports and feature requests** — [GitHub Issues](https://github.com/lool-ventures/founder-skills/issues)
 - **Questions and discussion** — [GitHub Discussions](https://github.com/lool-ventures/founder-skills/discussions)
+- **Private feedback** — [founder-skills@lool.vc](mailto:founder-skills@lool.vc)
 - **Security vulnerabilities** — [Report privately](https://github.com/lool-ventures/founder-skills/security/advisories/new) (see [SECURITY.md](SECURITY.md))
 - **About lool ventures** — [lool.vc](https://lool.vc)
 

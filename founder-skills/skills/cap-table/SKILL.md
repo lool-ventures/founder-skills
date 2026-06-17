@@ -609,3 +609,10 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 - The structured success payload from the Context B sub-agent (Step 11): `{status, review_dir, report_path, scenarios_modeled, counsel_review_count, completeness_breakdown, high_severity_warnings}`.
 
 **Do NOT inline `report_markdown` in the assistant message.** The founder reads the file via the path. (Same rationale as deck-review #13: avoids ~25 KB round-trip through the parent context.)
+
+## Feedback
+
+If a run ends **blocked or failed**, after you report the reason to the founder, add one line:
+> _If this looks wrong or didn't finish, you can flag it: `/founder-skills:feedback`._
+
+On **unsolicited** praise or frustration, you may mention `/founder-skills:feedback` once — never routinely, never mid-workflow, never more than once per session.

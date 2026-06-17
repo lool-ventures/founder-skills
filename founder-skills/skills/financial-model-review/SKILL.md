@@ -571,3 +571,10 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 - Each of 46 items: pass / fail / warn / not_applicable
 - `score_pct` = (pass + 0.5 * warn) / (total - not_applicable) * 100
 - Overall: "strong" (>=85%), "solid" (>=70%), "needs_work" (>=50%), "major_revision" (<50%)
+
+## Feedback
+
+If a run ends **blocked or failed**, after you report the reason to the founder, add one line:
+> _If this looks wrong or didn't finish, you can flag it: `/founder-skills:feedback`._
+
+On **unsolicited** praise or frustration, you may mention `/founder-skills:feedback` once — never routinely, never mid-workflow, never more than once per session.

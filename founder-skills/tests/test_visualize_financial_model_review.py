@@ -392,7 +392,11 @@ def test_self_contained() -> None:
     d = _make_artifact_dir()
     rc, stdout, _stderr = run_script_raw("visualize.py", ["--dir", d])
     assert rc == 0
-    allowed = {"https://github.com/lool-ventures/founder-skills", "https://lool.vc"}
+    allowed = {
+        "https://github.com/lool-ventures/founder-skills",
+        "https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback",
+        "https://lool.vc",
+    }
     src_matches = re.findall(r'(?:src|href)\s*=\s*"([^"]*)"', stdout)
     for url in src_matches:
         if url in allowed:

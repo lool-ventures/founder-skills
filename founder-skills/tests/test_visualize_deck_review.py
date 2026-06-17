@@ -350,7 +350,11 @@ def test_self_contained() -> None:
     # Allow xmlns references and internal anchors
     import re
 
-    allowed = {"https://github.com/lool-ventures/founder-skills", "https://lool.vc"}
+    allowed = {
+        "https://github.com/lool-ventures/founder-skills",
+        "https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback",
+        "https://lool.vc",
+    }
     src_refs = re.findall(r'(?:src|href)="([^"]*)"', stdout)
     for ref in src_refs:
         if ref in allowed:

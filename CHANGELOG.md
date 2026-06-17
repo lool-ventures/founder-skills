@@ -18,6 +18,19 @@ stable form — neither was available in any prior distributed release.
 *Versions 0.4.8–0.4.11 were internal development versions and were never distributed; all of their
 changes ship in 0.5.0.*
 
+### Added — feedback channel
+
+- `/founder-skills:feedback` command — drafts a bug report, idea, help request, or "founder win"
+  and hands the user a prefilled GitHub Issue / Discussion link (or a private `mailto:` to
+  founder-skills@lool.vc) to submit themselves. The plugin transmits nothing automatically; a
+  privacy hard-stop keeps company names, numbers, file paths, and transcript data out of the draft.
+- Every generated report (Markdown + HTML) now carries a "Share feedback" link in its footer,
+  routing to the Ideas & Feedback discussion category.
+- Skills surface `/founder-skills:feedback` on a blocked/failed run and on unsolicited sentiment
+  (once per session, never routine).
+- cap-table report footer harmonized with the other five skills (now links back to the repo and
+  lool ventures; drops the internal rule-pack version line).
+
 ### Added — new skill: cap-table
 
 The cap-table skill extracts structured terms from SAFEs, convertible notes, term sheets, articles

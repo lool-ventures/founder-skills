@@ -670,3 +670,10 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 ## What-If Recomputation Rule
 
 If the founder asks "what if [parameter] were [value]": re-run `market_sizing.py` and/or `sensitivity.py` with the modified input and present the script's output. Never recompute TAM/SAM/SOM by hand — the compound formula (customer count × ARPU × serviceable % × target %) makes mental arithmetic error-prone and the script output is the authoritative source.
+
+## Feedback
+
+If a run ends **blocked or failed**, after you report the reason to the founder, add one line:
+> _If this looks wrong or didn't finish, you can flag it: `/founder-skills:feedback`._
+
+On **unsolicited** praise or frustration, you may mention `/founder-skills:feedback` once — never routinely, never mid-workflow, never more than once per session.

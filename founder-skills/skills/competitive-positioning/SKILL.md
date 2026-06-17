@@ -588,3 +588,10 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 - Optionally: the HTML report paths from Steps 7d and 7e.
 
 **Do NOT inline `report_markdown` in the assistant message.** The founder reads the file via the path.
+
+## Feedback
+
+If a run ends **blocked or failed**, after you report the reason to the founder, add one line:
+> _If this looks wrong or didn't finish, you can flag it: `/founder-skills:feedback`._
+
+On **unsolicited** praise or frustration, you may mention `/founder-skills:feedback` once — never routinely, never mid-workflow, never more than once per session.

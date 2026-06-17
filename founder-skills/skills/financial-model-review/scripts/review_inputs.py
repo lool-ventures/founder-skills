@@ -301,7 +301,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <div id="tab-panels"></div>
 
-<div class="footer-credit">founder-skills by lool ventures</div>
+<div class="footer-credit">founder-skills by lool ventures &middot; <a href="https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback" style="color:inherit">Share feedback</a></div>
 
 <div class="corrections-bar" id="corrections-bar">
   <div class="corrections-summary" id="corrections-summary">

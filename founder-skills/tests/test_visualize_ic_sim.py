@@ -378,7 +378,11 @@ def test_self_contained() -> None:
     assert rc == 0, f"exit {rc}, stderr={stderr}"
 
     # Find all src="..." and href="..." attributes
-    allowed = {"https://github.com/lool-ventures/founder-skills", "https://lool.vc"}
+    allowed = {
+        "https://github.com/lool-ventures/founder-skills",
+        "https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback",
+        "https://lool.vc",
+    }
     src_matches = re.findall(r'(?:src|href)\s*=\s*"([^"]*)"', stdout)
     for url in src_matches:
         if url in allowed:

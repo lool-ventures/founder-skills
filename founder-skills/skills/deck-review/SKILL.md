@@ -577,3 +577,10 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 ## What-If Recomputation Rule
 
 If the founder asks "what's my score if I fix X" or any score recomputation question: re-run `checklist.py` with the updated item statuses (or read the Appendix evidence from report.md) and present the script's output. Never compute a revised score by mental arithmetic in the chat — the formula is non-trivial (warn/fail earn no credit; N/A items are excluded from the denominator) and off-by-one errors cause real harm.
+
+## Feedback
+
+If a run ends **blocked or failed**, after you report the reason to the founder, add one line:
+> _If this looks wrong or didn't finish, you can flag it: `/founder-skills:feedback`._
+
+On **unsolicited** praise or frustration, you may mention `/founder-skills:feedback` once — never routinely, never mid-workflow, never more than once per session.

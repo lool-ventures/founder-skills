@@ -122,3 +122,7 @@ Use the [bug report template](https://github.com/lool-ventures/founder-skills/is
 ## Suggesting Features
 
 Use the [feature request template](https://github.com/lool-ventures/founder-skills/issues/new?template=feature_request.md) for new skill ideas or improvements. For open-ended discussion, use [GitHub Discussions](https://github.com/lool-ventures/founder-skills/discussions).
+
+## Feedback
+
+Using the plugin and have feedback? Run `/founder-skills:feedback` in your session — it drafts a message (bug, idea, help, or a win to share) and gives you a link to submit yourself; nothing is sent automatically. Prefer to browse? Post in [Discussions](https://github.com/lool-ventures/founder-skills/discussions). For anything private, email [founder-skills@lool.vc](mailto:founder-skills@lool.vc).

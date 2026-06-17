@@ -4,6 +4,7 @@
 
 - `founder-skills/` — Claude Code plugin (SDK/CLI-based)
 - `founder-skills/.claude-plugin/plugin.json` — Plugin manifest
+- `founder-skills/commands/feedback.md` — `/founder-skills:feedback` slash command (drafts a bug/idea/help/win report, hands the user a prefilled GitHub/`mailto:` link to submit; transmits nothing automatically)
 - `founder-skills/skills/market-sizing/` — Market sizing skill with scripts and references
 - `founder-skills/skills/deck-review/` — Deck review skill with scripts and references
 - `founder-skills/agents/market-sizing.md` — Market sizing agent definition

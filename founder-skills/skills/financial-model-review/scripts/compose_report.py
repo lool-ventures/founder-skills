@@ -955,7 +955,8 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         " by [lool ventures](https://lool.vc)"
         " — Financial Model Review Agent*  \n"
         "*For what-if scenarios (burn cuts, growth rate changes), generate the interactive explorer: "
-        "`explore.py --dir <review_dir> -o explore.html`*\n"
+        "`explore.py --dir <review_dir> -o explore.html`*  \n"
+        "*[Share feedback](https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback)*\n"
     )
 
     # Stderr summary

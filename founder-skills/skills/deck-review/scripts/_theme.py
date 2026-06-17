@@ -70,7 +70,11 @@ TOKENS_CSS = """\
 """
 
 # Subtle provenance line rendered at the bottom of each artifact.
-FOOTER_CREDIT_HTML = '<div class="footer-credit">founder-skills by lool ventures</div>'
+FOOTER_CREDIT_HTML = (
+    '<div class="footer-credit">founder-skills by lool ventures'
+    ' &middot; <a href="https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback"'
+    ' style="color:inherit">Share feedback</a></div>'
+)
 
 FOOTER_CREDIT_CSS = """\
 .footer-credit {
