@@ -2,7 +2,7 @@
 
 Token-free **replay** PR gate (`.github/workflows/cowork-replay.yml`) over committed cassettes that
 exercise the founder-skills skills under Claude Cowork's runtime via
-[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (≥ 0.5.0). Recording is **live**
+[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (≥ 0.6.0). Recording is **live**
 (needs the staged agent + Docker); replay/verify are **token/agent-free** (stock CI).
 
 Coverage: a deep **cap-table** matrix (6 cassettes across all four extraction lanes) plus a
@@ -57,9 +57,15 @@ live in the top-level `agents/` root, not under `skills/`) DO re-stale the whole
 safe direction). `founder-skills/tests/` is dropped via `founder-skills/.cowork-hashignore` (pytest is not
 runtime). The CI staleness gate is **warn-not-fail** (CI is replay-only and can't re-record).
 
-**`--rerecord-stale` caveat:** re-records from each cassette's *embedded* scenario — only correct once the
-cassette already carries `skills:`. To (re)introduce/change scoping, re-record **from the scenario YAML**
-(`record scenarios/<name>.yaml ...`), not `--rerecord-stale`.
+**`--rerecord-stale` caveat:** in 0.6.0 it re-records **from the on-disk `scenarios/<name>.yaml`** when
+present (falling back to the cassette's embedded snapshot with a warning) — so it now respects `skills:`
+edits. To be explicit, you can still re-record straight from the YAML (`record scenarios/<name>.yaml ...`).
+
+**0.6.0 cassette-format bump (one-time re-record):** 0.6.0 moves the staleness fingerprint to format v2,
+so the committed v1 cassettes flag as stale **once** after the upgrade (reported as "recorded under an
+older hash format (v1 → v2)", not a content change). Replay still passes and the CI staleness gate is
+warn-only, so nothing breaks — but the fleet should be re-recorded once locally (`record --rerecord-stale`,
+or per-scenario from the YAML) to clear the v2 staleness flag.
 
 ### Iterating asserts cheaply (0.5.0 `verify-run`)
 A wrong/edited `assert:` does **not** need a live re-record. With a kept run dir (set
@@ -80,14 +86,14 @@ cowork-harness lint scenarios/*.yaml             # no-silent-false-green (0.4.0 
 # allowed wholesale via --allow-domain (research skills cite 150+ public domains; non-PII); and only
 # SYNTHETIC email domains via --allow-email (acmecorp.com, RFC-2606 example.com) — any OTHER email still
 # FAILS (the live PII tripwire). Decision 2026-06-18; see the workflow comment.
-cowork-harness verify-cassettes cassettes/ --privacy-only \
+cowork-harness verify-cassettes cassettes/ --skip-staleness \
   --allow '\$\s*\d[\d.,]*\s*(?:[MmKkBb]|million|thousand|billion)?' \
   --allow-domain '[A-Za-z0-9][A-Za-z0-9.\-]*\.[A-Za-z]{2,}' \
   --allow-email '[A-Za-z0-9._%+\-]+@(?:acmecorp|example)\.com'
 ```
 
-> **Staleness** runs as a **separate `--staleness-only` step under `continue-on-error: true`** (warn, not
-> fail) — the **privacy** step (`--privacy-only`) is the hard gate. Warn (not hard) because CI is
+> **Staleness** runs as a **separate `--skip-privacy` step under `continue-on-error: true`** (warn, not
+> fail) — the **privacy** step (`--skip-staleness`) is the hard gate. Warn (not hard) because CI is
 > replay-only and cannot re-record, so a hard gate would block every skill PR on a manual local re-record.
 > With 0.5.0 per-skill scoping (`skills: [<name>]`) the signal is now **precise**: a `[stale] skill/plugin
 > dir contents changed` finding means *that skill's* dir (or a shared root — `scripts/`, `references/`,
