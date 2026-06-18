@@ -7,16 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.5.0] - 2026-06-10 — New skill: cap-table; financial-model-review hardening
+## [0.5.1] - 2026-06-18 — Fleet-wide hardening: audit remediation, brand theme, self-sufficient reports
 
 ### Highlights
 
-This release ships the cap-table skill for the first time and completes a pre-distribution hardening
-pass on financial-model-review. Users upgrading from 0.4.7 get both skills in their first-ever
-stable form — neither was available in any prior distributed release.
-
-*Versions 0.4.8–0.4.11 were internal development versions and were never distributed; all of their
-changes ship in 0.5.0.*
+A broad correctness, observability, and presentation pass across all six skills following 0.5.0's
+cap-table introduction. The headline work: a full-repo audit remediation hardening every skill and
+the shared scripts; the lool brand theme applied to every generated HTML artifact; self-sufficient
+reports that read standalone without the chat context; a founder feedback channel; deterministic
+`run_id` stamping and artifacts-root resolution; and a large cap-table extraction- and
+math-correctness pass. New drift-contract and renderer-key-coverage test suites lock each skill's
+prose to its producers so these fixes can't silently regress.
 
 ### Added — feedback channel
 
@@ -30,6 +31,118 @@ changes ship in 0.5.0.*
   (once per session, never routine).
 - cap-table report footer harmonized with the other five skills (now links back to the repo and
   lool ventures; drops the internal rule-pack version line).
+
+### Added — self-sufficient reports
+
+- Every skill's report (Markdown + HTML) now stands alone — it carries the context, definitions, and
+  provenance needed to be read and shared without the originating chat session. Rolled out across
+  all six skills (deck-review, market-sizing, ic-sim, competitive-positioning,
+  financial-model-review, cap-table).
+
+### Added — lool brand theme
+
+- The lool visual identity is applied to every generated HTML artifact across all six skills:
+  design-token CSS plus the Sora variable font (OFL) embedded base64-inline so artifacts stay
+  self-contained, with a footer credit. A theme-sync contract test keeps each skill's `_theme.py`
+  copy identical.
+
+### Added — other
+
+- **cap-table cowork-harness replay gate.** Token-free **replay** PR gate
+  (`.github/workflows/cowork-replay.yml`) over committed cassettes that exercise the cap-table skill
+  under Claude Cowork's runtime via `cowork-harness`. Recording is live (staged agent + Docker);
+  replay/verify run token- and agent-free in stock CI. Six scenarios cover Lane 1/2/4 extraction,
+  anti-hallucination, priced-round + BBWA anti-dilution, and fast-assess routing, plus a
+  `verify-cassettes` privacy + staleness scan over synthetic-only fixtures.
+- **cap-table:** Articles-of-Association extraction dispatch template (Lane 1); `--mode=grid` dumps
+  the Lane-3 cell grid deterministically; vision fallback for image-only documents in the evidence
+  verifier.
+- **deck-review:** resume now preserves same-run pipeline artifacts across the stage-gate
+  round-trip.
+
+### Changed — determinism & observability
+
+- **Unified `run_id` stamping.** All producers now inject `metadata.run_id` via a required
+  `--run-id` CLI flag, so every artifact in a run shares one identifier and compose can enforce
+  parity. Applied across ic-sim, market-sizing, competitive-positioning, deck-review,
+  financial-model-review, and cap-table; a static orchestration guard asserts CLI-stamping producer
+  pipes carry `--run-id`.
+- **Deterministic artifacts-root resolution.** The inline `ARTIFACTS_ROOT` path computation in each
+  SKILL.md Step 0 block was guidance the agent paraphrased, not code it ran verbatim — it kept the
+  intent ("under `outputs/`") but dropped the detection, landing `outputs/` in one run and
+  `outputs/artifacts/` in another, desyncing cross-skill `find_artifact.py` resolution and
+  path-based assertions. All six skills now invoke a shared `scripts/resolve_artifacts_root.py`
+  (fixed resolution order, deterministic, creates the dir) as one opaque command. cap-table
+  additionally stages sub-agent JSON in a `/tmp` mktemp dir instead of under the promoted `outputs/`
+  tree, since deletes under `outputs/` are unsafe or denied in Cowork.
+- **CI version-bump filter** now requires in-plugin Markdown bumps, matching the documented
+  versioning policy.
+
+### Fixed — fleet-wide audit remediation
+
+A full-repo audit hardened all six skills and the shared scripts. By area:
+
+- **cap-table:** math correctness (conversion-cap-price fallback, anti-dilution baseline, donut
+  palette, summary counts); extraction correctness (AoA merge, Carta fabrication guard, share-suffix
+  parsing); pre-money SAFE now honors the document's two conversion branches and a pool-inclusive
+  denominator; warrants join the broad-based anti-dilution base and the rule text matches the NVCA
+  charter it cites; the solver flags economically impossible rounds instead of returning garbage;
+  note conversion surfaces as a dilution driver; anti-dilution meta keys excluded from the explorer
+  donut/legend; `pdfplumber` declared so a missing parser blocks the hallucination gate rather than
+  silently degrading; rule-pack version single-sourced and bound into every producer; the dead
+  ITA-SAFE citation replaced with live gov.il primary sources and honest Carta provenance.
+- **financial-model-review:** burn multiple was divided by net-new ARR instead of monthly ΔMRR (a
+  12× overstatement) — fixed, plus three more 12× period-mismatch bugs and a GRR sanity guard;
+  partial models now evaluate all 46 checklist items and data rows survive header detection; the
+  extracted-values review is a hard stop gate rather than a drive-by; stops overstating a
+  default-alive company as "on track to profitability"; magic number uses the full S&M base and
+  Rule of 40 uses realized YoY with honest benchmark labels (dead Mosaic citations retired); the
+  checklist sub-agent no longer self-gates (gating belongs to the producer); MARKER_COLLISION
+  pre-scan before status render; present-but-null numeric fields guarded in math and validators.
+- **market-sizing:** unit-aware sensitivity parameter values — the Value column holds the input
+  parameter (currency / count / percent), so the old USD-for-low/high, raw-number-for-base rendering
+  printed percentages and counts as dollars; a new `_fmt_param_value` formats each cell by parameter
+  name. Also: tolerates non-numeric deck claims and null notes; compose reordered so
+  MARKER_COLLISION reflects in both status and the Warnings section.
+- **deck-review:** 3-value `ai_company_status` with producer-applied AI-criteria gating and verbatim
+  pass-through; canonical scoring IDs enumerated in dispatch templates; `checklist.py` omits null
+  evidence/notes, requires `--run-id`, and fails closed on `-o` validation errors; `gate_state`
+  answer handling survives corrupt files; resume detection moved into `setup_run.py`; visualize
+  legend color and gauge fixes.
+- **ic-sim:** derives `consensus_strength`, fixes warnings ordering, guards renderers against
+  malformed artifacts; resolves cross-owned straggler findings shared with market-sizing.
+- **competitive-positioning:** `EVID_02` mode-gating prose corrected; scripts hardened against
+  malformed artifacts; `checklist.py` gains `--input-mode`/`--run-id` flags; all three
+  artifact-integrity warning codes named in SKILL.md.
+- **shared scripts:** `find_artifact.py` conformed to the `--pretty` / `-o` / JSON-stdout script
+  convention; `founder_context.py` now performs a real recursive deep merge; `marketplace.json`
+  drops the top-level `description` to match the documented format.
+
+### Tests
+
+- **Drift-contract suites** pin each skill's SKILL.md prose to its script source across all six
+  skills, and surfaced/fixed several dead `coaching_payload` shell-variable captures and an
+  input-mode attribution bug.
+- **Renderer key-coverage** tests across all six skills assert every produced key is either rendered
+  or explicitly excluded.
+- Regression suites added for the cap-table extraction and math fixes.
+
+### Docs
+
+- README adds the cap-table skill section and documents six agents and Python 3.10+; CONTRIBUTING and
+  SECURITY include cap-table; VERSIONING clarifies that tags gate releases and reconciles the
+  no-bump cases; CLAUDE.md sync-test-repo framing and e2e figures corrected.
+
+## [0.5.0] - 2026-06-10 — New skill: cap-table; financial-model-review hardening
+
+### Highlights
+
+This release ships the cap-table skill for the first time and completes a pre-distribution hardening
+pass on financial-model-review. Users upgrading from 0.4.7 get both skills in their first-ever
+stable form — neither was available in any prior distributed release.
+
+*Versions 0.4.8–0.4.11 were internal development versions and were never distributed; all of their
+changes ship in 0.5.0.*
 
 ### Added — new skill: cap-table
 
@@ -164,14 +277,6 @@ convergence harness and fresh-AI replay tests are scheduled as a v0.5.1 follow-u
   audit-cycle references from SKILL.md files, agent bodies, schema descriptions, rule pack fields,
   and inline comments across all skills. A new contract test
   (`test_no_internal_version_refs_in_user_facing_files`) enforces this policy on every PR.
-- **Deterministic artifacts-root resolution.** The inline `ARTIFACTS_ROOT` path computation in each
-  SKILL.md Step 0 block was guidance the agent paraphrased, not code it ran verbatim — it kept the
-  intent ("under `outputs/`") but dropped the detection, landing `outputs/` in one run and
-  `outputs/artifacts/` in another, desyncing cross-skill `find_artifact.py` resolution and
-  path-based assertions. All six skills now invoke a shared `scripts/resolve_artifacts_root.py`
-  (fixed resolution order, deterministic, creates the dir) as one opaque command. cap-table
-  additionally stages sub-agent JSON in a `/tmp` mktemp dir instead of under the promoted `outputs/`
-  tree, since deletes under `outputs/` are unsafe or denied in Cowork.
 
 ### financial-model-review: pre-ship hardening
 
@@ -245,21 +350,6 @@ A new contract test (`test_no_internal_version_refs_in_user_facing_files`) now e
 - `financial-model-review` added to `COACHING_SKILLS` in `test_compose_invariants.py`.
 - Fixture directory `tests/fixtures/financial-model-review/` populated with `inputs.json`, `checklist.json`, `unit_economics.json`, `runway.json` — the shared `coaching_payload` + `STALE_ARTIFACT` invariant suite now exercises this skill.
 - New `test_fmr_skill_contract.py`: CHECKLIST ID enumeration, SKILL.md/agent body ID consistency, fleet-wide internal-version-ref policy enforcement.
-
-### Fixed — market-sizing
-
-- **Unit-aware sensitivity parameter values.** The sensitivity table's Value column holds the input
-  parameter, whose unit varies (currency / count / percent). The old code rendered low/high as USD
-  and base as a raw number, so percentages and counts printed as dollars and the base cell was
-  inconsistent. A new `_fmt_param_value` formats each cell by parameter name so all three agree.
-
-### Added — cap-table cowork-harness replay gate
-
-- Token-free **replay** PR gate (`.github/workflows/cowork-replay.yml`) over committed cassettes that
-  exercise the cap-table skill under Claude Cowork's runtime via `cowork-harness`. Recording is live
-  (staged agent + Docker); replay/verify run token- and agent-free in stock CI. Six scenarios cover
-  Lane 1/2/4 extraction, anti-hallucination, priced-round + BBWA anti-dilution, and fast-assess
-  routing, plus a `verify-cassettes` privacy + staleness scan over synthetic-only fixtures.
 
 ### Out of scope for v0.5.0
 
