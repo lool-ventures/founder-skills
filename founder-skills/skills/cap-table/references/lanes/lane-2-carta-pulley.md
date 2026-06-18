@@ -2,7 +2,7 @@
 
 Typical input: a multi-sheet Carta XLSX export (Securities, Convertibles, Stakeholders).
 
-> **Pulley note:** `--mode=pulley` is a stub that returns a structured blocker. Pulley extraction is not yet supported end-to-end (no real Pulley exports available to verify field mappings against). Pulley-style exports route to `--mode=freeform` (Lane 3) instead.
+> **Pulley note:** `--mode=pulley` is a stub that returns a structured blocker. Pulley extraction is not yet supported end-to-end (no real Pulley exports available to verify field mappings against). Pulley-style exports route to Lane 3 (`--mode=freeform-emit`) instead.
 
 ## Run the extractor
 

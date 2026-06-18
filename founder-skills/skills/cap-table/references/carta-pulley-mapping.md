@@ -29,8 +29,9 @@ comparison (real exports occasionally have trailing spaces).
 | **Carta OCX standard** | `Capitalization by Stakeholder`, `Voting Details`, `Context` | OCX repo on GitHub; 0 real exports in corpus (rarely used in practice) |
 | **Pulley** | `Ownership` + contract-specific tabs: `Shares`, `SAFEs`, `Convertible Notes`, `Stock Options`, `RSAs`, `RSUs`, `Warrants` | Pulley help docs; 0 real exports in corpus |
 
-If none match, the script routes to `--mode=freeform` and dispatches the
-Context-A `SPREADSHEET_STRUCTURE_DETECTION` sub-agent.
+If none match, the script routes to Lane 3 (freeform) and dispatches the
+Context-A `SPREADSHEET_STRUCTURE_DETECTION` sub-agent, whose blocks feed
+`--mode=freeform-emit`.
 
 ## 2. Carta banner + header-row contract — VERIFIED
 
@@ -208,7 +209,7 @@ No real Pulley exports in either test corpus. Pulley's structure per their help 
 - `Ownership` tab — main view; columns include `Stakeholder Name`, `Share Classes Held`, `Outstanding Values`, `Fully Diluted Ownership %`
 - Contract-specific tabs: `Shares`, `SAFEs`, `Convertible Notes`, `Stock Options`, `RSAs`, `RSUs`, `Warrants`
 
-Field-level mapping to be derived from a real Pulley XLSX when available. Until then, `extract_cap_table.py --mode=pulley` returns a structured blocker pointing at this section and recommends `--mode=freeform`.
+Field-level mapping to be derived from a real Pulley XLSX when available. Until then, `extract_cap_table.py --mode=pulley` returns a structured blocker pointing at this section and recommends Lane 3 (`--mode=freeform-emit`).
 
 ## 6. Test coverage
 

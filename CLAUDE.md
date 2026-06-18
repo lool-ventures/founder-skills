@@ -33,6 +33,7 @@
 - `founder-skills/skills/cap-table/` — Cap-table skill (SAFE / note conversion, priced rounds, anti-dilution, Israeli ↔ Delaware flips)
 - `founder-skills/agents/cap-table.md` — Cap-table agent definition (Context A extraction + Context B coaching)
 - `founder-skills/tests/test_cap_table.py` — Cap-table regression tests (math producers + 11-gotcha regression suite)
+- `founder-skills/tests/test_cap_table_freeform.py` — Lane-3 freeform mapper tests (`freeform_mapper.map_freeform` golden maps + blockers + `--mode=freeform-emit` CLI + the `cap_state` `E_NO_EQUITY_BASE` guard)
 - `founder-skills/tests/test_visualize_cap_table.py` — Cap-table HTML visualization tests
 - `founder-skills/tests/cowork_async_subagent_filter.py` — Cowork sub-agent tool-name compatibility helper (skill-quality CI; v0.4.0-regression detector)
 - `founder-skills/tests/compose_invocations.py` — Per-skill compose-script invocation registry (skill-quality CI)
