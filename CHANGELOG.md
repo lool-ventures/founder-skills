@@ -15,9 +15,11 @@ A broad correctness, observability, and presentation pass across all six skills 
 cap-table introduction. The headline work: a full-repo audit remediation hardening every skill and
 the shared scripts; the lool brand theme applied to every generated HTML artifact; self-sufficient
 reports that read standalone without the chat context; a founder feedback channel; deterministic
-`run_id` stamping and artifacts-root resolution; and a large cap-table extraction- and
-math-correctness pass. New drift-contract and renderer-key-coverage test suites lock each skill's
-prose to its producers so these fixes can't silently regress.
+`run_id` stamping, artifacts-root resolution, and fleet-wide outputs-tree safety; and a large
+cap-table extraction- and math-correctness pass. New drift-contract and renderer-key-coverage test
+suites lock each skill's prose to its producers, and a fleet-wide cowork-harness replay gate
+exercises every skill under Cowork's runtime token-free on each PR — so these fixes can't silently
+regress.
 
 ### Added — feedback channel
 
@@ -46,14 +48,29 @@ prose to its producers so these fixes can't silently regress.
   self-contained, with a footer credit. A theme-sync contract test keeps each skill's `_theme.py`
   copy identical.
 
+### Added — cowork-harness replay gate
+
+- A token-free **replay** PR gate (`.github/workflows/cowork-replay.yml`) exercises the skills under
+  Claude Cowork's runtime via `cowork-harness` (≥ 0.5.0). Recording is live (staged agent + Docker);
+  replay/verify run token- and agent-free in stock CI. **11 committed cassettes:** six cap-table
+  scenarios (Lane 1/2/4 extraction, anti-hallucination, priced-round + BBWA anti-dilution,
+  fast-assess routing) plus a per-skill fleet-parity smoke for market-sizing, ic-sim,
+  competitive-positioning, deck-review, and financial-model-review — each proving the artifacts-root
+  resolver lands deliverables at `outputs/artifacts/<skill>-<slug>/` with no host-path leak and no
+  `outputs/` delete.
+- The suite lives at the repo root (`cowork-tests/`), **outside** the hashed plugin mount, so editing
+  a scenario or fixture no longer churns the cassette staleness fingerprint. Staleness is further
+  **scoped per skill** — each scenario declares the skill it exercises, and
+  `founder-skills/.cowork-hashignore` drops `tests/` (pytest is not skill runtime) — so editing one
+  skill re-stales only its own cassette.
+- The CI gate is split: **privacy is hard-fail** (class-scoped `--allow-domain` / `--allow-email`
+  allowlists; only synthetic email domains permitted) and **staleness is warn-only** (the whole-plugin
+  mount otherwise re-stales every cassette on any skill edit). An **email canary** must trip under the
+  same allowlist, so the job fails if the email tripwire is ever silently disabled. All fixtures are
+  synthetic.
+
 ### Added — other
 
-- **cap-table cowork-harness replay gate.** Token-free **replay** PR gate
-  (`.github/workflows/cowork-replay.yml`) over committed cassettes that exercise the cap-table skill
-  under Claude Cowork's runtime via `cowork-harness`. Recording is live (staged agent + Docker);
-  replay/verify run token- and agent-free in stock CI. Six scenarios cover Lane 1/2/4 extraction,
-  anti-hallucination, priced-round + BBWA anti-dilution, and fast-assess routing, plus a
-  `verify-cassettes` privacy + staleness scan over synthetic-only fixtures.
 - **cap-table:** Articles-of-Association extraction dispatch template (Lane 1); `--mode=grid` dumps
   the Lane-3 cell grid deterministically; vision fallback for image-only documents in the evidence
   verifier.
@@ -72,9 +89,14 @@ prose to its producers so these fixes can't silently regress.
   intent ("under `outputs/`") but dropped the detection, landing `outputs/` in one run and
   `outputs/artifacts/` in another, desyncing cross-skill `find_artifact.py` resolution and
   path-based assertions. All six skills now invoke a shared `scripts/resolve_artifacts_root.py`
-  (fixed resolution order, deterministic, creates the dir) as one opaque command. cap-table
-  additionally stages sub-agent JSON in a `/tmp` mktemp dir instead of under the promoted `outputs/`
-  tree, since deletes under `outputs/` are unsafe or denied in Cowork.
+  (fixed resolution order, deterministic, creates the dir) as one opaque command.
+- **Outputs-tree safety (fleet-wide).** In Cowork the per-run work dir is the promoted, user-visible
+  `outputs/` tree, where staging scratch or deleting artifacts is unsafe — Cowork can deny the delete
+  and the parity gate flags it. All six skills now stage sub-agent JSON in a `/tmp` mktemp dir and
+  overwrite each artifact in place every run instead of a fresh-start `rm`; a fresh per-run `run_id`
+  plus compose's `STALE_ARTIFACT` parity check backstop any skipped-step leftover. deck-review keeps
+  its `setup_run.py` resume lifecycle, with its `--clean` delete now tolerant of a Cowork-denied
+  delete. A `test_skill_orchestration` guard flags any `outputs/`-tree `.staging` path or `rm`.
 - **CI version-bump filter** now requires in-plugin Markdown bumps, matching the documented
   versioning policy.
 
