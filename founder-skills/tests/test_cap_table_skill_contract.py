@@ -138,7 +138,7 @@ def _collect_argparse_mode_choices(script_path: Path) -> frozenset[str]:
     if not m:
         return frozenset()
     raw = m.group(1)
-    return frozenset(re.findall(r'["\']([a-z_]+)["\']', raw))
+    return frozenset(re.findall(r'["\']([a-z_-]+)["\']', raw))
 
 
 def _extract_invocation_flags_from_text(text: str) -> dict[str, set[str]]:
@@ -201,7 +201,7 @@ def _extract_mode_values_from_text(text: str) -> dict[str, set[str]]:
             m = re.search(r"python3[^\|;]*?/([a-z_]+\.py)", line)
             if m:
                 script_name = m.group(1)
-                for mv in re.findall(r"--mode=([a-z_]+)", line):
+                for mv in re.findall(r"--mode=([a-z_-]+)", line):
                     result.setdefault(script_name, set()).add(mv)
     return result
 
@@ -736,7 +736,7 @@ def test_spreadsheet_structure_detection_return_shape() -> None:
     assert start != -1, f"{AGENT_MD.name} has no '{anchor}' section"
     section = agent_text[start : start + 4000]
 
-    # extract_cap_table.py --mode=freeform expects {"blocks": [...]}
+    # extract_cap_table.py --mode=freeform-emit expects {"blocks": [...]}
     assert '"blocks"' in section, (
         f"{AGENT_MD.name} SPREADSHEET_STRUCTURE_DETECTION return shape "
         f"is missing 'blocks' key (extract_cap_table.py reads blocks from stdin)"

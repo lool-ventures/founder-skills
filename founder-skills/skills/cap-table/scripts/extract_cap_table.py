@@ -16,8 +16,8 @@ Modes:
     references/carta-pulley-mapping.md).
   * --mode=pulley: stub — Pulley column mapping is Phase 1 follow-up
     (no real Pulley exports in the corpus yet to verify against).
-  * --mode=freeform: validates Context-A SPREADSHEET_STRUCTURE_DETECTION
-    sub-agent output; the actual cell-mapping happens in the sub-agent.
+  * --mode=freeform-emit: deterministically maps Context-A SPREADSHEET_STRUCTURE_DETECTION
+    blocks (stdin) + the --xlsx grid into schema-valid inputs.json + instruments.json.
 
 Carta extractor implementation notes (per real-world corpus):
   * Carta puts a banner in rows 2-3; real headers are in row 5.
@@ -412,15 +412,15 @@ def _carta_extract(xlsx_path: str) -> dict[str, Any]:
     # skipped, discount normalization not applied, both rows classified as
     # notes). Raising E_CARTA_FINGERPRINT_MISMATCH tells the founder the
     # file isn't the expected shape so they can re-export or fall back to
-    # --mode=freeform.
+    # Lane 3 (--mode=freeform-emit).
     if format_detected == "unknown":
         raise CartaFingerprintMismatchError(
             "E_CARTA_FINGERPRINT_MISMATCH: --mode=carta was specified but the workbook "
             f"sheet names {sheet_names!r} do not match Carta's verified Summary Cap Table + "
             "Convertible Ledger fingerprint. The export may be from a different version of "
             "Carta, a different vendor (Pulley/etc.), or a custom workbook. Re-export the "
-            "Carta cap table or use --mode=freeform to dispatch a Context-A "
-            "SPREADSHEET_STRUCTURE_DETECTION sub-agent."
+            "Carta cap table, or fall back to Lane 3: dispatch a Context-A "
+            "SPREADSHEET_STRUCTURE_DETECTION sub-agent and run --mode=freeform-emit."
         )
 
     # 1. Read Summary Cap Table for share-class totals
@@ -512,8 +512,9 @@ def _mode_carta(args: argparse.Namespace) -> int:
             "blocker": "E_CARTA_FINGERPRINT_MISMATCH",
             "error": str(e)[:600],
             "remedy": (
-                "The workbook isn't the Carta shape we extract from. Re-export from Carta, "
-                "or fall back to --mode=freeform to dispatch Context-A SPREADSHEET_STRUCTURE_DETECTION."
+                "The workbook isn't the Carta shape we extract from. Re-export from Carta, or "
+                "fall back to Lane 3 (--mode=freeform-emit) via a Context-A "
+                "SPREADSHEET_STRUCTURE_DETECTION dispatch."
             ),
         }
         print(json.dumps(err_receipt, indent=2))
@@ -524,7 +525,9 @@ def _mode_carta(args: argparse.Namespace) -> int:
             "mode": "carta",
             "blocker": "carta_extraction_failed",
             "error": f"{type(e).__name__}: {e}"[:300],
-            "remedy": "Fall back to --mode=freeform and dispatch Context-A SPREADSHEET_STRUCTURE_DETECTION.",
+            "remedy": (
+                "Fall back to Lane 3 (--mode=freeform-emit) via a Context-A SPREADSHEET_STRUCTURE_DETECTION dispatch."
+            ),
         }
         print(json.dumps(err_receipt, indent=2))
         return 1
@@ -587,8 +590,8 @@ def _mode_pulley_stub(args: argparse.Namespace) -> int:
         "blocker": "pulley_mapping_not_yet_implemented",
         "remedy": (
             "Pulley extraction is a Phase 1 follow-up — no real Pulley exports "
-            "in the test corpus to verify against. Run --mode=freeform and "
-            "dispatch the Context A sub-agent SPREADSHEET_STRUCTURE_DETECTION."
+            "in the test corpus to verify against. Dispatch the Context-A "
+            "SPREADSHEET_STRUCTURE_DETECTION sub-agent and run --mode=freeform-emit (Lane 3)."
         ),
     }
     print(json.dumps(receipt, indent=2))
@@ -685,46 +688,6 @@ def _mode_grid(args: argparse.Namespace) -> int:
     else:
         print(json.dumps(payload, indent=2 if args.pretty else None))
 
-    return 0
-
-
-def _mode_freeform_validate(args: argparse.Namespace) -> int:
-    """Validate Context-A sub-agent output for spreadsheet structure detection.
-
-    Expects JSON on stdin matching the agent's SPREADSHEET_STRUCTURE_DETECTION
-    return shape: {"blocks": [{"block_type", "sheet", "cell_range",
-    "column_role_map", "confidence", "evidence"}, ...]}.
-
-    For v0.1: validates the shape, surfaces ambiguities, but does NOT yet
-    convert the cell-mapping to instruments.json automatically — that's
-    Phase 1 follow-up work. The agent's mapping is captured to
-    extraction_audit.json and the founder confirms before commit.
-    """
-    payload = json.load(sys.stdin)
-    if "blocks" not in payload or not isinstance(payload["blocks"], list):
-        sys.stderr.write("extract_cap_table.py freeform: expected {blocks: [...]} on stdin\n")
-        return 1
-
-    audit = {
-        "mode": "freeform",
-        "blocks_detected": len(payload["blocks"]),
-        "blocks": payload["blocks"],
-        "low_confidence_blocks": [b for b in payload["blocks"] if b.get("confidence") in {"low", "medium"}],
-        "ambiguities": [a for b in payload["blocks"] for a in b.get("ambiguities", [])],
-        "next_action": (
-            "Present low_confidence_blocks + ambiguities to the founder via "
-            "AskUserQuestion. Once confirmed, map each block into "
-            "inputs.json + instruments.json (Phase 1 follow-up: automate the mapping)."
-        ),
-    }
-
-    if args.output:
-        out = os.path.abspath(args.output)
-        os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-        with open(out, "w", encoding="utf-8") as f:
-            json.dump(audit, f, indent=2)
-        audit["written_to"] = out
-    print(json.dumps(audit, indent=2 if args.pretty else None))
     return 0
 
 
@@ -901,7 +864,7 @@ def main() -> int:
     p.add_argument(
         "--mode",
         required=True,
-        choices=["validate", "carta", "pulley", "freeform", "freeform-emit", "auto", "grid"],
+        choices=["validate", "carta", "pulley", "freeform-emit", "auto", "grid"],
         help=(
             "validate: schema-check existing JSON in --dir; carta: extract from "
             "Carta XLSX (--xlsx); pulley: stub; freeform: validate Context-A "
@@ -969,8 +932,8 @@ def main() -> int:
                     "detected_format": "freeform",
                     "remedy": (
                         "Workbook does not match Carta or Pulley fingerprints. "
-                        "Run --mode=freeform with the Context-A SPREADSHEET_STRUCTURE_DETECTION "
-                        "sub-agent output piped on stdin."
+                        "Dispatch the Context-A SPREADSHEET_STRUCTURE_DETECTION sub-agent and pipe "
+                        "its blocks to --mode=freeform-emit (Lane 3)."
                     ),
                     "sheet_names": wb.sheetnames,
                 },
@@ -986,7 +949,8 @@ def main() -> int:
         return _mode_grid(args)
     if args.mode == "freeform-emit":
         return _mode_freeform_emit(args)
-    return _mode_freeform_validate(args)
+    sys.stderr.write(f"unknown mode: {args.mode}\n")
+    return 1
 
 
 if __name__ == "__main__":

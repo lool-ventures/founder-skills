@@ -4588,7 +4588,7 @@ class TestCorpusRobustness:
                 f.write("From: lawyer@example.com\nSubject: Cap table\n\n[attachment removed]")
             rc, stdout, stderr = _run(
                 "extract_cap_table.py",
-                ["--mode", "freeform", "--xlsx", eml_path, "-o", os.path.join(d, "audit.json")],
+                ["--mode", "auto", "--xlsx", eml_path],
             )
             assert rc != 0
             # stdout should contain the structured blocker
@@ -6742,18 +6742,16 @@ class TestExtractCapTableRunId:
                 f"Expected run_id='t', got {instruments['metadata'].get('run_id')!r}"
             )
 
-    def test_run_id_flag_accepted_freeform(self) -> None:
-        """--run-id must not be rejected (unknown-arg error) on freeform mode."""
-        # freeform reads stdin; pass minimal valid payload
+    def test_run_id_flag_accepted_freeform_emit(self) -> None:
+        """--run-id must not be rejected (unknown-arg error) on freeform-emit mode."""
         payload = json.dumps({"blocks": []})
         with tempfile.TemporaryDirectory() as d:
-            out = os.path.join(d, "audit.json")
             rc, stdout, stderr = _run(
                 "extract_cap_table.py",
-                ["--mode", "freeform", "--run-id", "myrun", "-o", out],
+                ["--mode", "freeform-emit", "--run-id", "myrun", "--xlsx", os.path.join(d, "x.xlsx"), "--dir", d],
                 stdin_data=payload,
             )
-            # rc may be 0 or non-zero depending on payload, but NOT argparse error
+            # rc may be non-zero (missing xlsx), but NOT an argparse error
             assert "unrecognized arguments" not in stderr, f"--run-id was rejected by argparse: {stderr}"
 
 
