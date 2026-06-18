@@ -691,8 +691,8 @@ def test_cleanup_names_cover_pipeline_artifacts() -> None:
     """
     _ALLOWLIST = frozenset(
         {
-            "gate_state.json",  # cleaned separately at end-of-run (Step 9) and
-            # on fresh runs by setup_run.py; its own lifecycle is documented
+            "gate_state.json",  # cleaned on fresh runs by setup_run.py --clean
+            # (run_id mismatch); left in place at end-of-run (no outputs/ delete)
         }
     )
     mod = _load_setup_run_module()
@@ -704,13 +704,15 @@ def test_cleanup_names_cover_pipeline_artifacts() -> None:
     artifact_names = set(re.findall(r"`([a-z_]+\.(?:json|html|md))`", skill_text))
 
     # Artifact filenames mentioned inside bash blocks (e.g. -o "$REVIEW_DIR/report.html").
-    # Exclude paths that go through .staging/ — those are transient temp files
-    # deleted by ``rm -rf "$REVIEW_DIR/.staging"`` in Step 9, not per-run pipeline outputs.
+    # Exclude transient staging scratch — it is NOT a per-run pipeline output that
+    # --clean must cover. Staging now lives in a `$STAGING_DIR` mktemp'd under /tmp
+    # (the sandbox reclaims it, no rm needed); the legacy `$REVIEW_DIR/.staging`
+    # form is still excluded for safety.
     bash_blocks = re.findall(r"```bash\n(.*?)```", skill_text, re.DOTALL)
     for block in bash_blocks:
         for m in re.finditer(r'([\$/"][^\s"]*?)/([a-z_]+\.(?:json|html|md))', block):
             full_path = m.group(0)
-            if ".staging" not in full_path:
+            if ".staging" not in full_path and "STAGING_DIR" not in full_path:
                 artifact_names.add(m.group(2))
 
     # Vacuity guard: if both extraction regexes stop matching (e.g. a prose

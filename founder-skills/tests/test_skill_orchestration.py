@@ -262,6 +262,52 @@ _RUN_ID_EXEMPT_SCRIPTS = (
 # regression, so every artifact-writing producer pipe must pass it.
 
 
+# Cowork-parity regression (fleet-wide): the promoted outputs/ tree is
+# user-visible AND read-only-after-write in Cowork — staging scratch there or
+# deleting anything there is a parity violation (Cowork can deny the delete,
+# and the harness verdict flags it; crucially the harness text-scan can't
+# resolve a shell `$VAR` to an outputs/ path — limitation H-A — so THIS pytest
+# is the real guard, not the verdict). Every skill resolves its work dir into a
+# `$<X>_DIR` variable under outputs/artifacts/ (ANALYSIS_DIR / SIM_DIR /
+# REVIEW_DIR). The two hazards:
+#   1. `.staging` UNDER that dir (`"$REVIEW_DIR/.staging"`). Fix: stage scratch
+#      in a `$STAGING_DIR` mktemp'd under /tmp. Matched by `/<>.staging` with a
+#      LITERAL slash before `.staging` — so the `$STAGING_DIR` mktemp template
+#      itself (`/tmp/<skill>-${SLUG}.staging.XXXXXX`, `.staging` preceded by
+#      `}`) is NOT matched.
+#   2. a bash `rm` whose target is one of those dir vars (the old fresh-start
+#      bulk-delete). Fix: overwrite-in-place — producers rewrite via `-o`, and
+#      compose's STALE_ARTIFACT (run_ids must match) catches a skipped-step
+#      stale leftover. deck-review's fresh-start is a Python `os.remove` in
+#      setup_run.py (invisible to a bash scan, resume-guarded) — NOT a bash rm,
+#      so it's correctly not matched here.
+_OUTPUTS_DIR_VARS = r"(?:ANALYSIS_DIR|SIM_DIR|REVIEW_DIR)"
+_STAGING_UNDER_OUTPUTS = re.compile(r"\$\{?" + _OUTPUTS_DIR_VARS + r"\}?/\.staging")
+_BASH_RM_OF_OUTPUTS = re.compile(r"\brm\b[^\n`]*\$\{?" + _OUTPUTS_DIR_VARS + r"\b")
+
+
+@pytest.mark.parametrize("skill_md", SKILL_MD_FILES, ids=lambda p: p.parent.name)
+def test_skill_md_stages_scratch_outside_outputs(skill_md: Path) -> None:
+    """No SKILL.md may stage scratch under, or bash-`rm` anything under, the
+    promoted outputs/ work dir (`$ANALYSIS_DIR` / `$SIM_DIR` / `$REVIEW_DIR`).
+
+    Both are Cowork-parity violations (outputs/ is user-visible; deleting there
+    can be denied and trips the verdict). Stage under a `/tmp` `$STAGING_DIR`,
+    and overwrite-in-place instead of bulk-deleting prior artifacts.
+    """
+    text = skill_md.read_text(encoding="utf-8")
+    hits: list[tuple[int, str]] = []
+    for label, pat in (("staging-under-outputs", _STAGING_UNDER_OUTPUTS), ("bash-rm-of-outputs", _BASH_RM_OF_OUTPUTS)):
+        for m in pat.finditer(text):
+            ln = text.count("\n", 0, m.start()) + 1
+            hits.append((ln, f"[{label}] {text.splitlines()[ln - 1].strip()[:90]}"))
+    assert not hits, (
+        f"{skill_md.relative_to(REPO_ROOT)}: Cowork-parity violation under the promoted outputs/ "
+        f"work dir. Stage scratch in a /tmp $STAGING_DIR; overwrite-in-place instead of bulk-rm "
+        f"(see compose's STALE_ARTIFACT backstop):\n" + "\n".join(f"  line {ln}: {txt}" for ln, txt in hits)
+    )
+
+
 @pytest.mark.parametrize("skill_md", SKILL_MD_FILES, ids=lambda p: p.parent.name)
 def test_producer_pipes_carry_run_id(skill_md: Path) -> None:
     """Every `... script.py ... -o <artifact>.json` invocation in a SKILL.md

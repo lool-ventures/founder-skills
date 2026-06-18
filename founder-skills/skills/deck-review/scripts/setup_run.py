@@ -17,6 +17,7 @@ Or simply parsed by a sub-agent that calls this once and uses the values.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
@@ -92,15 +93,25 @@ def main() -> int:
     if args.clean and not resume:
         # Fresh run: remove all cleanable pipeline artifacts so no stale
         # content from a prior run contaminates this invocation.
+        #
+        # In Cowork the review dir is the promoted outputs/ tree, where a delete
+        # can be DENIED ("Operation not permitted").  A denied delete must not be
+        # fatal: tolerate it and fall back to compose_report.py's run_id parity
+        # check (STALE_ARTIFACT) — the same backstop the other skills rely on for
+        # overwrite-in-place.  (Each pipeline step overwrites its artifact via -o
+        # with the fresh run_id, so a surviving prior-run artifact that a later
+        # step does not regenerate is caught as a run_id mismatch.)
         for name in _CLEANABLE_NAMES:
             path = os.path.join(review_dir, name)
             if os.path.isfile(path):
-                os.remove(path)
+                with contextlib.suppress(OSError):
+                    os.remove(path)
         # Also remove a stale answered gate_state.json so it cannot be
         # misread as a resume signal on a later invocation.
         gate_path = os.path.join(review_dir, _GATE_STATE_NAME)
         if os.path.isfile(gate_path):
-            os.remove(gate_path)
+            with contextlib.suppress(OSError):
+                os.remove(gate_path)
             gate_answer, gate_run_id, resume = "", "", False
     # resume is true: _CLEANABLE_NAMES artifacts are same-run checkpoints —
     # leave them intact.  gate_state.json is also preserved (it holds the

@@ -131,17 +131,20 @@ After Step 1 (when the slug is known):
 ```bash
 ANALYSIS_DIR="$ARTIFACTS_ROOT/market-sizing-${SLUG}"
 mkdir -p "$ANALYSIS_DIR"
-mkdir -p "$ANALYSIS_DIR/.staging"   # for ad-hoc sub-agent JSON staging
+# Sub-agent JSON staging lives OUTSIDE the promoted outputs/ tree. Anything under $ANALYSIS_DIR is a
+# user-visible deliverable in Cowork, and deleting under outputs/ is unsafe there — so stage scratch
+# in a temp dir, which is safe to both create and reclaim. Use the printed path verbatim in later steps.
+STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/market-sizing-${SLUG:-co}.staging.XXXXXX")"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
 Pass `RUN_ID` to all sub-agents. Every artifact written to `$ANALYSIS_DIR` must include `"metadata": {"run_id": "$RUN_ID"}` at the top level. `compose_report.py` checks that all artifact run IDs match — a mismatch triggers a `STALE_ARTIFACT` high-severity warning, blocking under `--strict`.
 
-If `ANALYSIS_DIR` already contains artifacts from a previous run, remove them before starting:
-
-    rm -f "$ANALYSIS_DIR"/{inputs,methodology,validation,sizing,sensitivity,checklist,report}.json "$ANALYSIS_DIR"/report.{html,md}
-
-In Cowork, file deletion may require explicit permission. If cleanup fails with "Operation not permitted", request delete permission and retry before proceeding.
+**Overwrite-in-place — do NOT delete prior artifacts under `$ANALYSIS_DIR`.** It is the promoted `outputs/`
+tree in Cowork, where deleting a user-visible path is unsafe (Cowork can deny it; the parity gate flags
+it). Each producer writes its artifact fresh via `-o` every run, and `RUN_ID` is minted fresh per run —
+so if a prior run left an artifact a later step doesn't regenerate, `compose_report.py`'s `STALE_ARTIFACT`
+check (run_ids must match) catches the mismatch. No bulk `rm` is needed or wanted.
 
 ### Step 1: Read or Create Founder Context
 
@@ -293,15 +296,16 @@ VAL_EOF
 ### Sub-agent JSON staging
 
 When a sub-agent returns JSON too large for bash heredoc, write it to
-`$ANALYSIS_DIR/.staging/<step>_input.json` first, then pipe via:
+`$STAGING_DIR/<step>_input.json` first, then pipe via:
 
 ```bash
-cat "$ANALYSIS_DIR/.staging/<step>_input.json" | python3 "$SCRIPTS/<producer>.py" ...
+cat "$STAGING_DIR/<step>_input.json" | python3 "$SCRIPTS/<producer>.py" ...
 ```
 
-The `.staging/` directory is created at setup and removed at cleanup.
-This avoids `Operation not permitted` errors that occur when writing to
-the session outputs mount (Cowork marks it read-only post-write).
+`$STAGING_DIR` is a `/tmp` scratch dir created at setup; the sandbox reclaims it — never `rm` it (and
+never stage scratch under `$ANALYSIS_DIR`, the promoted outputs/ tree). Staging in `/tmp` also avoids the
+`Operation not permitted` errors that occur when writing to the session outputs mount (Cowork marks it
+read-only post-write).
 
 ### Step 5: Calculate TAM/SAM/SOM -> `sizing.json` (Context A dispatch)
 
@@ -638,9 +642,9 @@ python3 "$SCRIPTS/visualize.py" --dir "$ANALYSIS_DIR" -o "$ANALYSIS_DIR/report.h
 
 Copy final deliverables to workspace root: `{Company}_Market_Sizing.md`, `.html` (if generated), `.json` (optional).
 
-```bash
-rm -rf "$ANALYSIS_DIR/.staging" 2>/dev/null || true
-```
+No cleanup needed: scratch lives in `$STAGING_DIR` (`/tmp`, reclaimed by the sandbox). **Do not `rm`
+anything under `$ANALYSIS_DIR`** — it is the promoted `outputs/` tree in Cowork, where deleting a
+user-visible path is unsafe (and the parity gate flags it).
 
 ## Edge Cases
 

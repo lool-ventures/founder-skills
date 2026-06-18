@@ -138,7 +138,10 @@ python3 "$SCRIPTS/setup_run.py" \
 Read `review_dir`, `run_id`, `resume`, and `gate_answer` from the JSON printed by the previous Bash command. Substitute `REVIEW_DIR` with the `review_dir` value, `RUN_ID` with the `run_id` value, and `IS_RESUMING` with `1` if `resume` is true, else empty, in every subsequent bash block. Then:
 
 ```bash
-mkdir -p "$REVIEW_DIR/.staging"   # for ad-hoc sub-agent JSON staging
+# Sub-agent JSON staging lives OUTSIDE the promoted outputs/ tree. Anything under $REVIEW_DIR is a
+# user-visible deliverable in Cowork, and deleting under outputs/ is unsafe there — so stage scratch
+# in a temp dir, which is safe to both create and reclaim. Use the printed path verbatim in later steps.
+STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/deck-review-${SLUG:-deck}.staging.XXXXXX")"
 ```
 
 To resume across a gate round-trip, the caller's task prompt must supply the prior `RUN_ID` (so `RUN_ID` above is set before this block runs). Then `setup_run.py` sees the answered `gate_state.json` whose `run_id` matches and returns `resume: true` — and because resume is true, `--clean` leaves `gate_state.json`, `deck_inventory.json`, and `stage_profile.json` in place (they are same-run checkpoints for this `RUN_ID`).
@@ -286,8 +289,8 @@ Then return — as your final assistant message — a JSON object the parent age
 - `Different stage`: emit a second gate (gate_id `stage_choice`) via `gate_state.py emit` to ask which stage. Treat this as a fresh gate — return a new `needs_input` payload and let the parent answer it the same way. When that one comes back answered, rebuild the profile for the chosen stage at **high** confidence (the founder explicitly picked it), then re-emit the original `stage_confirmation` gate to confirm:
 
   ```bash
-  cp "$REVIEW_DIR/stage_profile.json" "$REVIEW_DIR/.staging/sp.json"
-  cat "$REVIEW_DIR/.staging/sp.json" | python3 "$SCRIPTS/stage_profile.py" \
+  cp "$REVIEW_DIR/stage_profile.json" "$STAGING_DIR/sp.json"
+  cat "$STAGING_DIR/sp.json" | python3 "$SCRIPTS/stage_profile.py" \
     --rebuild-stage <chosen> --confidence high \
     --run-id "$RUN_ID" -o "$REVIEW_DIR/stage_profile.json"
   ```
@@ -295,8 +298,8 @@ Then return — as your final assistant message — a JSON object the parent age
 - `Not sure — proceed anyway`: proceed with the detected stage at **low** confidence:
 
   ```bash
-  cp "$REVIEW_DIR/stage_profile.json" "$REVIEW_DIR/.staging/sp.json"
-  cat "$REVIEW_DIR/.staging/sp.json" | python3 "$SCRIPTS/stage_profile.py" \
+  cp "$REVIEW_DIR/stage_profile.json" "$STAGING_DIR/sp.json"
+  cat "$STAGING_DIR/sp.json" | python3 "$SCRIPTS/stage_profile.py" \
     --rebuild-stage <detected> --confidence low \
     --run-id "$RUN_ID" -o "$REVIEW_DIR/stage_profile.json"
   ```
@@ -304,18 +307,18 @@ Then return — as your final assistant message — a JSON object the parent age
 - `Stop review` (out-of-scope): exit. Do not run later steps.
 - `Proceed anyway (best-effort)`: rebuild the profile at **low** confidence with `--rebuild-stage series_a --confidence low` (same staged-stdin invocation as above).
 
-`stage_profile.py` requires `--run-id` and `-o`, and reads the existing profile from stdin. Stage the current `stage_profile.json` to `.staging/sp.json` first and pipe *that* in — never `cat` and `-o` the same file in one command, which races and truncates it.
+`stage_profile.py` requires `--run-id` and `-o`, and reads the existing profile from stdin. Stage the current `stage_profile.json` to `$STAGING_DIR/sp.json` first and pipe *that* in — never `cat` and `-o` the same file in one command, which races and truncates it.
 
 ### Sub-agent JSON staging
 
 When a sub-agent returns JSON too large for bash heredoc, write it to
-`$REVIEW_DIR/.staging/<step>_input.json` first, then pipe via:
+`$STAGING_DIR/<step>_input.json` first, then pipe via:
 
 ```bash
-cat "$REVIEW_DIR/.staging/<step>_input.json" | python3 "$SCRIPTS/<producer>.py" ...
+cat "$STAGING_DIR/<step>_input.json" | python3 "$SCRIPTS/<producer>.py" ...
 ```
 
-The `.staging/` directory is created at setup and removed at cleanup.
+`$STAGING_DIR` is a `/tmp` scratch dir created at setup; the sandbox reclaims it — never `rm` it (and never stage scratch under `$REVIEW_DIR`, which is the promoted outputs/ tree in Cowork).
 This avoids `Operation not permitted` errors that occur when writing to
 the session outputs mount (Cowork marks it read-only post-write).
 
@@ -545,13 +548,11 @@ python3 "$SCRIPTS/visualize.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.html"
 
 Copy final deliverables to workspace root: `{Company}_Deck_Review.md`, `.html` (if generated), `.json` (optional).
 
-```bash
-rm -rf "$REVIEW_DIR/.staging" 2>/dev/null || true
-# Remove the answered gate so a later fresh review of this company is not
-# misread as a resume. setup_run.py --clean also guards this, but clearing it
-# at the end of a completed run keeps the working directory honest.
-rm -f "$REVIEW_DIR/gate_state.json" 2>/dev/null || true
-```
+**Do not `rm` anything under `$REVIEW_DIR`** — it is the promoted `outputs/` tree in Cowork, where
+deleting a user-visible path is unsafe (and the parity gate flags it). Scratch already lives in
+`$STAGING_DIR` (`/tmp`, reclaimed by the sandbox). The answered `gate_state.json` is left in place; a
+later fresh review of this company is not misread as a resume because `setup_run.py --clean` deletes a
+stale answered gate (run_id mismatch) at the start of the next run.
 
 ## Gotchas
 

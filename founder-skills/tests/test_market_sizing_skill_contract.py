@@ -733,70 +733,27 @@ def test_compose_required_artifacts_count_and_names() -> None:
     )
 
 
-def test_cleanup_rm_covers_pipeline_artifacts() -> None:
-    """The previous-run cleanup rm -f block in SKILL.md must cover every per-run
-    pipeline artifact mentioned in SKILL.md.
-
-    Market-sizing uses a bare 'rm -f' brace-expansion list (not setup_run.py).
-    Run_id parity is the staleness guard — any artifact NOT in the cleanup list
-    can satisfy a gate with last run's content.
-
-    Vacuity guards:
-    - At least 5 artifact names must be extracted from SKILL.md prose.
-    - The cleanup block itself must be found (checked by rm -f anchor).
-
-    Allowlist: reference docs (not runtime outputs) and schema files.
+def test_overwrite_in_place_no_outputs_delete() -> None:
+    """Cowork-parity: market-sizing must NOT bash-`rm` prior artifacts under
+    `$ANALYSIS_DIR` (the promoted outputs/ tree) and must NOT stage scratch
+    there. It overwrites-in-place (producers rewrite via `-o`; compose's
+    STALE_ARTIFACT run_id check backstops a skipped-step leftover) and stages in
+    a `/tmp` `$STAGING_DIR`. Replaces the old `rm -f` cleanup-coverage test —
+    deleting under outputs/ is the regression now, not an uncovered artifact.
     """
-    _ALLOWLIST: frozenset[str] = frozenset()
-
     skill_text = SKILL_MD.read_text(encoding="utf-8")
-
-    # Find the cleanup rm -f block
-    cleanup_start = skill_text.find("rm -f")
-    assert cleanup_start != -1, f"{SKILL_MD.name} has no 'rm -f' cleanup block"
-
-    # The cleanup command spans a single line/paragraph
-    cleanup = skill_text[cleanup_start : skill_text.find("\n\n", cleanup_start)]
-
-    # Expand brace-expansion form 1: {inputs,methodology,...}.json → individual filenames
-    for stems, ext in re.findall(r"\{([^}]+)\}\.(json|html|md)", cleanup):
-        cleanup += " " + " ".join(f"{s}.{ext}" for s in stems.split(","))
-    # Expand brace-expansion form 2: report.{html,md} → report.html report.md
-    for stem, exts in re.findall(r"([a-z_]+)\.\{([^}]+)\}", cleanup):
-        cleanup += " " + " ".join(f"{stem}.{e}" for e in exts.split(","))
-
-    # Collect all per-run artifact names from prose (backtick spans)
-    artifact_names = set(re.findall(r"`([a-z_]+\.(?:json|html|md))`", skill_text))
-
-    # Also collect from bash blocks (e.g. -o "$ANALYSIS_DIR/sizing.json")
-    bash_blocks = re.findall(r"```bash\n(.*?)```", skill_text, re.DOTALL)
-    for block in bash_blocks:
-        for m in re.finditer(r'(?:["\$/][^\s"]*?)/([a-z_]+\.(?:json|html|md))', block):
-            full_path = m.group(0)
-            if ".staging" not in full_path:
-                artifact_names.add(m.group(1))
-
-    # Vacuity guard
-    assert len(artifact_names) >= 5, (
-        f"Artifact-name extraction found only {len(artifact_names)} names in {SKILL_MD.name} "
-        f"— backtick/bash-block regexes may have stopped matching"
+    # No bash rm targeting the outputs work dir.
+    assert not re.search(r"\brm\b[^\n`]*\$\{?ANALYSIS_DIR\b", skill_text), (
+        f"{SKILL_MD.name}: bash `rm` of $ANALYSIS_DIR (promoted outputs/) — overwrite-in-place instead"
     )
-
-    # Reference doc filenames (not runtime outputs)
-    _REFERENCE_DOCS = frozenset(
-        {
-            "artifact-schemas.md",
-            "pitfalls-checklist.md",
-            "tam-sam-som-methodology.md",
-        }
+    # No `.staging` UNDER the outputs dir (the /tmp $STAGING_DIR template, '.staging.XXXXXX', is fine).
+    assert not re.search(r"\$\{?ANALYSIS_DIR\}?/\.staging", skill_text), (
+        f"{SKILL_MD.name}: stages scratch under $ANALYSIS_DIR — use a /tmp $STAGING_DIR"
     )
-
-    missing = sorted(
-        n
-        for n in artifact_names - _ALLOWLIST
-        if n not in cleanup and not n.endswith(".schema.json") and n not in _REFERENCE_DOCS
+    # Positive: a /tmp $STAGING_DIR is mktemp'd at setup.
+    assert re.search(r'STAGING_DIR="\$\(mktemp -d', skill_text), (
+        f"{SKILL_MD.name}: expected a `$STAGING_DIR` mktemp'd under /tmp for sub-agent scratch"
     )
-    assert not missing, f"Pipeline artifacts in {SKILL_MD.name} not covered by cleanup rm -f: {missing}"
 
 
 # ---------------------------------------------------------------------------

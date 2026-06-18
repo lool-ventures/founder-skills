@@ -138,15 +138,20 @@ After Step 1 (when the slug is known):
 ```bash
 ANALYSIS_DIR="$ARTIFACTS_ROOT/competitive-positioning-${SLUG}"
 mkdir -p "$ANALYSIS_DIR"
-mkdir -p "$ANALYSIS_DIR/.staging"   # for ad-hoc sub-agent JSON staging
+# Sub-agent JSON staging lives OUTSIDE the promoted outputs/ tree. Anything under $ANALYSIS_DIR is a
+# user-visible deliverable in Cowork, and deleting under outputs/ is unsafe there — so stage scratch
+# in a temp dir, which is safe to both create and reclaim. Use the printed path verbatim in later steps.
+STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/competitive-positioning-${SLUG:-co}.staging.XXXXXX")"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
 Pass `RUN_ID` to all sub-agents. Every artifact must include `"metadata": {"run_id": "$RUN_ID"}`. `compose_report.py` checks run_id consistency — a mismatch triggers `STALE_ARTIFACT`. Its sibling integrity checks emit `CORRUPT_ARTIFACT` (artifact file is not valid JSON) and `UNVALIDATED_ARTIFACT` (artifact exists but was written directly instead of through its producer script — the `_produced_by` stamp is missing or wrong). All three are high-severity: fix the artifact by re-running the producer; never hand-edit it to silence the warning.
 
-If `ANALYSIS_DIR` already contains artifacts from a previous run, remove them before starting:
-
-    rm -f "$ANALYSIS_DIR"/{product_profile,landscape_draft,landscape,positioning,moat_scores,positioning_scores,checklist,report}.json "$ANALYSIS_DIR/report.html" "$ANALYSIS_DIR/explore.html"
+**Overwrite-in-place — do NOT delete prior artifacts under `$ANALYSIS_DIR`.** It is the promoted
+`outputs/` tree in Cowork, where deleting a user-visible path is unsafe (Cowork can deny it; the parity
+gate flags it). Each producer writes its artifact fresh via `-o` every run, and `RUN_ID` is minted fresh
+per run — so if a prior run left an artifact a later step doesn't regenerate, `compose_report.py`'s
+`STALE_ARTIFACT` check (run_ids must match) catches the mismatch. No bulk `rm` is needed or wanted.
 
 ### Step 1: Read or Create Founder Context
 
@@ -212,15 +217,16 @@ Apply all corrections to `landscape_draft.json` before proceeding.
 ### Sub-agent JSON staging
 
 When a sub-agent returns JSON too large for bash heredoc, write it to
-`$ANALYSIS_DIR/.staging/<step>_input.json` first, then pipe via:
+`$STAGING_DIR/<step>_input.json` first, then pipe via:
 
 ```bash
-cat "$ANALYSIS_DIR/.staging/<step>_input.json" | python3 "$SCRIPTS/<producer>.py" ...
+cat "$STAGING_DIR/<step>_input.json" | python3 "$SCRIPTS/<producer>.py" ...
 ```
 
-The `.staging/` directory is created at setup and removed at cleanup.
-This avoids `Operation not permitted` errors that occur when writing to
-the session outputs mount (Cowork marks it read-only post-write).
+`$STAGING_DIR` is a `/tmp` scratch dir created at setup; the sandbox reclaims it — never `rm` it (and
+never stage scratch under `$ANALYSIS_DIR`, the promoted outputs/ tree). Staging in `/tmp` also avoids the
+`Operation not permitted` errors that occur when writing to the session outputs mount (Cowork marks it
+read-only post-write).
 
 ### Step 4: Research & Enrich Competitors -> `landscape.json` (Context A: LANDSCAPE_RESEARCH dispatch)
 
@@ -544,8 +550,11 @@ Copy final deliverables to workspace root with clean names:
 cp "$ANALYSIS_DIR/report.md" "./${COMPANY_NAME}_Competitive_Positioning.md"
 cp "$ANALYSIS_DIR/report.html" "./${COMPANY_NAME}_Competitive_Positioning.html" 2>/dev/null
 cp "$ANALYSIS_DIR/explore.html" "./${COMPANY_NAME}_Competitive_Explorer.html" 2>/dev/null
-rm -rf "$ANALYSIS_DIR/.staging" 2>/dev/null || true
 ```
+
+Scratch lives in `$STAGING_DIR` (`/tmp`, reclaimed by the sandbox) — no cleanup needed. **Do not `rm`
+anything under `$ANALYSIS_DIR`** — it is the promoted `outputs/` tree in Cowork, where deleting a
+user-visible path is unsafe (and the parity gate flags it).
 
 Where `COMPANY_NAME` is the company name with spaces replaced by underscores (e.g., "Acme Corp" -> "Acme_Corp"). Present the file paths to the user.
 

@@ -765,71 +765,24 @@ def test_compose_required_artifacts_count() -> None:
     )
 
 
-def test_cleanup_rm_covers_pipeline_artifacts() -> None:
-    """The previous-run cleanup rm -f block in SKILL.md must cover every per-run
-    pipeline artifact mentioned in SKILL.md.
-
-    ic-sim uses a bare 'rm -f' brace-expansion list (not setup_run.py).
-    Run_id parity is the staleness guard (STALE_ARTIFACT warning) — so any artifact
-    NOT in the cleanup list can satisfy a gate with last run's content.
-
-    Vacuity guards:
-    - At least 5 artifact names must be extracted from SKILL.md prose.
-    - The cleanup block itself must be found.
-
-    Allowlist: artifacts that are not per-run outputs and may legitimately be
-    absent from the cleanup list.
+def test_overwrite_in_place_no_outputs_delete() -> None:
+    """Cowork-parity: ic-sim must NOT bash-`rm` prior artifacts under `$SIM_DIR`
+    (the promoted outputs/ tree) and must NOT stage scratch there. It
+    overwrites-in-place (producers rewrite via `-o`; compose's STALE_ARTIFACT
+    run_id check backstops a skipped-step leftover) and stages in a `/tmp`
+    `$STAGING_DIR`. Replaces the old `rm -f` cleanup-coverage test — deleting
+    under outputs/ is the regression now, not an uncovered artifact.
     """
-    _ALLOWLIST: frozenset[str] = frozenset()
-
     skill_text = SKILL_MD.read_text(encoding="utf-8")
-
-    # Find the cleanup rm -f block
-    cleanup_start = skill_text.find("rm -f")
-    assert cleanup_start != -1, f"{SKILL_MD.name} has no 'rm -f' cleanup block"
-
-    # The cleanup command spans a continuation — take its paragraph
-    cleanup = skill_text[cleanup_start : skill_text.find("\n\n", cleanup_start)]
-    # Expand brace-expansion form 1: {a,b,c}.ext → a.ext b.ext c.ext
-    for stems, ext in re.findall(r"\{([^}]+)\}\.(json|html|md)", cleanup):
-        cleanup += " " + " ".join(f"{s}.{ext}" for s in stems.split(","))
-    # Expand brace-expansion form 2: stem.{ext1,ext2} → stem.ext1 stem.ext2
-    # (used for report.{html,md} in ic-sim's cleanup line)
-    for stem, exts in re.findall(r"([a-z_]+)\.\{([^}]+)\}", cleanup):
-        cleanup += " " + " ".join(f"{stem}.{e}" for e in exts.split(","))
-
-    # Collect all per-run artifact names from prose (backtick spans)
-    artifact_names = set(re.findall(r"`([a-z_]+\.(?:json|html|md))`", skill_text))
-
-    # Also collect from bash blocks (e.g. -o "$SIM_DIR/report.json")
-    bash_blocks = re.findall(r"```bash\n(.*?)```", skill_text, re.DOTALL)
-    for block in bash_blocks:
-        for m in re.finditer(r'(?:["\$/][^\s"]*?)/([a-z_]+\.(?:json|html|md))', block):
-            full_path = m.group(0)
-            if ".staging" not in full_path:
-                artifact_names.add(m.group(1))
-
-    # Vacuity guard
-    assert len(artifact_names) >= 5, (
-        f"Artifact-name extraction found only {len(artifact_names)} names in {SKILL_MD.name} "
-        f"— backtick/bash-block regexes may have stopped matching"
+    assert not re.search(r"\brm\b[^\n`]*\$\{?SIM_DIR\b", skill_text), (
+        f"{SKILL_MD.name}: bash `rm` of $SIM_DIR (promoted outputs/) — overwrite-in-place instead"
     )
-
-    missing = sorted(
-        n
-        for n in artifact_names - _ALLOWLIST
-        if n not in cleanup
-        and not n.endswith(".schema.json")
-        # Skip reference docs (not runtime outputs)
-        and n
-        not in {
-            "artifact-schemas.md",
-            "partner-archetypes.md",
-            "evaluation-criteria.md",
-            "ic-dynamics.md",
-        }
+    assert not re.search(r"\$\{?SIM_DIR\}?/\.staging", skill_text), (
+        f"{SKILL_MD.name}: stages scratch under $SIM_DIR — use a /tmp $STAGING_DIR"
     )
-    assert not missing, f"Pipeline artifacts in {SKILL_MD.name} not covered by cleanup rm -f: {missing}"
+    assert re.search(r'STAGING_DIR="\$\(mktemp -d', skill_text), (
+        f"{SKILL_MD.name}: expected a `$STAGING_DIR` mktemp'd under /tmp for sub-agent scratch"
+    )
 
 
 # ---------------------------------------------------------------------------

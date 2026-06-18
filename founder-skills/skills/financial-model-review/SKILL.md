@@ -152,18 +152,20 @@ After Step 1 (when the slug is known):
 ```bash
 REVIEW_DIR="$ARTIFACTS_ROOT/financial-model-review-${SLUG}"
 mkdir -p "$REVIEW_DIR"
-mkdir -p "$REVIEW_DIR/.staging"   # for ad-hoc sub-agent JSON staging
+# Sub-agent JSON staging lives OUTSIDE the promoted outputs/ tree. Anything under $REVIEW_DIR is a
+# user-visible deliverable in Cowork, and deleting under outputs/ is unsafe there — so stage scratch
+# in a temp dir, which is safe to both create and reclaim. Use the printed path verbatim in later steps.
+STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/financial-model-review-${SLUG:-fmr}.staging.XXXXXX")"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 ```
 
 Pass `RUN_ID` to all sub-agents. The four producer artifacts (`inputs.json`, `checklist.json`, `unit_economics.json`, `runway.json`) must carry `"metadata": {"run_id": "$RUN_ID"}` at the top level — including skipped stubs, whose stub heredoc carries the same `"metadata": {"run_id": "$RUN_ID"}` block. The producers propagate it from their stdin payloads; never hand-edit script outputs to add it. (`model_data.json` and `extraction_validation.json` have no run_id by design.) `compose_report.py` checks that all present run IDs match — a mismatch triggers a `STALE_ARTIFACT` high-severity warning, blocking under `--strict`. Stub artifacts are exempt from the value comparison but still carry the `run_id` key so the Context B parity grep finds it.
 
-If `REVIEW_DIR` already contains artifacts from a previous run, remove them before starting:
-
-    rm -f "$REVIEW_DIR"/{inputs,checklist,unit_economics,runway,report,model_data,extraction_validation,corrected_inputs,extraction_corrections,corrections_from_agent,commentary}.json \
-          "$REVIEW_DIR/report.html" "$REVIEW_DIR/explore.html" "$REVIEW_DIR/review.html" "$REVIEW_DIR/report.md"
-
-In Cowork, file deletion may require explicit permission. If cleanup fails with "Operation not permitted", request delete permission and retry before proceeding.
+**Overwrite-in-place — do NOT delete prior artifacts under `$REVIEW_DIR`.** It is the promoted
+`outputs/` tree in Cowork, where deleting a user-visible path is unsafe (Cowork can deny it; the parity
+gate flags it). Each producer writes its artifact fresh via `-o` every run, and `RUN_ID` is minted fresh
+per run — so if a prior run left an artifact a later step doesn't regenerate, `compose_report.py`'s
+`STALE_ARTIFACT` check (run_ids must match) catches the mismatch. No bulk `rm` is needed or wanted.
 
 ### Step 1: Read or Create Founder Context
 
@@ -215,15 +217,16 @@ Check the `periodicity_summary` and per-sheet `periodicity` fields. If periodici
 ### Sub-agent JSON staging
 
 When a sub-agent returns JSON too large for bash heredoc, write it to
-`$REVIEW_DIR/.staging/<step>_input.json` first, then pipe via:
+`$STAGING_DIR/<step>_input.json` first, then pipe via:
 
 ```bash
-cat "$REVIEW_DIR/.staging/<step>_input.json" | python3 "$SCRIPTS/<producer>.py" ...
+cat "$STAGING_DIR/<step>_input.json" | python3 "$SCRIPTS/<producer>.py" ...
 ```
 
-The `.staging/` directory is created at setup and removed at cleanup.
-This avoids `Operation not permitted` errors that occur when writing to
-the session outputs mount (Cowork marks it read-only post-write).
+`$STAGING_DIR` is a `/tmp` scratch dir created at setup; the sandbox reclaims it — never `rm` it (and
+never stage scratch under `$REVIEW_DIR`, the promoted outputs/ tree). Staging in `/tmp` also avoids the
+`Operation not permitted` errors that occur when writing to the session outputs mount (Cowork marks it
+read-only post-write).
 
 ### Step 3: INPUTS_REVIEW Dispatch (Context A)
 
@@ -531,9 +534,9 @@ Stop after returning JSON. Do not narrate.
 
 ### Step 8d: Cleanup
 
-```bash
-rm -rf "$REVIEW_DIR/.staging" 2>/dev/null || true
-```
+No cleanup needed: scratch lives in `$STAGING_DIR` (`/tmp`, reclaimed by the sandbox). **Do not `rm`
+anything under `$REVIEW_DIR`** — it is the promoted `outputs/` tree in Cowork, where deleting a
+user-visible path is unsafe (and the parity gate flags it).
 
 ### Verification Gate 2 (final)
 

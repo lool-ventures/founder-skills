@@ -112,6 +112,31 @@ def test_generates_html() -> None:
         assert "</html>" in stdout
 
 
+def test_3d_tab_degrades_gracefully_in_cowork() -> None:
+    """The optional 3D tab lazy-loads Plotly from a CDN (deliberately not
+    inlined — ~3 MB). In Cowork (embedded viewer, no CDN egress) that load
+    fails. This must degrade to a clear, Cowork-named fallback card, NOT a
+    silent blank tab. Regression guard: a refactor must not drop the
+    `#3d-fallback` card or the `onerror`/`catch` handlers that reveal it.
+
+    (The 2D map is vendored/offline and unaffected; only the 3D tab depends on
+    the CDN. See 2026-06-16-skills-live-test-findings.md Finding 1.)
+    """
+    arts = _all_artifacts()
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        # The fallback card element must exist...
+        assert 'id="3d-fallback"' in stdout, "missing #3d-fallback degradation card"
+        # ...both failure paths (CDN load error AND render error) must reveal it...
+        assert "script.onerror" in stdout, "missing CDN-load-failure (onerror) handler"
+        assert stdout.count("fallback.style.display = 'block'") >= 2, (
+            "both the onerror and the render-catch handlers must reveal the fallback card"
+        )
+        # ...and it must name Cowork so the user knows why and what to do.
+        assert "Cowork" in stdout, "fallback card must name Cowork (the embedded-viewer case)"
+
+
 def test_chartjs_loaded() -> None:
     """Chart.js must be inlined — the vendored source must appear in HTML."""
     arts = _all_artifacts()

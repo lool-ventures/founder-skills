@@ -122,30 +122,27 @@ def test_skill_md_produces_every_gate_required_artifact() -> None:
     assert not missing, f"verify_review requires artifacts SKILL.md never produces: {missing}"
 
 
-def test_cleanup_list_covers_every_pipeline_artifact() -> None:
-    """Every artifact file named in the pipeline table must appear in the
-    previous-run `rm -f` cleanup line — a stale artifact surviving cleanup
-    can silently satisfy a gate with last run's content (regression:
-    commentary.json and five others were missing from the list)."""
-    # Artifacts that are NOT per-run outputs in $REVIEW_DIR and may legitimately
-    # be absent from the cleanup line:
-    _ALLOWLIST = frozenset(
-        {
-            "benchmarks.md",  # shared reference file in $REFS/, never written to $REVIEW_DIR
-            "corrections.json",  # founder-uploaded file consumed by the agent, not a pipeline output
-        }
-    )
+def test_overwrite_in_place_no_outputs_delete() -> None:
+    """Cowork-parity: fmr must NOT bash-`rm` prior artifacts under `$REVIEW_DIR`
+    (the promoted outputs/ tree) and must NOT stage scratch there. It
+    overwrites-in-place (producers rewrite via `-o`; compose's STALE_ARTIFACT
+    run_id check backstops a skipped-step leftover) and stages in a `/tmp`
+    `$STAGING_DIR`. Replaces the old `rm -f` cleanup-coverage test — deleting
+    under outputs/ is the regression now, not an uncovered artifact.
+
+    (The Step-3.6 review page runs `review_inputs.py --static` in Cowork; the
+    `--workspace &` server branch is Claude-Code-only — neither is an rm.)
+    """
     text = SKILL_MD.read_text(encoding="utf-8")
-    cleanup_start = text.find("rm -f")
-    assert cleanup_start != -1
-    # the cleanup command may span continuation lines — take its paragraph
-    cleanup = text[cleanup_start : text.find("\n\n", cleanup_start)]
-    # brace-expansion form: rm -f "$REVIEW_DIR"/{a,b,c}.json — expand it
-    for stems, ext in re.findall(r"\{([^}]+)\}\.(json|html|md)", cleanup):
-        cleanup += " " + " ".join(f"{s}.{ext}" for s in stems.split(","))
-    artifact_names = set(re.findall(r"`([a-z_]+\.(?:json|html|md))`", text))
-    missing = sorted(n for n in artifact_names - _ALLOWLIST if n not in cleanup)
-    assert not missing, f"pipeline artifacts missing from the cleanup rm -f list: {missing}"
+    assert not re.search(r"\brm\b[^\n`]*\$\{?REVIEW_DIR\b", text), (
+        f"{SKILL_MD.name}: bash `rm` of $REVIEW_DIR (promoted outputs/) — overwrite-in-place instead"
+    )
+    assert not re.search(r"\$\{?REVIEW_DIR\}?/\.staging", text), (
+        f"{SKILL_MD.name}: stages scratch under $REVIEW_DIR — use a /tmp $STAGING_DIR"
+    )
+    assert re.search(r'STAGING_DIR="\$\(mktemp -d', text), (
+        f"{SKILL_MD.name}: expected a `$STAGING_DIR` mktemp'd under /tmp for sub-agent scratch"
+    )
 
 
 def test_checklist_dispatch_template_includes_run_id_and_company() -> None:

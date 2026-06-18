@@ -824,84 +824,38 @@ def test_compose_required_artifacts_count_and_names() -> None:
     )
 
 
-def test_cleanup_rm_covers_pipeline_artifacts() -> None:
-    """The previous-run cleanup rm -f block in SKILL.md must cover every per-run
-    pipeline artifact mentioned in SKILL.md.
-
-    Run_id parity is the staleness guard — any artifact NOT in the cleanup list
-    can satisfy a gate with last run's content.
-
-    Vacuity guards:
-    - At least 5 artifact names must be extracted from SKILL.md prose.
-    - The cleanup block itself must be found.
-    """
-    # Reference docs (never deleted) and final deliverables (kept for user).
-    # report.md is the final output written by compose_report.py and copied to
-    # the user's directory — it is intentionally not in the cleanup rm -f list.
-    # benchmarks.md is a shared reference, not a per-run pipeline artifact.
-    _EXCLUDED = frozenset(
-        {
-            "artifact-schemas.md",
-            "checklist-criteria.md",
-            "competitive-analysis-methodology.md",
-            "moat-definitions.md",
-            "stage-expectations.md",
-            "israel-guidance.md",
-            "benchmarks.md",
-            "report.md",  # final deliverable: intentionally kept post-run
-        }
-    )
-
-    skill_text = SKILL_MD.read_text(encoding="utf-8")
-
-    cleanup_start = skill_text.find("rm -f")
-    assert cleanup_start != -1, f"{SKILL_MD.name} has no 'rm -f' cleanup block"
-
-    cleanup = skill_text[cleanup_start : skill_text.find("\n\n", cleanup_start)]
-
-    # Expand brace-expansion form 1: {a,b,c}.ext → individual filenames
-    for stems, ext in re.findall(r"\{([^}]+)\}\.(json|html|md)", cleanup):
-        cleanup += " " + " ".join(f"{s}.{ext}" for s in stems.split(","))
-    # Expand brace-expansion form 2: report.{html,md} → report.html report.md
-    for stem, exts in re.findall(r"([a-z_]+)\.\{([^}]+)\}", cleanup):
-        cleanup += " " + " ".join(f"{stem}.{e}" for e in exts.split(","))
-
-    # Collect artifact names from backtick spans
-    artifact_names = set(re.findall(r"`([a-z_]+\.(?:json|html|md))`", skill_text))
-
-    # Also collect from bash blocks
-    bash_blocks = re.findall(r"```bash\n(.*?)```", skill_text, re.DOTALL)
-    for block in bash_blocks:
-        for m in re.finditer(r'(?:["\$/][^\s"]*?)/([a-z_]+\.(?:json|html|md))', block):
-            full_path = m.group(0)
-            if ".staging" not in full_path:
-                artifact_names.add(m.group(1))
-
-    # Vacuity guard
-    assert len(artifact_names) >= 5, (
-        f"Artifact-name extraction found only {len(artifact_names)} names in {SKILL_MD.name} "
-        f"— backtick/bash-block regexes may have stopped matching"
-    )
-
-    missing = sorted(
-        n for n in artifact_names if n not in cleanup and not n.endswith(".schema.json") and n not in _EXCLUDED
-    )
-    assert not missing, f"Pipeline artifacts in {SKILL_MD.name} not covered by cleanup rm -f: {missing}"
-
-
-def test_staging_dir_is_created_and_removed() -> None:
-    """SKILL.md creates a .staging/ subdirectory after Step 1 and removes it
-    at Step 8 cleanup. Vacuity guard: both the creation and removal patterns
-    must be found.
+def test_overwrite_in_place_no_outputs_delete() -> None:
+    """Cowork-parity: competitive-positioning must NOT bash-`rm` prior artifacts
+    under `$ANALYSIS_DIR` (the promoted outputs/ tree) and must NOT stage scratch
+    there. It overwrites-in-place (producers rewrite via `-o`; compose's
+    STALE_ARTIFACT run_id check backstops a skipped-step leftover) and stages in
+    a `/tmp` `$STAGING_DIR`. Replaces the old `rm -f` cleanup-coverage test —
+    deleting under outputs/ is the regression now, not an uncovered artifact.
     """
     skill_text = SKILL_MD.read_text(encoding="utf-8")
+    assert not re.search(r"\brm\b[^\n`]*\$\{?ANALYSIS_DIR\b", skill_text), (
+        f"{SKILL_MD.name}: bash `rm` of $ANALYSIS_DIR (promoted outputs/) — overwrite-in-place instead"
+    )
+    assert not re.search(r"\$\{?ANALYSIS_DIR\}?/\.staging", skill_text), (
+        f"{SKILL_MD.name}: stages scratch under $ANALYSIS_DIR — use a /tmp $STAGING_DIR"
+    )
+    assert re.search(r'STAGING_DIR="\$\(mktemp -d', skill_text), (
+        f"{SKILL_MD.name}: expected a `$STAGING_DIR` mktemp'd under /tmp for sub-agent scratch"
+    )
 
-    assert ".staging" in skill_text, f"{SKILL_MD.name} must create a .staging/ directory for sub-agent JSON staging"
 
-    # Removal: the rm -rf must target .staging on the same line — an unrelated
-    # rm -rf elsewhere in the file must not satisfy this check.
-    assert re.search(r"rm -rf [^\n]*\.staging", skill_text), (
-        f"{SKILL_MD.name} must remove the .staging/ directory at cleanup (rm -rf on the .staging path)"
+def test_staging_dir_is_tmp_not_outputs() -> None:
+    """Sub-agent JSON staging must be a `/tmp` `$STAGING_DIR` (mktemp'd), never a
+    `.staging` subdir of the promoted outputs/ work dir, and must never be `rm`'d
+    (the sandbox reclaims /tmp). Inverts the old created-and-removed-under-outputs
+    contract.
+    """
+    skill_text = SKILL_MD.read_text(encoding="utf-8")
+    assert re.search(r'STAGING_DIR="\$\(mktemp -d "?\$\{TMPDIR:-/tmp\}', skill_text), (
+        f"{SKILL_MD.name} must mktemp a /tmp $STAGING_DIR for sub-agent JSON staging"
+    )
+    assert not re.search(r"rm -rf [^\n]*\.staging", skill_text), (
+        f"{SKILL_MD.name} must NOT `rm -rf` a .staging path — scratch lives in /tmp, reclaimed by the sandbox"
     )
 
 
