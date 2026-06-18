@@ -1,0 +1,10 @@
+# Session for Lane-1 SAFE extraction (P1-b happy path + P0-c enum invention).
+# Whole-plugin mount (locked constraint #1) + the synthetic cap-plus-discount SAFE PDF.
+model: claude-sonnet-4-6
+plugins:
+  local_plugins:
+    - ../../../                 # founder-skills plugin root (whole plugin)
+  enabled:
+    - founder-skills@local
+uploads:
+  - ../fixtures/safe_cap_plus_discount.pdf

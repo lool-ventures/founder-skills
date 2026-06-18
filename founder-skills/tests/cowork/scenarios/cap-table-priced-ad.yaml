@@ -1,0 +1,35 @@
+name: cap-table-priced-ad
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: fail
+
+# P2-b — priced round + broad-based weighted-average (BBWA) anti-dilution (Gotcha #2). Lane 4
+# conversational with a prior preferred series and a DOWN round that triggers anti-dilution. Synthetic.
+prompt: |
+  I need the full cap-table review for Cadence (US Delaware seed-stage B2B SaaS) before our next
+  round.
+
+  Cap table today:
+  - Founder Alex Stone: 4,000,000 common shares
+  - Founder Sam Lee: 3,500,000 common shares
+  - Option pool: 1,000,000 issued
+  - Series Seed preferred: Foobar Ventures holds 2,000,000 shares, issued at $1.00/share, with
+    broad-based weighted-average anti-dilution protection.
+
+  Incoming round: a DOWN round — $2,000,000 of new money at $0.50/share (below the Series Seed price),
+  which should trigger the Series Seed anti-dilution adjustment.
+
+  Give me the full cap-table review — show the anti-dilution adjustment to the Series Seed conversion
+  and the resulting dilution — and build the interactive explorer.
+
+assert:
+  - result: success
+  - file_exists: outputs/artifacts/cap-table-cadence/scenarios.json
+  - file_exists: outputs/artifacts/cap-table-cadence/report.json
+  # The coupled solver computed a fully-diluted total (structural, stable).
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-cadence/cap_state.json
+      path: as_converted_totals.fully_diluted_shares
+      gt: 0
+  - transcript_matches: 'anti-dilution|weighted.average|down round|conversion'
+  - transcript_no_host_path: true

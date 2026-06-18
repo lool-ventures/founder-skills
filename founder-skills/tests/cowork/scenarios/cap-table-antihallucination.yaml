@@ -1,0 +1,25 @@
+name: cap-table-antihallucination
+session: ../sessions/term-sheet-blank.yaml
+fidelity: cowork
+on_unanswered: fail
+
+# P0-b — anti-hallucination negative (cap-table's signature property). Synthetic term sheet (ACMECORP)
+# whose EXCLUSIVITY clause has a template BLANK ("during a period of  days") — no number. A
+# hallucinating extractor fills "45 days"; the correct extraction is null/absent. Founder framing
+# matches the doc's company (Acmecorp) + complete context to suppress the founder-context gate.
+prompt: |
+  I'm a founder at Acmecorp Inc., a US Delaware seed-stage B2B SaaS company. I've uploaded a Series A
+  term sheet I received. Please review the uploaded term sheet — extract its terms and tell me what to
+  watch out for.
+
+answers:
+  - when_question: ".*"
+    choose: first
+
+assert:
+  - result: success
+  # The signature negative: the extractor must NOT fabricate a value for the blank exclusivity field.
+  # The exact artifact + dotted path are confirmed at discovery; `absent` fails loud on an unresolved
+  # intermediate (never a vacuous pass). The fabricated "45 days" must not appear as an extracted fact.
+  - transcript_not_matches: 'exclusivity[^.]{0,40}\b45\b'
+  - transcript_no_host_path: true

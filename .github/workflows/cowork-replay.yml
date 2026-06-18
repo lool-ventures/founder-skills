@@ -1,0 +1,56 @@
+name: cowork-replay
+
+# Token-free, agent-free PR gate for the cap-table cowork-harness cassettes (cowork-harness >= 0.4.0):
+#   1. lint    — scenario no-silent-false-green invariants (shipped as a CLI subcommand in 0.4.0)
+#   2. verify  — privacy scan + staleness (0.4.0's skillHash excludes *.cassette.json, so committed
+#                cassettes no longer self-invalidate; a real cap-table SKILL/script/rule edit DOES
+#                trip staleness → re-record locally)
+#   3. replay  — content + manifest-backed file_exists/artifact_json across the whole cassette dir
+# No model tokens, no Docker, no staged agent binary → runs on a stock GitHub-hosted runner.
+#
+# The LIVE lane (recording cassettes) needs the staged Cowork agent ELF (not redistributable, not on
+# hosted runners) → self-hosted/local only. See founder-skills/tests/cowork/README.md.
+
+on:
+  pull_request:
+    paths:
+      - 'founder-skills/skills/**'
+      - 'founder-skills/scripts/**'
+      - 'founder-skills/references/**'
+      - 'founder-skills/tests/cowork/**'
+      - '.github/workflows/cowork-replay.yml'
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyyaml          # cowork-harness lint needs python3 + PyYAML
+      - run: npm i -g 'cowork-harness@>=0.4.3'
+
+      - name: Lint scenarios (no silent false-greens)
+        run: cowork-harness lint founder-skills/tests/cowork/scenarios/*.yaml
+
+      - name: Privacy + staleness gate
+        # Privacy default classes: email / currency / bare-domain. Allowlist suppresses the synthetic
+        # currency cap-table emits, the agent/host domains, the XLSX XML namespace, and the reserved
+        # example.com (synthetic Carta stakeholder data). Names are NOT a default class — synthetic-only
+        # recording is the primary guard. Staleness fails if a cap-table SKILL/script/rule edit landed
+        # without a cassette re-record.
+        run: |
+          cowork-harness verify-cassettes founder-skills/tests/cowork/cassettes/ \
+            --allow '\$\s*\d[\d.,]*\s*(?:[MmKkBb]|million|thousand|billion)?' \
+            --allow 'claude\.com' \
+            --allow 'anthropic\.com' \
+            --allow 'openxmlformats\.org' \
+            --allow 'example\.com' \
+            --allow 'github\.com'
+
+      - name: Replay content + artifact_json assertions (token-free)
+        run: cowork-harness replay founder-skills/tests/cowork/cassettes/ --output-format json

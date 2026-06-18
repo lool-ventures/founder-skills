@@ -1,0 +1,37 @@
+name: cap-table-extract-safe
+session: ../sessions/safe-cap-discount.yaml
+fidelity: cowork
+on_unanswered: fail             # fully scripted (the harness llm-decider needs a host token we don't set)
+
+# P1-b (Lane-1 extraction happy path) + P0-c (canonical-enum). Synthetic cap-plus-discount SAFE PDF
+# (ACMECORP / Foobar). Founder framing MATCHES the doc's company and supplies the cap structure inline,
+# so only the SAFE instrument is extracted from the doc and gating is minimal.
+prompt: |
+  I'm a founder at Acmecorp Inc., a US Delaware seed-stage B2B SaaS company. My cap table: two
+  founders splitting 10,000,000 common shares evenly (5,000,000 each), plus a 1,000,000-share option
+  pool (none issued yet). I've uploaded a SAFE I'm about to sign. Please review the uploaded SAFE —
+  extract its terms, show how it converts, and give me the full cap-table review.
+
+answers:
+  # Backstop for any confirmation gate: take option 1 (deterministic; `first` resolves unconditionally,
+  # unlike `recommended` which needs an option flagged "(Recommended)").
+  - when_question: ".*"
+    choose: first
+
+assert:
+  - result: success
+  # P1-b — the SAFE terms were extracted from the doc (cap $20M, 20% discount → multiplier 0.8).
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-acmecorp-inc/instruments.json
+      path: safes.0.post_money_valuation_cap
+      equals: 20000000
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-acmecorp-inc/instruments.json
+      path: safes.0.discount_multiplier
+      equals: 0.8
+  # P0-c — the form maps to a CANONICAL enum (not a free-text invention). `in:` is stable across re-records.
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-acmecorp-inc/instruments.json
+      path: safes.0.form
+      in: ["cap_plus_discount", "post_money_cap_and_discount"]
+  - transcript_no_host_path: true

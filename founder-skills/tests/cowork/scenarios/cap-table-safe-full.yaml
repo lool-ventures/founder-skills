@@ -1,0 +1,40 @@
+name: cap-table-safe-full
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: fail             # Lane-4 conversational with complete inline data fires NO gates (verified)
+
+# P0-a — SAFE conversion, full pipeline (end-to-end smoke), Lane 4 (conversational).
+# All data is SYNTHETIC (Cadence / invented founders + numbers) — never real founder/company data.
+prompt: |
+  I'm raising a seed round for Cadence, a US Delaware C-corp (field-service scheduling SaaS), and I
+  want the full cap-table review before I sign.
+
+  Cap table today:
+  - Founder Alex Stone: 4,000,000 common shares
+  - Founder Sam Lee: 3,500,000 common shares
+  - Option pool: 1,500,000 authorized, 500,000 issued, 1,000,000 unallocated
+
+  Outstanding instrument: one post-money SAFE from Foobar Capital LLC — $500,000 on a $10,000,000
+  post-money valuation cap with a 20% discount.
+
+  Incoming round: a $4,000,000 Series A priced round at a $16,000,000 pre-money valuation.
+
+  Give me the full cap-table review — show how the SAFE converts at the priced round and the
+  resulting dilution for each holder — and build the interactive explorer.
+
+assert:
+  # End-to-end: the full pipeline ran and produced its deliverables (manifest-backed → survives replay).
+  - result: success
+  - user_visible_artifact: outputs/Cadence_Cap_Table_Explorer.html
+  - file_exists: outputs/artifacts/cap-table-cadence/report.json
+  - file_exists: outputs/artifacts/cap-table-cadence/scenarios.json
+  # The YC post-money denominator (Gotcha #1) was computed — structural, stable across re-records.
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-cadence/cap_state.json
+      path: as_converted_totals.fully_diluted_shares
+      gt: 0
+  # Context-B coaching sub-agent dispatched (match by agentType/description).
+  - subagent_dispatched: 'cap-table'
+  - transcript_matches: 'dilution|conversion|ownership'
+  # Boundary (live-only; skipped on the replay PR gate): no host path leaked into model-visible text.
+  - transcript_no_host_path: true
