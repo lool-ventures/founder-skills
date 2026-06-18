@@ -3482,6 +3482,83 @@ def test_compose_sensitivity_falls_back_without_tam_sam() -> None:
     assert "Low TAM" not in sens_section
 
 
+_VALID_SENSITIVITY_MIXED_UNITS = {
+    "approach": "bottom_up",
+    "base_result": {"tam": 67500000000, "sam": 23625000000, "som": 118125000},
+    "scenarios": [
+        {
+            "parameter": "industry_total",  # currency
+            "confidence": "sourced",
+            "original_range": {"low_pct": -20, "high_pct": 20},
+            "effective_range": {"low_pct": -20, "high_pct": 20},
+            "range_widened": False,
+            "base_value": 2800000000,
+            "low": {"value": 2240000000, "tam": 2240000000, "sam": 235200000, "som": 8232000},
+            "base": {"tam": 2800000000, "sam": 294000000, "som": 10290000},
+            "high": {"value": 3360000000, "tam": 3360000000, "sam": 352800000, "som": 12348000},
+        },
+        {
+            "parameter": "customer_count",  # count
+            "confidence": "derived",
+            "original_range": {"low_pct": -30, "high_pct": 30},
+            "effective_range": {"low_pct": -30, "high_pct": 30},
+            "range_widened": False,
+            "base_value": 185000,
+            "low": {"value": 129500, "tam": 466200000, "sam": 163170000, "som": 6526800},
+            "base": {"tam": 666000000, "sam": 233100000, "som": 9324000},
+            "high": {"value": 240500, "tam": 865800000, "sam": 303030000, "som": 12121200},
+        },
+        {
+            "parameter": "serviceable_pct",  # percent
+            "confidence": "derived",
+            "original_range": {"low_pct": -30, "high_pct": 30},
+            "effective_range": {"low_pct": -30, "high_pct": 30},
+            "range_widened": False,
+            "base_value": 35,
+            "low": {"value": 24.5, "tam": 666000000, "sam": 163170000, "som": 6526800},
+            "base": {"tam": 666000000, "sam": 233100000, "som": 9324000},
+            "high": {"value": 45.5, "tam": 666000000, "sam": 303030000, "som": 12121200},
+        },
+    ],
+    "sensitivity_ranking": [{"parameter": "serviceable_pct", "som_swing_pct": 60.0}],
+    "most_sensitive": "serviceable_pct",
+}
+
+
+def _sens_row(sens_section: str, label: str) -> str:
+    """Return the rendered table row whose first cell is `label`."""
+    for line in sens_section.splitlines():
+        if line.strip().startswith(f"| {label} |"):
+            return line
+    raise AssertionError(f"row for {label!r} not found in:\n{sens_section}")
+
+
+def test_compose_sensitivity_value_columns_are_unit_aware() -> None:
+    """Low/Base/High Value cells format by parameter unit (currency / count / percent),
+    and the Base cell uses the SAME unit as Low/High (no raw-number inconsistency)."""
+    d = _make_artifact_dir(_make_all_artifacts(**{"sensitivity.json": _VALID_SENSITIVITY_MIXED_UNITS}))
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    sens_section = md.split("## Sensitivity Analysis")[1].split("##")[0]
+
+    # Currency param: all three Value cells are abbreviated USD (incl. Base — the bug was Base raw).
+    currency = _sens_row(sens_section, "Industry Total")
+    assert "| $2.2B | $2.8B | $3.4B |" in currency, currency
+
+    # Count param: all three are grouped integers, NO dollar sign anywhere in the Value trio.
+    count = _sens_row(sens_section, "Customer Count")
+    assert "| 129,500 | 185,000 | 240,500 |" in count, count
+    # The buggy version rendered counts as USD ($129.5K / $240.5K); guard against regression.
+    assert "$129" not in count and "$240" not in count, count
+
+    # Percent param: all three end with %, none rendered as dollars.
+    pct = _sens_row(sens_section, "Serviceable %")
+    assert "| 24.5% | 35% | 45.5% |" in pct, pct
+    assert "$24" not in pct and "$45" not in pct, pct
+
+
 def test_compose_analysis_checklist_shows_failed_labels() -> None:
     """When checklist has failed items, they appear labeled below the count line."""
     checklist_with_fails = {

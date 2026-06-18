@@ -200,6 +200,31 @@ def _fmt_usd(value: float | int) -> str:
     return f"${value:,.2f}"
 
 
+def _fmt_param_value(name: str, value: Any) -> str:
+    """Unit-aware formatting for a sensitivity parameter's input value.
+
+    The Value column holds the parameter itself, not a market-size figure, so its unit varies:
+    percentages (``*_pct``), counts (``*_count``), and currency (everything else, e.g. ``arpu``,
+    ``industry_total``). Formatting all three the same way (the old behavior — USD for low/high,
+    raw number for base) renders percents and counts as dollars and leaves base inconsistent.
+    """
+    if not isinstance(value, (int, float)):
+        return "—"
+    lname = name.lower()
+    if lname.endswith("_pct") or "pct" in lname or "percent" in lname or "share" in lname or "rate" in lname:
+        return f"{float(value):.2f}".rstrip("0").rstrip(".") + "%"
+    if (
+        "count" in lname
+        or "customers" in lname
+        or "users" in lname
+        or "establishments" in lname
+        or lname.startswith("num_")
+        or lname.endswith("_num")
+    ):
+        return _fmt_number(int(value) if float(value).is_integer() else value)
+    return _fmt_usd(float(value))
+
+
 def _md_safe(text: str) -> str:
     """Escape text for safe markdown table cell interpolation."""
     return text.replace("|", "\\|").replace("\n", " ")
@@ -1015,14 +1040,16 @@ def _section_sensitivity(sensitivity: dict[str, Any] | None) -> str:
         range_str = f"[{eff.get('low_pct', 0)}%, +{eff.get('high_pct', 0)}%]"
         widened = " (widened)" if s.get("range_widened") else ""
 
-        # Parameter value columns (low/base/high parameter value, not market size)
+        # Parameter value columns (low/base/high parameter value, not market size).
+        # Format unit-aware (currency / count / percent) so all three cells are consistent.
+        raw_param = s.get("parameter", "")
         base_val = s.get("base_value")
         low_val_raw = low_d.get("value")
         high_val_raw = high_d.get("value")
         if base_val is not None and isinstance(base_val, (int, float)):
-            low_val_str = _fmt_usd(float(low_val_raw)) if isinstance(low_val_raw, (int, float)) else "—"
-            base_val_str = _fmt_number(base_val)
-            high_val_str = _fmt_usd(float(high_val_raw)) if isinstance(high_val_raw, (int, float)) else "—"
+            low_val_str = _fmt_param_value(raw_param, low_val_raw) if isinstance(low_val_raw, (int, float)) else "—"
+            base_val_str = _fmt_param_value(raw_param, base_val)
+            high_val_str = _fmt_param_value(raw_param, high_val_raw) if isinstance(high_val_raw, (int, float)) else "—"
         else:
             low_val_str = base_val_str = high_val_str = "—"
 
