@@ -2,6 +2,7 @@ name: cap-table-safe-full
 session: ../sessions/default.yaml
 fidelity: cowork
 on_unanswered: fail             # Lane-4 conversational with complete inline data fires NO gates (verified)
+skills: [cap-table]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
 
 # P0-a — SAFE conversion, full pipeline (end-to-end smoke), Lane 4 (conversational).
 # All data is SYNTHETIC (Cadence / invented founders + numbers) — never real founder/company data.

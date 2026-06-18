@@ -2,6 +2,7 @@ name: cap-table-antihallucination
 session: ../sessions/term-sheet-blank.yaml
 fidelity: cowork
 on_unanswered: fail
+skills: [cap-table]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
 
 # P0-b — anti-hallucination negative (cap-table's signature property). Synthetic term sheet (ACMECORP)
 # whose EXCLUSIVITY clause has a template BLANK ("during a period of  days") — no number. A

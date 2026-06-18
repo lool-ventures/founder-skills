@@ -2,6 +2,7 @@ name: deck-review-smoke
 session: ../sessions/default.yaml
 fidelity: cowork
 on_unanswered: fail
+skills: [deck-review]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
 
 # Phase 1 fleet-parity smoke — deck-review (paste lane, synthetic Acmecorp seed deck).
 # deck-review's trigger accepts pasted slide text (input_format: "text"), so the synthetic deck is pasted

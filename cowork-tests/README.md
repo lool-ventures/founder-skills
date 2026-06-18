@@ -49,10 +49,26 @@ export COWORK_HARNESS_RUNS_DIR=/tmp/ct-cowork-runs        # MUST be outside the 
 cd cowork-tests
 cowork-harness record scenarios/<name>.yaml --out cassettes/<name>.cassette.json
 ```
-Re-record after any change to a skill's SKILL.md / scripts / references / rules. **Caveat:** the
-skillHash hashes the WHOLE `founder-skills/` mount, so editing ANY skill re-stales EVERY cassette — the
-final pre-commit record pass must re-record all of them with the mount quiescent (and `plugin.json` at
-its committed value). The CI staleness gate is **warn-not-fail** for this reason (see below).
+Re-record after a change to the recorded skill's `SKILL.md` / its `scripts/` / `references/` / rules.
+**Staleness scope (0.5.0):** each scenario declares `skills: [<name>]`, so the staleness hash covers that
+skill's `skills/<name>/` dir **plus the plugin's shared roots** — editing a *different* skill no longer
+re-stales this cassette. Shared `scripts/`, `references/`, **and the per-skill `agents/<skill>.md`** (they
+live in the top-level `agents/` root, not under `skills/`) DO re-stale the whole fleet (over-stale, the
+safe direction). `founder-skills/tests/` is dropped via `founder-skills/.cowork-hashignore` (pytest is not
+runtime). The CI staleness gate is **warn-not-fail** (CI is replay-only and can't re-record).
+
+**`--rerecord-stale` caveat:** re-records from each cassette's *embedded* scenario — only correct once the
+cassette already carries `skills:`. To (re)introduce/change scoping, re-record **from the scenario YAML**
+(`record scenarios/<name>.yaml ...`), not `--rerecord-stale`.
+
+### Iterating asserts cheaply (0.5.0 `verify-run`)
+A wrong/edited `assert:` does **not** need a live re-record. With a kept run dir (set
+`COWORK_HARNESS_RUNS_DIR`), re-evaluate the scenario's asserts against it in ~1s, no agent/tokens:
+```bash
+cowork-harness verify-run /tmp/ct-cowork-runs/<scenario>/local_<id> scenarios/<scenario>.yaml
+```
+Only re-record (live) when the *run itself* must change. (Refuses rather than false-passes if a
+filesystem assertion needs a torn-down work dir.)
 
 ## Replay (CI / token-free)
 ```bash
@@ -70,14 +86,14 @@ cowork-harness verify-cassettes cassettes/ --privacy-only \
   --allow-email '[A-Za-z0-9._%+\-]+@(?:acmecorp|example)\.com'
 ```
 
-> **Staleness** (re-enabled on cowork-harness ≥ 0.4.0 — the skill hash now excludes `*.cassette.json`).
-> In CI it runs as a **separate `--staleness-only` step under `continue-on-error: true`** (warn, not
-> fail): because the whole-plugin mount means any skill edit re-stales every cassette, a hard gate would
-> force an 11-cassette re-record on every skill PR. The **privacy** step (`--privacy-only`) is the hard
-> gate. A `[stale] baseline moved …` finding **locally** is expected when your Cowork Desktop is ahead of
-> the harness's shipped baseline (cassettes stamp the shipped pin); a hosted CI runner has no newer
-> Desktop, so it doesn't fire. A `[stale] skill/plugin dir contents changed` finding means a SKILL/script/
-> rule edit landed without a re-record (see Record above) — expected until the next quiescent re-record.
+> **Staleness** runs as a **separate `--staleness-only` step under `continue-on-error: true`** (warn, not
+> fail) — the **privacy** step (`--privacy-only`) is the hard gate. Warn (not hard) because CI is
+> replay-only and cannot re-record, so a hard gate would block every skill PR on a manual local re-record.
+> With 0.5.0 per-skill scoping (`skills: [<name>]`) the signal is now **precise**: a `[stale] skill/plugin
+> dir contents changed` finding means *that skill's* dir (or a shared root — `scripts/`, `references/`,
+> `agents/`) changed without a re-record. A `[stale] baseline moved …` finding **locally** is expected
+> when your Cowork Desktop is ahead of the harness's shipped baseline; a hosted CI runner has no newer
+> Desktop, so it doesn't fire.
 
 ## Constraints (do not break)
 1. **Whole-plugin mount** — the session mounts `../../founder-skills` (the plugin root) so the rule pack +

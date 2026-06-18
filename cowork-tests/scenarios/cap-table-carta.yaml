@@ -2,6 +2,7 @@ name: cap-table-carta
 session: ../sessions/carta.yaml
 fidelity: cowork
 on_unanswered: fail
+skills: [cap-table]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
 
 # P2-a — Lane-2 Carta XLSX extraction. Synthetic Carta multi-sheet export upload. Carta exports carry
 # no founder identities or pool, so the cap structure is supplied inline to suppress the batched

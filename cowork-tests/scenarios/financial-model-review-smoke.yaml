@@ -2,6 +2,7 @@ name: financial-model-review-smoke
 session: ../sessions/fmr-model.yaml
 fidelity: cowork
 on_unanswered: fail
+skills: [financial-model-review]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
 
 # Phase 1 fleet-parity smoke — financial-model-review (UPLOAD lane, synthetic Excel model).
 # TWO gates (verified in SKILL.md):

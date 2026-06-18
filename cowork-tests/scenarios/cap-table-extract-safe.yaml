@@ -2,6 +2,7 @@ name: cap-table-extract-safe
 session: ../sessions/safe-cap-discount.yaml
 fidelity: cowork
 on_unanswered: fail             # fully scripted (the harness llm-decider needs a host token we don't set)
+skills: [cap-table]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
 
 # P1-b (Lane-1 extraction happy path) + P0-c (canonical-enum). Synthetic cap-plus-discount SAFE PDF
 # (ACMECORP / Foobar). Founder framing MATCHES the doc's company and supplies the cap structure inline,

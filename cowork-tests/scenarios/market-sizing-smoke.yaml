@@ -2,6 +2,7 @@ name: market-sizing-smoke
 session: ../sessions/default.yaml
 fidelity: cowork
 on_unanswered: fail
+skills: [market-sizing]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
 
 # Phase 1 fleet-parity smoke — market-sizing (conversational lane, Cadence).
 # Goal: prove the resolver fix lands artifacts at outputs/artifacts/market-sizing-<slug>/ and the
