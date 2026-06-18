@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 
 _REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -441,3 +442,132 @@ def test_cap_state_present_but_zero_pool_does_not_trip_guard() -> None:
     inputs["option_pool"] = {"plan_type": "nso", "authorized": 0, "issued": 0, "unallocated": 0}
     cs = cap_state_mod.build_cap_state(inputs, _instruments([_A_SAFE]))  # must not raise
     assert cs is not None
+
+
+# --- Phase 3: --mode=freeform-emit CLI wrapper (end-to-end) -----------------
+
+
+def test_freeform_emit_cli_writes_schema_valid_artifacts(tmp_path) -> None:
+    from openpyxl import Workbook  # type: ignore[import-untyped]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Cap Table"
+    for row in [
+        ["Name", "Shares"],
+        ["Alice", 5000000],
+        ["Bob", 5000000],
+        [None, None],
+        ["Investor", "Amt", "Cap"],
+        ["Acme", 500000, 20000000],
+    ]:
+        ws.append(row)
+    xlsx = tmp_path / "cap.xlsx"
+    wb.save(xlsx)
+    (tmp_path / "inputs.json").write_text(
+        json.dumps(
+            {
+                "company_name": "Cadence",
+                "analysis_date": "2026-06-19",
+                "mode": "standard",
+                "metadata": {"run_id": "R1", "schema_version": "v0.5.0-inputs"},
+            }
+        )
+    )
+    blocks = json.dumps(
+        {
+            "blocks": [
+                {
+                    "block_type": "founders_block",
+                    "sheet": "Cap Table",
+                    "cell_range": "A2:B3",
+                    "column_role_map": {"A": "holder_name", "B": "shares"},
+                },
+                {
+                    "block_type": "safes_block",
+                    "sheet": "Cap Table",
+                    "cell_range": "A6:C6",
+                    "column_role_map": {"A": "investor_name", "B": "amount", "C": "post_money_cap"},
+                },
+            ]
+        }
+    )
+    proc = subprocess.run(
+        [
+            sys.executable,
+            os.path.join(SCRIPTS, "extract_cap_table.py"),
+            "--mode=freeform-emit",
+            "--xlsx",
+            str(xlsx),
+            "--dir",
+            str(tmp_path),
+            "--run-id",
+            "R1",
+        ],
+        input=blocks,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    receipt = json.loads(proc.stdout)
+    assert receipt["ok"] is True
+    inputs = json.loads((tmp_path / "inputs.json").read_text())
+    instruments = json.loads((tmp_path / "instruments.json").read_text())
+    assert [f["name"] for f in inputs["founders"]] == ["Alice", "Bob"]
+    assert inputs["company_name"] == "Cadence"  # meta preserved
+    assert instruments["safes"][0]["id"] == "safe_000"
+    assert instruments["safes"][0]["post_money_valuation_cap"] == 20000000.0
+
+
+def test_freeform_emit_cli_blocker_is_a_gate_not_error(tmp_path) -> None:
+    from openpyxl import Workbook  # type: ignore[import-untyped]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "N"
+    ws.append(["Investor", "Principal"])
+    ws.append(["Lender", 250000])
+    wb.save(tmp_path / "n.xlsx")
+    (tmp_path / "inputs.json").write_text(
+        json.dumps(
+            {
+                "company_name": "Cadence",
+                "analysis_date": "2026-06-19",
+                "mode": "standard",
+                "metadata": {"run_id": "R1", "schema_version": "v0.5.0-inputs"},
+            }
+        )
+    )
+    blocks = json.dumps(
+        {
+            "blocks": [
+                {
+                    "block_type": "notes_block",
+                    "sheet": "N",
+                    "cell_range": "A2:B2",
+                    "column_role_map": {"A": "investor_name", "B": "principal"},
+                }
+            ]
+        }
+    )
+    proc = subprocess.run(
+        [
+            sys.executable,
+            os.path.join(SCRIPTS, "extract_cap_table.py"),
+            "--mode=freeform-emit",
+            "--xlsx",
+            str(tmp_path / "n.xlsx"),
+            "--dir",
+            str(tmp_path),
+            "--run-id",
+            "R1",
+        ],
+        input=blocks,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0  # a gate, not an error
+    receipt = json.loads(proc.stdout)
+    assert receipt["ok"] is False
+    assert any(b["field"] == "interest_rate_type" for b in receipt["blockers"])
+    assert not (tmp_path / "instruments.json").exists()  # nothing written while blocked

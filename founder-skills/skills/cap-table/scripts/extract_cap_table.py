@@ -769,12 +769,139 @@ def _check_supported_input_type(path: str) -> tuple[bool, str]:
     return True, ""
 
 
+def _mode_freeform_emit(args: argparse.Namespace) -> int:
+    """Deterministically map SPREADSHEET_STRUCTURE_DETECTION blocks (stdin) + the
+    --xlsx grid into inputs.json + instruments.json under --dir.
+
+    Required-but-unsupplied fields surface as blockers (no fabrication); the founder's
+    answers come back via --answer BLOCK.FIELD=VALUE (e.g.
+    --answer 0.interest_rate_type=fixed_numeric_simple). On a clean map (no blockers)
+    both artifacts are schema-validated and written. Blockers are a GATE (exit 0), not
+    an error: the agent resolves them with the founder and re-runs with --answer.
+    """
+    import freeform_mapper  # lazy: freeform_mapper imports from this module
+
+    if not args.xlsx:
+        sys.stderr.write("--xlsx required for --mode=freeform-emit\n")
+        return 1
+    if not args.dir:
+        sys.stderr.write("--dir required for --mode=freeform-emit\n")
+        return 1
+    if not os.path.exists(args.xlsx):
+        print(json.dumps({"ok": False, "blocker": "file_not_found", "error": f"file not found: {args.xlsx}"}))
+        return 1
+
+    try:
+        payload = json.load(sys.stdin)
+    except Exception as e:
+        sys.stderr.write(f"freeform-emit: expected {{blocks:[...]}} JSON on stdin ({e})\n")
+        return 1
+    blocks = payload.get("blocks") if isinstance(payload, dict) else None
+    if not isinstance(blocks, list):
+        print(json.dumps({"ok": False, "blocker": "bad_input", "error": "stdin must be {blocks:[...]}"}))
+        return 1
+
+    # Build the cell grid from the workbook (same shape as --mode=grid).
+    try:
+        wb = _open_xlsx(args.xlsx)
+    except Exception as e:
+        print(json.dumps({"ok": False, "blocker": "load_failed", "error": f"{type(e).__name__}: {e}"}))
+        return 1
+    sheets: dict[str, Any] = {}
+    for ws in wb.worksheets:
+        rows = [[_serialize_cell(cell) for cell in row] for row in ws.iter_rows(values_only=True)]
+        sheets[ws.title] = {
+            "dimensions": ws.dimensions,
+            "rows": rows,
+            "merged_ranges": [str(r) for r in ws.merged_cells.ranges],
+        }
+    grid = {"ok": True, "mode": "grid", "sheets": sheets}
+
+    # Company meta must already exist (Step 2 wrote inputs.json); equity merges into it.
+    inputs_path = os.path.join(args.dir, "inputs.json")
+    if not os.path.exists(inputs_path):
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "blocker": "no_inputs_json",
+                    "remedy": (
+                        "Run Step 2 first to establish company/mode in inputs.json; "
+                        "freeform-emit merges equity into it."
+                    ),
+                }
+            )
+        )
+        return 1
+    with open(inputs_path, encoding="utf-8") as f:
+        existing_inputs = json.load(f)
+
+    answers: dict[str, Any] = {}
+    for kv in args.answer or []:
+        if "=" not in kv:
+            sys.stderr.write(f"--answer must be BLOCK.FIELD=VALUE, got {kv!r}\n")
+            return 1
+        k, v = kv.split("=", 1)
+        answers[k.strip()] = v.strip()
+
+    result = freeform_mapper.map_freeform(
+        blocks, grid, existing_inputs=existing_inputs, answers=answers, run_id=args.run_id or ""
+    )
+
+    if result["blockers"]:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "mode": "freeform-emit",
+                    "blockers": result["blockers"],
+                    "warnings": result["warnings"],
+                    "next_action": (
+                        "Resolve each blocker with the founder via AskUserQuestion, then re-run with "
+                        "--answer <block_index>.<field>=<value> for the answerable fields."
+                    ),
+                },
+                indent=2 if args.pretty else None,
+            )
+        )
+        return 0  # a gate, not an error
+
+    errs: dict[str, Any] = {}
+    iv = validate(result["inputs"], load_schema(os.path.join(_SCHEMA_DIR, "inputs.schema.json")))
+    if iv:
+        errs["inputs.json"] = iv
+    nv = validate(result["instruments"], load_schema(os.path.join(_SCHEMA_DIR, "instruments.schema.json")))
+    if nv:
+        errs["instruments.json"] = nv
+    if errs:
+        print(json.dumps({"ok": False, "mode": "freeform-emit", "errors": errs}, indent=2 if args.pretty else None))
+        return 1
+
+    os.makedirs(args.dir, exist_ok=True)
+    for fname, data in (("inputs.json", result["inputs"]), ("instruments.json", result["instruments"])):
+        with open(os.path.join(args.dir, fname), "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "mode": "freeform-emit",
+                "written": ["inputs.json", "instruments.json"],
+                "dir": os.path.abspath(args.dir),
+                "warnings": result["warnings"],
+            },
+            indent=2 if args.pretty else None,
+        )
+    )
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
         "--mode",
         required=True,
-        choices=["validate", "carta", "pulley", "freeform", "auto", "grid"],
+        choices=["validate", "carta", "pulley", "freeform", "freeform-emit", "auto", "grid"],
         help=(
             "validate: schema-check existing JSON in --dir; carta: extract from "
             "Carta XLSX (--xlsx); pulley: stub; freeform: validate Context-A "
@@ -789,6 +916,12 @@ def main() -> int:
     p.add_argument("-o", "--output", help="Where to write extraction_audit.json")
     p.add_argument("--run-id", dest="run_id", help="Run identifier stamped into metadata.run_id")
     p.add_argument("--pretty", action="store_true")
+    p.add_argument(
+        "--answer",
+        action="append",
+        metavar="BLOCK.FIELD=VALUE",
+        help="(freeform-emit) founder answer to a blocker, e.g. 0.interest_rate_type=fixed_numeric_simple. Repeatable.",
+    )
     args = p.parse_args()
 
     # Normalize the xlsx path if provided (handle macOS dupe suffixes)
@@ -851,6 +984,8 @@ def main() -> int:
         return _mode_pulley_stub(args)
     if args.mode == "grid":
         return _mode_grid(args)
+    if args.mode == "freeform-emit":
+        return _mode_freeform_emit(args)
     return _mode_freeform_validate(args)
 
 
