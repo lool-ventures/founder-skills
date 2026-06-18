@@ -214,6 +214,22 @@ def _normalize_discount(d: Any) -> tuple[float | None, str | None]:
     return None, f"discount value {v} out of expected range"
 
 
+def _to_iso_date(v: Any) -> str | None:
+    """Convert a spreadsheet date cell to ISO 8601 string (or None).
+
+    Module-scope so both the Carta mapper and the Lane-3 freeform mapper share it.
+    """
+    if v is None or v == "":
+        return None
+    if hasattr(v, "date"):  # datetime
+        result: str = v.date().isoformat()
+        return result
+    if hasattr(v, "isoformat"):  # date
+        result_d: str = v.isoformat()
+        return result_d
+    return str(v)[:10]
+
+
 def _infer_safe_form(cap: Any, discount: Any) -> str:
     """Infer the SAFE form from cap + discount presence."""
     has_cap = cap is not None and cap != "" and float(cap) > 0
@@ -258,18 +274,6 @@ def _convertible_record_to_instrument(rec: dict[str, Any], idx: int) -> tuple[st
     if converted or cancelled:
         warnings_list.append(f"{sec_id}: skipped (converted={converted!r} cancelled={cancelled!r})")
         return ("skip", {}, warnings_list)
-
-    def _to_iso_date(v: Any) -> str | None:
-        """Convert a Carta date cell to ISO 8601 string (or None)."""
-        if v is None or v == "":
-            return None
-        if hasattr(v, "date"):  # datetime
-            result: str = v.date().isoformat()
-            return result
-        if hasattr(v, "isoformat"):  # date
-            result_d: str = v.isoformat()
-            return result_d
-        return str(v)[:10]
 
     investor_name = (rec.get("Stakeholder Name") or "").strip()
     issue_date = _to_iso_date(rec.get("Issue Date")) or "1900-01-01"

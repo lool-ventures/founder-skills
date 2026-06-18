@@ -455,6 +455,22 @@ def build_cap_state(
             "E_FOUNDER_SHARES_REQUIRED: at least one founder is declared but total common_shares across founders is 0."
         )
 
+    # No-equity-base invariant: an absent founders array used to sail through silently
+    # (the E_FOUNDER_SHARES check above only fires when founders are present-but-zero),
+    # yielding an all-zero pre-financing snapshot — into which SAFE/note conversions
+    # divide (silent corruption). Fire only when BOTH founders and option_pool are
+    # absent AND there are instruments to convert (a present-but-zero pool is fine).
+    _has_instruments = bool(
+        instruments.get("safes") or instruments.get("convertible_notes") or instruments.get("warrants")
+    )
+    if not founders and not option_pool and _has_instruments:
+        raise CapStateInvariantError(
+            "E_NO_EQUITY_BASE: instruments are present but inputs.json has neither founders nor an "
+            "option_pool — the pre-financing snapshot would be all-zero and conversions would divide "
+            "into an empty base. Populate founders/option_pool before computing cap state "
+            "(Lane 3: run the freeform producer to fill them from the sheet)."
+        )
+
     canonical_batches = [_canonicalize_common_class(b) for b in common_batches]
 
     canonical_preferred = [
