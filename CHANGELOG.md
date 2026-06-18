@@ -164,6 +164,14 @@ convergence harness and fresh-AI replay tests are scheduled as a v0.5.1 follow-u
   audit-cycle references from SKILL.md files, agent bodies, schema descriptions, rule pack fields,
   and inline comments across all skills. A new contract test
   (`test_no_internal_version_refs_in_user_facing_files`) enforces this policy on every PR.
+- **Deterministic artifacts-root resolution.** The inline `ARTIFACTS_ROOT` path computation in each
+  SKILL.md Step 0 block was guidance the agent paraphrased, not code it ran verbatim — it kept the
+  intent ("under `outputs/`") but dropped the detection, landing `outputs/` in one run and
+  `outputs/artifacts/` in another, desyncing cross-skill `find_artifact.py` resolution and
+  path-based assertions. All six skills now invoke a shared `scripts/resolve_artifacts_root.py`
+  (fixed resolution order, deterministic, creates the dir) as one opaque command. cap-table
+  additionally stages sub-agent JSON in a `/tmp` mktemp dir instead of under the promoted `outputs/`
+  tree, since deletes under `outputs/` are unsafe or denied in Cowork.
 
 ### financial-model-review: pre-ship hardening
 
@@ -237,6 +245,21 @@ A new contract test (`test_no_internal_version_refs_in_user_facing_files`) now e
 - `financial-model-review` added to `COACHING_SKILLS` in `test_compose_invariants.py`.
 - Fixture directory `tests/fixtures/financial-model-review/` populated with `inputs.json`, `checklist.json`, `unit_economics.json`, `runway.json` — the shared `coaching_payload` + `STALE_ARTIFACT` invariant suite now exercises this skill.
 - New `test_fmr_skill_contract.py`: CHECKLIST ID enumeration, SKILL.md/agent body ID consistency, fleet-wide internal-version-ref policy enforcement.
+
+### Fixed — market-sizing
+
+- **Unit-aware sensitivity parameter values.** The sensitivity table's Value column holds the input
+  parameter, whose unit varies (currency / count / percent). The old code rendered low/high as USD
+  and base as a raw number, so percentages and counts printed as dollars and the base cell was
+  inconsistent. A new `_fmt_param_value` formats each cell by parameter name so all three agree.
+
+### Added — cap-table cowork-harness replay gate
+
+- Token-free **replay** PR gate (`.github/workflows/cowork-replay.yml`) over committed cassettes that
+  exercise the cap-table skill under Claude Cowork's runtime via `cowork-harness`. Recording is live
+  (staged agent + Docker); replay/verify run token- and agent-free in stock CI. Six scenarios cover
+  Lane 1/2/4 extraction, anti-hallucination, priced-round + BBWA anti-dilution, and fast-assess
+  routing, plus a `verify-cassettes` privacy + staleness scan over synthetic-only fixtures.
 
 ### Out of scope for v0.5.0
 
