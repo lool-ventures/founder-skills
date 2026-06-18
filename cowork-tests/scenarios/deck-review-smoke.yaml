@@ -1,0 +1,53 @@
+name: deck-review-smoke
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: fail
+
+# Phase 1 fleet-parity smoke — deck-review (paste lane, synthetic Acmecorp seed deck).
+# deck-review's trigger accepts pasted slide text (input_format: "text"), so the synthetic deck is pasted
+# INLINE in the prompt below (no upload, no fixture file) — Acmecorp is fictional. Slug → deck-review-acmecorp.
+# Stage gate: the stage-confirmation gate can re-ask ("Different stage" → a second `stage_choice` gate).
+# Pre-state the stage (seed) in the prompt so the detected stage matches; catch-all `first` accepts the
+# confirmation. Also exercises the Phase-2a staging fix (scratch now lives in $STAGING_DIR under /tmp).
+# DISCOVERY-PENDING: confirm slug + whether the stage gate fires once or twice on this deck.
+prompt: |
+  I'm the founder of Acmecorp, a seed-stage startup. Please use the deck-review skill to review my
+  pitch deck. Here is the full slide text (treat this as the deck — it's a seed-stage raise):
+
+  SLIDE 1: TITLE
+  Acmecorp — AI-native developer tools for indie SaaS founders
+
+  SLIDE 2: PROBLEM
+  Indie SaaS founders waste 20+ hours/week on developer tooling integration.
+
+  SLIDE 3: SOLUTION
+  Acmecorp wraps GitHub, Linear, Stripe, and Vercel into one CLI.
+
+  SLIDE 4: TRACTION
+  $8K MRR, 24 paying customers, 18% MoM growth (last 4 months).
+
+  SLIDE 5: TEAM
+  Two founders, ex-Stripe (eng) and ex-Notion (product).
+
+  SLIDE 6: ASK
+  Raising $1.2M seed at $8M post.
+
+  Give me the full review with the scored checklist and the written report.
+
+answers:
+  - when_question: ".*"
+    choose: first
+
+assert:
+  - result: success
+  - file_exists: outputs/artifacts/deck-review-acmecorp/report.json
+  # artifact_json needs the artifact BODY, which the cassette truncates above ~64KB (record reads the
+  # on-disk file and passes; replay reads the truncated body and fails). deck-review's report.json runs
+  # ~66KB (LLM-variance), so assert a SMALL, bounded, stable artifact instead — stage_profile.json is
+  # ~1.2KB. file_exists above (manifest-backed) still proves report.json lands at the resolver path.
+  - artifact_json:
+      artifact: outputs/artifacts/deck-review-acmecorp/stage_profile.json
+      path: detected_stage
+      exists: true
+  - subagent_dispatched: 'deck-review'
+  - transcript_no_host_path: true

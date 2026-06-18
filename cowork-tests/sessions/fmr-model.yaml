@@ -1,0 +1,11 @@
+# Session for the financial-model-review upload lane (Phase 1 fleet smoke).
+# Whole-plugin mount (same skillHash contract as default.yaml) + the synthetic Excel model fixture.
+# The model carries only generic Parameter/Value + monthly P&L labels — no company or founder names.
+model: claude-sonnet-4-6        # parity with the other cowork runs
+plugins:
+  local_plugins:
+    - ../../founder-skills
+  enabled:
+    - founder-skills@local
+uploads:
+  - ../fixtures/sample_model.xlsx

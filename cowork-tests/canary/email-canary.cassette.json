@@ -1,0 +1,26 @@
+{
+ "cassetteVersion": 1,
+ "scenario": {
+  "name": "email-canary",
+  "session": "../sessions/default.yaml",
+  "fidelity": "cowork",
+  "prompt": "canary",
+  "assert": []
+ },
+ "events": [],
+ "controlOut": [],
+ "effectiveFidelity": "replay:cowork",
+ "artifacts": [
+  {
+   "path": "outputs/canary.txt",
+   "bytes": 76,
+   "sha256": "035e0fad9767da20cdb84d3e4ad9c824791832e4109ce318057c054ec0be1393",
+   "body": "Investor contact: analyst@realstartup.com discussed the round on 2026-06-18."
+  }
+ ],
+ "fingerprint": {
+  "baseline": "latest",
+  "skillHash": "canary",
+  "skillSources": []
+ }
+}

@@ -18,7 +18,7 @@ from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
 
 HERE = Path(__file__).resolve().parent
-EVAL = HERE.parent.parent / "fixtures" / "cap-table-eval"
+EVAL = HERE.parent.parent / "founder-skills" / "tests" / "fixtures" / "cap-table-eval"
 
 # (source .txt in cap-table-eval, output PDF name)
 DOCS = [

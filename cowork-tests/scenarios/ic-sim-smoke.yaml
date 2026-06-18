@@ -1,0 +1,32 @@
+name: ic-sim-smoke
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: fail
+
+# Phase 1 fleet-parity smoke — ic-sim (conversational lane, Cadence deal).
+# ic-sim dispatches THREE partner archetypes in parallel (visionary/operator/analyst) plus sequential
+# conflict/score/coaching dispatches — a multi-dispatch shape; do not assert a single-dispatch pattern.
+# Rich, self-sufficient prompt so no gate fires (matches the prior live run where gateDeliveries was
+# empty); catch-all `first` backstops any confirmation gate.
+# DISCOVERY-PENDING: confirm slug (`ic-sim-cadence`) on the first run.
+prompt: |
+  Simulate a VC investment-committee discussion for a seed deal in Cadence, a US Delaware C-corp
+  building field-service scheduling/dispatch SaaS for SMB service businesses. Deal: $4,000,000 round
+  at a $16,000,000 pre-money. Traction: $40K MRR, 18% MoM growth over the last 4 months, 120 paying
+  customers, ~$1,200 CAC, gross margin ~80%. Team: two technical co-founders (ex-Stripe eng, ex-Notion
+  product). Use the ic-sim skill to run the full IC simulation across all three partner archetypes and
+  produce the report.
+
+answers:
+  - when_question: ".*"
+    choose: first
+
+assert:
+  - result: success
+  - file_exists: outputs/artifacts/ic-sim-cadence/report.json
+  - artifact_json:
+      artifact: outputs/artifacts/ic-sim-cadence/report.json
+      path: coaching_payload.schema_version
+      exists: true
+  - subagent_dispatched: 'ic-sim'
+  - transcript_no_host_path: true

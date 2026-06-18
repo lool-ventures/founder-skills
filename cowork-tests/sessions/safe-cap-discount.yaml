@@ -3,7 +3,7 @@
 model: claude-sonnet-4-6
 plugins:
   local_plugins:
-    - ../../../                 # founder-skills plugin root (whole plugin)
+    - ../../founder-skills                 # founder-skills plugin root (whole plugin)
   enabled:
     - founder-skills@local
 uploads:

@@ -1,0 +1,15 @@
+# Shared session for the fleet cowork-harness scenarios (cap-table + the other five skills).
+# LOCKED CONSTRAINTS (see docs/internal/2026-06-16-cap-table-harness-test-plan.md §0.4):
+#  1. Mount the WHOLE founder-skills plugin (`../../founder-skills` resolves to the plugin root, NOT a
+#     single skills/<skill>/ dir), so the skillHash covers rules + references/ + scripts/ — a content
+#     edit then trips `verify-cassettes --staleness`. Narrowing this mount reintroduces a false-green.
+#     (Caveat: because the WHOLE plugin is hashed, ANY skill edit re-stales EVERY cassette — see the
+#     F8 staleness posture in docs/internal/2026-06-18-phase1-2-fleet-cowork-plan.md §8.)
+#  2. Repo-relative path (resolves from this session file's dir), so the committed session + cassettes
+#     resolve in CI with no absolute /Users/... leak.
+model: claude-sonnet-4-6        # parity with prior cowork runs
+plugins:
+  local_plugins:
+    - ../../founder-skills                 # founder-skills plugin root (whole plugin)
+  enabled:
+    - founder-skills@local

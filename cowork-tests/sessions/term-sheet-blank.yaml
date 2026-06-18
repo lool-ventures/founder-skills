@@ -4,7 +4,7 @@
 model: claude-sonnet-4-6
 plugins:
   local_plugins:
-    - ../../../
+    - ../../founder-skills
   enabled:
     - founder-skills@local
 uploads:

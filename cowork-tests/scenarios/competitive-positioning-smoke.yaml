@@ -1,0 +1,33 @@
+name: competitive-positioning-smoke
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: fail
+
+# Phase 1 fleet-parity smoke — competitive-positioning (conversational lane, Cadence).
+# Validation STOP gate(s): SKILL.md defines Gate 1 (competitor-set) and Gate 2 (axis-selection) as
+# "MANDATORY STOP"s, but the agent may MERGE them into one question ("Does this competitor set and these
+# axis pairs look right?") — DISCOVERED at record time. In every variant the FIRST option is the
+# accept/proceed path ("Looks good" / "Proceed to scoring"), so a catch-all `first` is both robust to the
+# merge AND satisfies "answer the proceed branch" (option 0 = proceed; never the additions/change branch,
+# which can't be driven headlessly). The fixed competitor set in the prompt suppresses the multiSelect
+# additions sub-prompt. Multi-dispatch: Step 5 dispatches MOAT_SCORING + POSITIONING_SCORING in parallel.
+prompt: |
+  I'm the founder of Cadence, a US seed-stage B2B SaaS company selling field-service scheduling and
+  dispatch software to SMB service businesses. Use the competitive-positioning skill to map our
+  competitive landscape and moats. Use exactly these three competitors — do not add others:
+  ServiceTitan, Jobber, and Housecall Pro. Then produce the positioning report and the explorer.
+
+answers:
+  # Accept the proposed set/axes (option 0 = "Looks good" / "Proceed to scoring" in every gate variant).
+  - when_question: ".*"
+    choose: first
+
+assert:
+  - result: success
+  - file_exists: outputs/artifacts/competitive-positioning-cadence/report.json
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-cadence/report.json
+      path: coaching_payload.schema_version
+      exists: true
+  - subagent_dispatched: 'competitive-positioning'
+  - transcript_no_host_path: true

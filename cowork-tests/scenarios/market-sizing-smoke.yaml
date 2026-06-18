@@ -1,0 +1,34 @@
+name: market-sizing-smoke
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: fail
+
+# Phase 1 fleet-parity smoke — market-sizing (conversational lane, Cadence).
+# Goal: prove the resolver fix lands artifacts at outputs/artifacts/market-sizing-<slug>/ and the
+# pipeline produces report.json. Rich prompt supplies name/stage/sector/geo so the founder-context gate
+# is self-satisfied; catch-all `first` backstops any single-select confirmation.
+# NOTE (research-skill / §6): market-sizing does WebSearch and may cite public source domains — the
+# privacy gate allowlist must cover any domain this run cites (extend cowork-replay.yml, documented).
+# DISCOVERY-PENDING: confirm slug (`market-sizing-cadence`) + the optional-HTML step on the first run.
+prompt: |
+  I'm the founder of Cadence, a US-based seed-stage B2B SaaS company selling field-service scheduling
+  and dispatch software to small and mid-sized service businesses (HVAC, plumbing, electrical). Please
+  use the market-sizing skill to build a full TAM/SAM/SOM analysis for Cadence — top-down and
+  bottom-up — with a sensitivity test, and produce the written report. Keep all figures illustrative;
+  where you would cite an external market source, label it clearly.
+
+answers:
+  - when_question: ".*"
+    choose: first
+
+assert:
+  - result: success
+  - file_exists: outputs/artifacts/market-sizing-cadence/report.json
+  - artifact_json:
+      artifact: outputs/artifacts/market-sizing-cadence/report.json
+      path: coaching_payload.schema_version
+      exists: true
+  # Analytical sub-agents (top-down / bottom-up / sensitivity / checklist) were dispatched — guards
+  # against a regression that collapses the per-step dispatch into the main thread.
+  - subagent_dispatched: 'market-sizing'
+  - transcript_no_host_path: true

@@ -18,8 +18,12 @@ answers:
 
 assert:
   - result: success
-  # The signature negative: the extractor must NOT fabricate a value for the blank exclusivity field.
-  # The exact artifact + dotted path are confirmed at discovery; `absent` fails loud on an unresolved
-  # intermediate (never a vacuous pass). The fabricated "45 days" must not appear as an extracted fact.
-  - transcript_not_matches: 'exclusivity[^.]{0,40}\b45\b'
+  # The signature negative, asserted POSITIVELY: the skill must explicitly flag the exclusivity field
+  # as blank/absent — proving it recognized the absence instead of fabricating a value. (A
+  # transcript_not_matches on "45" is too brittle: the skill legitimately COACHES "negotiate 30-45
+  # days" once a value is filled in, which is correct advice, not a hallucinated extraction.)
+  # Phrasing varies run-to-run ("___ days", "nothing filled in", "the number of days is blank",
+  # "not specified"), so the alternation is broad and the window wide — the skill ALWAYS flags the blank;
+  # only the wording moves.
+  - transcript_matches: 'exclusivit[\s\S]{0,150}(blank|___|nothing (is )?(filled|specified)|(not|nothing) filled|filled in|no (number|value|duration|days)|missing|not (specified|stated|provided|given)|empty|left blank|unspecified)'
   - transcript_no_host_path: true

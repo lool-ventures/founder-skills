@@ -1,0 +1,52 @@
+name: financial-model-review-smoke
+session: ../sessions/fmr-model.yaml
+fidelity: cowork
+on_unanswered: fail
+
+# Phase 1 fleet-parity smoke — financial-model-review (UPLOAD lane, synthetic Excel model).
+# TWO gates (verified in SKILL.md):
+#   1. numeric inputs confirm (cash / runway date / burn) — pre-state the numbers in the prompt so the
+#      AskUserQuestion is answerable;
+#   2. Step-3.6 extracted-values STOP — options "proceed" (reviewed, looks right) / "upload corrections".
+#      Headlessly there is NO corrections file to upload → must pick the PROCEED branch (option 0).
+#      Answered with a question-scoped label, not a blind catch-all.
+# review_inputs.py MUST run --static (the Cowork branch); the --workspace branch backgrounds an HTTP
+# server that never exits and would hang the record. The prompt states "you are in Cowork; use static
+# review mode" and we assert the transcript took --static (and NOT --workspace).
+# Also exercises the Phase-2a staging fix (scratch now lives in $STAGING_DIR under /tmp).
+# DISCOVERY-PENDING: confirm slug (`financial-model-review-cadence`) + the exact Step-3.6 proceed label.
+prompt: |
+  I'm the founder of Cadence, a US seed-stage B2B SaaS company. I've uploaded our financial model
+  (an Excel workbook). You are running in Cowork — use the static review mode for the extracted-values
+  review page (do not start a local server). Please use the financial-model-review skill to review the
+  model: validate the inputs, check unit economics, stress-test runway, and produce the report.
+
+  For the inputs the model doesn't state explicitly: current cash on hand is $1,500,000, monthly net
+  burn is about $120,000, and we want runway measured from 2026-06-01. When you show me the extracted
+  values for review, they look right — go ahead and proceed.
+
+answers:
+  # Step-3.6 extracted-values STOP — proceed (the values look right; nothing to upload headlessly).
+  - when_question: 'review|extracted|values|proceed|looks right'
+    choose: first
+  # Numeric inputs confirm + any remaining single-select.
+  - when_question: ".*"
+    choose: first
+
+assert:
+  - result: success
+  - file_exists: outputs/artifacts/financial-model-review-cadence/report.json
+  - artifact_json:
+      artifact: outputs/artifacts/financial-model-review-cadence/report.json
+      path: coaching_payload.schema_version
+      exists: true
+  - subagent_dispatched: 'financial-model-review'
+  # review_inputs.py ran in static (Cowork) mode, not the hanging server mode:
+  #  - review.html exists → the static review page was generated (the --static branch writes the file;
+  #    the --workspace branch serves it live instead). The `--static` flag lives in the bash tool-call
+  #    input, not the model's prose, so a positive transcript_matches on it is unreliable — file_exists
+  #    is the robust proof.
+  #  - --workspace must NOT appear → the &-backgrounded HTTP server (which would hang the record) never ran.
+  - file_exists: outputs/artifacts/financial-model-review-cadence/review.html
+  - transcript_not_matches: '--workspace'
+  - transcript_no_host_path: true
