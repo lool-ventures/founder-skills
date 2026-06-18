@@ -2,7 +2,7 @@
 
 Token-free **replay** PR gate (`.github/workflows/cowork-replay.yml`) over committed cassettes that
 exercise the founder-skills skills under Claude Cowork's runtime via
-[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (≥ 0.4.3). Recording is **live**
+[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (≥ 0.5.0). Recording is **live**
 (needs the staged agent + Docker); replay/verify are **token/agent-free** (stock CI).
 
 Coverage: a deep **cap-table** matrix (6 cassettes across all four extraction lanes) plus a
@@ -59,15 +59,15 @@ its committed value). The CI staleness gate is **warn-not-fail** for this reason
 cowork-harness replay cassettes/                 # replay every *.cassette.json (0.4.0 dir mode)
 cowork-harness lint scenarios/*.yaml             # no-silent-false-green (0.4.0 CLI subcommand)
 # Privacy gate (canonical allowlist is in .github/workflows/cowork-replay.yml). The real PII guard is
-# synthetic-only recording (every subject is fictional — Cadence/Acmecorp). Given that: currency is
-# allowed; the DOMAIN class is allowed wholesale but ANCHORED (^...$) so it matches a bare domain whole
-# and can't match the domain inside an email (an unanchored allow silently killed the email tripwire);
-# and only SYNTHETIC email domains (acmecorp.com, RFC-2606 example.com) are allowed — any OTHER email
-# still FAILS (the live PII tripwire). Decision 2026-06-18; see the workflow comment.
+# synthetic-only recording (every subject is fictional — Cadence/Acmecorp). Given that, using 0.5.0's
+# CLASS-SCOPED allows (an allow can't bleed across classes): currency via --allow; the DOMAIN class
+# allowed wholesale via --allow-domain (research skills cite 150+ public domains; non-PII); and only
+# SYNTHETIC email domains via --allow-email (acmecorp.com, RFC-2606 example.com) — any OTHER email still
+# FAILS (the live PII tripwire). Decision 2026-06-18; see the workflow comment.
 cowork-harness verify-cassettes cassettes/ --privacy-only \
   --allow '\$\s*\d[\d.,]*\s*(?:[MmKkBb]|million|thousand|billion)?' \
-  --allow '^[A-Za-z0-9][A-Za-z0-9.\-]*\.[A-Za-z]{2,}$' \
-  --allow '^[A-Za-z0-9._%+\-]+@(?:acmecorp|example)\.com$'
+  --allow-domain '[A-Za-z0-9][A-Za-z0-9.\-]*\.[A-Za-z]{2,}' \
+  --allow-email '[A-Za-z0-9._%+\-]+@(?:acmecorp|example)\.com'
 ```
 
 > **Staleness** (re-enabled on cowork-harness ≥ 0.4.0 — the skill hash now excludes `*.cassette.json`).
