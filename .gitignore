@@ -18,3 +18,4 @@ test-feedback-plugin/
 scripts/sync-test-repo.sh
 .superpowers/
 docs/superpowers/
+.playwright-mcp/
