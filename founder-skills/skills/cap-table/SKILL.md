@@ -155,8 +155,11 @@ fi
 PLUGIN_ROOT="${SCRIPTS%/skills/*}"
 REFS="$PLUGIN_ROOT/skills/cap-table/references"
 SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
-ARTIFACTS_ROOT="${ARTIFACTS_ROOT:-$(pwd)/artifacts}"
-mkdir -p "$ARTIFACTS_ROOT"
+# Resolve the canonical artifacts root via a SCRIPT, not inline bash. An inline path computation is
+# guidance the agent paraphrases — it lands outputs/ in one run and outputs/artifacts/ in another,
+# desyncing cross-skill find_artifact.py and breaking path-based checks. The script computes the root
+# deterministically (under the promoted outputs/ dir in Cowork, ./artifacts in the CLI) and creates it.
+python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py"   # prints ARTIFACTS_ROOT — use the printed path verbatim as ARTIFACTS_ROOT in every later block (a captured var dies in the next fresh shell)
 
 # Per-run identifier — used by every producer's --run-id. Stays constant
 # across the whole engagement (compose enforces parity).
@@ -177,7 +180,10 @@ After Step 1 (when the company slug is known), derive `REVIEW_DIR`. Two modes:
 REVIEW_DIR="${REVIEW_DIR:-$ARTIFACTS_ROOT/cap-table-$SLUG}"          # full pipeline
 # REVIEW_DIR="${REVIEW_DIR:-$ARTIFACTS_ROOT/cap-table-$SLUG-fastassess}"  # fast-assess
 mkdir -p "$REVIEW_DIR"
-mkdir -p "$REVIEW_DIR/.staging"   # for ad-hoc sub-agent JSON staging
+# Sub-agent JSON staging lives OUTSIDE the promoted outputs/ tree. Anything under $REVIEW_DIR is a
+# user-visible deliverable in Cowork, and deleting under outputs/ is unsafe there — so stage scratch
+# in a temp dir, which is safe to both create and clean up.
+STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cap-table-${SLUG}.staging.XXXXXX")"
 ```
 
 **Routing heuristics.** Default to **fast-assess** for first-touch when the founder has not attached a document AND has not asked for "the full review", "counsel packet", "report", "explorer", or "deep dive". Otherwise default to **full pipeline**. If an existing `cap-table-$SLUG/report.json` is present (full review already on disk), ask via `AskUserQuestion` whether the founder wants to use the existing full review or start a fresh fast-assess.
@@ -272,7 +278,7 @@ Route by input format. Each lane has a dedicated dispatch + validation protocol 
 | Freeform founder spreadsheet (arbitrary structure) | 3 | [`references/lanes/lane-3-freeform.md`](references/lanes/lane-3-freeform.md) |
 | Structured JSON paste or conversational reconstruction | 4 | [`references/lanes/lane-4-structured.md`](references/lanes/lane-4-structured.md) |
 
-**Lane 1 invocation pattern** — after capturing the sub-agent's JSON reply into a shell variable or staging file, pipe it through `extract_instrument.py` like this:
+**Lane 1 invocation pattern** — after capturing the sub-agent's JSON reply into a shell variable or a staging file under `$STAGING_DIR`, pipe it through `extract_instrument.py` like this:
 
 ```bash
 cat <<'EXTRACT_EOF' | python3 "$SCRIPTS/extract_instrument.py" \
@@ -537,11 +543,11 @@ cp "$REVIEW_DIR/report.md"     "${SLUG_TITLE}_Cap_Table.md"
 cp "$REVIEW_DIR/report.html"   "${SLUG_TITLE}_Cap_Table.html"
 cp "$REVIEW_DIR/explorer.html" "${SLUG_TITLE}_Cap_Table_Explorer.html"
 cp "$REVIEW_DIR/counsel_packet.md" "${SLUG_TITLE}_Counsel_Packet.md"
-
-rm -rf "$REVIEW_DIR/.staging" 2>/dev/null || true
-# In Cowork, the outputs sandbox may deny file deletion — that's fine; leave
-# staging files in place. The || true above ensures the step never fails.
 ```
+
+Do **not** delete the `/tmp` staging dir — it is ephemeral scratch the sandbox reclaims on its own.
+Never issue a `rm` here: a delete command near an `outputs/` path is conservatively read as an
+outputs-deletion (a Cowork-parity violation) even when its target is `/tmp`.
 
 **Fixing a bad artifact (Cowork-safe):** to correct a wrong artifact, **overwrite it in place** by re-running the producer script that writes it (e.g., re-run `cap_state.py` / `extract_instrument.py --replace` / `compose_report.py`). Do NOT delete-and-recreate; deletion may be denied in Cowork. Writing (overwriting) is always permitted.
 

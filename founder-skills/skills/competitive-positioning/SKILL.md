@@ -124,13 +124,9 @@ PLUGIN_ROOT="${SCRIPTS%/skills/*}"
 REFS="$PLUGIN_ROOT/skills/competitive-positioning/references"
 SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
 SHARED_REFS="$PLUGIN_ROOT/references"
-if ls "$(pwd)"/mnt/*/ >/dev/null 2>&1; then
-  ARTIFACTS_ROOT="$(ls -d "$(pwd)"/mnt/*/ | head -1)artifacts"
-elif ls "$(pwd)"/sessions/*/mnt/*/ >/dev/null 2>&1; then
-  ARTIFACTS_ROOT="$(ls -d "$(pwd)"/sessions/*/mnt/*/ | head -1)artifacts"
-else
-  ARTIFACTS_ROOT="./artifacts"
-fi
+# Resolve the canonical artifacts root via a SCRIPT, not inline bash (the agent paraphrases inline
+# path computations → outputs/ vs outputs/artifacts/ drift across runs). Deterministic + creates it.
+python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py"   # prints ARTIFACTS_ROOT — use the printed path verbatim as ARTIFACTS_ROOT in every later block (a captured var dies in the next fresh shell)
 ```
 
 The path setup handles both Claude Code (local filesystem) and Cowork (mounted sessions). The Step 0 block self-heals when `${CLAUDE_PLUGIN_ROOT}` doesn't resolve (Cowork). If it still comes up empty, locate the anchor manually: `find / -path '*/skills/competitive-positioning/scripts/validate_landscape.py' 2>/dev/null | head -5` and derive the variables from it.

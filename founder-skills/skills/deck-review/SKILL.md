@@ -110,8 +110,11 @@ fi
 PLUGIN_ROOT="${SCRIPTS%/skills/*}"
 REFS="$PLUGIN_ROOT/skills/deck-review/references"
 SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
-ARTIFACTS_ROOT="${ARTIFACTS_ROOT:-$(pwd)/artifacts}"
-mkdir -p "$ARTIFACTS_ROOT"
+# Resolve the canonical artifacts root via a SCRIPT, not inline bash. An inline path computation is
+# guidance the agent paraphrases — it lands outputs/ in one run and outputs/artifacts/ in another,
+# desyncing cross-skill find_artifact.py and breaking path-based checks. The script computes the root
+# deterministically (under the promoted outputs/ dir in Cowork, ./artifacts in the CLI) and creates it.
+python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py"   # prints ARTIFACTS_ROOT — use the printed path verbatim as ARTIFACTS_ROOT in every later block (a captured var dies in the next fresh shell)
 
 # RUN_ID — used by Step 1 (founder_context init) before slug-aware setup_run.py
 # runs, then passed to setup_run via --run-id. If the caller's task prompt
