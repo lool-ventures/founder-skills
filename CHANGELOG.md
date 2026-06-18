@@ -74,6 +74,17 @@ regress.
 - **cap-table:** Articles-of-Association extraction dispatch template (Lane 1); `--mode=grid` dumps
   the Lane-3 cell grid deterministically; vision fallback for image-only documents in the evidence
   verifier.
+- **cap-table — deterministic Lane-3 (freeform spreadsheet) mapping.** Replaces the agent-authored
+  heredoc that wrote Lane-3 artifacts with a pure, unit-tested mapper (`freeform_mapper.py`, behind
+  `extract_cap_table.py --mode=freeform-emit`). A closed agent↔producer contract
+  (`references/schemas/freeform-role-map.json`) pins block types + column-role values to schema
+  fields, so the structure-detection sub-agent and the producer can't drift. Off-contract roles and
+  fields freeform can't supply (a note's `interest_rate_type`, a preferred series' issue price, an
+  enum `plan_type`) become founder-confirmation **blockers** (a human-in-the-loop gate; answers
+  return via `--answer BLOCK.FIELD=VALUE`) rather than fabrications. Per-target-array stable instrument
+  ids, merged-cell/sheet-qualified-range handling, and a `cap_state.py` `E_NO_EQUITY_BASE` guard that
+  turns the old silent all-zero-snapshot (founders + option_pool both absent while instruments are
+  present) into a loud error.
 - **deck-review:** resume now preserves same-run pipeline artifacts across the stage-gate
   round-trip.
 

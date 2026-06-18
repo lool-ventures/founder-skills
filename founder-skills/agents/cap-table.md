@@ -326,27 +326,39 @@ Inputs you'll receive:
 - The founder's stated company name + a guess at what's in the sheet
   (from `inputs.json`).
 
-Your job: classify each region of cells into one of:
-- `founders_block` — table of founder common-share holdings
-- `preferred_series_block` — table of preferred-series holdings (per
-  series: shares, OCP, OIP, anti-dilution, liquidation preference)
-- `option_pool_block` — pool size, plan type, issued vs available
-- `options_grants_block` — individual grant records (holder, date, shares,
-  strike, vesting, plan type)
-- `safes_block` — outstanding SAFE table
-- `notes_block` — outstanding convertible-note table
-- `warrants_block` — outstanding warrants
-- `header_metadata` — company name, as-of date, currency, etc.
-- `derived_calculation` — formulas that compute totals or as-converted
-  values (ignore as input; we recompute from extracted holdings)
-- `noise` — empty cells, formatting, irrelevant content
+**Closed contract.** `block_type` and every `column_role_map` VALUE come from a fixed
+vocabulary — `references/schemas/freeform-role-map.json` (the single source of truth the
+deterministic producer `extract_cap_table.py --mode=freeform-emit` consumes). Emit ONLY
+those strings. An off-contract role value is rejected as a blocker, not silently mapped —
+do not invent names like `common_or_preferred` or `founder_id_or_none`.
 
-For each identified block, return:
-- `block_type` (one of the above)
-- `sheet` + `cell_range` (e.g., `"Sheet1!A5:F20"`)
-- `column_role_map` — which column encodes which canonical field
-  (e.g., `{"A": "holder_name", "B": "shares", "C": "common_or_preferred", ...}`)
-- `confidence` (high / medium / low) + evidence
+Classify each region into one `block_type`:
+- `founders_block` — founder common-share holdings. Roles: `holder_name`, `shares`,
+  `founder_id`, `common_class`, `voting_multiple`.
+- `preferred_series_block` — preferred-series holdings. Roles: `series_name`, `shares`,
+  `issue_price`, `original_conversion_price`, `current_conversion_price`, `issue_date`.
+- `option_pool_block` — pool size / plan type / issued vs available. Roles: `plan_type`,
+  `authorized`, `issued`, `unallocated`.
+- `safes_block` — outstanding SAFEs. Roles: `investor_name`, `amount`, `post_money_cap`,
+  `pre_money_cap`, `discount`, `issue_date`.
+- `notes_block` — convertible notes. Roles: `investor_name`, `principal`, `interest_rate`,
+  `interest_rate_type`, `valuation_cap`, `discount`, `issue_date`, `maturity_date`.
+- `options_grants_block`, `warrants_block` — classify them, but freeform-emit hard-blocks
+  both (required fields like strike/grant-date or settlement-type have no reliable column);
+  provide those via Lane 1 / conversationally.
+- `header_metadata` — company name, as-of date, currency (ignored by the producer).
+- `derived_calculation` — formulas computing totals/as-converted values (ignored; we
+  recompute from extracted holdings).
+- `noise` — empty cells, formatting, irrelevant content (ignored).
+
+A `discount` column states the discount RATE (e.g. `20` or `0.20` = 20%), NOT a multiplier.
+Map only the columns the sheet actually has — omit a role rather than guessing; required
+fields the sheet lacks become founder-confirmation blockers downstream (never fabricate).
+
+For each block return: `block_type`, `sheet` + `cell_range` (the **data rows only**, headers
+excluded; bare `"A5:F12"` or sheet-qualified `"Cap Table!A5:F12"` both accepted),
+`column_role_map` (column-letter → role value), `confidence` (high/medium/low) + `evidence`,
+and `ambiguities`.
 
 **Return shape (for `SPREADSHEET_STRUCTURE_DETECTION`):**
 
@@ -357,12 +369,11 @@ For each identified block, return:
       "block_type": "founders_block",
       "sheet": "Cap Table",
       "cell_range": "A5:F12",
-      "column_role_map": {"A": "holder_name", "B": "shares", "C": "founder_id_or_none", "...": "..."},
+      "column_role_map": {"A": "holder_name", "B": "shares", "C": "founder_id"},
       "confidence": "high",
-      "evidence": "Sheet titled 'Cap Table'; row 4 has headers 'Name | Shares | Type'; rows 5-12 contain founder-style entries.",
+      "evidence": "Sheet titled 'Cap Table'; row 4 headers 'Name | Shares | ID'; rows 5-12 founder entries.",
       "ambiguities": []
-    },
-    "..."
+    }
   ]
 }
 ```
