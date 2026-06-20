@@ -12,6 +12,7 @@ docs/internal/
 uv.lock
 .worktrees/
 artifacts/
+runs/
 cap-table-workspace/
 docs/plans/
 test-feedback-plugin/
