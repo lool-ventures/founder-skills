@@ -2,7 +2,7 @@
 
 Token-free **replay** PR gate (`.github/workflows/cowork-replay.yml`) over committed cassettes that
 exercise the founder-skills skills under Claude Cowork's runtime via
-[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (≥ 0.6.0). Recording is **live**
+[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (≥ 0.7.1). Recording is **live**
 (needs the staged agent + Docker); replay/verify are **token/agent-free** (stock CI).
 
 Coverage: a deep **cap-table** matrix (6 cassettes across all four extraction lanes) plus a
@@ -61,11 +61,20 @@ runtime). The CI staleness gate is **warn-not-fail** (CI is replay-only and can'
 present (falling back to the cassette's embedded snapshot with a warning) — so it now respects `skills:`
 edits. To be explicit, you can still re-record straight from the YAML (`record scenarios/<name>.yaml ...`).
 
-**0.6.0 cassette-format bump (one-time re-record):** 0.6.0 moves the staleness fingerprint to format v2,
-so the committed v1 cassettes flag as stale **once** after the upgrade (reported as "recorded under an
-older hash format (v1 → v2)", not a content change). Replay still passes and the CI staleness gate is
-warn-only, so nothing breaks — but the fleet should be re-recorded once locally (`record --rerecord-stale`,
-or per-scenario from the YAML) to clear the v2 staleness flag.
+**Large (truncated) artifacts — pin ≥ 0.7.1:** artifacts over the 64 KiB inline cap are recorded
+hash-only (manifest entry: `path` + `bytes` + `sha256`, body not inlined). 0.7.1 makes `file_exists` /
+`user_visible_artifact` **pass from that manifest** (existence is metadata) — so we keep the rich
+existence/promotion assertions on big HTML deliverables (e.g. `…_Cap_Table_Explorer.html`,
+`review.html`) without committing their bodies. (0.7.0 had a regression that *failed* these — that's why
+the pin is ≥ 0.7.1, not ≥ 0.7.0.) `artifact_json` still needs an inlined body, so assert **content** on
+the small JSON producers and **existence** on the big rendered deliverables. 0.7.x also redacts base64
+artifact bodies wholesale (`[REDACTED:base64]`) — fine here since we never assert base64 content. Always
+record with the pinned harness (the manifest must be present); the staleness format is 0.6.0's v2.
+
+**Diagnosing a failed live record:** if `record` errors fast with an empty `agent.stderr.log` (e.g. a
+missing model token — the in-Docker agent cannot read the macOS Keychain), check the run's
+`events.jsonl` for a structured `{"type":"infra_error",...}` entry (0.7.0). Auth needs
+`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` in the record environment.
 
 ### Iterating asserts cheaply (0.5.0 `verify-run`)
 A wrong/edited `assert:` does **not** need a live re-record. With a kept run dir (set

@@ -51,7 +51,7 @@ regress.
 ### Added — cowork-harness replay gate
 
 - A token-free **replay** PR gate (`.github/workflows/cowork-replay.yml`) exercises the skills under
-  Claude Cowork's runtime via `cowork-harness` (≥ 0.5.0). Recording is live (staged agent + Docker);
+  Claude Cowork's runtime via `cowork-harness` (≥ 0.7.1). Recording is live (staged agent + Docker);
   replay/verify run token- and agent-free in stock CI. **11 committed cassettes:** six cap-table
   scenarios (Lane 1/2/4 extraction, anti-hallucination, priced-round + BBWA anti-dilution,
   fast-assess routing) plus a per-skill fleet-parity smoke for market-sizing, ic-sim,
