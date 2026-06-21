@@ -145,11 +145,162 @@ def _resolve_mfn_elections(safes: list[dict[str, Any]]) -> list[dict[str, Any]]:
             shadow["pre_money_valuation_cap"] = anchor.get("pre_money_valuation_cap")
             shadow["discount_multiplier"] = anchor.get("discount_multiplier")
             shadow["_mfn_inherited_from"] = elected_id
+            # Audit fields so the resolved election is visible in per_safe (cap_state can't
+            # distinguish two scenarios that elect different siblings — see fix plan §3c).
+            if anchor.get("post_money_valuation_cap") is not None:
+                shadow["_mfn_inherited_cap"] = anchor.get("post_money_valuation_cap")
+                shadow["_mfn_inherited_cap_type"] = "post_money"
+            elif anchor.get("pre_money_valuation_cap") is not None:
+                shadow["_mfn_inherited_cap"] = anchor.get("pre_money_valuation_cap")
+                shadow["_mfn_inherited_cap_type"] = "pre_money"
+            shadow["_mfn_inherited_discount"] = anchor.get("discount_multiplier")
+            # The override pre-pass stamps "scenario_override"; default to "instrument" otherwise.
+            shadow.setdefault("_mfn_election_source", "instrument")
             out[i] = shadow
             changed = True
         if not changed:
             break
     return out
+
+
+def _apply_mfn_election_overrides(
+    safes: list[dict[str, Any]], elections: Any
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Apply scenario-level MFN election overrides onto a shadow copy of safes.
+
+    `elections` is a map ``{electing_safe_id: elected_against_safe_id}`` carried on
+    a scenario's ``parameters.mfn_elections``. For each entry the electing
+    ``yc_uncapped_mfn`` SAFE's ``mfn_provision.elected_against_safe_id`` is set on a
+    shadow record (the scenario override REPLACES any instrument-baked election), so
+    the downstream ``_resolve_mfn_elections`` inherits the chosen sibling's terms.
+
+    Returns ``(shadow_safes, blockers, warnings)`` and NEVER mutates the caller's
+    records (the nested ``mfn_provision`` dict is copied before mutation — a bare
+    ``dict(s)`` would share the original ref). A no-op (``None``/``{}``) returns the
+    input list unchanged. Any other malformed shape, or a semantically invalid
+    election, returns a structural blocker rather than crashing or silently ignoring.
+    """
+    if elections is None or elections == {}:
+        return safes, [], []
+    if not isinstance(elections, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in elections.items()
+    ):
+        return (
+            safes,
+            [
+                {
+                    "code": "E_MFN_ELECTIONS_BAD_SHAPE",
+                    "instance_id": None,
+                    "remedy": "mfn_elections must be a {electing_safe_id: elected_against_safe_id} "
+                    "object with string keys and values.",
+                }
+            ],
+            [],
+        )
+    by_id = {s.get("id"): s for s in safes}
+    out = [dict(s) for s in safes]
+    out_by_id = {s.get("id"): s for s in out}
+    blockers: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    for electing_id, elected_id in elections.items():
+        s = out_by_id.get(electing_id)
+        if s is None:
+            blockers.append(
+                {
+                    "code": "E_SAFE_MFN_ELECTION_UNKNOWN_SAFE",
+                    "instance_id": electing_id,
+                    "remedy": f"mfn_elections references unknown SAFE id {electing_id!r}.",
+                }
+            )
+            continue
+        if s.get("form") != "yc_uncapped_mfn":
+            blockers.append(
+                {
+                    "code": "E_SAFE_MFN_ELECTION_NOT_MFN",
+                    "instance_id": electing_id,
+                    "remedy": f"mfn_elections set on {electing_id!r}, which is not a yc_uncapped_mfn SAFE.",
+                }
+            )
+            continue
+        if elected_id == electing_id or elected_id not in by_id:
+            blockers.append(
+                {
+                    "code": "E_SAFE_MFN_ELECTION_BAD_TARGET",
+                    "instance_id": electing_id,
+                    "remedy": f"mfn election target {elected_id!r} is the SAFE itself or not a known SAFE id "
+                    "(if filtered by safe_ids, the target must be in the active set).",
+                }
+            )
+            continue
+        mfn = dict(s.get("mfn_provision") or {})
+        prior = mfn.get("elected_against_safe_id")
+        mfn["elected_against_safe_id"] = elected_id
+        mfn["elected"] = True
+        s["mfn_provision"] = mfn
+        s["_mfn_election_source"] = "scenario_override"
+        if prior is not None and prior != elected_id:
+            warnings.append(
+                {
+                    "code": "W_MFN_ELECTION_OVERRIDES_INSTRUMENT",
+                    "instance_id": electing_id,
+                    "detail": f"scenario election against {elected_id!r} overrides the instrument's "
+                    f"baked election against {prior!r} (counterfactual).",
+                }
+            )
+    return out, blockers, warnings
+
+
+def _mfn_not_most_favorable_warnings(
+    safes: list[dict[str, Any]], per_safe: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Post-solve check: flag any MFN-resolved SAFE that did NOT elect the most-favorable
+    (lowest realized conversion price) sibling available to it.
+
+    Must run after convergence because the effective price is
+    ``min(cap_price, pps*discount, pps)`` — price-dependent. The candidate set for an
+    MFN holder is every other resolved, non-`yc_uncapped_mfn`, non-rejected SAFE (each
+    has a realized ``conversion_price`` in ``per_safe``). Under a real YC MFN the holder
+    always takes most-favorable, so a non-most-favorable election is a counterfactual.
+    """
+    candidate_prices: dict[str, float] = {}
+    for s in safes:
+        sid = s.get("id")
+        # Candidates are the real anchor siblings an MFN could elect — exclude unresolved
+        # uncapped MFNs AND already-resolved MFN holders (their post-resolution form mirrors an
+        # anchor, but they are not themselves an electable sibling).
+        if sid is None or s.get("form") == "yc_uncapped_mfn" or s.get("_mfn_inherited_from"):
+            continue
+        entry = per_safe.get(sid) or {}
+        if entry.get("branch") == "rejected":
+            continue
+        cp = entry.get("conversion_price")
+        if cp is not None:
+            candidate_prices[str(sid)] = float(cp)
+    warnings: list[dict[str, Any]] = []
+    for s in safes:
+        elected = s.get("_mfn_inherited_from")
+        if not elected:
+            continue
+        sid = s.get("id")
+        if sid is None:
+            continue
+        elected_price = (per_safe.get(sid) or {}).get("conversion_price")
+        others = {k: v for k, v in candidate_prices.items() if k != sid}
+        if elected_price is None or not others:
+            continue
+        best = min(others.values())
+        if float(elected_price) > best + 1e-9:
+            warnings.append(
+                {
+                    "code": "W_MFN_NOT_MOST_FAVORABLE",
+                    "instance_id": sid,
+                    "detail": f"MFN SAFE {sid!r} elected {elected!r} (conversion price "
+                    f"{float(elected_price):.6f}) but a more favorable sibling exists "
+                    f"(best {best:.6f}). Real YC MFN would take the most-favorable terms; "
+                    "treat this election as a counterfactual.",
+                }
+            )
+    return warnings
 
 
 # ============================================================================
@@ -459,8 +610,15 @@ def _safe_shares_at_price(
             conversion_price_override=s.get("conversion_price_override"),
             pre_money_valuation=pre_money_valuation,
         )
-        if s.get("_mfn_inherited_from"):
-            r["_mfn_inherited_from"] = s["_mfn_inherited_from"]
+        for _mfn_key in (
+            "_mfn_inherited_from",
+            "_mfn_election_source",
+            "_mfn_inherited_cap",
+            "_mfn_inherited_cap_type",
+            "_mfn_inherited_discount",
+        ):
+            if s.get(_mfn_key) is not None:
+                r[_mfn_key] = s[_mfn_key]
         per_safe[s["id"]] = r
         if r.get("branch") != "rejected":
             total += r.get("conversion_shares", 0.0)
@@ -504,6 +662,7 @@ def solve_priced_round(
     target_pool_percent: float | None = None,
     target_basis: str = "pre_money",
     conversion_event_date: str | None = None,
+    mfn_elections: dict[str, Any] | None = None,
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
     convergence_threshold: float = DEFAULT_CONVERGENCE_THRESHOLD,
 ) -> dict[str, Any]:
@@ -546,12 +705,28 @@ def solve_priced_round(
             ],
             "per_safe": {},
             "per_note": {},
+            "math_provenance": [],
         }
 
     # After the guard above, conversion_event_date is non-None whenever notes
     # are present. Narrow to a non-Optional local for the note-conversion calls
     # (the bare assert is avoided so -O cannot strip note conversions).
     note_conversion_date: str = conversion_event_date or ""
+
+    # Scenario-level MFN election overrides (parameters.mfn_elections) — apply BEFORE
+    # structural resolution so the elected sibling's terms are the ones inherited.
+    # The structural override-conflict warning is held here and merged into
+    # solver_warnings once that list exists (W_MFN_NOT_MOST_FAVORABLE is computed
+    # later, post-convergence, since it is price-dependent).
+    safes, _mfn_override_blockers, _mfn_override_warnings = _apply_mfn_election_overrides(safes, mfn_elections)
+    if _mfn_override_blockers:
+        return {
+            "completeness": "structural_only",
+            "blockers": _mfn_override_blockers,
+            "per_safe": {},
+            "per_note": {},
+            "math_provenance": [],
+        }
 
     # MFN resolution is STRUCTURAL — one-time pre-pass, not per-iter.
     safes = _resolve_mfn_elections(safes)
@@ -572,6 +747,7 @@ def solve_priced_round(
             "blockers": blockers,
             "per_safe": {},
             "per_note": {},
+            "math_provenance": [],
         }
 
     pre_fd = float(working_cap_state["as_converted_totals"]["fully_diluted_shares"])
@@ -589,6 +765,7 @@ def solve_priced_round(
             "blockers": blockers,
             "per_safe": {},
             "per_note": {},
+            "math_provenance": [],
         }
 
     # IMMUTABLE A SNAPSHOT — frozen at iteration zero per NVCA §4.4.4
@@ -655,6 +832,9 @@ def solve_priced_round(
     ad_breakdown: list[dict[str, Any]] = []
     ad_warnings: list[dict[str, Any]] = []
     solver_warnings: list[dict[str, Any]] = []
+    # Structural MFN override-conflict warnings collected pre-solve; merged here so
+    # they survive the AD direct-assign at result["warnings"] below and reach the sink.
+    solver_warnings.extend(_mfn_override_warnings)
 
     # Initialize per-iter outputs (used in convergence-loop scope)
     safe_shares: float = 0.0
@@ -843,6 +1023,10 @@ def solve_priced_round(
         equity_financing_price=price,
         pre_money_valuation=pre_money,
     )
+    # W_MFN_NOT_MOST_FAVORABLE is price-dependent (effective price = min(cap, pps*disc, pps)),
+    # so it can only be computed AFTER convergence, from the realized per_safe prices. Appended
+    # to solver_warnings (merged at the sink below, surviving the AD direct-assign).
+    solver_warnings.extend(_mfn_not_most_favorable_warnings(safes, per_safe))
     if notes:
         # conversion_event_date guaranteed non-None by the structural guard
         # at the top of solve_priced_round (returns early otherwise).
@@ -1089,6 +1273,11 @@ def _cli() -> int:
     p.add_argument("--conversion-date", default=None)
     p.add_argument("--max-iter", type=int, default=DEFAULT_MAX_ITERATIONS)
     p.add_argument("--threshold", type=float, default=DEFAULT_CONVERGENCE_THRESHOLD)
+    p.add_argument(
+        "--mfn-elections",
+        default=None,
+        help="JSON map {electing_safe_id: elected_against_safe_id} of scenario MFN elections.",
+    )
     add_output_args(p)
     args = p.parse_args()
 
@@ -1096,6 +1285,8 @@ def _cli() -> int:
         cap_state = json.load(f)
     with open(args.instruments, encoding="utf-8") as f:
         instruments = json.load(f)
+
+    mfn_elections = json.loads(args.mfn_elections) if args.mfn_elections else None
 
     result = solve_priced_round(
         cap_state=cap_state,
@@ -1106,6 +1297,7 @@ def _cli() -> int:
         target_pool_percent=args.target_pool_pct,
         target_basis=args.target_basis,
         conversion_event_date=args.conversion_date,
+        mfn_elections=mfn_elections,
         max_iterations=args.max_iter,
         convergence_threshold=args.threshold,
     )

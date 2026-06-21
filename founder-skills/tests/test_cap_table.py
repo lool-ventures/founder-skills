@@ -7724,3 +7724,249 @@ class TestPerSafeCapImpliedOnlySkip:
         # safe_ci should NOT appear in the conversion math table
         # (it only appears in the cap-implied narrative)
         assert "safe_ci" not in md.split("Per-SAFE conversion math")[-1].split("\n\n")[0]
+
+
+# ===========================================================================
+# S1 — MFN election override (scenario-level mfn_elections)
+# ===========================================================================
+
+_MFN_CAP10 = {
+    **_SAFE_BASIC,
+    "id": "cap10",
+    "post_money_valuation_cap": 10_000_000,
+    "discount_multiplier": None,
+    "form": "yc_postmoney_cap",
+    "mfn_provision": None,
+}
+_MFN_CAP15 = {
+    **_SAFE_BASIC,
+    "id": "cap15",
+    "post_money_valuation_cap": 15_000_000,
+    "discount_multiplier": None,
+    "form": "yc_postmoney_cap",
+    "mfn_provision": None,
+}
+
+
+def _mfn_uncapped(elected: str | None) -> dict[str, Any]:
+    return {
+        **_SAFE_BASIC,
+        "id": "safe_mfn",
+        "post_money_valuation_cap": None,
+        "discount_multiplier": None,
+        "form": "yc_uncapped_mfn",
+        "mfn_provision": {
+            "present": True,
+            "elected_against_safe_id": elected,
+            "elected": elected is not None,
+            "cherry_pick_attempted": False,
+            "notes": None,
+        },
+    }
+
+
+class TestMfnElectionOverride:
+    def _solve(self, elections: dict[str, str]) -> dict[str, Any]:
+        cs = cap_state_mod.build_cap_state(_BASIC_INPUTS, _BASIC_INSTRUMENTS)
+        return priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=[_MFN_CAP10, _MFN_CAP15, _mfn_uncapped(None)],
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+            mfn_elections=elections,
+        )
+
+    def test_election_override_changes_conversion(self) -> None:
+        r10 = self._solve({"safe_mfn": "cap10"})
+        r15 = self._solve({"safe_mfn": "cap15"})
+        p10 = r10["per_safe"]["safe_mfn"]["conversion_price"]
+        p15 = r15["per_safe"]["safe_mfn"]["conversion_price"]
+        assert p10 != p15, "MFN election must change the conversion price"
+        assert p15 > p10, "$15M cap -> higher conversion price than $10M"
+        f10 = r10["aggregate_ownership_by_class"]["founders_pct"]
+        f15 = r15["aggregate_ownership_by_class"]["founders_pct"]
+        assert f15 > f10, "$15M election dilutes founders less -> higher founders_pct"
+
+    def _solve_safes(self, safes: list[dict[str, Any]], elections: dict[str, str]) -> dict[str, Any]:
+        cs = cap_state_mod.build_cap_state(_BASIC_INPUTS, _BASIC_INSTRUMENTS)
+        return priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=safes,
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            target_pool_percent=0.10,
+            target_basis="post_money",
+            mfn_elections=elections,
+        )
+
+    @staticmethod
+    def _has(result: dict[str, Any], code: str) -> bool:
+        return any(w.get("code") == code for w in result.get("warnings", []) or [])
+
+    def test_not_most_favorable_warns_on_higher_cap(self) -> None:
+        # electing the $15M sibling when a cheaper $10M exists is non-most-favorable
+        r = self._solve_safes([_MFN_CAP10, _MFN_CAP15, _mfn_uncapped(None)], {"safe_mfn": "cap15"})
+        assert self._has(r, "W_MFN_NOT_MOST_FAVORABLE")
+
+    def test_not_most_favorable_absent_on_best_election(self) -> None:
+        # electing the cheapest ($10M) sibling IS most-favorable -> no warning
+        r = self._solve_safes([_MFN_CAP10, _MFN_CAP15, _mfn_uncapped(None)], {"safe_mfn": "cap10"})
+        assert not self._has(r, "W_MFN_NOT_MOST_FAVORABLE")
+
+    def test_not_most_favorable_absent_with_single_candidate(self) -> None:
+        # only one capped sibling -> nothing more favorable to elect -> no warning
+        r = self._solve_safes([_MFN_CAP10, _mfn_uncapped(None)], {"safe_mfn": "cap10"})
+        assert not self._has(r, "W_MFN_NOT_MOST_FAVORABLE")
+
+    def test_override_beats_instrument_warns(self) -> None:
+        baked = _mfn_uncapped("cap10")  # instrument elects cap10
+        r = self._solve_safes([_MFN_CAP10, _MFN_CAP15, baked], {"safe_mfn": "cap15"})
+        assert self._has(r, "W_MFN_ELECTION_OVERRIDES_INSTRUMENT")
+        # control: override matches baked -> no override-conflict warning
+        r2 = self._solve_safes([_MFN_CAP10, _MFN_CAP15, _mfn_uncapped("cap10")], {"safe_mfn": "cap10"})
+        assert not self._has(r2, "W_MFN_ELECTION_OVERRIDES_INSTRUMENT")
+
+    def test_bad_shape_blocks(self) -> None:
+        cs = cap_state_mod.build_cap_state(_BASIC_INPUTS, _BASIC_INSTRUMENTS)
+        r = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=[_MFN_CAP10, _mfn_uncapped(None)],
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            mfn_elections=["safe_mfn", "cap10"],  # malformed: a list, not a dict
+        )
+        assert r["completeness"] == "structural_only"
+        assert any(b["code"] == "E_MFN_ELECTIONS_BAD_SHAPE" for b in r["blockers"])
+
+    def test_bad_target_blocks(self) -> None:
+        r = self._solve_safes([_MFN_CAP10, _mfn_uncapped(None)], {"safe_mfn": "nonexistent"})
+        assert r["completeness"] == "structural_only"
+        assert any(b["code"] == "E_SAFE_MFN_ELECTION_BAD_TARGET" for b in r["blockers"])
+
+    def test_input_not_mutated(self) -> None:
+        mfn = _mfn_uncapped(None)
+        before = mfn["mfn_provision"]["elected_against_safe_id"]
+        self._solve_safes([_MFN_CAP10, _MFN_CAP15, mfn], {"safe_mfn": "cap15"})
+        assert mfn["mfn_provision"]["elected_against_safe_id"] == before  # still None
+
+    def test_scenario_route_forwards_mfn_elections(self) -> None:
+        import run_scenario  # type: ignore[import-not-found]
+
+        cs = cap_state_mod.build_cap_state(_BASIC_INPUTS, _BASIC_INSTRUMENTS)
+        instruments = {"safes": [_MFN_CAP10, _MFN_CAP15, _mfn_uncapped(None)], "convertible_notes": []}
+
+        def run(elect: str) -> dict[str, Any]:
+            scenario = {
+                "type": "safe_conversion",
+                "parameters": {
+                    "priced_round_pre_money": 20_000_000,
+                    "priced_round_new_money": 5_000_000,
+                    "target_pool_percent": 0.10,
+                    "target_basis": "post_money",
+                    "mfn_elections": {"safe_mfn": elect},
+                },
+            }
+            return run_scenario.run_safe_conversion_scenario(scenario, instruments=instruments, cap_state=cs)
+
+        r10 = run("cap10")
+        r15 = run("cap15")
+        # the param actually reaches the solver -> the two scenarios differ
+        assert r10["per_safe"]["safe_mfn"]["conversion_price"] != r15["per_safe"]["safe_mfn"]["conversion_price"]
+        # and the resolved election is visible in per_safe for audit
+        assert r15["per_safe"]["safe_mfn"]["_mfn_election_source"] == "scenario_override"
+        assert r15["per_safe"]["safe_mfn"]["_mfn_inherited_cap"] == 15_000_000
+        assert r15["per_safe"]["safe_mfn"]["_mfn_inherited_cap_type"] == "post_money"
+
+    def test_cap_implied_path_blocks_mfn_elections(self) -> None:
+        import run_scenario  # type: ignore[import-not-found]
+
+        cs = cap_state_mod.build_cap_state(_BASIC_INPUTS, _BASIC_INSTRUMENTS)
+        instruments = {"safes": [_MFN_CAP10, _mfn_uncapped(None)], "convertible_notes": []}
+        scenario = {"type": "safe_conversion", "parameters": {"mfn_elections": {"safe_mfn": "cap10"}}}
+        r = run_scenario.run_safe_conversion_scenario(scenario, instruments=instruments, cap_state=cs)
+        assert any(b["code"] == "E_SAFE_MFN_ELECTION_REQUIRES_PRICED_ROUND" for b in r["blockers"])
+
+    def test_structural_returns_include_math_provenance(self) -> None:
+        # ALL FOUR structural early-returns must carry math_provenance (schema-required at
+        # scenarios.schema.json computed_outputs.required).
+        cs = cap_state_mod.build_cap_state(_BASIC_INPUTS, _BASIC_INSTRUMENTS)
+
+        # (1) MFN cycle path: two uncapped MFNs electing each other.
+        cyc = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=[
+                {
+                    **_mfn_uncapped("B"),
+                    "id": "A",
+                    "mfn_provision": {
+                        "present": True,
+                        "elected_against_safe_id": "B",
+                        "elected": True,
+                        "cherry_pick_attempted": False,
+                        "notes": None,
+                    },
+                },
+                {
+                    **_mfn_uncapped("A"),
+                    "id": "B",
+                    "mfn_provision": {
+                        "present": True,
+                        "elected_against_safe_id": "A",
+                        "elected": True,
+                        "cherry_pick_attempted": False,
+                        "notes": None,
+                    },
+                },
+            ],
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+        )
+        assert any(b["code"] == "E_SAFE_CIRCULAR_MFN" for b in cyc["blockers"])
+        assert "math_provenance" in cyc
+
+        # (2) bad-shape MFN override path.
+        bad = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=[_MFN_CAP10],
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+            mfn_elections=["bad"],
+        )
+        assert any(b["code"] == "E_MFN_ELECTIONS_BAD_SHAPE" for b in bad["blockers"])
+        assert "math_provenance" in bad
+
+        # (3) note-without-conversion-date path.
+        note = {"id": "n1", "principal": 100_000, "form": "convertible_note"}
+        nod = priced_round.solve_priced_round(
+            cap_state=cs,
+            safes=[],
+            notes=[note],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+        )
+        assert any(b["code"] == "E_NOTE_NO_CONVERSION_DATE" for b in nod["blockers"])
+        assert "math_provenance" in nod
+
+        # (4) zero pre-FD path (no founders / pool).
+        empty_inputs = {
+            **_BASIC_INPUTS,
+            "founders": [],
+            "option_pool": {"plan_type": "nso", "authorized": 0, "issued": 0, "unallocated": 0},
+        }
+        empty_cs = cap_state_mod.build_cap_state(empty_inputs, _BASIC_INSTRUMENTS)
+        zpf = priced_round.solve_priced_round(
+            cap_state=empty_cs,
+            safes=[],
+            notes=[],
+            pre_money=20_000_000,
+            new_money=5_000_000,
+        )
+        assert any(b["code"] == "E_SCENARIO_NO_PRE_FD" for b in zpf["blockers"])
+        assert "math_provenance" in zpf

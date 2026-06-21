@@ -124,6 +124,9 @@ def quick_assess(
             f"for convertible-note conversion math."
         )
 
+    # Scope note: fast-assess does NOT honor scenario-level mfn_elections overrides — it has
+    # no scenario parameters. Baked instrument elections (mfn_provision) still resolve inside
+    # the solver. For counterfactual MFN elections, use the full pipeline (run_scenario).
     solver_result = solve_priced_round(
         cap_state=cs,
         safes=safes,

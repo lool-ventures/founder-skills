@@ -191,6 +191,15 @@ For a **term sheet**: extract the priced-round parameters (`pre_money`,
 `new_money`, target pool, etc.) into the scenario-parameter shape rather
 than `instruments.json`. The main thread will route them.
 
+To model a specific MFN election in a priced-round / safe-conversion scenario,
+set `parameters.mfn_elections` to a map `{electing_safe_id: elected_against_safe_id}`
+(e.g. `{"safe_mfn": "safe_1"}`). The solver applies it before resolving the
+chain, so two scenarios that elect different siblings compute differently. A
+real YC MFN holder always takes the **most-favorable** terms, so an election
+against a non-most-favorable sibling is a **counterfactual** ("what-if") — the
+solver emits `W_MFN_NOT_MOST_FAVORABLE` and the report should label it as such,
+not as the holder's actual entitlement.
+
 For an **option plan**: extract `plan_type` (one of `iso` / `nso` /
 `section_102_cg` / `section_102_oi` / `section_3i`), authorized pool size,
 strike-price methodology, vesting standard. Do NOT extract individual

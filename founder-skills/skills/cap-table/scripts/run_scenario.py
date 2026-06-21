@@ -98,7 +98,18 @@ def run_safe_conversion_scenario(
 
     per_safe: dict[str, dict[str, Any]] = {}
     if priced_pre is None or priced_new is None:
-        # Cap-implied path only
+        # Cap-implied path only. MFN elections need a priced round to resolve against
+        # (convert_safe_cap_implied has no election path) — surface a blocker once rather
+        # than silently dropping the param.
+        if params.get("mfn_elections"):
+            blockers.append(
+                {
+                    "code": "E_SAFE_MFN_ELECTION_REQUIRES_PRICED_ROUND",
+                    "instance_id": None,
+                    "remedy": "mfn_elections requires a priced round (priced_round_pre_money / "
+                    "priced_round_new_money); the cap-implied path cannot resolve an MFN election.",
+                }
+            )
         for s in safes:
             r = convert_safe_cap_implied(
                 purchase_amount=s["purchase_amount"],
@@ -142,6 +153,7 @@ def run_safe_conversion_scenario(
         target_pool_percent=params.get("target_pool_percent"),
         target_basis=params.get("target_basis", "pre_money"),
         conversion_event_date=params.get("transaction_event_date"),
+        mfn_elections=params.get("mfn_elections"),
     )
 
 
@@ -252,6 +264,7 @@ def run_priced_round_scenario(
         target_pool_percent=params.get("target_pool_percent"),
         target_basis=params.get("target_basis", "pre_money"),
         conversion_event_date=params.get("transaction_event_date"),
+        mfn_elections=params.get("mfn_elections"),
     )
 
     if warrant_events:
