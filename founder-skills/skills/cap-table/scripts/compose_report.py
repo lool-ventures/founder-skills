@@ -581,6 +581,16 @@ def render_report_markdown(
         lines.append("> dilution scenarios, add SAFEs, convertible notes, option grants, or warrants to")
         lines.append("> `instruments.json`.")
         lines.append("")
+    if any(w == "W_CAP_BASE_ASSUMED" for w in cap_state_warnings):
+        lines.append("> ⚠ **Cap base ASSUMED, not founder-confirmed.** Founder share counts / option pool were")
+        lines.append("> not confirmed (generic placeholder names or an explicit assumed flag) — ownership")
+        lines.append("> figures below are DIRECTIONAL. Confirm the cap base before relying on these numbers.")
+        lines.append("")
+    if any(w == "W_FOUNDER_LOOKS_LIKE_INVESTOR" for w in cap_state_warnings):
+        lines.append("> ⚠ **A listed founder resembles an investment entity** (name contains")
+        lines.append("> Ventures/Capital/Fund). Confirm it is a founder, not an investor — mis-classifying an")
+        lines.append("> investor as a founder distorts the ownership table.")
+        lines.append("")
 
     # 2. Current Cap State
     lines.append("## Current Cap State")

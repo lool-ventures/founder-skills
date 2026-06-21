@@ -7970,3 +7970,104 @@ class TestMfnElectionOverride:
         )
         assert any(b["code"] == "E_SCENARIO_NO_PRE_FD" for b in zpf["blockers"])
         assert "math_provenance" in zpf
+
+
+# ===========================================================================
+# S3 — investor entity offered/recorded as a "founder"
+# ===========================================================================
+
+
+def _inputs_with_founders(founder_names: list[str]) -> dict[str, Any]:
+    return {
+        "company_name": "TestCo",
+        "analysis_date": "2026-06-21",
+        "jurisdiction": {"structure": "delaware"},
+        "founders": [
+            {"name": n, "founder_id": f"f{i}", "common_shares": 5_000_000} for i, n in enumerate(founder_names, start=1)
+        ],
+        "option_pool": {"plan_type": "iso", "authorized": 1_000_000, "issued": 0, "unallocated": 1_000_000},
+        "metadata": {"run_id": "20260621T000000Z", "schema_version": "v0.5.0-inputs"},
+    }
+
+
+class TestFounderInvestorWarning:
+    def test_looks_like_investor_entity_truth_table(self) -> None:
+        f = cap_state_mod.looks_like_investor_entity
+        for name in ["OG Tech Ventures", "Foo Capital", "Bar Fund", "Acme Ventures LP", "Foo Capital, L.P."]:
+            assert f(name) is True, name
+        for name in [
+            "Jane Doe",
+            "Acme Holdings Founder Trust",
+            "Smith Partners",
+            "Foo Ltd",
+            "Acme Holdings",
+            "LP Morgan",
+            "Fundamentals Inc",
+        ]:
+            assert f(name) is False, name
+
+    def test_investor_entity_founder_warns(self) -> None:
+        cs = cap_state_mod.build_cap_state(
+            _inputs_with_founders(["Jane Doe", "OG Tech Ventures"]), {"safes": [], "convertible_notes": []}
+        )
+        assert "W_FOUNDER_LOOKS_LIKE_INVESTOR" in cs.get("warnings", [])
+
+    def test_clean_founders_do_not_warn(self) -> None:
+        cs = cap_state_mod.build_cap_state(
+            _inputs_with_founders(["Jane Doe", "John Smith"]), {"safes": [], "convertible_notes": []}
+        )
+        assert "W_FOUNDER_LOOKS_LIKE_INVESTOR" not in cs.get("warnings", [])
+
+    def test_founder_co_investor_does_not_warn_alone(self) -> None:
+        # a personal founder who ALSO appears as a SAFE investor is a legit Israeli
+        # pattern -> must NOT fire on the cross-reference alone.
+        inputs = _inputs_with_founders(["Jane Doe", "John Smith"])
+        instruments = {
+            "safes": [{**_SAFE_BASIC, "id": "s1", "investor_name": "Jane Doe"}],
+            "convertible_notes": [],
+        }
+        cs = cap_state_mod.build_cap_state(inputs, instruments)
+        assert "W_FOUNDER_LOOKS_LIKE_INVESTOR" not in cs.get("warnings", [])
+
+
+# ===========================================================================
+# S2 — silent assumed cap base
+# ===========================================================================
+
+
+def _inputs_named(founder_names: list[str], cap_base_source: str | None = None) -> dict[str, Any]:
+    d = _inputs_with_founders(founder_names)
+    if cap_base_source is not None:
+        d["metadata"]["cap_base_source"] = cap_base_source
+    return d
+
+
+class TestAssumedCapBaseWarning:
+    NO_INST = {"safes": [], "convertible_notes": []}
+
+    def test_placeholder_names_warn(self) -> None:
+        cs = cap_state_mod.build_cap_state(_inputs_named(["Founder A", "Founder B"]), self.NO_INST)
+        assert "W_CAP_BASE_ASSUMED" in cs.get("warnings", [])
+
+    def test_bare_founder_and_real_names_silent(self) -> None:
+        cs = cap_state_mod.build_cap_state(_inputs_named(["Founder", "Jane Doe"]), self.NO_INST)
+        assert "W_CAP_BASE_ASSUMED" not in cs.get("warnings", [])
+
+    def test_explicit_assumed_flag_warns(self) -> None:
+        cs = cap_state_mod.build_cap_state(
+            _inputs_named(["Jane Doe", "John Smith"], cap_base_source="assumed"), self.NO_INST
+        )
+        assert "W_CAP_BASE_ASSUMED" in cs.get("warnings", [])
+
+    def test_confirmed_suppresses_placeholder(self) -> None:
+        cs = cap_state_mod.build_cap_state(
+            _inputs_named(["Founder A", "Founder B"], cap_base_source="confirmed"), self.NO_INST
+        )
+        assert "W_CAP_BASE_ASSUMED" not in cs.get("warnings", [])
+
+    def test_is_placeholder_founder_name_truth_table(self) -> None:
+        f = cap_state_mod._is_placeholder_founder_name
+        for n in ["Founder A", "Founder B", "Founder 1", "Co-Founder A", "CoFounder B"]:
+            assert f(n) is True, n
+        for n in ["Founder", "Jane Doe", "Founder Jane", "Foundering"]:
+            assert f(n) is False, n

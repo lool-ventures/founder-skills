@@ -835,3 +835,45 @@ def test_instrument_type_enum_matches_extract_instrument() -> None:
         f"{AGENT_MD.name} instrument_type enum is missing values from extract_instrument.py:\n"
         f"  missing: {sorted(missing)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# S2 / S3 / S5 drift-contract guards (structural, not prose-presence)
+# ---------------------------------------------------------------------------
+
+_CAP_STATE_SRC = (SCRIPTS_DIR / "cap_state.py").read_text(encoding="utf-8")
+_COMPOSE_SRC = (SCRIPTS_DIR / "compose_report.py").read_text(encoding="utf-8")
+_QUICK_ASSESS_SRC = (SCRIPTS_DIR / "quick_assess.py").read_text(encoding="utf-8")
+_SKILL_TEXT = SKILL_MD.read_text(encoding="utf-8")
+_INPUTS_SCHEMA = json.loads((CAP_TABLE_DIR / "references" / "schemas" / "inputs.schema.json").read_text())
+_FAST_ASSESS_SCHEMA = json.loads(
+    (CAP_TABLE_DIR / "references" / "schemas" / "fast_assess_only.schema.json").read_text()
+)
+
+
+def test_s3_investor_founder_warning_wired() -> None:
+    # producer emits it, compose renders it, SKILL documents the exclusion
+    assert "W_FOUNDER_LOOKS_LIKE_INVESTOR" in _CAP_STATE_SRC
+    assert "looks_like_investor_entity" in _CAP_STATE_SRC
+    assert "W_FOUNDER_LOOKS_LIKE_INVESTOR" in _COMPOSE_SRC
+    assert "investor" in _SKILL_TEXT.lower() and "founder candidate" in _SKILL_TEXT.lower()
+
+
+def test_s2_cap_base_assumed_wired() -> None:
+    assert "W_CAP_BASE_ASSUMED" in _CAP_STATE_SRC
+    assert "W_CAP_BASE_ASSUMED" in _COMPOSE_SRC
+    assert "cap_base_source" in _SKILL_TEXT
+    # schema declares the enum (present-key enforcement)
+    props = _INPUTS_SCHEMA["properties"]["metadata"]["properties"]
+    assert props["cap_base_source"]["enum"] == ["confirmed", "assumed"]
+
+
+def test_s5_fast_assess_warnings_field_and_boundary() -> None:
+    # sentinel schema declares warnings (optional, not required) so the render validates
+    assert "warnings" in _FAST_ASSESS_SCHEMA["properties"]
+    assert "warnings" not in _FAST_ASSESS_SCHEMA.get("required", [])
+    assert _FAST_ASSESS_SCHEMA["additionalProperties"] is False
+    # quick_assess actually surfaces cap_state warnings into the sentinel
+    assert 'sentinel["warnings"]' in _QUICK_ASSESS_SRC
+    # routing boundary clause present (acknowledged presence-only)
+    assert "quick_assess" in _SKILL_TEXT and "post-financing ownership" in _SKILL_TEXT

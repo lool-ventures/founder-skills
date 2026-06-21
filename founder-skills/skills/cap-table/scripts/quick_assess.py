@@ -194,11 +194,29 @@ def quick_assess(
         ),
         "assumptions": assumptions,
     }
+    # Surface cap_state warnings (S2 W_CAP_BASE_ASSUMED, S3 W_FOUNDER_LOOKS_LIKE_INVESTOR) into the
+    # sentinel too — only when non-empty (the schema declares `warnings` optional; an empty array
+    # would still validate but adds noise). This carries the same backstops the full pipeline shows.
+    _cs_warnings = list(cs.get("warnings") or [])
+    if _cs_warnings:
+        sentinel["warnings"] = _cs_warnings
 
     # Founder-facing markdown
     md_lines: list[str] = []
     md_lines.append(f"# {company_name} — Fast-Assess Cap Table")
     md_lines.append("")
+    if "W_CAP_BASE_ASSUMED" in _cs_warnings:
+        md_lines.append(
+            "> ⚠ **Cap base assumed, not confirmed** — these ownership figures are directional; "
+            "confirm founder share counts / pool before relying on them."
+        )
+        md_lines.append("")
+    if "W_FOUNDER_LOOKS_LIKE_INVESTOR" in _cs_warnings:
+        md_lines.append(
+            "> ⚠ **A listed founder resembles an investment entity** (Ventures/Capital/Fund) — "
+            "confirm it is a founder, not an investor."
+        )
+        md_lines.append("")
     md_lines.append(
         "_Fast-assess mode: a 1-page directional answer. For the full review "
         "(counsel packet, rule audit, anti-dilution, interactive explorer), "

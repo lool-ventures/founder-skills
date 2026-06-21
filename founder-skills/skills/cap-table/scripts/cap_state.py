@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from typing import Any
 
@@ -415,6 +416,30 @@ def _canonicalize_common_class(holder: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# S3: investor-entity-as-founder detection. NARROW, high-precision suffix/token matcher —
+# `Ventures`/`Capital`/`Fund` only. NOT `Holdings`/`Ltd`/`LLC`/`Partners`/`LP`/`VC` (too common for
+# personal/Israeli founder vehicles; e.g. "Acme Holdings Founder Trust", "LP Morgan" must NOT match).
+_INVESTOR_ENTITY_RE = re.compile(r"\b(?:Ventures|Capital|Fund)\b", re.IGNORECASE)
+
+# S2: generic placeholder founder-name tell (the model uses these when it's assuming the cap base
+# rather than confirming it). Anchored full-match, case-sensitive. Bare "Founder" does NOT match.
+_PLACEHOLDER_FOUNDER_RE = re.compile(r"^(?:Co-?)?Founder ?[A-Z0-9]$|^Founder \d+$")
+
+
+def looks_like_investor_entity(name: str) -> bool:
+    """True if a holder name resembles an investment entity (S3 founder-mislabel guard).
+
+    Conservative by design: false-negatives are acceptable (the warning is advisory), but it must
+    not false-positive on real/personal founder names or common founder holding vehicles.
+    """
+    return bool(name) and bool(_INVESTOR_ENTITY_RE.search(name))
+
+
+def _is_placeholder_founder_name(name: str) -> bool:
+    """True if a founder name is a generic placeholder (e.g. 'Founder A') — the S2 assumed-base tell."""
+    return bool(name) and bool(_PLACEHOLDER_FOUNDER_RE.match(name.strip()))
+
+
 def build_cap_state(
     inputs: dict[str, Any],
     instruments: dict[str, Any],
@@ -539,6 +564,21 @@ def build_cap_state(
         if vrm is not None and float(vrm) != 1.0:
             warnings_list.append("W_PREFERRED_VOTING_NON_UNITY_NOT_MODELED")
             break
+
+    # S3: a founder whose name resembles an investment entity is likely mis-classified (advisory).
+    # The suffix match is the sole trigger; founder co-investment (founder name also an investor_name)
+    # is a normal Israeli pattern and must NOT fire this on its own.
+    if any(looks_like_investor_entity(f.get("name", "")) for f in founders):
+        warnings_list.append("W_FOUNDER_LOOKS_LIKE_INVESTOR")
+
+    # S2: the cap base looks ASSUMED rather than founder-confirmed — generic placeholder founder names
+    # (the model's tell when it assumes) OR an explicit metadata.cap_base_source == "assumed".
+    # Suppressed entirely when cap_base_source == "confirmed".
+    cap_base_source = (inputs.get("metadata") or {}).get("cap_base_source")
+    if cap_base_source != "confirmed" and (
+        cap_base_source == "assumed" or any(_is_placeholder_founder_name(f.get("name", "")) for f in founders)
+    ):
+        warnings_list.append("W_CAP_BASE_ASSUMED")
 
     cap_state: dict[str, Any] = {
         "as_of_date": inputs.get("analysis_date", ""),

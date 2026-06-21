@@ -149,7 +149,11 @@
       "required": ["run_id", "schema_version"],
       "properties": {
         "run_id": {"type": "string"},
-        "schema_version": {"const": "v0.5.0-inputs"}
+        "schema_version": {"const": "v0.5.0-inputs"},
+        "cap_base_source": {
+          "enum": ["confirmed", "assumed"],
+          "description": "Whether the founder cap base (founders + share counts + pool) was founder-confirmed ('confirmed') or assumed/placeholder ('assumed'). Drives the S2 W_CAP_BASE_ASSUMED backstop; absent is treated as not-confirmed but only warns on a positive signal (placeholder names)."
+        }
       }
     }
   }
