@@ -2,8 +2,14 @@
 
 Token-free **replay** PR gate (`.github/workflows/cowork-replay.yml`) over committed cassettes that
 exercise the founder-skills skills under Claude Cowork's runtime via
-[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (≥ 0.7.1). Recording is **live**
+[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (≥ 0.8.0). Recording is **live**
 (needs the staged agent + Docker); replay/verify are **token/agent-free** (stock CI).
+
+> **0.8.0 note:** the committed cassettes were recorded under an older harness; they **replay clean
+> under 0.8.0** (all assertions pass) with only non-fatal staleness warnings (`baseline
+> 1.13576.1→1.14271.0`, `hash v3→v4`). Those clear on the next live re-record — not required for the
+> gate to be valid. The v3→v4 cassette-format break only forces a re-record for **folder-artifact**
+> cassettes; ours mount via `uploads:`/`local_plugins`, not connected folders, so it does not apply.
 
 Coverage: a deep **cap-table** matrix (6 cassettes across all four extraction lanes) plus a
 **fleet-parity smoke** — one happy-path cassette per other skill (market-sizing, ic-sim,
@@ -49,6 +55,10 @@ export COWORK_HARNESS_RUNS_DIR=/tmp/ct-cowork-runs        # MUST be outside the 
 cd cowork-tests
 cowork-harness record scenarios/<name>.yaml --out cassettes/<name>.cassette.json
 ```
+**0.8.0 agent image (live lane):** rebuild the container agent image to `:2` before recording — run
+the build command `cowork-harness doctor --tier container` prints. Image `:2` ships the doc stack
+(openpyxl etc.) the xlsx/pdf skills exercise; a stale `:1` can mis-record. (Replay/CI never builds
+the image.) Re-recording is what clears the `baseline`/`hash v3→v4` staleness warnings.
 Re-record after a change to the recorded skill's `SKILL.md` / its `scripts/` / `references/` / rules.
 **Staleness scope (0.5.0):** each scenario declares `skills: [<name>]`, so the staleness hash covers that
 skill's `skills/<name>/` dir **plus the plugin's shared roots** — editing a *different* skill no longer
@@ -61,15 +71,16 @@ runtime). The CI staleness gate is **warn-not-fail** (CI is replay-only and can'
 present (falling back to the cassette's embedded snapshot with a warning) — so it now respects `skills:`
 edits. To be explicit, you can still re-record straight from the YAML (`record scenarios/<name>.yaml ...`).
 
-**Large (truncated) artifacts — pin ≥ 0.7.1:** artifacts over the 64 KiB inline cap are recorded
-hash-only (manifest entry: `path` + `bytes` + `sha256`, body not inlined). 0.7.1 makes `file_exists` /
+**Large (truncated) artifacts (≥ 0.7.1 fix, carried in 0.8.0):** artifacts over the 64 KiB inline cap
+are recorded hash-only (manifest entry: `path` + `bytes` + `sha256`, body not inlined). `file_exists` /
 `user_visible_artifact` **pass from that manifest** (existence is metadata) — so we keep the rich
 existence/promotion assertions on big HTML deliverables (e.g. `…_Cap_Table_Explorer.html`,
-`review.html`) without committing their bodies. (0.7.0 had a regression that *failed* these — that's why
-the pin is ≥ 0.7.1, not ≥ 0.7.0.) `artifact_json` still needs an inlined body, so assert **content** on
-the small JSON producers and **existence** on the big rendered deliverables. 0.7.x also redacts base64
+`review.html`) without committing their bodies. (0.7.0 had a regression that *failed* these; the floor was
+≥ 0.7.1 and is now ≥ 0.8.0.) `artifact_json` still needs an inlined body, so assert **content** on the
+small JSON producers and **existence** on the big rendered deliverables. 0.7.x+ also redacts base64
 artifact bodies wholesale (`[REDACTED:base64]`) — fine here since we never assert base64 content. Always
-record with the pinned harness (the manifest must be present); the staleness format is 0.6.0's v2.
+record with the pinned harness (the manifest must be present); **0.8.0 records the v4 hash format** (the
+committed cassettes are v3 — they replay fine, and re-recording rewrites them to v4 + clears staleness).
 
 **Diagnosing a failed live record:** if `record` errors fast with an empty `agent.stderr.log` (e.g. a
 missing model token — the in-Docker agent cannot read the macOS Keychain), check the run's

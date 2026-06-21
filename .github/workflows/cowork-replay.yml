@@ -1,6 +1,6 @@
 name: cowork-replay
 
-# Token-free, agent-free PR gate for the fleet cowork-harness cassettes (cowork-harness >= 0.7.1):
+# Token-free, agent-free PR gate for the fleet cowork-harness cassettes (cowork-harness >= 0.8.0):
 #   1. lint            — scenario no-silent-false-green invariants (CLI subcommand since 0.4.0)
 #   2. privacy gate    — HARD: PII/host-path scan (--skip-staleness). A finding fails the job.
 #   3. staleness gate  — WARN: --skip-privacy under continue-on-error. The skillHash hashes the WHOLE
@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install pyyaml          # cowork-harness lint needs python3 + PyYAML
-      - run: npm i -g 'cowork-harness@>=0.7.1'   # >=0.7.1: file_exists/user_visible_artifact pass for truncated (large) artifacts via the manifest — 0.7.0 regressed this, we require the 0.7.1 fix; + 51-TLD domain scan; --skip-staleness/--skip-privacy (0.6.0); class-scoped --allow-domain/--allow-email (0.5.0)
+      - run: npm i -g 'cowork-harness@>=0.8.0'   # >=0.8.0: validated floor — the committed cassettes replay clean under 0.8.0 (only non-fatal staleness warnings: baseline 1.13576.1→1.14271.0 + hash v3→v4, surfaced by the WARN gate below). 0.8.0 adds cassette hash format v4 (userVisibleRoots) + multiSelect-gate scripting + the doc/openpyxl stack in agent image :2 (live lane only). Carries forward: file_exists/user_visible_artifact pass for truncated (large) artifacts via the manifest (0.7.1 fix; 0.7.0 regressed it); 51-TLD domain scan; --skip-staleness/--skip-privacy (0.6.0); class-scoped --allow-domain/--allow-email (0.5.0)
 
       - name: Lint scenarios (no silent false-greens)
         run: cowork-harness lint cowork-tests/scenarios/*.yaml
