@@ -9,9 +9,9 @@ skills: [cap-table]                # 0.5.0: scope the staleness hash to this ski
 # so only the SAFE instrument is extracted from the doc and gating is minimal.
 prompt: |
   I'm a founder at Acmecorp Inc., a US Delaware seed-stage B2B SaaS company. My cap table: two
-  founders splitting 10,000,000 common shares evenly (5,000,000 each), plus a 1,000,000-share option
-  pool (none issued yet). I've uploaded a SAFE I'm about to sign. Please review the uploaded SAFE —
-  extract its terms, show how it converts, and give me the full cap-table review.
+  founders, Dana Levin and Omri Shapira, splitting 10,000,000 common shares evenly (5,000,000 each),
+  plus a 1,000,000-share option pool (none issued yet). I've uploaded a SAFE I'm about to sign. Please
+  review the uploaded SAFE — extract its terms, show how it converts, and give me the full cap-table review.
 
 answers:
   # Backstop for any confirmation gate: take option 1 (deterministic; `first` resolves unconditionally,

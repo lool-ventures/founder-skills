@@ -9,10 +9,10 @@ skills: [cap-table]                # 0.5.0: scope the staleness hash to this ski
 # founder gate (which can include free-text fields the harness cannot answer); a catch-all `first`
 # backstops any remaining single-select confirmation.
 prompt: |
-  I'm a founder at Cadence, a US Delaware seed-stage B2B SaaS company. My cap table: two founders
-  splitting 8,000,000 common shares evenly (4,000,000 each), plus a 1,000,000-share option pool (none
-  issued yet). I've uploaded our Carta cap-table export of the convertible instruments. Please review
-  it (map the Carta sheets to instruments) and give me the full cap-table review.
+  I'm a founder at Cadence, a US Delaware seed-stage B2B SaaS company. My cap table: two founders,
+  Maya Gold and Ofer Tal, splitting 8,000,000 common shares evenly (4,000,000 each), plus a
+  1,000,000-share option pool (none issued yet). I've uploaded our Carta cap-table export of the
+  convertible instruments. Please review it (map the Carta sheets to instruments) and give me the full cap-table review.
 
 answers:
   - when_question: ".*"

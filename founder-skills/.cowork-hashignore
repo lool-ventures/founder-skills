@@ -6,3 +6,6 @@
 # (A slash-free `tests` would match at ANY depth and could silently exclude such runtime fixtures.)
 # Do NOT add `**/*.md`: SKILL.md is runtime and must stay in the hash.
 /tests
+# Eval tooling/datasets are NOT skill runtime behavior — they pollute the staleness hash (and the
+# sandbox mount) without affecting what the skill does. Anchored to the one eval dir we ship locally.
+/skills/cap-table/evals

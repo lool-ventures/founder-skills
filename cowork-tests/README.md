@@ -39,8 +39,13 @@ Consequences for authoring:
 - **Don't grow the matrix for correctness.** Add a cassette only for a new *runtime / LLM-behavior*
   surface. cap-table's 4 lanes are runtime-distinct (PDF-read, XLSX-openpyxl, freeform-grid,
   conversational) → one each; one smoke per other skill. Correctness variants belong in pytest.
-- **`choose: first` is fine** for a parity layer — only invest in explicit `choose: [list]` if
-  which-options-get-selected is itself the runtime behavior under test.
+- **Provide every field the skill will gate on, in the prompt** (e.g. founder *names*, not just
+  counts). If the prompt omits something the current skill mandates, the agent raises an
+  `AskUserQuestion` for it — and a re-record can then flake (see the 2026-06-22 extract-safe analysis).
+- **Avoid blanket `choose: first` for gates that can't be designed away.** AskUserQuestion option
+  *order* is nondeterministic, so `choose: first` can land on a dead-end option (e.g. "I'll type them
+  below"), stalling the run with `result: success` but no artifact. For an unavoidable select gate,
+  match the specific usable option (e.g. `choose: "Use anonymized names"`) instead of `first`.
 
 *Audit (2026-06-21):* all 11 cassettes' asserts are already parity / extraction / structural-presence
 — zero deterministic-pytest duplicates. No trims needed.
