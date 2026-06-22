@@ -1096,11 +1096,26 @@ class TestExploreDonutPalette:
 _DOM_SHIM = r"""
 const _byId = {};
 function mkEl(id) {
+  const _classes = new Set();
+  const _listeners = {};
   return {
     id, _html: "", hidden: false, textContent: "", style: {}, dataset: {},
-    classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } },
-    addEventListener() {}, append() {}, querySelectorAll() { return []; },
-    setAttribute() {}, getAttribute() { return null; },
+    classList: {
+      add(c) { _classes.add(c); },
+      remove(c) { _classes.delete(c); },
+      contains(c) { return _classes.has(c); },
+      toggle(c, force) {
+        const on = force === undefined ? !_classes.has(c) : force;
+        if (on) _classes.add(c); else _classes.delete(c);
+        return on;
+      },
+    },
+    addEventListener(type, fn) { (_listeners[type] = _listeners[type] || []).push(fn); },
+    dispatchEvent(ev) { (_listeners[ev.type] || []).forEach(fn => fn(ev)); return true; },
+    click() { this.dispatchEvent({ type: "click", target: this }); },
+    append() {}, querySelectorAll() { return []; },
+    setAttribute(k, v) { this["_attr_" + k] = v; },
+    getAttribute(k) { return this["_attr_" + k] ?? null; },
     set innerHTML(v) { this._html = v; if (this.id) _byId[this.id] = this; },
     get innerHTML() { return this._html; },
   };
@@ -1109,6 +1124,7 @@ global.document = {
   getElementById(id) { return _byId[id] || (_byId[id] = mkEl(id)); },
   querySelectorAll() { return []; },
   addEventListener() {},
+  createElement() { return null; },  // canvas/pattern path falls back to solid
   body: mkEl("body"),
 };
 global.window = { matchMedia() { return { matches: false }; } };
@@ -1235,8 +1251,8 @@ class TestExploreDonutMorphWiring:
         # so guard the in-place update + stable order explicitly).
         with tempfile.TemporaryDirectory() as d:
             app = _render_explorer_app_script(d)
-        # C1 refactored the single _chartInstance global into a per-canvas
-        # registry; the morph now updates the registered chart in place.
+        # The donut morphs in place by updating the chart registered for its
+        # canvas (the per-canvas registry, not a single shared instance).
         assert "DONUT_ORDER" in app and "existing.update(" in app, (
             "donut must morph in place over a stable category order (P1), not destroy+recreate."
         )
@@ -1618,9 +1634,10 @@ class TestWatchlistGrouping:
 
 
 # ===========================================================================
-# PR1 usability pass — responsive layout, de-emoji, contained what-if slider,
-# default-to-modeled, plain-language flow, counsel cue + relevance + codes
-# toggle, print-to-PDF, donut a11y, controllable walkthrough.
+# Explorer usability surface — responsive layout, de-emoji chrome, contained
+# what-if slider, default-to-modeled view, plain-language flow, counsel cue +
+# relevance + codes toggle, print-to-PDF, donut accessibility, controllable
+# walkthrough.
 # ===========================================================================
 
 
@@ -1638,8 +1655,8 @@ class TestExploreResponsiveLayout:
     def test_breakpoints_present(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             html = _render_explorer_full(d)
-        assert "@media (max-width: 1180px)" in html, "tablet breakpoint missing (A2)"
-        assert "@media (max-width: 760px)" in html, "mobile breakpoint missing (A2)"
+        assert "@media (max-width: 1180px)" in html, "tablet breakpoint missing"
+        assert "@media (max-width: 760px)" in html, "mobile breakpoint missing"
 
     def test_metric_row_is_grid_not_clipping_flex(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -1674,7 +1691,7 @@ class TestExploreNoEmoji:
 
 class TestExploreDefaultView:
     def test_defaults_to_first_modeled_scenario(self) -> None:
-        # D1: landing index is firstModeledIdx(), not a hardcoded 0.
+        # The default landing index is firstModeledIdx(), not a hardcoded 0.
         with tempfile.TemporaryDirectory() as d:
             html = _render_explorer_full(d)
         app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
@@ -1687,7 +1704,7 @@ class TestExplorePlainLanguageFlow:
     def test_flow_renamed_no_sankey_jargon(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             html = _render_explorer_full(d)
-        assert "Where your ownership went" in html, "flow should use plain language (B1)"
+        assert "Where your ownership went" in html, "flow should use plain language"
         assert "Dilution flow" not in html, "jargon heading 'Dilution flow' should be gone"
 
     def test_flow_keeps_transition_helper_and_path_class(self) -> None:
@@ -1711,7 +1728,7 @@ class TestExploreContainedSlider:
     def test_modeled_state_and_reset_control(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             html = self._with_sweep(d)
-        assert 'id="sweep-reset"' in html, "reset-to-scenario control missing (C2)"
+        assert 'id="sweep-reset"' in html, "reset-to-scenario control missing"
         app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
         assert "function enterModeled" in app and "function exitModeled" in app
         assert "enterModeled()" in app, "a slider drag must mark the cards modeled"
@@ -1764,7 +1781,7 @@ class TestExploreDonutA11y:
         with tempfile.TemporaryDirectory() as d:
             app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
         assert "function renderDonutSummary" in app
-        assert 'setAttribute("aria-label"' in app, "donut needs a text alternative (E1)"
+        assert 'setAttribute("aria-label"' in app, "donut needs a text alternative"
 
     def test_pattern_fills_with_headless_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -1773,7 +1790,7 @@ class TestExploreDonutA11y:
         assert 'typeof document.createElement !== "function"' in app, (
             "pattern builder must fall back to solid color under the headless shim"
         )
-        # E1 must not reintroduce a raw PALETTE[cat] lookup on _pct keys.
+        # The pattern fill must not reintroduce a raw PALETTE[cat] lookup on _pct keys.
         assert "_wedgeFill" in app and "PALETTE[cat]" not in app
 
 
@@ -1782,12 +1799,12 @@ class TestExploreWalkthroughControls:
         with tempfile.TemporaryDirectory() as d:
             html = _render_explorer_full(d)
         for el in ('id="wt-prev"', 'id="wt-next"', 'id="wt-playpause"'):
-            assert el in html, f"walkthrough control {el} missing (E3)"
+            assert el in html, f"walkthrough control {el} missing"
         app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
         assert "function _wtStep" in app and "function _wtPlayPause" in app
 
     def test_walkthrough_counsel_copy_preserved(self) -> None:
-        # The verbatim copy the existing zero/plural test pins must survive E3.
+        # The verbatim counsel copy that the zero/plural test pins must stay intact.
         with tempfile.TemporaryDirectory() as d:
             app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
         assert "No counsel-review items were flagged" in app
@@ -1798,7 +1815,7 @@ class TestExploreCompareView:
     def test_compare_markup_and_functions(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             html = _render_explorer_full(d)
-        assert 'id="compare-toggle"' in html, "Compare button missing (C1)"
+        assert 'id="compare-toggle"' in html, "Compare button missing"
         assert 'id="compare-view"' in html and 'id="compare-grid"' in html
         app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
         assert "function renderCompare" in app and "function toggleCompare" in app
@@ -1809,7 +1826,7 @@ class TestExploreCompareView:
             app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
         assert "const _charts" in app and "function _destroyChart" in app
         # The single-global must be fully gone so two donuts can coexist.
-        assert "_chartInstance" not in app, "C1 must remove the single _chartInstance global"
+        assert "_chartInstance" not in app, "the single shared chart instance must be gone"
 
     def test_compare_runs_headless_with_two_donuts(self) -> None:
         node = shutil.which("node")
@@ -1852,3 +1869,151 @@ class TestExploreCompareView:
                 f.write(runner)
             res = subprocess.run([node, js_path], capture_output=True, text=True)
         assert res.returncode == 0 and "OK_COMPARE" in res.stdout, f"compare view threw at runtime:\n{res.stderr}"
+
+
+class TestExploreHeadlessBehavior:
+    """Behavioral (not string-presence) checks enabled by the stateful DOM shim:
+    real classList membership + dispatched click handlers."""
+
+    def _sweep_app(self, d: str) -> str:
+        _make_fixture_dir(d)
+        _write_priced_round_base(d)
+        _run("sweep.py", ["--dir", d, "--run-id", "rid1", "-o", os.path.join(d, "sweep.json")])
+        out = os.path.join(d, "explorer.html")
+        rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
+        assert rc == 0, err
+        with open(out, encoding="utf-8") as f:
+            return re.findall(r"<script>(.*?)</script>", f.read(), re.DOTALL)[-1]
+
+    def _node(self, runner: str, d: str) -> subprocess.CompletedProcess:
+        js_path = os.path.join(d, "runner.js")
+        with open(js_path, "w", encoding="utf-8") as f:
+            f.write(runner)
+        return subprocess.run([shutil.which("node"), js_path], capture_output=True, text=True)
+
+    def test_modeled_marker_set_on_drag_and_cleared_on_reset(self) -> None:
+        if shutil.which("node") is None:
+            pytest.skip("node not available")
+        with tempfile.TemporaryDirectory() as d:
+            app = self._sweep_app(d)
+            runner = (
+                _DOM_SHIM
+                + "\n"
+                + app
+                + "\napplySweepFrame(0);"  # a drag opts into the what-if
+                + "\nif (!document.getElementById('metric-row').classList.contains('modeled'))"
+                + "\n  throw new Error('metric cards must be marked modeled during a what-if');"
+                + "\nif (document.getElementById('sweep-reset').hidden)"
+                + "\n  throw new Error('Reset control must appear while modeled');"
+                + "\ndocument.getElementById('sweep-reset').click();"  # reset → selectScenario(active)
+                + "\nif (document.getElementById('metric-row').classList.contains('modeled'))"
+                + "\n  throw new Error('modeled state must clear on reset');"
+                + "\nconsole.log('OK_MODELED');\n"
+            )
+            res = self._node(runner, d)
+        assert res.returncode == 0 and "OK_MODELED" in res.stdout, res.stderr
+
+    def test_donut_aria_regenerates_on_drag(self) -> None:
+        if shutil.which("node") is None:
+            pytest.skip("node not available")
+        with tempfile.TemporaryDirectory() as d:
+            app = self._sweep_app(d)
+            runner = (
+                _DOM_SHIM
+                + "\n"
+                + app
+                + "\napplySweepFrame(0);"
+                + "\nconst _a0 = document.getElementById('donut-chart').getAttribute('aria-label');"
+                + "\napplySweepFrame(DATA.sweep.frames.length - 1);"
+                + "\nconst _a1 = document.getElementById('donut-chart').getAttribute('aria-label');"
+                + "\nif (!_a0 || !_a1) throw new Error('donut aria-label must be set on each frame');"
+                + "\nif (_a0 === _a1) throw new Error('donut aria-label must update as the what-if changes');"
+                + "\nconsole.log('OK_ARIA');\n"
+            )
+            res = self._node(runner, d)
+        assert res.returncode == 0 and "OK_ARIA" in res.stdout, res.stderr
+
+    def test_walkthrough_pause_and_step(self) -> None:
+        if shutil.which("node") is None:
+            pytest.skip("node not available")
+        with tempfile.TemporaryDirectory() as d:
+            app = self._sweep_app(d)
+            # Stub setTimeout so auto-advance doesn't run the tour to completion;
+            # we drive the state machine by hand to verify pause/step.
+            runner = (
+                _DOM_SHIM
+                + "\nglobal.setTimeout = function () { return 0; };\n"
+                + app
+                + "\nstartWalkthrough();"
+                + "\nif (_wtState !== 'playing') throw new Error('walkthrough should start playing');"
+                + "\n_wtPlayPause();"
+                + "\nif (_wtState !== 'paused') throw new Error('play-pause should pause');"
+                + "\nconst _f = _wtFrame; _wtStep(1);"
+                + "\nif (_wtFrame !== _f + 1) throw new Error('next should advance one frame');"
+                + "\n_wtStep(-1);"
+                + "\nif (_wtFrame !== _f) throw new Error('prev should step back one frame');"
+                + "\nstopWalkthrough();"
+                + "\nif (_wtState !== 'idle') throw new Error('end should return to idle');"
+                + "\nconsole.log('OK_WALK');\n"
+            )
+            res = self._node(runner, d)
+        assert res.returncode == 0 and "OK_WALK" in res.stdout, res.stderr
+
+
+class TestExploreBlockerDemotion:
+    def test_blocker_leads_with_remedy_not_code(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+        # The remedy is the first thing in the blocker; the raw code sits on a
+        # muted secondary line, never leading.
+        assert 'class="blocker">${escape(b.remedy)}' in app, "blocker must lead with the remedy"
+        assert '<div class="blocker"><code>' not in app, "raw code must not lead the blocker"
+        assert "blocker-code" in app, "code is demoted to a secondary line, still present"
+
+
+class TestExploreDonutResponsive:
+    def test_donut_canvas_has_max_width(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        assert "max-width: 100%" in html, "donut canvas must be able to shrink below 200px"
+        assert ".donut-wrap" not in html, "dead .donut-wrap CSS should be removed"
+
+
+class TestExploreDefaultViewBehavior:
+    def test_default_skips_structure_only_scenario_headless(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not available")
+        with tempfile.TemporaryDirectory() as d:
+            _make_fixture_dir(d)
+            structural = {
+                "scenario_id": "cap_today",
+                "label": "Cap-implied today",
+                "type": "safe_conversion",
+                "parameters": {},
+                "computed_outputs": {"completeness": "structural_only", "cap_implied_only": True, "blockers": []},
+            }
+            scenarios = {
+                "scenarios": [structural, _full_scenario("p1", "Series A", 0.55)],
+                "metadata": {"run_id": "rid1"},
+            }
+            with open(os.path.join(d, "scenarios.json"), "w", encoding="utf-8") as f:
+                json.dump(scenarios, f)
+            out = os.path.join(d, "explorer.html")
+            rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
+            assert rc == 0, err
+            with open(out, encoding="utf-8") as f:
+                app = re.findall(r"<script>(.*?)</script>", f.read(), re.DOTALL)[-1]
+            runner = (
+                _DOM_SHIM
+                + "\n"
+                + app
+                + "\nif (_activeIdx !== 1)"
+                + "\n  throw new Error('default must skip the structure-only scenario, landed on ' + _activeIdx);"
+                + "\nconsole.log('OK_DEFAULT');\n"
+            )
+            js_path = os.path.join(d, "runner.js")
+            with open(js_path, "w", encoding="utf-8") as f:
+                f.write(runner)
+            res = subprocess.run([node, js_path], capture_output=True, text=True)
+        assert res.returncode == 0 and "OK_DEFAULT" in res.stdout, res.stderr

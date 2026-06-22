@@ -1042,10 +1042,10 @@ def build_counsel_review_items(
         if rule_id in seen_rules:
             continue
         seen_rules.add(rule_id)
-        # D2: carry the (instance_type, instance_id) the gating already computed
-        # so the explorer can honestly badge what a counsel item applies to. We
-        # keep ONE item per rule (cardinality unchanged) and attach the matched
-        # instances as an additive, deterministically-sorted list.
+        # Carry the (instance_type, instance_id) the gating already computed so
+        # downstream consumers can show what a counsel item applies to. Exactly
+        # one item per rule; the matched instances ride along as a
+        # deterministically-sorted list.
         inst_list = _counsel_instances(instances)
         items.append(
             {
@@ -1062,6 +1062,14 @@ def build_counsel_review_items(
                 "applies_to": _counsel_applies_to(inst_list),
             }
         )
+    # A general-scoped item whose DOMAIN has a specific instrument/scenario match
+    # elsewhere in this cap table is "likely relevant": the class is present even
+    # though this rule matched no exact instance of its own. Deterministic
+    # (depends only on the assembled items).
+    specific_domains = {it["domain"] for it in items if it["relevance_tier"] == "applies" and it.get("domain")}
+    for it in items:
+        if it["relevance_tier"] == "general" and it.get("domain") and it["domain"] in specific_domains:
+            it["relevance_tier"] = "likely"
     return items
 
 

@@ -246,9 +246,7 @@ def render_explorer_html(
   main {{ padding: 24px; overflow-y: auto; }}
   .right-rail {{ padding: 16px; border-left: 1px solid var(--border); background: var(--surface);
                   overflow-y: auto; max-height: calc(100vh - 65px); }}
-  .donut-wrap {{ display: grid; grid-template-columns: 200px 1fr; gap: 24px;
-                  align-items: center; margin: 16px 0; }}
-  .donut-canvas {{ position: relative; height: 200px; width: 200px; }}
+  .donut-canvas {{ position: relative; height: 200px; width: 200px; max-width: 100%; }}
   .legend {{ list-style: none; padding: 0; margin: 0; font-size: 13px; }}
   .legend li {{ display: flex; align-items: center; gap: 8px; padding: 4px 0; }}
   .swatch {{ width: 14px; height: 14px; border-radius: 0; flex-shrink: 0; }}
@@ -265,6 +263,8 @@ def render_explorer_html(
   .blocker {{ background: var(--lool-danger-tint); border-left: 3px solid var(--lool-danger); padding: 8px 12px;
               margin: 8px 0; border-radius: 0; font-size: 13px; color: var(--lool-danger); }}
   .blocker code {{ font-weight: 600; }}
+  .blocker-code {{ margin-top: 6px; font-family: var(--font-mono); font-size: 11px;
+                    color: var(--lool-mute); opacity: 0.85; }}
   code {{ background: var(--surface-2); padding: 1px 4px; border-radius: var(--r-input);
           font-size: 0.9em; font-family: var(--font-mono); }}
   details {{ margin: 8px 0; background: var(--bg); border: 1px solid var(--border);
@@ -373,7 +373,7 @@ def render_explorer_html(
                     border-radius: var(--r-input); background: transparent; color: var(--label);
                     font-size: 11px; font-family: var(--font-mono); cursor: pointer; }}
   @media (max-width: 760px) {{ .graphics-row {{ grid-template-columns: 1fr; }} }}
-  /* C1 two-up compare */
+  /* Two-up side-by-side scenario compare */
   .compare-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 12px 0; }}
   @media (max-width: 760px) {{ .compare-grid {{ grid-template-columns: 1fr; }} }}
   .compare-card {{ border: 1px solid var(--border); border-radius: 8px; padding: 20px 22px;
@@ -527,9 +527,10 @@ const NEUTRAL = "#A6AEB5";
 function sliceColor(cat) {{ return PALETTE[cat.replace(/_pct$/, "")] || NEUTRAL; }}
 function sliceLabel(cat) {{ return cat.replace(/_pct$/, "").replace(/_/g, " "); }}
 
-// Chart registry keyed by canvas id (C1): the single-view donut ("donut-chart")
-// plus the two compare donuts ("cmp-donut-a"/"cmp-donut-b") must coexist, so a
-// single global won't do. Every donut site looks up / tears down by canvas id.
+// Chart registry keyed by canvas id: the single-view donut ("donut-chart") and
+// the two compare donuts ("cmp-donut-a"/"cmp-donut-b") must all be live at once,
+// so a single shared instance won't do. Every donut site looks up / tears down
+// its chart by canvas id.
 const _charts = {{}};
 function _destroyChart(id) {{ if (_charts[id]) {{ _charts[id].destroy(); delete _charts[id]; }} }}
 let _pinnedScenarioIdx = null;
@@ -625,7 +626,7 @@ function setSankeyHTML(container, html, instant) {{
   }}, 150);
 }}
 
-// Ownership flow — a "before → after" story in plain language (B1).
+// Ownership flow — a plain-language "before → after" story for founders.
 // Carried classes (founders, preferred, pool) flow straight across;
 // new issuance (converting SAFEs/notes + new investors) rises in FROM BELOW the
 // "after" column, so the same founder shares visibly become a smaller slice of
@@ -717,10 +718,10 @@ function renderSankey(container, scenarioData, instant) {{
 // of a fresh grow-in. Keys carry the `_pct` suffix; there is no warrants_pct.
 const DONUT_ORDER = ["founders_pct", "preferred_pct", "option_pool_pct", "safe_pct", "note_pct", "new_money_pct"];
 
-// E1 a11y: a non-color channel for the wedges (hatch/dot patterns) so the
-// near-identical blues are still distinguishable for color-blind/low-vision
-// founders. Guarded: when the canvas API is unavailable (headless shim — no
-// document.createElement), fall back to the solid color.
+// Accessibility: a non-color channel for the wedges (hatch/dot patterns) so the
+// near-identical blues are still distinguishable for color-blind and low-vision
+// readers. Guarded: when the canvas API is unavailable (e.g. a server-side or
+// test renderer with no document.createElement), fall back to the solid color.
 const PATTERN_KIND = {{
   founders_pct: "solid", preferred_pct: "diag", option_pool_pct: "dot",
   safe_pct: "cross", note_pct: "solid", new_money_pct: "solid",
@@ -788,9 +789,9 @@ function renderDonut(canvasEl, breakdown, animate) {{
   }});
 }}
 
-// Index of the first fully/partly-modeled scenario — the default landing view
-// (D1). A structure-only "cap-implied today" scenario hides all three hero
-// metrics by design, so landing there shows a payoff-free first screen.
+// Index of the first fully/partly-modeled scenario — the default landing view.
+// A structure-only "cap-implied today" scenario hides all three hero metrics by
+// design, so landing there would show a founder a first screen with no numbers.
 function firstModeledIdx() {{
   const i = DATA.scenarios.findIndex(s => s.completeness === "full" || s.completeness === "mixed");
   return i === -1 ? 0 : i;
@@ -896,12 +897,26 @@ function renderDonutSummary(agg, fd) {{
   if (canvas) canvas.setAttribute("aria-label", "Ownership after this round: " + el.textContent);
 }}
 
-// Founder-ownership delta vs today (pre-financing), shown under the founder card.
-function renderFounderDelta(impact) {{
+// Founders' fully-diluted ownership BEFORE this round (pre-financing): the sum
+// of founder common over the pre-financing fully-diluted total. The baseline
+// the per-scenario delta is measured against.
+function _preFounderFrac() {{
+  const pre = DATA.pre_financing || {{}};
+  const fd = pre.fully_diluted || 0;
+  if (!fd) return null;
+  const common = (DATA.founders || []).reduce((a, f) => a + (f.common_shares || 0), 0);
+  return common / fd;
+}}
+
+// Founder-ownership delta vs today (pre-financing), shown under the founder
+// card. Computed from the displayed founders fraction so it stays correct for
+// both a saved scenario and a slider-modeled what-if.
+function renderFounderDelta(foundersFrac) {{
   const el = document.getElementById("founder-delta");
   if (!el) return;
-  const d = impact && impact.founder_delta_pct_points;
-  if (d == null) {{ el.textContent = ""; return; }}
+  const base = _preFounderFrac();
+  if (foundersFrac == null || base == null) {{ el.textContent = ""; return; }}
+  const d = (foundersFrac - base) * 100;
   const sign = d > 0 ? "+" : "";
   el.textContent = `${{sign}}${{d.toFixed(1)}} pts vs. today`;
 }}
@@ -912,7 +927,7 @@ function renderFounderDelta(impact) {{
 function instrumentDetailsHTML(perSafe, perNote) {{
   let out = "";
   if (perSafe && Object.keys(perSafe).length > 0) {{
-    out += "<details><summary>Per-SAFE detail</summary><table><thead><tr><th>SAFE</th><th>Branch</th><th class='num'>Shares</th><th class='num'>Price</th></tr></thead><tbody>";
+    out += "<details><summary>Per-SAFE detail</summary><table><thead><tr><th>SAFE</th><th><span class='term' title='Which conversion rule applied — e.g. valuation cap, discount, or most-favored-nation'>How it converts</span></th><th class='num'>Shares</th><th class='num'>Price</th></tr></thead><tbody>";
     for (const [sid, r] of Object.entries(perSafe)) {{
       const shares = r.conversion_shares || r.cap_implied_shares || 0;
       const price = r.conversion_price || r.safe_price || 0;
@@ -921,7 +936,7 @@ function instrumentDetailsHTML(perSafe, perNote) {{
     out += "</tbody></table></details>";
   }}
   if (perNote && Object.keys(perNote).length > 0) {{
-    out += "<details><summary>Per-note detail</summary><table><thead><tr><th>Note</th><th>Branch</th><th class='num'>Shares / Cash</th></tr></thead><tbody>";
+    out += "<details><summary>Per-note detail</summary><table><thead><tr><th>Note</th><th><span class='term' title='Which conversion rule applied — e.g. valuation cap, discount, or cash repayment at maturity'>How it converts</span></th><th class='num'>Shares / Cash</th></tr></thead><tbody>";
     for (const [nid, r] of Object.entries(perNote)) {{
       const val = r.conversion_shares !== undefined
         ? fmtShares(r.conversion_shares) + " shares"
@@ -959,9 +974,13 @@ function selectScenario(idx) {{
 
   let blockers = "";
   if (s.blockers && s.blockers.length > 0) {{
-    blockers = "<h3>Blockers</h3>";
+    blockers = "<h3>What's blocking this scenario</h3>";
     for (const b of s.blockers) {{
-      blockers += `<div class="blocker"><code>${{escape(b.code)}}</code> ${{b.instance_id ? "on " + escape(b.instance_id) : ""}}: ${{escape(b.remedy)}}</div>`;
+      // Lead with the plain-language remedy a founder can act on; keep the raw
+      // rule code + instance on a muted secondary line for counsel to cite.
+      const where = b.instance_id ? " on " + escape(b.instance_id) : "";
+      blockers += `<div class="blocker">${{escape(b.remedy)}}`
+        + `<div class="blocker-code">${{escape(b.code)}}${{where}}</div></div>`;
     }}
   }}
   document.getElementById("scenario-blockers").innerHTML = blockers;
@@ -972,7 +991,7 @@ function selectScenario(idx) {{
   // place rather than against a freshly-rebuilt node.
   // The what-if slider only shows when this scenario IS the sweep base — its
   // frames model that scenario's pre-money axis; showing it on any other
-  // scenario would describe a different round than the cards (review fix).
+  // scenario would describe a different round than the metric cards show.
   const sweepHere = isFull && _hasSweep && _isSweepBase(idx);
   exitModeled();  // a scenario switch always clears any modeled what-if state
   show("metric-row", isFull);
@@ -987,7 +1006,7 @@ function selectScenario(idx) {{
 
     renderLegend(agg);
     renderDonutSummary(agg, s.post_round_fd);
-    renderFounderDelta(s.founder_impact);
+    renderFounderDelta(agg.founders_pct);
 
     // Impact callout persists, so it must be cleared+hidden when absent or a
     // stale "Founder Impact" from the prior scenario lingers.
@@ -1007,7 +1026,7 @@ function selectScenario(idx) {{
   let variable = "";
   if (!isFull && s.cap_implied_only && Object.keys(s.per_safe || {{}}).length > 0) {{
     variable += `<h3>Pre-round ownership snapshot</h3><p class="meta">${{CAP_IMPLIED_GLOSS}}</p>`;
-    variable += `<table><thead><tr><th>SAFE</th><th class="num">Cap-implied %</th><th class="num">Safe price</th><th class="num">Shares</th></tr></thead><tbody>`;
+    variable += `<table><thead><tr><th>SAFE</th><th class="num"><span class="term" title="Ownership this SAFE locks in from its valuation cap, before a priced round sets a share price">Cap-implied %</span></th><th class="num"><span class="term" title="Effective price per share implied by the SAFE's valuation cap">Cap price</span></th><th class="num">Shares</th></tr></thead><tbody>`;
     for (const [sid, r] of Object.entries(s.per_safe)) {{
       variable += `<tr><td>${{escape(sid)}}</td><td class="num">${{pct(r.cap_implied_ownership || 0)}}</td><td class="num">$${{(r.safe_price || 0).toFixed(4)}}</td><td class="num">${{fmtShares(r.cap_implied_shares || 0)}}</td></tr>`;
     }}
@@ -1049,8 +1068,8 @@ function selectScenario(idx) {{
 }}
 
 // ---------------------------------------------------------------------------
-// C1: true side-by-side compare — both donuts, both metric sets, the verdict.
-// Uses the chart registry (separate canvas ids) so two donuts coexist.
+// True side-by-side compare — both donuts, both metric sets, and a verdict line.
+// Uses the chart registry (separate canvas ids) so two donuts can be live together.
 // ---------------------------------------------------------------------------
 function _compareTargetIdx() {{
   // Prefer the pinned baseline (B); else the first modeled scenario != active.
@@ -1145,7 +1164,7 @@ function updateCompareBanner() {{
   banner.style.display = "flex";
   banner.className = "compare-banner";
   slideIn(banner);
-  banner.innerHTML = `<div>Compared to <strong>${{escape(pinned.label)}}</strong> (baseline): founder ownership is <strong>${{sign}}${{delta}}pp</strong></div><button id="unpin-btn">Unpin baseline</button>`;
+  banner.innerHTML = `<div>Compared to <strong>${{escape(pinned.label)}}</strong> (baseline): founder ownership is <strong>${{sign}}${{delta}} <span class="term" title="percentage points">pts</span></strong></div><button id="unpin-btn">Unpin baseline</button>`;
   document.getElementById("unpin-btn").addEventListener("click", () => {{
     _pinnedScenarioIdx = null;
     updateCompareBanner();
@@ -1153,9 +1172,9 @@ function updateCompareBanner() {{
   }});
 }}
 
-// Relevance tier for a counsel item, derived from the producer-supplied
-// `relevance_tier` (D2). Honest default "general" when the producer hasn't
-// scoped it — we never invent per-scenario precision client-side.
+// Relevance tier for a counsel item, taken from the producer-supplied
+// `relevance_tier`. Defaults to "general" when the producer hasn't scoped it —
+// the client never invents a relevance it can't back.
 const _TIER_ORDER = {{ applies: 0, likely: 1, general: 2 }};
 const _TIER_META = {{
   applies: {{ cls: "rel-applies", label: "Applies here" }},
@@ -1198,8 +1217,8 @@ function renderCounsel() {{
     html += `<div class="counsel-code">${{escape(it.rule_id)}}</div>`;
     html += `</div>`;
   }}
-  // B2: rule codes hidden by default behind one rail-level toggle (still
-  // reachable for counsel to cite).
+  // Rule codes are hidden by default behind one rail-level toggle so the founder
+  // view stays clean while counsel can still reveal and cite them.
   html += `<button class="codes-toggle no-print" id="codes-toggle">Show rule codes (for counsel)</button>`;
   list.innerHTML = html;
   document.getElementById("codes-toggle").addEventListener("click", () => {{
@@ -1213,7 +1232,7 @@ function renderCounsel() {{
 }}
 
 // Header "N for your lawyer" cue — counts items that apply to this cap table
-// (falls back to the total before D2 relevance lands).
+// (falls back to the total count when no item is tagged as applying here).
 function renderCounselCue(n) {{
   const cue = document.getElementById("counsel-cue");
   const label = document.getElementById("counsel-cue-label");
@@ -1259,9 +1278,8 @@ function hideToast() {{
   document.getElementById("toast").classList.remove("visible");
 }}
 
-// E3: controllable walkthrough — prev / play-pause / next over a 3-state
-// machine (idle | playing | paused). Replaces the old auto-only timer so a
-// founder can read at their own pace.
+// Controllable walkthrough — prev / play-pause / next over a three-state
+// machine (idle | playing | paused) so a founder can read at their own pace.
 let _wtState = "idle";
 let _wtFrame = 0;
 let _wtFrames = [];
@@ -1385,6 +1403,8 @@ function applySweepFrame(idx) {{
   const canvas = document.getElementById("donut-chart");
   if (canvas) renderDonut(canvas, agg, _CAPTURE);  // snap unless capture
   renderLegend(agg);  // the per-class % next to the pie
+  renderDonutSummary(agg, fr.post_round_fd);  // keep the summary + donut aria fresh during a what-if
+  renderFounderDelta(fp);  // delta vs today must track the modeled founders %
   renderImpact(fr.impact_text, false);  // the Founder-Impact narrative for this frame
   const sankeyDiv = document.getElementById("sankey");
   if (sankeyDiv) {{
@@ -1419,7 +1439,7 @@ function _sweepReadout(idx) {{
 
 // Return the slider thumb to the middle frame and refresh its readout/aria.
 // Called on every scenario change so the thumb never drifts out of sync with
-// the displayed scenario (review #6/#7).
+// the displayed scenario.
 function resetSweepSlider() {{
   if (!_hasSweep) return;
   const slider = document.getElementById("sweep-slider");
@@ -1458,19 +1478,19 @@ document.getElementById("pin-btn").addEventListener("click", () => {{
   updateCompareBanner();
 }});
 
-// Export to PDF via the browser's print dialog (D3).
+// Export to PDF via the browser's print dialog.
 document.getElementById("print-btn").addEventListener("click", () => window.print());
 
-// Two-up side-by-side compare (C1).
+// Two-up side-by-side scenario compare.
 document.getElementById("compare-toggle").addEventListener("click", toggleCompare);
 
-// Walkthrough controls (E3): prev / play-pause / next / end.
+// Walkthrough controls: prev / play-pause / next / end.
 document.getElementById("wt-prev").addEventListener("click", () => _wtStep(-1));
 document.getElementById("wt-next").addEventListener("click", () => _wtStep(1));
 document.getElementById("wt-playpause").addEventListener("click", _wtPlayPause);
 document.getElementById("wt-close").addEventListener("click", stopWalkthrough);
 
-// Reset a modeled what-if back to the saved scenario (C2).
+// Reset a modeled what-if back to the saved scenario.
 document.getElementById("sweep-reset").addEventListener("click", () => selectScenario(_activeIdx));
 
 // Header counsel cue: jump to the rail + brief highlight (keeps the rail
