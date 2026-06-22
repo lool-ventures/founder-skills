@@ -4,9 +4,9 @@
 contain a **non-synthetic** email — `analyst@realstartup.com` (a made-up address; not real PII) — that
 the production privacy allowlist must **flag**.
 
-The CI privacy step (`.github/workflows/cowork-replay.yml`) runs `verify-cassettes --privacy-only` on this
-file with the **same** `$ALLOW` list it uses for the real cassettes, and **fails the job if the canary
-does NOT trip**. This locks the email PII tripwire — the one guard the synthetic-only posture leans on
+The CI privacy step (`.github/workflows/cowork-replay.yml`) runs `verify-cassettes --skip-staleness` on this
+file with the **same** `$ALLOW` list (sourced from `cowork-tests/privacy-allowlist.sh`) it uses for the real
+cassettes, and **fails the job if the canary does NOT trip**. This locks the email PII tripwire — the one guard the synthetic-only posture leans on
 hardest — against a regression. (It nearly died once: an *unanchored* domain allow silently suppressed
 every email finding by matching the domain inside the address. The canary makes that failure loud.)
 

@@ -17,6 +17,49 @@ competitive-positioning, deck-review, financial-model-review) proving the `resol
 fix lands deliverables at `outputs/artifacts/<skill>-<slug>/` and Cowork parity holds (no host-path
 leak, no outputs/ delete). See `docs/internal/2026-06-18-phase1-2-fleet-cowork-plan.md`.
 
+## Test strategy — what cassettes are for (and aren't)
+
+Two test layers, deliberately separated. Keeping the boundary clean is what keeps this maintainable.
+
+- **pytest (`founder-skills/tests/`) owns deterministic correctness** — math producers, validators
+  given fixed JSON, gating helpers. No LLM. Fast, exhaustive, zero re-record cost. This is the
+  correctness backbone.
+- **Cowork cassettes own what only they can test:** LLM-in-the-loop behavior under the real Cowork
+  runtime (extraction accuracy from a real doc, gate/routing decisions, sub-agent orchestration)
+  **plus sandbox parity** (artifact paths land right, no host-path leak, no `outputs/` delete). A
+  cassette is a frozen snapshot of one stochastic run — its strength (regression detection) and its
+  cost (it goes stale on skill / baseline / format change; re-record is paid + local-only).
+
+Consequences for authoring:
+- **Assert only what this layer uniquely covers:** parity keys (`result`, `file_exists`,
+  `user_visible_artifact`, `transcript_no_host_path`, `subagent_dispatched`, `dispatch_count_max`),
+  hard-fact LLM extraction (`artifact_json` on an *extracted* value), and structural presence
+  (`artifact_json … exists/gt:0`). Do **not** add asserts that merely re-check deterministic producer
+  math pytest already covers — that's pure re-record cost for no new signal.
+- **Don't grow the matrix for correctness.** Add a cassette only for a new *runtime / LLM-behavior*
+  surface. cap-table's 4 lanes are runtime-distinct (PDF-read, XLSX-openpyxl, freeform-grid,
+  conversational) → one each; one smoke per other skill. Correctness variants belong in pytest.
+- **`choose: first` is fine** for a parity layer — only invest in explicit `choose: [list]` if
+  which-options-get-selected is itself the runtime behavior under test.
+
+*Audit (2026-06-21):* all 11 cassettes' asserts are already parity / extraction / structural-presence
+— zero deterministic-pytest duplicates. No trims needed.
+
+## Release-cadence re-record
+
+Staleness is a **WARN** gate (CI can't re-record), so refresh on a **release cadence**, not per-PR:
+
+```bash
+export COWORK_AGENT_BINARY="$HOME/Library/Application Support/Claude/claude-code-vm/<ver>/claude"
+./rerecord.sh                 # all scenarios (or: ./rerecord.sh <name> ... for a subset)
+```
+
+`rerecord.sh` needs the staged agent + Docker + the **`:2`** agent image (rebuild via
+`cowork-harness doctor --tier container`). It records per-cassette (temp+`mv`, atomic), then runs the
+same gates as CI scoped to what it recorded (lint, privacy with the shared allowlist, staleness,
+replay). On green, review `git diff -- cassettes/` (synthetic only) and commit by name. See the
+release-process note in the repo `CLAUDE.md`.
+
 ## Layout
 - `sessions/` — repo-relative sessions: the **environment** (model, plugin mount, file `uploads:`).
   All mount the **whole** `founder-skills` plugin (`local_plugins: [../../founder-skills]`) — never a
@@ -106,10 +149,8 @@ cowork-harness lint scenarios/*.yaml             # no-silent-false-green (0.4.0 
 # allowed wholesale via --allow-domain (research skills cite 150+ public domains; non-PII); and only
 # SYNTHETIC email domains via --allow-email (acmecorp.com, RFC-2606 example.com) — any OTHER email still
 # FAILS (the live PII tripwire). Decision 2026-06-18; see the workflow comment.
-cowork-harness verify-cassettes cassettes/ --skip-staleness \
-  --allow '\$\s*\d[\d.,]*\s*(?:[MmKkBb]|million|thousand|billion)?' \
-  --allow-domain '[A-Za-z0-9][A-Za-z0-9.\-]*\.[A-Za-z]{2,}' \
-  --allow-email '[A-Za-z0-9._%+\-]+@(?:acmecorp|example)\.com'
+source privacy-allowlist.sh   # canonical allowlist — single source of truth (also sourced by the workflow + rerecord.sh)
+cowork-harness verify-cassettes cassettes/ --skip-staleness "${ALLOW[@]}"
 ```
 
 > **Staleness** runs as a **separate `--skip-privacy` step under `continue-on-error: true`** (warn, not

@@ -61,11 +61,8 @@ jobs:
         # (analyst@realstartup.com) MUST trip. If it stops tripping, the tripwire is disabled → job fails.
         # Defining $ALLOW once means the gate and the canary can never drift apart.
         run: |
-          ALLOW=(
-            --allow '\$\s*\d[\d.,]*\s*(?:[MmKkBb]|million|thousand|billion)?'
-            --allow-domain '[A-Za-z0-9][A-Za-z0-9.\-]*\.[A-Za-z]{2,}'
-            --allow-email '[A-Za-z0-9._%+\-]+@(?:acmecorp|example)\.com'
-          )
+          # Canonical allowlist — single source of truth shared with cowork-tests/rerecord.sh.
+          source cowork-tests/privacy-allowlist.sh
           # Real gate: committed cassettes must be clean under the allowlist.
           cowork-harness verify-cassettes cowork-tests/cassettes/ --skip-staleness "${ALLOW[@]}"
           # Email canary: the SAME allowlist must still FLAG a non-synthetic email. If verify-cassettes
