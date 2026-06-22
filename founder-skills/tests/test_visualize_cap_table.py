@@ -1442,3 +1442,84 @@ class TestHumanizedLabels:
             app = _render_explorer_app_script(d)
         assert "const LABELS" in app, "explorer missing the injected label map"
         assert "function humanize" in app and "function term" in app, "explorer missing label helpers"
+
+
+class TestWatchlistGrouping:
+    def test_group_watchlist_dedupes_and_picks_urgent(self) -> None:
+        import _rules  # type: ignore[import-not-found]
+
+        items = [
+            {
+                "rule_id": "r.a",
+                "title": "Rule A",
+                "current_status": "pre_effective",
+                "event_date_value": "2024-09-01",
+                "action_required": "wait",
+            },
+            {
+                "rule_id": "r.a",
+                "title": "Rule A",
+                "current_status": "in_window",
+                "event_date_value": "2025-01-15",
+                "action_required": "act now",
+            },
+            {
+                "rule_id": "r.b",
+                "title": "Rule B",
+                "current_status": "missing_event_date",
+                "event_date_value": None,
+                "action_required": "give date",
+            },
+        ]
+        grouped = _rules.group_watchlist(items)
+        assert len(grouped) == 2, "per-instance rows must collapse to one row per rule"
+        a = next(g for g in grouped if g["rule_id"] == "r.a")
+        assert a["count"] == 2
+        assert a["status"] == "in_window", "most-urgent status must win"
+        assert a["action"] == "act now", "action must come from the urgent instance"
+        assert a["dates"] == ["2024-09-01", "2025-01-15"]
+
+    def test_report_watchlist_is_slim_and_deduped(self) -> None:
+        # Inject a watchlist with the same rule firing on two instances; the
+        # report must show one row per rule with Rule/Status/When/Action (no
+        # Scope column, no rule-code in the cell).
+        with tempfile.TemporaryDirectory() as d:
+            _make_fixture_dir(d)
+            with open(os.path.join(d, "rule_audit.json"), encoding="utf-8") as f:
+                ra = json.load(f)
+            ra["date_sensitive_watchlist"] = [
+                {
+                    "rule_id": "safe.israeli_2025_safe_harbor",
+                    "title": "Israel 2025 SAFE temporary guidance",
+                    "scope": "legal_tax_applicability",
+                    "current_status": "in_window",
+                    "event_date_value": "2025-01-15",
+                    "action_required": "Confirm the SAFE was signed in the safe-harbor window.",
+                    "applies_when_matched": True,
+                },
+                {
+                    "rule_id": "safe.israeli_2025_safe_harbor",
+                    "title": "Israel 2025 SAFE temporary guidance",
+                    "scope": "legal_tax_applicability",
+                    "current_status": "pre_effective",
+                    "event_date_value": "2024-09-01",
+                    "action_required": "Window has not started yet.",
+                    "applies_when_matched": True,
+                },
+            ]
+            with open(os.path.join(d, "rule_audit.json"), "w", encoding="utf-8") as f:
+                json.dump(ra, f)
+            out = os.path.join(d, "report.html")
+            rc, _, err = _run("visualize.py", ["--dir", d, "-o", out])
+            assert rc == 0, err
+            with open(out, encoding="utf-8") as f:
+                html_doc = f.read()
+        seg = html_doc[html_doc.find("Date-sensitive watchlist") :]
+        for col in ("<th>Rule</th>", "<th>Status</th>", "<th>When</th>", "<th>Action</th>"):
+            assert col in seg, f"watchlist missing column {col}"
+        assert "<th>Scope</th>" not in seg, "Scope column should be dropped"
+        # Two instances of one rule → one row (one <tr> in the tbody).
+        tbody = seg[seg.find("<tbody>") : seg.find("</tbody>")]
+        assert tbody.count("<tr>") == 1, "per-instance watchlist rows must dedupe to one per rule"
+        assert "rule-code" not in tbody, "compact watchlist cell must not show the raw rule_id code"
+        assert "· 2×" in tbody, "deduped row should show the instance count"

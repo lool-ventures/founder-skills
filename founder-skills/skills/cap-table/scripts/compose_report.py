@@ -44,15 +44,19 @@ def _rule_md(
     item_title: str | None = None,
     item_source_ids: list[str] | None = None,
     bold: bool = False,
+    compact: bool = False,
 ) -> str:
-    """Readable rule reference for Markdown: title linked to its primary source,
-    extra publishers as 'also' links, raw rule_id as small-print code."""
+    """Readable rule reference for Markdown: title linked to its primary source.
+    Full form adds extra 'also' links + the raw rule_id; `compact=True` (for
+    dense tables) keeps just the linked title."""
     ref = _rules.rule_ref(rule_id, item_title=item_title, item_source_ids=item_source_ids)
     title = str(ref["title"])
     links = ref["links"]
     title_part = f"[{title}]({links[0][1]})" if links else title
     if bold:
         title_part = f"**{title_part}**"
+    if compact:
+        return title_part
     out = title_part
     if links and links[1:]:
         out += " · " + " · ".join(f"[{p}]({u})" for p, u in links[1:])
@@ -1095,19 +1099,19 @@ def render_report_markdown(
                 annotation_items.append(w)
 
         if active_items:
+            grouped = _rules.group_watchlist(active_items)
             lines.append("## Date-Sensitive Watchlist")
             lines.append("")
-            lines.append(f"_{len(active_items)} active item(s) — rules whose predicates match this engagement._")
+            lines.append(f"_{len(grouped)} rule(s) to watch (from {len(active_items)} matched instances)._")
             lines.append("")
-            lines.append("| Rule | Scope | Status | Date | Action |")
-            lines.append("|---|---|---|---|---|")
-            for w in active_items:
-                status_or_fresh = w.get("current_status") or w.get("freshness_status")
-                date_val = w.get("event_date_value") or "—"
+            lines.append("| Rule | Status | When | Action |")
+            lines.append("|---|---|---|---|")
+            for g in grouped:
+                status = _labels.humanize("status", g["status"]) + (f" · {g['count']}×" if g["count"] > 1 else "")
+                action = (g.get("action") or "").replace("|", "\\|")[:80]
                 lines.append(
-                    f"| {_rule_md(w['rule_id'], item_title=w.get('title'))} | {_labels.humanize('scope', w.get('scope'))} | "
-                    f"{_labels.humanize('status', status_or_fresh)} | {date_val} | "
-                    f"{w.get('action_required', '')[:60]} |"
+                    f"| {_rule_md(g['rule_id'], item_title=g['title'], compact=True)} | {status} | "
+                    f"{_rules.format_dates(g['dates'])} | {action} |"
                 )
             lines.append("")
         if annotation_items:

@@ -69,6 +69,66 @@ def source_links(source_ids: list[str] | None) -> list[list[str]]:
     return out
 
 
+# Watchlist status urgency — lower sorts first (most actionable).
+_STATUS_RANK = {
+    "in_window": 0,  # Active now
+    "missing_event_date": 1,  # Needs a date from you
+    "pre_effective": 2,  # Not yet in effect
+    "date_tracking_only": 3,
+    "expired": 4,
+    "not_date_sensitive": 5,
+}
+
+
+def _wl_status(w: dict[str, Any]) -> str | None:
+    return w.get("current_status") or w.get("freshness_status")
+
+
+def group_watchlist(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse per-instance watchlist rows into one row per rule.
+
+    Each group reports the most-urgent status across its instances, the unique
+    event dates, the instance count, and the action. Sorted by urgency.
+    """
+    groups: dict[str, dict[str, Any]] = {}
+    for w in items:
+        rid = w.get("rule_id", "")
+        groups.setdefault(rid, {"rule_id": rid, "title": w.get("title"), "items": []})["items"].append(w)
+
+    out: list[dict[str, Any]] = []
+    for rid, g in groups.items():
+        rows = g["items"]
+        urgent = min(rows, key=lambda w: _STATUS_RANK.get(_wl_status(w) or "", 6))
+        dates = sorted({w.get("event_date_value") for w in rows if w.get("event_date_value")})
+        # Action from the same instance whose status we surface, so they agree.
+        action = urgent.get("action_required") or next(
+            (w.get("action_required") for w in rows if w.get("action_required")), ""
+        )
+        out.append(
+            {
+                "rule_id": rid,
+                "title": g["title"] or rule_title(rid),
+                "count": len(rows),
+                "status": _wl_status(urgent),
+                "dates": dates,
+                "action": action,
+            }
+        )
+    out.sort(key=lambda r: (_STATUS_RANK.get(r["status"] or "", 6), str(r["title"])))
+    return out
+
+
+def format_dates(dates: list[str]) -> str:
+    """Compact 'When' rendering: one date, a short list, or earliest…latest."""
+    if not dates:
+        return "—"
+    if len(dates) == 1:
+        return dates[0]
+    if len(dates) <= 3:
+        return ", ".join(dates)
+    return f"{dates[0]} … {dates[-1]} ({len(dates)})"
+
+
 def rule_ref(
     rule_id: str,
     *,
