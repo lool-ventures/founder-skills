@@ -98,9 +98,12 @@ def render_explorer_html(
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
+    import _labels
     import _theme
 
     brand_css = _theme.brand_css()
+    labels_json = _embed_json(_labels.MAPS)
+    cap_implied_gloss = _esc(_labels.CAP_IMPLIED_GLOSS)
 
     company = _esc(inputs.get("company_name", "Company"))
 
@@ -181,6 +184,7 @@ def render_explorer_html(
         letter-spacing: -0.01em; }}
   h2, h3 {{ font-weight: 500; color: var(--heading-2); }}
   .meta {{ color: var(--muted); font-size: 13px; }}
+  .term {{ border-bottom: 1px dotted var(--border); cursor: help; }}
   .controls {{ display: flex; gap: 8px; align-items: center; }}
   .btn {{ padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--r-input);
           background: var(--bg); color: var(--fg); font-size: 13px; cursor: pointer;
@@ -325,6 +329,19 @@ def render_explorer_html(
 
 <script>
 const DATA = {data_json};
+const LABELS = {labels_json};
+const CAP_IMPLIED_GLOSS = "{cap_implied_gloss}";
+
+// Plain-language label for an internal enum; raw code stays as a hover tooltip.
+function humanize(cat, val) {{
+  if (val === null || val === undefined || val === "") return "—";
+  const m = LABELS[cat] || {{}};
+  return m[val] || String(val).replace(/_/g, " ");
+}}
+function term(cat, val) {{
+  if (val === null || val === undefined || val === "") return humanize(cat, val);
+  return `<span class="term" title="${{escape(val)}}">${{escape(humanize(cat, val))}}</span>`;
+}}
 
 const PALETTE = {{
   founders: "#0D549D",
@@ -604,9 +621,9 @@ function selectScenario(idx) {{
   const isFull = (s.completeness === "full" || s.completeness === "mixed");
 
   // Variable region (rebuilt each switch): heading + badge + type + blockers.
-  let head = `<h2 style="margin-top:0;">${{escape(s.label)}} <span class="badge ${{s.completeness}}">${{s.completeness}}</span></h2>`;
-  if (s.cap_implied_only) head += `<p class="meta">Cap-implied output set only (pre-financing snapshot)</p>`;
-  head += `<p class="meta">Type: <code>${{escape(s.type)}}</code></p>`;
+  let head = `<h2 style="margin-top:0;">${{escape(s.label)}} <span class="badge ${{s.completeness}}" title="${{escape(s.completeness)}}">${{escape(humanize("completeness", s.completeness))}}</span></h2>`;
+  if (s.cap_implied_only) head += `<p class="meta">Pre-round snapshot — ${{CAP_IMPLIED_GLOSS}}</p>`;
+  head += `<p class="meta">Type: ${{term("scenario_type", s.type)}}</p>`;
   document.getElementById("scenario-head").innerHTML = head;
 
   let blockers = "";
@@ -666,7 +683,7 @@ function selectScenario(idx) {{
   // Variable region: cap-implied table / pending notice / per-instrument details.
   let variable = "";
   if (!isFull && s.cap_implied_only && Object.keys(s.per_safe || {{}}).length > 0) {{
-    variable += `<h3>Cap-implied ownership (pre-financing)</h3>`;
+    variable += `<h3>Pre-round ownership snapshot</h3><p class="meta">${{CAP_IMPLIED_GLOSS}}</p>`;
     variable += `<table><thead><tr><th>SAFE</th><th class="num">Cap-implied %</th><th class="num">Safe price</th><th class="num">Shares</th></tr></thead><tbody>`;
     for (const [sid, r] of Object.entries(s.per_safe)) {{
       variable += `<tr><td>${{escape(sid)}}</td><td class="num">${{pct(r.cap_implied_ownership || 0)}}</td><td class="num">$${{(r.safe_price || 0).toFixed(4)}}</td><td class="num">${{fmtShares(r.cap_implied_shares || 0)}}</td></tr>`;

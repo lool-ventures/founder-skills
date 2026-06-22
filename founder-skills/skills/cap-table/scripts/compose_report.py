@@ -31,6 +31,9 @@ import sys
 import uuid
 from typing import Any
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _labels  # noqa: E402
+
 SCHEMA_VERSION = "v0.5.0-cap-table"
 
 # Required canonical artifacts per design §3.6
@@ -756,26 +759,13 @@ def render_report_markdown(
         )
         lines.append("")
     for s in scenarios:
-        lines.append(f"### {s.get('label', s['scenario_id'])} ({s['type']})")
+        lines.append(f"### {s.get('label', s['scenario_id'])} ({_labels.humanize('scenario_type', s['type'])})")
         lines.append("")
         co = s["computed_outputs"]
         completeness = co.get("completeness", "structural_only")
-        completeness_human = {
-            "full": "full — share-producing math ran end-to-end",
-            "mixed": "mixed — some scenarios produced share outputs, others didn't",
-            "structural_only": (
-                "structural_only — schema and rule-applicability checks passed, but no "
-                "share-producing math ran (e.g. flip mode in v0.1 is share-for-share-only; "
-                "legal/tax math requires counsel)"
-            ),
-            "repay_only": "repay_only — note matured with repay treatment; no shares issued",
-            "cap_implied_only": "cap_implied_only — pre-financing cap-implied snapshot, no priced round",
-        }.get(completeness, completeness)
-        lines.append(
-            f"**Completeness:** `{completeness}` — {completeness_human.split(' — ', 1)[1] if ' — ' in completeness_human else completeness_human}"
-        )
+        lines.append(f"**Stage:** {_labels.md_term('completeness', completeness)}")
         if co.get("cap_implied_only"):
-            lines.append("**Sub-flag:** `cap_implied_only` — pre-financing snapshot only")
+            lines.append(f"_{_labels.CAP_IMPLIED_GLOSS}_")
         lines.append("")
         # Inputs
         params = s.get("parameters", {})
@@ -1013,14 +1003,15 @@ def render_report_markdown(
     if len(scenarios) >= 2:
         lines.append("## Scenario Comparison")
         lines.append("")
-        lines.append("| Scenario | Completeness | Founder %  | Equity Price |")
+        lines.append("| Scenario | Stage | Founder %  | Equity Price |")
         lines.append("|---|---|---:|---:|")
         for s in scenarios:
             co = s["computed_outputs"]
             agg = co.get("aggregate_ownership_by_class", {})
             fp = _percent(agg.get("founders_pct", 0.0)) if agg else "—"
             ep = f"${co.get('equity_financing_price', 0):.4f}" if co.get("equity_financing_price") else "—"
-            lines.append(f"| {s.get('label', s['scenario_id'])} | {co.get('completeness')} | {fp} | {ep} |")
+            stage = _labels.humanize("completeness", co.get("completeness"))
+            lines.append(f"| {s.get('label', s['scenario_id'])} | {stage} | {fp} | {ep} |")
         lines.append("")
 
     # 5. Counsel Review Required
@@ -1083,10 +1074,11 @@ def render_report_markdown(
             lines.append("| Rule | Scope | Status | Date | Action |")
             lines.append("|---|---|---|---|---|")
             for w in active_items:
-                status_or_fresh = w.get("current_status") or w.get("freshness_status") or "—"
+                status_or_fresh = w.get("current_status") or w.get("freshness_status")
                 date_val = w.get("event_date_value") or "—"
                 lines.append(
-                    f"| `{w['rule_id']}` | {w['scope']} | {status_or_fresh} | {date_val} | "
+                    f"| `{w['rule_id']}` | {_labels.humanize('scope', w.get('scope'))} | "
+                    f"{_labels.humanize('status', status_or_fresh)} | {date_val} | "
                     f"{w.get('action_required', '')[:60]} |"
                 )
             lines.append("")

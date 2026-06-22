@@ -1416,3 +1416,29 @@ class TestVisualizeCapImplied:
                 html_doc = f.read()
         assert "Cap-implied %" in html_doc, "cap-implied per-SAFE table missing from report"
         assert "see blockers" not in html_doc, "report claims 'see blockers' for a cap-implied scenario that has none"
+
+
+class TestHumanizedLabels:
+    """Internal enums must not leak as visible prose into founder-facing output;
+    they appear as friendly labels with the raw code only as a hover tooltip."""
+
+    def test_report_humanizes_completeness_and_type(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            _make_fixture_dir(d)  # cap-implied safe_conversion / structural_only
+            out = os.path.join(d, "report.html")
+            rc, _, err = _run("visualize.py", ["--dir", d, "-o", out])
+            assert rc == 0, err
+            with open(out, encoding="utf-8") as f:
+                html_doc = f.read()
+        assert "SAFE conversion" in html_doc, "scenario type not humanized in report"
+        assert "Structure only" in html_doc, "completeness not humanized in report"
+        # The raw enum must not appear as visible text — only inside a title= tooltip.
+        assert "<code>structural_only</code>" not in html_doc
+        assert ">structural_only<" not in html_doc
+        assert 'title="structural_only"' in html_doc, "raw enum should be preserved as a tooltip"
+
+    def test_explorer_carries_label_map_and_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            app = _render_explorer_app_script(d)
+        assert "const LABELS" in app, "explorer missing the injected label map"
+        assert "function humanize" in app and "function term" in app, "explorer missing label helpers"
