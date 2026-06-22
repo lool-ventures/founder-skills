@@ -516,7 +516,7 @@ function renderDonut(canvasEl, breakdown) {{
     _chartInstance.data.datasets[0].data = data;
     _chartInstance.data.datasets[0].backgroundColor = colors;
     _chartInstance.data.datasets[0].borderColor = borderColor;
-    _chartInstance.update(_REDUCED_MOTION ? "none" : undefined);
+    if (_REDUCED_MOTION) {{ _chartInstance.update("none"); }} else {{ _chartInstance.update(); }}
     return;
   }}
   if (_chartInstance) _chartInstance.destroy();
@@ -584,8 +584,10 @@ function selectScenario(idx) {{
     show("metric-price", !!s.equity_financing_price);
     show("metric-fd", !!s.post_round_fd);
 
+    // Iterate the fixed DONUT_ORDER so legend swatches match the donut arc order.
     let legend = "";
-    for (const [cat, frac] of Object.entries(agg)) {{
+    for (const cat of DONUT_ORDER) {{
+      const frac = agg[cat] || 0;
       if (frac <= 0) continue;
       legend += `<li><span class="swatch" style="background:${{sliceColor(cat)}};"></span>${{escape(sliceLabel(cat))}}: <strong style="margin-left:auto;">${{pct(frac)}}</strong></li>`;
     }}
@@ -625,7 +627,7 @@ function selectScenario(idx) {{
     variable += `<p class="meta"><em>This scenario is pending — see blockers above.</em></p>`;
   }}
 
-  if (Object.keys(s.per_safe || {{}}).length > 0 && !s.cap_implied_only) {{
+  if (isFull && Object.keys(s.per_safe || {{}}).length > 0) {{
     variable += "<details><summary>Per-SAFE detail</summary><table><thead><tr><th>SAFE</th><th>Branch</th><th class='num'>Shares</th><th class='num'>Price</th></tr></thead><tbody>";
     for (const [sid, r] of Object.entries(s.per_safe)) {{
       const shares = r.conversion_shares || r.cap_implied_shares || 0;
@@ -634,7 +636,7 @@ function selectScenario(idx) {{
     }}
     variable += "</tbody></table></details>";
   }}
-  if (Object.keys(s.per_note || {{}}).length > 0) {{
+  if (isFull && Object.keys(s.per_note || {{}}).length > 0) {{
     variable += "<details><summary>Per-note detail</summary><table><thead><tr><th>Note</th><th>Branch</th><th class='num'>Shares / Cash</th></tr></thead><tbody>";
     for (const [nid, r] of Object.entries(s.per_note)) {{
       const val = r.conversion_shares !== undefined
@@ -682,10 +684,19 @@ function updateCompareBanner() {{
   }}
   const pinned = DATA.scenarios[_pinnedScenarioIdx];
   const active = DATA.scenarios[_activeIdx];
-  const pinnedF = (pinned.aggregate.founders_pct || 0) * 100;
-  const activeF = (active.aggregate.founders_pct || 0) * 100;
-  const delta = (activeF - pinnedF).toFixed(1);
-  const sign = delta >= 0 ? "+" : "";
+  // Only meaningful when both scenarios have a real founder %; a cap-implied /
+  // pending scenario has an empty aggregate, so comparing against 0% is noise.
+  const pinnedHas = pinned.aggregate && pinned.aggregate.founders_pct;
+  const activeHas = active.aggregate && active.aggregate.founders_pct;
+  if (!pinnedHas || !activeHas) {{
+    banner.style.display = "none";
+    return;
+  }}
+  const pinnedF = pinned.aggregate.founders_pct * 100;
+  const activeF = active.aggregate.founders_pct * 100;
+  const rawDelta = activeF - pinnedF;
+  const delta = rawDelta.toFixed(1);
+  const sign = rawDelta >= 0 ? "+" : "";
   banner.style.display = "flex";
   banner.className = "compare-banner";
   banner.innerHTML = `<div>Compared to <strong>${{escape(pinned.label)}}</strong> (baseline): founder ownership is <strong>${{sign}}${{delta}}pp</strong></div><button id="unpin-btn">Unpin baseline</button>`;

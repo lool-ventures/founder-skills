@@ -1106,6 +1106,10 @@ global.URLSearchParams = class { constructor() {} get() { return null; } };
 global.requestAnimationFrame = function () {};
 global.performance = { now() { return 0; } };
 global.getComputedStyle = function () { return { getPropertyValue() { return "#000"; } }; };
+// Run timers synchronously so the Sankey fade swap (setTimeout) actually
+// executes within the test rather than after node exits.
+global.setTimeout = function (fn) { fn(); return 0; };
+global.clearTimeout = function () {};
 global.Chart = class {
   constructor(el, cfg) { this.canvas = el; this.data = cfg.data; this.options = cfg.options; }
   update() {}
@@ -1200,6 +1204,9 @@ class TestExploreRuntimeSmoke:
                 + "\n"
                 + app
                 + "\nselectScenario(1);"  # exercises the in-place .update() morph branch
+                # With synchronous setTimeout the Sankey fade swap runs; assert it populated.
+                + "\nconst _sk = document.getElementById('sankey').innerHTML || '';"
+                + "\nif (!_sk.length) throw new Error('Sankey not populated after switch');"
                 + "\nconsole.log('OK_MORPH');\n"
             )
             js_path = os.path.join(d, "runner.js")
