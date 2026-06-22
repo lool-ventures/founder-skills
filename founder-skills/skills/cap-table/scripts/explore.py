@@ -67,12 +67,33 @@ def _chartjs_source() -> str:
     return js_path.read_text(encoding="utf-8")
 
 
+def _sweep_payload(sweep: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Normalize sweep.json frames to the compact shape the slider JS consumes."""
+    if not sweep or not sweep.get("frames"):
+        return None
+    frames = []
+    for fr in sweep["frames"]:
+        o = fr.get("outputs") or {}
+        frames.append(
+            {
+                "pre_money": fr.get("pre_money"),
+                "valid": bool(fr.get("valid")),
+                "aggregate": _filter_agg(o.get("aggregate_ownership_by_class") or {}),
+                "equity_financing_price": o.get("equity_financing_price"),
+                "post_round_fd": o.get("post_round_fully_diluted_shares"),
+                "shares_breakdown": o.get("shares_breakdown") or {},
+            }
+        )
+    return {"axis": sweep.get("axis", "pre_money"), "frames": frames}
+
+
 def render_explorer_html(
     *,
     inputs: dict[str, Any],
     cap_state: dict[str, Any],
     scenarios_doc: dict[str, Any],
     counsel_packet: dict[str, Any],
+    sweep: dict[str, Any] | None = None,
 ) -> str:
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
     if scripts_dir not in sys.path:
@@ -120,6 +141,7 @@ def render_explorer_html(
             for s in scenarios_doc.get("scenarios", [])
         ],
         "counsel_items": counsel_packet.get("items", []),
+        "sweep": _sweep_payload(sweep),
     }
     data_json = _embed_json(payload)
     chart_js = _chartjs_source()
@@ -216,6 +238,13 @@ def render_explorer_html(
   .metric-row {{ display: flex; gap: 24px; margin: 16px 0; }}
   .metric {{ flex: 1; padding: 12px 16px; background: var(--surface); border-radius: 0;
               border: 1px solid var(--border); }}
+  #sweep-wrap {{ margin: 16px 0; padding: 12px 16px; background: var(--surface);
+                  border: 1px solid var(--border); }}
+  #sweep-wrap label {{ display: block; font-size: 11px; text-transform: uppercase;
+                        letter-spacing: 0.06em; color: var(--label); font-weight: 600; margin-bottom: 8px; }}
+  #sweep-slider {{ width: 100%; accent-color: var(--lool-blue); }}
+  .sweep-readout {{ font-size: 13px; color: var(--muted); margin-top: 8px;
+                     font-variant-numeric: tabular-nums; }}
   .compare-banner {{ background: var(--lool-warning-tint); color: var(--lool-ink); padding: 10px 16px;
                       border-radius: 0; border-left: 3px solid var(--lool-warning);
                       margin: 12px 0; font-size: 13px;
@@ -268,6 +297,11 @@ def render_explorer_html(
         <div class="metric" id="metric-founder"><div class="number-display" id="founder-pct">—</div><div class="number-label">Founder ownership</div></div>
         <div class="metric" id="metric-price"><div class="number-display" id="price-psh">—</div><div class="number-label">Price per share</div></div>
         <div class="metric" id="metric-fd"><div class="number-display" id="post-fd">—</div><div class="number-label">Post-round FD shares</div></div>
+      </div>
+      <div id="sweep-wrap" hidden>
+        <label for="sweep-slider">Pre-money what-if — drag to model</label>
+        <input type="range" id="sweep-slider" min="0" max="0" value="0" step="1" aria-label="Pre-money valuation">
+        <div class="sweep-readout" id="sweep-readout"></div>
       </div>
       <div class="donut-wrap" id="donut-wrap" hidden>
         <div class="donut-canvas"><canvas id="donut-chart"></canvas></div>
@@ -322,6 +356,7 @@ let _walkthroughTimer = null;
 let _prevMetrics = {{ founders_pct: null, price: null, post_fd: null }};
 let _metricAnimGen = 0;
 let _metricsIntroDone = false;
+let _hasSweep = false;
 const _REDUCED_MOTION = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 const _CAPTURE = new URLSearchParams(location.search).get("capture") === "1";
 if (_CAPTURE) document.body.dataset.capture = "1";
@@ -504,7 +539,11 @@ function renderSankey(container, scenarioData) {{
 // of a fresh grow-in. Keys carry the `_pct` suffix; there is no warrants_pct.
 const DONUT_ORDER = ["founders_pct", "preferred_pct", "option_pool_pct", "safe_pct", "note_pct", "new_money_pct"];
 
-function renderDonut(canvasEl, breakdown) {{
+function renderDonut(canvasEl, breakdown, animate) {{
+  // `animate` defaults true. The slider passes false to SNAP wedges (no
+  // fabricated in-between geometry mid-drag); under capture it passes true.
+  if (animate === undefined) animate = true;
+  const doAnim = animate && !_REDUCED_MOTION;
   const labels = DONUT_ORDER.map(sliceLabel);
   const data = DONUT_ORDER.map(k => (breakdown[k] || 0) * 100);
   const colors = DONUT_ORDER.map(sliceColor);
@@ -516,7 +555,7 @@ function renderDonut(canvasEl, breakdown) {{
     _chartInstance.data.datasets[0].data = data;
     _chartInstance.data.datasets[0].backgroundColor = colors;
     _chartInstance.data.datasets[0].borderColor = borderColor;
-    if (_REDUCED_MOTION) {{ _chartInstance.update("none"); }} else {{ _chartInstance.update(); }}
+    if (doAnim) {{ _chartInstance.update(); }} else {{ _chartInstance.update("none"); }}
     return;
   }}
   if (_chartInstance) _chartInstance.destroy();
@@ -530,7 +569,7 @@ function renderDonut(canvasEl, breakdown) {{
         // Hide the zero-area wedges the fixed order introduces from the tooltip.
         tooltip: {{ filter: item => item.parsed > 0, callbacks: {{ label: ctx => `${{ctx.label}}: ${{ctx.parsed.toFixed(1)}}%` }} }},
       }},
-      animation: _REDUCED_MOTION ? false : {{ duration: 750, easing: "easeInOutCubic" }},
+      animation: doAnim ? {{ duration: 750, easing: "easeInOutCubic" }} : false,
     }},
   }});
 }}
@@ -584,6 +623,7 @@ function selectScenario(idx) {{
   // can morph them in place; the metric nodes survive so the tickers tick in
   // place rather than against a freshly-rebuilt node.
   show("metric-row", isFull);
+  show("sweep-wrap", isFull && _hasSweep);
   show("donut-wrap", isFull);
   show("sankey-container", isFull);
   if (isFull) {{
@@ -797,6 +837,61 @@ function startWalkthrough() {{
 }}
 
 // ---------------------------------------------------------------------------
+// Pre-money sweep slider (P4)
+// ---------------------------------------------------------------------------
+// Scrubs precomputed real solver frames. The slider snaps to discrete frames,
+// so every value it ever shows — number AND donut geometry — is real solver
+// output. By default the donut SNAPS too (no fabricated in-between geometry);
+// only under capture mode does the geometry tween.
+function applySweepFrame(idx) {{
+  const fr = DATA.sweep.frames[idx];
+  const readout = document.getElementById("sweep-readout");
+  if (!fr) return;
+  const preM = "$" + (fr.pre_money / 1e6).toFixed(1) + "M";
+  if (!fr.valid) {{
+    readout.textContent = "Pre-money " + preM + " — doesn't converge (frame skipped).";
+    return;
+  }}
+  // Cancel any in-flight metric tween so the snapped value sticks.
+  _metricAnimGen++;
+  const agg = fr.aggregate || {{}};
+  const fp = agg.founders_pct || 0;
+  const fpEl = document.getElementById("founder-pct");
+  if (fpEl) fpEl.textContent = pct(fp);
+  const priceEl = document.getElementById("price-psh");
+  if (priceEl && fr.equity_financing_price != null) priceEl.textContent = "$" + fr.equity_financing_price.toFixed(4);
+  const fdEl = document.getElementById("post-fd");
+  if (fdEl && fr.post_round_fd != null) fdEl.textContent = fmtShares(fr.post_round_fd);
+  const canvas = document.getElementById("donut-chart");
+  if (canvas) renderDonut(canvas, agg, _CAPTURE);  // snap unless capture
+  readout.textContent = "Pre-money " + preM + " → founders " + pct(fp);
+}}
+
+function _sweepAria(idx) {{
+  const slider = document.getElementById("sweep-slider");
+  const fr = DATA.sweep.frames[idx];
+  if (!fr) return;
+  const txt = "Pre-money $" + (fr.pre_money / 1e6).toFixed(1) + "M, founders "
+    + (fr.valid && fr.aggregate ? pct(fr.aggregate.founders_pct || 0) : "not available");
+  slider.setAttribute("aria-valuetext", txt);
+}}
+
+function initSweep() {{
+  const sw = DATA.sweep;
+  if (!sw || !sw.frames || !sw.frames.some(f => f.valid)) return;
+  _hasSweep = true;
+  const slider = document.getElementById("sweep-slider");
+  slider.max = String(sw.frames.length - 1);
+  slider.value = String(Math.floor((sw.frames.length - 1) / 2));
+  slider.addEventListener("input", () => {{
+    const idx = parseInt(slider.value);
+    applySweepFrame(idx);
+    _sweepAria(idx);
+  }});
+  _sweepAria(parseInt(slider.value));  // initial label; does NOT apply until dragged
+}}
+
+// ---------------------------------------------------------------------------
 // Wire up event handlers
 // ---------------------------------------------------------------------------
 document.getElementById("theme-toggle").addEventListener("click", toggleTheme);
@@ -818,6 +913,7 @@ document.addEventListener("keydown", e => {{
   }}
 }});
 
+initSweep();
 renderScenarioList();
 renderCounsel();
 </script>
@@ -843,11 +939,19 @@ def main() -> int:
     scenarios_doc = _read("scenarios.json")
     counsel_packet = _read("counsel_packet.json")
 
+    # sweep.json is optional — present only when a pre-money sweep was generated.
+    sweep: dict[str, Any] | None = None
+    sweep_path = os.path.join(args.dir, "sweep.json")
+    if os.path.exists(sweep_path):
+        with open(sweep_path, encoding="utf-8") as f:
+            sweep = json.load(f)
+
     html_out = render_explorer_html(
         inputs=inputs,
         cap_state=cap_state,
         scenarios_doc=scenarios_doc,
         counsel_packet=counsel_packet,
+        sweep=sweep,
     )
     out = os.path.abspath(args.output)
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)

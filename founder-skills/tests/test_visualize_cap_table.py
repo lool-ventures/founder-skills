@@ -1090,6 +1090,7 @@ function mkEl(id) {
     id, _html: "", hidden: false, textContent: "", style: {}, dataset: {},
     classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } },
     addEventListener() {}, append() {}, querySelectorAll() { return []; },
+    setAttribute() {}, getAttribute() { return null; },
     set innerHTML(v) { this._html = v; if (this.id) _byId[this.id] = this; },
     get innerHTML() { return this._html; },
   };
@@ -1244,3 +1245,136 @@ class TestExploreDonutMorphWiring:
             app = _render_explorer_app_script(d)
         assert "function slideIn" in app, "card mount animation helper (P3) missing"
         assert app.count("slideIn(") >= 3, "slideIn must be applied to the impact callout and the compare banner."
+
+
+# ===========================================================================
+# P4 — pre-money sweep generator (sweep.py) + explorer slider.
+# ===========================================================================
+
+
+def _write_priced_round_base(d: str) -> None:
+    """Overwrite scenarios.json with a priced_round base (pre_money + new_money)."""
+    scen = {
+        "scenarios": [
+            {
+                "scenario_id": "pr1",
+                "label": "Series A",
+                "type": "priced_round",
+                "parameters": {"pre_money": 20_000_000, "new_money": 5_000_000},
+                "computed_outputs": {"completeness": "full", "math_provenance": [], "blockers": []},
+            }
+        ],
+        "metadata": {"run_id": "rid1"},
+    }
+    with open(os.path.join(d, "scenarios.json"), "w", encoding="utf-8") as f:
+        json.dump(scen, f)
+
+
+class TestSweepGenerator:
+    def test_generates_real_frames_monotonic(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            _make_fixture_dir(d)
+            _write_priced_round_base(d)
+            out = os.path.join(d, "sweep.json")
+            rc, _, err = _run("sweep.py", ["--dir", d, "--run-id", "rid1", "-o", out, "--steps", "13"])
+            assert rc == 0, err
+            with open(out, encoding="utf-8") as f:
+                sw = json.load(f)
+        assert sw["axis"] == "pre_money"
+        assert len(sw["frames"]) == 13
+        assert all(fr["valid"] for fr in sw["frames"])
+        fps = [fr["outputs"]["aggregate_ownership_by_class"]["founders_pct"] for fr in sw["frames"]]
+        # Higher pre-money -> less dilution -> higher founder %. Every frame is
+        # real solver output (no interpolation).
+        assert fps == sorted(fps), "founder % must rise monotonically with pre-money"
+
+    def test_new_money_held_fixed(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            _make_fixture_dir(d)
+            _write_priced_round_base(d)
+            out = os.path.join(d, "sweep.json")
+            _run("sweep.py", ["--dir", d, "--run-id", "rid1", "-o", out])
+            with open(out, encoding="utf-8") as f:
+                sw = json.load(f)
+        assert {fr["new_money"] for fr in sw["frames"]} == {5_000_000}
+
+    def test_no_base_scenario_yields_empty_sweep(self) -> None:
+        # The default fixture has only a cap-implied safe_conversion scenario.
+        with tempfile.TemporaryDirectory() as d:
+            _make_fixture_dir(d)
+            out = os.path.join(d, "sweep.json")
+            rc, _, err = _run("sweep.py", ["--dir", d, "--run-id", "rid1", "-o", out])
+            assert rc == 0, err
+            with open(out, encoding="utf-8") as f:
+                sw = json.load(f)
+        assert sw["frames"] == [] and sw["base_scenario_id"] is None
+
+    def test_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            _make_fixture_dir(d)
+            _write_priced_round_base(d)
+            o1, o2 = os.path.join(d, "s1.json"), os.path.join(d, "s2.json")
+            _run("sweep.py", ["--dir", d, "--run-id", "rid1", "-o", o1])
+            _run("sweep.py", ["--dir", d, "--run-id", "rid1", "-o", o2])
+            with open(o1, encoding="utf-8") as f:
+                a = f.read()
+            with open(o2, encoding="utf-8") as f:
+                b = f.read()
+        assert a == b
+
+
+class TestExploreSweepSlider:
+    def _render_with_sweep(self, d: str) -> str:
+        _make_fixture_dir(d)
+        _write_priced_round_base(d)
+        _run("sweep.py", ["--dir", d, "--run-id", "rid1", "-o", os.path.join(d, "sweep.json")])
+        out = os.path.join(d, "explorer.html")
+        rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
+        assert rc == 0, err
+        with open(out, encoding="utf-8") as f:
+            return f.read()
+
+    def test_slider_present_with_sweep(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            html = self._render_with_sweep(d)
+        assert 'id="sweep-slider"' in html
+        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        assert "function initSweep" in app and "function applySweepFrame" in app
+        assert "aria-valuetext" in app, "slider must announce its value to screen readers"
+
+    def test_no_slider_without_sweep(self) -> None:
+        # Back-compat: no sweep.json → sweep payload null → slider stays hidden.
+        with tempfile.TemporaryDirectory() as d:
+            _make_fixture_dir(d)
+            out = os.path.join(d, "explorer.html")
+            rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
+            assert rc == 0, err
+            with open(out, encoding="utf-8") as f:
+                app = re.findall(r"<script>(.*?)</script>", f.read(), re.DOTALL)[-1]
+        assert '"sweep": null' in app or '"sweep":null' in app
+
+    def test_slider_snaps_number_to_real_frame_headless(self) -> None:
+        # Drag the slider headless; the founder-% must equal a real frame value
+        # (snap — no fabricated in-between number).
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not available")
+        with tempfile.TemporaryDirectory() as d:
+            html = self._render_with_sweep(d)
+            app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+            runner = (
+                _DOM_SHIM
+                + "\n"
+                + app
+                + "\napplySweepFrame(0);"
+                + "\nconst _txt = document.getElementById('founder-pct').textContent || '';"
+                + "\nconst _f0 = DATA.sweep.frames[0].aggregate.founders_pct;"
+                + "\nconst _expect = (_f0 * 100).toFixed(1) + '%';"
+                + "\nif (_txt !== _expect) throw new Error('slider number not real: ' + _txt + ' vs ' + _expect);"
+                + "\nconsole.log('OK_SLIDER');\n"
+            )
+            js_path = os.path.join(d, "runner.js")
+            with open(js_path, "w", encoding="utf-8") as f:
+                f.write(runner)
+            res = subprocess.run([node, js_path], capture_output=True, text=True)
+        assert res.returncode == 0 and "OK_SLIDER" in res.stdout, res.stderr

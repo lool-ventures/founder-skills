@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "cap-table sweep.json",
+  "description": "A parametric pre-money sweep: K real priced-round solver frames the explorer slider scrubs between. Every frame is real solver output; the slider snaps to discrete frames so no fabricated in-between ownership is shown.",
+  "type": "object",
+  "required": ["axis", "frames", "metadata"],
+  "properties": {
+    "axis": {"enum": ["pre_money"], "description": "The swept parameter. v1 supports pre_money only."},
+    "base_scenario_id": {"type": ["string", "null"], "description": "The priced_round scenario the sweep was derived from, or null when none was eligible."},
+    "base_pre_money": {"type": ["number", "null"]},
+    "note": {"type": "string", "description": "Present only when no sweep was generated (no eligible base scenario)."},
+    "frames": {
+      "type": "array",
+      "description": "Ordered low->high pre_money. Each frame is a real solver output; new_money is held fixed across frames.",
+      "items": {
+        "type": "object",
+        "required": ["pre_money", "valid", "outputs"],
+        "properties": {
+          "pre_money": {"type": "number"},
+          "new_money": {"type": ["number", "null"]},
+          "valid": {"type": "boolean", "description": "True only when the frame solved to full/mixed completeness with no blockers; the slider skips invalid frames."},
+          "outputs": {
+            "type": "object",
+            "description": "Trimmed computed_outputs: only the fields the slider view consumes (aggregate, price, post-FD shares, shares_breakdown, completeness, blockers)."
+          }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["run_id"],
+      "properties": {"run_id": {"type": "string"}}
+    }
+  }
+}

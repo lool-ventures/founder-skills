@@ -95,6 +95,7 @@ All scripts live at `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts/`:
 - **`compose_report.py`** — Assembles all artifacts into `report.md` + `report.json` (with embedded `coaching_payload` block). Cross-artifact validation; emits per-uuid coaching insertion marker.
 - **`visualize.py`** — Generates `report.html` (self-contained, inline SVG donut + tables; no CDN). The interactive `explore.py` is the one that uses vendored Chart.js.
 - **`explore.py`** — Generates `explorer.html` (polished interactive scenario tool; demo/video-friendly).
+- **`sweep.py`** — Generates the optional `sweep.json`: a pre-money parametric sweep (K real solver frames, `new_money` held fixed) that powers the explorer's "drag pre-money" slider. No new math — re-runs the priced-round path across a `pre_money` range. Slider snaps to discrete frames, so every value shown is real.
 - **`quick_assess.py`** — Fast-assess directional review (Step 5-fast); writes the `fast_assess_only.json` sentinel + `report_fast_assess.md`, skipping the full pipeline.
 - **`verify_one.py`** — Rule-lookup mode (Step 5-lookup): `--rule-lookup <rule_id>` returns the cited constant a rule holds (e.g. the QSBS OBBBA window start) + its citations + the reliance boundary, for a bare eligibility/date question. Allowlists by data: rules without a stored constant (e.g. §102 capital-gains) return `lookup_status: "escalate"` rather than echoing a non-constant field. No solver, no artifact.
 - **`concise_report.py`** — Concise mode (Step 5-concise): renders `scenarios.json` (the solver's `computed_outputs`) + optional `rule_audit.json` flags into a short cited `report_concise.md`, skipping `visualize`/`explore`/`counsel_packet`/the full `compose_report`/the coaching sub-agent. Same numbers as the full pipeline (reads the same output); for a single quick math question.
@@ -136,8 +137,9 @@ Every cap-table engagement deposits structured JSON artifacts into a working dir
 | 10 | `comparisons.json` (when ≥2 scenarios) | `compose_report.py` |
 | 11 | `report.md` + `report.json` (with `coaching_payload` block) | `compose_report.py --write-md` |
 | 12 | `report.html` | `visualize.py` |
-| 13 | `explorer.html` | `explore.py` |
-| 14 | `## Coaching Commentary` appended to `report.md` | Context B sub-agent (POST_COMPOSE_COACHING) |
+| 13 | `sweep.json` (optional — priced rounds only) | `sweep.py` |
+| 14 | `explorer.html` | `explore.py` |
+| 15 | `## Coaching Commentary` appended to `report.md` | Context B sub-agent (POST_COMPOSE_COACHING) |
 
 **Rules:**
 - Deposit each artifact before proceeding to the next step.
@@ -396,7 +398,7 @@ Inputs are built from the founder's conversational description via `AskUserQuest
 
 **Read `report_fast_assess.md` and present its numbers verbatim to the founder — never re-derive or reconstruct the ownership table in chat.** If you computed preliminary estimates while gathering inputs, discard them in favour of the script output. The script is the authoritative source; hand-reconstructed math will diverge from the fixed-point solver result. This includes the dilution explanation — use the share counts from the report; never re-derive top-up or conversion shares by hand. For what-if follow-ups (e.g. "what if we top up the pool to 10%?"), re-run `quick_assess.py` with the changed flag and present the new report — never estimate the answer by hand.
 
-**Full-pipeline what-ifs (applies to both fast-assess and full reviews):** the `explorer.html` displays only precomputed scenarios. For any scenario not yet modeled, write a new scenario request and re-run the full pipeline:
+**Full-pipeline what-ifs (applies to both fast-assess and full reviews):** the `explorer.html` displays only precomputed scenarios (plus, when `sweep.json` exists, a pre-money slider that scrubs precomputed real solver frames — also not hand-estimated). For any scenario not yet modeled, write a new scenario request and re-run the full pipeline:
 1. Add the new scenario to `scenario_requests.json`
 2. Re-run `run_scenario.py` → `rule_audit.py --phase=post_math` → `compose_report.py`
 3. Present the updated `report.md` numbers verbatim
@@ -517,7 +519,16 @@ python3 "$SCRIPTS/visualize.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.html"
 
 ### Step 10: Generate `explorer.html`
 
+When at least one `priced_round` scenario carries both `pre_money` and `new_money`, first generate the
+optional pre-money sweep so the explorer renders a "drag pre-money" slider. The slider scrubs precomputed
+**real solver frames** (every value shown is real math — it snaps to discrete frames, never interpolates
+ownership), holding `new_money` fixed. It is optional: if `sweep.json` is absent, the explorer simply
+renders no slider.
+
 ```bash
+# Optional: precomputed pre-money sweep for the explorer slider (skip if no eligible priced_round scenario).
+python3 "$SCRIPTS/sweep.py" --dir "$REVIEW_DIR" --run-id "$RUN_ID" -o "$REVIEW_DIR/sweep.json" || true
+
 python3 "$SCRIPTS/explore.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/explorer.html"
 ```
 
