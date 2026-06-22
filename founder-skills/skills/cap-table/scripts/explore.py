@@ -99,11 +99,18 @@ def render_explorer_html(
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
     import _labels
+    import _rules
     import _theme
 
     brand_css = _theme.brand_css()
     labels_json = _embed_json(_labels.MAPS)
     cap_implied_gloss = _esc(_labels.CAP_IMPLIED_GLOSS)
+
+    def _enrich_counsel(it: dict[str, Any]) -> dict[str, Any]:
+        # Resolve the rule's plain-English summary + primary-source links so the
+        # counsel rail can show a linked, readable reference.
+        ref = _rules.rule_ref(it.get("rule_id", ""), item_source_ids=it.get("source_ids"))
+        return {**it, "_summary": ref["summary"], "_links": ref["links"]}
 
     company = _esc(inputs.get("company_name", "Company"))
 
@@ -143,7 +150,7 @@ def render_explorer_html(
             }
             for s in scenarios_doc.get("scenarios", [])
         ],
-        "counsel_items": counsel_packet.get("items", []),
+        "counsel_items": [_enrich_counsel(it) for it in counsel_packet.get("items", [])],
         "sweep": _sweep_payload(sweep),
     }
     data_json = _embed_json(payload)
@@ -783,8 +790,15 @@ function renderCounsel() {{
   const _n = DATA.counsel_items.length;
   let html = "<p style='font-size:13px;color:var(--muted);'>" + _n + (_n === 1 ? " item" : " items") + " for your lawyer.</p>";
   for (const it of DATA.counsel_items) {{
+    const links = it._links || [];
     html += `<details><summary>${{escape(it.title)}}</summary>`;
-    html += `<p style='font-size:12px;margin:8px 0 0;color:var(--muted);'><code>${{escape(it.rule_id)}}</code></p>`;
+    if (it._summary) html += `<p style='font-size:12px;margin:8px 0 0;color:var(--muted);'>${{escape(it._summary)}}</p>`;
+    if (links.length) {{
+      html += `<p style='font-size:12px;margin:6px 0 0;'>Source: `
+        + links.map(l => `<a href="${{escape(l[1])}}" target="_blank" rel="noopener noreferrer">${{escape(l[0])}} ↗</a>`).join(" · ")
+        + `</p>`;
+    }}
+    html += `<p style='font-size:11px;margin:6px 0 0;color:var(--muted);'><code>${{escape(it.rule_id)}}</code></p>`;
     if (it.counsel_question) html += `<p style='font-size:13px;margin:8px 0;'>${{escape(it.counsel_question)}}</p>`;
     html += `</details>`;
   }}

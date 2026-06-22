@@ -33,8 +33,32 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _labels  # noqa: E402
+import _rules  # noqa: E402
 
 SCHEMA_VERSION = "v0.5.0-cap-table"
+
+
+def _rule_md(
+    rule_id: str,
+    *,
+    item_title: str | None = None,
+    item_source_ids: list[str] | None = None,
+    bold: bool = False,
+) -> str:
+    """Readable rule reference for Markdown: title linked to its primary source,
+    extra publishers as 'also' links, raw rule_id as small-print code."""
+    ref = _rules.rule_ref(rule_id, item_title=item_title, item_source_ids=item_source_ids)
+    title = str(ref["title"])
+    links = ref["links"]
+    title_part = f"[{title}]({links[0][1]})" if links else title
+    if bold:
+        title_part = f"**{title_part}**"
+    out = title_part
+    if links and links[1:]:
+        out += " · " + " · ".join(f"[{p}]({u})" for p, u in links[1:])
+    out += f" (`{rule_id}`)"
+    return out
+
 
 # Required canonical artifacts per design §3.6
 REQUIRED_ARTIFACTS = [
@@ -1024,7 +1048,9 @@ def render_report_markdown(
         for domain in sorted(by_domain.keys()):
             lines.append(f"### {domain.replace('_', ' ').title()}")
             for it in by_domain[domain]:
-                lines.append(f"- **{it['title']}** (`{it['rule_id']}`)")
+                lines.append(
+                    f"- {_rule_md(it['rule_id'], item_title=it.get('title'), item_source_ids=it.get('source_ids'), bold=True)}"
+                )
                 if it.get("counsel_question"):
                     lines.append(f"  - {it['counsel_question']}")
             lines.append("")
@@ -1045,7 +1071,9 @@ def render_report_markdown(
         for domain in sorted(by_domain_sn.keys()):
             lines.append(f"### {domain.replace('_', ' ').title()}")
             for sn in by_domain_sn[domain]:
-                lines.append(f"- **{sn['title']}** (`{sn['rule_id']}`)")
+                lines.append(
+                    f"- {_rule_md(sn['rule_id'], item_title=sn.get('title'), item_source_ids=sn.get('source_ids'), bold=True)}"
+                )
                 if sn.get("summary"):
                     lines.append(f"  - {sn['summary']}")
             lines.append("")
@@ -1077,7 +1105,7 @@ def render_report_markdown(
                 status_or_fresh = w.get("current_status") or w.get("freshness_status")
                 date_val = w.get("event_date_value") or "—"
                 lines.append(
-                    f"| `{w['rule_id']}` | {_labels.humanize('scope', w.get('scope'))} | "
+                    f"| {_rule_md(w['rule_id'], item_title=w.get('title'))} | {_labels.humanize('scope', w.get('scope'))} | "
                     f"{_labels.humanize('status', status_or_fresh)} | {date_val} | "
                     f"{w.get('action_required', '')[:60]} |"
                 )

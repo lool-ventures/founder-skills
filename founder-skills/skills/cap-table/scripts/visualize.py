@@ -21,7 +21,32 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _labels  # noqa: E402
+import _rules  # noqa: E402
 from _rule_pack import RULE_PACK_VERSION  # noqa: E402
+
+
+def _rule_html(rule_id: str, *, item_title: str | None = None, item_source_ids: list[str] | None = None) -> str:
+    """Readable rule reference: title → primary source (new tab), summary as a
+    tooltip, extra publishers as small 'also' links, raw rule_id as small-print."""
+    ref = _rules.rule_ref(rule_id, item_title=item_title, item_source_ids=item_source_ids)
+    title = html.escape(str(ref["title"]), quote=True)
+    tip = html.escape(str(ref["summary"]), quote=True)
+    links = ref["links"]
+    if links:
+        primary = html.escape(str(links[0][1]), quote=True)
+        out = f'<a href="{primary}" target="_blank" rel="noopener noreferrer" class="term" title="{tip}">{title} ↗</a>'
+        extras = links[1:]
+        if extras:
+            joined = " · ".join(
+                f'<a href="{html.escape(str(u), quote=True)}" target="_blank" rel="noopener noreferrer">{html.escape(str(p), quote=True)} ↗</a>'
+                for p, u in extras
+            )
+            out += f' <span class="rule-extra">· also {joined}</span>'
+    else:
+        out = f'<span class="term" title="{tip}">{title}</span>' if tip else title
+    out += f' <code class="rule-code">{html.escape(str(rule_id), quote=True)}</code>'
+    return out
+
 
 # Color palette — see design §10
 PALETTE = {
@@ -345,8 +370,8 @@ def render_report_html(
             items_html.append("<ul>")
             for it in by_domain[domain]:
                 items_html.append(
-                    f"<li><strong>{_esc(it['title'])}</strong> "
-                    f"(<code>{_esc(it['rule_id'])}</code>) — {_esc(it.get('counsel_question', ''))}</li>"
+                    f"<li><strong>{_rule_html(it['rule_id'], item_title=it.get('title'), item_source_ids=it.get('source_ids'))}</strong>"
+                    f" — {_esc(it.get('counsel_question', ''))}</li>"
                 )
             items_html.append("</ul>")
         counsel_html = "".join(items_html)
@@ -384,6 +409,8 @@ def render_report_html(
   th {{ background: var(--lool-paper); }}
   .num {{ text-align: right; }}
   .term {{ border-bottom: 1px dotted var(--lool-line-2); cursor: help; }}
+  .rule-code {{ font-size: 11px; color: var(--muted); }}
+  .rule-extra {{ font-size: 11px; color: var(--muted); }}
   .footer {{ margin-top: 40px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--lool-line-2); padding-top: 12px; }}
 </style>
 </head>
@@ -413,7 +440,7 @@ def render_report_html(
   <tbody>
     {
         "".join(
-            f"<tr><td><code>{_esc(w['rule_id'])}</code></td><td>{_labels.html_term('scope', w.get('scope'))}</td>"
+            f"<tr><td>{_rule_html(w['rule_id'], item_title=w.get('title'))}</td><td>{_labels.html_term('scope', w.get('scope'))}</td>"
             f"<td>{_labels.html_term('status', w.get('current_status') or w.get('freshness_status'))}</td>"
             f"<td>{_esc(w.get('event_date_value') or '—')}</td></tr>"
             for w in rule_audit.get("date_sensitive_watchlist", [])
