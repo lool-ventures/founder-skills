@@ -443,8 +443,14 @@ function animateMetric(id, from, to, formatter, gen) {{
 // transition") so a scenario switch reads as a transition, not a snap. The
 // #sankey node persists (P0a); a pending swap is cancelled so rapid switches
 // don't stack. Reduced-motion sets directly.
-function setSankeyHTML(container, html) {{
-  if (_REDUCED_MOTION) {{ container.innerHTML = html; return; }}
+function setSankeyHTML(container, html, instant) {{
+  // `instant` (slider scrub) skips the fade so rapid updates don't strobe.
+  if (_REDUCED_MOTION || instant) {{
+    if (container._sankeyTimer) {{ clearTimeout(container._sankeyTimer); container._sankeyTimer = null; }}
+    container.style.opacity = "1";
+    container.innerHTML = html;
+    return;
+  }}
   if (container._sankeyTimer) clearTimeout(container._sankeyTimer);
   container.style.transition = "opacity 0.15s";
   container.style.opacity = "0";
@@ -455,13 +461,13 @@ function setSankeyHTML(container, html) {{
   }}, 150);
 }}
 
-function renderSankey(container, scenarioData) {{
+function renderSankey(container, scenarioData, instant) {{
   const pre = DATA.pre_financing;
   const breakdown = scenarioData.shares_breakdown || {{}};
   const postFd = scenarioData.post_round_fd || pre.fully_diluted;
 
   if (!breakdown.pre_round_fully_diluted) {{
-    setSankeyHTML(container, '<p style="color:var(--muted);font-size:13px;">No dilution flow — scenario is pending.</p>');
+    setSankeyHTML(container, '<p style="color:var(--muted);font-size:13px;">No dilution flow — scenario is pending.</p>', instant);
     return;
   }}
 
@@ -550,7 +556,7 @@ function renderSankey(container, scenarioData) {{
       <text class="sankey-label" x="${{W - PAD + 4}}" y="${{b.y + b.h/2 + 4}}" text-anchor="start">${{escape(b.label)}} (${{pct(b.value/postFd)}})</text>
     `).join("")}}
   </svg>`;
-  setSankeyHTML(container, svg);
+  setSankeyHTML(container, svg, instant);
 }}
 
 // ---------------------------------------------------------------------------
@@ -609,6 +615,20 @@ function renderScenarioList() {{
   if (DATA.scenarios.length > 0) selectScenario(0);
 }}
 
+// Ownership legend (the per-class % next to the donut). Iterates DONUT_ORDER
+// so swatch order matches the donut arcs. Shared by selectScenario + the slider.
+function renderLegend(agg) {{
+  agg = agg || {{}};
+  let legend = "";
+  for (const cat of DONUT_ORDER) {{
+    const frac = agg[cat] || 0;
+    if (frac <= 0) continue;
+    legend += `<li><span class="swatch" style="background:${{sliceColor(cat)}};"></span>${{escape(sliceLabel(cat))}}: <strong style="margin-left:auto;">${{pct(frac)}}</strong></li>`;
+  }}
+  const el = document.getElementById("legend");
+  if (el) el.innerHTML = legend;
+}}
+
 function show(id, on) {{ const el = document.getElementById(id); if (el) el.hidden = !on; }}
 
 // Card mount animation (P3 / design §10-D): 200ms fade + 8px translate-Y.
@@ -656,14 +676,7 @@ function selectScenario(idx) {{
     show("metric-price", !!s.equity_financing_price);
     show("metric-fd", !!s.post_round_fd);
 
-    // Iterate the fixed DONUT_ORDER so legend swatches match the donut arc order.
-    let legend = "";
-    for (const cat of DONUT_ORDER) {{
-      const frac = agg[cat] || 0;
-      if (frac <= 0) continue;
-      legend += `<li><span class="swatch" style="background:${{sliceColor(cat)}};"></span>${{escape(sliceLabel(cat))}}: <strong style="margin-left:auto;">${{pct(frac)}}</strong></li>`;
-    }}
-    document.getElementById("legend").innerHTML = legend;
+    renderLegend(agg);
 
     // Impact callout persists, so it must be cleared+hidden when absent or a
     // stale "Founder Impact" from the prior scenario lingers.
@@ -907,6 +920,12 @@ function applySweepFrame(idx) {{
   if (fdEl && fr.post_round_fd != null) fdEl.textContent = fmtShares(fr.post_round_fd);
   const canvas = document.getElementById("donut-chart");
   if (canvas) renderDonut(canvas, agg, _CAPTURE);  // snap unless capture
+  renderLegend(agg);  // the per-class % next to the pie
+  const sankeyDiv = document.getElementById("sankey");
+  if (sankeyDiv) {{
+    // The dilution flow for this frame; snap (no fade) so a drag doesn't strobe.
+    renderSankey(sankeyDiv, {{ shares_breakdown: fr.shares_breakdown, post_round_fd: fr.post_round_fd }}, true);
+  }}
   readout.textContent = "Pre-money " + preM + " → founders " + pct(fp);
 }}
 

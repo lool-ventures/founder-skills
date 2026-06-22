@@ -1401,6 +1401,36 @@ class TestExploreSweepSlider:
             res = subprocess.run([node, js_path], capture_output=True, text=True)
         assert res.returncode == 0 and "OK_SLIDER" in res.stdout, res.stderr
 
+    def test_slider_updates_legend_and_sankey(self) -> None:
+        # Dragging the slider must update the legend (per-class % next to the
+        # pie) AND the dilution-flow Sankey, not just the top numbers + donut.
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not available")
+        with tempfile.TemporaryDirectory() as d:
+            html = self._render_with_sweep(d)
+            app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+            runner = (
+                _DOM_SHIM
+                + "\n"
+                + app
+                + "\nselectScenario(0);"  # the priced-round base is full → legend+sankey present
+                + "\napplySweepFrame(0);"
+                + "\nconst leg0 = document.getElementById('legend').innerHTML || '';"
+                + "\nconst snk0 = document.getElementById('sankey').innerHTML || '';"
+                + "\napplySweepFrame(DATA.sweep.frames.length - 1);"
+                + "\nconst leg1 = document.getElementById('legend').innerHTML || '';"
+                + "\nconst snk1 = document.getElementById('sankey').innerHTML || '';"
+                + "\nif (!leg0.length || leg0 === leg1) throw new Error('legend did not update on slider drag');"
+                + "\nif (!snk0.length || snk0 === snk1) throw new Error('sankey did not update on slider drag');"
+                + "\nconsole.log('OK_LEGEND_SANKEY');\n"
+            )
+            js_path = os.path.join(d, "runner.js")
+            with open(js_path, "w", encoding="utf-8") as f:
+                f.write(runner)
+            res = subprocess.run([node, js_path], capture_output=True, text=True)
+        assert res.returncode == 0 and "OK_LEGEND_SANKEY" in res.stdout, res.stderr
+
 
 class TestVisualizeCapImplied:
     def test_cap_implied_card_shows_table_not_phantom_blockers(self) -> None:
