@@ -241,8 +241,6 @@ def render_explorer_html(
                      font-size: 14px; font-family: var(--font-body); transition: all .12s ease; }}
   .scenario-pill:hover {{ border-color: var(--lool-azure); }}
   .scenario-pill.active {{ border-color: var(--lool-blue); background: var(--accent-bg); font-weight: 600; }}
-  .scenario-pill.pinned::after {{ content: " · baseline"; color: var(--lool-azure);
-                                   font-size: 11px; font-weight: 600; }}
   main {{ padding: 24px; overflow-y: auto; }}
   .right-rail {{ padding: 16px; border-left: 1px solid var(--border); background: var(--surface);
                   overflow-y: auto; max-height: calc(100vh - 65px); }}
@@ -383,6 +381,38 @@ def render_explorer_html(
   .compare-card .cmp-canvas {{ position: relative; width: 120px; height: 120px; flex: none; }}
   .compare-card table {{ margin: 0; }}
   .compare-card td {{ border: none; padding: 3px 0; }}
+  /* The scenario whose founders keep more reads greener. */
+  .compare-card.better {{ border-color: var(--lool-success); background: var(--lool-success-tint); }}
+  .cmp-canvas {{ position: relative; }}
+  .cmp-center {{ position: absolute; inset: 0; display: flex; align-items: center;
+                  justify-content: center; font-size: 17px; font-weight: 700; color: var(--heading); }}
+  /* Donut hole overlay: the headline founder share + label. */
+  .donut-center {{ position: absolute; inset: 0; display: flex; flex-direction: column;
+                    align-items: center; justify-content: center; pointer-events: none; }}
+  .donut-center-val {{ font-size: 24px; font-weight: 700; color: var(--heading); line-height: 1; }}
+  .donut-center-label {{ font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+                          color: var(--muted); margin-top: 3px; }}
+  .metric-sub {{ margin-top: 4px; }}
+  .nowrap {{ white-space: nowrap; }}
+  .sweep-ends {{ display: flex; justify-content: space-between; font-size: 11px;
+                  color: var(--label); margin-top: 2px; font-variant-numeric: tabular-nums; }}
+  /* In a modeled what-if the whole slider panel reads as a warning, icon included. */
+  #sweep-wrap.modeled .sweep-title svg {{ stroke: var(--lool-warning); }}
+  .sweep-reset.invisible {{ visibility: hidden; pointer-events: none; }}
+  #compare-hint {{ margin-top: 12px; padding: 10px 12px; background: var(--accent-bg);
+                    border-radius: var(--r-input); font-size: 12px; line-height: 1.5; color: var(--lool-slate); }}
+  /* Scenario pills: a status dot + status line, and a "B" tag on the compare target. */
+  .scenario-pill {{ position: relative; }}
+  .pill-row {{ display: flex; justify-content: space-between; align-items: center; gap: 8px; }}
+  .pill-status {{ display: flex; align-items: center; gap: 6px; margin-top: 6px;
+                   font-size: 11px; color: var(--muted); }}
+  .pill-dot {{ width: 7px; height: 7px; border-radius: 50%; flex: none; }}
+  .b-badge {{ display: none; font-size: 10px; font-weight: 700; text-transform: uppercase;
+              letter-spacing: 0.05em; color: var(--lool-azure); }}
+  .scenario-pill.pinned .b-badge {{ display: inline; }}
+  .cta-card {{ padding: 22px 24px; border: 1px dashed var(--border); border-radius: 8px;
+               background: var(--surface); margin: 12px 0; }}
+  .cta-title {{ font-size: 15px; font-weight: 600; color: var(--heading-2); margin-bottom: 6px; }}
   @media print {{
     .no-print {{ display: none !important; }}
     body {{ background: #fff; color: #111; }}
@@ -416,6 +446,7 @@ def render_explorer_html(
   <aside>
     <div class="section-label">Scenarios</div>
     <div id="scenario-list"></div>
+    <div id="compare-hint" hidden>Pick a second scenario above to set it as <strong>B</strong> and compare side by side.</div>
     <div style="margin-top: 24px;">
       <div class="section-label">Compare</div>
       <button class="btn" id="pin-btn" style="width:100%;">
@@ -439,21 +470,24 @@ def render_explorer_html(
           </div>
           <div style="display:flex;align-items:center;gap:14px;">
             <span class="sweep-pre"><span id="sweep-pre-val">—</span> <span style="font-size:11px;font-weight:500;color:var(--muted);">pre-money</span></span>
-            <button class="sweep-reset" id="sweep-reset" hidden>Reset to scenario</button>
+            <button class="sweep-reset invisible" id="sweep-reset">Reset to scenario</button>
           </div>
         </div>
         <input type="range" id="sweep-slider" min="0" max="0" value="0" step="1" style="width:100%;margin-top:12px;accent-color:var(--lool-blue);" aria-label="Pre-money valuation">
+        <div class="sweep-ends"><span id="sweep-end-lo"></span><span id="sweep-end-hi"></span></div>
         <div class="sweep-readout" id="sweep-readout"></div>
       </div>
       <div class="metric-row" id="metric-row" hidden>
-        <div class="metric" id="metric-founder"><div class="number-display" id="founder-pct">—</div><div class="number-label">Founder ownership</div><div class="number-label" id="founder-delta" style="color:var(--lool-danger);margin-top:4px;"></div></div>
-        <div class="metric" id="metric-price"><div class="number-display" id="price-psh">—</div><div class="number-label">Price per share</div></div>
-        <div class="metric" id="metric-fd"><div class="number-display" id="post-fd">—</div><div class="number-label"><span class="term" title="Fully-diluted shares — the total if every option and convertible converts to stock">Shares after round</span></div></div>
+        <div class="metric" id="metric-founder"><div class="number-display" id="founder-pct">—</div><div class="number-label">Founder ownership</div><div class="number-label metric-sub" id="founder-delta" style="color:var(--lool-danger);"></div></div>
+        <div class="metric" id="metric-price"><div class="number-display" id="price-psh">—</div><div class="number-label">Price per share</div><div class="number-label metric-sub">what new investors pay</div></div>
+        <div class="metric" id="metric-fd"><div class="number-display nowrap" id="post-fd">—</div><div class="number-label"><span class="term" title="Fully-diluted shares — the total if every option and convertible converts to stock">Shares after round</span></div><div class="number-label metric-sub">fully diluted total</div></div>
       </div>
       <div class="graphics-row" id="graphics-row" hidden>
         <div class="graphics-card" style="display:flex;flex-direction:column;align-items:center;">
           <div class="section-label" style="align-self:flex-start;">Ownership after this round</div>
-          <div class="donut-canvas"><canvas id="donut-chart"></canvas></div>
+          <div class="donut-canvas"><canvas id="donut-chart"></canvas>
+            <div class="donut-center"><div class="donut-center-val" id="donut-center-val">—</div><div class="donut-center-label">founders</div></div>
+          </div>
         </div>
         <div class="graphics-card" id="sankey-container">
           <div class="section-label">Where your ownership went</div>
@@ -470,7 +504,7 @@ def render_explorer_html(
     </div>
     <div id="compare-view" hidden>
       <h2 style="margin-top:0;">Side by side</h2>
-      <p class="meta" style="margin-top:0;">Which round leaves founders better off? Pin a baseline (left rail), then pick the scenario to compare.</p>
+      <p class="meta" style="margin-top:0;">Which round leaves founders better off? The greener column keeps more.</p>
       <div class="compare-grid" id="compare-grid"></div>
       <div class="impact-callout" id="compare-verdict" hidden></div>
     </div>
@@ -632,6 +666,17 @@ function setSankeyHTML(container, html, instant) {{
 // "after" column, so the same founder shares visibly become a smaller slice of
 // a bigger total. Keeps setSankeyHTML + .sankey-path/.sankey-block for the
 // transition + headless tests.
+// A fixed shares→pixels reference (the largest post-round total across every
+// scenario and what-if frame) so the "Before" stack stays the same physical
+// height everywhere — only the "After" column grows as more shares are issued.
+const _FLOW_REF = (() => {{
+  let m = 0;
+  for (const s of DATA.scenarios) if (s.post_round_fd) m = Math.max(m, s.post_round_fd);
+  if (DATA.sweep && DATA.sweep.frames) for (const f of DATA.sweep.frames) if (f.post_round_fd) m = Math.max(m, f.post_round_fd);
+  const pre = DATA.pre_financing || {{}};
+  return m || (pre.fully_diluted ? pre.fully_diluted * 1.5 : 1);
+}})();
+
 function renderSankey(container, scenarioData, instant) {{
   const pre = DATA.pre_financing;
   const breakdown = scenarioData.shares_breakdown || {{}};
@@ -665,7 +710,7 @@ function renderSankey(container, scenarioData, instant) {{
   const W = 760, H = 320, BW = 15, TOP = 34;
   const LG = 168, RG = 150;
   const innerH = H - TOP - 26;
-  const scale = innerH / postFd;  // "after" fills the height; "before" is shorter → dilution is visible
+  const scale = innerH / _FLOW_REF;  // fixed reference: Before stays put, After grows with issuance
 
   const preTotal = before.reduce((a, s) => a + s.v, 0) || 1;
   let y = TOP + (innerH - preTotal * scale) / 2;
@@ -797,11 +842,23 @@ function firstModeledIdx() {{
   return i === -1 ? 0 : i;
 }}
 
+// A colored dot + one-line status for a scenario pill, keyed on completeness.
+function _scenarioStatus(s) {{
+  if (s.completeness === "full") return {{ dot: "var(--lool-success)", text: "Fully modeled" }};
+  if (s.completeness === "mixed") return {{ dot: "var(--lool-success)", text: "Partially modeled" }};
+  if (s.cap_implied_only) return {{ dot: "var(--lool-warning)", text: "Structure only — no priced round" }};
+  return {{ dot: "var(--lool-slate)", text: humanize("completeness", s.completeness) }};
+}}
+
 function renderScenarioList() {{
   const list = document.getElementById("scenario-list");
-  list.innerHTML = DATA.scenarios.map((s, i) =>
-    `<button class="scenario-pill" data-idx="${{i}}">${{escape(s.label)}}</button>`
-  ).join("");
+  list.innerHTML = DATA.scenarios.map((s, i) => {{
+    const st = _scenarioStatus(s);
+    return `<button class="scenario-pill" data-idx="${{i}}">`
+      + `<div class="pill-row"><span>${{escape(s.label)}}</span><span class="b-badge">B</span></div>`
+      + `<div class="pill-status"><span class="pill-dot" style="background:${{st.dot}};"></span>${{escape(st.text)}}</div>`
+      + `</button>`;
+  }}).join("");
   list.querySelectorAll(".scenario-pill").forEach(b => {{
     b.addEventListener("click", () => selectScenario(parseInt(b.dataset.idx)));
   }});
@@ -824,16 +881,23 @@ function renderFoundersBlock() {{
 
 // Ownership legend (the per-class % next to the donut). Iterates DONUT_ORDER
 // so swatch order matches the donut arcs. Shared by selectScenario + the slider.
-function renderLegend(agg) {{
+function renderLegend(agg, fd) {{
   agg = agg || {{}};
   let legend = "";
   for (const cat of DONUT_ORDER) {{
     const frac = agg[cat] || 0;
     if (frac <= 0) continue;
-    legend += `<li><span class="swatch" style="background:${{sliceColor(cat)}};"></span>${{escape(sliceLabel(cat))}}: <strong style="margin-left:auto;">${{pct(frac)}}</strong></li>`;
+    const shares = fd ? ` <span style="color:var(--label);">· ${{fmtShares(frac * fd)}}</span>` : "";
+    legend += `<li><span class="swatch" style="background:${{sliceColor(cat)}};"></span>${{escape(sliceLabel(cat))}} <strong>${{pct(frac)}}</strong>${{shares}}</li>`;
   }}
   const el = document.getElementById("legend");
   if (el) el.innerHTML = legend;
+}}
+
+// The founder share shown in the donut hole. Kept in sync with the metric card.
+function _setDonutCenter(foundersFrac) {{
+  const el = document.getElementById("donut-center-val");
+  if (el) el.textContent = foundersFrac == null ? "—" : pct(foundersFrac);
 }}
 
 // Founder-Impact callout. Persists across renders, so it's cleared+hidden when
@@ -871,14 +935,15 @@ function enterModeled() {{
   const sw = document.getElementById("sweep-wrap"); if (sw) sw.classList.add("modeled");
   const mr = document.getElementById("metric-row"); if (mr) mr.classList.add("modeled");
   const t = document.getElementById("sweep-title-text"); if (t) t.textContent = "Modeled what-if — not the agreed round";
-  show("sweep-reset", true);
+  // Toggle visibility (not display) so the panel height never shifts.
+  const rb = document.getElementById("sweep-reset"); if (rb) rb.classList.remove("invisible");
 }}
 function exitModeled() {{
   _modeled = false;
   const sw = document.getElementById("sweep-wrap"); if (sw) sw.classList.remove("modeled");
   const mr = document.getElementById("metric-row"); if (mr) mr.classList.remove("modeled");
   const t = document.getElementById("sweep-title-text"); if (t) t.textContent = "Model the round — drag to explore a valuation";
-  show("sweep-reset", false);
+  const rb = document.getElementById("sweep-reset"); if (rb) rb.classList.add("invisible");
 }}
 
 // Plain-language ownership summary under the shared legend (founder-facing
@@ -1004,9 +1069,10 @@ function selectScenario(idx) {{
     show("metric-price", !!s.equity_financing_price);
     show("metric-fd", !!s.post_round_fd);
 
-    renderLegend(agg);
+    renderLegend(agg, s.post_round_fd);
     renderDonutSummary(agg, s.post_round_fd);
     renderFounderDelta(agg.founders_pct);
+    _setDonutCenter(agg.founders_pct);
 
     // Impact callout persists, so it must be cleared+hidden when absent or a
     // stale "Founder Impact" from the prior scenario lingers.
@@ -1024,6 +1090,15 @@ function selectScenario(idx) {{
 
   // Variable region: cap-implied table / pending notice / per-instrument details.
   let variable = "";
+  // Structure-only scenarios show no priced-round metrics — offer a clear way
+  // to jump to a modeled round when one exists.
+  const _hasModeled = DATA.scenarios.some(x => x.completeness === "full" || x.completeness === "mixed");
+  if (!isFull && _hasModeled) {{
+    variable += `<div class="cta-card">`
+      + `<div class="cta-title">No priced round yet</div>`
+      + `<p class="meta" style="margin:0 0 12px;max-width:64ch;">This view shows only what each SAFE locks in from its valuation cap — there's no share price until a priced round sets one. Open a modeled round to see ownership, price, and dilution.</p>`
+      + `<button class="btn primary" id="go-modeled">View a modeled round →</button></div>`;
+  }}
   if (!isFull && s.cap_implied_only && Object.keys(s.per_safe || {{}}).length > 0) {{
     variable += `<h3>Pre-round ownership snapshot</h3><p class="meta">${{CAP_IMPLIED_GLOSS}}</p>`;
     variable += `<table><thead><tr><th>SAFE</th><th class="num"><span class="term" title="Ownership this SAFE locks in from its valuation cap, before a priced round sets a share price">Cap-implied %</span></th><th class="num"><span class="term" title="Effective price per share implied by the SAFE's valuation cap">Cap price</span></th><th class="num">Shares</th></tr></thead><tbody>`;
@@ -1037,6 +1112,8 @@ function selectScenario(idx) {{
 
   if (isFull) variable += instrumentDetailsHTML(s.per_safe, s.per_note);
   document.getElementById("scenario-variable").innerHTML = variable;
+  const _gm = document.getElementById("go-modeled");
+  if (_gm) _gm.addEventListener("click", () => selectScenario(firstModeledIdx()));
 
   // Animate the three hero metric numbers (P0 / design §10 number tickers).
   // Read `s.aggregate` directly — `agg` is block-scoped to the full/mixed
@@ -1093,23 +1170,27 @@ function renderCompare() {{
     return;
   }}
   const A = DATA.scenarios[aIdx], B = DATA.scenarios[bIdx];
+  const fa = (A.aggregate && A.aggregate.founders_pct) || 0;
+  const fb = (B.aggregate && B.aggregate.founders_pct) || 0;
+  const base = _preFounderFrac();
   const cols = [
-    {{ s: A, slot: "A", tag: "var(--lool-blue)", canvas: "cmp-donut-a" }},
-    {{ s: B, slot: "B", tag: "var(--lool-azure)", canvas: "cmp-donut-b" }},
+    {{ s: A, fp: fa, slot: "A", tag: "var(--lool-blue)", canvas: "cmp-donut-a", better: fa >= fb }},
+    {{ s: B, fp: fb, slot: "B", tag: "var(--lool-azure)", canvas: "cmp-donut-b", better: fb > fa }},
   ];
   grid.innerHTML = cols.map(c => {{
-    const s = c.s;
-    const fp = (s.aggregate && s.aggregate.founders_pct) || 0;
+    const s = c.s, fp = c.fp;
     const price = s.equity_financing_price != null ? "$" + s.equity_financing_price.toFixed(4) : "—";
     const fd = s.post_round_fd != null ? fmtShares(s.post_round_fd) : "—";
-    return `<div class="compare-card">
+    const dil = base == null ? "—" : ((fp - base) * 100).toFixed(1) + " pts";
+    return `<div class="compare-card${{c.better ? " better" : ""}}">
       <div style="margin-bottom:14px;"><span class="cmp-slot" style="background:${{c.tag}};">${{escape(c.slot)}}</span><strong>${{escape(s.label)}}</strong></div>
       <div style="display:flex;gap:18px;align-items:center;">
-        <div class="cmp-canvas"><canvas id="${{c.canvas}}"></canvas></div>
+        <div class="cmp-canvas" style="width:120px;height:120px;flex:none;"><canvas id="${{c.canvas}}"></canvas><div class="cmp-center">${{pct(fp)}}</div></div>
         <table style="flex:1;"><tbody>
           ${{_cmpRow("Founders", "<strong>" + pct(fp) + "</strong>")}}
           ${{_cmpRow("Price/share", price)}}
           ${{_cmpRow("Shares after", fd)}}
+          ${{_cmpRow("Dilution", `<span style="color:var(--lool-danger);">${{dil}}</span>`)}}
         </tbody></table>
       </div>
     </div>`;
@@ -1117,8 +1198,6 @@ function renderCompare() {{
   renderDonut(document.getElementById("cmp-donut-a"), A.aggregate || {{}}, false);
   renderDonut(document.getElementById("cmp-donut-b"), B.aggregate || {{}}, false);
 
-  const fa = (A.aggregate && A.aggregate.founders_pct) || 0;
-  const fb = (B.aggregate && B.aggregate.founders_pct) || 0;
   const better = fa >= fb ? A : B;
   const diff = Math.abs(fa - fb) * 100;
   verdict.innerHTML = `<strong>${{escape(better.label)}}</strong> keeps founders ${{diff.toFixed(1)}} points higher — ${{pct(Math.max(fa, fb))}} vs ${{pct(Math.min(fa, fb))}} fully diluted.`;
@@ -1132,6 +1211,7 @@ function toggleCompare() {{
   document.getElementById("compare-toggle").classList.toggle("primary", _compareMode);
   show("scenario-view", !_compareMode);
   show("compare-view", _compareMode);
+  show("compare-hint", _compareMode);
   if (_compareMode) {{
     renderCompare();
   }} else {{
@@ -1197,8 +1277,12 @@ function renderCounsel() {{
     .map(it => ({{ ...it, _tier: _counselTier(it) }}))
     .sort((a, b) => _TIER_ORDER[a._tier] - _TIER_ORDER[b._tier]);
   const _n = items.length;
-  let html = "<p style='font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.5;'>Not legal advice — "
-    + _n + (_n === 1 ? " question" : " questions") + " for your lawyer.</p>";
+  // Items are sorted by relevance to this cap table, most relevant first. The
+  // tiers reflect the instruments present, not the active scenario, so we keep
+  // the framing cap-table-level rather than naming one scenario.
+  let html = "<p style='font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.5;'>"
+    + "Not legal advice. Showing the items most relevant to your cap table first — "
+    + _n + (_n === 1 ? " question" : " questions") + " in all.</p>";
   for (const it of items) {{
     const meta = _TIER_META[it._tier];
     const links = it._links || [];
@@ -1402,9 +1486,10 @@ function applySweepFrame(idx) {{
   if (fdEl && fr.post_round_fd != null) fdEl.textContent = fmtShares(fr.post_round_fd);
   const canvas = document.getElementById("donut-chart");
   if (canvas) renderDonut(canvas, agg, _CAPTURE);  // snap unless capture
-  renderLegend(agg);  // the per-class % next to the pie
+  renderLegend(agg, fr.post_round_fd);  // the per-class % + shares next to the pie
   renderDonutSummary(agg, fr.post_round_fd);  // keep the summary + donut aria fresh during a what-if
   renderFounderDelta(fp);  // delta vs today must track the modeled founders %
+  _setDonutCenter(fp);  // donut-hole headline tracks the modeled founders %
   renderImpact(fr.impact_text, false);  // the Founder-Impact narrative for this frame
   const sankeyDiv = document.getElementById("sankey");
   if (sankeyDiv) {{
@@ -1458,6 +1543,12 @@ function initSweep() {{
   _hasSweep = true;
   const slider = document.getElementById("sweep-slider");
   slider.max = String(sw.frames.length - 1);
+  // Anchor the track ends with the min/max pre-money the frames span.
+  const fmtM = v => "$" + (v / 1e6).toFixed(0) + "M";
+  const lo = document.getElementById("sweep-end-lo");
+  const hi = document.getElementById("sweep-end-hi");
+  if (lo) lo.textContent = fmtM(sw.frames[0].pre_money);
+  if (hi) hi.textContent = fmtM(sw.frames[sw.frames.length - 1].pre_money);
   slider.addEventListener("input", () => {{
     const idx = parseInt(slider.value);
     applySweepFrame(idx);  // drag = opt into the what-if; updates the cards

@@ -1903,8 +1903,8 @@ class TestExploreHeadlessBehavior:
                 + "\napplySweepFrame(0);"  # a drag opts into the what-if
                 + "\nif (!document.getElementById('metric-row').classList.contains('modeled'))"
                 + "\n  throw new Error('metric cards must be marked modeled during a what-if');"
-                + "\nif (document.getElementById('sweep-reset').hidden)"
-                + "\n  throw new Error('Reset control must appear while modeled');"
+                + "\nif (document.getElementById('sweep-reset').classList.contains('invisible'))"
+                + "\n  throw new Error('Reset control must be visible while modeled');"
                 + "\ndocument.getElementById('sweep-reset').click();"  # reset → selectScenario(active)
                 + "\nif (document.getElementById('metric-row').classList.contains('modeled'))"
                 + "\n  throw new Error('modeled state must clear on reset');"
@@ -2017,3 +2017,101 @@ class TestExploreDefaultViewBehavior:
                 f.write(runner)
             res = subprocess.run([node, js_path], capture_output=True, text=True)
         assert res.returncode == 0 and "OK_DEFAULT" in res.stdout, res.stderr
+
+
+class TestExploreMockFidelity:
+    """The shipped explorer should match the approved 'Improved' design mock on
+    the visible details: donut center overlay, metric sub-captions, the compare
+    Dilution row + greener winning column, constant-scale flow, scenario status
+    dots + B badge, the structure-only CTA, legend share counts, slider end
+    labels, and the cap-table-level counsel intro."""
+
+    def test_donut_and_metric_details(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        assert 'id="donut-center-val"' in html and "founders" in html, "donut hole needs a founder% overlay"
+        assert "what new investors pay" in html and "fully diluted total" in html, "metric sub-captions missing"
+        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        assert "function _setDonutCenter" in app
+
+    def test_compare_dilution_greener_and_center(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        assert "The greener column keeps more" in html, "compare subtitle should match the mock"
+        assert ".compare-card.better" in html, "winning column must tint greener"
+        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        assert '_cmpRow("Dilution"' in app, "compare card needs the Dilution row"
+        assert "cmp-center" in app, "compare donuts need a center % overlay"
+
+    def test_flow_uses_constant_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+        # The Before stack must stay a constant height across frames, so the
+        # scale divides by a fixed reference, not the per-frame post-round total.
+        assert "_FLOW_REF" in app
+        assert "innerH / postFd" not in app, "flow must not scale per-frame by postFd"
+
+    def test_scenario_pills_have_status_and_b_badge(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        assert "function _scenarioStatus" in app
+        assert "pill-dot" in app and 'class="b-badge"' in app, "pills need a status dot + compare B badge"
+        assert ".scenario-pill.pinned .b-badge" in html, "B badge shows on the pinned compare target"
+
+    def test_legend_shows_per_class_shares(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+        assert "fmtShares(frac * fd)" in app, "legend rows should carry the per-class share count"
+
+    def test_counsel_intro_is_cap_table_level(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+        assert "most relevant to your cap table first" in app
+
+    def test_slider_end_labels_and_reset_visibility(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        assert 'id="sweep-end-lo"' in html and 'id="sweep-end-hi"' in html, "slider needs min/max end labels"
+        assert ".sweep-reset.invisible" in html, "reset toggles via visibility, not display"
+
+    def test_structure_only_cta_headless(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not available")
+        with tempfile.TemporaryDirectory() as d:
+            _make_fixture_dir(d)
+            structural = {
+                "scenario_id": "cap_today",
+                "label": "Cap-implied today",
+                "type": "safe_conversion",
+                "parameters": {},
+                "computed_outputs": {"completeness": "structural_only", "cap_implied_only": True, "blockers": []},
+            }
+            scenarios = {
+                "scenarios": [structural, _full_scenario("p1", "Series A", 0.55)],
+                "metadata": {"run_id": "rid1"},
+            }
+            with open(os.path.join(d, "scenarios.json"), "w", encoding="utf-8") as f:
+                json.dump(scenarios, f)
+            out = os.path.join(d, "explorer.html")
+            rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
+            assert rc == 0, err
+            with open(out, encoding="utf-8") as f:
+                app = re.findall(r"<script>(.*?)</script>", f.read(), re.DOTALL)[-1]
+            runner = (
+                _DOM_SHIM
+                + "\n"
+                + app
+                + "\nselectScenario(0);"  # the structure-only scenario
+                + "\nif (document.getElementById('scenario-variable').innerHTML.indexOf('No priced round yet') < 0)"
+                + "\n  throw new Error('structure-only scenario must offer the View-a-modeled-round CTA');"
+                + "\ndocument.getElementById('go-modeled').click();"
+                + "\nif (_activeIdx !== 1) throw new Error('CTA must jump to the modeled scenario');"
+                + "\nconsole.log('OK_CTA');\n"
+            )
+            js_path = os.path.join(d, "runner.js")
+            with open(js_path, "w", encoding="utf-8") as f:
+                f.write(runner)
+            res = subprocess.run([node, js_path], capture_output=True, text=True)
+        assert res.returncode == 0 and "OK_CTA" in res.stdout, res.stderr
