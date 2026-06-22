@@ -1043,6 +1043,16 @@ class TestExploreNumberTickerWiring:
             res = subprocess.run([node, "--check", js_path], capture_output=True, text=True)
         assert res.returncode == 0, f"node --check failed on explorer app script:\n{res.stderr}"
 
+    def test_walkthrough_counsel_copy_handles_zero_and_plural(self) -> None:
+        # The walkthrough must not read "0 counsel-review items ... questions for
+        # your lawyer" when there are none, and must pluralize.
+        with tempfile.TemporaryDirectory() as d:
+            app = _render_explorer_app_script(d)
+        assert "No counsel-review items were flagged" in app, "zero-counsel case not handled in walkthrough"
+        assert 'nCounsel === 1 ? "" : "s"' in app, "counsel count not pluralized in walkthrough"
+        # The old hardcoded interpolated count must be gone.
+        assert "counsel_items.length}} counsel-review items" not in app
+
 
 # ===========================================================================
 # Donut/legend palette — the `_pct` key-mismatch bug.

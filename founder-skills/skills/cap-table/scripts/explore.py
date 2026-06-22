@@ -763,7 +763,8 @@ function renderCounsel() {{
     list.innerHTML = "<p class='meta'><em>No counsel items.</em></p>";
     return;
   }}
-  let html = "<p style='font-size:13px;color:var(--muted);'>" + DATA.counsel_items.length + " item(s) for your lawyer.</p>";
+  const _n = DATA.counsel_items.length;
+  let html = "<p style='font-size:13px;color:var(--muted);'>" + _n + (_n === 1 ? " item" : " items") + " for your lawyer.</p>";
   for (const it of DATA.counsel_items) {{
     html += `<details><summary>${{escape(it.title)}}</summary>`;
     html += `<p style='font-size:12px;margin:8px 0 0;color:var(--muted);'><code>${{escape(it.rule_id)}}</code></p>`;
@@ -813,11 +814,16 @@ function startWalkthrough() {{
   }}
   document.getElementById("walkthrough-btn").textContent = "■ Stop";
 
+  const nCounsel = DATA.counsel_items.length;
+  const counselMsg = nCounsel === 0
+    ? "No counsel-review items were flagged for this cap table — still, run any financing past your lawyer."
+    : `${{nCounsel}} counsel-review item${{nCounsel === 1 ? "" : "s"}} in the right rail — ${{nCounsel === 1 ? "a question" : "questions"}} for your lawyer, not legal advice.`;
+
   const frames = [
     {{ msg: "Welcome — this is your cap-table explorer. The left rail shows the scenarios we modeled.", duration: 4500, action: () => selectScenario(0) }},
     {{ msg: `Scenario 1: ${{DATA.scenarios[0]?.label || "baseline"}}. Watch the donut + Sankey on the right.`, duration: 4500 }},
     ...DATA.scenarios.slice(1).map((s, i) => ({{ msg: `Now: ${{s.label}} — see how ownership shifts.`, duration: 4500, action: () => selectScenario(i + 1) }})),
-    {{ msg: `${{DATA.counsel_items.length}} counsel-review items in the right rail — these are questions for your lawyer, not legal advice.`, duration: 5000 }},
+    {{ msg: counselMsg, duration: 5000 }},
     {{ msg: "Walkthrough complete. Click any scenario to explore further.", duration: 4000 }},
   ];
 
