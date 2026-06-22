@@ -51,12 +51,11 @@ echo "=== lint ==="; cowork-harness lint scenarios/                # 0.9.0: lint
 if [ "$#" -gt 0 ]; then targets=("${recorded[@]}"); else targets=("cassettes/"); fi
 for t in "${targets[@]}"; do
   echo "=== privacy: $t ===";   cowork-harness verify-cassettes "$t" --skip-staleness "${ALLOW[@]}"
-  # Staleness is WARN, not fatal — matching the CI gate's continue-on-error posture. A freshly recorded
-  # cassette can still show skillHash drift because the in-sandbox record-time hash isn't byte-reproducible
-  # by the host recompute (untracked/gitignored files in scope the mount drops but the recompute includes,
-  # + a residual host-vs-mount nuance). See docs/internal/2026-06-22-cowork-harness-feedback.md (H9).
-  echo "=== staleness: $t (WARN) ==="; cowork-harness verify-cassettes "$t" --skip-privacy \
-    || echo "  ⚠ staleness drift (non-fatal — see harness-feedback H9; baseline/format are current, only skillHash bucket drifts)"
+  # Staleness is a HARD gate (0.9.0): the git-tracked boundary closed the fresh-cassette-stale
+  # asymmetry (H9), so a just-recorded cassette passes its own staleness check — validated. A [stale]
+  # here therefore means real drift (fileSigs names the file); fail loud. (CI keeps staleness WARN
+  # because CI can't re-record; here we just did, so green is the correct expectation.)
+  echo "=== staleness: $t ==="; cowork-harness verify-cassettes "$t" --skip-privacy
   echo "=== replay: $t ===";    cowork-harness replay "$t" --output-format json \
     | python3 -c 'import sys,json;d=json.load(sys.stdin);ok=d["ok"] and all(r["result"]=="success" for r in d["results"]);print("replay ok=",ok);sys.exit(0 if ok else 1)'
 done
