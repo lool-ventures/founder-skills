@@ -16,6 +16,8 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -960,3 +962,83 @@ class TestBuildTopDilutionDriversCoverage:
         assert not any("Note" in label for label in driver_labels), (
             "Mutation simulation failed: zeroing note_pct should suppress the note driver."
         )
+
+
+# ===========================================================================
+# P0 — number-ticker animation wiring (design §10).
+#
+# These guard the exact regression that shipped before: countUp was defined
+# but never called, so the advertised number-ticker silently did nothing. A
+# string-presence check is not enough (the definition contains the substring),
+# so each guard strips the definition line first, then asserts a remaining
+# call site. The node --check test is a syntax/parse net (NOT a runtime net).
+# ===========================================================================
+
+
+def _render_explorer_app_script(tmp: str) -> str:
+    """Render explorer.html from a full fixture and return the app <script>
+    block — the last one, after the vendored Chart.js block."""
+    _make_fixture_dir(tmp)
+    out = os.path.join(tmp, "explorer.html")
+    rc, _, err = _run("explore.py", ["--dir", tmp, "-o", out])
+    assert rc == 0, err
+    with open(out, encoding="utf-8") as f:
+        html = f.read()
+    blocks = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)
+    assert blocks, "explorer.html has no <script> blocks"
+    return blocks[-1]
+
+
+class TestExploreNumberTickerWiring:
+    def test_countup_invoked_not_just_defined(self) -> None:
+        # Proves countUp is reachable (called by animateMetric), not dead-defined.
+        # NOTE: this alone does NOT prove the tickers are wired into
+        # selectScenario — animateMetric internally calls countUp, so this would
+        # pass even if the selectScenario wiring were deleted. The actual wiring
+        # is guarded by test_metric_tickers_wired_into_selectscenario below.
+        with tempfile.TemporaryDirectory() as d:
+            app = _render_explorer_app_script(d)
+        without_def = app.replace("function countUp(", "")
+        assert "countUp(" in without_def, "countUp is defined but never called — the §10 number-ticker is dead code."
+
+    def test_metric_tickers_wired_into_selectscenario(self) -> None:
+        # The real P0 regression guard: each of the three hero metrics must have
+        # its own animateMetric call site. If the selectScenario wiring were
+        # removed, animateMetric would have zero call sites (it is only called
+        # from there) and these asserts would fail.
+        with tempfile.TemporaryDirectory() as d:
+            app = _render_explorer_app_script(d)
+        for metric_id in ("founder-pct", "price-psh", "post-fd"):
+            assert f'animateMetric("{metric_id}"' in app, (
+                f"Hero metric '{metric_id}' is not wired to animateMetric in selectScenario — "
+                "the number-ticker regressed to a snap."
+            )
+
+    def test_reduced_motion_guard_present(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            app = _render_explorer_app_script(d)
+        assert "prefers-reduced-motion" in app, (
+            "Number tickers must honor prefers-reduced-motion (direct-set, no tween)."
+        )
+
+    def test_countup_seeds_start_value_synchronously(self) -> None:
+        # Without a synchronous seed of `from`, the rebuilt node already holds
+        # the final value, so it flashes for one frame before the tween starts.
+        with tempfile.TemporaryDirectory() as d:
+            app = _render_explorer_app_script(d)
+        assert "el.textContent = formatter(from)" in app, (
+            "countUp must seed the start value synchronously to avoid a 1-frame flash."
+        )
+
+    def test_app_script_parses_with_node_check(self) -> None:
+        # Syntax/parse net only — does NOT catch a runtime ReferenceError.
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not available; skipping JS syntax check")
+        with tempfile.TemporaryDirectory() as d:
+            app = _render_explorer_app_script(d)
+            js_path = os.path.join(d, "app.js")
+            with open(js_path, "w", encoding="utf-8") as f:
+                f.write(app)
+            res = subprocess.run([node, "--check", js_path], capture_output=True, text=True)
+        assert res.returncode == 0, f"node --check failed on explorer app script:\n{res.stderr}"

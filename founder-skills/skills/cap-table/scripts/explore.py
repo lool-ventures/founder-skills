@@ -294,6 +294,17 @@ let _pinnedScenarioIdx = null;
 let _activeIdx = 0;
 let _walkthroughTimer = null;
 
+// P0 number-ticker state. `_prevMetrics` caches the last *displayed* value per
+// metric (so a full→cap-implied→full sequence still tweens from the real prior
+// value); `_metricAnimGen` invalidates superseded tweens; `_metricsIntroDone`
+// gates the capture-mode intro tick to the first full/mixed metric render.
+let _prevMetrics = {{ founders_pct: null, price: null, post_fd: null }};
+let _metricAnimGen = 0;
+let _metricsIntroDone = false;
+const _REDUCED_MOTION = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+const _CAPTURE = new URLSearchParams(location.search).get("capture") === "1";
+if (_CAPTURE) document.body.dataset.capture = "1";
+
 function escape(s) {{
   if (s === null || s === undefined) return "";
   return String(s).replace(/[&<>"']/g, c =>
@@ -313,11 +324,16 @@ function fmtShares(n) {{
   return Math.round(n).toLocaleString();
 }}
 
-// countUp animation utility — animates from `from` to `to` over `duration` ms
-function countUp(el, from, to, duration, formatter) {{
+// countUp animation utility — animates from `from` to `to` over `duration` ms.
+// Seeds the start value synchronously so the eye never sees the pre-rendered
+// final value flash for one frame before the tween starts. `gen` lets a newer
+// animation supersede an in-flight one (rapid scenario switches / arrow-nav).
+function countUp(el, from, to, duration, formatter, gen) {{
   formatter = formatter || (v => v.toFixed(1) + "%");
+  el.textContent = formatter(from);
   const start = performance.now();
   function tick(now) {{
+    if (gen !== undefined && gen !== _metricAnimGen) return;
     const elapsed = now - start;
     const t = Math.min(1, elapsed / duration);
     const eased = 1 - Math.pow(1 - t, 3);  // ease-out cubic
@@ -326,6 +342,16 @@ function countUp(el, from, to, duration, formatter) {{
     if (t < 1) requestAnimationFrame(tick);
   }}
   requestAnimationFrame(tick);
+}}
+
+// animateMetric — tween one metric node from its previous value to the new one.
+// Direct-sets (no tween) under prefers-reduced-motion or when there is no prior
+// value (first appearance). 600ms ease-out per design §10.
+function animateMetric(id, from, to, formatter, gen) {{
+  const el = document.getElementById(id);
+  if (!el || to == null) return;
+  if (_REDUCED_MOTION || from == null) {{ el.textContent = formatter(to); return; }}
+  countUp(el, from, to, 600, formatter, gen);
 }}
 
 // ---------------------------------------------------------------------------
@@ -560,6 +586,30 @@ function selectScenario(idx) {{
   }}
   const sankeyDiv = document.getElementById("sankey");
   if (sankeyDiv) renderSankey(sankeyDiv, s);
+
+  // Animate the three hero metric numbers (P0 / design §10 number tickers).
+  // Read `s.aggregate` directly — `agg` is block-scoped to the full/mixed
+  // branch above and is out of scope here. Bump the generation first so any
+  // in-flight tween from a prior scenario bails.
+  _metricAnimGen++;
+  const gen = _metricAnimGen;
+  if (s.completeness === "full" || s.completeness === "mixed") {{
+    const fp = (s.aggregate && s.aggregate.founders_pct) || 0;
+    const introCapture = _CAPTURE && !_metricsIntroDone;
+    animateMetric("founder-pct", introCapture ? 1.0 : _prevMetrics.founders_pct, fp, v => pct(v), gen);
+    _prevMetrics.founders_pct = fp;
+    // Gate price/shares on the same truthiness the metric-row template uses, so
+    // the card and its animation appear together.
+    if (s.equity_financing_price) {{
+      animateMetric("price-psh", introCapture ? 0 : _prevMetrics.price, s.equity_financing_price, v => "$" + v.toFixed(4), gen);
+      _prevMetrics.price = s.equity_financing_price;
+    }}
+    if (s.post_round_fd) {{
+      animateMetric("post-fd", introCapture ? 0 : _prevMetrics.post_fd, s.post_round_fd, v => fmtShares(v), gen);
+      _prevMetrics.post_fd = s.post_round_fd;
+    }}
+    _metricsIntroDone = true;
+  }}
 
   // Compare banner
   updateCompareBanner();
