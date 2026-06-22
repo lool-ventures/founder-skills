@@ -96,6 +96,7 @@ All scripts live at `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts/`:
 - **`visualize.py`** — Generates `report.html` (self-contained, inline SVG donut + tables; no CDN). The interactive `explore.py` is the one that uses vendored Chart.js.
 - **`explore.py`** — Generates `explorer.html` (polished interactive scenario tool; demo/video-friendly).
 - **`quick_assess.py`** — Fast-assess directional review (Step 5-fast); writes the `fast_assess_only.json` sentinel + `report_fast_assess.md`, skipping the full pipeline.
+- **`verify_one.py`** — Rule-lookup mode (Step 5-lookup): `--rule-lookup <rule_id>` returns the cited constant a rule holds (e.g. the QSBS OBBBA window start) + its citations + the reliance boundary, for a bare eligibility/date question. Allowlists by data: rules without a stored constant (e.g. §102 capital-gains) return `lookup_status: "escalate"` rather than echoing a non-constant field. No solver, no artifact.
 - **`evidence_verifier.py` / `invariant_checker.py` / `cross_checker.py` / `backward_verifier.py`** — Lane-1 verification stack (Step 3). Forward evidence-quote check, real-world-bounds check, multi-extractor cross-check (demote-only), and fresh-sub-agent backward re-extraction. `extract_instrument.py` invokes these by default; they are also runnable standalone.
 - **`_dispatch_json.py`** — Tolerant JSON extraction for Context A returns.
 
@@ -179,6 +180,7 @@ After Step 1 (when the company slug is known), derive `REVIEW_DIR`. Two modes:
 
 - **Full pipeline** (default — when the founder shared a document, asked for the full review, counsel packet, or interactive explorer, OR when there's no existing full review for this slug): `REVIEW_DIR="$ARTIFACTS_ROOT/cap-table-$SLUG"`.
 - **Fast-assess mode** (Phase O — short directional answer to a conversational question, no document attached, no explicit "full review" request): `REVIEW_DIR="$ARTIFACTS_ROOT/cap-table-$SLUG-fastassess"`. Run `quick_assess.py` (Step 5-fast) instead of Steps 2–11. Total wall-clock under 60 seconds.
+- **Rule-lookup mode** (a bare eligibility/date question — QSBS, Israeli §102, IIA — with **no instruments to model and no document**): answer straight from the rule pack — no `REVIEW_DIR`, no pipeline. Run `verify_one.py --rule-lookup <rule_id>` (Step 5-lookup) and present its cited constant + the reliance boundary (state the date/threshold; never conclude eligibility — emit a counsel item). If it returns `lookup_status: "escalate"` (the rule carries no stored constant — e.g. the §102 capital-gains clock, which runs from a plan/trustee-specific date the pack does not hold), ask the founder for the specific fact it names (e.g. the trustee-deposit date) and treat as a counsel determination — never state a default like `grant_date`.
 
 **Slug discipline:** Use the slug returned by `founder_context.py` VERBATIM in directory names — never invent ad-hoc suffixes (e.g. appending `-seed`, `-round`, or any other qualifier). Downstream `find_artifact.py` lookups resolve by that slug; a mismatched directory is invisible to the cross-skill layer.
 
@@ -193,7 +195,7 @@ mkdir -p "$REVIEW_DIR"
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cap-table-${SLUG}.staging.XXXXXX")"
 ```
 
-**Routing heuristics.** Default to **fast-assess** for first-touch when the founder has not attached a document AND has not asked for "the full review", "counsel packet", "report", "explorer", or "deep dive". Otherwise default to **full pipeline**. If an existing `cap-table-$SLUG/report.json` is present (full review already on disk), ask via `AskUserQuestion` whether the founder wants to use the existing full review or start a fresh fast-assess.
+**Routing heuristics.** First, if the question is a **bare eligibility/date question** (QSBS, Israeli §102, IIA) with no instruments to model and no document, use **rule-lookup mode** (Step 5-lookup) — a cited fact, not a pipeline run. Otherwise: default to **fast-assess** for first-touch when the founder has not attached a document AND has not asked for "the full review", "counsel packet", "report", "explorer", or "deep dive"; otherwise default to **full pipeline**. If an existing `cap-table-$SLUG/report.json` is present (full review already on disk), ask via `AskUserQuestion` whether the founder wants to use the existing full review or start a fresh fast-assess.
 
 **Artifact-worthy boundary (write the sentinel).** If your answer presents a founder-facing ownership/dilution **table** or a **post-financing ownership %**, you MUST run `quick_assess` (it writes the `fast_assess_only.json` sentinel + `report_fast_assess.md`) — do NOT hand-build such an answer in chat. A one-line directional aside while gathering inputs (e.g. "≈20% to new investors") is fine in chat and writes no artifact. This keeps any quantitative ownership answer backed by the script + sentinel, so downstream consumers can detect that cap-table ran.
 
@@ -399,6 +401,20 @@ Inputs are built from the founder's conversational description via `AskUserQuest
 Never hand-estimate a new scenario in chat.
 
 Total wall-clock: under 60 seconds. Then jump to **Step 12: Deliver Artifacts** with the fast-assess deliverable. Offer the founder a follow-up: "I gave you the directional answer — want the full review with counsel packet and interactive explorer?"
+
+### Step 5-lookup (RULE-LOOKUP MODE ONLY): Run `verify_one.py` and exit
+
+For a bare eligibility/date question (QSBS, Israeli §102, IIA) — no instruments, no document — answer from the rule pack instead of running the pipeline. Pick the rule that holds the relevant fact and run:
+
+```bash
+python3 "$SCRIPTS/verify_one.py" --rule-lookup delaware_cross_border.qsbs_date_sensitive --pretty
+```
+
+- **`lookup_status: "answered"`** — present the `answer` (the cited constant + its primary source) and the `reliance_boundary` verbatim-in-spirit: state the date/threshold, then stop. Never conclude eligibility; emit a counsel item (the rule carries `counsel_review: true`).
+- **`lookup_status: "escalate"`** — the rule holds no stored constant (e.g. `israel_equity_tax.section_102_capital_gains`, whose clock runs from a plan/trustee-specific date the pack does not store). Do **not** state a default. Ask the founder for the specific fact the payload names (e.g. the trustee-deposit date), and treat it as a counsel determination.
+- **`lookup_status: "not_found"`** — the rule_id was wrong; pick the correct one or fall back to fast-assess / full pipeline.
+
+This writes no artifact and runs in well under a second. If the founder then supplies instruments or asks for the full picture, route to fast-assess or the full pipeline.
 
 ### Step 5: Determine Scenarios + Run Math → `scenarios.json`
 
