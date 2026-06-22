@@ -280,9 +280,30 @@ def render_report_html(
                     + "".join(series_rows)
                     + "</ul>"
                 )
+        elif co.get("cap_implied_only") and co.get("per_safe"):
+            # Cap-implied (pre-financing) — real per-SAFE ownership, NOT a blocked
+            # scenario. Show the cap-implied table; ownership resolves at a priced round.
+            donut = '<div style="width:180px;height:180px;display:flex;align-items:center;justify-content:center;background:var(--lool-paper-2);border-radius:50%;font-size:12px;color:var(--lool-mute);text-align:center;">Cap-implied</div>'
+            rows = "".join(
+                f'<tr><td>{_esc(sid)}</td><td class="num">{_pct(r.get("cap_implied_ownership", 0))}</td>'
+                f'<td class="num">${float(r.get("safe_price") or 0):.4f}</td>'
+                f'<td class="num">{int(r.get("cap_implied_shares") or 0):,}</td></tr>'
+                for sid, r in co["per_safe"].items()
+            )
+            details = (
+                '<p style="font-size:13px;color:var(--lool-slate);">Each SAFE\'s cap fixes a cap-implied '
+                "ownership today; final ownership resolves at a priced round.</p>"
+                '<table><thead><tr><th>SAFE</th><th class="num">Cap-implied %</th>'
+                '<th class="num">Price</th><th class="num">Shares</th></tr></thead><tbody>' + rows + "</tbody></table>"
+            )
+            impact_line = ""
         else:
             donut = '<div style="width:180px;height:180px;display:flex;align-items:center;justify-content:center;background:var(--lool-paper-2);border-radius:50%;font-size:12px;color:var(--lool-mute);">Pending</div>'
-            details = "<em>No resolved ownership yet — see blockers.</em>"
+            details = (
+                "<em>No resolved ownership yet — see blockers below.</em>"
+                if co.get("blockers")
+                else "<em>No resolved ownership yet.</em>"
+            )
             impact_line = ""
         blockers_html = ""
         if co.get("blockers"):

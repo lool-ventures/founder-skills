@@ -1400,3 +1400,19 @@ class TestExploreSweepSlider:
                 f.write(runner)
             res = subprocess.run([node, js_path], capture_output=True, text=True)
         assert res.returncode == 0 and "OK_SLIDER" in res.stdout, res.stderr
+
+
+class TestVisualizeCapImplied:
+    def test_cap_implied_card_shows_table_not_phantom_blockers(self) -> None:
+        # The fixture's only scenario is cap_implied_only with per_safe data and
+        # NO blockers. The report card must show the cap-implied ownership table,
+        # not "see blockers" (there are none).
+        with tempfile.TemporaryDirectory() as d:
+            _make_fixture_dir(d)
+            out = os.path.join(d, "report.html")
+            rc, _, err = _run("visualize.py", ["--dir", d, "-o", out])
+            assert rc == 0, err
+            with open(out, encoding="utf-8") as f:
+                html_doc = f.read()
+        assert "Cap-implied %" in html_doc, "cap-implied per-SAFE table missing from report"
+        assert "see blockers" not in html_doc, "report claims 'see blockers' for a cap-implied scenario that has none"
