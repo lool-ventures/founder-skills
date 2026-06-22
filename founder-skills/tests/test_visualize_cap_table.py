@@ -1852,11 +1852,15 @@ class TestExploreCompareView:
                 _DOM_SHIM
                 + "\n"
                 + app
-                + "\ntoggleCompare();"  # enter compare → renders two donuts via the registry
+                + "\ntoggleCompare();"  # enter compare → A shown, B is a pick-one placeholder
                 + "\nconst _g = document.getElementById('compare-grid').innerHTML || '';"
                 + "\nif (!_g.length) throw new Error('compare-grid not populated');"
+                + "\nif (!_charts['cmp-donut-a']) throw new Error('A donut must render on entry');"
+                + "\nif (_charts['cmp-donut-b']) throw new Error('B must stay empty until the user picks');"
+                + "\nconst _b = [0,1].find(i => i !== _activeIdx);"
+                + "\nonPillClick(_b);"  # pick B → second donut renders
                 + "\nif (!_charts['cmp-donut-a'] || !_charts['cmp-donut-b'])"
-                + "\n  throw new Error('both compare donuts must register');"
+                + "\n  throw new Error('both compare donuts must register once B is picked');"
                 + "\nif (_charts['cmp-donut-a'] === _charts['cmp-donut-b'])"
                 + "\n  throw new Error('two distinct chart instances required');"
                 + "\ntoggleCompare();"  # exit → tears the compare donuts down
@@ -2166,3 +2170,45 @@ class TestExploreCompareSetB:
                 f.write(runner)
             res = subprocess.run([node, js_path], capture_output=True, text=True)
         assert res.returncode == 0 and "OK_SETB" in res.stdout, res.stderr
+
+
+class TestExploreSliderHomeFrame:
+    """Returning the slider to the scenario's own pre-money clears the modeled
+    what-if; any other frame keeps it."""
+
+    def _sweep_app(self, d: str) -> str:
+        _make_fixture_dir(d)
+        _write_priced_round_base(d)
+        _run("sweep.py", ["--dir", d, "--run-id", "rid1", "-o", os.path.join(d, "sweep.json")])
+        out = os.path.join(d, "explorer.html")
+        rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
+        assert rc == 0, err
+        with open(out, encoding="utf-8") as f:
+            return re.findall(r"<script>(.*?)</script>", f.read(), re.DOTALL)[-1]
+
+    def test_home_frame_clears_modeled_other_frames_set_it(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not available")
+        with tempfile.TemporaryDirectory() as d:
+            app = self._sweep_app(d)
+            runner = (
+                _DOM_SHIM
+                + "\n"
+                + app
+                + "\nconst _home = _sweepHomeIdx();"
+                + "\nconst _away = _home === 0 ? DATA.sweep.frames.length - 1 : 0;"
+                + "\nconst _mr = document.getElementById('metric-row');"
+                + "\napplySweepFrame(_away);"  # a real what-if
+                + "\nif (!_mr.classList.contains('modeled'))"
+                + "\n  throw new Error('a non-home frame must mark the cards modeled');"
+                + "\napplySweepFrame(_home);"  # back to the scenario's own pre-money
+                + "\nif (_mr.classList.contains('modeled'))"
+                + "\n  throw new Error('returning to the home frame must clear the modeled state');"
+                + "\nconsole.log('OK_HOME');\n"
+            )
+            js_path = os.path.join(d, "runner.js")
+            with open(js_path, "w", encoding="utf-8") as f:
+                f.write(runner)
+            res = subprocess.run([node, js_path], capture_output=True, text=True)
+        assert res.returncode == 0 and "OK_HOME" in res.stdout, res.stderr

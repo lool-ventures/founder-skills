@@ -98,6 +98,7 @@ def _sweep_payload(sweep: dict[str, Any] | None) -> dict[str, Any] | None:
     return {
         "axis": sweep.get("axis", "pre_money"),
         "base_scenario_id": sweep.get("base_scenario_id"),
+        "base_pre_money": sweep.get("base_pre_money"),
         "frames": frames,
     }
 
@@ -378,6 +379,8 @@ def render_explorer_html(
   .compare-card td {{ border: none; padding: 3px 0; }}
   /* The scenario whose founders keep more reads greener. */
   .compare-card.better {{ border-color: var(--lool-success); background: var(--lool-success-tint); }}
+  .compare-card.cmp-empty {{ border-style: dashed; display: flex; flex-direction: column;
+                              justify-content: center; }}
   .cmp-canvas {{ position: relative; }}
   .cmp-center {{ position: absolute; inset: 0; display: flex; align-items: center;
                   justify-content: center; font-size: 17px; font-weight: 700; color: var(--heading); }}
@@ -1143,55 +1146,66 @@ function selectScenario(idx) {{
 // ---------------------------------------------------------------------------
 function _modeledAt(i) {{ const s = DATA.scenarios[i]; return !!s && (s.completeness === "full" || s.completeness === "mixed"); }}
 
-function _compareTargetIdx() {{
-  // The chosen B if still valid; else the first modeled scenario != active.
-  if (_compareIdx !== null && _compareIdx !== _activeIdx && _modeledAt(_compareIdx)) return _compareIdx;
-  for (let i = 0; i < DATA.scenarios.length; i++) if (i !== _activeIdx && _modeledAt(i)) return i;
-  return -1;
-}}
-
 function _cmpRow(label, val) {{
   return `<tr><td style="color:var(--muted);">${{label}}</td><td class="num">${{val}}</td></tr>`;
+}}
+
+function _compareCardHTML(s, slot, tag, canvas, better, base) {{
+  const fp = (s.aggregate && s.aggregate.founders_pct) || 0;
+  const price = s.equity_financing_price != null ? "$" + s.equity_financing_price.toFixed(4) : "—";
+  const fd = s.post_round_fd != null ? fmtShares(s.post_round_fd) : "—";
+  const dil = base == null ? "—" : ((fp - base) * 100).toFixed(1) + " pts";
+  return `<div class="compare-card${{better ? " better" : ""}}">
+    <div style="margin-bottom:14px;"><span class="cmp-slot" style="background:${{tag}};">${{escape(slot)}}</span><strong>${{escape(s.label)}}</strong></div>
+    <div style="display:flex;gap:18px;align-items:center;">
+      <div class="cmp-canvas" style="width:120px;height:120px;flex:none;"><canvas id="${{canvas}}"></canvas><div class="cmp-center">${{pct(fp)}}</div></div>
+      <table style="flex:1;"><tbody>
+        ${{_cmpRow("Founders", "<strong>" + pct(fp) + "</strong>")}}
+        ${{_cmpRow("Price/share", price)}}
+        ${{_cmpRow("Shares after", fd)}}
+        ${{_cmpRow("Dilution", `<span style="color:var(--lool-danger);">${{dil}}</span>`)}}
+      </tbody></table>
+    </div>
+  </div>`;
 }}
 
 function renderCompare() {{
   const grid = document.getElementById("compare-grid");
   const verdict = document.getElementById("compare-verdict");
-  const aIdx = _activeIdx, bIdx = _compareTargetIdx();
-  if (bIdx === -1) {{
-    grid.innerHTML = "<p class='meta'>Pick or pin a second fully-modeled scenario in the left rail to compare.</p>";
+  const aIdx = _activeIdx;
+  // A is the active scenario. Comparison needs a modeled A to anchor against.
+  if (!_modeledAt(aIdx)) {{
+    grid.innerHTML = "<p class='meta'>Switch to a modeled scenario, then pick a second one to compare.</p>";
+    verdict.hidden = true;
+    _destroyChart("cmp-donut-a");
+    _destroyChart("cmp-donut-b");
+    return;
+  }}
+  const A = DATA.scenarios[aIdx];
+  const fa = (A.aggregate && A.aggregate.founders_pct) || 0;
+  const base = _preFounderFrac();
+  const hasB = _compareIdx !== null && _compareIdx !== aIdx && _modeledAt(_compareIdx);
+
+  if (!hasB) {{
+    // A is shown filled; B stays an explicit "pick one" placeholder until the
+    // user chooses a second scenario from the rail.
+    _destroyChart("cmp-donut-b");
+    grid.innerHTML = _compareCardHTML(A, "A", "var(--lool-blue)", "cmp-donut-a", false, base)
+      + `<div class="compare-card cmp-empty"><span class="cmp-slot" style="background:var(--lool-azure);">B</span>`
+      + `<p class="meta" style="margin:14px 0 0;">Pick a scenario from the left to compare against <strong>${{escape(A.label)}}</strong>.</p></div>`;
+    renderDonut(document.getElementById("cmp-donut-a"), A.aggregate || {{}}, false);
+    slideIn(grid);
     verdict.hidden = true;
     return;
   }}
-  const A = DATA.scenarios[aIdx], B = DATA.scenarios[bIdx];
-  const fa = (A.aggregate && A.aggregate.founders_pct) || 0;
+
+  const B = DATA.scenarios[_compareIdx];
   const fb = (B.aggregate && B.aggregate.founders_pct) || 0;
-  const base = _preFounderFrac();
-  const cols = [
-    {{ s: A, fp: fa, slot: "A", tag: "var(--lool-blue)", canvas: "cmp-donut-a", better: fa >= fb }},
-    {{ s: B, fp: fb, slot: "B", tag: "var(--lool-azure)", canvas: "cmp-donut-b", better: fb > fa }},
-  ];
-  grid.innerHTML = cols.map(c => {{
-    const s = c.s, fp = c.fp;
-    const price = s.equity_financing_price != null ? "$" + s.equity_financing_price.toFixed(4) : "—";
-    const fd = s.post_round_fd != null ? fmtShares(s.post_round_fd) : "—";
-    const dil = base == null ? "—" : ((fp - base) * 100).toFixed(1) + " pts";
-    return `<div class="compare-card${{c.better ? " better" : ""}}">
-      <div style="margin-bottom:14px;"><span class="cmp-slot" style="background:${{c.tag}};">${{escape(c.slot)}}</span><strong>${{escape(s.label)}}</strong></div>
-      <div style="display:flex;gap:18px;align-items:center;">
-        <div class="cmp-canvas" style="width:120px;height:120px;flex:none;"><canvas id="${{c.canvas}}"></canvas><div class="cmp-center">${{pct(fp)}}</div></div>
-        <table style="flex:1;"><tbody>
-          ${{_cmpRow("Founders", "<strong>" + pct(fp) + "</strong>")}}
-          ${{_cmpRow("Price/share", price)}}
-          ${{_cmpRow("Shares after", fd)}}
-          ${{_cmpRow("Dilution", `<span style="color:var(--lool-danger);">${{dil}}</span>`)}}
-        </tbody></table>
-      </div>
-    </div>`;
-  }}).join("");
+  grid.innerHTML = _compareCardHTML(A, "A", "var(--lool-blue)", "cmp-donut-a", fa >= fb, base)
+    + _compareCardHTML(B, "B", "var(--lool-azure)", "cmp-donut-b", fb > fa, base);
   renderDonut(document.getElementById("cmp-donut-a"), A.aggregate || {{}}, false);
   renderDonut(document.getElementById("cmp-donut-b"), B.aggregate || {{}}, false);
-  slideIn(document.getElementById("compare-grid"));
+  slideIn(grid);
 
   const better = fa >= fb ? A : B;
   const diff = Math.abs(fa - fb) * 100;
@@ -1208,9 +1222,8 @@ function toggleCompare() {{
   show("compare-view", _compareMode);
   show("compare-hint", _compareMode);
   if (_compareMode) {{
-    // Seed B with the chosen target (or the first other modeled scenario), then
-    // mark its pill so the "B" badge appears.
-    _compareIdx = _compareTargetIdx();
+    // Start with B unset: A is shown and the rail invites the user to pick B.
+    _compareIdx = null;
     _refreshPillBadges();
     renderCompare();
   }} else {{
@@ -1437,11 +1450,26 @@ function _wtStep(delta) {{
 // so every value it ever shows — number AND donut geometry — is real solver
 // output. By default the donut SNAPS too (no fabricated in-between geometry);
 // only under capture mode does the geometry tween.
+// The frame at the scenario's own (saved) pre-money — the slider's "home". At
+// home the cards show the real round, so it is NOT a modeled what-if.
+function _sweepHomeIdx() {{
+  const frames = (DATA.sweep && DATA.sweep.frames) || [];
+  const home = DATA.sweep && DATA.sweep.base_pre_money;
+  if (home != null) {{
+    let best = 0, bestD = Infinity;
+    frames.forEach((f, i) => {{ const d = Math.abs((f.pre_money || 0) - home); if (d < bestD) {{ bestD = d; best = i; }} }});
+    return best;
+  }}
+  return Math.floor((frames.length - 1) / 2);
+}}
+
 function applySweepFrame(idx) {{
   const fr = DATA.sweep.frames[idx];
   const readout = document.getElementById("sweep-readout");
   if (!fr) return;
-  enterModeled();  // a drag opts into the hypothetical — mark cards as modeled
+  // Returning the slider to the scenario's saved pre-money clears the modeled
+  // state; any other frame is a hypothetical.
+  if (idx === _sweepHomeIdx()) exitModeled(); else enterModeled();
   const preM = "$" + (fr.pre_money / 1e6).toFixed(1) + "M";
   const preEl = document.getElementById("sweep-pre-val");
   if (preEl) preEl.textContent = preM;
@@ -1502,19 +1530,19 @@ function _sweepReadout(idx) {{
     : ("Drag to model — " + preM + " doesn't converge");
 }}
 
-// Return the slider thumb to the middle frame and refresh its readout/aria.
-// Called on every scenario change so the thumb never drifts out of sync with
-// the displayed scenario.
+// Return the slider thumb to the scenario's own pre-money (the "home" frame)
+// and refresh its readout/aria. Called on every scenario change so the thumb
+// never drifts out of sync with the displayed scenario.
 function resetSweepSlider() {{
   if (!_hasSweep) return;
   const slider = document.getElementById("sweep-slider");
-  const mid = Math.floor((DATA.sweep.frames.length - 1) / 2);
-  slider.value = String(mid);
-  const fr = DATA.sweep.frames[mid];
+  const home = _sweepHomeIdx();
+  slider.value = String(home);
+  const fr = DATA.sweep.frames[home];
   const preEl = document.getElementById("sweep-pre-val");
   if (preEl && fr) preEl.textContent = "$" + (fr.pre_money / 1e6).toFixed(1) + "M";
-  _sweepReadout(mid);
-  _sweepAria(mid);
+  _sweepReadout(home);
+  _sweepAria(home);
 }}
 
 function initSweep() {{
