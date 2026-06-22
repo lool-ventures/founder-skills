@@ -239,6 +239,8 @@ Tag-push triggers `deck-review-e2e-smoke` in `.github/workflows/skill-quality.ym
 
 `sync-test-repo.sh` is a local, untracked TESTING step — it pushes the working tree to the private test repo (`yaniv-golan/founderskills-test`) so the release can be exercised in Cowork before users see it. It is NOT the user-facing distribution event: users install from the marketplace clone that tracks `main`, so `plugin.json#version` on `main` is what they actually pick up (see VERSIONING.md). Run the test sync only after the release gate is green — syncing a broken build means the test pass exercises a build you'd never ship.
 
+**Model-tier acceptance:** when adopting or recommending a new model tier, run the cap-table reliability bench (`founder-skills/skills/cap-table/evals/run_reliability_bench.py`, see its `README.md`) and record the per-tier correctness; Sonnet 4.6 is the support floor.
+
 **Already-distributed retag pitfall:** if `sync-test-repo.sh` ran before you noticed the bug, **bump to the next patch version instead of retagging** — Cowork caches by `plugin.json#version`, so retagging the same version will not refresh user caches (`cpd refresh ... --force-fetch -y` is the manual recovery, not always coordinatable across users).
 
 ### When to manually dispatch e2e on a PR
