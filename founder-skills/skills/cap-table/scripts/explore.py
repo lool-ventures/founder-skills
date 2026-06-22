@@ -261,7 +261,22 @@ def render_explorer_html(
   </aside>
   <main>
     <div id="compare-banner" style="display:none;"></div>
-    <div id="scenario-view"></div>
+    <div id="scenario-view">
+      <div id="scenario-head"></div>
+      <div id="scenario-blockers"></div>
+      <div class="metric-row" id="metric-row" hidden>
+        <div class="metric" id="metric-founder"><div class="number-display" id="founder-pct">—</div><div class="number-label">Founder ownership</div></div>
+        <div class="metric" id="metric-price"><div class="number-display" id="price-psh">—</div><div class="number-label">Price per share</div></div>
+        <div class="metric" id="metric-fd"><div class="number-display" id="post-fd">—</div><div class="number-label">Post-round FD shares</div></div>
+      </div>
+      <div class="donut-wrap" id="donut-wrap" hidden>
+        <div class="donut-canvas"><canvas id="donut-chart"></canvas></div>
+        <ul class="legend" id="legend"></ul>
+      </div>
+      <div class="impact-callout" id="impact-callout" hidden></div>
+      <div class="sankey-container" id="sankey-container" hidden><h3>Dilution flow</h3><div id="sankey"></div></div>
+      <div id="scenario-variable"></div>
+    </div>
   </main>
   <div class="right-rail">
     <div class="section-label">Counsel Review</div>
@@ -505,6 +520,8 @@ function renderScenarioList() {{
   if (DATA.scenarios.length > 0) selectScenario(0);
 }}
 
+function show(id, on) {{ const el = document.getElementById(id); if (el) el.hidden = !on; }}
+
 function selectScenario(idx) {{
   _activeIdx = idx;
   document.querySelectorAll(".scenario-pill").forEach((b, i) => {{
@@ -512,86 +529,96 @@ function selectScenario(idx) {{
     b.classList.toggle("pinned", i === _pinnedScenarioIdx);
   }});
   const s = DATA.scenarios[idx];
-  const view = document.getElementById("scenario-view");
+  const isFull = (s.completeness === "full" || s.completeness === "mixed");
 
-  let body = `<h2 style="margin-top:0;">${{escape(s.label)}} <span class="badge ${{s.completeness}}">${{s.completeness}}</span></h2>`;
-  if (s.cap_implied_only) body += `<p class="meta">Cap-implied output set only (pre-financing snapshot)</p>`;
-  body += `<p class="meta">Type: <code>${{escape(s.type)}}</code></p>`;
+  // Variable region (rebuilt each switch): heading + badge + type + blockers.
+  let head = `<h2 style="margin-top:0;">${{escape(s.label)}} <span class="badge ${{s.completeness}}">${{s.completeness}}</span></h2>`;
+  if (s.cap_implied_only) head += `<p class="meta">Cap-implied output set only (pre-financing snapshot)</p>`;
+  head += `<p class="meta">Type: <code>${{escape(s.type)}}</code></p>`;
+  document.getElementById("scenario-head").innerHTML = head;
 
+  let blockers = "";
   if (s.blockers && s.blockers.length > 0) {{
-    body += "<h3>Blockers</h3>";
+    blockers = "<h3>Blockers</h3>";
     for (const b of s.blockers) {{
-      body += `<div class="blocker"><code>${{escape(b.code)}}</code> ${{b.instance_id ? "on " + escape(b.instance_id) : ""}}: ${{escape(b.remedy)}}</div>`;
+      blockers += `<div class="blocker"><code>${{escape(b.code)}}</code> ${{b.instance_id ? "on " + escape(b.instance_id) : ""}}: ${{escape(b.remedy)}}</div>`;
     }}
   }}
+  document.getElementById("scenario-blockers").innerHTML = blockers;
 
-  if (s.completeness === "full" || s.completeness === "mixed") {{
-    const agg = s.aggregate;
-    // Metric row
-    const founderImpact = s.founder_impact || {{}};
-    body += `<div class="metric-row">
-      <div class="metric"><div class="number-display" id="founder-pct">${{pct(agg.founders_pct || 0)}}</div><div class="number-label">Founder ownership</div></div>
-      ${{s.equity_financing_price ? `<div class="metric"><div class="number-display" id="price-psh">$${{s.equity_financing_price.toFixed(4)}}</div><div class="number-label">Price per share</div></div>` : ""}}
-      ${{s.post_round_fd ? `<div class="metric"><div class="number-display" id="post-fd">${{fmtShares(s.post_round_fd)}}</div><div class="number-label">Post-round FD shares</div></div>` : ""}}
-    </div>`;
+  // Persistent widgets (P0a): show + update in place for full/mixed, hide +
+  // tear down otherwise. The canvas/sankey nodes survive the switch so P1/P2
+  // can morph them in place; the metric nodes survive so the tickers tick in
+  // place rather than against a freshly-rebuilt node.
+  show("metric-row", isFull);
+  show("donut-wrap", isFull);
+  show("sankey-container", isFull);
+  if (isFull) {{
+    const agg = s.aggregate || {{}};
+    show("metric-price", !!s.equity_financing_price);
+    show("metric-fd", !!s.post_round_fd);
 
-    body += `<div class="donut-wrap"><div class="donut-canvas"><canvas id="donut-chart"></canvas></div>`;
-    body += `<ul class="legend">`;
+    let legend = "";
     for (const [cat, frac] of Object.entries(agg)) {{
       if (frac <= 0) continue;
-      const c = sliceColor(cat);
-      body += `<li><span class="swatch" style="background:${{c}};"></span>${{escape(sliceLabel(cat))}}: <strong style="margin-left:auto;">${{pct(frac)}}</strong></li>`;
+      legend += `<li><span class="swatch" style="background:${{sliceColor(cat)}};"></span>${{escape(sliceLabel(cat))}}: <strong style="margin-left:auto;">${{pct(frac)}}</strong></li>`;
     }}
-    body += `</ul></div>`;
+    document.getElementById("legend").innerHTML = legend;
 
+    // Impact callout persists, so it must be cleared+hidden when absent or a
+    // stale "Founder Impact" from the prior scenario lingers.
+    const impact = document.getElementById("impact-callout");
     if (s.founder_impact) {{
-      body += `<div class="impact-callout"><strong>Founder Impact:</strong> ${{escape(s.founder_impact.plain_language)}}</div>`;
+      impact.innerHTML = `<strong>Founder Impact:</strong> ${{escape(s.founder_impact.plain_language)}}`;
+      impact.hidden = false;
+    }} else {{
+      impact.innerHTML = "";
+      impact.hidden = true;
     }}
 
-    // Sankey dilution flow
-    body += `<div class="sankey-container"><h3>Dilution flow</h3><div id="sankey"></div></div>`;
-  }} else if (s.cap_implied_only && Object.keys(s.per_safe).length > 0) {{
-    // Cap-implied per-SAFE summary
-    body += `<h3>Cap-implied ownership (pre-financing)</h3>`;
-    body += `<table><thead><tr><th>SAFE</th><th class="num">Cap-implied %</th><th class="num">Safe price</th><th class="num">Shares</th></tr></thead><tbody>`;
-    for (const [sid, r] of Object.entries(s.per_safe)) {{
-      body += `<tr><td>${{escape(sid)}}</td><td class="num">${{pct(r.cap_implied_ownership || 0)}}</td><td class="num">$${{(r.safe_price || 0).toFixed(4)}}</td><td class="num">${{fmtShares(r.cap_implied_shares || 0)}}</td></tr>`;
-    }}
-    body += `</tbody></table>`;
+    // donut-wrap is now visible — Chart.js needs the canvas sized before init.
+    renderDonut(document.getElementById("donut-chart"), agg);
+    renderSankey(document.getElementById("sankey"), s);
   }} else {{
-    body += `<p class="meta"><em>This scenario is pending — see blockers above.</em></p>`;
+    // No donut here — destroy the chart so it does not retain a hidden, stale
+    // canvas, and hide the persistent impact callout.
+    if (_chartInstance) {{ _chartInstance.destroy(); _chartInstance = null; }}
+    document.getElementById("impact-callout").hidden = true;
   }}
 
-  // Per-SAFE / per-note details
+  // Variable region: cap-implied table / pending notice / per-instrument details.
+  let variable = "";
+  if (!isFull && s.cap_implied_only && Object.keys(s.per_safe || {{}}).length > 0) {{
+    variable += `<h3>Cap-implied ownership (pre-financing)</h3>`;
+    variable += `<table><thead><tr><th>SAFE</th><th class="num">Cap-implied %</th><th class="num">Safe price</th><th class="num">Shares</th></tr></thead><tbody>`;
+    for (const [sid, r] of Object.entries(s.per_safe)) {{
+      variable += `<tr><td>${{escape(sid)}}</td><td class="num">${{pct(r.cap_implied_ownership || 0)}}</td><td class="num">$${{(r.safe_price || 0).toFixed(4)}}</td><td class="num">${{fmtShares(r.cap_implied_shares || 0)}}</td></tr>`;
+    }}
+    variable += `</tbody></table>`;
+  }} else if (!isFull) {{
+    variable += `<p class="meta"><em>This scenario is pending — see blockers above.</em></p>`;
+  }}
+
   if (Object.keys(s.per_safe || {{}}).length > 0 && !s.cap_implied_only) {{
-    body += "<details><summary>Per-SAFE detail</summary><table><thead><tr><th>SAFE</th><th>Branch</th><th class='num'>Shares</th><th class='num'>Price</th></tr></thead><tbody>";
+    variable += "<details><summary>Per-SAFE detail</summary><table><thead><tr><th>SAFE</th><th>Branch</th><th class='num'>Shares</th><th class='num'>Price</th></tr></thead><tbody>";
     for (const [sid, r] of Object.entries(s.per_safe)) {{
       const shares = r.conversion_shares || r.cap_implied_shares || 0;
       const price = r.conversion_price || r.safe_price || 0;
-      body += `<tr><td>${{escape(sid)}}</td><td>${{escape(r.branch)}}</td><td class="num">${{fmtShares(shares)}}</td><td class="num">$${{price.toFixed(4)}}</td></tr>`;
+      variable += `<tr><td>${{escape(sid)}}</td><td>${{escape(r.branch)}}</td><td class="num">${{fmtShares(shares)}}</td><td class="num">$${{price.toFixed(4)}}</td></tr>`;
     }}
-    body += "</tbody></table></details>";
+    variable += "</tbody></table></details>";
   }}
   if (Object.keys(s.per_note || {{}}).length > 0) {{
-    body += "<details><summary>Per-note detail</summary><table><thead><tr><th>Note</th><th>Branch</th><th class='num'>Shares / Cash</th></tr></thead><tbody>";
+    variable += "<details><summary>Per-note detail</summary><table><thead><tr><th>Note</th><th>Branch</th><th class='num'>Shares / Cash</th></tr></thead><tbody>";
     for (const [nid, r] of Object.entries(s.per_note)) {{
       const val = r.conversion_shares !== undefined
         ? fmtShares(r.conversion_shares) + " shares"
         : (r.cash_repayment !== undefined ? fmtMoney(r.cash_repayment) : "—");
-      body += `<tr><td>${{escape(nid)}}</td><td>${{escape(r.branch)}}</td><td class="num">${{val}}</td></tr>`;
+      variable += `<tr><td>${{escape(nid)}}</td><td>${{escape(r.branch)}}</td><td class="num">${{val}}</td></tr>`;
     }}
-    body += "</tbody></table></details>";
+    variable += "</tbody></table></details>";
   }}
-
-  view.innerHTML = body;
-
-  // Render Chart.js donut + Sankey after DOM update
-  const canvas = document.getElementById("donut-chart");
-  if (canvas && (s.completeness === "full" || s.completeness === "mixed")) {{
-    renderDonut(canvas, s.aggregate);
-  }}
-  const sankeyDiv = document.getElementById("sankey");
-  if (sankeyDiv) renderSankey(sankeyDiv, s);
+  document.getElementById("scenario-variable").innerHTML = variable;
 
   // Animate the three hero metric numbers (P0 / design §10 number tickers).
   // Read `s.aggregate` directly — `agg` is block-scoped to the full/mixed

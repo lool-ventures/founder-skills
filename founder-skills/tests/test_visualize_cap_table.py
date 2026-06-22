@@ -1070,3 +1070,64 @@ class TestExploreDonutPalette:
         assert "PALETTE[cat]" not in app, (
             "raw PALETTE[cat] lookup remains — _pct-suffixed aggregate keys fall back to gray. Use sliceColor(cat)."
         )
+
+
+# ===========================================================================
+# Runtime smoke (the real anti-crash net node --check can't provide).
+#
+# Runs the inline app script through a minimal DOM shim and lets the wire-up
+# call selectScenario(0) for the cap-implied fixture. Catches runtime
+# ReferenceErrors / missing-node bugs (e.g. the persistent-DOM refactor losing
+# a getElementById target) that a parse check misses. The cap-implied path does
+# not touch Chart.js, so no chart engine is needed in the shim.
+# ===========================================================================
+
+
+_DOM_SHIM = r"""
+const _byId = {};
+function mkEl(id) {
+  return {
+    id, _html: "", hidden: false, textContent: "", style: {}, dataset: {},
+    classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } },
+    addEventListener() {}, append() {}, querySelectorAll() { return []; },
+    set innerHTML(v) { this._html = v; if (this.id) _byId[this.id] = this; },
+    get innerHTML() { return this._html; },
+  };
+}
+global.document = {
+  getElementById(id) { return _byId[id] || (_byId[id] = mkEl(id)); },
+  querySelectorAll() { return []; },
+  addEventListener() {},
+  body: mkEl("body"),
+};
+global.window = { matchMedia() { return { matches: false }; } };
+global.location = { search: "" };
+global.URLSearchParams = class { constructor() {} get() { return null; } };
+global.requestAnimationFrame = function () {};
+global.performance = { now() { return 0; } };
+global.getComputedStyle = function () { return { getPropertyValue() { return "#000"; } }; };
+"""
+
+
+class TestExploreRuntimeSmoke:
+    def test_selectscenario_runs_headless_without_error(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not available; skipping headless runtime smoke")
+        with tempfile.TemporaryDirectory() as d:
+            app = _render_explorer_app_script(d)
+            runner = (
+                _DOM_SHIM
+                + "\n"
+                + app
+                + "\nconst _v = document.getElementById('scenario-variable').innerHTML || '';"
+                + "\nif (!_v.length) throw new Error('selectScenario did not populate scenario-variable');"
+                + "\nconsole.log('OK_NO_THROW');\n"
+            )
+            js_path = os.path.join(d, "runner.js")
+            with open(js_path, "w", encoding="utf-8") as f:
+                f.write(runner)
+            res = subprocess.run([node, js_path], capture_output=True, text=True)
+        assert res.returncode == 0 and "OK_NO_THROW" in res.stdout, (
+            f"explorer app threw at runtime running selectScenario(0):\n{res.stderr}"
+        )
