@@ -1435,6 +1435,61 @@ class TestExploreSweepSlider:
             res = subprocess.run([node, js_path], capture_output=True, text=True)
         assert res.returncode == 0 and "OK_LEGEND_SANKEY_IMPACT" in res.stdout, res.stderr
 
+    def test_slider_panel_matches_scenario_selection_comprehensive(self) -> None:
+        # COMPREHENSIVE guard against per-element whack-a-mole: applySweepFrame(i)
+        # must produce the SAME pre-money-dependent panel as selecting that frame
+        # as a full scenario. If any element is wired into selectScenario's full
+        # path but not the slider (or vice-versa), the signatures diverge and this
+        # fails — naming the offending element.
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not available")
+        with tempfile.TemporaryDirectory() as d:
+            html = self._render_with_sweep(d)
+            app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+            # Reduced-motion so selectScenario direct-sets metrics (matching the
+            # slider's snap), making the two panels directly comparable.
+            shim_rm = _DOM_SHIM.replace(
+                "matchMedia() { return { matches: false }; }", "matchMedia() { return { matches: true }; }"
+            )
+            probe = (
+                "\nfunction _panelSig() {"
+                "\n  const g = id => { const e = document.getElementById(id);"
+                "\n    return e ? (e.innerHTML || e.textContent || '') : null; };"
+                "\n  return JSON.stringify({"
+                "\n    fp: g('founder-pct'), price: g('price-psh'), fd: g('post-fd'),"
+                "\n    legend: g('legend'), impact: g('impact-callout'),"
+                "\n    variable: g('scenario-variable'), sankey: g('sankey'),"
+                "\n    donut: _chartInstance ? JSON.stringify(_chartInstance.data.datasets[0].data) : null,"
+                "\n  });"
+                "\n}"
+                "\nconst _i = DATA.sweep.frames.length - 1;"  # use a frame far from the base
+                "\nconst _fr = DATA.sweep.frames[_i];"
+                "\nconst _synth = { scenario_id: 'probe', label: 'probe', type: 'priced_round',"
+                "\n  completeness: 'full', cap_implied_only: false, blockers: [],"
+                "\n  aggregate: _fr.aggregate, equity_financing_price: _fr.equity_financing_price,"
+                "\n  post_round_fd: _fr.post_round_fd, shares_breakdown: _fr.shares_breakdown,"
+                "\n  founder_impact: _fr.impact_text ? { plain_language: _fr.impact_text } : null,"
+                "\n  per_safe: _fr.per_safe, per_note: _fr.per_note, parameters: {} };"
+                "\nDATA.scenarios.push(_synth);"
+                "\nselectScenario(DATA.scenarios.length - 1);"  # render the frame AS a scenario
+                "\nconst _sigScenario = _panelSig();"
+                "\napplySweepFrame(_i);"  # render the same frame via the slider
+                "\nconst _sigSlider = _panelSig();"
+                "\nif (_sigScenario !== _sigSlider) {"
+                "\n  const a = JSON.parse(_sigScenario), b = JSON.parse(_sigSlider);"
+                "\n  const diff = Object.keys(a).filter(k => a[k] !== b[k]);"
+                "\n  throw new Error('slider panel diverges from scenario in: ' + diff.join(', '));"
+                "\n}"
+                "\nconsole.log('OK_COMPREHENSIVE');"
+            )
+            runner = shim_rm + "\n" + app + "\n" + probe + "\n"
+            js_path = os.path.join(d, "runner.js")
+            with open(js_path, "w", encoding="utf-8") as f:
+                f.write(runner)
+            res = subprocess.run([node, js_path], capture_output=True, text=True)
+        assert res.returncode == 0 and "OK_COMPREHENSIVE" in res.stdout, res.stderr
+
 
 class TestVisualizeCapImplied:
     def test_cap_implied_card_shows_table_not_phantom_blockers(self) -> None:

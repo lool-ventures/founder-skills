@@ -53,6 +53,8 @@ _SLIDER_FIELDS = (
     "post_round_fully_diluted_shares",
     "shares_breakdown",
     "founder_impact",
+    "per_safe",
+    "per_note",
     "blockers",
 )
 

@@ -71,6 +71,14 @@ def _sweep_payload(sweep: dict[str, Any] | None) -> dict[str, Any] | None:
     """Normalize sweep.json frames to the compact shape the slider JS consumes."""
     if not sweep or not sweep.get("frames"):
         return None
+
+    # Only the per-instrument fields the detail tables show — keeps payload small.
+    _safe_keys = ("branch", "conversion_shares", "conversion_price", "cap_implied_shares", "safe_price")
+    _note_keys = ("branch", "conversion_shares", "cash_repayment")
+
+    def _trim(d: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
+        return {sid: {k: r.get(k) for k in keys if k in r} for sid, r in (d or {}).items()}
+
     frames = []
     for fr in sweep["frames"]:
         o = fr.get("outputs") or {}
@@ -83,6 +91,8 @@ def _sweep_payload(sweep: dict[str, Any] | None) -> dict[str, Any] | None:
                 "post_round_fd": o.get("post_round_fully_diluted_shares"),
                 "shares_breakdown": o.get("shares_breakdown") or {},
                 "impact_text": (o.get("founder_impact") or {}).get("plain_language"),
+                "per_safe": _trim(o.get("per_safe") or {}, _safe_keys),
+                "per_note": _trim(o.get("per_note") or {}, _note_keys),
             }
         )
     return {"axis": sweep.get("axis", "pre_money"), "frames": frames}
@@ -646,6 +656,33 @@ function renderImpact(text, animate) {{
   }}
 }}
 
+// Per-SAFE / per-note conversion detail tables (the <details> in the variable
+// region). These depend on the round price, so they change with pre-money —
+// shared by selectScenario + the slider so a drag keeps them in sync.
+function instrumentDetailsHTML(perSafe, perNote) {{
+  let out = "";
+  if (perSafe && Object.keys(perSafe).length > 0) {{
+    out += "<details><summary>Per-SAFE detail</summary><table><thead><tr><th>SAFE</th><th>Branch</th><th class='num'>Shares</th><th class='num'>Price</th></tr></thead><tbody>";
+    for (const [sid, r] of Object.entries(perSafe)) {{
+      const shares = r.conversion_shares || r.cap_implied_shares || 0;
+      const price = r.conversion_price || r.safe_price || 0;
+      out += `<tr><td>${{escape(sid)}}</td><td>${{escape(r.branch)}}</td><td class="num">${{fmtShares(shares)}}</td><td class="num">$${{price.toFixed(4)}}</td></tr>`;
+    }}
+    out += "</tbody></table></details>";
+  }}
+  if (perNote && Object.keys(perNote).length > 0) {{
+    out += "<details><summary>Per-note detail</summary><table><thead><tr><th>Note</th><th>Branch</th><th class='num'>Shares / Cash</th></tr></thead><tbody>";
+    for (const [nid, r] of Object.entries(perNote)) {{
+      const val = r.conversion_shares !== undefined
+        ? fmtShares(r.conversion_shares) + " shares"
+        : (r.cash_repayment !== undefined ? fmtMoney(r.cash_repayment) : "—");
+      out += `<tr><td>${{escape(nid)}}</td><td>${{escape(r.branch)}}</td><td class="num">${{val}}</td></tr>`;
+    }}
+    out += "</tbody></table></details>";
+  }}
+  return out;
+}}
+
 function show(id, on) {{ const el = document.getElementById(id); if (el) el.hidden = !on; }}
 
 // Card mount animation (P3 / design §10-D): 200ms fade + 8px translate-Y.
@@ -722,25 +759,7 @@ function selectScenario(idx) {{
     variable += `<p class="meta"><em>This scenario is pending — see blockers above.</em></p>`;
   }}
 
-  if (isFull && Object.keys(s.per_safe || {{}}).length > 0) {{
-    variable += "<details><summary>Per-SAFE detail</summary><table><thead><tr><th>SAFE</th><th>Branch</th><th class='num'>Shares</th><th class='num'>Price</th></tr></thead><tbody>";
-    for (const [sid, r] of Object.entries(s.per_safe)) {{
-      const shares = r.conversion_shares || r.cap_implied_shares || 0;
-      const price = r.conversion_price || r.safe_price || 0;
-      variable += `<tr><td>${{escape(sid)}}</td><td>${{escape(r.branch)}}</td><td class="num">${{fmtShares(shares)}}</td><td class="num">$${{price.toFixed(4)}}</td></tr>`;
-    }}
-    variable += "</tbody></table></details>";
-  }}
-  if (isFull && Object.keys(s.per_note || {{}}).length > 0) {{
-    variable += "<details><summary>Per-note detail</summary><table><thead><tr><th>Note</th><th>Branch</th><th class='num'>Shares / Cash</th></tr></thead><tbody>";
-    for (const [nid, r] of Object.entries(s.per_note)) {{
-      const val = r.conversion_shares !== undefined
-        ? fmtShares(r.conversion_shares) + " shares"
-        : (r.cash_repayment !== undefined ? fmtMoney(r.cash_repayment) : "—");
-      variable += `<tr><td>${{escape(nid)}}</td><td>${{escape(r.branch)}}</td><td class="num">${{val}}</td></tr>`;
-    }}
-    variable += "</tbody></table></details>";
-  }}
+  if (isFull) variable += instrumentDetailsHTML(s.per_safe, s.per_note);
   document.getElementById("scenario-variable").innerHTML = variable;
 
   // Animate the three hero metric numbers (P0 / design §10 number tickers).
@@ -936,6 +955,8 @@ function applySweepFrame(idx) {{
     // The dilution flow for this frame; snap (no fade) so a drag doesn't strobe.
     renderSankey(sankeyDiv, {{ shares_breakdown: fr.shares_breakdown, post_round_fd: fr.post_round_fd }}, true);
   }}
+  // Per-SAFE/per-note conversion detail tables also move with the round price.
+  document.getElementById("scenario-variable").innerHTML = instrumentDetailsHTML(fr.per_safe, fr.per_note);
   readout.textContent = "Pre-money " + preM + " → founders " + pct(fp);
 }}
 
