@@ -152,7 +152,7 @@ Models what a founder's term sheets, SAFEs, and convertible notes actually do to
 
 **What to provide:** A signed or draft SAFE, convertible note, term sheet, option plan, warrant, articles of association, or Carta XLSX — or a structured description of holders and outstanding instruments.
 
-**What you get back:** Rule-pack-cited conversion and dilution math, a pre/post-financing cap-table snapshot, anti-dilution and option-pool scenarios, a counsel-handoff packet, and a founder-readable report explaining exactly how each instrument moves your ownership.
+**What you get back:** Rule-pack-cited conversion and dilution math, a pre/post-financing cap-table snapshot, anti-dilution and option-pool scenarios, a counsel-handoff packet, an interactive explorer (animated scenario comparison with a drag-to-model pre-money slider that scrubs precomputed real solver frames), and a founder-readable report explaining exactly how each instrument moves your ownership.
 
 **Example prompts:**
 - "Here's our YC SAFE -- how much do we dilute when we raise our priced round?"

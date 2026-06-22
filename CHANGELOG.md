@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — cap-table explorer animation layer + pre-money slider
+
+- The cap-table explorer's interactive output now animates on every scenario change, per the design
+  spec: the three hero metrics (founder %, price/share, post-round FD shares) tick from their previous
+  value to the new one; the ownership donut value-morphs its wedges; the dilution Sankey transitions;
+  and the Founder-Impact callout and compare banner slide in. All animations honor
+  `prefers-reduced-motion`.
+- New **pre-money "what-if" slider** in the explorer. A new `sweep.py` generator re-runs the
+  priced-round solver across a pre-money range (holding new money fixed) and writes a schema-locked
+  `sweep.json`; the explorer renders a slider that scrubs these precomputed **real solver frames** — it
+  snaps to discrete frames so every value shown (number and chart) is real math, never interpolated.
+  Optional and fully backward-compatible (no `sweep.json` → no slider). Wired into the cap-table
+  workflow for priced rounds; the slider is screen-reader accessible.
+
+### Fixed — cap-table explorer donut colors
+
+- The explorer's ownership donut rendered every wedge in grey (and labelled them "founders pct", etc.)
+  because the colour lookup didn't account for the `_pct` suffix on ownership keys. Wedges and legend
+  swatches now show their correct class colours.
+
 ## [0.5.1] - 2026-06-18 — Fleet-wide hardening: audit remediation, brand theme, self-sufficient reports
 
 ### Highlights
