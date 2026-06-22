@@ -97,6 +97,7 @@ All scripts live at `${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts/`:
 - **`explore.py`** — Generates `explorer.html` (polished interactive scenario tool; demo/video-friendly).
 - **`quick_assess.py`** — Fast-assess directional review (Step 5-fast); writes the `fast_assess_only.json` sentinel + `report_fast_assess.md`, skipping the full pipeline.
 - **`verify_one.py`** — Rule-lookup mode (Step 5-lookup): `--rule-lookup <rule_id>` returns the cited constant a rule holds (e.g. the QSBS OBBBA window start) + its citations + the reliance boundary, for a bare eligibility/date question. Allowlists by data: rules without a stored constant (e.g. §102 capital-gains) return `lookup_status: "escalate"` rather than echoing a non-constant field. No solver, no artifact.
+- **`concise_report.py`** — Concise mode (Step 5-concise): renders `scenarios.json` (the solver's `computed_outputs`) + optional `rule_audit.json` flags into a short cited `report_concise.md`, skipping `visualize`/`explore`/`counsel_packet`/the full `compose_report`/the coaching sub-agent. Same numbers as the full pipeline (reads the same output); for a single quick math question.
 - **`evidence_verifier.py` / `invariant_checker.py` / `cross_checker.py` / `backward_verifier.py`** — Lane-1 verification stack (Step 3). Forward evidence-quote check, real-world-bounds check, multi-extractor cross-check (demote-only), and fresh-sub-agent backward re-extraction. `extract_instrument.py` invokes these by default; they are also runnable standalone.
 - **`_dispatch_json.py`** — Tolerant JSON extraction for Context A returns.
 
@@ -181,6 +182,7 @@ After Step 1 (when the company slug is known), derive `REVIEW_DIR`. Two modes:
 - **Full pipeline** (default — when the founder shared a document, asked for the full review, counsel packet, or interactive explorer, OR when there's no existing full review for this slug): `REVIEW_DIR="$ARTIFACTS_ROOT/cap-table-$SLUG"`.
 - **Fast-assess mode** (Phase O — short directional answer to a conversational question, no document attached, no explicit "full review" request): `REVIEW_DIR="$ARTIFACTS_ROOT/cap-table-$SLUG-fastassess"`. Run `quick_assess.py` (Step 5-fast) instead of Steps 2–11. Total wall-clock under 60 seconds.
 - **Rule-lookup mode** (a bare eligibility/date question — QSBS, Israeli §102, IIA — with **no instruments to model and no document**): answer straight from the rule pack — no `REVIEW_DIR`, no pipeline. Run `verify_one.py --rule-lookup <rule_id>` (Step 5-lookup) and present its cited constant + the reliance boundary (state the date/threshold; never conclude eligibility — emit a counsel item). If it returns `lookup_status: "escalate"` (the rule carries no stored constant — e.g. the §102 capital-gains clock, which runs from a plan/trustee-specific date the pack does not hold), ask the founder for the specific fact it names (e.g. the trustee-deposit date) and treat as a counsel determination — never state a default like `grant_date`.
+- **Concise mode** (a single quick **math** question that `quick_assess` can't shape and that isn't a pure eligibility lookup — a fully-diluted warrant count, an as-converted snapshot, a standalone anti-dilution adjustment, one note/SAFE outside a priced round): run the deterministic math, then render a short cited answer with `concise_report.py` (Step 5-concise) — **skip** `visualize`, `explore`, `counsel_packet`, the full `compose_report`, and the Context-B coaching sub-agent. The numbers are identical to the full pipeline's (it reads the same `run_scenario` output); only the production weight is dropped. Offer the full review as a follow-up. `REVIEW_DIR="$ARTIFACTS_ROOT/cap-table-$SLUG-concise"`.
 
 **Slug discipline:** Use the slug returned by `founder_context.py` VERBATIM in directory names — never invent ad-hoc suffixes (e.g. appending `-seed`, `-round`, or any other qualifier). Downstream `find_artifact.py` lookups resolve by that slug; a mismatched directory is invisible to the cross-skill layer.
 
@@ -195,9 +197,9 @@ mkdir -p "$REVIEW_DIR"
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cap-table-${SLUG}.staging.XXXXXX")"
 ```
 
-**Routing heuristics.** First, if the question is a **bare eligibility/date question** (QSBS, Israeli §102, IIA) with no instruments to model and no document, use **rule-lookup mode** (Step 5-lookup) — a cited fact, not a pipeline run. Otherwise: default to **fast-assess** for first-touch when the founder has not attached a document AND has not asked for "the full review", "counsel packet", "report", "explorer", or "deep dive"; otherwise default to **full pipeline**. If an existing `cap-table-$SLUG/report.json` is present (full review already on disk), ask via `AskUserQuestion` whether the founder wants to use the existing full review or start a fresh fast-assess.
+**Routing heuristics.** In order: (1) a **bare eligibility/date question** (QSBS, §102, IIA) with no instruments and no document → **rule-lookup** (Step 5-lookup) — a cited fact, not a pipeline run. (2) A **single quick math question** that `quick_assess` can't shape (warrant fully-diluted count, as-converted snapshot, standalone anti-dilution, a lone note/SAFE outside a priced round) → **concise mode** (Step 5-concise) — the real math, short answer, no heavy tail. (3) A **priced-round gut-check** / first-touch conversational answer (no document, no "full review"/"counsel packet"/"report"/"explorer"/"deep dive") → **fast-assess**. (4) Otherwise → **full pipeline**. If an existing `cap-table-$SLUG/report.json` is present, ask via `AskUserQuestion` whether to use it or start fresh.
 
-**Artifact-worthy boundary (write the sentinel).** If your answer presents a founder-facing ownership/dilution **table** or a **post-financing ownership %**, you MUST run `quick_assess` (it writes the `fast_assess_only.json` sentinel + `report_fast_assess.md`) — do NOT hand-build such an answer in chat. A one-line directional aside while gathering inputs (e.g. "≈20% to new investors") is fine in chat and writes no artifact. This keeps any quantitative ownership answer backed by the script + sentinel, so downstream consumers can detect that cap-table ran.
+**Artifact-worthy boundary (write the sentinel).** If your answer presents a founder-facing ownership/dilution **table** or a **post-financing ownership %**, you MUST run a script-backed path — `quick_assess` (fast-assess; writes the `fast_assess_only.json` sentinel + `report_fast_assess.md`), `concise_report` (concise mode; writes the real `cap_state.json` + `scenarios.json` + `report_concise.md`), or the full pipeline — do NOT hand-build such an answer in chat. A one-line directional aside while gathering inputs (e.g. "≈20% to new investors") is fine in chat and writes no artifact. This keeps any quantitative ownership answer backed by the script + sentinel, so downstream consumers can detect that cap-table ran.
 
 ### Step 1: Read or Create Founder Context
 
@@ -415,6 +417,21 @@ python3 "$SCRIPTS/verify_one.py" --rule-lookup delaware_cross_border.qsbs_date_s
 - **`lookup_status: "not_found"`** — the rule_id was wrong; pick the correct one or fall back to fast-assess / full pipeline.
 
 This writes no artifact and runs in well under a second. If the founder then supplies instruments or asks for the full picture, route to fast-assess or the full pipeline.
+
+### Step 5-concise (CONCISE MODE ONLY): run the math, render a short answer, skip the heavy tail
+
+For a single quick math question, do Steps 2–3 (build `inputs.json` + `instruments.json` + a one-line `scenario_requests.json` from the founder's description, Lane 4), then run ONLY the math producers + `concise_report.py`. **Skip** `counsel_packet`, the full `compose_report`, `visualize`, `explore`, and the Context-B coaching sub-agent. The over-production in the full pipeline is the model driving ~14 sequential tool calls plus the coaching sub-agent — not the scripts (each runs in well under 0.1 s); concise mode collapses the tail to one render.
+
+```bash
+mkdir -p "$REVIEW_DIR"
+python3 "$SCRIPTS/cap_state.py" --inputs "$REVIEW_DIR/inputs.json" --instruments "$REVIEW_DIR/instruments.json" --run-id "$RUN_ID" -o "$REVIEW_DIR/cap_state.json"
+python3 "$SCRIPTS/rule_audit.py" --phase=pre_math --inputs "$REVIEW_DIR/inputs.json" --instruments "$REVIEW_DIR/instruments.json" --cap-state "$REVIEW_DIR/cap_state.json" --run-id "$RUN_ID" -o "$REVIEW_DIR/rule_audit.json"
+python3 "$SCRIPTS/run_scenario.py" --inputs "$REVIEW_DIR/inputs.json" --instruments "$REVIEW_DIR/instruments.json" --cap-state "$REVIEW_DIR/cap_state.json" --scenarios-input "$REVIEW_DIR/scenario_requests.json" --run-id "$RUN_ID" -o "$REVIEW_DIR/scenarios.json"
+python3 "$SCRIPTS/rule_audit.py" --phase=post_math --inputs "$REVIEW_DIR/inputs.json" --scenarios "$REVIEW_DIR/scenarios.json" --run-id "$RUN_ID" -o "$REVIEW_DIR/rule_audit.json"
+python3 "$SCRIPTS/concise_report.py" --inputs "$REVIEW_DIR/inputs.json" --scenarios "$REVIEW_DIR/scenarios.json" --rule-audit "$REVIEW_DIR/rule_audit.json" --run-id "$RUN_ID" -o "$REVIEW_DIR/report_concise.md"
+```
+
+Present `report_concise.md` verbatim — never re-derive its numbers in chat. Concise mode writes the real `cap_state.json` + `scenarios.json` (so downstream consumers detect cap-table ran). Then jump to **Step 12: Deliver Artifacts** and offer the full review as a follow-up.
 
 ### Step 5: Determine Scenarios + Run Math → `scenarios.json`
 
