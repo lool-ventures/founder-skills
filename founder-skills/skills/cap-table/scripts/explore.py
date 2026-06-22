@@ -373,6 +373,16 @@ def render_explorer_html(
                     border-radius: var(--r-input); background: transparent; color: var(--label);
                     font-size: 11px; font-family: var(--font-mono); cursor: pointer; }}
   @media (max-width: 760px) {{ .graphics-row {{ grid-template-columns: 1fr; }} }}
+  /* C1 two-up compare */
+  .compare-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 12px 0; }}
+  @media (max-width: 760px) {{ .compare-grid {{ grid-template-columns: 1fr; }} }}
+  .compare-card {{ border: 1px solid var(--border); border-radius: 8px; padding: 20px 22px;
+                    background: var(--surface); }}
+  .compare-card .cmp-slot {{ display: inline-block; font-size: 11px; font-weight: 700; color: #fff;
+                              border-radius: var(--r-input); padding: 2px 8px; margin-right: 8px; }}
+  .compare-card .cmp-canvas {{ position: relative; width: 120px; height: 120px; flex: none; }}
+  .compare-card table {{ margin: 0; }}
+  .compare-card td {{ border: none; padding: 3px 0; }}
   @media print {{
     .no-print {{ display: none !important; }}
     body {{ background: #fff; color: #111; }}
@@ -392,6 +402,8 @@ def render_explorer_html(
   <div class="controls no-print">
     <button class="btn cue" id="counsel-cue" hidden title="Jump to questions for your lawyer">
       <svg class="ico" viewBox="0 0 24 24" style="stroke:var(--lool-warning);"><path d="M12 3v18M5 7h14M7 7l-3 7h6l-3-7zM17 7l-3 7h6l-3-7z"/></svg><span id="counsel-cue-label"></span></button>
+    <button class="btn" id="compare-toggle" title="Compare two scenarios side by side">
+      <svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="16" rx="1"/><rect x="14" y="4" width="7" height="16" rx="1"/></svg><span id="compare-label">Compare</span></button>
     <button class="btn" id="theme-toggle" title="Toggle light/dark" aria-label="Toggle light/dark theme">
       <svg class="ico" id="theme-ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
     <button class="btn" id="print-btn" title="Print or save as PDF">
@@ -456,6 +468,12 @@ def render_explorer_html(
       <div class="impact-callout" id="impact-callout" hidden></div>
       <div id="scenario-variable"></div>
     </div>
+    <div id="compare-view" hidden>
+      <h2 style="margin-top:0;">Side by side</h2>
+      <p class="meta" style="margin-top:0;">Which round leaves founders better off? Pin a baseline (left rail), then pick the scenario to compare.</p>
+      <div class="compare-grid" id="compare-grid"></div>
+      <div class="impact-callout" id="compare-verdict" hidden></div>
+    </div>
   </main>
   <div class="right-rail" id="counsel-rail">
     <div class="section-label">Questions for your lawyer</div>
@@ -509,9 +527,14 @@ const NEUTRAL = "#A6AEB5";
 function sliceColor(cat) {{ return PALETTE[cat.replace(/_pct$/, "")] || NEUTRAL; }}
 function sliceLabel(cat) {{ return cat.replace(/_pct$/, "").replace(/_/g, " "); }}
 
-let _chartInstance = null;
+// Chart registry keyed by canvas id (C1): the single-view donut ("donut-chart")
+// plus the two compare donuts ("cmp-donut-a"/"cmp-donut-b") must coexist, so a
+// single global won't do. Every donut site looks up / tears down by canvas id.
+const _charts = {{}};
+function _destroyChart(id) {{ if (_charts[id]) {{ _charts[id].destroy(); delete _charts[id]; }} }}
 let _pinnedScenarioIdx = null;
 let _activeIdx = 0;
+let _compareMode = false;
 let _walkthroughTimer = null;
 
 // P0 number-ticker state. `_prevMetrics` caches the last *displayed* value per
@@ -738,17 +761,19 @@ function renderDonut(canvasEl, breakdown, animate) {{
   const colors = DONUT_ORDER.map(_wedgeFill);
   const borderColor = getComputedStyle(document.body).getPropertyValue("--bg");
 
-  // Morph in place when the chart is already bound to this (persistent) canvas.
-  if (_chartInstance && _chartInstance.canvas === canvasEl) {{
-    _chartInstance.data.labels = labels;
-    _chartInstance.data.datasets[0].data = data;
-    _chartInstance.data.datasets[0].backgroundColor = colors;
-    _chartInstance.data.datasets[0].borderColor = borderColor;
-    if (doAnim) {{ _chartInstance.update(); }} else {{ _chartInstance.update("none"); }}
+  // Morph in place when a chart is already bound to this (persistent) canvas.
+  const cid = canvasEl.id;
+  const existing = _charts[cid];
+  if (existing && existing.canvas === canvasEl) {{
+    existing.data.labels = labels;
+    existing.data.datasets[0].data = data;
+    existing.data.datasets[0].backgroundColor = colors;
+    existing.data.datasets[0].borderColor = borderColor;
+    if (doAnim) {{ existing.update(); }} else {{ existing.update("none"); }}
     return;
   }}
-  if (_chartInstance) _chartInstance.destroy();
-  _chartInstance = new Chart(canvasEl, {{
+  _destroyChart(cid);
+  _charts[cid] = new Chart(canvasEl, {{
     type: "doughnut",
     data: {{ labels, datasets: [{{ data, backgroundColor: colors, borderWidth: 2, borderColor }}] }},
     options: {{
@@ -974,7 +999,7 @@ function selectScenario(idx) {{
   }} else {{
     // No donut here — destroy the chart so it does not retain a hidden, stale
     // canvas, and hide the persistent impact callout.
-    if (_chartInstance) {{ _chartInstance.destroy(); _chartInstance = null; }}
+    _destroyChart("donut-chart");
     document.getElementById("impact-callout").hidden = true;
   }}
 
@@ -1018,8 +1043,82 @@ function selectScenario(idx) {{
     _metricsIntroDone = true;
   }}
 
-  // Compare banner
+  // Compare banner + (if active) the two-up compare view
   updateCompareBanner();
+  if (_compareMode) renderCompare();
+}}
+
+// ---------------------------------------------------------------------------
+// C1: true side-by-side compare — both donuts, both metric sets, the verdict.
+// Uses the chart registry (separate canvas ids) so two donuts coexist.
+// ---------------------------------------------------------------------------
+function _compareTargetIdx() {{
+  // Prefer the pinned baseline (B); else the first modeled scenario != active.
+  const modeled = i => {{ const s = DATA.scenarios[i]; return s && (s.completeness === "full" || s.completeness === "mixed"); }};
+  if (_pinnedScenarioIdx !== null && _pinnedScenarioIdx !== _activeIdx && modeled(_pinnedScenarioIdx)) return _pinnedScenarioIdx;
+  for (let i = 0; i < DATA.scenarios.length; i++) if (i !== _activeIdx && modeled(i)) return i;
+  return -1;
+}}
+
+function _cmpRow(label, val) {{
+  return `<tr><td style="color:var(--muted);">${{label}}</td><td class="num">${{val}}</td></tr>`;
+}}
+
+function renderCompare() {{
+  const grid = document.getElementById("compare-grid");
+  const verdict = document.getElementById("compare-verdict");
+  const aIdx = _activeIdx, bIdx = _compareTargetIdx();
+  if (bIdx === -1) {{
+    grid.innerHTML = "<p class='meta'>Pick or pin a second fully-modeled scenario in the left rail to compare.</p>";
+    verdict.hidden = true;
+    return;
+  }}
+  const A = DATA.scenarios[aIdx], B = DATA.scenarios[bIdx];
+  const cols = [
+    {{ s: A, slot: "A", tag: "var(--lool-blue)", canvas: "cmp-donut-a" }},
+    {{ s: B, slot: "B", tag: "var(--lool-azure)", canvas: "cmp-donut-b" }},
+  ];
+  grid.innerHTML = cols.map(c => {{
+    const s = c.s;
+    const fp = (s.aggregate && s.aggregate.founders_pct) || 0;
+    const price = s.equity_financing_price != null ? "$" + s.equity_financing_price.toFixed(4) : "—";
+    const fd = s.post_round_fd != null ? fmtShares(s.post_round_fd) : "—";
+    return `<div class="compare-card">
+      <div style="margin-bottom:14px;"><span class="cmp-slot" style="background:${{c.tag}};">${{escape(c.slot)}}</span><strong>${{escape(s.label)}}</strong></div>
+      <div style="display:flex;gap:18px;align-items:center;">
+        <div class="cmp-canvas"><canvas id="${{c.canvas}}"></canvas></div>
+        <table style="flex:1;"><tbody>
+          ${{_cmpRow("Founders", "<strong>" + pct(fp) + "</strong>")}}
+          ${{_cmpRow("Price/share", price)}}
+          ${{_cmpRow("Shares after", fd)}}
+        </tbody></table>
+      </div>
+    </div>`;
+  }}).join("");
+  renderDonut(document.getElementById("cmp-donut-a"), A.aggregate || {{}}, false);
+  renderDonut(document.getElementById("cmp-donut-b"), B.aggregate || {{}}, false);
+
+  const fa = (A.aggregate && A.aggregate.founders_pct) || 0;
+  const fb = (B.aggregate && B.aggregate.founders_pct) || 0;
+  const better = fa >= fb ? A : B;
+  const diff = Math.abs(fa - fb) * 100;
+  verdict.innerHTML = `<strong>${{escape(better.label)}}</strong> keeps founders ${{diff.toFixed(1)}} points higher — ${{pct(Math.max(fa, fb))}} vs ${{pct(Math.min(fa, fb))}} fully diluted.`;
+  verdict.hidden = false;
+}}
+
+function toggleCompare() {{
+  _compareMode = !_compareMode;
+  const lbl = document.getElementById("compare-label");
+  if (lbl) lbl.textContent = _compareMode ? "Exit compare" : "Compare";
+  document.getElementById("compare-toggle").classList.toggle("primary", _compareMode);
+  show("scenario-view", !_compareMode);
+  show("compare-view", _compareMode);
+  if (_compareMode) {{
+    renderCompare();
+  }} else {{
+    _destroyChart("cmp-donut-a");
+    _destroyChart("cmp-donut-b");
+  }}
 }}
 
 function updateCompareBanner() {{
@@ -1138,10 +1237,11 @@ function toggleTheme() {{
       ? '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'
       : '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
   }}
-  // Re-tint the donut border to the new --bg without re-animating the wedges.
-  if (_chartInstance) {{
-    _chartInstance.data.datasets[0].borderColor = getComputedStyle(document.body).getPropertyValue("--bg");
-    _chartInstance.update("none");
+  // Re-tint every live donut's border to the new --bg without re-animating.
+  const bg = getComputedStyle(document.body).getPropertyValue("--bg");
+  for (const id in _charts) {{
+    _charts[id].data.datasets[0].borderColor = bg;
+    _charts[id].update("none");
   }}
 }}
 
@@ -1360,6 +1460,9 @@ document.getElementById("pin-btn").addEventListener("click", () => {{
 
 // Export to PDF via the browser's print dialog (D3).
 document.getElementById("print-btn").addEventListener("click", () => window.print());
+
+// Two-up side-by-side compare (C1).
+document.getElementById("compare-toggle").addEventListener("click", toggleCompare);
 
 // Walkthrough controls (E3): prev / play-pause / next / end.
 document.getElementById("wt-prev").addEventListener("click", () => _wtStep(-1));

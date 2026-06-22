@@ -1235,7 +1235,9 @@ class TestExploreDonutMorphWiring:
         # so guard the in-place update + stable order explicitly).
         with tempfile.TemporaryDirectory() as d:
             app = _render_explorer_app_script(d)
-        assert "DONUT_ORDER" in app and "_chartInstance.update(" in app, (
+        # C1 refactored the single _chartInstance global into a per-canvas
+        # registry; the morph now updates the registered chart in place.
+        assert "DONUT_ORDER" in app and "existing.update(" in app, (
             "donut must morph in place over a stable category order (P1), not destroy+recreate."
         )
         assert "filter: item => item.parsed > 0" in app, (
@@ -1460,7 +1462,8 @@ class TestExploreSweepSlider:
                 "\n    fp: g('founder-pct'), price: g('price-psh'), fd: g('post-fd'),"
                 "\n    legend: g('legend'), impact: g('impact-callout'),"
                 "\n    variable: g('scenario-variable'), sankey: g('sankey'),"
-                "\n    donut: _chartInstance ? JSON.stringify(_chartInstance.data.datasets[0].data) : null,"
+                "\n    donut: _charts['donut-chart']"
+                "\n      ? JSON.stringify(_charts['donut-chart'].data.datasets[0].data) : null,"
                 "\n  });"
                 "\n}"
                 "\nconst _i = DATA.sweep.frames.length - 1;"  # use a frame far from the base
@@ -1789,3 +1792,63 @@ class TestExploreWalkthroughControls:
             app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
         assert "No counsel-review items were flagged" in app
         assert 'nCounsel === 1 ? "" : "s"' in app
+
+
+class TestExploreCompareView:
+    def test_compare_markup_and_functions(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        assert 'id="compare-toggle"' in html, "Compare button missing (C1)"
+        assert 'id="compare-view"' in html and 'id="compare-grid"' in html
+        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        assert "function renderCompare" in app and "function toggleCompare" in app
+        assert "cmp-donut-a" in app and "cmp-donut-b" in app
+
+    def test_chart_registry_replaces_single_global(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+        assert "const _charts" in app and "function _destroyChart" in app
+        # The single-global must be fully gone so two donuts can coexist.
+        assert "_chartInstance" not in app, "C1 must remove the single _chartInstance global"
+
+    def test_compare_runs_headless_with_two_donuts(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not available; skipping compare headless smoke")
+        with tempfile.TemporaryDirectory() as d:
+            _make_fixture_dir(d)
+            scenarios = {
+                "scenarios": [
+                    _full_scenario("p1", "Base case", 0.50),
+                    _full_scenario("p2", "Higher pre-money", 0.58),
+                ],
+                "metadata": {"run_id": "rid1"},
+            }
+            with open(os.path.join(d, "scenarios.json"), "w", encoding="utf-8") as f:
+                json.dump(scenarios, f)
+            out = os.path.join(d, "explorer.html")
+            rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
+            assert rc == 0, err
+            with open(out, encoding="utf-8") as f:
+                app = re.findall(r"<script>(.*?)</script>", f.read(), re.DOTALL)[-1]
+            runner = (
+                _DOM_SHIM
+                + "\n"
+                + app
+                + "\ntoggleCompare();"  # enter compare → renders two donuts via the registry
+                + "\nconst _g = document.getElementById('compare-grid').innerHTML || '';"
+                + "\nif (!_g.length) throw new Error('compare-grid not populated');"
+                + "\nif (!_charts['cmp-donut-a'] || !_charts['cmp-donut-b'])"
+                + "\n  throw new Error('both compare donuts must register');"
+                + "\nif (_charts['cmp-donut-a'] === _charts['cmp-donut-b'])"
+                + "\n  throw new Error('two distinct chart instances required');"
+                + "\ntoggleCompare();"  # exit → tears the compare donuts down
+                + "\nif (_charts['cmp-donut-a'] || _charts['cmp-donut-b'])"
+                + "\n  throw new Error('compare donuts must be torn down on exit');"
+                + "\nconsole.log('OK_COMPARE');\n"
+            )
+            js_path = os.path.join(d, "runner.js")
+            with open(js_path, "w", encoding="utf-8") as f:
+                f.write(runner)
+            res = subprocess.run([node, js_path], capture_output=True, text=True)
+        assert res.returncode == 0 and "OK_COMPARE" in res.stdout, f"compare view threw at runtime:\n{res.stderr}"
