@@ -95,7 +95,11 @@ def _sweep_payload(sweep: dict[str, Any] | None) -> dict[str, Any] | None:
                 "per_note": _trim(o.get("per_note") or {}, _note_keys),
             }
         )
-    return {"axis": sweep.get("axis", "pre_money"), "frames": frames}
+    return {
+        "axis": sweep.get("axis", "pre_money"),
+        "base_scenario_id": sweep.get("base_scenario_id"),
+        "frames": frames,
+    }
 
 
 def render_explorer_html(
@@ -211,8 +215,23 @@ def render_explorer_html(
   .btn:hover {{ border-color: var(--lool-azure); }}
   .btn.primary {{ background: var(--lool-blue); color: white; border-color: var(--lool-blue); }}
   .btn.primary:hover {{ background: var(--lool-blue-deep); }}
-  .layout {{ display: grid; grid-template-columns: 240px 1fr 280px;
+  .layout {{ display: grid; grid-template-columns: 236px minmax(0, 1fr) 312px;
              min-height: calc(100vh - 65px); }}
+  /* Counsel rail stacks below content on small laptops/tablets; everything
+     stacks single-column on phones. The header counsel cue keeps the rail
+     reachable when it's pushed out of sight. */
+  @media (max-width: 1180px) {{
+    .layout {{ grid-template-columns: 220px minmax(0, 1fr); }}
+    .right-rail {{ grid-column: 1 / -1; border-left: none; border-top: 1px solid var(--border);
+                    max-height: none; }}
+  }}
+  @media (max-width: 760px) {{
+    .layout {{ grid-template-columns: 1fr; }}
+    aside {{ grid-column: 1 / -1; border-right: none; border-bottom: 1px solid var(--border); }}
+    .metric-row {{ grid-template-columns: 1fr !important; }}
+    .graphics-row {{ grid-template-columns: 1fr !important; }}
+    .compare-grid {{ grid-template-columns: 1fr !important; }}
+  }}
   aside {{ padding: 16px; border-right: 1px solid var(--border); background: var(--surface); }}
   .section-label {{ font-size: 11px; color: var(--label); margin-bottom: 8px;
                      text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }}
@@ -222,7 +241,8 @@ def render_explorer_html(
                      font-size: 14px; font-family: var(--font-body); transition: all .12s ease; }}
   .scenario-pill:hover {{ border-color: var(--lool-azure); }}
   .scenario-pill.active {{ border-color: var(--lool-blue); background: var(--accent-bg); font-weight: 600; }}
-  .scenario-pill.pinned::after {{ content: "📌"; margin-left: 6px; font-size: 11px; }}
+  .scenario-pill.pinned::after {{ content: " · baseline"; color: var(--lool-azure);
+                                   font-size: 11px; font-weight: 600; }}
   main {{ padding: 24px; overflow-y: auto; }}
   .right-rail {{ padding: 16px; border-left: 1px solid var(--border); background: var(--surface);
                   overflow-y: auto; max-height: calc(100vh - 65px); }}
@@ -257,9 +277,14 @@ def render_explorer_html(
                       color: var(--heading); }}
   .number-label {{ font-size: 12px; color: var(--muted); text-transform: uppercase;
                     letter-spacing: 0.06em; margin-top: 2px; }}
-  .metric-row {{ display: flex; gap: 24px; margin: 16px 0; }}
-  .metric {{ flex: 1; padding: 12px 16px; background: var(--surface); border-radius: 0;
-              border: 1px solid var(--border); }}
+  .metric-row {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+                  gap: 14px; margin: 16px 0; }}
+  .metric {{ padding: 14px 18px; background: var(--surface); border-radius: 6px;
+              border: 1px solid var(--border); transition: background .15s, border-color .15s; }}
+  .number-display {{ font-size: clamp(24px, 2.6vw, 36px); }}
+  /* Modeled what-if: tint the slider panel + metric cards so a slider-driven
+     number never reads as the agreed round. */
+  .metric-row.modeled .metric {{ background: var(--lool-warning-tint); border-color: var(--lool-warning); }}
   #sweep-wrap {{ margin: 16px 0; padding: 12px 16px; background: var(--surface);
                   border: 1px solid var(--border); }}
   #sweep-wrap label {{ display: block; font-size: 11px; text-transform: uppercase;
@@ -275,11 +300,18 @@ def render_explorer_html(
                               color: var(--lool-warning); padding: 4px 8px; border-radius: var(--r-input);
                               font-family: var(--font-body); cursor: pointer; }}
   .walkthrough-toast {{ position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-                          background: var(--fg); color: var(--bg); padding: 14px 20px;
-                          border-radius: var(--r-input); font-size: 14px; max-width: 600px; z-index: 1000;
-                          box-shadow: var(--shadow-soft); opacity: 0;
+                          background: var(--fg); color: var(--bg); padding: 12px 16px;
+                          border-radius: var(--r-input); font-size: 14px; max-width: 640px; z-index: 1000;
+                          box-shadow: var(--shadow-soft); opacity: 0; pointer-events: none;
+                          display: flex; align-items: center; gap: 10px;
                           transition: opacity 0.3s, transform 0.3s; }}
-  .walkthrough-toast.visible {{ opacity: 1; transform: translateX(-50%) translateY(-4px); }}
+  .walkthrough-toast.visible {{ opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(-4px); }}
+  .wt-ctl {{ flex: none; width: 26px; height: 26px; padding: 0; display: inline-flex;
+              align-items: center; justify-content: center; background: transparent;
+              border: 1px solid rgba(255,255,255,0.35); border-radius: var(--r-input);
+              color: var(--bg); font-size: 15px; line-height: 1; cursor: pointer; font-family: var(--font-body); }}
+  .wt-ctl .ico {{ width: 13px; height: 13px; }}
+  #wt-msg {{ flex: 1; min-width: 0; }}
   .sankey-container {{ margin: 24px 0; border: 1px solid var(--border); border-radius: 0;
                         padding: 16px; background: var(--surface); }}
   .sankey-container h3 {{ margin: 0 0 12px; font-size: 14px; color: var(--label);
@@ -288,6 +320,67 @@ def render_explorer_html(
   .sankey-path:hover {{ opacity: 0.7; cursor: pointer; }}
   .sankey-label {{ font-size: 11px; fill: var(--fg); font-family: var(--font-body); }}
   .sankey-block {{ stroke: var(--bg); stroke-width: 1; }}
+
+  /* ---- PR1 usability: icons, counsel cue, print, slider panel, graphics ---- */
+  .btn {{ display: inline-flex; align-items: center; gap: 7px; }}
+  .ico {{ width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.7;
+          flex: none; }}
+  .btn.cue {{ border-color: var(--lool-warning); background: var(--lool-warning-tint);
+              color: var(--lool-warning); font-weight: 600; }}
+  .btn.cue:hover {{ border-color: var(--lool-warning); }}
+  /* Slider panel (what-if): primary control at top; folds in the modeled state. */
+  #sweep-wrap {{ border-radius: 8px; }}
+  #sweep-wrap.modeled {{ background: var(--lool-warning-tint); border-color: var(--lool-warning); }}
+  .sweep-head {{ display: flex; justify-content: space-between; align-items: center;
+                  gap: 16px; min-height: 28px; }}
+  .sweep-title {{ display: flex; align-items: center; gap: 9px; font-size: 12px;
+                   text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600;
+                   color: var(--label); }}
+  #sweep-wrap.modeled .sweep-title {{ color: var(--lool-warning); }}
+  .sweep-pre {{ font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums;
+                 color: var(--heading); white-space: nowrap; }}
+  .sweep-reset {{ padding: 4px 11px; border: 1px solid var(--lool-warning); border-radius: var(--r-input);
+                   background: var(--bg); color: var(--lool-warning); font-size: 12px; font-weight: 600;
+                   font-family: var(--font-body); cursor: pointer; }}
+  /* Donut + flow side by side; shared legend below. */
+  .graphics-row {{ display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 14px;
+                    margin: 16px 0; align-items: stretch; }}
+  .graphics-card {{ border: 1px solid var(--border); border-radius: 8px; padding: 18px;
+                     background: var(--surface); min-width: 0; }}
+  .legend-summary {{ border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px;
+                      background: var(--surface-2); margin: 4px 0 20px; }}
+  .legend-summary .legend {{ display: flex; flex-wrap: wrap; gap: 8px 22px; }}
+  .legend-summary .legend li {{ gap: 9px; }}
+  .donut-summary {{ font-size: 12px; color: var(--label); margin: 12px 0 0; line-height: 1.55; }}
+  /* Counsel relevance tiers + flow caption */
+  .rel-badge {{ display: inline-block; font-size: 9px; font-weight: 700; text-transform: uppercase;
+                 letter-spacing: 0.05em; padding: 2px 7px; border-radius: var(--r-pill); }}
+  .rel-applies {{ background: var(--lool-warning-tint); color: var(--lool-warning); }}
+  .rel-likely {{ background: var(--accent-bg); color: var(--heading-2); }}
+  .rel-general {{ background: var(--surface-2); color: var(--lool-slate); }}
+  .flow-cap {{ font-size: 13px; fill: var(--label); font-style: italic; }}
+  .counsel-item {{ padding: 13px 0; border-top: 1px solid var(--border); }}
+  .counsel-item .ci-head {{ display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }}
+  .counsel-item .ci-domain {{ font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
+                               color: var(--label); }}
+  .counsel-item .ci-title {{ font-size: 13px; font-weight: 600; color: var(--fg); line-height: 1.35;
+                              margin-bottom: 4px; }}
+  .counsel-item .ci-q {{ font-size: 12px; line-height: 1.5; color: var(--muted); }}
+  .counsel-code {{ display: none; margin-top: 6px; font-family: var(--font-mono); font-size: 10px;
+                    color: var(--label); }}
+  #counsel-list.codes-shown .counsel-code {{ display: block; }}
+  .codes-toggle {{ margin-top: 14px; width: 100%; padding: 7px; border: 1px dashed var(--border);
+                    border-radius: var(--r-input); background: transparent; color: var(--label);
+                    font-size: 11px; font-family: var(--font-mono); cursor: pointer; }}
+  @media (max-width: 760px) {{ .graphics-row {{ grid-template-columns: 1fr; }} }}
+  @media print {{
+    .no-print {{ display: none !important; }}
+    body {{ background: #fff; color: #111; }}
+    .layout {{ display: block; }}
+    aside, .right-rail {{ border: none; }}
+    .metric, .graphics-card, .legend-summary {{ break-inside: avoid; }}
+    [hidden] {{ display: none !important; }}
+  }}
 </style>
 </head>
 <body>
@@ -296,9 +389,15 @@ def render_explorer_html(
     <h1>Cap Table Explorer — {company}</h1>
     <span class="meta">As of <span id="as-of">{_esc(cap_state.get("as_of_date", ""))}</span></span>
   </div>
-  <div class="controls">
-    <button class="btn" id="theme-toggle" title="Toggle light/dark">☀️</button>
-    <button class="btn primary" id="walkthrough-btn">▶ Walkthrough</button>
+  <div class="controls no-print">
+    <button class="btn cue" id="counsel-cue" hidden title="Jump to questions for your lawyer">
+      <svg class="ico" viewBox="0 0 24 24" style="stroke:var(--lool-warning);"><path d="M12 3v18M5 7h14M7 7l-3 7h6l-3-7zM17 7l-3 7h6l-3-7z"/></svg><span id="counsel-cue-label"></span></button>
+    <button class="btn" id="theme-toggle" title="Toggle light/dark" aria-label="Toggle light/dark theme">
+      <svg class="ico" id="theme-ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
+    <button class="btn" id="print-btn" title="Print or save as PDF">
+      <svg class="ico" viewBox="0 0 24 24"><path d="M6 9V3h12v6"/><rect x="6" y="13" width="12" height="8"/><path d="M6 17H3v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5h-3"/></svg>Export PDF</button>
+    <button class="btn primary" id="walkthrough-btn">
+      <svg class="ico" id="walkthrough-ico" viewBox="0 0 24 24" style="fill:currentColor;stroke:none;"><path d="M8 5v14l11-7z"/></svg><span id="walkthrough-label">Walkthrough</span></button>
   </div>
 </header>
 <div class="layout">
@@ -307,7 +406,12 @@ def render_explorer_html(
     <div id="scenario-list"></div>
     <div style="margin-top: 24px;">
       <div class="section-label">Compare</div>
-      <button class="btn" id="pin-btn" style="width:100%;">📌 Pin current as baseline</button>
+      <button class="btn" id="pin-btn" style="width:100%;">
+        <svg class="ico" viewBox="0 0 24 24"><path d="M9 4h6l-1 7 3 3v2H7v-2l3-3-1-7zM12 16v4"/></svg><span id="pin-label">Pin current as baseline</span></button>
+    </div>
+    <div id="founders-block" style="margin-top:24px;" hidden>
+      <div class="section-label">Founders today</div>
+      <div id="founders-list"></div>
     </div>
   </aside>
   <main>
@@ -315,31 +419,57 @@ def render_explorer_html(
     <div id="scenario-view">
       <div id="scenario-head"></div>
       <div id="scenario-blockers"></div>
-      <div class="metric-row" id="metric-row" hidden>
-        <div class="metric" id="metric-founder"><div class="number-display" id="founder-pct">—</div><div class="number-label">Founder ownership</div></div>
-        <div class="metric" id="metric-price"><div class="number-display" id="price-psh">—</div><div class="number-label">Price per share</div></div>
-        <div class="metric" id="metric-fd"><div class="number-display" id="post-fd">—</div><div class="number-label">Post-round FD shares</div></div>
-      </div>
-      <div id="sweep-wrap" hidden>
-        <label for="sweep-slider">Pre-money what-if — drag to model</label>
-        <input type="range" id="sweep-slider" min="0" max="0" value="0" step="1" aria-label="Pre-money valuation">
+      <div id="sweep-wrap" class="no-print" hidden>
+        <div class="sweep-head">
+          <div class="sweep-title">
+            <svg class="ico" viewBox="0 0 24 24" style="width:18px;height:18px;"><path d="M4 8h8M16 8h4M4 16h4M12 16h8"/><circle cx="14" cy="8" r="2"/><circle cx="10" cy="16" r="2"/></svg>
+            <span id="sweep-title-text">Model the round — drag to explore a valuation</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:14px;">
+            <span class="sweep-pre"><span id="sweep-pre-val">—</span> <span style="font-size:11px;font-weight:500;color:var(--muted);">pre-money</span></span>
+            <button class="sweep-reset" id="sweep-reset" hidden>Reset to scenario</button>
+          </div>
+        </div>
+        <input type="range" id="sweep-slider" min="0" max="0" value="0" step="1" style="width:100%;margin-top:12px;accent-color:var(--lool-blue);" aria-label="Pre-money valuation">
         <div class="sweep-readout" id="sweep-readout"></div>
       </div>
-      <div class="donut-wrap" id="donut-wrap" hidden>
-        <div class="donut-canvas"><canvas id="donut-chart"></canvas></div>
+      <div class="metric-row" id="metric-row" hidden>
+        <div class="metric" id="metric-founder"><div class="number-display" id="founder-pct">—</div><div class="number-label">Founder ownership</div><div class="number-label" id="founder-delta" style="color:var(--lool-danger);margin-top:4px;"></div></div>
+        <div class="metric" id="metric-price"><div class="number-display" id="price-psh">—</div><div class="number-label">Price per share</div></div>
+        <div class="metric" id="metric-fd"><div class="number-display" id="post-fd">—</div><div class="number-label"><span class="term" title="Fully-diluted shares — the total if every option and convertible converts to stock">Shares after round</span></div></div>
+      </div>
+      <div class="graphics-row" id="graphics-row" hidden>
+        <div class="graphics-card" style="display:flex;flex-direction:column;align-items:center;">
+          <div class="section-label" style="align-self:flex-start;">Ownership after this round</div>
+          <div class="donut-canvas"><canvas id="donut-chart"></canvas></div>
+        </div>
+        <div class="graphics-card" id="sankey-container">
+          <div class="section-label">Where your ownership went</div>
+          <p class="donut-summary" id="flow-intro" style="margin:0 0 8px;">Founders &amp; the option pool carry straight across. New investors and converting SAFEs are issued this round, so the same founder shares become a smaller slice of a bigger total.</p>
+          <div id="sankey"></div>
+        </div>
+      </div>
+      <div class="legend-summary" id="legend-summary" hidden>
         <ul class="legend" id="legend"></ul>
+        <p class="donut-summary" id="donut-summary"></p>
       </div>
       <div class="impact-callout" id="impact-callout" hidden></div>
-      <div class="sankey-container" id="sankey-container" hidden><h3>Dilution flow</h3><div id="sankey"></div></div>
       <div id="scenario-variable"></div>
     </div>
   </main>
-  <div class="right-rail">
-    <div class="section-label">Counsel Review</div>
+  <div class="right-rail" id="counsel-rail">
+    <div class="section-label">Questions for your lawyer</div>
     <div id="counsel-list"></div>
   </div>
 </div>
-<div class="walkthrough-toast" id="toast"></div>
+<div class="walkthrough-toast no-print" id="toast">
+  <button class="wt-ctl" id="wt-prev" title="Previous" aria-label="Previous step">‹</button>
+  <button class="wt-ctl" id="wt-playpause" title="Pause" aria-label="Pause">
+    <svg class="ico" id="wt-pp-ico" viewBox="0 0 24 24" style="fill:currentColor;stroke:none;"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg></button>
+  <button class="wt-ctl" id="wt-next" title="Next" aria-label="Next step">›</button>
+  <span id="wt-msg"></span>
+  <button class="wt-ctl" id="wt-close" title="End walkthrough" aria-label="End walkthrough">×</button>
+</div>
 
 <script>
 {chart_js}
@@ -472,6 +602,12 @@ function setSankeyHTML(container, html, instant) {{
   }}, 150);
 }}
 
+// Ownership flow — a "before → after" story in plain language (B1).
+// Carried classes (founders, preferred, pool) flow straight across;
+// new issuance (converting SAFEs/notes + new investors) rises in FROM BELOW the
+// "after" column, so the same founder shares visibly become a smaller slice of
+// a bigger total. Keeps setSankeyHTML + .sankey-path/.sankey-block for the
+// transition + headless tests.
 function renderSankey(container, scenarioData, instant) {{
   const pre = DATA.pre_financing;
   const breakdown = scenarioData.shares_breakdown || {{}};
@@ -482,90 +618,68 @@ function renderSankey(container, scenarioData, instant) {{
     return;
   }}
 
-  // Sources (pre-financing pools)
-  const sources = [
-    {{ label: "Common", value: pre.common, color: PALETTE.founders }},
-    {{ label: "Preferred", value: pre.preferred_as_converted, color: PALETTE.preferred }},
-    {{ label: "Option Pool", value: pre.options_outstanding + pre.options_available, color: PALETTE.option_pool }},
-  ].filter(s => s.value > 0);
+  const common = pre.common || 0;
+  const preferred = pre.preferred_as_converted || 0;
+  const poolBase = (pre.options_outstanding || 0) + (pre.options_available || 0);
+  const poolTopup = breakdown.pool_topup || 0;
+  const safeNote = (breakdown.safe_converted || 0) + (breakdown.note_converted || 0);
+  const newMoney = breakdown.new_money || 0;
 
-  // Sinks (post-financing pools)
-  const sinks = [
-    {{ label: "Founders & Common", value: pre.common, color: PALETTE.founders }},
-    {{ label: "Preferred", value: pre.preferred_as_converted, color: PALETTE.preferred }},
-    {{ label: "Option Pool + Top-up", value: (pre.options_outstanding + pre.options_available + (breakdown.pool_topup || 0)), color: PALETTE.option_pool }},
-    {{ label: "SAFE/Note Converted", value: (breakdown.safe_converted || 0) + (breakdown.note_converted || 0), color: PALETTE.safe }},
-    {{ label: "New Money", value: breakdown.new_money || 0, color: PALETTE.new_money }},
-  ].filter(s => s.value > 0);
+  const before = [
+    {{ key: "common", label: "Founders & common", v: common, c: PALETTE.founders }},
+    {{ key: "preferred", label: "Preferred", v: preferred, c: PALETTE.preferred }},
+    {{ key: "pool", label: "Option pool", v: poolBase, c: PALETTE.option_pool }},
+  ].filter(s => s.v > 0);
+  const after = [
+    {{ key: "common", label: "Founders & common", v: common, c: PALETTE.founders }},
+    {{ key: "preferred", label: "Preferred", v: preferred, c: PALETTE.preferred }},
+    {{ key: "pool", label: "Option pool", v: poolBase + poolTopup, c: PALETTE.option_pool }},
+    {{ key: "safe", label: "SAFEs converted", v: safeNote, c: PALETTE.safe }},
+    {{ key: "new", label: "New investors", v: newMoney, c: PALETTE.new_money }},
+  ].filter(s => s.v > 0);
 
-  const W = 720, H = 360;
-  const PAD = 20, BLOCK_W = 14;
-  const innerH = H - 2 * PAD;
+  const W = 760, H = 320, BW = 15, TOP = 34;
+  const LG = 168, RG = 150;
+  const innerH = H - TOP - 26;
+  const scale = innerH / postFd;  // "after" fills the height; "before" is shorter → dilution is visible
 
-  // Stack sources on left
-  let yCursor = PAD;
-  const sourceBlocks = sources.map(s => {{
-    const h = (s.value / postFd) * innerH;
-    const block = {{ ...s, y: yCursor, h }};
-    yCursor += h;
-    return block;
+  const preTotal = before.reduce((a, s) => a + s.v, 0) || 1;
+  let y = TOP + (innerH - preTotal * scale) / 2;
+  const lB = before.map(s => {{ const h = Math.max(2, s.v * scale); const b = {{ ...s, y, h }}; y += h; return b; }});
+  y = TOP + (innerH - postFd * scale) / 2;
+  const rB = after.map(s => {{ const h = Math.max(2, s.v * scale); const b = {{ ...s, y, h }}; y += h; return b; }});
+
+  const xL = LG, xR = W - RG - BW;
+  const x1 = xL + BW, x2 = xR;
+  const lByKey = {{}}; lB.forEach(b => {{ lByKey[b.key] = b; }});
+
+  let paths = "";
+  rB.forEach(rb => {{
+    const lb = lByKey[rb.key];
+    if (!lb) return;  // new issuance handled below
+    const sy = lb.y + lb.h / 2, dy = rb.y + rb.h / 2;
+    const cx1 = x1 + (x2 - x1) * 0.5, cx2 = x2 - (x2 - x1) * 0.5;
+    paths += `<path class="sankey-path" d="M ${{x1}},${{sy}} C ${{cx1}},${{sy}} ${{cx2}},${{dy}} ${{x2}},${{dy}}" stroke="${{lb.c}}" stroke-width="${{Math.max(2, rb.h)}}" fill="none" opacity="0.42"/>`;
+  }});
+  rB.filter(b => b.key === "safe" || b.key === "new").forEach((rb, i) => {{
+    const dy = rb.y + rb.h / 2;
+    const sx = x2 - (x2 - x1) * (0.30 - i * 0.12);
+    paths += `<path class="sankey-path" d="M ${{sx}},${{H}} C ${{sx}},${{dy + 46}} ${{x2 - 24}},${{dy}} ${{x2}},${{dy}}" stroke="${{rb.c}}" stroke-width="${{Math.max(2, rb.h)}}" fill="none" opacity="0.42"/>`;
   }});
 
-  // Stack sinks on right
-  yCursor = PAD;
-  const sinkBlocks = sinks.map(s => {{
-    const h = (s.value / postFd) * innerH;
-    const block = {{ ...s, y: yCursor, h }};
-    yCursor += h;
-    return block;
-  }});
+  const rect = (b, x) => `<rect class="sankey-block" x="${{x}}" y="${{b.y}}" width="${{BW}}" height="${{b.h}}" rx="1" fill="${{b.c}}"/>`;
+  const lLabels = lB.map(b => `<text class="sankey-label" x="${{xL - 6}}" y="${{b.y + b.h/2 + 4}}" text-anchor="end">${{escape(b.label)}} · ${{Math.round(b.v / preTotal * 100)}}%</text>`).join("");
+  const rLabels = rB.map(b => `<text class="sankey-label" x="${{xR + BW + 6}}" y="${{b.y + b.h/2 + 4}}" text-anchor="start">${{escape(b.label)}} · ${{Math.round(b.v / postFd * 100)}}%</text>`).join("");
 
-  // Build flow paths: each source → corresponding sink (by label match for the common/preferred/pool flows;
-  // SAFE/Note + New Money come from synthetic "issuance" sources).
-  const flows = [];
-  const matchByLabel = {{
-    "Common": "Founders & Common",
-    "Preferred": "Preferred",
-    "Option Pool": "Option Pool + Top-up",
-  }};
-
-  sourceBlocks.forEach(src => {{
-    const sinkLabel = matchByLabel[src.label];
-    const dst = sinkBlocks.find(s => s.label === sinkLabel);
-    if (dst) flows.push({{ src, dst, color: src.color, opacity: 0.55 }});
-  }});
-  // Synthetic flows from outside (right edge of source area) for new issuances
-  const safeNoteAmount = (breakdown.safe_converted || 0) + (breakdown.note_converted || 0);
-  const newMoneyAmount = breakdown.new_money || 0;
-  if (safeNoteAmount > 0) {{
-    const dst = sinkBlocks.find(s => s.label === "SAFE/Note Converted");
-    if (dst) flows.push({{ src: {{ x: PAD, y: H/2 - 20, h: (safeNoteAmount / postFd) * innerH, label: "New issuance" }}, dst, color: PALETTE.safe, opacity: 0.55, isSynthetic: true }});
-  }}
-  if (newMoneyAmount > 0) {{
-    const dst = sinkBlocks.find(s => s.label === "New Money");
-    if (dst) flows.push({{ src: {{ x: PAD, y: H/2 + 20, h: (newMoneyAmount / postFd) * innerH, label: "Investor cash" }}, dst, color: PALETTE.new_money, opacity: 0.55, isSynthetic: true }});
-  }}
-
-  // Render SVG
-  const svg = `<svg viewBox="0 0 ${{W}} ${{H}}" style="width:100%;height:auto;max-height:400px;">
-    ${{flows.map(f => {{
-      const x1 = PAD + BLOCK_W;
-      const x2 = W - PAD - BLOCK_W;
-      const y1 = (f.src.y || PAD) + (f.src.h / 2);
-      const y2 = f.dst.y + (f.dst.h / 2);
-      const cx1 = x1 + (x2 - x1) * 0.5;
-      const cx2 = x2 - (x2 - x1) * 0.5;
-      const strokeW = Math.max(2, f.dst.h);
-      return `<path class="sankey-path" d="M ${{x1}},${{y1}} C ${{cx1}},${{y1}} ${{cx2}},${{y2}} ${{x2}},${{y2}}" stroke="${{f.color}}" stroke-width="${{strokeW}}" fill="none" opacity="${{f.opacity}}"/>`;
-    }}).join("")}}
-    ${{sourceBlocks.map(b => `
-      <rect class="sankey-block" x="${{PAD}}" y="${{b.y}}" width="${{BLOCK_W}}" height="${{b.h}}" fill="${{b.color}}"/>
-      <text class="sankey-label" x="${{PAD - 4}}" y="${{b.y + b.h/2 + 4}}" text-anchor="end">${{escape(b.label)}}</text>
-    `).join("")}}
-    ${{sinkBlocks.map(b => `
-      <rect class="sankey-block" x="${{W - PAD - BLOCK_W}}" y="${{b.y}}" width="${{BLOCK_W}}" height="${{b.h}}" fill="${{b.color}}"/>
-      <text class="sankey-label" x="${{W - PAD + 4}}" y="${{b.y + b.h/2 + 4}}" text-anchor="start">${{escape(b.label)}} (${{pct(b.value/postFd)}})</text>
-    `).join("")}}
+  const svg = `<svg viewBox="0 0 ${{W}} ${{H}}" style="width:100%;height:auto;max-height:340px;display:block;">
+    <text class="sankey-label" x="${{xL}}" y="18" style="font-weight:600;fill:var(--label);">Before · ${{fmtShares(preTotal)}} sh</text>
+    <text class="sankey-label" x="${{xR + BW}}" y="18" text-anchor="end" style="font-weight:600;fill:var(--label);">After · ${{fmtShares(postFd)}} sh</text>
+    ${{paths}}
+    ${{lB.map(b => rect(b, xL)).join("")}}
+    ${{rB.map(b => rect(b, xR)).join("")}}
+    ${{lLabels}}
+    ${{rLabels}}
+    <text class="flow-cap" x="${{x2 - (x2 - x1) * 0.22}}" y="${{H - 3}}" text-anchor="middle">↑ new shares issued this round</text>
   </svg>`;
   setSankeyHTML(container, svg, instant);
 }}
@@ -580,6 +694,40 @@ function renderSankey(container, scenarioData, instant) {{
 // of a fresh grow-in. Keys carry the `_pct` suffix; there is no warrants_pct.
 const DONUT_ORDER = ["founders_pct", "preferred_pct", "option_pool_pct", "safe_pct", "note_pct", "new_money_pct"];
 
+// E1 a11y: a non-color channel for the wedges (hatch/dot patterns) so the
+// near-identical blues are still distinguishable for color-blind/low-vision
+// founders. Guarded: when the canvas API is unavailable (headless shim — no
+// document.createElement), fall back to the solid color.
+const PATTERN_KIND = {{
+  founders_pct: "solid", preferred_pct: "diag", option_pool_pct: "dot",
+  safe_pct: "cross", note_pct: "solid", new_money_pct: "solid",
+}};
+function _wedgePattern(color, kind) {{
+  if (typeof document.createElement !== "function") return color;
+  let cv;
+  try {{ cv = document.createElement("canvas"); }} catch (e) {{ return color; }}
+  if (!cv || typeof cv.getContext !== "function") return color;
+  const S = 10; cv.width = S; cv.height = S;
+  const ctx = cv.getContext("2d");
+  if (!ctx) return color;
+  ctx.fillStyle = color; ctx.fillRect(0, 0, S, S);
+  ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.lineWidth = 2;
+  if (kind === "diag" || kind === "cross") {{
+    ctx.beginPath(); ctx.moveTo(0, S); ctx.lineTo(S, 0); ctx.stroke();
+    if (kind === "cross") {{ ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(S, S); ctx.stroke(); }}
+  }} else if (kind === "dot") {{
+    ctx.fillStyle = "rgba(255,255,255,0.6)";
+    ctx.beginPath(); ctx.arc(S / 2, S / 2, 1.7, 0, Math.PI * 2); ctx.fill();
+  }}
+  const p = ctx.createPattern(cv, "repeat");
+  return p || color;
+}}
+function _wedgeFill(cat) {{
+  const color = sliceColor(cat);
+  const kind = PATTERN_KIND[cat] || "solid";
+  return kind === "solid" ? color : _wedgePattern(color, kind);
+}}
+
 function renderDonut(canvasEl, breakdown, animate) {{
   // `animate` defaults true. The slider passes false to SNAP wedges (no
   // fabricated in-between geometry mid-drag); under capture it passes true.
@@ -587,7 +735,7 @@ function renderDonut(canvasEl, breakdown, animate) {{
   const doAnim = animate && !_REDUCED_MOTION;
   const labels = DONUT_ORDER.map(sliceLabel);
   const data = DONUT_ORDER.map(k => (breakdown[k] || 0) * 100);
-  const colors = DONUT_ORDER.map(sliceColor);
+  const colors = DONUT_ORDER.map(_wedgeFill);
   const borderColor = getComputedStyle(document.body).getPropertyValue("--bg");
 
   // Morph in place when the chart is already bound to this (persistent) canvas.
@@ -615,6 +763,14 @@ function renderDonut(canvasEl, breakdown, animate) {{
   }});
 }}
 
+// Index of the first fully/partly-modeled scenario — the default landing view
+// (D1). A structure-only "cap-implied today" scenario hides all three hero
+// metrics by design, so landing there shows a payoff-free first screen.
+function firstModeledIdx() {{
+  const i = DATA.scenarios.findIndex(s => s.completeness === "full" || s.completeness === "mixed");
+  return i === -1 ? 0 : i;
+}}
+
 function renderScenarioList() {{
   const list = document.getElementById("scenario-list");
   list.innerHTML = DATA.scenarios.map((s, i) =>
@@ -623,7 +779,21 @@ function renderScenarioList() {{
   list.querySelectorAll(".scenario-pill").forEach(b => {{
     b.addEventListener("click", () => selectScenario(parseInt(b.dataset.idx)));
   }});
-  if (DATA.scenarios.length > 0) selectScenario(0);
+  if (DATA.scenarios.length > 0) selectScenario(firstModeledIdx());
+}}
+
+// "Founders today" rail block — orientation: who holds what right now.
+function renderFoundersBlock() {{
+  const founders = DATA.founders || [];
+  if (!founders.length) return;
+  const list = document.getElementById("founders-list");
+  if (!list) return;
+  list.innerHTML = founders.map(f =>
+    `<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;">`
+    + `<span>${{escape(f.name)}}</span>`
+    + `<span class="num" style="color:var(--muted);">${{fmtShares(f.common_shares)}}</span></div>`
+  ).join("");
+  show("founders-block", true);
 }}
 
 // Ownership legend (the per-class % next to the donut). Iterates DONUT_ORDER
@@ -654,6 +824,61 @@ function renderImpact(text, animate) {{
     impact.innerHTML = "";
     impact.hidden = true;
   }}
+}}
+
+// The slider's frames model the base scenario's pre-money axis; it is only
+// meaningful on that scenario. Other scenarios hide the slider so its readout
+// never describes a different round than the cards show.
+function _isSweepBase(idx) {{
+  if (!_hasSweep || !DATA.sweep) return false;
+  const s = DATA.scenarios[idx];
+  return !!s && s.scenario_id === DATA.sweep.base_scenario_id;
+}}
+
+// Modeled-state: a slider drag opts into a hypothetical. We tint the slider
+// panel + metric cards and reveal Reset so a modeled number never reads as the
+// agreed round. Sticky until reset or a scenario switch.
+let _modeled = false;
+function enterModeled() {{
+  if (_modeled) return;
+  _modeled = true;
+  const sw = document.getElementById("sweep-wrap"); if (sw) sw.classList.add("modeled");
+  const mr = document.getElementById("metric-row"); if (mr) mr.classList.add("modeled");
+  const t = document.getElementById("sweep-title-text"); if (t) t.textContent = "Modeled what-if — not the agreed round";
+  show("sweep-reset", true);
+}}
+function exitModeled() {{
+  _modeled = false;
+  const sw = document.getElementById("sweep-wrap"); if (sw) sw.classList.remove("modeled");
+  const mr = document.getElementById("metric-row"); if (mr) mr.classList.remove("modeled");
+  const t = document.getElementById("sweep-title-text"); if (t) t.textContent = "Model the round — drag to explore a valuation";
+  show("sweep-reset", false);
+}}
+
+// Plain-language ownership summary under the shared legend (founder-facing
+// alternative to reading the donut + the chart's text alternative for a11y).
+function renderDonutSummary(agg, fd) {{
+  const el = document.getElementById("donut-summary");
+  if (!el) return;
+  const parts = [];
+  for (const cat of DONUT_ORDER) {{
+    const frac = agg[cat] || 0;
+    if (frac > 0) parts.push(`${{sliceLabel(cat)}} ${{pct(frac)}}`);
+  }}
+  const tail = fd ? ` — of ${{fmtShares(fd)}} fully-diluted shares` : "";
+  el.textContent = parts.join(", ") + tail + ".";
+  const canvas = document.getElementById("donut-chart");
+  if (canvas) canvas.setAttribute("aria-label", "Ownership after this round: " + el.textContent);
+}}
+
+// Founder-ownership delta vs today (pre-financing), shown under the founder card.
+function renderFounderDelta(impact) {{
+  const el = document.getElementById("founder-delta");
+  if (!el) return;
+  const d = impact && impact.founder_delta_pct_points;
+  if (d == null) {{ el.textContent = ""; return; }}
+  const sign = d > 0 ? "+" : "";
+  el.textContent = `${{sign}}${{d.toFixed(1)}} pts vs. today`;
 }}
 
 // Per-SAFE / per-note conversion detail tables (the <details> in the variable
@@ -720,23 +945,30 @@ function selectScenario(idx) {{
   // tear down otherwise. The canvas/sankey nodes survive the switch so P1/P2
   // can morph them in place; the metric nodes survive so the tickers tick in
   // place rather than against a freshly-rebuilt node.
+  // The what-if slider only shows when this scenario IS the sweep base — its
+  // frames model that scenario's pre-money axis; showing it on any other
+  // scenario would describe a different round than the cards (review fix).
+  const sweepHere = isFull && _hasSweep && _isSweepBase(idx);
+  exitModeled();  // a scenario switch always clears any modeled what-if state
   show("metric-row", isFull);
-  show("sweep-wrap", isFull && _hasSweep);
-  if (isFull && _hasSweep) resetSweepSlider();  // keep thumb in sync with the scenario
-  show("donut-wrap", isFull);
-  show("sankey-container", isFull);
+  show("sweep-wrap", sweepHere);
+  if (sweepHere) resetSweepSlider();  // keep thumb in sync with the scenario
+  show("graphics-row", isFull);
+  show("legend-summary", isFull);
   if (isFull) {{
     const agg = s.aggregate || {{}};
     show("metric-price", !!s.equity_financing_price);
     show("metric-fd", !!s.post_round_fd);
 
     renderLegend(agg);
+    renderDonutSummary(agg, s.post_round_fd);
+    renderFounderDelta(s.founder_impact);
 
     // Impact callout persists, so it must be cleared+hidden when absent or a
     // stale "Founder Impact" from the prior scenario lingers.
     renderImpact(s.founder_impact && s.founder_impact.plain_language, true);
 
-    // donut-wrap is now visible — Chart.js needs the canvas sized before init.
+    // graphics-row is now visible — Chart.js needs the canvas sized before init.
     renderDonut(document.getElementById("donut-chart"), agg);
     renderSankey(document.getElementById("sankey"), s);
   }} else {{
@@ -822,28 +1054,74 @@ function updateCompareBanner() {{
   }});
 }}
 
+// Relevance tier for a counsel item, derived from the producer-supplied
+// `relevance_tier` (D2). Honest default "general" when the producer hasn't
+// scoped it — we never invent per-scenario precision client-side.
+const _TIER_ORDER = {{ applies: 0, likely: 1, general: 2 }};
+const _TIER_META = {{
+  applies: {{ cls: "rel-applies", label: "Applies here" }},
+  likely:  {{ cls: "rel-likely",  label: "Likely relevant" }},
+  general: {{ cls: "rel-general", label: "General" }},
+}};
+function _counselTier(it) {{
+  const t = it.relevance_tier;
+  return (t === "applies" || t === "likely") ? t : "general";
+}}
+
 function renderCounsel() {{
   const list = document.getElementById("counsel-list");
   if (!DATA.counsel_items || DATA.counsel_items.length === 0) {{
     list.innerHTML = "<p class='meta'><em>No counsel items.</em></p>";
+    renderCounselCue(0);
     return;
   }}
-  const _n = DATA.counsel_items.length;
-  let html = "<p style='font-size:13px;color:var(--muted);'>" + _n + (_n === 1 ? " item" : " items") + " for your lawyer.</p>";
-  for (const it of DATA.counsel_items) {{
+  const items = DATA.counsel_items
+    .map(it => ({{ ...it, _tier: _counselTier(it) }}))
+    .sort((a, b) => _TIER_ORDER[a._tier] - _TIER_ORDER[b._tier]);
+  const _n = items.length;
+  let html = "<p style='font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.5;'>Not legal advice — "
+    + _n + (_n === 1 ? " question" : " questions") + " for your lawyer.</p>";
+  for (const it of items) {{
+    const meta = _TIER_META[it._tier];
     const links = it._links || [];
-    html += `<details><summary>${{escape(it.title)}}</summary>`;
-    if (it._summary) html += `<p style='font-size:12px;margin:8px 0 0;color:var(--muted);'>${{escape(it._summary)}}</p>`;
+    html += `<div class="counsel-item">`;
+    html += `<div class="ci-head"><span class="rel-badge ${{meta.cls}}">${{escape(meta.label)}}</span>`;
+    if (it.applies_to) html += `<span class="ci-domain">${{escape(it.applies_to)}}</span>`;
+    html += `</div>`;
+    html += `<div class="ci-title">${{escape(it.title)}}</div>`;
+    const q = it.counsel_question || it._summary;
+    if (q) html += `<div class="ci-q">${{escape(q)}}</div>`;
     if (links.length) {{
-      html += `<p style='font-size:12px;margin:6px 0 0;'>Source: `
-        + links.map(l => `<a href="${{escape(l[1])}}" target="_blank" rel="noopener noreferrer">${{escape(l[0])}} ↗</a>`).join(" · ")
-        + `</p>`;
+      html += `<div class="ci-q" style="margin-top:6px;">Source: `
+        + links.map(l => `<a href="${{escape(l[1])}}" target="_blank" rel="noopener noreferrer">${{escape(l[0])}}</a>`).join(" · ")
+        + `</div>`;
     }}
-    html += `<p style='font-size:11px;margin:6px 0 0;color:var(--muted);'><code>${{escape(it.rule_id)}}</code></p>`;
-    if (it.counsel_question) html += `<p style='font-size:13px;margin:8px 0;'>${{escape(it.counsel_question)}}</p>`;
-    html += `</details>`;
+    html += `<div class="counsel-code">${{escape(it.rule_id)}}</div>`;
+    html += `</div>`;
   }}
+  // B2: rule codes hidden by default behind one rail-level toggle (still
+  // reachable for counsel to cite).
+  html += `<button class="codes-toggle no-print" id="codes-toggle">Show rule codes (for counsel)</button>`;
   list.innerHTML = html;
+  document.getElementById("codes-toggle").addEventListener("click", () => {{
+    const shown = list.classList.toggle("codes-shown");
+    document.getElementById("codes-toggle").textContent =
+      shown ? "Hide rule codes" : "Show rule codes (for counsel)";
+  }});
+
+  const appliesN = items.filter(it => it._tier === "applies").length;
+  renderCounselCue(appliesN || _n);
+}}
+
+// Header "N for your lawyer" cue — counts items that apply to this cap table
+// (falls back to the total before D2 relevance lands).
+function renderCounselCue(n) {{
+  const cue = document.getElementById("counsel-cue");
+  const label = document.getElementById("counsel-cue-label");
+  if (!cue || !label) return;
+  if (!n) {{ cue.hidden = true; return; }}
+  label.textContent = n + " for your lawyer";
+  cue.hidden = false;
 }}
 
 // ---------------------------------------------------------------------------
@@ -853,7 +1131,13 @@ function toggleTheme() {{
   const current = document.body.dataset.theme || "light";
   const next = current === "light" ? "dark" : "light";
   document.body.dataset.theme = next;
-  document.getElementById("theme-toggle").textContent = next === "dark" ? "🌙" : "☀️";
+  // Swap the SVG icon (sun ↔ moon) — no emoji in product chrome.
+  const ico = document.getElementById("theme-ico");
+  if (ico) {{
+    ico.innerHTML = next === "dark"
+      ? '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'
+      : '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
+  }}
   // Re-tint the donut border to the new --bg without re-animating the wedges.
   if (_chartInstance) {{
     _chartInstance.data.datasets[0].borderColor = getComputedStyle(document.body).getPropertyValue("--bg");
@@ -865,54 +1149,103 @@ function toggleTheme() {{
 // Walkthrough demo mode
 // ---------------------------------------------------------------------------
 
-function showToast(msg, duration) {{
-  const toast = document.getElementById("toast");
-  toast.textContent = msg;
-  toast.classList.add("visible");
-  if (duration) setTimeout(() => toast.classList.remove("visible"), duration);
+function showToast(msg) {{
+  const m = document.getElementById("wt-msg");
+  if (m) m.textContent = msg;
+  document.getElementById("toast").classList.add("visible");
 }}
 
 function hideToast() {{
   document.getElementById("toast").classList.remove("visible");
 }}
 
-function startWalkthrough() {{
-  if (_walkthroughTimer) {{
-    clearTimeout(_walkthroughTimer);
-    _walkthroughTimer = null;
-    hideToast();
-    document.getElementById("walkthrough-btn").textContent = "▶ Walkthrough";
-    return;
-  }}
-  document.getElementById("walkthrough-btn").textContent = "■ Stop";
+// E3: controllable walkthrough — prev / play-pause / next over a 3-state
+// machine (idle | playing | paused). Replaces the old auto-only timer so a
+// founder can read at their own pace.
+let _wtState = "idle";
+let _wtFrame = 0;
+let _wtFrames = [];
+const _WT_DURATION = 4500;
 
+function _wtBuildFrames() {{
   const nCounsel = DATA.counsel_items.length;
   const counselMsg = nCounsel === 0
     ? "No counsel-review items were flagged for this cap table — still, run any financing past your lawyer."
     : `${{nCounsel}} counsel-review item${{nCounsel === 1 ? "" : "s"}} in the right rail — ${{nCounsel === 1 ? "a question" : "questions"}} for your lawyer, not legal advice.`;
-
-  const frames = [
-    {{ msg: "Welcome — this is your cap-table explorer. The left rail shows the scenarios we modeled.", duration: 4500, action: () => selectScenario(0) }},
-    {{ msg: `Scenario 1: ${{DATA.scenarios[0]?.label || "baseline"}}. Watch the donut + Sankey on the right.`, duration: 4500 }},
-    ...DATA.scenarios.slice(1).map((s, i) => ({{ msg: `Now: ${{s.label}} — see how ownership shifts.`, duration: 4500, action: () => selectScenario(i + 1) }})),
-    {{ msg: counselMsg, duration: 5000 }},
-    {{ msg: "Walkthrough complete. Click any scenario to explore further.", duration: 4000 }},
+  const start = firstModeledIdx();
+  return [
+    {{ msg: "Welcome — this is your cap-table explorer. The left rail shows the scenarios we modeled.", action: () => selectScenario(start) }},
+    {{ msg: `${{DATA.scenarios[start]?.label || "Your round"}} — watch the donut and the before→after flow on the right.`, action: null }},
+    ...DATA.scenarios.map((s, i) => ({{ msg: `Now: ${{s.label}} — see how ownership shifts.`, action: () => selectScenario(i) }})),
+    {{ msg: counselMsg, action: null }},
+    {{ msg: "Walkthrough complete. Click any scenario, or replay.", action: null }},
   ];
+}}
 
-  let i = 0;
-  function nextFrame() {{
-    if (i >= frames.length) {{
-      hideToast();
-      document.getElementById("walkthrough-btn").textContent = "▶ Walkthrough";
-      _walkthroughTimer = null;
-      return;
-    }}
-    const f = frames[i++];
-    if (f.action) f.action();
-    showToast(f.msg);
-    _walkthroughTimer = setTimeout(nextFrame, f.duration);
-  }}
-  nextFrame();
+function _wtRender() {{
+  const f = _wtFrames[_wtFrame];
+  if (!f) return;
+  if (f.action) f.action();
+  showToast(f.msg);
+}}
+
+function _wtClearTimer() {{
+  if (_walkthroughTimer) {{ clearTimeout(_walkthroughTimer); _walkthroughTimer = null; }}
+}}
+
+function _wtSchedule() {{
+  _wtClearTimer();
+  if (_wtState !== "playing") return;
+  _walkthroughTimer = setTimeout(() => {{
+    if (_wtFrame < _wtFrames.length - 1) {{ _wtFrame++; _wtRender(); _wtSchedule(); }}
+    else stopWalkthrough();
+  }}, _WT_DURATION);
+}}
+
+function _wtSetPlayIcon(playing) {{
+  const ico = document.getElementById("wt-pp-ico");
+  const btn = document.getElementById("wt-playpause");
+  if (ico) ico.innerHTML = playing
+    ? '<rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/>'
+    : '<path d="M8 5v14l11-7z"/>';
+  if (btn) btn.setAttribute("title", playing ? "Pause" : "Play");
+}}
+
+function _wtSetWalkButton(active) {{
+  const lbl = document.getElementById("walkthrough-label");
+  if (lbl) lbl.textContent = active ? "Stop" : "Walkthrough";
+  const ico = document.getElementById("walkthrough-ico");
+  if (ico) ico.innerHTML = active ? '<rect x="6" y="6" width="12" height="12"/>' : '<path d="M8 5v14l11-7z"/>';
+}}
+
+function startWalkthrough() {{
+  if (_wtState !== "idle") {{ stopWalkthrough(); return; }}
+  _wtFrames = _wtBuildFrames();
+  _wtFrame = 0;
+  _wtState = "playing";
+  _wtSetWalkButton(true);
+  _wtSetPlayIcon(true);
+  _wtRender();
+  _wtSchedule();
+}}
+
+function stopWalkthrough() {{
+  _wtClearTimer();
+  _wtState = "idle";
+  _wtSetWalkButton(false);
+  hideToast();
+}}
+
+function _wtPlayPause() {{
+  if (_wtState === "playing") {{ _wtState = "paused"; _wtClearTimer(); _wtSetPlayIcon(false); }}
+  else if (_wtState === "paused") {{ _wtState = "playing"; _wtSetPlayIcon(true); _wtSchedule(); }}
+}}
+
+function _wtStep(delta) {{
+  if (_wtState === "idle") return;
+  _wtFrame = Math.max(0, Math.min(_wtFrames.length - 1, _wtFrame + delta));
+  _wtRender();
+  if (_wtState === "playing") _wtSchedule();  // restart the dwell timer
 }}
 
 // ---------------------------------------------------------------------------
@@ -926,7 +1259,10 @@ function applySweepFrame(idx) {{
   const fr = DATA.sweep.frames[idx];
   const readout = document.getElementById("sweep-readout");
   if (!fr) return;
+  enterModeled();  // a drag opts into the hypothetical — mark cards as modeled
   const preM = "$" + (fr.pre_money / 1e6).toFixed(1) + "M";
+  const preEl = document.getElementById("sweep-pre-val");
+  if (preEl) preEl.textContent = preM;
   if (!fr.valid) {{
     // Never show a stale (real-but-wrong) number for a non-converging frame.
     ["founder-pct", "price-psh", "post-fd"].forEach(id => {{
@@ -989,6 +1325,9 @@ function resetSweepSlider() {{
   const slider = document.getElementById("sweep-slider");
   const mid = Math.floor((DATA.sweep.frames.length - 1) / 2);
   slider.value = String(mid);
+  const fr = DATA.sweep.frames[mid];
+  const preEl = document.getElementById("sweep-pre-val");
+  if (preEl && fr) preEl.textContent = "$" + (fr.pre_money / 1e6).toFixed(1) + "M";
   _sweepReadout(mid);
   _sweepAria(mid);
 }}
@@ -1004,8 +1343,8 @@ function initSweep() {{
     applySweepFrame(idx);  // drag = opt into the what-if; updates the cards
     _sweepAria(idx);
   }});
-  // selectScenario(0) (called by renderScenarioList, after this) sets the
-  // initial thumb + readout via resetSweepSlider.
+  // The initial scenario selection (called by renderScenarioList, after this)
+  // sets the initial thumb + readout via resetSweepSlider.
 }}
 
 // ---------------------------------------------------------------------------
@@ -1017,6 +1356,30 @@ document.getElementById("pin-btn").addEventListener("click", () => {{
   _pinnedScenarioIdx = (_pinnedScenarioIdx === _activeIdx) ? null : _activeIdx;
   document.querySelectorAll(".scenario-pill").forEach((p, i) => p.classList.toggle("pinned", i === _pinnedScenarioIdx));
   updateCompareBanner();
+}});
+
+// Export to PDF via the browser's print dialog (D3).
+document.getElementById("print-btn").addEventListener("click", () => window.print());
+
+// Walkthrough controls (E3): prev / play-pause / next / end.
+document.getElementById("wt-prev").addEventListener("click", () => _wtStep(-1));
+document.getElementById("wt-next").addEventListener("click", () => _wtStep(1));
+document.getElementById("wt-playpause").addEventListener("click", _wtPlayPause);
+document.getElementById("wt-close").addEventListener("click", stopWalkthrough);
+
+// Reset a modeled what-if back to the saved scenario (C2).
+document.getElementById("sweep-reset").addEventListener("click", () => selectScenario(_activeIdx));
+
+// Header counsel cue: jump to the rail + brief highlight (keeps the rail
+// reachable once it stacks below content on narrow screens).
+document.getElementById("counsel-cue").addEventListener("click", () => {{
+  const el = document.getElementById("counsel-rail");
+  if (!el) return;
+  const y = el.getBoundingClientRect().top + window.scrollY - 12;
+  window.scrollTo({{ top: y, behavior: "smooth" }});
+  if (el.animate) el.animate(
+    [{{ boxShadow: "0 0 0 3px var(--lool-warning)" }}, {{ boxShadow: "0 0 0 0 transparent" }}],
+    {{ duration: 1100, easing: "ease-out" }});
 }});
 
 // Keyboard navigation: arrow keys to switch scenarios
@@ -1031,6 +1394,7 @@ document.addEventListener("keydown", e => {{
 }});
 
 initSweep();
+renderFoundersBlock();
 renderScenarioList();
 renderCounsel();
 </script>

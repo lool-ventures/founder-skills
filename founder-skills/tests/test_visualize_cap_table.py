@@ -1612,3 +1612,180 @@ class TestWatchlistGrouping:
         assert tbody.count("<tr>") == 1, "per-instance watchlist rows must dedupe to one per rule"
         assert "rule-code" not in tbody, "compact watchlist cell must not show the raw rule_id code"
         assert "· 2×" in tbody, "deduped row should show the instance count"
+
+
+# ===========================================================================
+# PR1 usability pass — responsive layout, de-emoji, contained what-if slider,
+# default-to-modeled, plain-language flow, counsel cue + relevance + codes
+# toggle, print-to-PDF, donut a11y, controllable walkthrough.
+# ===========================================================================
+
+
+def _render_explorer_full(tmp: str) -> str:
+    """Render explorer.html from a full fixture and return the whole document."""
+    _make_fixture_dir(tmp)
+    out = os.path.join(tmp, "explorer.html")
+    rc, _, err = _run("explore.py", ["--dir", tmp, "-o", out])
+    assert rc == 0, err
+    with open(out, encoding="utf-8") as f:
+        return f.read()
+
+
+class TestExploreResponsiveLayout:
+    def test_breakpoints_present(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        assert "@media (max-width: 1180px)" in html, "tablet breakpoint missing (A2)"
+        assert "@media (max-width: 760px)" in html, "mobile breakpoint missing (A2)"
+
+    def test_metric_row_is_grid_not_clipping_flex(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        # A1: the three metric cards live in a grid of equal min-0 tracks, so the
+        # third (FD) card can never be clipped off the right edge.
+        assert ".metric-row {{ display: grid".replace("{{", "{") in html
+        assert "repeat(3, minmax(0, 1fr))" in html
+
+    def test_graphics_row_donut_and_flow_side_by_side(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        assert 'id="graphics-row"' in html
+        assert ".graphics-row" in html
+
+
+class TestExploreNoEmoji:
+    def test_no_chrome_emoji(self) -> None:
+        # E2: explicit codepoint denylist of the three replaced emoji. NOT a
+        # property/range check — ▶ ■ → ↗ … — are legitimate non-emoji glyphs.
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        for cp, name in ((0x2600, "sun"), (0x1F319, "moon"), (0x1F4CC, "pin")):
+            assert chr(cp) not in html, f"chrome still contains the {name} emoji U+{cp:04X}"
+
+    def test_chrome_uses_svg_icons(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        assert 'id="theme-ico"' in html, "theme toggle should be an SVG icon, not an emoji"
+        assert 'id="print-btn"' in html
+
+
+class TestExploreDefaultView:
+    def test_defaults_to_first_modeled_scenario(self) -> None:
+        # D1: landing index is firstModeledIdx(), not a hardcoded 0.
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        assert "function firstModeledIdx" in app
+        assert "selectScenario(firstModeledIdx())" in app
+        assert "selectScenario(0)" not in app, "default must not hardcode scenario 0"
+
+
+class TestExplorePlainLanguageFlow:
+    def test_flow_renamed_no_sankey_jargon(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        assert "Where your ownership went" in html, "flow should use plain language (B1)"
+        assert "Dilution flow" not in html, "jargon heading 'Dilution flow' should be gone"
+
+    def test_flow_keeps_transition_helper_and_path_class(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+        assert "function setSankeyHTML" in app and "setSankeyHTML(container" in app
+        assert "sankey-path" in app
+
+
+class TestExploreContainedSlider:
+    def _with_sweep(self, d: str) -> str:
+        _make_fixture_dir(d)
+        _write_priced_round_base(d)
+        _run("sweep.py", ["--dir", d, "--run-id", "rid1", "-o", os.path.join(d, "sweep.json")])
+        out = os.path.join(d, "explorer.html")
+        rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
+        assert rc == 0, err
+        with open(out, encoding="utf-8") as f:
+            return f.read()
+
+    def test_modeled_state_and_reset_control(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            html = self._with_sweep(d)
+        assert 'id="sweep-reset"' in html, "reset-to-scenario control missing (C2)"
+        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        assert "function enterModeled" in app and "function exitModeled" in app
+        assert "enterModeled()" in app, "a slider drag must mark the cards modeled"
+
+    def test_slider_gated_to_sweep_base_scenario(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            app = re.findall(r"<script>(.*?)</script>", self._with_sweep(d), re.DOTALL)[-1]
+        assert "function _isSweepBase" in app
+        assert "base_scenario_id" in app, "sweep payload must carry the base scenario id"
+
+
+class TestExploreCounselRail:
+    def test_header_counsel_cue(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        assert 'id="counsel-cue"' in html
+        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        assert "function renderCounselCue" in app
+        assert "for your lawyer" in app
+
+    def test_relevance_tiers_present(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+        assert "Applies here" in app and "Likely relevant" in app and "General" in app
+        assert "function _counselTier" in app
+
+    def test_rule_codes_behind_toggle_but_reachable(self) -> None:
+        # B2: codes hidden by default behind one toggle, still present for counsel.
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        assert "Show rule codes (for counsel)" in html
+        assert ".counsel-code {{ display: none".replace("{{", "{") in html
+        assert "codes-shown" in html, "toggle reveals codes via a class, not removal"
+
+
+class TestExplorePrint:
+    def test_print_button_and_media_query(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        assert "@media print" in html
+        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        assert "window.print()" in app
+        # print CSS must respect the [hidden] attribute so torn-down widgets
+        # don't print empty.
+        assert "[hidden] {{ display: none".replace("{{", "{") in html
+
+
+class TestExploreDonutA11y:
+    def test_aria_text_alternative(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+        assert "function renderDonutSummary" in app
+        assert 'setAttribute("aria-label"' in app, "donut needs a text alternative (E1)"
+
+    def test_pattern_fills_with_headless_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+        assert "function _wedgeFill" in app and "function _wedgePattern" in app
+        assert 'typeof document.createElement !== "function"' in app, (
+            "pattern builder must fall back to solid color under the headless shim"
+        )
+        # E1 must not reintroduce a raw PALETTE[cat] lookup on _pct keys.
+        assert "_wedgeFill" in app and "PALETTE[cat]" not in app
+
+
+class TestExploreWalkthroughControls:
+    def test_prev_next_pause_controls(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        for el in ('id="wt-prev"', 'id="wt-next"', 'id="wt-playpause"'):
+            assert el in html, f"walkthrough control {el} missing (E3)"
+        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        assert "function _wtStep" in app and "function _wtPlayPause" in app
+
+    def test_walkthrough_counsel_copy_preserved(self) -> None:
+        # The verbatim copy the existing zero/plural test pins must survive E3.
+        with tempfile.TemporaryDirectory() as d:
+            app = re.findall(r"<script>(.*?)</script>", _render_explorer_full(d), re.DOTALL)[-1]
+        assert "No counsel-review items were flagged" in app
+        assert 'nCounsel === 1 ? "" : "s"' in app
