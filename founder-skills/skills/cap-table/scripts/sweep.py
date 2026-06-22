@@ -52,6 +52,7 @@ _SLIDER_FIELDS = (
     "equity_financing_price",
     "post_round_fully_diluted_shares",
     "shares_breakdown",
+    "founder_impact",
     "blockers",
 )
 

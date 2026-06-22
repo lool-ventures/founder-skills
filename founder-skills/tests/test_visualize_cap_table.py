@@ -1401,9 +1401,10 @@ class TestExploreSweepSlider:
             res = subprocess.run([node, js_path], capture_output=True, text=True)
         assert res.returncode == 0 and "OK_SLIDER" in res.stdout, res.stderr
 
-    def test_slider_updates_legend_and_sankey(self) -> None:
+    def test_slider_updates_legend_sankey_and_impact(self) -> None:
         # Dragging the slider must update the legend (per-class % next to the
-        # pie) AND the dilution-flow Sankey, not just the top numbers + donut.
+        # pie), the dilution-flow Sankey, AND the Founder-Impact callout — not
+        # just the top numbers + donut.
         node = shutil.which("node")
         if node is None:
             pytest.skip("node not available")
@@ -1414,22 +1415,25 @@ class TestExploreSweepSlider:
                 _DOM_SHIM
                 + "\n"
                 + app
-                + "\nselectScenario(0);"  # the priced-round base is full → legend+sankey present
+                + "\nselectScenario(0);"  # the priced-round base is full → legend/sankey/impact present
                 + "\napplySweepFrame(0);"
                 + "\nconst leg0 = document.getElementById('legend').innerHTML || '';"
                 + "\nconst snk0 = document.getElementById('sankey').innerHTML || '';"
+                + "\nconst imp0 = document.getElementById('impact-callout').innerHTML || '';"
                 + "\napplySweepFrame(DATA.sweep.frames.length - 1);"
                 + "\nconst leg1 = document.getElementById('legend').innerHTML || '';"
                 + "\nconst snk1 = document.getElementById('sankey').innerHTML || '';"
+                + "\nconst imp1 = document.getElementById('impact-callout').innerHTML || '';"
                 + "\nif (!leg0.length || leg0 === leg1) throw new Error('legend did not update on slider drag');"
                 + "\nif (!snk0.length || snk0 === snk1) throw new Error('sankey did not update on slider drag');"
-                + "\nconsole.log('OK_LEGEND_SANKEY');\n"
+                + "\nif (!imp0.length || imp0 === imp1) throw new Error('impact did not update on slider drag');"
+                + "\nconsole.log('OK_LEGEND_SANKEY_IMPACT');\n"
             )
             js_path = os.path.join(d, "runner.js")
             with open(js_path, "w", encoding="utf-8") as f:
                 f.write(runner)
             res = subprocess.run([node, js_path], capture_output=True, text=True)
-        assert res.returncode == 0 and "OK_LEGEND_SANKEY" in res.stdout, res.stderr
+        assert res.returncode == 0 and "OK_LEGEND_SANKEY_IMPACT" in res.stdout, res.stderr
 
 
 class TestVisualizeCapImplied:

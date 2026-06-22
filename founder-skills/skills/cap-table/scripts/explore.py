@@ -82,6 +82,7 @@ def _sweep_payload(sweep: dict[str, Any] | None) -> dict[str, Any] | None:
                 "equity_financing_price": o.get("equity_financing_price"),
                 "post_round_fd": o.get("post_round_fully_diluted_shares"),
                 "shares_breakdown": o.get("shares_breakdown") or {},
+                "impact_text": (o.get("founder_impact") or {}).get("plain_language"),
             }
         )
     return {"axis": sweep.get("axis", "pre_money"), "frames": frames}
@@ -629,6 +630,22 @@ function renderLegend(agg) {{
   if (el) el.innerHTML = legend;
 }}
 
+// Founder-Impact callout. Persists across renders, so it's cleared+hidden when
+// absent. Shared by selectScenario (animate) + the slider (snap). `text` is the
+// plain-language impact sentence (or falsy to hide).
+function renderImpact(text, animate) {{
+  const impact = document.getElementById("impact-callout");
+  if (!impact) return;
+  if (text) {{
+    impact.innerHTML = `<strong>Founder Impact:</strong> ${{escape(text)}}`;
+    impact.hidden = false;
+    if (animate) slideIn(impact);
+  }} else {{
+    impact.innerHTML = "";
+    impact.hidden = true;
+  }}
+}}
+
 function show(id, on) {{ const el = document.getElementById(id); if (el) el.hidden = !on; }}
 
 // Card mount animation (P3 / design §10-D): 200ms fade + 8px translate-Y.
@@ -680,15 +697,7 @@ function selectScenario(idx) {{
 
     // Impact callout persists, so it must be cleared+hidden when absent or a
     // stale "Founder Impact" from the prior scenario lingers.
-    const impact = document.getElementById("impact-callout");
-    if (s.founder_impact) {{
-      impact.innerHTML = `<strong>Founder Impact:</strong> ${{escape(s.founder_impact.plain_language)}}`;
-      impact.hidden = false;
-      slideIn(impact);
-    }} else {{
-      impact.innerHTML = "";
-      impact.hidden = true;
-    }}
+    renderImpact(s.founder_impact && s.founder_impact.plain_language, true);
 
     // donut-wrap is now visible — Chart.js needs the canvas sized before init.
     renderDonut(document.getElementById("donut-chart"), agg);
@@ -921,6 +930,7 @@ function applySweepFrame(idx) {{
   const canvas = document.getElementById("donut-chart");
   if (canvas) renderDonut(canvas, agg, _CAPTURE);  // snap unless capture
   renderLegend(agg);  // the per-class % next to the pie
+  renderImpact(fr.impact_text, false);  // the Founder-Impact narrative for this frame
   const sankeyDiv = document.getElementById("sankey");
   if (sankeyDiv) {{
     // The dilution flow for this frame; snap (no fade) so a drag doesn't strobe.
