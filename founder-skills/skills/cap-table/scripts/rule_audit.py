@@ -1042,6 +1042,11 @@ def build_counsel_review_items(
         if rule_id in seen_rules:
             continue
         seen_rules.add(rule_id)
+        # D2: carry the (instance_type, instance_id) the gating already computed
+        # so the explorer can honestly badge what a counsel item applies to. We
+        # keep ONE item per rule (cardinality unchanged) and attach the matched
+        # instances as an additive, deterministically-sorted list.
+        inst_list = _counsel_instances(instances)
         items.append(
             {
                 "rule_id": rule_id,
@@ -1052,9 +1057,58 @@ def build_counsel_review_items(
                 "counsel_question": rule.get("summary", ""),
                 "documents_needed": [],  # placeholder; design §17 promises richer field
                 "source_ids": rule.get("source_ids", []),
+                "instances": inst_list,
+                "relevance_tier": _counsel_relevance_tier(inst_list),
+                "applies_to": _counsel_applies_to(inst_list),
             }
         )
     return items
+
+
+# Instance types that are not tied to a specific instrument/scenario in this
+# cap table — counsel items scoped only to these read as "applies to all".
+_GENERAL_INSTANCE_TYPES = {"global", "engagement", None, ""}
+
+
+def _counsel_instances(instances: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Distinct (instance_type, instance_id) pairs for the gating entries that
+    actually matched, sorted None-safely for deterministic output."""
+    seen: set[tuple[Any, Any]] = set()
+    out: list[dict[str, Any]] = []
+    for e in instances.values():
+        if not (e.get("applies_when_matched") and e.get("status") not in {"pre_effective", "expired"}):
+            continue
+        key = (e.get("instance_type"), e.get("instance_id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"instance_type": e.get("instance_type"), "instance_id": e.get("instance_id")})
+    out.sort(key=lambda x: (x["instance_type"] or "", x["instance_id"] or ""))
+    return out
+
+
+def _counsel_relevance_tier(inst_list: list[dict[str, Any]]) -> str:
+    """ "applies" when the item matched a real instrument/scenario in this cap
+    table; "general" when only global/engagement-scoped. We do not invent a
+    per-scenario tier the data cannot support."""
+    has_specific = any(i.get("instance_type") not in _GENERAL_INSTANCE_TYPES for i in inst_list)
+    return "applies" if has_specific else "general"
+
+
+def _counsel_applies_to(inst_list: list[dict[str, Any]]) -> str:
+    """Short founder-facing label of what an item applies to."""
+    ids = [
+        i["instance_id"]
+        for i in inst_list
+        if i.get("instance_id") and i.get("instance_type") not in _GENERAL_INSTANCE_TYPES
+    ]
+    if not ids:
+        return "all"
+    uniq: list[str] = []
+    for x in ids:
+        if str(x) not in uniq:
+            uniq.append(str(x))
+    return ", ".join(uniq[:3]) + ("…" if len(uniq) > 3 else "")
 
 
 def build_source_notes(

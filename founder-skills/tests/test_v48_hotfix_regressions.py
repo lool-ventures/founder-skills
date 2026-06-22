@@ -279,3 +279,114 @@ def test_compose_report_ownership_block_skips_ad_meta_fields() -> None:
     # The fix skips this field, so we just verify the fix's constant set:
     # (no direct API for the closure; this test documents the contract.)
     assert agg["anti_dilution_delta_pct_points"] == -2.75
+
+
+# ---------------------------------------------------------------------------
+# D2 (PR2): counsel items carry an additive, deterministic instances[] list and
+# an honest relevance tier derived from instrument/scenario presence.
+# ---------------------------------------------------------------------------
+
+
+def _gating_instances(rule_id: str, entries: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    return {rule_id: entries}
+
+
+def test_counsel_item_applies_when_instrument_matched() -> None:
+    rule_id = "safe.israeli_2025_safe_harbor"
+    gating = _gating_instances(
+        rule_id,
+        {
+            "safe:safe_001": {
+                "applies_when_matched": True,
+                "status": "in_window",
+                "instance_type": "safe",
+                "instance_id": "safe_001",
+            }
+        },
+    )
+    rules = {
+        "domains": {
+            "safe": [{"rule_id": rule_id, "domain": "safe", "title": "t", "summary": "s", "counsel_review": True}]
+        }
+    }
+    items = rule_audit.build_counsel_review_items(gating, rules, scenarios_data={}, inputs={})
+    assert len(items) == 1
+    it = items[0]
+    assert it["relevance_tier"] == "applies"
+    assert it["applies_to"] == "safe_001"
+    assert it["instances"] == [{"instance_type": "safe", "instance_id": "safe_001"}]
+
+
+def test_counsel_item_general_when_only_global() -> None:
+    rule_id = "delaware_cross_border.qsbs_date_sensitive"
+    gating = _gating_instances(
+        rule_id,
+        {
+            "global:": {
+                "applies_when_matched": True,
+                "status": "in_window",
+                "instance_type": "global",
+                "instance_id": None,
+            }
+        },
+    )
+    rules = {
+        "domains": {
+            "delaware_cross_border": [
+                {
+                    "rule_id": rule_id,
+                    "domain": "delaware_cross_border",
+                    "title": "t",
+                    "summary": "s",
+                    "counsel_review": True,
+                }
+            ]
+        }
+    }
+    items = rule_audit.build_counsel_review_items(gating, rules, scenarios_data={}, inputs={})
+    assert items[0]["relevance_tier"] == "general"
+    assert items[0]["applies_to"] == "all"
+
+
+def test_counsel_instances_none_id_sort_does_not_crash() -> None:
+    # The review flagged a TypeError if instance_id None isn't coerced in the sort.
+    rule_id = "safe.x"
+    gating = _gating_instances(
+        rule_id,
+        {
+            "safe:safe_002": {
+                "applies_when_matched": True,
+                "status": "in_window",
+                "instance_type": "safe",
+                "instance_id": "safe_002",
+            },
+            "global:": {
+                "applies_when_matched": True,
+                "status": "in_window",
+                "instance_type": "global",
+                "instance_id": None,
+            },
+            "safe:safe_001": {
+                "applies_when_matched": True,
+                "status": "in_window",
+                "instance_type": "safe",
+                "instance_id": "safe_001",
+            },
+        },
+    )
+    rules = {
+        "domains": {
+            "safe": [{"rule_id": rule_id, "domain": "safe", "title": "t", "summary": "s", "counsel_review": True}]
+        }
+    }
+    items = rule_audit.build_counsel_review_items(gating, rules, scenarios_data={}, inputs={})
+    # one item per rule (cardinality unchanged) despite 3 instances
+    assert len(items) == 1
+    inst = items[0]["instances"]
+    # deterministic order: (instance_type, instance_id) with None coerced to ""
+    assert inst == [
+        {"instance_type": "global", "instance_id": None},
+        {"instance_type": "safe", "instance_id": "safe_001"},
+        {"instance_type": "safe", "instance_id": "safe_002"},
+    ]
+    assert items[0]["applies_to"] == "safe_001, safe_002"
