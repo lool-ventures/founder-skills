@@ -2181,6 +2181,14 @@ class TestRuleAudit:
         rule = {"rule_id": "r1", "domain": "safe"}  # no date_window
         assert rule_audit._classify_scope(rule) == "not_applicable"
 
+    def test_missing_date_action_humanizes_field_name(self) -> None:
+        # The 'Provide X' watchlist action must not leak the raw snake_case field.
+        action = rule_audit._action_for_status(
+            {"status": "missing_event_date", "event_date_field": "tax_position_date"}, {}
+        )
+        assert "tax_position_date" not in action
+        assert "tax position date" in action
+
     def test_israeli_aoa_rules_do_not_fire_on_delaware_no_preferred(self) -> None:
         """Real-doc test surfaced this: israeli_aoa.* rules were firing on a
         Delaware C-corp with no preferred series, because they weren't in the

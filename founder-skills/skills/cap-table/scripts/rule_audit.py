@@ -864,10 +864,11 @@ def _action_for_status(entry: dict[str, Any], rule: dict[str, Any]) -> str:
         if f == "stale":
             return "Benchmark dataset is stale; refresh annually per rule notes."
         if f == "unknown":
-            return "Set benchmark_reference_date in inputs.event_dates to use current data."
+            return "Set a benchmark reference date in your inputs to use current data."
         return "Benchmark fresh; renders as context only."
     if status == "missing_event_date":
-        return f"Provide {entry.get('event_date_field')} on the relevant instance."
+        field = (entry.get("event_date_field") or "date").replace("_", " ")
+        return f"Provide the {field} for this instance."
     if status == "expired":
         return "Rule's applicability window has passed; counsel review for current regime."
     if status == "pre_effective":
