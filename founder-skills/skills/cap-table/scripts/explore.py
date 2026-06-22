@@ -186,9 +186,7 @@ def render_explorer_html(
                   align-items: center; margin: 16px 0; }}
   .donut-canvas {{ position: relative; height: 200px; width: 200px; }}
   .legend {{ list-style: none; padding: 0; margin: 0; font-size: 13px; }}
-  .legend li {{ display: flex; align-items: center; gap: 8px; padding: 4px 0;
-                 transition: opacity 0.2s; }}
-  .legend li.dimmed {{ opacity: 0.35; }}
+  .legend li {{ display: flex; align-items: center; gap: 8px; padding: 4px 0; }}
   .swatch {{ width: 14px; height: 14px; border-radius: 0; flex-shrink: 0; }}
   table {{ border-collapse: collapse; width: 100%; font-size: 13px; margin: 12px 0; }}
   th, td {{ border: 1px solid var(--border); padding: 6px 10px; text-align: left; }}
@@ -288,6 +286,14 @@ const PALETTE = {{
   new_money: "#2F8A56",
   warrants: "#48B4EA",
 }};
+const NEUTRAL = "#A6AEB5";
+
+// aggregate_ownership_by_class keys carry a `_pct` suffix (founders_pct, …),
+// but PALETTE keys do not. Strip the suffix before color/label lookup, or every
+// wedge falls back to NEUTRAL and labels read "founders pct". Mirrors
+// visualize.py's _palette_color (color); also drops `_pct` from the label.
+function sliceColor(cat) {{ return PALETTE[cat.replace(/_pct$/, "")] || NEUTRAL; }}
+function sliceLabel(cat) {{ return cat.replace(/_pct$/, "").replace(/_/g, " "); }}
 
 let _chartInstance = null;
 let _pinnedScenarioIdx = null;
@@ -469,9 +475,9 @@ function renderDonut(canvasEl, breakdown) {{
   const colors = [];
   for (const [cat, frac] of Object.entries(breakdown)) {{
     if (frac <= 0) continue;
-    labels.push(cat.replace(/_/g, " "));
+    labels.push(sliceLabel(cat));
     data.push(frac * 100);
-    colors.push(PALETTE[cat] || "#A6AEB5");
+    colors.push(sliceColor(cat));
   }}
   _chartInstance = new Chart(canvasEl, {{
     type: "doughnut",
@@ -533,8 +539,8 @@ function selectScenario(idx) {{
     body += `<ul class="legend">`;
     for (const [cat, frac] of Object.entries(agg)) {{
       if (frac <= 0) continue;
-      const c = PALETTE[cat] || "#A6AEB5";
-      body += `<li><span class="swatch" style="background:${{c}};"></span>${{escape(cat.replace(/_/g, ' '))}}: <strong style="margin-left:auto;">${{pct(frac)}}</strong></li>`;
+      const c = sliceColor(cat);
+      body += `<li><span class="swatch" style="background:${{c}};"></span>${{escape(sliceLabel(cat))}}: <strong style="margin-left:auto;">${{pct(frac)}}</strong></li>`;
     }}
     body += `</ul></div>`;
 

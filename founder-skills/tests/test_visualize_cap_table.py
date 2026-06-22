@@ -1042,3 +1042,31 @@ class TestExploreNumberTickerWiring:
                 f.write(app)
             res = subprocess.run([node, "--check", js_path], capture_output=True, text=True)
         assert res.returncode == 0, f"node --check failed on explorer app script:\n{res.stderr}"
+
+
+# ===========================================================================
+# Donut/legend palette — the `_pct` key-mismatch bug.
+#
+# aggregate_ownership_by_class keys carry a `_pct` suffix (founders_pct, …) but
+# PALETTE keys do not. A raw PALETTE[cat] lookup therefore returns undefined and
+# every wedge falls back to gray + labels read "founders pct". The render must
+# strip `_pct` via sliceColor/sliceLabel. (The existing palette tests only check
+# PALETTE *key presence*, so they pass even with this bug live — these guard it.)
+# ===========================================================================
+
+
+class TestExploreDonutPalette:
+    def test_ownership_render_uses_pct_stripping_helpers(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            app = _render_explorer_app_script(d)
+        assert "sliceColor(" in app and "sliceLabel(" in app, (
+            "donut/legend must color+label via sliceColor/sliceLabel (which strip _pct)."
+        )
+
+    def test_no_raw_palette_lookup_on_pct_keys(self) -> None:
+        # The bug site was a raw `PALETTE[cat]` where cat is a _pct-suffixed key.
+        with tempfile.TemporaryDirectory() as d:
+            app = _render_explorer_app_script(d)
+        assert "PALETTE[cat]" not in app, (
+            "raw PALETTE[cat] lookup remains — _pct-suffixed aggregate keys fall back to gray. Use sliceColor(cat)."
+        )
