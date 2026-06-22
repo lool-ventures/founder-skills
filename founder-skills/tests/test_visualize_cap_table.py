@@ -1237,3 +1237,10 @@ class TestExploreDonutMorphWiring:
         assert "function setSankeyHTML" in app and "setSankeyHTML(container" in app, (
             "Sankey must swap via the fade transition helper (P2), not a raw innerHTML snap."
         )
+
+    def test_card_slide_in_applied(self) -> None:
+        # P3 / §10-D: impact callout + compare banner mount with a fade+translate.
+        with tempfile.TemporaryDirectory() as d:
+            app = _render_explorer_app_script(d)
+        assert "function slideIn" in app, "card mount animation helper (P3) missing"
+        assert app.count("slideIn(") >= 3, "slideIn must be applied to the impact callout and the compare banner."

@@ -548,6 +548,13 @@ function renderScenarioList() {{
 
 function show(id, on) {{ const el = document.getElementById(id); if (el) el.hidden = !on; }}
 
+// Card mount animation (P3 / design §10-D): 200ms fade + 8px translate-Y.
+// Reduced-motion and environments without the Web Animations API skip it.
+function slideIn(el) {{
+  if (_REDUCED_MOTION || !el || !el.animate) return;
+  el.animate([{{ opacity: 0, transform: "translateY(8px)" }}, {{ opacity: 1, transform: "none" }}], {{ duration: 200, easing: "ease" }});
+}}
+
 function selectScenario(idx) {{
   _activeIdx = idx;
   document.querySelectorAll(".scenario-pill").forEach((b, i) => {{
@@ -599,6 +606,7 @@ function selectScenario(idx) {{
     if (s.founder_impact) {{
       impact.innerHTML = `<strong>Founder Impact:</strong> ${{escape(s.founder_impact.plain_language)}}`;
       impact.hidden = false;
+      slideIn(impact);
     }} else {{
       impact.innerHTML = "";
       impact.hidden = true;
@@ -699,6 +707,7 @@ function updateCompareBanner() {{
   const sign = rawDelta >= 0 ? "+" : "";
   banner.style.display = "flex";
   banner.className = "compare-banner";
+  slideIn(banner);
   banner.innerHTML = `<div>Compared to <strong>${{escape(pinned.label)}}</strong> (baseline): founder ownership is <strong>${{sign}}${{delta}}pp</strong></div><button id="unpin-btn">Unpin baseline</button>`;
   document.getElementById("unpin-btn").addEventListener("click", () => {{
     _pinnedScenarioIdx = null;
