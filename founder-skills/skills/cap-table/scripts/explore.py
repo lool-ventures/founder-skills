@@ -380,14 +380,29 @@ function animateMetric(id, from, to, formatter, gen) {{
 // Source pools → Target pools, path widths proportional to share counts.
 // ---------------------------------------------------------------------------
 
+// Swap the Sankey content with a fade transition (P2 / design §10-C "Sankey
+// transition") so a scenario switch reads as a transition, not a snap. The
+// #sankey node persists (P0a); a pending swap is cancelled so rapid switches
+// don't stack. Reduced-motion sets directly.
+function setSankeyHTML(container, html) {{
+  if (_REDUCED_MOTION) {{ container.innerHTML = html; return; }}
+  if (container._sankeyTimer) clearTimeout(container._sankeyTimer);
+  container.style.transition = "opacity 0.15s";
+  container.style.opacity = "0";
+  container._sankeyTimer = setTimeout(() => {{
+    container.innerHTML = html;
+    container.style.opacity = "1";
+    container._sankeyTimer = null;
+  }}, 150);
+}}
+
 function renderSankey(container, scenarioData) {{
-  container.innerHTML = "";
   const pre = DATA.pre_financing;
   const breakdown = scenarioData.shares_breakdown || {{}};
   const postFd = scenarioData.post_round_fd || pre.fully_diluted;
 
   if (!breakdown.pre_round_fully_diluted) {{
-    container.innerHTML = '<p style="color:var(--muted);font-size:13px;">No dilution flow — scenario is pending.</p>';
+    setSankeyHTML(container, '<p style="color:var(--muted);font-size:13px;">No dilution flow — scenario is pending.</p>');
     return;
   }}
 
@@ -476,35 +491,46 @@ function renderSankey(container, scenarioData) {{
       <text class="sankey-label" x="${{W - PAD + 4}}" y="${{b.y + b.h/2 + 4}}" text-anchor="start">${{escape(b.label)}} (${{pct(b.value/postFd)}})</text>
     `).join("")}}
   </svg>`;
-  container.innerHTML = svg;
+  setSankeyHTML(container, svg);
 }}
 
 // ---------------------------------------------------------------------------
 // Chart.js donut + ownership table
 // ---------------------------------------------------------------------------
 
+// Fixed wedge order (P1). Building over a stable key set with 0 for absent
+// categories keeps Chart.js dataset indices stable across scenarios, so
+// `.update()` tweens wedges (0→value to appear, value→0 to disappear) instead
+// of a fresh grow-in. Keys carry the `_pct` suffix; there is no warrants_pct.
+const DONUT_ORDER = ["founders_pct", "preferred_pct", "option_pool_pct", "safe_pct", "note_pct", "new_money_pct"];
+
 function renderDonut(canvasEl, breakdown) {{
-  if (_chartInstance) _chartInstance.destroy();
-  const labels = [];
-  const data = [];
-  const colors = [];
-  for (const [cat, frac] of Object.entries(breakdown)) {{
-    if (frac <= 0) continue;
-    labels.push(sliceLabel(cat));
-    data.push(frac * 100);
-    colors.push(sliceColor(cat));
+  const labels = DONUT_ORDER.map(sliceLabel);
+  const data = DONUT_ORDER.map(k => (breakdown[k] || 0) * 100);
+  const colors = DONUT_ORDER.map(sliceColor);
+  const borderColor = getComputedStyle(document.body).getPropertyValue("--bg");
+
+  // Morph in place when the chart is already bound to this (persistent) canvas.
+  if (_chartInstance && _chartInstance.canvas === canvasEl) {{
+    _chartInstance.data.labels = labels;
+    _chartInstance.data.datasets[0].data = data;
+    _chartInstance.data.datasets[0].backgroundColor = colors;
+    _chartInstance.data.datasets[0].borderColor = borderColor;
+    _chartInstance.update(_REDUCED_MOTION ? "none" : undefined);
+    return;
   }}
+  if (_chartInstance) _chartInstance.destroy();
   _chartInstance = new Chart(canvasEl, {{
     type: "doughnut",
-    data: {{ labels, datasets: [{{ data, backgroundColor: colors, borderWidth: 2,
-                                    borderColor: getComputedStyle(document.body).getPropertyValue("--bg") }}] }},
+    data: {{ labels, datasets: [{{ data, backgroundColor: colors, borderWidth: 2, borderColor }}] }},
     options: {{
       responsive: true, maintainAspectRatio: false,
       plugins: {{
         legend: {{ display: false }},
-        tooltip: {{ callbacks: {{ label: ctx => `${{ctx.label}}: ${{ctx.parsed.toFixed(1)}}%` }} }},
+        // Hide the zero-area wedges the fixed order introduces from the tooltip.
+        tooltip: {{ filter: item => item.parsed > 0, callbacks: {{ label: ctx => `${{ctx.label}}: ${{ctx.parsed.toFixed(1)}}%` }} }},
       }},
-      animation: {{ duration: 750, easing: "easeInOutCubic" }},
+      animation: _REDUCED_MOTION ? false : {{ duration: 750, easing: "easeInOutCubic" }},
     }},
   }});
 }}
@@ -694,10 +720,10 @@ function toggleTheme() {{
   const next = current === "light" ? "dark" : "light";
   document.body.dataset.theme = next;
   document.getElementById("theme-toggle").textContent = next === "dark" ? "🌙" : "☀️";
-  // Re-render donut to pick up new border color
-  if (_chartInstance && _activeIdx !== null) {{
-    const canvas = document.getElementById("donut-chart");
-    if (canvas) renderDonut(canvas, DATA.scenarios[_activeIdx].aggregate);
+  // Re-tint the donut border to the new --bg without re-animating the wedges.
+  if (_chartInstance) {{
+    _chartInstance.data.datasets[0].borderColor = getComputedStyle(document.body).getPropertyValue("--bg");
+    _chartInstance.update("none");
   }}
 }}
 

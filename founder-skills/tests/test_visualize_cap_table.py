@@ -1106,7 +1106,46 @@ global.URLSearchParams = class { constructor() {} get() { return null; } };
 global.requestAnimationFrame = function () {};
 global.performance = { now() { return 0; } };
 global.getComputedStyle = function () { return { getPropertyValue() { return "#000"; } }; };
+global.Chart = class {
+  constructor(el, cfg) { this.canvas = el; this.data = cfg.data; this.options = cfg.options; }
+  update() {}
+  destroy() {}
+};
 """
+
+
+def _full_scenario(scenario_id: str, label: str, founders_pct: float) -> dict[str, Any]:
+    """A 'full' priced-round scenario that exercises the donut + Sankey path."""
+    return {
+        "scenario_id": scenario_id,
+        "label": label,
+        "type": "priced_round",
+        "parameters": {"pre_money": 20_000_000, "new_money": 5_000_000},
+        "computed_outputs": {
+            "completeness": "full",
+            "cap_implied_only": False,
+            "blockers": [],
+            "math_provenance": [],
+            "aggregate_ownership_by_class": {
+                "founders_pct": founders_pct,
+                "preferred_pct": 0.20,
+                "option_pool_pct": 0.10,
+                "new_money_pct": round(0.70 - founders_pct, 4),
+            },
+            "equity_financing_price": 1.2345,
+            "post_round_fully_diluted_shares": 8_000_000,
+            "shares_breakdown": {
+                "pre_round_fully_diluted": 6_000_000,
+                "new_money": 2_000_000,
+                "safe_converted": 0,
+                "note_converted": 0,
+                "pool_topup": 0,
+            },
+            "founder_impact": {"plain_language": "Founders diluted to a controlling-but-shared stake."},
+            "per_safe": {},
+            "per_note": {},
+        },
+    }
 
 
 class TestExploreRuntimeSmoke:
@@ -1130,4 +1169,64 @@ class TestExploreRuntimeSmoke:
             res = subprocess.run([node, js_path], capture_output=True, text=True)
         assert res.returncode == 0 and "OK_NO_THROW" in res.stdout, (
             f"explorer app threw at runtime running selectScenario(0):\n{res.stderr}"
+        )
+
+    def test_donut_morph_and_sankey_path_run_headless(self) -> None:
+        # Exercise the full/mixed render path (donut .update() morph + Sankey
+        # transition) by switching between two full scenarios. Catches runtime
+        # bugs in renderDonut/renderSankey the cap-implied smoke can't reach.
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not available; skipping headless morph smoke")
+        with tempfile.TemporaryDirectory() as d:
+            _make_fixture_dir(d)
+            scenarios = {
+                "scenarios": [
+                    _full_scenario("p1", "Base case", 0.50),
+                    _full_scenario("p2", "Higher pre-money", 0.55),
+                ],
+                "metadata": {"run_id": "rid1"},
+            }
+            with open(os.path.join(d, "scenarios.json"), "w", encoding="utf-8") as f:
+                json.dump(scenarios, f)
+            out = os.path.join(d, "explorer.html")
+            rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
+            assert rc == 0, err
+            with open(out, encoding="utf-8") as f:
+                app = re.findall(r"<script>(.*?)</script>", f.read(), re.DOTALL)[-1]
+            # load (auto-selects scenario 0 → new Chart), then switch to 1 → morph.
+            runner = (
+                _DOM_SHIM
+                + "\n"
+                + app
+                + "\nselectScenario(1);"  # exercises the in-place .update() morph branch
+                + "\nconsole.log('OK_MORPH');\n"
+            )
+            js_path = os.path.join(d, "runner.js")
+            with open(js_path, "w", encoding="utf-8") as f:
+                f.write(runner)
+            res = subprocess.run([node, js_path], capture_output=True, text=True)
+        assert res.returncode == 0 and "OK_MORPH" in res.stdout, (
+            f"donut morph / Sankey path threw at runtime:\n{res.stderr}"
+        )
+
+
+class TestExploreDonutMorphWiring:
+    def test_donut_morphs_in_place_over_stable_order(self) -> None:
+        # Locks the morph (a behavioral test still passes with destroy+recreate,
+        # so guard the in-place update + stable order explicitly).
+        with tempfile.TemporaryDirectory() as d:
+            app = _render_explorer_app_script(d)
+        assert "DONUT_ORDER" in app and "_chartInstance.update(" in app, (
+            "donut must morph in place over a stable category order (P1), not destroy+recreate."
+        )
+        assert "filter: item => item.parsed > 0" in app, (
+            "tooltip must filter the zero-area wedges the fixed order introduces."
+        )
+
+    def test_sankey_uses_transition_helper(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            app = _render_explorer_app_script(d)
+        assert "function setSankeyHTML" in app and "setSankeyHTML(container" in app, (
+            "Sankey must swap via the fade transition helper (P2), not a raw innerHTML snap."
         )
