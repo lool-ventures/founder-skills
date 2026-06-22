@@ -2,14 +2,16 @@
 
 Token-free **replay** PR gate (`.github/workflows/cowork-replay.yml`) over committed cassettes that
 exercise the founder-skills skills under Claude Cowork's runtime via
-[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (≥ 0.8.0). Recording is **live**
+[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (≥ 0.9.0). Recording is **live**
 (needs the staged agent + Docker); replay/verify are **token/agent-free** (stock CI).
 
-> **0.8.0 note:** the committed cassettes were recorded under an older harness; they **replay clean
-> under 0.8.0** (all assertions pass) with only non-fatal staleness warnings (`baseline
-> 1.13576.1→1.14271.0`, `hash v3→v4`). Those clear on the next live re-record — not required for the
-> gate to be valid. The v3→v4 cassette-format break only forces a re-record for **folder-artifact**
-> cassettes; ours mount via `uploads:`/`local_plugins`, not connected folders, so it does not apply.
+> **0.9.0 note:** 0.9.0 makes the **git-tracked file set the default boundary** for both the staleness
+> hash and the sandbox mount (untracked scratch / OS-junk excluded from both), which closes the
+> "fresh cassette is immediately stale" asymmetry — so a freshly re-recorded cassette now passes its
+> own staleness check. Cassette format is **v6** (re-record once; pre-v6 cassettes report "older hash
+> format — re-record"). On a staleness mismatch, `fileSigs` names the **exact** changed file, and
+> `COWORK_HARNESS_DEBUG_SKILLHASH=1` dumps the hashed file set. Never set `COWORK_HARNESS_GITSET=0`
+> (it reverts to the legacy raw-walk boundary and reintroduces the staleness asymmetry).
 
 Coverage: a deep **cap-table** matrix (6 cassettes across all four extraction lanes) plus a
 **fleet-parity smoke** — one happy-path cassette per other skill (market-sizing, ic-sim,
@@ -112,10 +114,11 @@ export COWORK_HARNESS_RUNS_DIR=/tmp/ct-cowork-runs        # MUST be outside the 
 cd cowork-tests
 cowork-harness record scenarios/<name>.yaml --out cassettes/<name>.cassette.json
 ```
-**0.8.0 agent image (live lane):** rebuild the container agent image to `:2` before recording — run
+**Agent image (live lane):** rebuild the container agent image to `:2` before recording — run
 the build command `cowork-harness doctor --tier container` prints. Image `:2` ships the doc stack
 (openpyxl etc.) the xlsx/pdf skills exercise; a stale `:1` can mis-record. (Replay/CI never builds
-the image.) Re-recording is what clears the `baseline`/`hash v3→v4` staleness warnings.
+the image.) Re-recording under 0.9.0 rewrites cassettes to format **v6** and — thanks to the
+git-tracked boundary — produces a cassette that passes its own staleness check (no residual drift).
 Re-record after a change to the recorded skill's `SKILL.md` / its `scripts/` / `references/` / rules.
 **Staleness scope (0.5.0):** each scenario declares `skills: [<name>]`, so the staleness hash covers that
 skill's `skills/<name>/` dir **plus the plugin's shared roots** — editing a *different* skill no longer
@@ -133,11 +136,11 @@ are recorded hash-only (manifest entry: `path` + `bytes` + `sha256`, body not in
 `user_visible_artifact` **pass from that manifest** (existence is metadata) — so we keep the rich
 existence/promotion assertions on big HTML deliverables (e.g. `…_Cap_Table_Explorer.html`,
 `review.html`) without committing their bodies. (0.7.0 had a regression that *failed* these; the floor was
-≥ 0.7.1 and is now ≥ 0.8.0.) `artifact_json` still needs an inlined body, so assert **content** on the
+≥ 0.7.1 and is now ≥ 0.9.0.) `artifact_json` still needs an inlined body, so assert **content** on the
 small JSON producers and **existence** on the big rendered deliverables. 0.7.x+ also redacts base64
 artifact bodies wholesale (`[REDACTED:base64]`) — fine here since we never assert base64 content. Always
-record with the pinned harness (the manifest must be present); **0.8.0 records the v4 hash format** (the
-committed cassettes are v3 — they replay fine, and re-recording rewrites them to v4 + clears staleness).
+record with the pinned harness (the manifest must be present); **0.9.0 records the v6 hash format**
+(pre-v6 cassettes report "older hash format — re-record"; re-recording rewrites them to v6).
 
 **Diagnosing a failed live record:** if `record` errors fast with an empty `agent.stderr.log` (e.g. a
 missing model token — the in-Docker agent cannot read the macOS Keychain), check the run's
@@ -156,7 +159,7 @@ filesystem assertion needs a torn-down work dir.)
 ## Replay (CI / token-free)
 ```bash
 cowork-harness replay cassettes/                 # replay every *.cassette.json (0.4.0 dir mode)
-cowork-harness lint scenarios/*.yaml             # no-silent-false-green (0.4.0 CLI subcommand)
+cowork-harness lint scenarios/                   # no-silent-false-green (0.9.0: accepts a directory)
 # Privacy gate (canonical allowlist is in .github/workflows/cowork-replay.yml). The real PII guard is
 # synthetic-only recording (every subject is fictional — Cadence/Acmecorp). Given that, using 0.5.0's
 # CLASS-SCOPED allows (an allow can't bleed across classes): currency via --allow; the DOMAIN class

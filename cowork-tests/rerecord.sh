@@ -14,7 +14,7 @@ ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head 
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
-{ [ "$major" -gt 0 ] || [ "$minor" -ge 8 ]; } || { echo "FATAL: need >=0.8.0 (have $ver)"; exit 1; }
+{ [ "$major" -gt 0 ] || [ "$minor" -ge 9 ]; } || { echo "FATAL: need >=0.9.0 (have $ver)"; exit 1; }
 : "${COWORK_AGENT_BINARY:?FATAL: set COWORK_AGENT_BINARY to the staged claude ELF (claude-code-vm/<ver>/claude)}"
 [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 docker info >/dev/null 2>&1 || { echo "FATAL: Docker not running (live lane needs it)"; exit 1; }
@@ -47,7 +47,7 @@ done
 # A subset run must NOT verify the whole dir: the un-refreshed cassettes are legitimately still stale
 # and would staleness-fail the batch. Full run (no args) -> the dir; subset -> only the refreshed files.
 source ./privacy-allowlist.sh
-echo "=== lint ==="; cowork-harness lint scenarios/*.yaml          # scenario-level, cheap — always all
+echo "=== lint ==="; cowork-harness lint scenarios/                # 0.9.0: lint accepts a directory
 if [ "$#" -gt 0 ]; then targets=("${recorded[@]}"); else targets=("cassettes/"); fi
 for t in "${targets[@]}"; do
   echo "=== privacy: $t ===";   cowork-harness verify-cassettes "$t" --skip-staleness "${ALLOW[@]}"
