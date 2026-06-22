@@ -1271,8 +1271,8 @@ class TestExploreDonutMorphWiring:
         # P3 / §10-D: impact callout + compare banner mount with a fade+translate.
         with tempfile.TemporaryDirectory() as d:
             app = _render_explorer_app_script(d)
-        assert "function slideIn" in app, "card mount animation helper (P3) missing"
-        assert app.count("slideIn(") >= 3, "slideIn must be applied to the impact callout and the compare banner."
+        assert "function slideIn" in app, "card mount animation helper missing"
+        assert app.count("slideIn(") >= 3, "slideIn must be applied to the impact callout and the compare view."
 
 
 # ===========================================================================
@@ -2115,3 +2115,54 @@ class TestExploreMockFidelity:
                 f.write(runner)
             res = subprocess.run([node, js_path], capture_output=True, text=True)
         assert res.returncode == 0 and "OK_CTA" in res.stdout, res.stderr
+
+
+class TestExploreCompareSetB:
+    def test_no_pin_button_or_banner(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            html = _render_explorer_full(d)
+        # The pin button + delta banner were retired in favor of click-to-set-B.
+        assert 'id="pin-btn"' not in html and 'id="compare-banner"' not in html
+        app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
+        assert "function onPillClick" in app
+
+    def test_click_in_compare_mode_sets_b_not_a(self) -> None:
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("node not available")
+        with tempfile.TemporaryDirectory() as d:
+            _make_fixture_dir(d)
+            scenarios = {
+                "scenarios": [
+                    _full_scenario("p1", "Series A", 0.50),
+                    _full_scenario("p2", "Series A — high", 0.58),
+                    _full_scenario("p3", "Series A — low", 0.44),
+                ],
+                "metadata": {"run_id": "rid1"},
+            }
+            with open(os.path.join(d, "scenarios.json"), "w", encoding="utf-8") as f:
+                json.dump(scenarios, f)
+            out = os.path.join(d, "explorer.html")
+            rc, _, err = _run("explore.py", ["--dir", d, "-o", out])
+            assert rc == 0, err
+            with open(out, encoding="utf-8") as f:
+                app = re.findall(r"<script>(.*?)</script>", f.read(), re.DOTALL)[-1]
+            runner = (
+                _DOM_SHIM
+                + "\n"
+                + app
+                + "\nconst _a = _activeIdx;"
+                + "\ntoggleCompare();"  # enter compare → B auto-seeded
+                + "\nif (!_compareMode) throw new Error('compare mode should be on');"
+                + "\nconst _other = [0,1,2].find(i => i !== _a);"
+                + "\nonPillClick(_other);"  # clicking a scenario sets it as B
+                + "\nif (_compareIdx !== _other) throw new Error('click in compare mode must set B');"
+                + "\nif (_activeIdx !== _a)"
+                + "\n  throw new Error('active scenario (A) must not change on a compare-mode click');"
+                + "\nconsole.log('OK_SETB');\n"
+            )
+            js_path = os.path.join(d, "runner.js")
+            with open(js_path, "w", encoding="utf-8") as f:
+                f.write(runner)
+            res = subprocess.run([node, js_path], capture_output=True, text=True)
+        assert res.returncode == 0 and "OK_SETB" in res.stdout, res.stderr

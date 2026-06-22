@@ -244,7 +244,7 @@ def render_explorer_html(
   main {{ padding: 24px; overflow-y: auto; }}
   .right-rail {{ padding: 16px; border-left: 1px solid var(--border); background: var(--surface);
                   overflow-y: auto; max-height: calc(100vh - 65px); }}
-  .donut-canvas {{ position: relative; height: 200px; width: 200px; max-width: 100%; }}
+  .donut-canvas {{ position: relative; height: 170px; width: 170px; max-width: 100%; }}
   .legend {{ list-style: none; padding: 0; margin: 0; font-size: 13px; }}
   .legend li {{ display: flex; align-items: center; gap: 8px; padding: 4px 0; }}
   .swatch {{ width: 14px; height: 14px; border-radius: 0; flex-shrink: 0; }}
@@ -279,7 +279,9 @@ def render_explorer_html(
                   gap: 14px; margin: 16px 0; }}
   .metric {{ padding: 14px 18px; background: var(--surface); border-radius: 6px;
               border: 1px solid var(--border); transition: background .15s, border-color .15s; }}
-  .number-display {{ font-size: clamp(24px, 2.6vw, 36px); }}
+  .number-display {{ font-size: clamp(26px, 2.7vw, 38px); }}
+  /* The shares-after number is longer, so it gets a slightly smaller clamp. */
+  #post-fd {{ font-size: clamp(24px, 2.4vw, 34px); }}
   /* Modeled what-if: tint the slider panel + metric cards so a slider-driven
      number never reads as the agreed round. */
   .metric-row.modeled .metric {{ background: var(--lool-warning-tint); border-color: var(--lool-warning); }}
@@ -290,13 +292,6 @@ def render_explorer_html(
   #sweep-slider {{ width: 100%; accent-color: var(--lool-blue); }}
   .sweep-readout {{ font-size: 13px; color: var(--muted); margin-top: 8px;
                      font-variant-numeric: tabular-nums; }}
-  .compare-banner {{ background: var(--lool-warning-tint); color: var(--lool-ink); padding: 10px 16px;
-                      border-radius: 0; border-left: 3px solid var(--lool-warning);
-                      margin: 12px 0; font-size: 13px;
-                      display: flex; justify-content: space-between; align-items: center; }}
-  .compare-banner button {{ background: transparent; border: 1px solid var(--lool-warning);
-                              color: var(--lool-warning); padding: 4px 8px; border-radius: var(--r-input);
-                              font-family: var(--font-body); cursor: pointer; }}
   .walkthrough-toast {{ position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
                           background: var(--fg); color: var(--bg); padding: 12px 16px;
                           border-radius: var(--r-input); font-size: 14px; max-width: 640px; z-index: 1000;
@@ -316,7 +311,7 @@ def render_explorer_html(
                             text-transform: uppercase; letter-spacing: 0.06em; }}
   .sankey-path {{ transition: opacity 0.2s; }}
   .sankey-path:hover {{ opacity: 0.7; cursor: pointer; }}
-  .sankey-label {{ font-size: 11px; fill: var(--fg); font-family: var(--font-body); }}
+  .sankey-label {{ font-size: 15px; fill: var(--fg); font-family: var(--font-body); }}
   .sankey-block {{ stroke: var(--bg); stroke-width: 1; }}
 
   /* ---- PR1 usability: icons, counsel cue, print, slider panel, graphics ---- */
@@ -447,18 +442,12 @@ def render_explorer_html(
     <div class="section-label">Scenarios</div>
     <div id="scenario-list"></div>
     <div id="compare-hint" hidden>Pick a second scenario above to set it as <strong>B</strong> and compare side by side.</div>
-    <div style="margin-top: 24px;">
-      <div class="section-label">Compare</div>
-      <button class="btn" id="pin-btn" style="width:100%;">
-        <svg class="ico" viewBox="0 0 24 24"><path d="M9 4h6l-1 7 3 3v2H7v-2l3-3-1-7zM12 16v4"/></svg><span id="pin-label">Pin current as baseline</span></button>
-    </div>
     <div id="founders-block" style="margin-top:24px;" hidden>
       <div class="section-label">Founders today</div>
       <div id="founders-list"></div>
     </div>
   </aside>
   <main>
-    <div id="compare-banner" style="display:none;"></div>
     <div id="scenario-view">
       <div id="scenario-head"></div>
       <div id="scenario-blockers"></div>
@@ -567,7 +556,7 @@ function sliceLabel(cat) {{ return cat.replace(/_pct$/, "").replace(/_/g, " "); 
 // its chart by canvas id.
 const _charts = {{}};
 function _destroyChart(id) {{ if (_charts[id]) {{ _charts[id].destroy(); delete _charts[id]; }} }}
-let _pinnedScenarioIdx = null;
+let _compareIdx = null;  // the "B" scenario in compare mode
 let _activeIdx = 0;
 let _compareMode = false;
 let _walkthroughTimer = null;
@@ -707,9 +696,9 @@ function renderSankey(container, scenarioData, instant) {{
     {{ key: "new", label: "New investors", v: newMoney, c: PALETTE.new_money }},
   ].filter(s => s.v > 0);
 
-  const W = 760, H = 320, BW = 15, TOP = 34;
-  const LG = 168, RG = 150;
-  const innerH = H - TOP - 26;
+  const W = 860, H = 300, BW = 16, TOP = 36;
+  const LG = 210, RG = 200;  // label gutters sized for the 15px labels
+  const innerH = H - TOP - 22;
   const scale = innerH / _FLOW_REF;  // fixed reference: Before stays put, After grows with issuance
 
   const preTotal = before.reduce((a, s) => a + s.v, 0) || 1;
@@ -733,14 +722,14 @@ function renderSankey(container, scenarioData, instant) {{
   rB.filter(b => b.key === "safe" || b.key === "new").forEach((rb, i) => {{
     const dy = rb.y + rb.h / 2;
     const sx = x2 - (x2 - x1) * (0.30 - i * 0.12);
-    paths += `<path class="sankey-path" d="M ${{sx}},${{H}} C ${{sx}},${{dy + 46}} ${{x2 - 24}},${{dy}} ${{x2}},${{dy}}" stroke="${{rb.c}}" stroke-width="${{Math.max(2, rb.h)}}" fill="none" opacity="0.42"/>`;
+    paths += `<path class="sankey-path" d="M ${{sx}},${{H}} C ${{sx}},${{dy + 50}} ${{x2 - 26}},${{dy}} ${{x2}},${{dy}}" stroke="${{rb.c}}" stroke-width="${{Math.max(2, rb.h)}}" fill="none" opacity="0.42"/>`;
   }});
 
   const rect = (b, x) => `<rect class="sankey-block" x="${{x}}" y="${{b.y}}" width="${{BW}}" height="${{b.h}}" rx="1" fill="${{b.c}}"/>`;
   const lLabels = lB.map(b => `<text class="sankey-label" x="${{xL - 6}}" y="${{b.y + b.h/2 + 4}}" text-anchor="end">${{escape(b.label)}} · ${{Math.round(b.v / preTotal * 100)}}%</text>`).join("");
   const rLabels = rB.map(b => `<text class="sankey-label" x="${{xR + BW + 6}}" y="${{b.y + b.h/2 + 4}}" text-anchor="start">${{escape(b.label)}} · ${{Math.round(b.v / postFd * 100)}}%</text>`).join("");
 
-  const svg = `<svg viewBox="0 0 ${{W}} ${{H}}" style="width:100%;height:auto;max-height:340px;display:block;">
+  const svg = `<svg viewBox="0 0 ${{W}} ${{H}}" style="width:100%;height:auto;max-height:320px;display:block;">
     <text class="sankey-label" x="${{xL}}" y="18" style="font-weight:600;fill:var(--label);">Before · ${{fmtShares(preTotal)}} sh</text>
     <text class="sankey-label" x="${{xR + BW}}" y="18" text-anchor="end" style="font-weight:600;fill:var(--label);">After · ${{fmtShares(postFd)}} sh</text>
     ${{paths}}
@@ -748,7 +737,7 @@ function renderSankey(container, scenarioData, instant) {{
     ${{rB.map(b => rect(b, xR)).join("")}}
     ${{lLabels}}
     ${{rLabels}}
-    <text class="flow-cap" x="${{x2 - (x2 - x1) * 0.22}}" y="${{H - 3}}" text-anchor="middle">↑ new shares issued this round</text>
+    <text class="flow-cap" x="${{x2 - (x2 - x1) * 0.24}}" y="${{H - 3}}" text-anchor="middle">↑ new shares issued this round</text>
   </svg>`;
   setSankeyHTML(container, svg, instant);
 }}
@@ -860,7 +849,7 @@ function renderScenarioList() {{
       + `</button>`;
   }}).join("");
   list.querySelectorAll(".scenario-pill").forEach(b => {{
-    b.addEventListener("click", () => selectScenario(parseInt(b.dataset.idx)));
+    b.addEventListener("click", () => onPillClick(parseInt(b.dataset.idx)));
   }});
   if (DATA.scenarios.length > 0) selectScenario(firstModeledIdx());
 }}
@@ -1022,12 +1011,17 @@ function slideIn(el) {{
   el.animate([{{ opacity: 0, transform: "translateY(8px)" }}, {{ opacity: 1, transform: "none" }}], {{ duration: 200, easing: "ease" }});
 }}
 
+// Active highlight + the "B" compare-target badge (B shows only in compare mode).
+function _refreshPillBadges() {{
+  document.querySelectorAll(".scenario-pill").forEach((p, i) => {{
+    p.classList.toggle("active", i === _activeIdx);
+    p.classList.toggle("pinned", _compareMode && i === _compareIdx && i !== _activeIdx);
+  }});
+}}
+
 function selectScenario(idx) {{
   _activeIdx = idx;
-  document.querySelectorAll(".scenario-pill").forEach((b, i) => {{
-    b.classList.toggle("active", i === idx);
-    b.classList.toggle("pinned", i === _pinnedScenarioIdx);
-  }});
+  _refreshPillBadges();
   const s = DATA.scenarios[idx];
   const isFull = (s.completeness === "full" || s.completeness === "mixed");
 
@@ -1139,8 +1133,7 @@ function selectScenario(idx) {{
     _metricsIntroDone = true;
   }}
 
-  // Compare banner + (if active) the two-up compare view
-  updateCompareBanner();
+  // Keep the two-up compare view in sync when it's open.
   if (_compareMode) renderCompare();
 }}
 
@@ -1148,11 +1141,12 @@ function selectScenario(idx) {{
 // True side-by-side compare — both donuts, both metric sets, and a verdict line.
 // Uses the chart registry (separate canvas ids) so two donuts can be live together.
 // ---------------------------------------------------------------------------
+function _modeledAt(i) {{ const s = DATA.scenarios[i]; return !!s && (s.completeness === "full" || s.completeness === "mixed"); }}
+
 function _compareTargetIdx() {{
-  // Prefer the pinned baseline (B); else the first modeled scenario != active.
-  const modeled = i => {{ const s = DATA.scenarios[i]; return s && (s.completeness === "full" || s.completeness === "mixed"); }};
-  if (_pinnedScenarioIdx !== null && _pinnedScenarioIdx !== _activeIdx && modeled(_pinnedScenarioIdx)) return _pinnedScenarioIdx;
-  for (let i = 0; i < DATA.scenarios.length; i++) if (i !== _activeIdx && modeled(i)) return i;
+  // The chosen B if still valid; else the first modeled scenario != active.
+  if (_compareIdx !== null && _compareIdx !== _activeIdx && _modeledAt(_compareIdx)) return _compareIdx;
+  for (let i = 0; i < DATA.scenarios.length; i++) if (i !== _activeIdx && _modeledAt(i)) return i;
   return -1;
 }}
 
@@ -1197,6 +1191,7 @@ function renderCompare() {{
   }}).join("");
   renderDonut(document.getElementById("cmp-donut-a"), A.aggregate || {{}}, false);
   renderDonut(document.getElementById("cmp-donut-b"), B.aggregate || {{}}, false);
+  slideIn(document.getElementById("compare-grid"));
 
   const better = fa >= fb ? A : B;
   const diff = Math.abs(fa - fb) * 100;
@@ -1213,43 +1208,28 @@ function toggleCompare() {{
   show("compare-view", _compareMode);
   show("compare-hint", _compareMode);
   if (_compareMode) {{
+    // Seed B with the chosen target (or the first other modeled scenario), then
+    // mark its pill so the "B" badge appears.
+    _compareIdx = _compareTargetIdx();
+    _refreshPillBadges();
     renderCompare();
   }} else {{
+    _refreshPillBadges();
     _destroyChart("cmp-donut-a");
     _destroyChart("cmp-donut-b");
   }}
 }}
 
-function updateCompareBanner() {{
-  const banner = document.getElementById("compare-banner");
-  if (_pinnedScenarioIdx === null || _pinnedScenarioIdx === _activeIdx) {{
-    banner.style.display = "none";
-    return;
+// In compare mode, clicking a (modeled) scenario sets it as the B target,
+// leaving A in place; otherwise it switches the active scenario.
+function onPillClick(idx) {{
+  if (_compareMode && idx !== _activeIdx && _modeledAt(idx) && _modeledAt(_activeIdx)) {{
+    _compareIdx = idx;
+    _refreshPillBadges();
+    renderCompare();
+  }} else {{
+    selectScenario(idx);
   }}
-  const pinned = DATA.scenarios[_pinnedScenarioIdx];
-  const active = DATA.scenarios[_activeIdx];
-  // Only meaningful when both scenarios have a real founder %; a cap-implied /
-  // pending scenario has an empty aggregate, so comparing against 0% is noise.
-  const pinnedHas = pinned.aggregate && pinned.aggregate.founders_pct;
-  const activeHas = active.aggregate && active.aggregate.founders_pct;
-  if (!pinnedHas || !activeHas) {{
-    banner.style.display = "none";
-    return;
-  }}
-  const pinnedF = pinned.aggregate.founders_pct * 100;
-  const activeF = active.aggregate.founders_pct * 100;
-  const rawDelta = activeF - pinnedF;
-  const delta = rawDelta.toFixed(1);
-  const sign = rawDelta >= 0 ? "+" : "";
-  banner.style.display = "flex";
-  banner.className = "compare-banner";
-  slideIn(banner);
-  banner.innerHTML = `<div>Compared to <strong>${{escape(pinned.label)}}</strong> (baseline): founder ownership is <strong>${{sign}}${{delta}} <span class="term" title="percentage points">pts</span></strong></div><button id="unpin-btn">Unpin baseline</button>`;
-  document.getElementById("unpin-btn").addEventListener("click", () => {{
-    _pinnedScenarioIdx = null;
-    updateCompareBanner();
-    document.querySelectorAll(".scenario-pill").forEach(p => p.classList.remove("pinned"));
-  }});
 }}
 
 // Relevance tier for a counsel item, taken from the producer-supplied
@@ -1563,11 +1543,6 @@ function initSweep() {{
 // ---------------------------------------------------------------------------
 document.getElementById("theme-toggle").addEventListener("click", toggleTheme);
 document.getElementById("walkthrough-btn").addEventListener("click", startWalkthrough);
-document.getElementById("pin-btn").addEventListener("click", () => {{
-  _pinnedScenarioIdx = (_pinnedScenarioIdx === _activeIdx) ? null : _activeIdx;
-  document.querySelectorAll(".scenario-pill").forEach((p, i) => p.classList.toggle("pinned", i === _pinnedScenarioIdx));
-  updateCompareBanner();
-}});
 
 // Export to PDF via the browser's print dialog.
 document.getElementById("print-btn").addEventListener("click", () => window.print());
