@@ -73,7 +73,8 @@ def build_sweep_requests(base: dict[str, Any], *, steps: int) -> list[dict[str, 
     lo, hi = base_pre * _RANGE_LO, base_pre * _RANGE_HI
     requests: list[dict[str, Any]] = []
     for i in range(steps):
-        frac = i / (steps - 1) if steps > 1 else 0.0
+        # steps==1 → the base value (frac 0.5), not the low end.
+        frac = i / (steps - 1) if steps > 1 else 0.5
         pre = round(lo + (hi - lo) * frac, 2)
         params = dict(base_params)
         params["pre_money"] = pre

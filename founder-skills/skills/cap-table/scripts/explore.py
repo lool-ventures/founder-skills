@@ -624,6 +624,7 @@ function selectScenario(idx) {{
   // place rather than against a freshly-rebuilt node.
   show("metric-row", isFull);
   show("sweep-wrap", isFull && _hasSweep);
+  if (isFull && _hasSweep) resetSweepSlider();  // keep thumb in sync with the scenario
   show("donut-wrap", isFull);
   show("sankey-container", isFull);
   if (isFull) {{
@@ -849,6 +850,11 @@ function applySweepFrame(idx) {{
   if (!fr) return;
   const preM = "$" + (fr.pre_money / 1e6).toFixed(1) + "M";
   if (!fr.valid) {{
+    // Never show a stale (real-but-wrong) number for a non-converging frame.
+    ["founder-pct", "price-psh", "post-fd"].forEach(id => {{
+      const el = document.getElementById(id);
+      if (el) el.textContent = "—";
+    }});
     readout.textContent = "Pre-money " + preM + " — doesn't converge (frame skipped).";
     return;
   }}
@@ -876,19 +882,43 @@ function _sweepAria(idx) {{
   slider.setAttribute("aria-valuetext", txt);
 }}
 
+// Update only the slider's own readout/aria (NOT the metric cards), so the
+// selected scenario's real numbers stay authoritative until the user drags.
+function _sweepReadout(idx) {{
+  const fr = DATA.sweep.frames[idx];
+  const readout = document.getElementById("sweep-readout");
+  if (!fr || !readout) return;
+  const preM = "$" + (fr.pre_money / 1e6).toFixed(1) + "M";
+  readout.textContent = fr.valid
+    ? ("Drag to model — at " + preM + ", founders " + pct(fr.aggregate.founders_pct || 0))
+    : ("Drag to model — " + preM + " doesn't converge");
+}}
+
+// Return the slider thumb to the middle frame and refresh its readout/aria.
+// Called on every scenario change so the thumb never drifts out of sync with
+// the displayed scenario (review #6/#7).
+function resetSweepSlider() {{
+  if (!_hasSweep) return;
+  const slider = document.getElementById("sweep-slider");
+  const mid = Math.floor((DATA.sweep.frames.length - 1) / 2);
+  slider.value = String(mid);
+  _sweepReadout(mid);
+  _sweepAria(mid);
+}}
+
 function initSweep() {{
   const sw = DATA.sweep;
   if (!sw || !sw.frames || !sw.frames.some(f => f.valid)) return;
   _hasSweep = true;
   const slider = document.getElementById("sweep-slider");
   slider.max = String(sw.frames.length - 1);
-  slider.value = String(Math.floor((sw.frames.length - 1) / 2));
   slider.addEventListener("input", () => {{
     const idx = parseInt(slider.value);
-    applySweepFrame(idx);
+    applySweepFrame(idx);  // drag = opt into the what-if; updates the cards
     _sweepAria(idx);
   }});
-  _sweepAria(parseInt(slider.value));  // initial label; does NOT apply until dragged
+  // selectScenario(0) (called by renderScenarioList, after this) sets the
+  // initial thumb + readout via resetSweepSlider.
 }}
 
 // ---------------------------------------------------------------------------

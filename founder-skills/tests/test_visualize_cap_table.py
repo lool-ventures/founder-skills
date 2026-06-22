@@ -1322,6 +1322,18 @@ class TestSweepGenerator:
                 b = f.read()
         assert a == b
 
+    def test_steps_one_uses_base_pre_money(self) -> None:
+        # --steps 1 must produce the base value, not the low end of the range.
+        with tempfile.TemporaryDirectory() as d:
+            _make_fixture_dir(d)
+            _write_priced_round_base(d)
+            out = os.path.join(d, "sweep.json")
+            _run("sweep.py", ["--dir", d, "--run-id", "rid1", "-o", out, "--steps", "1"])
+            with open(out, encoding="utf-8") as f:
+                sw = json.load(f)
+        assert len(sw["frames"]) == 1
+        assert sw["frames"][0]["pre_money"] == sw["base_pre_money"] == 20_000_000
+
 
 class TestExploreSweepSlider:
     def _render_with_sweep(self, d: str) -> str:
