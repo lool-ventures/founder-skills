@@ -1,7 +1,7 @@
 """Drift guard for the reliability bench's computation-case canonical numbers.
 
 The bench's ``computation_cases[*].canonical_values`` are derived from the
-deterministic producers by ``evals/build_canonicals.py`` rather than hand-typed.
+deterministic producers by ``evals/cap-table/build_canonicals.py`` rather than hand-typed.
 This test, for each case carrying a ``canonical_values`` block:
 
 1. Re-runs the same producer recipe (importing build_canonicals.py so recipe
@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EVALS_DIR = REPO_ROOT / "founder-skills" / "skills" / "cap-table" / "evals"
+EVALS_DIR = REPO_ROOT / "evals" / "cap-table"
 BUILD_CANONICALS = EVALS_DIR / "build_canonicals.py"
 BENCH_PATH = EVALS_DIR / "reliability-bench.json"
 

@@ -36,8 +36,10 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 BENCH = HERE / "reliability-bench.json"
-# founder-skills plugin root (…/founder-skills) — three levels up from evals/
-PLUGIN_ROOT = HERE.parents[2]
+# founder-skills plugin root. This bench lives at repo-root evals/cap-table/ (outside the distributed
+# plugin). HERE is the evals/cap-table DIRECTORY, so HERE.parents[1] = repo root (one shallower than a
+# file-based parents index); then into founder-skills/ for `claude --plugin-dir`.
+PLUGIN_ROOT = HERE.parents[1] / "founder-skills"
 
 
 def low(s: str) -> str:

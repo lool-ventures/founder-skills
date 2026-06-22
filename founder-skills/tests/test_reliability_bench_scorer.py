@@ -19,7 +19,7 @@ import types
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-BENCH_SCRIPT = REPO_ROOT / "founder-skills" / "skills" / "cap-table" / "evals" / "run_reliability_bench.py"
+BENCH_SCRIPT = REPO_ROOT / "evals" / "cap-table" / "run_reliability_bench.py"
 
 
 def _load_bench_module() -> types.ModuleType:

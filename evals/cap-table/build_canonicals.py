@@ -31,7 +31,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
+# Bench lives at repo-root evals/cap-table/ (outside the distributed plugin); the cap-table producer
+# scripts are under founder-skills/. parents[2] = repo root.
+SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "founder-skills" / "skills" / "cap-table" / "scripts"
 BENCH_PATH = Path(__file__).resolve().parent / "reliability-bench.json"
 
 RUN_ID = "BENCH"
