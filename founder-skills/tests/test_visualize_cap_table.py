@@ -2129,6 +2129,9 @@ class TestExploreCompareSetB:
         assert 'id="pin-btn"' not in html and 'id="compare-banner"' not in html
         app = re.findall(r"<script>(.*?)</script>", html, re.DOTALL)[-1]
         assert "function onPillClick" in app
+        # The empty B placeholder must left-align so its "B" slot tag stays a
+        # small inline badge, not a full-width bar.
+        assert ".compare-card.cmp-empty" in html and "align-items: flex-start" in html
 
     def test_click_in_compare_mode_sets_b_not_a(self) -> None:
         node = shutil.which("node")

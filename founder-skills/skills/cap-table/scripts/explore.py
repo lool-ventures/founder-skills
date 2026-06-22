@@ -380,7 +380,7 @@ def render_explorer_html(
   /* The scenario whose founders keep more reads greener. */
   .compare-card.better {{ border-color: var(--lool-success); background: var(--lool-success-tint); }}
   .compare-card.cmp-empty {{ border-style: dashed; display: flex; flex-direction: column;
-                              justify-content: center; }}
+                              align-items: flex-start; justify-content: center; }}
   .cmp-canvas {{ position: relative; }}
   .cmp-center {{ position: absolute; inset: 0; display: flex; align-items: center;
                   justify-content: center; font-size: 17px; font-weight: 700; color: var(--heading); }}
