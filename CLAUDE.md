@@ -226,6 +226,7 @@ Tag-push triggers `deck-review-e2e-smoke` in `.github/workflows/skill-quality.ym
 
 ### Release ordering
 
+0. **Refresh cowork cassettes** (release cadence): `cowork-tests/rerecord.sh` (needs the staged agent + Docker + the `:2` image; paid/local) → confirm green, commit refreshed `cassettes/` by name. The cowork-replay staleness gate is WARN-only, so cassettes drift between releases; this re-records them against the current baseline/format. Skip only if no skill/`scripts/`/`references/`/`agents/` change landed since the last refresh.
 1. Bump versions in `pyproject.toml` and `founder-skills/.claude-plugin/plugin.json` (must match)
 2. Update `CHANGELOG.md`
 3. `git commit -m "release: vX.Y.Z"`

@@ -60,6 +60,15 @@ same gates as CI scoped to what it recorded (lint, privacy with the shared allow
 replay). On green, review `git diff -- cassettes/` (synthetic only) and commit by name. See the
 release-process note in the repo `CLAUDE.md`.
 
+### Future: automated live lane (deferred)
+
+The re-record treadmill exists because the staged agent ELF isn't redistributable, so the **live**
+lane can't run on hosted CI — only the token-free **replay** lane does. **Trigger to revisit:** if the
+cassette matrix grows past what a release-cadence manual `rerecord.sh` can sustain, stand up a
+**self-hosted runner** with the staged agent to run a periodic (nightly/weekly) live re-record +
+verify, turning the manual chore into always-fresh automation. **Decision today: deferred** — the
+current matrix (6 cap-table lanes + 5 smokes) doesn't justify the runner cost.
+
 ## Layout
 - `sessions/` — repo-relative sessions: the **environment** (model, plugin mount, file `uploads:`).
   All mount the **whole** `founder-skills` plugin (`local_plugins: [../../founder-skills]`) — never a
