@@ -1,20 +1,27 @@
 ---
 name: cap-table
-description: "Models cap-table mechanics for founders modeling dilution before signing — SAFE/note conversion, priced rounds with BBWA / narrow-based / full-ratchet anti-dilution, option-pool top-ups, warrants (cash and net-share exercise of vested outstanding warrants, deterministic pre-round pump), Israeli ↔ Delaware flips (1:1 share-for-share), MFN chains, pay-to-play, dual-class structures with voting-power render, Israeli §102 / IIA cap-table interactions, multi-scenario chained or independent rounds, and counsel-handoff packets citing NVCA, YC SAFE primer, Cooley GO. Use when a founder shares a SAFE, convertible note, term sheet, option plan, warrant, Articles of Association, or Carta XLSX. NOT for waterfall modeling, cumulative dividends, RSUs, 83(b), 409A, SPAC, or warrant repricing — see scope notes."
+description: "Use for any cap-table number, mechanic, or date before a founder signs — even one SAFE/note/warrant described in chat, a quick 'is this dilution reasonable?' gut-check, or a single QSBS / Israeli §102 eligibility question. Reliable, source-cited deterministic math (YC, NVCA, Cooley GO) for SAFE/note conversion and the post-money 'company capitalization' denominator, priced-round dilution, anti-dilution (BBWA / narrow-based / full-ratchet), option pools, warrants, MFN chains, dual-class voting, and Israeli ↔ Delaware flips. NOT for waterfall modeling, cumulative dividends, RSUs, 83(b), 409A, SPAC, warrant repricing, or pure term-glossary definitions — see scope notes."
 when_to_use: >
-  Use ONLY when the user has cap-table content (a signed or draft SAFE / note,
-  a term sheet, a Carta XLSX export, a freeform spreadsheet cap-table, or
-  a structured description of holders + outstanding instruments) AND has asked
-  to model conversion math, project dilution, run a priced round, or evaluate
-  a Delaware flip. Do not auto-invoke on general fundraising questions ("how
-  much should I raise?"), term-glossary questions ("what is a SAFE?"), or for
-  financial-model review (use `financial-model-review` skill instead).
+  Use whenever a question turns on a cap-table number, mechanic, or date —
+  conversion math, the post-money denominator, dilution, anti-dilution, MFN
+  chains, warrants, dual-class voting, QSBS eligibility dates, §102 timing, or
+  a flip — INCLUDING a single instrument described in chat, a bare yes/no, or a
+  quick gut-check, and any draft or signed SAFE, note, term sheet, option plan,
+  AoA, Carta XLSX, or spreadsheet. These carry known miscalculation and reliance
+  traps, so run the deterministic math rather than answer from memory. Do NOT
+  use for pure glossary definitions with nothing numeric, dated, or
+  eligibility-related at stake ("what is a SAFE?"), fundraising strategy ("how
+  much should I raise?"), or financial-model review (use `financial-model-review`).
 user-invocable: true
 ---
 
 # Cap-Table Skill
 
 Model cap-table mechanics for founders so they understand what their term sheets, SAFEs, and convertible notes actually do to their ownership — before they sign. Produce rule-pack-cited math for SAFE conversion, convertible-note conversion, priced-round dilution, option-pool top-ups, anti-dilution, and Israeli ↔ Delaware flips. Every counsel-review item links back to a primary source (YC SAFE primer, NVCA model docs, Israeli Companies Law / Income Tax Ordinance, etc.). Tone is founder-first: a candid coach who's read the documents you can't be expected to read.
+
+## Reliance Boundary (mandatory)
+
+For any eligibility, qualification, or status determination that turns on tax or legal facts the cap-table data cannot settle — QSBS (IRC §1202), Israeli §102 track / holding period, IIA obligations, or any rule carrying `counsel_review` — state the **cited fact** (the date window, threshold, or clock) and stop there. **Never conclude that the founder does or will qualify** ("yes, you qualify", "you're eligible", "strong eligibility posture"). The date or threshold is a fact you may assert with its citation; the *conclusion* is a counsel determination — present it as such and emit a counsel item. This holds whether the engagement runs the full pipeline, fast-assess, or a one-line directional answer: the boundary is about what you may *conclude*, not how deep the analysis went.
 
 ## Skill Metadata
 
