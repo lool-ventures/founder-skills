@@ -18,7 +18,7 @@ Then read the cell grid — per sheet: sheet name, dimensions, cell values per r
 python3 "$SCRIPTS/extract_cap_table.py" --mode=grid --xlsx "$XLSX_PATH"
 ```
 
-The output is JSON to stdout (`{"ok": true, "mode": "grid", "sheets": {...}, "compaction": {...}}`). Paste the full JSON into the dispatch prompt below.
+The output is JSON to stdout (`{"ok": true, "mode": "grid", "sheets": {...}, "compaction": {...}}`). **Paste this JSON VERBATIM into the dispatch prompt below — do NOT hand-condense, sample, summarize, or chunk it yourself.** `--mode=grid` has already compacted it under the control-frame budget (see below), so re-condensing it both wastes turns and risks dropping the very rows/columns the sub-agent needs. If a workbook were ever too large to compact, the script returns a `grid_too_large` blocker instead of overflowing — handle that, don't pre-empt it by trimming the grid.
 
 ### The grid is compacted to fit the control-frame cap
 
@@ -71,10 +71,11 @@ sheet, so seeding placeholders would just conflict.
 
 ## Map deterministically via `extract_cap_table.py --mode=freeform-emit`
 
-Pipe the sub-agent's `{blocks:[...]}` to the producer. It builds the cell grid from the
-xlsx, maps each block (per the role-map contract) to schema-valid `inputs.json` (equity,
-merged into the Step-2 file) + `instruments.json` (SAFEs/notes), and writes both **only**
-when there are no blockers. No heredoc-authored artifacts — the mapping is deterministic.
+Pipe the sub-agent's `{blocks:[...]}` JSON **verbatim on stdin** — exactly as the heredoc below shows,
+do not reshape, re-key, or re-summarize it. The producer builds the cell grid from the xlsx, maps each
+block (per the role-map contract) to schema-valid `inputs.json` (equity, merged into the Step-2 file) +
+`instruments.json` (SAFEs/notes), and writes both **only** when there are no blockers. No heredoc-authored
+artifacts — the mapping is deterministic.
 
 ```bash
 cat <<'FREEFORM_EOF' | python3 "$SCRIPTS/extract_cap_table.py" \
@@ -83,7 +84,13 @@ cat <<'FREEFORM_EOF' | python3 "$SCRIPTS/extract_cap_table.py" \
 FREEFORM_EOF
 ```
 
-- `{"ok": true, ...}` → `inputs.json` + `instruments.json` written (schema-validated). Done.
+- `{"ok": true, "warnings": [...]}` → `inputs.json` + `instruments.json` written (schema-validated).
+  **Surface any `warnings` in the output as one-line NON-blocking notes in your final presentation** — e.g.
+  the discount rate→multiplier conversion (`"SAFE 'Acme Ventures': Carta discount 0.2 (= 20%) converted to
+  multiplier 0.8000"`) or a sentinel issuance date — so the founder sees how each value was interpreted and
+  can catch a mis-entry (a freeform `discount` is read as a RATE per the role-map convention; the freeform
+  path has no separate invariant backstop on it, so this note IS the check). These are transparency notes,
+  not gates — never raise an `AskUserQuestion` for them. Done.
 - `{"ok": false, "blockers": [...]}` → a **gate** (exit 0, nothing written). Each blocker is
   a field the sheet cannot supply deterministically (e.g. a note's `interest_rate_type`, a
   preferred series' `original_issue_price`, an option pool's enum `plan_type`) or an
@@ -92,10 +99,11 @@ FREEFORM_EOF
 
 ## Resolve blockers with the founder, then re-emit
 
-Batch the blockers (plus any `warnings`) into ONE `AskUserQuestion`. Feed the founder's
-answers back as repeatable `--answer BLOCK.FIELD=VALUE` flags (the producer validates each
-against the field's enum) and re-run the same command — it is pure over (blocks, answers),
-so re-emitting is deterministic:
+Batch the **blockers** into ONE `AskUserQuestion`. Any `warnings` in the same response are
+transparency notes (e.g. the discount rate→multiplier conversion) — show them inline as context,
+NOT as gate questions (same rule as the `ok:true` branch above). Feed the founder's answers back
+as repeatable `--answer BLOCK.FIELD=VALUE` flags (the producer validates each against the field's
+enum) and re-run the same command — it is pure over (blocks, answers), so re-emitting is deterministic:
 
 ```bash
 cat <<'FREEFORM_EOF' | python3 "$SCRIPTS/extract_cap_table.py" \

@@ -21,18 +21,18 @@ prompt: |
   ONLY the SAFE's cap-implied ownership snapshot — no priced-round or Series A scenarios — and give
   me the full cap-table review with the interactive explorer built on that snapshot.
 
-# The prompt pre-answers the two fields the cap-table skill gates on for this fixture (option-pool
-# existence + which scenario to model), so the run is intended to be GATE-CLEAN — like the Lane-4
-# safe-full scenario (fires no gates with complete inline data). The `answers` below are a backstop
-# only, with phrasing-robust substring anchors (option LABELS are reworded every run, so match a
-# stable fragment, never the full label and never blanket `first`).
+# The prompt pre-answers the fields the cap-table skill gates on for this fixture (option-pool existence
+# + which scenario to model), so the run is intended to be GATE-CLEAN — like the Lane-4 safe-full scenario.
+# The `answers` below are a backstop only, anchored on a stable FRAGMENT of the canonical label (SKILL.md
+# "Canonical gate phrasing") — never the full label, never blanket `first`.
+# NOTE: there is intentionally NO discount anchor — the freeform discount rate-vs-multiplier gate was
+# removed (the convention is deterministic; SKILL.md no longer raises it, surfacing the conversion as a
+# non-blocking note instead), so that gate never fires.
 answers:
-  - when_question: "Discount.*value|discount rate|price multiplier"
-    choose: "discount rate"         # the "Yes — 20% discount rate" option (alt is "price multiplier")
   - when_question: "scenarios.*model"
-    choose: "SAFE cap-implied"      # stable across "…snapshot (Recommended)" / "…(standalone)"
+    choose: "implied"               # canonical "Cap-implied SAFE snapshot"; robust to word-order paraphrase
   - when_question: "option pool"
-    choose: "pool yet"              # stable across "No option pool yet" / "No pool yet"
+    choose: "No option pool"        # canonical label (SKILL.md); the prompt also pre-suppresses this gate
 
 assert:
   # Lane-3 ran end-to-end and produced its equity artifacts from the freeform sheet.

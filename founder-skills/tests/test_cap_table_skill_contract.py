@@ -877,3 +877,71 @@ def test_s5_fast_assess_warnings_field_and_boundary() -> None:
     assert 'sentinel["warnings"]' in _QUICK_ASSESS_SRC
     # routing boundary clause present (acknowledged presence-only)
     assert "quick_assess" in _SKILL_TEXT and "post-financing ownership" in _SKILL_TEXT
+
+
+# ---------------------------------------------------------------------------
+# Lane-3 gate-quality guards (skill-side fixes: grid self-chunking, discount
+# no-gate + conversion surfacing, canonical gate phrasing)
+# ---------------------------------------------------------------------------
+
+_LANE3_TEXT = (LANES_DIR / "lane-3-freeform.md").read_text(encoding="utf-8")
+
+
+def test_lane3_grid_paste_verbatim_no_chunking() -> None:
+    """#8 — the agent must be told the --mode=grid output is pre-compacted and to
+    paste it verbatim, not hand-condense/chunk it (the observed wasted-turn bug)."""
+    assert "hand-condense, sample, summarize, or chunk" in _LANE3_TEXT, (
+        "lane-3-freeform.md must instruct the agent NOT to hand-condense/chunk the grid"
+    )
+    assert "VERBATIM into the dispatch prompt" in _LANE3_TEXT
+    # And the freeform-emit stdin must be piped verbatim (the observed stdin-fumble bug).
+    assert "verbatim on stdin" in _LANE3_TEXT
+
+
+def test_lane3_ok_true_surfaces_warnings() -> None:
+    """#9 — the ok:true branch must surface producer `warnings` (e.g. the discount
+    rate->multiplier conversion) as non-blocking notes; this is the Lane-3 safety net
+    (no invariant_checker on the freeform path) and closes the inert-warning gap."""
+    # Anchor on the ok:true bullet so we test the success branch, not the blocker branch.
+    anchor = '`{"ok": true, "warnings"'
+    start = _LANE3_TEXT.find(anchor)
+    assert start != -1, "lane-3-freeform.md ok:true bullet must surface warnings (show the warnings key)"
+    section = _LANE3_TEXT[start : start + 800]
+    assert "Surface any `warnings`" in section
+    assert "NON-blocking notes" in section
+    # tie it to the discount conversion specifically (robust to markdown line-wrapping)
+    assert "discount" in section.lower() and "multiplier" in section
+    # Consistency: the ok:false blocker-resolver must NOT batch warnings into the AskUserQuestion
+    # (that contradicts the no-gate rule — warnings are transparency, blockers are the gate).
+    assert "(plus any `warnings`)" not in _LANE3_TEXT, (
+        "ok:false resolver must not batch `warnings` into the AskUserQuestion gate"
+    )
+
+
+def test_skill_freeform_discount_not_a_confirm_gate() -> None:
+    """#9 — SKILL.md must tell the agent NOT to raise a discount rate-vs-multiplier
+    AskUserQuestion on the freeform path (the convention is deterministic). The
+    discount math is unchanged; this only stops the discretionary gate."""
+    assert "Freeform `discount` is NOT a confirm-gate field" in _SKILL_TEXT
+    assert "NEVER raise a rate-vs-multiplier" in _SKILL_TEXT
+    # references the source-of-truth convention so the instruction can't drift loose
+    assert "discount_convention" in _SKILL_TEXT
+
+
+def test_skill_canonical_gate_phrasing_present() -> None:
+    """#7 — SKILL.md must carry canonical gate phrasing for the recurring gates so
+    founders + regression cassettes get stable text, and the option pool gate must
+    keep the free-text affordance (cap-base chat path must not collapse to yes/no).
+
+    Assertions are scoped to the canonical-phrasing BLOCK so they pin the new text,
+    not pre-existing occurrences elsewhere in SKILL.md (e.g. the bolded scenario
+    bullets above it or the S2 gate's own 'authorized / issued / unallocated')."""
+    start = _SKILL_TEXT.find("Canonical gate phrasing")
+    assert start != -1, "SKILL.md must carry a 'Canonical gate phrasing' block"
+    block = _SKILL_TEXT[start : start + 1500]
+    # scenario labels — within the canonical block
+    for label in ("Cap-implied SAFE snapshot", "Series A priced round", "Convertible note conversion at financing"):
+        assert label in block, f"canonical scenario label missing from the canonical-phrasing block: {label!r}"
+    # option-pool labels + preserved free-text affordance — within the canonical block
+    assert "No option pool" in block
+    assert "authorized / issued / unallocated" in block
