@@ -1535,12 +1535,12 @@ class TestHumanizedLabels:
             assert rc == 0, err
             with open(out, encoding="utf-8") as f:
                 html_doc = f.read()
-        assert "SAFE conversion" in html_doc, "scenario type not humanized in report"
-        assert "Structure only" in html_doc, "completeness not humanized in report"
-        # The raw enum must not appear as visible text — only inside a title= tooltip.
+        # completeness surfaces as a human pill; scenario-type line is dropped
+        assert "Structure only" in html_doc, "cap-implied completeness not humanized"
+        # the raw enum must not leak as visible text OR as a tooltip anymore
         assert "<code>structural_only</code>" not in html_doc
         assert ">structural_only<" not in html_doc
-        assert 'title="structural_only"' in html_doc, "raw enum should be preserved as a tooltip"
+        assert 'title="structural_only"' not in html_doc
 
     def test_explorer_carries_label_map_and_helpers(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -1620,14 +1620,13 @@ class TestWatchlistGrouping:
             with open(out, encoding="utf-8") as f:
                 html_doc = f.read()
         seg = html_doc[html_doc.find("Date-sensitive watchlist") :]
-        for col in ("<th>Rule</th>", "<th>Status</th>", "<th>When</th>", "<th>Action</th>"):
+        for col in ("<th>Rule</th>", "<th>Status</th>", "<th>Next date</th>", "<th>What to do</th>"):
             assert col in seg, f"watchlist missing column {col}"
-        assert "<th>Scope</th>" not in seg, "Scope column should be dropped"
-        # Two instances of one rule → one row (one <tr> in the tbody).
+        assert "<th>When</th>" not in seg and "<th>Scope</th>" not in seg
         tbody = seg[seg.find("<tbody>") : seg.find("</tbody>")]
         assert tbody.count("<tr>") == 1, "per-instance watchlist rows must dedupe to one per rule"
-        assert "rule-code" not in tbody, "compact watchlist cell must not show the raw rule_id code"
-        assert "· 2×" in tbody, "deduped row should show the instance count"
+        assert "· 2×" not in tbody, "count badge dropped (decision 21)"
+        assert "rule-code" not in tbody, "watchlist cell must not show the raw rule_id code"
 
 
 # ===========================================================================
@@ -2348,3 +2347,48 @@ def test_comparison_table_em_dash_for_missing_fields() -> None:
     html_out = viz.render_comparison_table([good, partial], cs)
     assert "—" in html_out  # missing price/FD → em dash
     assert "Note round" in html_out  # label fallback when no parameters
+
+
+def test_report_redesign_integration() -> None:
+    viz = _load_viz()
+    cap_state = {
+        "as_of_date": "2026-06-22",
+        "founders": [{"common_shares": 8_000_000}],
+        "common_batches": [],
+        "as_converted_totals": {
+            "fully_diluted_shares": 9_500_000,
+            "common_shares": 8_000_000,
+            "preferred_shares_as_converted": 0,
+            "options_outstanding": 1_000_000,
+            "options_available": 500_000,
+            "warrants_underlying_total": 0,
+        },
+    }
+    s1 = _full_scenario("sA", "Series A — $18M pre · $5M raise", 0.584)
+    s1["parameters"] = {"pre_money": 18_000_000, "new_money": 5_000_000}
+    s1["computed_outputs"]["equity_financing_price"] = 1.68
+    s1["computed_outputs"]["post_round_fully_diluted_shares"] = 13_690_476
+    s2 = _full_scenario("sB", "Series A — $25M pre · $6M raise", 0.602)
+    s2["parameters"] = {"pre_money": 25_000_000, "new_money": 6_000_000}
+    s2["computed_outputs"]["equity_financing_price"] = 2.33
+    s2["computed_outputs"]["post_round_fully_diluted_shares"] = 13_285_714
+
+    html_doc = viz.render_report_html(
+        inputs={"company_name": "Northwind Robotics"},
+        cap_state=cap_state,
+        scenarios_doc={"scenarios": [s1, s2]},
+        rule_audit={"date_sensitive_watchlist": []},
+        counsel_packet={"items": []},
+    )
+    # A1 headline + A2 sheet + D1 print + E1 palette
+    assert "Comparing the priced rounds" in html_doc
+    assert "least dilutive" in html_doc
+    assert "@media print" in html_doc and "@page" in html_doc
+    assert "doc-sheet" in html_doc
+    assert "#7A5EA8" in html_doc or "#C9892B" in html_doc  # new palette present
+    # B1: no raw data keys leak
+    assert "founders pct" not in html_doc
+    # eyebrow + bare company h1 (decision 9) but <title> preserved (decision 20)
+    assert "Cap table report" in html_doc
+    assert "<h1>Northwind Robotics</h1>" in html_doc
+    assert "Cap Table — Northwind Robotics" in html_doc
