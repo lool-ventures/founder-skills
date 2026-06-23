@@ -19,6 +19,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Callable
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -300,6 +301,86 @@ def render_legend(breakdown: dict[str, float], *, fd: float | None = None) -> st
             f"{shares}</li>"
         )
     return f'<ul class="legend">{"".join(rows)}</ul>'
+
+
+def _scenario_before_pct(cap_state: dict[str, Any]) -> float:
+    """Founders-only 'today' fraction — same basis as _compute_founder_impact
+    and the producer's founders_pct (excludes common_batches)."""
+    ats = cap_state["as_converted_totals"]
+    fd = ats.get("fully_diluted_shares") or 0
+    f_shares = sum(int(f.get("common_shares", 0)) for f in cap_state.get("founders", []))
+    return f_shares / fd if fd else 0.0
+
+
+def _col_label(s: dict[str, Any]) -> str:
+    p = s.get("parameters") or {}
+    pre = p.get("pre_money", p.get("priced_round_pre_money"))
+    raise_ = p.get("new_money", p.get("priced_round_new_money"))
+    if pre is not None and raise_ is not None:
+        return f"{_money_compact(pre)} pre · {_money_compact(raise_)}"
+    return _esc(str(s.get("label", s.get("scenario_id", "Scenario"))))
+
+
+def render_comparison_table(
+    full_scenarios: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]],
+    cap_state: dict[str, Any],
+) -> str:
+    """Comparison across ≥2 fully-modeled scenarios. Returns "" when <2.
+    Columns = scenarios; rows = founders after / dilution vs today / price /
+    shares. Missing fields render '—'; the max-founders_pct column is flagged
+    'least dilutive'."""
+    if len(full_scenarios) < 2:
+        return ""
+
+    before = _scenario_before_pct(cap_state)
+    cols: list[dict[str, Any]] = []
+    for s, co, agg in full_scenarios:
+        after = agg.get("founders_pct")
+        fi = co.get("founder_impact")
+        if fi and fi.get("delta_pp") is not None:
+            delta = fi["delta_pp"]
+        elif after is not None:
+            delta = (after - before) * 100
+        else:
+            delta = None
+        cols.append(
+            {
+                "label": _col_label(s),
+                "after": after,
+                "delta": delta,
+                "price": co.get("equity_financing_price"),
+                "fd": co.get("post_round_fully_diluted_shares"),
+            }
+        )
+
+    afters = [c["after"] for c in cols if c["after"] is not None]
+    best_after = max(afters) if afters else None
+
+    def _cell(v: str, *, best: bool) -> str:
+        bg = ' style="background:rgba(47,138,86,0.07);"' if best else ""
+        return f'<td class="num"{bg}>{v}</td>'
+
+    head = '<th class="cmp-metric">Metric</th>'
+    for c in cols:
+        is_best = best_after is not None and c["after"] == best_after
+        tag = '<span class="cmp-best">least dilutive</span>' if is_best else ""
+        cls = " cmp-best-col" if is_best else ""
+        head += f'<th class="num{cls}">{c["label"]}{tag}</th>'
+
+    def _row(label: str, fmt: Callable[[dict[str, Any]], str]) -> str:
+        cells = ""
+        for c in cols:
+            is_best = best_after is not None and c["after"] == best_after
+            cells += _cell(fmt(c), best=is_best)
+        return f'<tr><td class="cmp-metric">{label}</td>{cells}</tr>'
+
+    rows = (
+        _row("Founders after round", lambda c: _pct(c["after"]) if c["after"] is not None else "—")
+        + _row("Dilution vs. today", lambda c: f"{c['delta']:.1f} pts" if c["delta"] is not None else "—")
+        + _row("Price per share", lambda c: f"${c['price']:.2f}" if c["price"] is not None else "—")
+        + _row("Shares after round", lambda c: f"{int(c['fd']):,}" if c["fd"] is not None else "—")
+    )
+    return f'<div class="cmp-wrap"><table class="cmp"><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table></div>'
 
 
 def render_report_html(

@@ -2297,3 +2297,54 @@ def test_render_legend_plain_labels_and_shares() -> None:
     assert "sh" in with_shares  # shares mode
     no_shares = viz.render_legend(bd)
     assert "sh" not in no_shares  # default: no shares column
+
+
+def _cmp_cap_state() -> dict[str, Any]:
+    return {
+        "founders": [{"common_shares": 8_000_000}],
+        "common_batches": [],
+        "as_converted_totals": {"fully_diluted_shares": 9_500_000, "common_shares": 8_000_000},
+    }
+
+
+def _cmp_scenario(
+    label: str, pre: float, raise_: float, founders_pct: float, price: float, fd: int
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    s = {
+        "scenario_id": label,
+        "label": label,
+        "type": "priced_round",
+        "parameters": {"pre_money": pre, "new_money": raise_},
+    }
+    co: dict[str, Any] = {
+        "completeness": "full",
+        "equity_financing_price": price,
+        "post_round_fully_diluted_shares": fd,
+        "aggregate_ownership_by_class": {"founders_pct": founders_pct},
+    }
+    return (s, co, co["aggregate_ownership_by_class"])
+
+
+def test_comparison_table_needs_two_and_flags_best() -> None:
+    viz = _load_viz()
+    cs = _cmp_cap_state()
+    one = [_cmp_scenario("A", 18e6, 5e6, 0.584, 1.68, 13_690_476)]
+    assert viz.render_comparison_table(one, cs) == ""  # <2 → skipped
+    two = one + [_cmp_scenario("B", 25e6, 6e6, 0.602, 2.33, 13_285_714)]
+    html_out = viz.render_comparison_table(two, cs)
+    assert "$18M pre · $5M" in html_out and "$25M pre · $6M" in html_out
+    assert "Founders after round" in html_out and "Dilution vs. today" in html_out
+    assert "least dilutive" in html_out  # B has higher founders_pct
+    assert "60.2%" in html_out
+
+
+def test_comparison_table_em_dash_for_missing_fields() -> None:
+    viz = _load_viz()
+    cs = _cmp_cap_state()
+    good = _cmp_scenario("A", 18e6, 5e6, 0.584, 1.68, 13_690_476)
+    partial_s = {"scenario_id": "B", "label": "Note round", "type": "note_conversion", "parameters": {}}
+    partial_co = {"completeness": "mixed", "aggregate_ownership_by_class": {"founders_pct": 0.60}}
+    partial = (partial_s, partial_co, partial_co["aggregate_ownership_by_class"])
+    html_out = viz.render_comparison_table([good, partial], cs)
+    assert "—" in html_out  # missing price/FD → em dash
+    assert "Note round" in html_out  # label fallback when no parameters
