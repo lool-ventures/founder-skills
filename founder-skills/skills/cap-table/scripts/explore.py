@@ -36,6 +36,18 @@ from typing import Any
 
 _VENDOR_DIR = Path(__file__).resolve().parent / "vendor"
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _palette  # noqa: E402
+
+
+def _js_palette_block() -> str:
+    """JS object body for the explorer's PALETTE, sourced from _palette so the
+    explorer's wedge colors can never drift from the report (E3). Keys are the
+    producer-renderable classes the explorer draws (no other_common/neutral)."""
+    keys = ["founders", "preferred", "option_pool", "safe", "note", "new_money", "warrants"]
+    return "\n".join(f'  {k}: "{_palette.PALETTE[k]}",' for k in keys)
+
+
 # Pre-AD / delta narrative fields that aggregate_ownership_by_class carries.
 # They are not ownership wedges — the donut and legend must exclude them.
 # Mirrors visualize.py EXCLUDED_OWNERSHIP_KEYS.
@@ -171,6 +183,7 @@ def render_explorer_html(
     }
     data_json = _embed_json(payload)
     chart_js = _chartjs_source()
+    js_palette_block = _js_palette_block()
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -186,8 +199,6 @@ def render_explorer_html(
     --accent-bg: var(--lool-line-2);
     --heading: var(--lool-blue); --heading-2: var(--lool-royal);
     --label: var(--lool-subtle);
-    --founders: #0D549D; --preferred: #365A8A; --pool: #6CCDFF;
-    --safe: #21A2E3; --note: #C9892B; --new-money: #2F8A56;
   }}
   [data-theme="dark"] {{
     --bg: #0E1B2C; --fg: #F1F4F4; --muted: #A6AEB5; --border: #2A3B52;
@@ -536,13 +547,7 @@ function term(cat, val) {{
 }}
 
 const PALETTE = {{
-  founders: "#0D549D",
-  preferred: "#365A8A",
-  option_pool: "#6CCDFF",
-  safe: "#21A2E3",
-  note: "#C9892B",
-  new_money: "#2F8A56",
-  warrants: "#48B4EA",
+{js_palette_block}
 }};
 const NEUTRAL = "#A6AEB5";
 

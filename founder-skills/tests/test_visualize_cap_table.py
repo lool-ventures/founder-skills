@@ -671,54 +671,50 @@ class TestExploreOwnershipKeyCoverage:
             )
 
     def test_js_palette_covers_renderable_classes(self) -> None:
-        """The JS PALETTE dict embedded in explore.py must contain an entry for
-        every renderable class the solver can emit.
-
-        Approach: load visualize.py to get the Python-side excluded keys and
-        palette, then parse the JS PALETTE block from explore.py source and
-        compare.  This is more robust than executing the JS.
-        """
-        import re
+        """Every renderable producer class has a colour in the explorer's
+        JS PALETTE (now generated from the shared _palette module)."""
+        import importlib.util
+        import types
 
         viz = self._import_visualize()
         excluded = viz.EXCLUDED_OWNERSHIP_KEYS
-
-        # Derive renderable classes from the solver (no-AD fixture)
         agg = _build_full_agg()
-        filtered = {k: v for k, v in agg.items() if isinstance(v, (int, float))}
-        renderable_classes = {k.removesuffix("_pct") for k in filtered if k not in excluded}
+        renderable = {
+            k.removesuffix("_pct") for k, v in agg.items() if isinstance(v, (int, float)) and k not in excluded
+        }
 
-        # Read explore.py source and extract the JS PALETTE block
-        with open(os.path.join(SCRIPTS, "explore.py"), encoding="utf-8") as f:
-            src = f.read()
+        spec = importlib.util.spec_from_file_location("_test_explore_palette", os.path.join(SCRIPTS, "explore.py"))
+        assert spec and spec.loader
+        explore = types.ModuleType("_test_explore_palette")
+        explore.__file__ = os.path.join(SCRIPTS, "explore.py")
+        spec.loader.exec_module(explore)  # type: ignore[union-attr]
 
-        # JS PALETTE in explore.py looks like:
-        #   const PALETTE = {{
-        #     founders: "#...",
-        #     ...
-        #   }};
-        # The double-brace {{ }} is because it's inside an f-string template.
-        palette_block_match = re.search(r"const PALETTE = \{+\s*(.*?)\}\};", src, re.DOTALL)
-        assert palette_block_match, "explore.py: could not locate JS PALETTE block"
-        palette_block = palette_block_match.group(1)
-        # Each line like '  founders: "#0D549D",' → extract "founders".
-        # Note: the first key may have zero leading whitespace (it follows
-        # directly after the `{{` in the f-string template), so use \s* not \s+.
-        js_palette_keys = set(re.findall(r"^[ \t]*(\w+):", palette_block, re.MULTILINE))
-
-        missing = renderable_classes - js_palette_keys
-        assert not missing, (
-            f"explore.py JS PALETTE missing key(s) for renderable classes: "
-            f"{sorted(missing)}.  Add a colour entry to the JS PALETTE block."
-        )
+        block = explore._js_palette_block()
+        js_keys = set(re.findall(r"^[ \t]*(\w+):", block, re.MULTILINE))
+        missing = renderable - js_keys
+        assert not missing, f"explorer JS PALETTE missing classes: {sorted(missing)}"
 
     def test_palette_hex_consistency_with_visualize(self) -> None:
-        """Interim (Task 2): report palette is the shared _palette dict. Task 3
-        upgrades this to also assert the explorer sources the same module."""
-        import _palette as pal  # type: ignore[import-not-found]
+        """Report and explorer use identical hex per class — both trace to
+        _palette, so this verifies the explorer actually sources it."""
+        import importlib.util
+        import types
 
         viz = self._import_visualize()
-        assert viz.PALETTE is pal.PALETTE
+        spec = importlib.util.spec_from_file_location("_test_explore_palette2", os.path.join(SCRIPTS, "explore.py"))
+        assert spec and spec.loader
+        explore = types.ModuleType("_test_explore_palette2")
+        explore.__file__ = os.path.join(SCRIPTS, "explore.py")
+        spec.loader.exec_module(explore)  # type: ignore[union-attr]
+
+        block = explore._js_palette_block()
+        js_pairs = dict(re.findall(r'(\w+):\s*"(#[0-9A-Fa-f]+)"', block))
+        mismatches = [
+            f"{cls}: report={hexv} explorer={js_pairs[cls]}"
+            for cls, hexv in viz.PALETTE.items()
+            if cls in js_pairs and js_pairs[cls].lower() != hexv.lower()
+        ]
+        assert not mismatches, "report/explorer hex drift: " + "; ".join(mismatches)
 
     def _import_visualize(self) -> Any:
         mod_name = "_test_viz_cap_coverage_visualize"
