@@ -1,7 +1,7 @@
 name: cap-table-fast-assess
 session: ../sessions/default.yaml
 fidelity: cowork
-on_unanswered: fail
+on_unanswered: first   # variance-gate backstop = option 1 (preserves the old catch-all); known gates label-pinned below (0.10.0 lint flags positional `choose: first` in answers)
 skills: [cap-table]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
 
 # P2-c — fast-assess routing (Phase O). SHORT directional question, no document, and NONE of the
@@ -14,10 +14,13 @@ prompt: |
   fast assessment, I don't need the full review, report, or explorer yet.
 
 answers:
-  # Fast-assess sometimes gathers cap structure via a (multi-question) gate before the directional
-  # read; answer any such gate with option 1 so the run is deterministic.
-  - when_question: ".*"
-    choose: first
+  # Label-pinned (exact option labels) on the option-1 choice the prior catch-all `first` recorded.
+  - when_question: "common shares"
+    choose: "8,000,000"
+  - when_question: "authorized size"
+    choose: "No pool yet"
+  - when_question: "top.up"
+    choose: "No top-up planned"
 
 assert:
   - result: success

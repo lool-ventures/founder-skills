@@ -1,7 +1,7 @@
 name: cap-table-antihallucination
 session: ../sessions/term-sheet-blank.yaml
 fidelity: cowork
-on_unanswered: fail
+on_unanswered: first   # variance-gate backstop = option 1 (preserves the old catch-all); known gates label-pinned below (0.10.0 lint flags positional `choose: first` in answers)
 skills: [cap-table]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
 
 # P0-b — anti-hallucination negative (cap-table's signature property). Synthetic term sheet (ACMECORP)
@@ -14,8 +14,13 @@ prompt: |
   watch out for.
 
 answers:
-  - when_question: ".*"
-    choose: first
+  # Label-pinned (exact option labels, order-independent). Anchored on the option-1 choice the prior
+  # catch-all `first` recorded, so behavior is preserved. The cap-base gates are a backstop — the prompt
+  # usually suppresses them; on_unanswered:first covers any other variance gate.
+  - when_question: "founders"
+    choose: "2 equal founders"
+  - when_question: "option pool|ESOP"
+    choose: "Yes — ~10% of cap table"
 
 assert:
   - result: success
