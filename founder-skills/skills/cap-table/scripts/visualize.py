@@ -644,7 +644,7 @@ def render_report_html(
         watchlist_html = (
             "<h2>Date-sensitive watchlist</h2>"
             '<p class="section-note">Rules with a time window — one row each.</p>'
-            '<div class="cmp-wrap avoid-break"><table class="data wl"><thead><tr>'
+            '<div class="cmp-wrap avoid-break"><table class="data"><thead><tr>'
             "<th>Rule</th><th>Status</th><th>Next date</th><th>What to do</th>"
             f"</tr></thead><tbody>{wl_rows}</tbody></table></div>"
         )
@@ -705,6 +705,7 @@ def render_report_html(
   .impact {{ font-size: 14px; line-height: 1.55; color: var(--lool-slate);
          margin: 16px 0 0; padding-top: 14px; border-top: 1px solid var(--lool-paper-2); }}
   .gloss {{ font-size: 13px; color: var(--lool-mute); margin: 0 0 12px; }}
+  .blockers {{ margin: 8px 0 0; padding-left: 18px; font-size: 13px; color: var(--lool-mute); }}
   .pill {{ font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
          padding: 3px 11px; border-radius: 50px; background: var(--lool-paper-2); color: var(--lool-subtle); }}
   .pill-ok {{ background: var(--lool-success-tint); color: var(--lool-success); }}
@@ -719,6 +720,8 @@ def render_report_html(
   th.num {{ text-align: right; }}
   .cmp-best {{ display: block; font-size: 10px; font-weight: 600; text-transform: uppercase;
          letter-spacing: 0.05em; color: var(--lool-success); margin-top: 2px; }}
+  .cmp-metric {{ text-align: left; color: var(--lool-mute); }}
+  .cmp-best-col {{ background: var(--lool-success-tint); }}
   .ci-group {{ margin-bottom: 20px; }}
   .ci-domain {{ font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
          color: var(--lool-azure-deep); margin-bottom: 8px; }}
