@@ -4,12 +4,48 @@ from __future__ import annotations
 
 import os
 import sys
+import types
+from typing import Any
 
 _REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SCRIPTS = os.path.join(_REPO, "founder-skills", "skills", "cap-table", "scripts")
 sys.path.insert(0, SCRIPTS)
 
 import _palette  # type: ignore[import-not-found]  # noqa: E402
+
+
+def _import_visualize() -> Any:
+    import importlib.util
+
+    mod_name = "_test_palette_viz"
+    path = os.path.join(SCRIPTS, "visualize.py")
+    spec = importlib.util.spec_from_file_location(mod_name, path)
+    assert spec and spec.loader
+    mod = types.ModuleType(mod_name)
+    mod.__spec__ = spec
+    mod.__file__ = path
+    theme_stub = types.ModuleType("_theme")
+    theme_stub.brand_css = lambda: ""  # type: ignore[attr-defined]
+    theme_stub.FOOTER_CREDIT_HTML = ""  # type: ignore[attr-defined]
+    sys.modules.setdefault("_theme", theme_stub)
+    sys.modules[mod_name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_visualize_reexports_palette_from_module() -> None:
+    viz = _import_visualize()
+    assert viz.PALETTE is _palette.PALETTE, "visualize.PALETTE must be the shared dict"
+    assert hasattr(viz, "EXCLUDED_OWNERSHIP_KEYS")
+
+
+def test_money_compact_strips_round_decimals_only() -> None:
+    viz = _import_visualize()
+    assert viz._money_compact(18_000_000) == "$18M"
+    assert viz._money_compact(5_000_000) == "$5M"
+    assert viz._money_compact(18_500_000) == "$18.50M"
+    assert viz._money_compact(4_250_000) == "$4.25M"
+    assert viz._money_compact(None) == "—"
 
 
 def test_palette_has_mock_values() -> None:

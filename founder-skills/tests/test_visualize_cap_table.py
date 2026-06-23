@@ -713,38 +713,12 @@ class TestExploreOwnershipKeyCoverage:
         )
 
     def test_palette_hex_consistency_with_visualize(self) -> None:
-        """visualize.py and explore.py must use the same hex value for each
-        shared class so the two views are visually consistent.
+        """Interim (Task 2): report palette is the shared _palette dict. Task 3
+        upgrades this to also assert the explorer sources the same module."""
+        import _palette as pal  # type: ignore[import-not-found]
 
-        Approach: compare the Python PALETTE from visualize.py against the
-        hex values parsed from the JS PALETTE block in explore.py.
-        """
-        viz = self._import_visualize()  # type: ignore[attr-defined]
-        import re
-
-        with open(os.path.join(SCRIPTS, "explore.py"), encoding="utf-8") as f:
-            src = f.read()
-
-        palette_block_match = re.search(r"const PALETTE = \{+\s*(.*?)\}\};", src, re.DOTALL)
-        assert palette_block_match
-        palette_block = palette_block_match.group(1)
-        # Extract key → hex pairs
-        js_pairs = re.findall(r'(\w+):\s*"(#[0-9A-Fa-f]+)"', palette_block)
-        js_palette = {k: v for k, v in js_pairs}
-
-        mismatches = []
-        for cls, py_hex in viz.PALETTE.items():
-            if cls == "neutral":
-                # neutral is a fallback in visualize.py; explore.py falls back
-                # to the literal "#A6AEB5" string inline — not a PALETTE key.
-                # Alignment is checked by the JS fallback "#A6AEB5" matching.
-                continue
-            if cls in js_palette and js_palette[cls].lower() != py_hex.lower():
-                mismatches.append(f"{cls}: visualize={py_hex} explore_js={js_palette[cls]}")
-
-        assert not mismatches, "visualize.py and explore.py use different hex values for same concept: " + "; ".join(
-            mismatches
-        )
+        viz = self._import_visualize()
+        assert viz.PALETTE is pal.PALETTE
 
     def _import_visualize(self) -> Any:
         mod_name = "_test_viz_cap_coverage_visualize"

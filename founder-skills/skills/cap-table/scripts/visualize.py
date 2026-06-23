@@ -16,11 +16,13 @@ import argparse
 import html
 import json
 import os
+import re
 import sys
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _labels  # noqa: E402
+import _palette  # noqa: E402
 import _rules  # noqa: E402
 from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 
@@ -57,17 +59,10 @@ def _rule_html(
     return out
 
 
-# Color palette — see design §10
-PALETTE = {
-    "founders": "#0D549D",
-    "preferred": "#365A8A",
-    "option_pool": "#6CCDFF",
-    "safe": "#21A2E3",
-    "note": "#C9892B",
-    "new_money": "#2F8A56",
-    "warrants": "#48B4EA",
-    "neutral": "#A6AEB5",
-}
+# Ownership-class colors live in the shared _palette module so the report and
+# the explorer can't drift (design E3). Re-exported here because existing tests
+# read visualize.PALETTE.
+PALETTE = _palette.PALETTE
 
 # Pre-AD / delta line-items that aggregate_ownership_by_class may carry. They
 # are not ownership slices — render_donut/render_legend must exclude them so
@@ -80,9 +75,7 @@ EXCLUDED_OWNERSHIP_KEYS = {
 
 
 def _palette_color(cat: str) -> str:
-    """Look up a slice color, tolerating the ``_pct`` suffix that
-    aggregate_ownership_by_class keys carry (e.g. ``founders_pct``)."""
-    return PALETTE.get(cat.removesuffix("_pct"), PALETTE["neutral"])
+    return _palette.slice_color(cat)
 
 
 def _esc(s: Any) -> str:
@@ -104,6 +97,25 @@ def _money(m: float | None) -> str:
     if abs(m) >= 1_000:
         return f"${m / 1_000:,.0f}K"
     return f"${m:,.0f}"
+
+
+def _money_compact(m: float | None) -> str:
+    """`_money` with a trailing `.00` stripped (so $18.00M → $18M) but real
+    decimals kept ($18.50M stays). Used for comparison column labels."""
+    return re.sub(r"\.00(?=[BMK]?$)", "", _money(m))
+
+
+def _ordered_items(breakdown: dict[str, float], order: list[str]) -> list[tuple[str, float]]:
+    """Walk `order` (bare class names) and emit (key, value) for each class
+    present in `breakdown`, matching either the bare key or its `_pct` form.
+    Keys absent from `order` are dropped (order lists every renderable class)."""
+    items: list[tuple[str, float]] = []
+    for name in order:
+        if name in breakdown:
+            items.append((name, breakdown[name]))
+        elif f"{name}_pct" in breakdown:
+            items.append((f"{name}_pct", breakdown[f"{name}_pct"]))
+    return items
 
 
 def render_donut(
