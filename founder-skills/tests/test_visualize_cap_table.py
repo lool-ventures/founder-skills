@@ -2229,6 +2229,63 @@ def _load_viz() -> Any:
     return mod
 
 
+def test_counsel_domain_label_map_and_fallback() -> None:
+    viz = _load_viz()
+    assert viz.counsel_domain_label("safe") == "SAFEs & Israeli tax"
+    assert viz.counsel_domain_label("delaware_cross_border") == "Cross-border structure"
+    assert viz.counsel_domain_label("brand_new_domain") == "Brand New Domain"
+
+
+def test_watchlist_status_pill_covers_freshness_values() -> None:
+    viz = _load_viz()
+    for status in (
+        "in_window",
+        "pre_effective",
+        "missing_event_date",
+        "date_tracking_only",
+        "expired",
+        "not_date_sensitive",
+        "stale",
+        "fresh",
+        "unknown",
+    ):
+        pill = viz.watchlist_status_pill(status)
+        assert "<span" in pill and status not in pill, f"{status} leaked raw token"
+    assert "Active now" in viz.watchlist_status_pill("in_window")
+    assert "Refresh data" in viz.watchlist_status_pill("stale")
+
+
+def test_watchlist_next_date_branches() -> None:
+    viz = _load_viz()
+    # empty as_of → earliest parseable
+    assert viz.watchlist_next_date(["2026-07-01", "2025-01-15"], "pre_effective", "") == "2025-01-15"
+    # as_of present, a future date exists → soonest future
+    assert viz.watchlist_next_date(["2025-01-15", "2026-07-01"], "in_window", "2026-01-01") == "2026-07-01"
+    # as_of present, all past → latest past
+    assert viz.watchlist_next_date(["2024-01-01", "2025-01-15"], "expired", "2026-01-01") == "2025-01-15"
+    # no dates → em dash
+    assert viz.watchlist_next_date([], "missing_event_date", "2026-01-01") == "—"
+    # present but unparseable → format_dates fallback (no crash)
+    out = viz.watchlist_next_date(["sometime in Q3"], "in_window", "2026-01-01")
+    assert "Q3" in out
+
+
+def test_counsel_item_html_structure() -> None:
+    viz = _load_viz()
+    item = {
+        "rule_id": "safe.israeli_2025_safe_harbor",
+        "title": "Israel 2025 SAFE temporary guidance",
+        "counsel_question": "Counsel review required before treating a SAFE as equity.",
+        "source_ids": [],
+    }
+    html_out = viz.counsel_item_html(item)
+    assert "Israel 2025 SAFE temporary guidance" in html_out
+    assert "Counsel review required" in html_out
+    # rule code present but in a muted/mono class, not a bare inline <code> next to the title
+    assert "safe.israeli_2025_safe_harbor" in html_out
+    assert "ci-code" in html_out
+
+
 def test_render_legend_plain_labels_and_shares() -> None:
     viz = _load_viz()
     bd = {"founders_pct": 0.584, "new_money_pct": 0.217, "preferred_pct": 0.0}

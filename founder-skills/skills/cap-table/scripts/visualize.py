@@ -13,6 +13,7 @@ user-controlled string per design doc §10 security contract.
 from __future__ import annotations
 
 import argparse
+import datetime
 import html
 import json
 import os
@@ -57,6 +58,105 @@ def _rule_html(
     if not compact:
         out += f' <code class="rule-code">{html.escape(str(rule_id), quote=True)}</code>'
     return out
+
+
+_COUNSEL_DOMAIN_LABELS = {
+    "safe": "SAFEs & Israeli tax",
+    "israel_equity_tax": "Section 102 & equity tax",
+    "israeli_ltd": "Israeli company administration",
+    "israeli_aoa": "Articles of Association",
+    "delaware_cross_border": "Cross-border structure",
+    "delaware_flip": "Delaware flip",
+    "convertible_notes": "Convertible notes",
+    "anti_dilution": "Anti-dilution",
+    "dual_class": "Dual-class shares",
+    "option_pool": "Option pool",
+    "warrants": "Warrants",
+    "founder_benchmarks": "Founder benchmarks",
+    "cap_table": "Cap table",
+}
+
+
+def counsel_domain_label(slug: str) -> str:
+    return _COUNSEL_DOMAIN_LABELS.get(slug, slug.replace("_", " ").title())
+
+
+# status value → (pill text, tint key). Covers every value _rules._wl_status
+# can surface: current_status (legal/tax) AND freshness_status (benchmarks).
+_STATUS_PILL = {
+    "in_window": ("Active now", "success"),
+    "pre_effective": ("Opens soon", "warning"),
+    "missing_event_date": ("Needs a date", "warning"),
+    "date_tracking_only": ("Tracking", "neutral"),
+    "expired": ("Window passed", "faint"),
+    "not_date_sensitive": ("—", "neutral"),
+    "stale": ("Refresh data", "warning"),
+    "fresh": ("Current", "neutral"),
+    "unknown": ("Set a date", "warning"),
+}
+_PILL_TINT = {
+    "success": ("var(--lool-success-tint)", "var(--lool-success)"),
+    "warning": ("var(--lool-warning-tint)", "var(--lool-warning)"),
+    "neutral": ("var(--lool-paper-2)", "var(--lool-subtle)"),
+    "faint": ("var(--lool-paper-2)", "var(--lool-faint)"),
+}
+
+
+def watchlist_status_pill(status: str | None) -> str:
+    text, tint = _STATUS_PILL.get(status or "", ((status or "").replace("_", " ") or "—", "neutral"))
+    bg, fg = _PILL_TINT[tint]
+    return f'<span class="pill" style="background:{bg};color:{fg};">{_esc(text)}</span>'
+
+
+def _parse_iso(d: Any) -> datetime.date | None:
+    try:
+        return datetime.date.fromisoformat(str(d))
+    except (ValueError, TypeError):
+        return None
+
+
+def watchlist_next_date(dates: list[str], status: str | None, as_of: str) -> str:
+    """Single neutral date cell. The status pill carries Active/Opens/Passed;
+    this just shows the relevant event date (no Opens/Until/Ended verbs, since
+    the watchlist only carries trigger dates, not window boundaries)."""
+    parsed = [p for p in (_parse_iso(d) for d in (dates or [])) if p is not None]
+    if not parsed:
+        return _rules.format_dates(dates) if dates else "—"
+    ref = _parse_iso(as_of)
+    if ref is None:
+        return min(parsed).isoformat()
+    future = [p for p in parsed if p >= ref]
+    return (min(future) if future else max(parsed)).isoformat()
+
+
+def counsel_item_html(item: dict[str, Any]) -> str:
+    """Structured counsel block (mock layout): bold title, question, primary
+    source link + secondary 'also' links, and the rule code as muted mono
+    small-print. Reuses _rules.rule_ref for title/links."""
+    ref = _rules.rule_ref(item["rule_id"], item_title=item.get("title"), item_source_ids=item.get("source_ids"))
+    title = _esc(str(ref["title"]))
+    question = _esc(item.get("counsel_question", ""))
+    links = ref["links"]
+    src_html = ""
+    if links:
+        primary_pub, primary_url = links[0]
+        src_html = (
+            f'<a href="{_esc(primary_url)}" target="_blank" rel="noopener noreferrer" '
+            f'class="ci-src">{_esc(primary_pub)} ↗</a>'
+        )
+        if links[1:]:
+            also = " · ".join(
+                f'<a href="{_esc(u)}" target="_blank" rel="noopener noreferrer">{_esc(p)} ↗</a>' for p, u in links[1:]
+            )
+            src_html += f'<span class="ci-also">· also {also}</span>'
+    code_html = f'<span class="ci-code">{_esc(item["rule_id"])}</span>'
+    return (
+        '<div class="ci">'
+        f'<div class="ci-title">{title}</div>'
+        f'<div class="ci-q">{question}</div>'
+        f'<div class="ci-meta">{src_html}{code_html}</div>'
+        "</div>"
+    )
 
 
 # Ownership-class colors live in the shared _palette module so the report and
