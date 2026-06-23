@@ -176,6 +176,51 @@ class TestCapState:
         # 1M shares × (2.0 / 1.0) = 2M as-converted
         assert cs["as_converted_totals"]["preferred_shares_as_converted"] == 2_000_000
 
+    def test_anti_dilution_recovered_from_wrong_key(self) -> None:
+        """A founder's anti-dilution intent written under the WRONG key `anti_dilution` (the model's
+        common slip — e.g. {"anti_dilution": "bbwa"}) while the canonical `anti_dilution_protection`
+        is absent must be RECOVERED to the canonical field + flagged, never silently dropped to
+        'none' (which skips the down-round adjustment the founder explicitly asked for).
+        Regression for the priced-ad silent-drop bug (cap_state read only anti_dilution_protection)."""
+        inputs = dict(_BASIC_INPUTS)
+        inputs["preferred_series"] = [
+            {
+                "series_name": "Series Seed",
+                "shares": 2_000_000,
+                "original_issue_price": 1.0,
+                "original_conversion_price": 1.0,
+                "current_conversion_price": 1.0,
+                "issuance_date": "2025-03-01",
+                "anti_dilution": "bbwa",  # WRONG key + abbreviation; no anti_dilution_protection
+            }
+        ]
+        cs = cap_state_mod.build_cap_state(inputs, _BASIC_INSTRUMENTS)
+        ps = cs["preferred_series"][0]
+        assert ps["anti_dilution_protection"] == "broad_based_weighted_average", (
+            "BBWA intent under the wrong key must be recovered, not silently dropped to 'none'"
+        )
+        assert any("ANTI_DILUTION" in w for w in cs.get("warnings", [])), (
+            "the recovery must be surfaced as a warning, never silent"
+        )
+
+    def test_anti_dilution_canonical_field_unchanged_no_warning(self) -> None:
+        """The correct canonical field must pass through untouched with NO normalization warning."""
+        inputs = dict(_BASIC_INPUTS)
+        inputs["preferred_series"] = [
+            {
+                "series_name": "Series Seed",
+                "shares": 2_000_000,
+                "original_issue_price": 1.0,
+                "original_conversion_price": 1.0,
+                "current_conversion_price": 1.0,
+                "issuance_date": "2025-03-01",
+                "anti_dilution_protection": "broad_based_weighted_average",
+            }
+        ]
+        cs = cap_state_mod.build_cap_state(inputs, _BASIC_INSTRUMENTS)
+        assert cs["preferred_series"][0]["anti_dilution_protection"] == "broad_based_weighted_average"
+        assert not any("ANTI_DILUTION" in w for w in cs.get("warnings", []))
+
     def test_with_common_batches(self) -> None:
         inputs = dict(_BASIC_INPUTS)
         inputs["common_batches"] = [

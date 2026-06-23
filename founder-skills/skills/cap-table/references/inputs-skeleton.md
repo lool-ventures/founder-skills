@@ -75,6 +75,14 @@ Insert this block before `option_pool`:
   ],
 ```
 
+**Anti-dilution field (don't get this wrong — it drives the down-round adjustment).** The key is
+`anti_dilution_protection`, and its value MUST be one of the canonical enum
+`none | broad_based_weighted_average | narrow_based_weighted_average | full_ratchet` — NOT a shorthand
+like `anti_dilution`/`bbwa`/`ratchet`. A wrong key or abbreviation that lands as `none` would silently
+skip the anti-dilution math a founder asked for. `cap_state.py` recovers common slips and emits a
+`W_ANTI_DILUTION_NONCANONICAL` warning so nothing is dropped silently, but write the canonical field
+directly.
+
 ### Why three price fields
 
 - `original_issue_price` (OIP) — per-share consideration investors paid. The NVCA model trigger is the conversion price in effect immediately prior (CP1); the OIP trigger is a charter-specific variant this pipeline uses as its soft default — counsel confirms which the charter adopts.
