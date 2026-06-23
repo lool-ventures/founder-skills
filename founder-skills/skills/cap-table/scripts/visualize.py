@@ -376,7 +376,7 @@ def render_comparison_table(
 
     rows = (
         _row("Founders after round", lambda c: _pct(c["after"]) if c["after"] is not None else "—")
-        + _row("Dilution vs. today", lambda c: f"{c['delta']:.1f} pts" if c["delta"] is not None else "—")
+        + _row("Dilution vs. today", lambda c: f"{c['delta']:+.1f} pts" if c["delta"] is not None else "—")
         + _row("Price per share", lambda c: f"${c['price']:.2f}" if c["price"] is not None else "—")
         + _row("Shares after round", lambda c: f"{int(c['fd']):,}" if c["fd"] is not None else "—")
     )
