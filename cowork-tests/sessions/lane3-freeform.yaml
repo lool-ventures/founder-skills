@@ -1,0 +1,11 @@
+# Session for Lane-3 freeform-spreadsheet extraction.
+# Whole-plugin mount + the synthetic freeform workbook (founders + SAFE + a non-mappable
+# exit-modeling tab).
+model: claude-sonnet-4-6
+plugins:
+  local_plugins:
+    - ../../founder-skills
+  enabled:
+    - founder-skills@local
+uploads:
+  - ../fixtures/freeform_lane3.xlsx

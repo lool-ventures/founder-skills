@@ -1,0 +1,60 @@
+name: cap-table-lane3-freeform
+session: ../sessions/lane3-freeform.yaml
+fidelity: cowork
+on_unanswered: fail
+skills: [cap-table]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
+
+# Lane-3 freeform spreadsheet — the runtime-distinct surface no other cassette covers: the
+# SPREADSHEET_STRUCTURE_DETECTION sub-agent reads the compacted cell grid and classifies blocks
+# (founders / SAFEs) AND must classify the non-mappable "Returns" exit-modeling tab as an ignore
+# type rather than inventing a block_type. All data is SYNTHETIC (Cadence / invented founders).
+prompt: |
+  I'm a founder at Cadence, a US Delaware C-corp (seed-stage B2B SaaS). I've uploaded our cap
+  table as a freeform Excel workbook: a "Cap Table" tab with our two founders (Maya Gold and Ofer
+  Tal) and their common share counts, a "SAFEs" tab with our one outstanding SAFE (Foobar Capital
+  LLC), and a "Returns" tab with exit-scenario modeling. We have NO employee option pool.
+
+  The "Discount" value of 0.2 in the SAFEs tab is a 20% discount RATE (the investor converts at 80%
+  of the priced-round price), not a price multiplier.
+
+  Please reconstruct the cap table from the spreadsheet (Lane 3 freeform). For the review, model
+  ONLY the SAFE's cap-implied ownership snapshot — no priced-round or Series A scenarios — and give
+  me the full cap-table review with the interactive explorer built on that snapshot.
+
+# The prompt pre-answers the two fields the cap-table skill gates on for this fixture (option-pool
+# existence + which scenario to model), so the run is intended to be GATE-CLEAN — like the Lane-4
+# safe-full scenario (fires no gates with complete inline data). The `answers` below are a backstop
+# only, with phrasing-robust substring anchors (option LABELS are reworded every run, so match a
+# stable fragment, never the full label and never blanket `first`).
+answers:
+  - when_question: "Discount.*value|discount rate|price multiplier"
+    choose: "discount rate"         # the "Yes — 20% discount rate" option (alt is "price multiplier")
+  - when_question: "scenarios.*model"
+    choose: "SAFE cap-implied"      # stable across "…snapshot (Recommended)" / "…(standalone)"
+  - when_question: "option pool"
+    choose: "pool yet"              # stable across "No option pool yet" / "No pool yet"
+
+assert:
+  # Lane-3 ran end-to-end and produced its equity artifacts from the freeform sheet.
+  - result: success
+  - file_exists: outputs/artifacts/cap-table-cadence/inputs.json
+  - file_exists: outputs/artifacts/cap-table-cadence/instruments.json
+  # Deliverables promoted to the outputs root (manifest-backed → survives replay; parity).
+  - user_visible_artifact: outputs/Cadence_Cap_Table_Explorer.html
+  # Hard-fact extraction from the freeform grid (unique to this layer — not deterministic-pytest).
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-cadence/inputs.json
+      path: founders.0.common_shares
+      equals: 4000000
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-cadence/instruments.json
+      path: safes.0.post_money_valuation_cap
+      equals: 10000000
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-cadence/instruments.json
+      path: safes.0.discount_multiplier
+      equals: 0.8
+  # The SPREADSHEET_STRUCTURE_DETECTION (+ Context-B) sub-agents were dispatched.
+  - subagent_dispatched: 'cap-table'
+  # Boundary (live-only; skipped on the replay PR gate): no host path leaked into model-visible text.
+  - transcript_no_host_path: true
