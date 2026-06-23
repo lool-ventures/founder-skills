@@ -14,7 +14,7 @@ ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head 
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
-{ [ "$major" -gt 0 ] || [ "$minor" -ge 9 ]; } || { echo "FATAL: need >=0.9.0 (have $ver)"; exit 1; }
+{ [ "$major" -gt 0 ] || [ "$minor" -ge 10 ]; } || { echo "FATAL: need >=0.10.0 (have $ver)"; exit 1; }
 : "${COWORK_AGENT_BINARY:?FATAL: set COWORK_AGENT_BINARY to the staged claude ELF (claude-code-vm/<ver>/claude)}"
 [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 docker info >/dev/null 2>&1 || { echo "FATAL: Docker not running (live lane needs it)"; exit 1; }
@@ -29,6 +29,15 @@ if [ "$#" -gt 0 ]; then scns=("$@"); else
 fi
 echo "re-recording: ${scns[*]}"
 
+# Authoring a NEW cassette (or one whose gates are hard to pre-script)? Don't iterate THIS batch loop on
+# paid records discovering gate phrasing. Use 0.10.0's live-decider flow to answer gates in one pass:
+#   cowork-harness record scenarios/<new>.yaml --decider-llm --intent "…"   # a model answers the gates
+#   cowork-harness record scenarios/<new>.yaml --decider-dir <fresh-dir>    # YOU answer in-band (gates/answer)
+# Then lock the chosen answers into the scenario's `answers:` (cowork-harness verify-run confirms they still
+# match the run's gates in ~1s — no paid re-record) and re-record HERE. This batch loop stays SCRIPTED-only
+# on purpose: a live decider stamps the cassette `authoring.nonDeterministic`, and committed cassettes must
+# be reproducible via this script without a decider.
+#
 # --- record (synthetic data only — every scenario subject is fictional Cadence/Acmecorp) ---
 # Per-cassette temp+mv so a mid-batch failure never leaves a half-written committed cassette.
 recorded=()

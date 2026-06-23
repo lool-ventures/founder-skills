@@ -2,16 +2,27 @@
 
 Token-free **replay** PR gate (`.github/workflows/cowork-replay.yml`) over committed cassettes that
 exercise the founder-skills skills under Claude Cowork's runtime via
-[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (≥ 0.9.0). Recording is **live**
-(needs the staged agent + Docker); replay/verify are **token/agent-free** (stock CI).
+[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (**pinned to `0.10.0`** — see the note).
+Recording is **live** (needs the staged agent + Docker); replay/verify are **token/agent-free** (stock CI).
 
-> **0.9.0 note:** 0.9.0 makes the **git-tracked file set the default boundary** for both the staleness
-> hash and the sandbox mount (untracked scratch / OS-junk excluded from both), which closes the
-> "fresh cassette is immediately stale" asymmetry — so a freshly re-recorded cassette now passes its
-> own staleness check. Cassette format is **v6** (re-record once; pre-v6 cassettes report "older hash
-> format — re-record"). On a staleness mismatch, `fileSigs` names the **exact** changed file, and
-> `COWORK_HARNESS_DEBUG_SKILLHASH=1` dumps the hashed file set. Never set `COWORK_HARNESS_GITSET=0`
-> (it reverts to the legacy raw-walk boundary and reintroduces the staleness asymmetry).
+> **0.10.0 note (current pin).** Cassette format is still **v6** — the upgrade forces no re-record.
+> New in 0.10.0: `record` can answer gates **live** (`--decider-llm` / `--decider-dir` / `--on-unanswered`)
+> for one-pass cassette authoring (see "Record" below); `verify-run` now also checks `answers:` coverage —
+> a drifted `when_question`/`choose` fails in ~1s instead of on a paid record (exits `1` on answer mismatch,
+> `2` if the kept run has no `events.jsonl`); `lint` **bundles its own PyYAML** (no `pip install pyyaml`) and
+> flags positional `choose: first` as order-dependent (advisory); `doctor` detects the
+> "macOS-Keychain-but-no-`.env`" auth trap and points you at copying the token into `./.env`.
+> **Breaking — `stalled` verdict:** a run ending on an unanswered trailing question (final assistant turn
+> ends with `?`, no tool call, no `AskUserQuestion`) now **FAILS** by default; opt out per scenario with
+> `allow_stall: true`. None of our scenarios need it (verified by replay under 0.10.0).
+> **Why an exact pin, not a `>=` floor:** pre-1.0 minors may break — a future cassette-format bump would
+> replay-FAIL our committed cassettes in CI, which cannot re-record. Bump the pin in `cowork-replay.yml`
+> deliberately after the ~30s token-free gate (lint + privacy + replay) goes green on the new version.
+>
+> **Carried forward from 0.9.0 (still in effect):** the **git-tracked file set** is the boundary for both
+> the staleness hash and the sandbox mount, so a freshly re-recorded cassette passes its own staleness
+> check; on a mismatch `fileSigs` names the exact changed file and `COWORK_HARNESS_DEBUG_SKILLHASH=1` dumps
+> the hashed set. Never set `COWORK_HARNESS_GITSET=0` (reverts to the legacy raw-walk boundary).
 
 Coverage: a deep **cap-table** matrix (7 cassettes across all four extraction lanes) plus a
 **fleet-parity smoke** — one happy-path cassette per other skill (market-sizing, ic-sim,
@@ -116,6 +127,18 @@ export COWORK_HARNESS_RUNS_DIR=/tmp/ct-cowork-runs        # MUST be outside the 
 cd cowork-tests
 cowork-harness record scenarios/<name>.yaml --out cassettes/<name>.cassette.json
 ```
+**Authoring gates without the discovery dance (0.10.0).** Pre-scripting every `answers:` entry and then
+burning paid records when option labels drift run-to-run is the old pain. Instead, let the recorder answer
+gates **live in one pass**: `record scenarios/<name>.yaml --decider-llm --intent "<one line>"` (a model
+answers) or `--decider-dir <fresh-dir>` (you answer in-band via the `gates` / `answer` subcommands). The
+cassette still **replays deterministically**, but is stamped `authoring.nonDeterministic` (+ a "re-record
+may drift" warning). For a *committed* cassette, then lock the chosen answers into the scenario's `answers:`
+(run `verify-run` to confirm they still match the run's gates, ~1s) and do a final **scripted** `record` so
+it stays reproducible via `rerecord.sh` without a decider. `--on-unanswered first` auto-picks option 1 for
+any unscripted gate — use sparingly (option order is nondeterministic, so it can dead-end). Note:
+`--decider-*` is rejected with `--rerecord-stale` and with a directory batch; and `--allow-failing` only
+relaxes the post-run verdict — it does **not** salvage an unanswered gate.
+
 **Agent image (live lane):** rebuild the container agent image to `:2` before recording — run
 the build command `cowork-harness doctor --tier container` prints. Image `:2` ships the doc stack
 (openpyxl etc.) the xlsx/pdf skills exercise; a stale `:1` can mis-record. (Replay/CI never builds
@@ -157,6 +180,15 @@ cowork-harness verify-run /tmp/ct-cowork-runs/<scenario>/local_<id> scenarios/<s
 ```
 Only re-record (live) when the *run itself* must change. (Refuses rather than false-passes if a
 filesystem assertion needs a torn-down work dir.)
+
+**Answer coverage (0.10.0).** When a scenario declares `answers:`, `verify-run` now also checks that each
+scripted answer still matches a gate the kept run actually fired (parsed from the run's `events.jsonl`,
+which retains the offered option labels) — so a drifted `when_question` or a `choose:` naming an option the
+run never offered **fails in ~1s** instead of on a paid re-record. ⚠️ This changes `verify-run`'s
+exit-code contract: a run green on `assert:` can now exit **`1`** on an answer mismatch; if the scenario
+declares answers but the kept run dir has no `events.jsonl`, it exits **`2`** (refuses rather than vacuously
+passing). Assert-only scenarios (no `answers:`) are unaffected. Use this to validate `answers:` edits off a
+kept run before committing — it's the cheap guard for the gate-phrasing-drift class of re-record flake.
 
 ## Replay (CI / token-free)
 ```bash
