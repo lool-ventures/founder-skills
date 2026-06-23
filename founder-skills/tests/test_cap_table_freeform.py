@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -571,3 +572,174 @@ def test_freeform_emit_cli_blocker_is_a_gate_not_error(tmp_path) -> None:
     assert receipt["ok"] is False
     assert any(b["field"] == "interest_rate_type" for b in receipt["blockers"])
     assert not (tmp_path / "instruments.json").exists()  # nothing written while blocked
+
+
+# --- Part 2: next_action branches on blocker kind ---------------------------
+# An off-contract block_type/role is NOT founder-answerable — telling the agent to
+# "ask the founder / re-run with --answer" is wrong advice. The producer must steer
+# an off-contract blocker to a re-dispatch instead.
+
+
+def _emit_cli(tmp_path, sheet_rows: list, blocks: dict) -> dict:
+    """Run --mode=freeform-emit over a one-sheet xlsx + blocks; return the receipt."""
+    from openpyxl import Workbook  # type: ignore[import-untyped]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "S"
+    for row in sheet_rows:
+        ws.append(row)
+    wb.save(tmp_path / "s.xlsx")
+    (tmp_path / "inputs.json").write_text(
+        json.dumps(
+            {
+                "company_name": "Cadence",
+                "analysis_date": "2026-06-19",
+                "mode": "standard",
+                "metadata": {"run_id": "R1", "schema_version": "v0.5.0-inputs"},
+            }
+        )
+    )
+    proc = subprocess.run(
+        [
+            sys.executable,
+            os.path.join(SCRIPTS, "extract_cap_table.py"),
+            "--mode=freeform-emit",
+            "--xlsx",
+            str(tmp_path / "s.xlsx"),
+            "--dir",
+            str(tmp_path),
+            "--run-id",
+            "R1",
+        ],
+        input=json.dumps(blocks),
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout)
+
+
+def test_offcontract_blocktype_next_action_says_redispatch(tmp_path) -> None:
+    receipt = _emit_cli(
+        tmp_path,
+        [["Exit", "Proceeds"], [1_000_000, 500_000]],
+        {
+            "blocks": [
+                {
+                    "block_type": "waterfall_scenarios",  # off-contract: not in the closed vocabulary
+                    "sheet": "S",
+                    "cell_range": "A2:B2",
+                    "column_role_map": {"A": "exit", "B": "proceeds"},
+                }
+            ]
+        },
+    )
+    assert receipt["ok"] is False
+    na = receipt["next_action"].lower()
+    # off-contract → steer to re-dispatch, not to the founder/--answer path
+    assert "re-dispatch" in na
+    assert "spreadsheet_structure_detection" in na
+
+
+def test_answerable_blocker_keeps_founder_next_action(tmp_path) -> None:
+    receipt = _emit_cli(
+        tmp_path,
+        [["Investor", "Principal"], ["Lender", 250_000]],
+        {
+            "blocks": [
+                {
+                    "block_type": "notes_block",  # on-contract; missing interest_rate_type is founder-answerable
+                    "sheet": "S",
+                    "cell_range": "A2:B2",
+                    "column_role_map": {"A": "investor_name", "B": "principal"},
+                }
+            ]
+        },
+    )
+    assert receipt["ok"] is False
+    na = receipt["next_action"].lower()
+    # purely founder-answerable → keep the --answer guidance, do NOT tell it to re-dispatch
+    assert "--answer" in na
+    assert "re-dispatch" not in na
+
+
+def test_offcontract_role_next_action_says_redispatch(tmp_path) -> None:
+    # Off-contract ROLE (not block_type): the block_type is valid (founders_block) but a
+    # column-role value is off-contract. This must hit the "off-contract" reason discriminator,
+    # NOT the field=="block_type" one — so it isolates that branch.
+    receipt = _emit_cli(
+        tmp_path,
+        [["Name", "Shares"], ["Alice", 1_000_000]],
+        {
+            "blocks": [
+                {
+                    "block_type": "founders_block",
+                    "sheet": "S",
+                    "cell_range": "A2:B2",
+                    "column_role_map": {"A": "holder_name", "B": "bogus_role"},
+                }
+            ]
+        },
+    )
+    assert receipt["ok"] is False
+    # no block_type-field blocker here → only the reason clause can trigger re-dispatch
+    assert all(b["field"] != "block_type" for b in receipt["blockers"])
+    assert any("off-contract" in str(b.get("reason", "")) for b in receipt["blockers"])
+    na = receipt["next_action"].lower()
+    assert "re-dispatch" in na and "spreadsheet_structure_detection" in na
+
+
+def test_mixed_offcontract_and_answerable_next_action(tmp_path) -> None:
+    # An off-contract block AND a founder-answerable blocker in the same run: steer to
+    # re-dispatch (off-contract wins) but still surface the --answer path for the rest.
+    receipt = _emit_cli(
+        tmp_path,
+        [["Exit", "Proceeds"], [1_000_000, 500_000], ["Investor", "Principal"], ["Lender", 250_000]],
+        {
+            "blocks": [
+                {  # off-contract block_type
+                    "block_type": "waterfall_scenarios",
+                    "sheet": "S",
+                    "cell_range": "A2:B2",
+                    "column_role_map": {"A": "exit", "B": "proceeds"},
+                },
+                {  # on-contract but missing required interest_rate_type → founder-answerable
+                    "block_type": "notes_block",
+                    "sheet": "S",
+                    "cell_range": "A4:B4",
+                    "column_role_map": {"A": "investor_name", "B": "principal"},
+                },
+            ]
+        },
+    )
+    assert receipt["ok"] is False
+    fields = {b["field"] for b in receipt["blockers"]}
+    assert "block_type" in fields  # the off-contract block
+    assert "interest_rate_type" in fields  # the founder-answerable one
+    na = receipt["next_action"].lower()
+    assert "re-dispatch" in na  # off-contract steers the whole message to re-dispatch
+    assert "--answer" in na  # ...while still pointing at the answerable path for the rest
+
+
+# --- Part 3: drift guard — the contract vocabulary must stay surfaced in the
+# sub-agent system prompt (the hand-maintained copy the sub-agent actually reads).
+
+
+def test_role_map_vocab_present_in_agent_prompt() -> None:
+    """Every closed-contract term — block_type KEYS, role KEYS (what the sub-agent emits,
+    NOT role values or enum values), ignore types, hard-block keys — must appear word-bounded
+    in agents/cap-table.md. Guards against adding a term to freeform-role-map.json without
+    surfacing it in the SPREADSHEET_STRUCTURE_DETECTION prompt."""
+    rm = fm._load_role_map()
+    terms: set[str] = set(rm["block_types"].keys())
+    for bt in rm["block_types"].values():
+        terms |= set(bt["roles"].keys())  # role KEYS only
+    terms |= set(rm["ignore_block_types"])
+    terms |= set(rm["hard_block_block_types"].keys())
+
+    agent_md = os.path.join(_REPO, "founder-skills", "agents", "cap-table.md")
+    with open(agent_md, encoding="utf-8") as f:
+        text = f.read()
+    missing = [t for t in sorted(terms) if not re.search(r"\b" + re.escape(t) + r"\b", text)]
+    assert not missing, f"closed-contract terms absent from agents/cap-table.md: {missing}"

@@ -339,7 +339,13 @@ Inputs you'll receive:
 vocabulary — `references/schemas/freeform-role-map.json` (the single source of truth the
 deterministic producer `extract_cap_table.py --mode=freeform-emit` consumes). Emit ONLY
 those strings. An off-contract role value is rejected as a blocker, not silently mapped —
-do not invent names like `common_or_preferred` or `founder_id_or_none`.
+do not invent names like `common_or_preferred` or `founder_id_or_none`. The `block_type`
+list is closed too: a region that is neither equity holdings nor a listed instrument is an
+ignore type (`derived_calculation` for computed/modeling tabs, `noise` otherwise) — never
+coin a new `block_type` for it. But do not over-ignore: when a region might hold founder,
+preferred, option-pool, SAFE, or note rows, classify it as that block even if some columns
+are unclear — missing required fields become founder-confirmation blockers downstream, so a
+recoverable blocker beats silently dropping holdings by mis-filing them as a calc tab.
 
 Classify each region into one `block_type`:
 - `founders_block` — founder common-share holdings. Roles: `holder_name`, `shares`,
@@ -356,8 +362,9 @@ Classify each region into one `block_type`:
   both (required fields like strike/grant-date or settlement-type have no reliable column);
   provide those via Lane 1 / conversationally.
 - `header_metadata` — company name, as-of date, currency (ignored by the producer).
-- `derived_calculation` — formulas computing totals/as-converted values (ignored; we
-  recompute from extracted holdings).
+- `derived_calculation` — computed/modeling tabs and formula cells: totals, as-converted
+  values, waterfalls, exit/returns models, vesting schedules, pro-formas, 409A/valuation
+  (ignored; we recompute from extracted holdings).
 - `noise` — empty cells, formatting, irrelevant content (ignored).
 
 A `discount` column states the discount RATE (e.g. `20` or `0.20` = 20%), NOT a multiplier.

@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import math
 import os
 import re
 import sys
@@ -616,6 +617,131 @@ def _serialize_cell(value: Any) -> Any:
     return value
 
 
+# --- Lane-3 grid payload compaction (H4: control-frame size cap) -------------
+#
+# The --mode=grid dump is inlined into the SPREADSHEET_STRUCTURE_DETECTION
+# dispatch prompt, which becomes a harness/Cowork control frame with a hard size
+# ceiling (256 KiB). A large freeform workbook can blow past that. But the grid
+# is consumed ONLY for structure/role detection — the deterministic
+# --mode=freeform-emit phase re-reads the FULL grid straight from the file — so
+# the structure-detection grid can be trimmed, rounded, and row-elided down to a
+# byte budget with no effect on final-output fidelity.
+
+GRID_BUDGET_BYTES = 200_000  # ~195 KiB; headroom under the 256 KiB control-frame cap
+_GRID_FLOAT_SIG = 8  # significant figures kept when rounding floats
+_GRID_ELIDE_HEAD = 40  # data rows kept at the top of an elided block
+_GRID_ELIDE_TAIL = 10  # data rows kept at the bottom of an elided block
+
+
+def _grid_cell_blank(v: Any) -> bool:
+    return v is None or (isinstance(v, str) and v.strip() == "")
+
+
+def _used_bounds(rows: list[Any], merged_ranges: list[str]) -> tuple[int, int]:
+    """Return (last_row, last_col), 1-based, covering every non-blank cell plus
+    any merged range. (0, 0) when the sheet has no content. Used to drop the
+    phantom blank padding openpyxl reports beyond the real used range."""
+    from openpyxl.utils import range_boundaries  # type: ignore[import-untyped]
+
+    last_row = 0
+    last_col = 0
+    for r_idx, row in enumerate(rows, start=1):
+        for c_idx, cell in enumerate(row, start=1):
+            if not _grid_cell_blank(cell):
+                last_row = max(last_row, r_idx)
+                last_col = max(last_col, c_idx)
+    for mr in merged_ranges:
+        try:
+            _min_col, _min_row, max_col, max_row = range_boundaries(str(mr))
+        except Exception:
+            continue
+        if max_row:
+            last_row = max(last_row, int(max_row))
+        if max_col:
+            last_col = max(last_col, int(max_col))
+    return last_row, last_col
+
+
+def _trim_sheet(raw: dict[str, Any]) -> dict[str, Any]:
+    """Trim a raw sheet to its used bounding box (drops phantom trailing rows and
+    columns; keeps interior blanks so column index still maps to column letter)."""
+    from openpyxl.utils import get_column_letter  # type: ignore[import-untyped]
+
+    rows = raw.get("rows", [])
+    last_row, last_col = _used_bounds(rows, raw.get("merged_ranges", []))
+    trimmed = [list(row[:last_col]) + [None] * max(0, last_col - len(row)) for row in rows[:last_row]]
+    out = dict(raw)
+    out["rows"] = trimmed
+    out["dimensions"] = f"A1:{get_column_letter(last_col)}{last_row}" if last_row and last_col else "A1:A1"
+    return out
+
+
+def _round_sig(x: float, sig: int) -> float:
+    if x == 0 or not math.isfinite(x):
+        return x
+    digits = sig - int(math.floor(math.log10(abs(x)))) - 1
+    return round(x, digits)
+
+
+def _round_floats(rows: list[Any], sig: int = _GRID_FLOAT_SIG) -> list[Any]:
+    """Round every float cell to `sig` significant figures; leave ints/strings/None
+    untouched. Structure detection never needs 15-digit precision."""
+    return [[_round_sig(c, sig) if isinstance(c, float) else c for c in row] for row in rows]
+
+
+def _elide_sheet(raw: dict[str, Any], head: int = _GRID_ELIDE_HEAD, tail: int = _GRID_ELIDE_TAIL) -> dict[str, Any]:
+    """Collapse a tall block: keep `head` rows from the top and `tail` from the
+    bottom, replacing the middle with a marker. Kept rows become indexed objects
+    ({"r": <1-based row>, "c": [cells]}) so the sub-agent still reports cell_range
+    in true spreadsheet coordinates; the marker is {"elided": n, "rows": "a-b"}."""
+    rows = raw.get("rows", [])
+    n = len(rows)
+    if n <= head + tail:
+        return raw  # nothing worth eliding
+    indexed: list[Any] = [{"r": i + 1, "c": rows[i]} for i in range(head)]
+    first_elided, last_elided = head + 1, n - tail
+    indexed.append({"elided": last_elided - first_elided + 1, "rows": f"{first_elided}-{last_elided}"})
+    indexed.extend({"r": i + 1, "c": rows[i]} for i in range(n - tail, n))
+    out = dict(raw)
+    out["rows"] = indexed
+    out["indexed"] = True
+    return out
+
+
+def _compact_sheets(raw_sheets: dict[str, Any], budget: int) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Compact the grid under `budget` bytes via escalating tiers (each applied
+    only while still over budget): trim phantom blanks → round floats → elide tall
+    sheets (largest first). Returns (sheets, meta) where meta records which tiers
+    fired, the final payload size, and whether it is still over budget."""
+
+    def measure(sh: dict[str, Any]) -> int:
+        return len(json.dumps({"ok": True, "mode": "grid", "sheets": sh}, separators=(",", ":")))
+
+    applied: list[str] = ["trim"]
+    sheets = {name: _trim_sheet(raw) for name, raw in raw_sheets.items()}
+
+    if measure(sheets) > budget:
+        applied.append("round_floats")
+        for name in sheets:
+            sheets[name]["rows"] = _round_floats(sheets[name]["rows"])
+
+    if measure(sheets) > budget:
+        applied.append("elide_rows")
+        for name in sorted(sheets, key=lambda n: len(json.dumps(sheets[n], default=str)), reverse=True):
+            if measure(sheets) <= budget:
+                break
+            sheets[name] = _elide_sheet(sheets[name])
+
+    payload_bytes = measure(sheets)
+    meta = {
+        "applied": applied,
+        "payload_bytes": payload_bytes,
+        "budget_bytes": budget,
+        "over_budget": payload_bytes > budget,
+    }
+    return sheets, meta
+
+
 def _mode_grid(args: argparse.Namespace) -> int:
     """Dump every sheet of --xlsx as a cell-value grid for Lane-3 dispatch.
 
@@ -625,9 +751,17 @@ def _mode_grid(args: argparse.Namespace) -> int:
          "<sheet_name>": {
            "dimensions": "<str>",
            "rows": [[...], ...],       // values_only; None for blank cells
-           "merged_ranges": ["A4:C4", ...]
+           "merged_ranges": ["A4:C4", ...],
+           "indexed": true             // present only when rows were elided
          }, ...
-       }}
+       },
+       "compaction": {"applied": [...], "payload_bytes": N, "budget_bytes": B, "over_budget": false}}
+
+    The grid is compacted under a byte budget (default GRID_BUDGET_BYTES, override
+    with --grid-budget-bytes) so it fits the control-frame cap; an elided sheet's
+    rows are indexed objects ({"r","c"}) interleaved with {"elided","rows"} markers.
+    If the grid cannot be compacted under budget, a `grid_too_large` blocker is
+    returned (exit 1) rather than overflowing the control frame.
 
     With -o/--output the full JSON is written to the file and a compact
     receipt is emitted to stdout confirming the write path.
@@ -657,20 +791,39 @@ def _mode_grid(args: argparse.Namespace) -> int:
         print(json.dumps(err))
         return 1
 
-    sheets: dict[str, Any] = {}
+    raw_sheets: dict[str, Any] = {}
     for ws in wb.worksheets:
         rows = [[_serialize_cell(cell) for cell in row] for row in ws.iter_rows(values_only=True)]
         merged = [str(r) for r in ws.merged_cells.ranges]
-        sheets[ws.title] = {
+        raw_sheets[ws.title] = {
             "dimensions": ws.dimensions,
             "rows": rows,
             "merged_ranges": merged,
         }
 
+    budget = args.grid_budget_bytes if getattr(args, "grid_budget_bytes", None) else GRID_BUDGET_BYTES
+    sheets, compaction = _compact_sheets(raw_sheets, budget)
+
+    if compaction["over_budget"]:
+        blocker = {
+            "ok": False,
+            "mode": "grid",
+            "blocker": "grid_too_large",
+            "compaction": compaction,
+            "error": (
+                f"freeform grid is {compaction['payload_bytes']} bytes after compaction, over the "
+                f"{budget}-byte control-frame budget. Split the workbook into per-sheet files and run "
+                "--mode=grid on each, or reconstruct the cap table conversationally (Lane 4)."
+            ),
+        }
+        print(json.dumps(blocker, indent=2 if args.pretty else None))
+        return 1
+
     payload: dict[str, Any] = {
         "ok": True,
         "mode": "grid",
         "sheets": sheets,
+        "compaction": compaction,
     }
 
     if args.output:
@@ -683,6 +836,7 @@ def _mode_grid(args: argparse.Namespace) -> int:
             "mode": "grid",
             "written_to": out,
             "sheet_count": len(sheets),
+            "compaction": compaction,
         }
         print(json.dumps(receipt, indent=2 if args.pretty else None))
     else:
@@ -812,6 +966,25 @@ def _mode_freeform_emit(args: argparse.Namespace) -> int:
     )
 
     if result["blockers"]:
+        # An off-contract blocker (the sub-agent emitted a block_type/role outside the closed
+        # vocabulary) is NOT founder-answerable — steer it to a re-dispatch, not an AskUserQuestion.
+        off_contract = any(
+            b.get("field") == "block_type" or "off-contract" in str(b.get("reason", "")) for b in result["blockers"]
+        )
+        if off_contract:
+            next_action = (
+                "One or more blocks are off-contract: the SPREADSHEET_STRUCTURE_DETECTION sub-agent used a "
+                "block_type or column-role value outside the closed vocabulary (see the contract in "
+                "agents/cap-table.md / references/schemas/freeform-role-map.json). Re-dispatch "
+                "SPREADSHEET_STRUCTURE_DETECTION and emit ONLY contract block_types/roles — do not ask the "
+                "founder about these. Any remaining founder-answerable blockers still use "
+                "--answer <block_index>.<field>=<value>."
+            )
+        else:
+            next_action = (
+                "Resolve each blocker with the founder via AskUserQuestion, then re-run with "
+                "--answer <block_index>.<field>=<value> for the answerable fields."
+            )
         print(
             json.dumps(
                 {
@@ -819,10 +992,7 @@ def _mode_freeform_emit(args: argparse.Namespace) -> int:
                     "mode": "freeform-emit",
                     "blockers": result["blockers"],
                     "warnings": result["warnings"],
-                    "next_action": (
-                        "Resolve each blocker with the founder via AskUserQuestion, then re-run with "
-                        "--answer <block_index>.<field>=<value> for the answerable fields."
-                    ),
+                    "next_action": next_action,
                 },
                 indent=2 if args.pretty else None,
             )
@@ -878,6 +1048,16 @@ def main() -> int:
     p.add_argument("--instruments", help="(Carta mode) Where to write/append instruments.json")
     p.add_argument("-o", "--output", help="Where to write extraction_audit.json")
     p.add_argument("--run-id", dest="run_id", help="Run identifier stamped into metadata.run_id")
+    p.add_argument(
+        "--grid-budget-bytes",
+        dest="grid_budget_bytes",
+        type=int,
+        default=None,
+        help=(
+            "(grid mode) byte budget for the compacted cell grid; defaults to "
+            f"{GRID_BUDGET_BYTES} (headroom under the 256 KiB control-frame cap)."
+        ),
+    )
     p.add_argument("--pretty", action="store_true")
     p.add_argument(
         "--answer",

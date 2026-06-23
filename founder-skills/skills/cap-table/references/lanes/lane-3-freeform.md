@@ -18,7 +18,21 @@ Then read the cell grid — per sheet: sheet name, dimensions, cell values per r
 python3 "$SCRIPTS/extract_cap_table.py" --mode=grid --xlsx "$XLSX_PATH"
 ```
 
-The output is JSON to stdout (`{"ok": true, "mode": "grid", "sheets": {...}}`). Paste the full JSON into the dispatch prompt below.
+The output is JSON to stdout (`{"ok": true, "mode": "grid", "sheets": {...}, "compaction": {...}}`). Paste the full JSON into the dispatch prompt below.
+
+### The grid is compacted to fit the control-frame cap
+
+A whole freeform workbook can be too large to inline into a dispatch prompt (the control frame has a hard ~256 KiB ceiling). Since the grid is used **only** for structure/role detection — the deterministic `--mode=freeform-emit` step below re-reads the *full* grid straight from the file — `--mode=grid` shrinks the payload under a byte budget without losing any fidelity in the final artifacts. The `compaction.applied` list reports which tiers fired:
+
+- **`trim`** (always) — phantom blank rows/columns beyond the real used range are dropped. Interior blanks are kept, so a cell's column position still maps to its column letter.
+- **`round_floats`** — float cells are rounded to 8 significant figures (precision you don't need to detect block/column structure).
+- **`elide_rows`** — for a tall block, only the first 40 and last 10 rows are kept. **When a sheet is elided it carries `"indexed": true`,** and its `rows` become objects rather than bare arrays:
+  - a kept row is `{"r": <1-based spreadsheet row number>, "c": [cell, cell, ...]}`
+  - the gap is one marker `{"elided": <count>, "rows": "<first>-<last>"}`
+
+  For an `indexed` sheet, read the row number from `r` (not from array position) and assume the elided rows continue the same columns/pattern — so a holder block that visibly runs from `r: 5` through a `{"elided": 850, "rows": "55-904"}` marker to `r: 905` has `cell_range` `A5:…905`. For a non-indexed sheet, rows are positional starting at row 1 as before.
+
+If the workbook cannot be compacted under budget, `--mode=grid` returns `{"ok": false, "blocker": "grid_too_large", ...}` (exit 1) instead of overflowing — split the workbook into per-sheet files and run `--mode=grid` on each (merge the returned blocks), or reconstruct conversationally via Lane 4.
 
 ## Dispatch Context A — `SPREADSHEET_STRUCTURE_DETECTION`
 
@@ -30,14 +44,21 @@ REVIEW_DIR: <absolute path>
 RUN_ID: <RUN_ID>
 
 You are the cap-table agent dispatched in Context A (SPREADSHEET_STRUCTURE_DETECTION).
-Sheet structure + cell grid:
+Sheet structure + cell grid (compacted to fit the control frame):
 
-<paste the sheet data — sheet name, dimensions, cell values per row>
+<paste the full --mode=grid JSON — sheets + the compaction block>
+
+The grid is size-compacted. A sheet with "indexed": true has rows as objects:
+{"r": <1-based row number>, "c": [cells...]} for kept rows, plus one
+{"elided": <n>, "rows": "<a>-<b>"} marker for collapsed middle rows — use `r`
+for row numbers and treat an elided span as a continuation of the same block
+(its cell_range spans across the marker). A sheet without "indexed" has positional
+rows starting at row 1, as usual.
 
 Return JSON only — the {blocks: [{block_type, sheet, cell_range,
-column_role_map, confidence, evidence, ambiguities}]} shape. block_type and every
-column_role_map VALUE MUST come from references/schemas/freeform-role-map.json
-(closed vocabulary). Do not write artifacts.
+column_role_map, confidence, evidence, ambiguities}]} shape. cell_range MUST use
+true spreadsheet row numbers. block_type and every column_role_map VALUE MUST come
+from references/schemas/freeform-role-map.json (closed vocabulary). Do not write artifacts.
 ```
 
 After the sub-agent returns, apply the tolerant JSON extraction protocol.

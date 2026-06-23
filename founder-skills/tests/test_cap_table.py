@@ -25,6 +25,7 @@ sys.path.insert(0, SCRIPTS)
 # Import library APIs once for in-process tests (faster than subprocess for math).
 import anti_dilution  # type: ignore[import-not-found]  # noqa: E402
 import cap_state as cap_state_mod  # type: ignore[import-not-found]  # noqa: E402
+import extract_cap_table  # type: ignore[import-not-found]  # noqa: E402
 import note_conversion  # type: ignore[import-not-found]  # noqa: E402
 import option_pool  # type: ignore[import-not-found]  # noqa: E402
 import priced_round  # type: ignore[import-not-found]  # noqa: E402
@@ -7004,6 +7005,157 @@ class TestGridMode:
         empty_sheet = receipt["sheets"].get("Empty", {})
         rows = empty_sheet.get("rows", [])
         assert isinstance(rows, list)
+
+
+# ---------------------------------------------------------------------------
+# extract_cap_table.py --mode=grid payload compaction (H4: control-frame cap)
+#
+# The grid is consumed ONLY by the SPREADSHEET_STRUCTURE_DETECTION sub-agent for
+# block/role detection; the deterministic freeform-emit phase re-reads the FULL
+# grid from the file. So the structure-detection grid may be trimmed, rounded,
+# and row-elided down to a byte budget without any loss of final-output fidelity.
+# ---------------------------------------------------------------------------
+
+
+def _measure(obj: Any) -> int:
+    return len(json.dumps(obj, separators=(",", ":")))
+
+
+class TestGridUsedBounds:
+    """_used_bounds(rows, merged_ranges) -> (last_row, last_col), 1-based."""
+
+    def test_bounds_from_values(self) -> None:
+        rows = [["A", 1, None], [None, None, None], ["B", 2, None]]
+        assert extract_cap_table._used_bounds(rows, []) == (3, 2)
+
+    def test_empty_grid_is_zero(self) -> None:
+        assert extract_cap_table._used_bounds([], []) == (0, 0)
+        assert extract_cap_table._used_bounds([[None, None]], []) == (0, 0)
+
+    def test_merged_ranges_extend_bounds(self) -> None:
+        # Values only reach B1, but a merged range spans to C4.
+        rows = [["A", 1, None]]
+        assert extract_cap_table._used_bounds(rows, ["A4:C4"]) == (4, 3)
+
+
+class TestGridRoundFloats:
+    """_round_floats keeps non-floats verbatim, rounds floats to N sig figs."""
+
+    def test_rounds_floats_to_sig_figs(self) -> None:
+        rows = [[0.123456789012345, 1234567.891234]]
+        out = extract_cap_table._round_floats(rows, sig=8)
+        assert out[0][0] == 0.12345679
+        assert out[0][1] == 1234567.9
+
+    def test_leaves_ints_strings_none(self) -> None:
+        rows = [[10_000_000, "Acmecorp", None, 0]]
+        out = extract_cap_table._round_floats(rows, sig=8)
+        assert out[0] == [10_000_000, "Acmecorp", None, 0]
+        assert isinstance(out[0][0], int)
+
+
+class TestGridCompactSheets:
+    """_compact_sheets(raw_sheets, budget) -> (sheets, meta)."""
+
+    def _raw(self, rows: list, merged: list | None = None) -> dict:
+        return {"S": {"dimensions": "A1:Z999", "rows": rows, "merged_ranges": merged or []}}
+
+    def test_trims_phantom_rows_and_cols(self) -> None:
+        # openpyxl over-reports dimension: real data is A1:B2, padded out to 6x6.
+        rows = [["A", 1, None, None, None, None], ["B", 2, None, None, None, None]]
+        rows += [[None] * 6 for _ in range(4)]
+        sheets, meta = extract_cap_table._compact_sheets(self._raw(rows), budget=1_000_000)
+        assert sheets["S"]["rows"] == [["A", 1], ["B", 2]]
+        assert "trim" in meta["applied"]
+        assert meta["over_budget"] is False
+
+    def test_keeps_interior_blank_rows(self) -> None:
+        rows = [["A", 1], [None, None], ["B", 2]]
+        sheets, _ = extract_cap_table._compact_sheets(self._raw(rows), budget=1_000_000)
+        assert sheets["S"]["rows"] == [["A", 1], [None, None], ["B", 2]]
+
+    def test_meta_reports_payload_and_budget(self) -> None:
+        sheets, meta = extract_cap_table._compact_sheets(self._raw([["A", 1]]), budget=12_345)
+        assert meta["budget_bytes"] == 12_345
+        assert meta["payload_bytes"] == _measure({"ok": True, "mode": "grid", "sheets": sheets})
+
+    def test_rounds_floats_when_over_budget(self) -> None:
+        rows = [[0.123456789012345 + i, 0.987654321098 + i] for i in range(60)]
+        sheets, meta = extract_cap_table._compact_sheets(self._raw(rows), budget=1_700)
+        assert "round_floats" in meta["applied"]
+        assert "elide_rows" not in meta["applied"]  # rounding alone fits → rows stay positional
+        # No 15-digit floats survive.
+        assert all(len(repr(c)) <= 12 for r in sheets["S"]["rows"] for c in r if isinstance(c, float))
+
+    def test_elides_tall_sheet_preserving_endpoints(self) -> None:
+        rows = [[f"holder_{i}", i] for i in range(1, 501)]
+        sheets, meta = extract_cap_table._compact_sheets(self._raw(rows), budget=1_500)
+        assert "elide_rows" in meta["applied"]
+        s = sheets["S"]
+        assert s.get("indexed") is True
+        kept = [r for r in s["rows"] if "r" in r]
+        markers = [r for r in s["rows"] if "elided" in r]
+        assert markers, "expected at least one elision marker"
+        # First and last data rows survive with correct 1-based row numbers.
+        assert kept[0]["r"] == 1 and kept[0]["c"] == ["holder_1", 1]
+        assert kept[-1]["r"] == 500 and kept[-1]["c"] == ["holder_500", 500]
+
+    def test_unshrinkable_payload_flags_over_budget(self) -> None:
+        # One very wide row of long strings: trim/round/elide cannot help.
+        rows = [["x" * 200 for _ in range(400)]]
+        _sheets, meta = extract_cap_table._compact_sheets(self._raw(rows), budget=2_000)
+        assert meta["over_budget"] is True
+
+
+class TestGridModeCompactionCLI:
+    """End-to-end --mode=grid behavior with the byte budget."""
+
+    def test_grid_output_includes_compaction_meta(self, tmp_path: Any) -> None:
+        xlsx = _make_grid_xlsx(str(tmp_path))
+        rc, stdout, _ = _run("extract_cap_table.py", ["--mode", "grid", "--xlsx", xlsx])
+        assert rc == 0
+        receipt = json.loads(stdout)
+        assert "compaction" in receipt
+        assert "payload_bytes" in receipt["compaction"]
+        assert "budget_bytes" in receipt["compaction"]
+
+    def test_grid_large_sheet_stays_under_budget(self, tmp_path: Any) -> None:
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.title = "Big"
+        for r in range(1, 801):
+            for c in range(1, 9):
+                ws.cell(row=r, column=c, value=r * 1000 + c + 0.123456789012345)
+        path = os.path.join(str(tmp_path), "big.xlsx")
+        wb.save(path)
+
+        rc, stdout, _ = _run("extract_cap_table.py", ["--mode", "grid", "--xlsx", path, "--grid-budget-bytes", "20000"])
+        assert rc == 0, f"stdout={stdout[:300]}"
+        receipt = json.loads(stdout)
+        assert receipt["ok"] is True
+        assert receipt["compaction"]["payload_bytes"] <= 20_000
+        assert receipt["compaction"]["over_budget"] is False
+
+    def test_grid_unshrinkable_returns_blocker(self, tmp_path: Any) -> None:
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.title = "Wide"
+        for c in range(1, 401):
+            ws.cell(row=1, column=c, value="x" * 200)
+        path = os.path.join(str(tmp_path), "wide.xlsx")
+        wb.save(path)
+
+        rc, stdout, _ = _run("extract_cap_table.py", ["--mode", "grid", "--xlsx", path, "--grid-budget-bytes", "2000"])
+        assert rc != 0
+        receipt = json.loads(stdout)
+        assert receipt["ok"] is False
+        assert receipt["blocker"] == "grid_too_large"
 
 
 # ===========================================================================
