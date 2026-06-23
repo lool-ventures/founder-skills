@@ -122,48 +122,61 @@ def render_donut(
     breakdown: dict[str, float],
     *,
     size: int = 200,
-    label: str = "",
+    center_value: str = "",
+    center_label: str = "",
 ) -> str:
-    """Render an SVG donut. `breakdown` maps category → percentage (0-1)."""
-    cx = cy = size // 2
-    r_outer = size // 2 - 10
-    r_inner = r_outer - 30
+    """Inline SVG donut. `breakdown` maps class → fraction (0-1), keyed either
+    bare (``founders``) or `_pct`-suffixed (``founders_pct``). Wedges are drawn
+    at raw `frac × 360°` (no renormalization) so a wedge, its legend %, and the
+    headline founder % are the same number; classes below EPS or in
+    EXCLUDED_OWNERSHIP_KEYS are dropped. `center_value`/`center_label` print in
+    the hole."""
     import math
 
-    slices = {k: v for k, v in breakdown.items() if k not in EXCLUDED_OWNERSHIP_KEYS}
-    total = sum(slices.values())
-    if total <= 0:
-        return f'<svg width="{size}" height="{size}"><circle cx="{cx}" cy="{cy}" r="{r_outer}" fill="#F1F4F4"/></svg>'
+    cx = cy = size / 2
+    r_outer = size / 2 - 6
+    r_inner = r_outer * 0.62
 
-    paths = []
-    start_angle = -math.pi / 2  # 12 o'clock
-    for cat, frac in slices.items():
-        if frac <= 0:
-            continue
-        end_angle = start_angle + (frac / total) * 2 * math.pi
-        x1 = cx + r_outer * math.cos(start_angle)
-        y1 = cy + r_outer * math.sin(start_angle)
-        x2 = cx + r_outer * math.cos(end_angle)
-        y2 = cy + r_outer * math.sin(end_angle)
-        x1i = cx + r_inner * math.cos(end_angle)
-        y1i = cy + r_inner * math.sin(end_angle)
-        x2i = cx + r_inner * math.cos(start_angle)
-        y2i = cy + r_inner * math.sin(start_angle)
-        large_arc = 1 if (end_angle - start_angle) > math.pi else 0
-        color = _palette_color(cat)
-        d = (
-            f"M {x1} {y1} A {r_outer} {r_outer} 0 {large_arc} 1 {x2} {y2} "
-            f"L {x1i} {y1i} A {r_inner} {r_inner} 0 {large_arc} 0 {x2i} {y2i} Z"
-        )
-        paths.append(f'<path d="{d}" fill="{color}"/>')
-        start_angle = end_angle
+    slices = [
+        (cat, frac)
+        for cat, frac in _ordered_items(breakdown, _palette.ORDER_DONUT)
+        if cat not in EXCLUDED_OWNERSHIP_KEYS and frac >= _palette.EPS
+    ]
 
-    label_svg = ""
-    if label:
-        label_svg = (
-            f'<text x="{cx}" y="{cy + 5}" text-anchor="middle" font-size="12" fill="#374B65">{_esc(label)}</text>'
+    paths: list[str] = []
+    if not slices or sum(f for _, f in slices) <= 0:
+        paths.append(f'<circle cx="{cx}" cy="{cy}" r="{r_outer}" fill="var(--lool-paper-2)"/>')
+    else:
+        start = -math.pi / 2  # 12 o'clock
+        for cat, frac in slices:
+            end = start + frac * 2 * math.pi  # raw frac, denominator 1.0
+            x1, y1 = cx + r_outer * math.cos(start), cy + r_outer * math.sin(start)
+            x2, y2 = cx + r_outer * math.cos(end), cy + r_outer * math.sin(end)
+            large = 1 if (end - start) > math.pi else 0
+            paths.append(
+                f'<path d="M {cx} {cy} L {x1:.2f} {y1:.2f} '
+                f'A {r_outer:.2f} {r_outer:.2f} 0 {large} 1 {x2:.2f} {y2:.2f} Z" '
+                f'fill="{_palette.slice_color(cat)}"/>'
+            )
+            start = end
+
+    # Hole (turns the pie into a donut)
+    paths.append(f'<circle cx="{cx}" cy="{cy}" r="{r_inner:.2f}" fill="var(--lool-white)"/>')
+
+    center = ""
+    if center_value:
+        center = (
+            f'<text x="{cx}" y="{cy - 2:.2f}" text-anchor="middle" '
+            f'font-size="{size * 0.16:.0f}" font-weight="700" '
+            f'fill="var(--lool-blue)">{_esc(center_value)}</text>'
         )
-    return f'<svg width="{size}" height="{size}">{"".join(paths)}{label_svg}</svg>'
+        if center_label:
+            center += (
+                f'<text x="{cx}" y="{cy + size * 0.12:.2f}" text-anchor="middle" '
+                f'font-size="{max(9, size * 0.07):.0f}" fill="var(--lool-mute)">'
+                f"{_esc(center_label)}</text>"
+            )
+    return f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}">{"".join(paths)}{center}</svg>'
 
 
 def render_legend(breakdown: dict[str, float]) -> str:
@@ -293,7 +306,7 @@ def render_report_html(
             # scalar pct values before passing to donut/legend so the SVG
             # math doesn't try to add a dict.
             agg_scalar = {k: v for k, v in agg.items() if isinstance(v, (int, float))}
-            donut = render_donut(agg_scalar, size=180, label=_pct(agg.get("founders_pct", 0)))
+            donut = render_donut(agg_scalar, size=180)
             details = render_legend(agg_scalar)
             fi = co.get("founder_impact", {}) or {}
             impact_line = _esc(fi.get("plain_language", ""))
@@ -465,7 +478,7 @@ def render_report_html(
 
 <h2>Current cap state (pre-financing)</h2>
 <div class="card-body">
-  {render_donut(pre_breakdown, size=180, label="current")}
+  {render_donut(pre_breakdown, size=180)}
   {render_legend(pre_breakdown)}
 </div>
 {voting_pct_html}

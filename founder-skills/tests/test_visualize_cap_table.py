@@ -136,6 +136,33 @@ def _make_fixture_dir(tmp: str, *, company_name: str = "TestCo", safe_id: str = 
     return tmp
 
 
+def test_render_donut_centers_value_and_drops_sub_eps() -> None:
+    import importlib.util
+    import types
+
+    spec = importlib.util.spec_from_file_location("_t_donut", os.path.join(SCRIPTS, "visualize.py"))
+    mod = types.ModuleType("_t_donut")
+    mod.__file__ = os.path.join(SCRIPTS, "visualize.py")
+    ts = types.ModuleType("_theme")
+    ts.brand_css = lambda: ""  # type: ignore[attr-defined]
+    ts.FOOTER_CREDIT_HTML = ""  # type: ignore[attr-defined]
+    sys.modules.setdefault("_theme", ts)
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+
+    svg = mod.render_donut(
+        {"founders": 0.842, "option_pool": 0.158, "preferred": 0.0},
+        size=150,
+        center_value="84.2%",
+        center_label="founders",
+    )
+    assert "<svg" in svg and "84.2%" in svg
+    assert ">founders<" in svg
+    # exact-zero preferred is dropped: only two wedge <path>s
+    assert svg.count("<path") == 2
+    # the hole circle is present (donut, not pie)
+    assert "circle" in svg
+
+
 # ===========================================================================
 # visualize.py — self-contained HTML
 # ===========================================================================
