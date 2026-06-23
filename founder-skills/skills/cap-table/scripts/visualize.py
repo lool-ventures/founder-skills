@@ -393,21 +393,26 @@ def render_report_html(
 ) -> str:
     company = _esc(inputs.get("company_name", "Company"))
     scenarios = scenarios_doc.get("scenarios", [])
-    fd = cap_state["as_converted_totals"]["fully_diluted_shares"]
+
+    # Step 1: founders-only pre_breakdown + other_common slice
+    ats = cap_state["as_converted_totals"]
+    fd = ats.get("fully_diluted_shares") or 0
+    founder_shares = sum(int(f.get("common_shares", 0)) for f in cap_state.get("founders", []))
+    batch_shares = sum(int(b.get("shares", 0)) for b in cap_state.get("common_batches", []))
     pre_breakdown = (
         {
-            "founders": cap_state["as_converted_totals"]["common_shares"] / fd,
-            "preferred": cap_state["as_converted_totals"]["preferred_shares_as_converted"] / fd,
-            "option_pool": (
-                cap_state["as_converted_totals"]["options_outstanding"]
-                + cap_state["as_converted_totals"]["options_available"]
-            )
-            / fd,
-            "warrants": cap_state["as_converted_totals"].get("warrants_underlying_total", 0) / fd,
+            "founders": founder_shares / fd,
+            "other_common": batch_shares / fd,
+            "preferred": ats["preferred_shares_as_converted"] / fd,
+            "option_pool": (ats["options_outstanding"] + ats["options_available"]) / fd,
+            "warrants": ats.get("warrants_underlying_total", 0) / fd,
         }
         if fd
         else {}
     )
+    today_founder_pct = founder_shares / fd if fd else 0.0
+    fd_total_str = f"{int(fd):,}" if fd else "—"
+    as_of = cap_state.get("as_of_date", "")
 
     # Voting_pct per-holder table when dual-class (§6.5 HTML mirror).
     founders_list_v = cap_state.get("founders") or []
@@ -428,7 +433,7 @@ def render_report_html(
             vrm = float(b.get("voting_rights_multiple") or 1.0)
             shares = int(b.get("shares") or 0)
             rows_v.append((f"Batch {b.get('batch_id') or b.get('holder_id', '?')}", cls, shares, vrm, shares * vrm))
-        preferred_as_conv_v = int(cap_state["as_converted_totals"]["preferred_shares_as_converted"])
+        preferred_as_conv_v = int(ats["preferred_shares_as_converted"])
         if preferred_as_conv_v > 0:
             rows_v.append(
                 ("Preferred (as-converted)", "preferred", preferred_as_conv_v, 1.0, float(preferred_as_conv_v))
@@ -442,9 +447,9 @@ def render_report_html(
         )
         voting_pct_html = (
             "<h2>Voting power (dual-class)</h2>"
-            "<p style='color:var(--muted);font-size:13px;'>Dual-class structure detected. Voting % = shares × voting_rights_multiple, normalized across all voting holders. "
+            "<p class='section-note'>Dual-class structure detected. Voting % = shares × voting_rights_multiple, normalized across all voting holders. "
             "Preferred treated as 1× per v0.5.0 simplification; see <code>dual_class.founder_super_voting</code> counsel item.</p>"
-            "<table><thead><tr><th>Holder</th><th>Class</th><th>Shares</th><th>Voting units</th><th>Voting %</th></tr></thead>"
+            '<table class="data"><thead><tr><th>Holder</th><th>Class</th><th>Shares</th><th>Voting units</th><th>Voting %</th></tr></thead>'
             f"<tbody>{voting_rows_html}</tbody></table>"
         )
 
@@ -478,99 +483,129 @@ def render_report_html(
             aoa_rows_html += f"<tr><td>{_esc(label)}</td><td>{rendered}</td></tr>"
         aoa_findings_html = (
             "<h2>Articles of Association — extracted findings</h2>"
-            "<table><thead><tr><th>Finding</th><th>Value</th></tr></thead>"
+            '<table class="data"><thead><tr><th>Finding</th><th>Value</th></tr></thead>'
             f"<tbody>{aoa_rows_html}</tbody></table>"
         )
 
-    scenario_cards = []
+    # Step 2: classify scenarios into ordered buckets
+    rich: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+    cap_implied: list[dict[str, Any]] = []
+    pending: list[dict[str, Any]] = []
     for s in scenarios:
-        co = s["computed_outputs"]
+        co = s.get("computed_outputs", {}) or {}
         completeness = co.get("completeness", "structural_only")
         agg = co.get("aggregate_ownership_by_class") or {}
-        if completeness in {"full", "mixed"} and agg:
-            # agg contains a `founders_by_class` map sub-object; filter to
-            # scalar pct values before passing to donut/legend so the SVG
-            # math doesn't try to add a dict.
-            agg_scalar = {k: v for k, v in agg.items() if isinstance(v, (int, float))}
-            donut = render_donut(agg_scalar, size=180)
-            details = render_legend(agg_scalar)
-            fi = co.get("founder_impact", {}) or {}
-            impact_line = _esc(fi.get("plain_language", ""))
-            # Render AD breakdown when present
-            ad_bd = co.get("anti_dilution_breakdown") or []
-            if ad_bd:
-                pre_ad = agg.get("founders_pct_pre_anti_dilution")
-                delta = agg.get("anti_dilution_delta_pct_points")
-                ad_summary_parts = []
-                if pre_ad is not None:
-                    ad_summary_parts.append(f"<strong>Pre-AD baseline:</strong> {_pct(pre_ad)}")
-                if delta is not None:
-                    sign = "−" if delta < 0 else "+"
-                    ad_summary_parts.append(f"<strong>AD impact:</strong> {sign}{abs(delta):.2f} pp")
-                details += (
-                    '<p style="margin-top:8px;font-size:13px;color:var(--lool-slate);">'
-                    + " | ".join(ad_summary_parts)
-                    + "</p>"
-                )
-                # Per-series AD rows
-                series_rows = []
-                for bd in ad_bd:
-                    sid = _esc(bd.get("series_id", "?"))
-                    ptype = _esc(bd.get("protection_type", "?").replace("_", " "))
-                    cb = bd.get("ccp_before", 0)
-                    ca = bd.get("ccp_after", 0)
-                    floor_note = " <em>(floor clamped)</em>" if bd.get("floor_applied") else ""
-                    series_rows.append(f"<li>{sid} ({ptype}): CCP ${cb:.4f} → ${ca:.4f}{floor_note}</li>")
-                details += (
-                    '<ul style="font-size:12px;color:var(--lool-mute);margin-top:6px;">'
-                    + "".join(series_rows)
-                    + "</ul>"
-                )
+        agg_scalar = {k: v for k, v in agg.items() if isinstance(v, (int, float))}
+        if completeness in {"full", "mixed"} and agg_scalar:
+            rich.append((s, co, agg_scalar))
         elif co.get("cap_implied_only") and co.get("per_safe"):
-            # Cap-implied (pre-financing) — real per-SAFE ownership, NOT a blocked
-            # scenario. Show the cap-implied table; ownership resolves at a priced round.
-            donut = '<div style="width:180px;height:180px;display:flex;align-items:center;justify-content:center;background:var(--lool-paper-2);border-radius:50%;font-size:12px;color:var(--lool-mute);text-align:center;padding:0 10px;">Pre-round<br>snapshot</div>'
-            rows = "".join(
-                f'<tr><td>{_esc(sid)}</td><td class="num">{_pct(r.get("cap_implied_ownership", 0))}</td>'
-                f'<td class="num">${float(r.get("safe_price") or 0):.4f}</td>'
-                f'<td class="num">{int(r.get("cap_implied_shares") or 0):,}</td></tr>'
-                for sid, r in co["per_safe"].items()
-            )
-            details = (
-                f'<p style="font-size:13px;color:var(--lool-slate);">{_esc(_labels.CAP_IMPLIED_GLOSS)}</p>'
-                '<table><thead><tr><th>SAFE</th><th class="num">Cap-implied %</th>'
-                '<th class="num">Price</th><th class="num">Shares</th></tr></thead><tbody>' + rows + "</tbody></table>"
-            )
-            impact_line = ""
+            cap_implied.append(s)
         else:
-            donut = '<div style="width:180px;height:180px;display:flex;align-items:center;justify-content:center;background:var(--lool-paper-2);border-radius:50%;font-size:12px;color:var(--lool-mute);">Pending</div>'
-            details = (
-                "<em>No resolved ownership yet — see blockers below.</em>"
-                if co.get("blockers")
-                else "<em>No resolved ownership yet.</em>"
+            pending.append(s)
+    comparison_html = render_comparison_table(rich, cap_state)
+
+    # Step 3: build cards in bucket order (rich → cap-implied → pending)
+    scenario_cards: list[str] = []
+    for s, co, agg_scalar in rich:
+        donut = render_donut(agg_scalar, size=128, center_value=_pct(agg_scalar.get("founders_pct", 0)))
+        legend = render_legend(agg_scalar)
+        after = agg_scalar.get("founders_pct")
+        fi = co.get("founder_impact") or {}
+        if fi.get("delta_pp") is not None:
+            delta_pp = fi["delta_pp"]
+        elif after is not None:
+            delta_pp = (after - _scenario_before_pct(cap_state)) * 100
+        else:
+            delta_pp = None
+        delta_txt = f"{delta_pp:+.1f} pts" if delta_pp is not None else "—"
+        price = co.get("equity_financing_price")
+        price_txt = f"${price:.2f}" if price is not None else "—"
+        fd_after = co.get("post_round_fully_diluted_shares")
+        fd_txt = f"{int(fd_after):,}" if fd_after is not None else "—"
+        impact = (
+            _esc(fi.get("plain_language", ""))
+            if fi.get("plain_language")
+            else (
+                f"Founders held {_pct(_scenario_before_pct(cap_state))} before; after, "
+                f"{_pct(after) if after is not None else '—'} — {delta_txt}."
             )
-            impact_line = ""
-        blockers_html = ""
+        )
+        ad_html = ""
+        ad_bd = co.get("anti_dilution_breakdown") or []
+        if ad_bd:
+            pre_ad = agg_scalar.get("founders_pct_pre_anti_dilution")
+            d = agg_scalar.get("anti_dilution_delta_pct_points")
+            parts = []
+            if pre_ad is not None:
+                parts.append(f"Pre-AD baseline {_pct(pre_ad)}")
+            if d is not None:
+                parts.append(f"AD impact {'−' if d < 0 else '+'}{abs(d):.2f} pp")
+            series = "".join(
+                f"<li>{_esc(b.get('series_id', '?'))} "
+                f"({_esc(str(b.get('protection_type', '?')).replace('_', ' '))}): "
+                f"CCP ${b.get('ccp_before', 0):.4f} → ${b.get('ccp_after', 0):.4f}"
+                f"{' (floor clamped)' if b.get('floor_applied') else ''}</li>"
+                for b in ad_bd
+            )
+            ad_html = f'<p class="ad-summary">{" | ".join(parts)}</p><ul class="ad-series">{series}</ul>'
+        scenario_cards.append(f"""
+<div class="card avoid-break">
+  <div class="card-head">
+    <h3>{_esc(s.get("label", s["scenario_id"]))}</h3>
+    <span class="pill pill-ok">Fully modeled</span>
+  </div>
+  <div class="card-body">
+    {donut}
+    <div class="card-main">
+      <div class="metric-trio">
+        <div><div class="metric-n metric-blue">{_pct(after) if after is not None else "—"}</div><div class="metric-l">founders after · <span class="delta">{delta_txt}</span></div></div>
+        <div><div class="metric-n">{price_txt}</div><div class="metric-l">price per share</div></div>
+        <div><div class="metric-n">{fd_txt}</div><div class="metric-l">shares after round</div></div>
+      </div>
+      {legend}
+    </div>
+  </div>
+  {ad_html}
+  <p class="impact">{impact}</p>
+</div>""")
+
+    for s in cap_implied:
+        co = s["computed_outputs"]
+        rows = "".join(
+            f'<tr><td>{_esc(sid)}</td><td class="num">{_pct(r.get("cap_implied_ownership", 0))}</td>'
+            f'<td class="num">${float(r.get("safe_price") or 0):.4f}</td>'
+            f'<td class="num">{int(r.get("cap_implied_shares") or 0):,}</td></tr>'
+            for sid, r in co["per_safe"].items()
+        )
+        scenario_cards.append(f"""
+<div class="card card-dashed avoid-break">
+  <div class="card-head">
+    <h3>{_esc(s.get("label", s["scenario_id"]))}</h3>
+    <span class="pill pill-warn">Structure only</span>
+  </div>
+  <p class="gloss">{_esc(_labels.CAP_IMPLIED_GLOSS)}</p>
+  <table class="data"><thead><tr><th>SAFE</th><th class="num">Cap-implied %</th>
+    <th class="num">Price</th><th class="num">Shares</th></tr></thead><tbody>{rows}</tbody></table>
+</div>""")
+
+    for s in pending:
+        co = s.get("computed_outputs", {}) or {}
         if co.get("blockers"):
-            blockers_html = (
-                "<ul>"
+            body = (
+                "<ul class='blockers'>"
                 + "".join(f"<li><code>{_esc(b['code'])}</code>: {_esc(b['remedy'])}</li>" for b in co["blockers"])
                 + "</ul>"
             )
+        else:
+            body = "<p class='gloss'>No resolved ownership yet.</p>"
         scenario_cards.append(f"""
-<div class="card">
-  <h3>{_esc(s.get("label", s["scenario_id"]))}</h3>
-  <div class="card-body">
-    {donut}
-    <div>
-      <p><strong>Type:</strong> {_labels.html_term("scenario_type", s["type"])} | <strong>Status:</strong> {_labels.html_term("completeness", completeness)}</p>
-      {details}
-      <p style="margin-top:10px;">{impact_line}</p>
-      {blockers_html}
-    </div>
+<div class="card avoid-break">
+  <div class="card-head">
+    <h3>{_esc(s.get("label", s["scenario_id"]))}</h3>
+    <span class="pill">{_esc(_labels.humanize("completeness", co.get("completeness", "structural_only")))}</span>
   </div>
-</div>
-""")
+  {body}
+</div>""")
 
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
     if scripts_dir not in sys.path:
@@ -579,45 +614,44 @@ def render_report_html(
 
     brand_css = _theme.brand_css()
 
+    # Step 4: counsel grouped by domain via counsel_item_html; watchlist 4-col
+    counsel_items = counsel_packet.get("items", [])
     counsel_html = ""
-    if counsel_packet.get("items"):
-        items_html = []
+    if counsel_items:
         by_domain: dict[str, list[dict[str, Any]]] = {}
-        for it in counsel_packet["items"]:
+        for it in counsel_items:
             by_domain.setdefault(it.get("domain", "other"), []).append(it)
-        for domain in sorted(by_domain.keys()):
-            items_html.append(f"<h3>{_esc(domain.replace('_', ' ').title())}</h3>")
-            items_html.append("<ul>")
-            for it in by_domain[domain]:
-                items_html.append(
-                    f"<li><strong>{_rule_html(it['rule_id'], item_title=it.get('title'), item_source_ids=it.get('source_ids'))}</strong>"
-                    f" — {_esc(it.get('counsel_question', ''))}</li>"
-                )
-            items_html.append("</ul>")
-        counsel_html = "".join(items_html)
+        blocks = []
+        for domain in sorted(by_domain):
+            items_html = "".join(counsel_item_html(it) for it in by_domain[domain])
+            blocks.append(
+                f'<div class="ci-group avoid-break"><div class="ci-domain">'
+                f"{_esc(counsel_domain_label(domain))}</div>{items_html}</div>"
+            )
+        counsel_html = "".join(blocks)
 
-    # Date-sensitive watchlist — deduped to one row per rule, slim columns.
     wl_groups = _rules.group_watchlist(rule_audit.get("date_sensitive_watchlist", []))
     if wl_groups:
-        wl_row_list = []
-        for g in wl_groups:
-            count_badge = f' <span class="rule-extra">· {g["count"]}×</span>' if g["count"] > 1 else ""
-            wl_row_list.append(
-                "<tr>"
-                f"<td>{_rule_html(g['rule_id'], item_title=g['title'], compact=True)}</td>"
-                f"<td>{_labels.html_term('status', g['status'])}{count_badge}</td>"
-                f'<td class="num">{_esc(_rules.format_dates(g["dates"]))}</td>'
-                f"<td>{_esc(g['action'])}</td>"
-                "</tr>"
-            )
+        wl_rows = "".join(
+            "<tr>"
+            f"<td>{_esc(g['title'])}</td>"
+            f"<td>{watchlist_status_pill(g['status'])}</td>"
+            f'<td class="num">{_esc(watchlist_next_date(g["dates"], g["status"], as_of))}</td>'
+            f'<td class="wl-do">{_esc(g["action"])}</td>'
+            "</tr>"
+            for g in wl_groups
+        )
         watchlist_html = (
             "<h2>Date-sensitive watchlist</h2>"
-            "<table><thead><tr><th>Rule</th><th>Status</th><th>When</th><th>Action</th></tr></thead>"
-            f"<tbody>{''.join(wl_row_list)}</tbody></table>"
+            '<p class="section-note">Rules with a time window — one row each.</p>'
+            '<div class="cmp-wrap avoid-break"><table class="data wl"><thead><tr>'
+            "<th>Rule</th><th>Status</th><th>Next date</th><th>What to do</th>"
+            f"</tr></thead><tbody>{wl_rows}</tbody></table></div>"
         )
     else:
         watchlist_html = "<h2>Date-sensitive watchlist</h2><p>No date-sensitive rules apply.</p>"
 
+    counsel_count = len(counsel_items)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -625,63 +659,133 @@ def render_report_html(
 <title>Cap Table — {company}</title>
 <style>
 {brand_css}
-  :root {{
-    --bg: var(--lool-white);
-    --fg: var(--lool-ink);
-    --muted: var(--lool-mute);
-    --border: var(--lool-line-2);
-    --accent: var(--lool-azure);
-  }}
-  body {{ font-family: var(--font-body);
-         color: var(--fg); background: var(--bg); margin: 0; padding: 24px; line-height: 1.5;
+  @page {{ size: A4; margin: 18mm 16mm 20mm; }}
+  body {{ font-family: var(--font-body); color: var(--lool-ink); background: var(--lool-paper);
+         margin: 0; padding: 40px 24px; line-height: 1.5; font-size: 15px;
          -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }}
-  h1 {{ font-size: 32px; margin: 0 0 12px; font-weight: 400; color: var(--lool-blue); letter-spacing: -0.01em; }}
-  h2 {{ font-size: 20px; margin: 32px 0 8px; font-weight: 500; color: var(--lool-royal);
-        border-bottom: 1px solid var(--border); padding-bottom: 4px; }}
-  h3 {{ font-size: 16px; margin: 16px 0 8px; font-weight: 500; color: var(--lool-royal); }}
-  .header-row {{ display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }}
-  .meta {{ color: var(--muted); font-size: 14px; }}
-  .card {{ border: 1px solid var(--lool-line-2); border-radius: 0; padding: 16px; margin: 12px 0;
-           background: var(--lool-paper); }}
-  .card-body {{ display: flex; gap: 20px; align-items: flex-start; }}
-  code {{ background: var(--lool-paper-2); padding: 1px 4px; border-radius: var(--r-input);
+  .doc-sheet {{ max-width: 820px; margin: 0 auto; background: var(--lool-white);
+         box-shadow: var(--shadow-soft); padding: 56px 64px 48px; }}
+  .topbar {{ max-width: 820px; margin: 0 auto 16px; display: flex; justify-content: flex-end; }}
+  .printbtn {{ display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px;
+         border: 1px solid var(--lool-blue); border-radius: 4px; background: var(--lool-blue);
+         color: #fff; font: 600 13px var(--font-body); cursor: pointer; }}
+  h1 {{ font-family: var(--font-body); font-size: 34px; font-weight: 400; margin: 0;
+         color: var(--lool-blue); letter-spacing: -0.01em; }}
+  h2 {{ font-family: var(--font-body); font-size: 20px; font-weight: 500; color: var(--lool-royal);
+         margin: 34px 0 10px; }}
+  h3 {{ font-family: var(--font-body); font-size: 18px; font-weight: 500; color: var(--lool-ink); margin: 0; }}
+  .eyebrow {{ font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.10em;
+         color: var(--lool-subtle); margin-bottom: 8px; }}
+  .title-row {{ display: flex; justify-content: space-between; align-items: flex-end; gap: 24px;
+         border-bottom: 2px solid var(--lool-blue); padding-bottom: 18px; }}
+  .title-meta {{ text-align: right; font-size: 13px; color: var(--lool-mute); line-height: 1.5; }}
+  .section-note {{ font-size: 14px; color: var(--lool-mute); margin: 0 0 14px; }}
+  .panel {{ display: flex; gap: 32px; align-items: center; padding: 22px 24px;
+         border: 1px solid var(--lool-line); border-radius: 8px; }}
+  .legend {{ list-style: none; padding: 0; margin: 0; flex: 1; }}
+  .lg-row {{ display: flex; align-items: center; gap: 11px; padding: 7px 0;
+         border-bottom: 1px solid var(--lool-paper-2); font-size: 15px; }}
+  .lg-sw {{ width: 13px; height: 13px; border-radius: 3px; flex: none; }}
+  .lg-label {{ flex: 1; color: var(--lool-ink); }}
+  .lg-pct {{ font-variant-numeric: tabular-nums; font-weight: 700; min-width: 60px; text-align: right; }}
+  .lg-sh {{ font-variant-numeric: tabular-nums; color: var(--lool-faint); min-width: 96px;
+         text-align: right; font-size: 14px; }}
+  .card {{ border: 1px solid var(--lool-line); border-radius: 8px; padding: 22px 24px; margin: 16px 0; }}
+  .card-dashed {{ border-style: dashed; border-color: var(--lool-line-form); }}
+  .card-head {{ display: flex; justify-content: space-between; align-items: baseline;
+         gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }}
+  .card-body {{ display: flex; gap: 28px; align-items: center; }}
+  .card-main {{ flex: 1; min-width: 0; }}
+  .metric-trio {{ display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 14px; }}
+  .metric-n {{ font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums;
+         line-height: 1; color: var(--lool-ink); }}
+  .metric-blue {{ color: var(--lool-blue); }}
+  .metric-l {{ font-size: 12px; color: var(--lool-mute); margin-top: 4px; }}
+  .delta {{ color: var(--lool-danger); font-weight: 600; }}
+  .impact {{ font-size: 14px; line-height: 1.55; color: var(--lool-slate);
+         margin: 16px 0 0; padding-top: 14px; border-top: 1px solid var(--lool-paper-2); }}
+  .gloss {{ font-size: 13px; color: var(--lool-mute); margin: 0 0 12px; }}
+  .pill {{ font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+         padding: 3px 11px; border-radius: 50px; background: var(--lool-paper-2); color: var(--lool-subtle); }}
+  .pill-ok {{ background: var(--lool-success-tint); color: var(--lool-success); }}
+  .pill-warn {{ background: var(--lool-warning-tint); color: var(--lool-warning); }}
+  table.data, table.cmp {{ border-collapse: collapse; width: 100%; font-size: 14px; }}
+  table.data th, table.data td, table.cmp th, table.cmp td {{ padding: 10px 14px; text-align: left;
+         border-top: 1px solid var(--lool-line); }}
+  table.cmp thead th, table.data thead th {{ background: var(--lool-paper-2); color: var(--lool-subtle);
+         font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; border-top: none; }}
+  .cmp-wrap {{ border: 1px solid var(--lool-line); border-radius: 8px; overflow: hidden; margin: 8px 0; }}
+  .num {{ text-align: right; font-variant-numeric: tabular-nums; }}
+  th.num {{ text-align: right; }}
+  .cmp-best {{ display: block; font-size: 10px; font-weight: 600; text-transform: uppercase;
+         letter-spacing: 0.05em; color: var(--lool-success); margin-top: 2px; }}
+  .ci-group {{ margin-bottom: 20px; }}
+  .ci-domain {{ font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+         color: var(--lool-azure-deep); margin-bottom: 8px; }}
+  .ci {{ padding: 12px 0; border-top: 1px solid var(--lool-paper-2); }}
+  .ci-title {{ font-size: 15px; font-weight: 600; color: var(--lool-ink); margin-bottom: 4px; line-height: 1.35; }}
+  .ci-q {{ font-size: 14px; line-height: 1.55; color: var(--lool-mute); margin-bottom: 6px; }}
+  .ci-meta {{ display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }}
+  .ci-src {{ font-size: 13px; color: var(--lool-azure-deep); text-decoration: none; font-weight: 500; }}
+  .ci-also {{ font-size: 12px; color: var(--lool-mute); }}
+  .ci-code {{ font-family: var(--font-mono); font-size: 10px; color: var(--lool-faint); }}
+  .ad-summary {{ font-size: 13px; color: var(--lool-slate); margin: 14px 0 4px; }}
+  .ad-series {{ font-size: 12px; color: var(--lool-mute); margin: 0; }}
+  .wl-do {{ color: var(--lool-slate); font-size: 13px; line-height: 1.45; }}
+  .footer {{ margin-top: 36px; padding-top: 14px; border-top: 1px solid var(--lool-line);
+         display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+         font-size: 12px; color: var(--lool-subtle); }}
+  code {{ background: var(--lool-paper-2); padding: 1px 4px; border-radius: 3px;
           font-size: 0.9em; font-family: var(--font-mono); }}
-  table {{ border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 14px; }}
-  th, td {{ border: 1px solid var(--lool-line-2); padding: 6px 10px; text-align: left; }}
-  th {{ background: var(--lool-paper); }}
-  .num {{ text-align: right; }}
-  .term {{ border-bottom: 1px dotted var(--lool-line-2); cursor: help; }}
-  .rule-code {{ font-size: 11px; color: var(--muted); }}
-  .rule-extra {{ font-size: 11px; color: var(--muted); }}
-  .footer {{ margin-top: 40px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--lool-line-2); padding-top: 12px; }}
+  .term {{ border-bottom: 1px dotted var(--lool-line); cursor: help; }}
+  .rule-code {{ font-size: 11px; color: var(--lool-mute); }}
+  .rule-extra {{ font-size: 11px; color: var(--lool-mute); }}
+  @media print {{
+    body {{ background: #fff; padding: 0; }}
+    .doc-sheet {{ box-shadow: none; margin: 0; max-width: none; }}
+    .screen-only {{ display: none !important; }}
+    .avoid-break {{ break-inside: avoid; }}
+    .pg-break {{ break-before: page; }}
+  }}
 </style>
 </head>
 <body>
-<div class="header-row">
-  <h1>Cap Table — {company}</h1>
-  <span class="meta">As of {_esc(cap_state.get("as_of_date", ""))}</span>
+<div class="topbar screen-only">
+  <button class="printbtn" onclick="window.print()">Print / Save PDF</button>
 </div>
+<div class="doc-sheet">
+  <div class="title-row">
+    <div>
+      <div class="eyebrow">Cap table report</div>
+      <h1>{company}</h1>
+    </div>
+    <div class="title-meta">As of {_esc(as_of)}<br>{fd_total_str} FD shares today</div>
+  </div>
 
-<h2>Current cap state (pre-financing)</h2>
-<div class="card-body">
-  {render_donut(pre_breakdown, size=180)}
-  {render_legend(pre_breakdown)}
+  <h2>Ownership today (pre-financing)</h2>
+  <div class="panel avoid-break">
+    {render_donut(pre_breakdown, size=150, center_value=_pct(today_founder_pct), center_label="founders")}
+    {render_legend(pre_breakdown, fd=fd)}
+  </div>
+  {voting_pct_html}
+
+  {f"<h2>Comparing the priced rounds</h2>{comparison_html}" if comparison_html else ""}
+
+  <h2>Each scenario in detail</h2>
+  {"".join(scenario_cards)}
+  {aoa_findings_html}
+
+  <h2 class="pg-break">Questions for your lawyer <span class="section-note" style="display:inline;">· {counsel_count} items</span></h2>
+  <p class="section-note">Not legal advice — a checklist to raise with qualified counsel. Each item links to its primary source.</p>
+  {counsel_html or "<p>No counsel items.</p>"}
+
+  {watchlist_html}
+
+  <div class="footer">
+    <span>{company} · cap table report · generated {_esc(as_of)} · rule pack v{RULE_PACK_VERSION}</span>
+    <span>founder-skills by lool ventures</span>
+  </div>
 </div>
-{voting_pct_html}
-{aoa_findings_html}
-
-<h2>Scenarios modeled</h2>
-{"".join(scenario_cards)}
-
-<h2>Counsel review required ({len(counsel_packet.get("items", []))} items)</h2>
-{counsel_html or "<p>No counsel items.</p>"}
-
-{watchlist_html}
-
-<div class="footer">
-  Report generated by cap-table skill. Rule pack v{RULE_PACK_VERSION}.
-</div>
-{_theme.FOOTER_CREDIT_HTML}
 </body>
 </html>
 """
