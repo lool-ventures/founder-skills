@@ -179,22 +179,27 @@ def render_donut(
     return f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}">{"".join(paths)}{center}</svg>'
 
 
-def render_legend(breakdown: dict[str, float]) -> str:
-    items = []
-    for cat, frac in breakdown.items():
-        # Skip the pre-AD / delta-pp fields here — they're rendered
-        # separately by the scenario-card AD block (in render_report_html).
-        # `_pct(frac)` multiplies by 100, which would double-encode the
-        # already-in-pp anti_dilution_delta_pct_points field.
-        if cat in EXCLUDED_OWNERSHIP_KEYS:
+def render_legend(breakdown: dict[str, float], *, fd: float | None = None) -> str:
+    """Legend rows `swatch · Label · pct` (+ ` · N sh` when `fd` given). Plain
+    class labels via _palette; classes below EPS or excluded are skipped; rows
+    follow ORDER_LEGEND."""
+    rows: list[str] = []
+    for cat, frac in _ordered_items(breakdown, _palette.ORDER_LEGEND):
+        if cat in EXCLUDED_OWNERSHIP_KEYS or frac < _palette.EPS:
             continue
-        color = _palette_color(cat)
-        items.append(
-            f'<li style="display:flex;align-items:center;gap:6px;font-size:12px;">'
-            f'<span style="width:12px;height:12px;background:{color};display:inline-block;"></span>'
-            f"{_esc(cat.replace('_', ' '))}: {_pct(frac)}</li>"
+        color = _palette.slice_color(cat)
+        label = _esc(_palette.slice_label(cat))
+        shares = ""
+        if fd:
+            shares = f'<span class="lg-sh">{int(round(frac * fd)):,} sh</span>'
+        rows.append(
+            '<li class="lg-row">'
+            f'<span class="lg-sw" style="background:{color};"></span>'
+            f'<span class="lg-label">{label}</span>'
+            f'<span class="lg-pct">{_pct(frac)}</span>'
+            f"{shares}</li>"
         )
-    return f'<ul style="list-style:none;padding:0;margin:0;">{"".join(items)}</ul>'
+    return f'<ul class="legend">{"".join(rows)}</ul>'
 
 
 def render_report_html(

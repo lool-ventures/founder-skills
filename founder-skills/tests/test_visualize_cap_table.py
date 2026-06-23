@@ -2212,3 +2212,31 @@ class TestExploreSliderHomeFrame:
                 f.write(runner)
             res = subprocess.run([node, js_path], capture_output=True, text=True)
         assert res.returncode == 0 and "OK_HOME" in res.stdout, res.stderr
+
+
+def _load_viz() -> Any:
+    import importlib.util
+    import types
+
+    spec = importlib.util.spec_from_file_location("_t_legend", os.path.join(SCRIPTS, "visualize.py"))
+    mod = types.ModuleType("_t_legend")
+    mod.__file__ = os.path.join(SCRIPTS, "visualize.py")
+    ts = types.ModuleType("_theme")
+    ts.brand_css = lambda: ""  # type: ignore[attr-defined]
+    ts.FOOTER_CREDIT_HTML = ""  # type: ignore[attr-defined]
+    sys.modules.setdefault("_theme", ts)
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def test_render_legend_plain_labels_and_shares() -> None:
+    viz = _load_viz()
+    bd = {"founders_pct": 0.584, "new_money_pct": 0.217, "preferred_pct": 0.0}
+    with_shares = viz.render_legend(bd, fd=10_000_000)
+    assert "Founders" in with_shares and "New investors" in with_shares
+    assert "founders pct" not in with_shares  # no raw data keys (B1)
+    assert "Preferred" not in with_shares  # exact-zero dropped (C1)
+    assert "58.4%" in with_shares
+    assert "sh" in with_shares  # shares mode
+    no_shares = viz.render_legend(bd)
+    assert "sh" not in no_shares  # default: no shares column
