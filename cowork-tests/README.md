@@ -24,7 +24,7 @@ Recording is **live** (needs the staged agent + Docker); replay/verify are **tok
 > check; on a mismatch `fileSigs` names the exact changed file and `COWORK_HARNESS_DEBUG_SKILLHASH=1` dumps
 > the hashed set. Never set `COWORK_HARNESS_GITSET=0` (reverts to the legacy raw-walk boundary).
 
-Coverage: a deep **cap-table** matrix (7 cassettes across all four extraction lanes) plus a
+Coverage: a deep **cap-table** matrix (8 cassettes across all four extraction lanes) plus a
 **fleet-parity smoke** — one happy-path cassette per other skill (market-sizing, ic-sim,
 competitive-positioning, deck-review, financial-model-review) proving the `resolve_artifacts_root.py`
 fix lands deliverables at `outputs/artifacts/<skill>-<slug>/` and Cowork parity holds (no host-path
@@ -61,8 +61,9 @@ Consequences for authoring:
   match the specific usable option (e.g. `choose: "Use anonymized names"`) instead of `first`.
 
 *Audit (2026-06-21):* all 11 cassettes' asserts are already parity / extraction / structural-presence
-— zero deterministic-pytest duplicates. No trims needed. (The 12th, `cap-table-lane3-freeform`, follows
-the same discipline: parity + hard-fact extraction asserts only.)
+— zero deterministic-pytest duplicates. No trims needed. (The 12th, `cap-table-lane3-freeform`, and the
+13th, `cap-table-note-conversion`, follow the same discipline: parity + hard-fact extraction asserts only —
+the convertible-note 7-branch *math* stays in pytest; the cassette only proves the LLM-in-the-loop path.)
 
 ## Release-cadence re-record
 
@@ -86,7 +87,7 @@ lane can't run on hosted CI — only the token-free **replay** lane does. **Trig
 cassette matrix grows past what a release-cadence manual `rerecord.sh` can sustain, stand up a
 **self-hosted runner** with the staged agent to run a periodic (nightly/weekly) live re-record +
 verify, turning the manual chore into always-fresh automation. **Decision today: deferred** — the
-current matrix (7 cap-table cassettes + 5 smokes) doesn't justify the runner cost.
+current matrix (8 cap-table cassettes + 5 smokes) doesn't justify the runner cost.
 
 ## Layout
 - `sessions/` — repo-relative sessions: the **environment** (model, plugin mount, file `uploads:`).
@@ -113,6 +114,7 @@ current matrix (7 cap-table cassettes + 5 smokes) doesn't justify the runner cos
 | `cap-table-carta` | 2 (Carta XLSX) | sheet-fingerprint mapping → instruments (P2-a) |
 | `cap-table-lane3-freeform` | 3 (freeform XLSX) | freeform-grid structure detection → founders + SAFE blocks; non-mappable "Returns" tab → `derived_calculation` (role-contract) |
 | `cap-table-priced-ad` | 4 (conversational) | priced round + BBWA anti-dilution (P2-b) |
+| `cap-table-note-conversion` | 4 (conversational) | convertible-note conversion at a qualified financing (cap_conversion); reconstructs the note + runs `note_conversion` (LLM-in-the-loop layer; the 7-branch math is pytest) |
 | `cap-table-fast-assess` | conversational | Phase-O fast-assess routing + sentinel (P2-c) |
 | `market-sizing-smoke` | conversational | resolver path + `report.json`; research-skill (cites sources, §6) |
 | `ic-sim-smoke` | conversational | resolver path + `report.json`; 3 parallel partner dispatches |
