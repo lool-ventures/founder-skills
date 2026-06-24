@@ -271,7 +271,10 @@ def map_freeform(
                     warnings.append(f"SAFE {inv!r}: {disc_warn}")
                 post_cap = _f(raw.get("post_money_cap"))
                 pre_cap = _f(raw.get("pre_money_cap"))
-                idate = _to_iso_date(raw.get("issue_date")) or _DATE_SENTINEL
+                idate = _to_iso_date(raw.get("issue_date"))
+                if idate is None:
+                    idate = _DATE_SENTINEL
+                    warnings.append(f"SAFE {inv!r}: issuance_date defaulted to {_DATE_SENTINEL} (confirm)")
                 rec = {
                     "id": f"safe_{safe_n:03d}",
                     "investor_name": str(inv),
@@ -316,6 +319,10 @@ def map_freeform(
                 disc_mult, disc_warn = _normalize_discount(disc_raw)
                 if disc_warn and not _is_blank(disc_raw):
                     warnings.append(f"note {inv!r}: {disc_warn}")
+                ndate = _to_iso_date(raw.get("issue_date"))
+                if ndate is None:
+                    ndate = _DATE_SENTINEL
+                    warnings.append(f"note {inv!r}: issuance_date defaulted to {_DATE_SENTINEL} (confirm)")
                 rec = {
                     "id": f"note_{note_n:03d}",
                     "investor_name": str(inv),
@@ -324,7 +331,7 @@ def map_freeform(
                     "interest_rate_type": str(irt),
                     "valuation_cap": _f(raw.get("valuation_cap")),
                     "discount_multiplier": disc_mult,
-                    "issuance_date": _to_iso_date(raw.get("issue_date")) or _DATE_SENTINEL,
+                    "issuance_date": ndate,
                     "maturity_date": _to_iso_date(raw.get("maturity_date")),
                     "source_document": src,
                     "extraction_confidence": "medium",

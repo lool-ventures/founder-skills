@@ -776,6 +776,44 @@ def test_emit_empty_does_not_stamp_cap_base_confirmed() -> None:
     assert (r["inputs"].get("metadata") or {}).get("cap_base_source") != "confirmed"
 
 
+def test_safe_missing_issue_date_warns_on_sentinel() -> None:
+    # Transparency symmetry (R-4): the preferred path warns when it applies _DATE_SENTINEL for a missing
+    # issue date; the SAFE path applied it silently. A missing date must surface a warning on every path.
+    blocks = [
+        {
+            "block_type": "safes_block",
+            "sheet": "S",
+            "cell_range": "A2:B2",
+            "column_role_map": {"A": "investor_name", "B": "amount"},
+        }
+    ]
+    grid = _grid({"S": [["Investor", "Amount"], ["Acme Ventures", 500000]]})  # no issue_date column
+    r = fm.map_freeform(blocks, grid, existing_inputs=_meta_inputs(), run_id=RUN)
+    assert r["instruments"]["safes"][0]["issuance_date"] == "1900-01-01"  # sentinel applied
+    assert any("issuance_date" in w and "Acme Ventures" in w for w in r["warnings"]), r["warnings"]
+
+
+def test_note_missing_issue_date_warns_on_sentinel() -> None:
+    blocks = [
+        {
+            "block_type": "notes_block",
+            "sheet": "N",
+            "cell_range": "A2:B2",
+            "column_role_map": {"A": "investor_name", "B": "principal"},
+        }
+    ]
+    grid = _grid({"N": [["Investor", "Principal"], ["Lender", 250000]]})  # no issue_date column
+    r = fm.map_freeform(
+        blocks,
+        grid,
+        existing_inputs=_meta_inputs(),
+        answers={"0.interest_rate_type": "fixed_numeric_simple"},
+        run_id=RUN,
+    )
+    assert r["instruments"]["convertible_notes"][0]["issuance_date"] == "1900-01-01"
+    assert any("issuance_date" in w and "Lender" in w for w in r["warnings"]), r["warnings"]
+
+
 def test_wrong_field_schema_next_action_says_redispatch(tmp_path) -> None:
     # CLI: the schema/empty blocker steers to a re-dispatch with the right field names — NOT the founder.
     receipt = _emit_cli(
