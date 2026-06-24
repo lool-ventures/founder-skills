@@ -550,6 +550,39 @@ def _assert_coaching_payload_privacy_clean(
         )
 
 
+def _render_warning_callouts(cap_state_warnings: list[str]) -> list[str]:
+    """Founder-facing callout block for cap_state warnings. Bare-code warnings match by equality;
+    the anti-dilution recovery warnings are interpolated SENTENCES (`W_ANTI_DILUTION_*: …`) so they
+    match by PREFIX — otherwise the already-shipped AD recovery stays invisible to the founder."""
+    out: list[str] = []
+    if any(w == "W_AOA_ONLY_NO_INSTRUMENTS" for w in cap_state_warnings):
+        out.append("> **AoA-only engagement detected.** No instruments to convert; this report renders the")
+        out.append("> Articles-of-Association findings and the current pre-financing cap state. To model")
+        out.append("> dilution scenarios, add SAFEs, convertible notes, option grants, or warrants to")
+        out.append("> `instruments.json`.")
+        out.append("")
+    if any(w == "W_CAP_BASE_ASSUMED" for w in cap_state_warnings):
+        out.append("> ⚠ **Cap base ASSUMED, not founder-confirmed.** Founder share counts / option pool were")
+        out.append("> not confirmed (generic placeholder names or an explicit assumed flag) — ownership")
+        out.append("> figures below are DIRECTIONAL. Confirm the cap base before relying on these numbers.")
+        out.append("")
+    if any(w == "W_FOUNDER_LOOKS_LIKE_INVESTOR" for w in cap_state_warnings):
+        out.append("> ⚠ **A listed founder resembles an investment entity** (name contains")
+        out.append("> Ventures/Capital/Fund). Confirm it is a founder, not an investor — mis-classifying an")
+        out.append("> investor as a founder distorts the ownership table.")
+        out.append("")
+    ad = [w for w in cap_state_warnings if w.startswith("W_ANTI_DILUTION")]
+    if ad:
+        out.append("> ⚠ **Anti-dilution input recovered — confirm with counsel.** The anti-dilution intent")
+        out.append("> below was not supplied in the canonical field; it was recovered (or flagged) so it is")
+        out.append("> NOT silently dropped. Verify the term before relying on the down-round math:")
+        for w in ad:
+            detail = w.split(":", 1)[1].strip() if ":" in w else w
+            out.append(f"> - {detail}")
+        out.append("")
+    return out
+
+
 def render_report_markdown(
     *,
     artifacts: dict[str, dict[str, Any]],
@@ -601,27 +634,9 @@ def render_report_markdown(
         )
     lines.append("")
 
-    # W_AOA_ONLY_NO_INSTRUMENTS banner — surfaces when the engagement has no
-    # instruments + has AoA findings. The cap_state.py warnings array carries
-    # the warning code; render it as a preamble above Current Cap State so the
-    # founder sees the engagement scope first.
-    cap_state_warnings = cap_state.get("warnings") or []
-    if any(w == "W_AOA_ONLY_NO_INSTRUMENTS" for w in cap_state_warnings):
-        lines.append("> **AoA-only engagement detected.** No instruments to convert; this report renders the")
-        lines.append("> Articles-of-Association findings and the current pre-financing cap state. To model")
-        lines.append("> dilution scenarios, add SAFEs, convertible notes, option grants, or warrants to")
-        lines.append("> `instruments.json`.")
-        lines.append("")
-    if any(w == "W_CAP_BASE_ASSUMED" for w in cap_state_warnings):
-        lines.append("> ⚠ **Cap base ASSUMED, not founder-confirmed.** Founder share counts / option pool were")
-        lines.append("> not confirmed (generic placeholder names or an explicit assumed flag) — ownership")
-        lines.append("> figures below are DIRECTIONAL. Confirm the cap base before relying on these numbers.")
-        lines.append("")
-    if any(w == "W_FOUNDER_LOOKS_LIKE_INVESTOR" for w in cap_state_warnings):
-        lines.append("> ⚠ **A listed founder resembles an investment entity** (name contains")
-        lines.append("> Ventures/Capital/Fund). Confirm it is a founder, not an investor — mis-classifying an")
-        lines.append("> investor as a founder distorts the ownership table.")
-        lines.append("")
+    # cap_state.py warnings array → founder-facing callouts, rendered above Current Cap State so the
+    # founder sees engagement scope / data caveats first.
+    lines.extend(_render_warning_callouts(cap_state.get("warnings") or []))
 
     # 2. Current Cap State
     lines.append("## Current Cap State")

@@ -359,6 +359,8 @@ python3 "$SCRIPTS/cap_state.py" \
 
 The script computes the pre-financing `as_converted_totals` (Gotcha #1 enforced structurally) and validates against `references/schemas/cap_state.schema.json`.
 
+**Scan `cap_state.json.warnings[]`.** A `W_ANTI_DILUTION_NONCANONICAL` / `W_ANTI_DILUTION_UNRECOGNIZED` warning means a founder's anti-dilution intent was written under a non-canonical key (e.g. `anti_dilution` / `bbwa`) and was recovered (or flagged) rather than silently dropped — the report renderers now surface it, but you MUST also confirm the recovered term with the founder before relying on the down-round math (it changes the conversion).
+
 ### Step 4.5: Pre-Math Rule Audit → `rule_audit.json` (gating block)
 
 ```bash
@@ -432,8 +434,10 @@ python3 "$SCRIPTS/cap_state.py" --inputs "$REVIEW_DIR/inputs.json" --instruments
 python3 "$SCRIPTS/rule_audit.py" --phase=pre_math --inputs "$REVIEW_DIR/inputs.json" --instruments "$REVIEW_DIR/instruments.json" --cap-state "$REVIEW_DIR/cap_state.json" --run-id "$RUN_ID" -o "$REVIEW_DIR/rule_audit.json"
 python3 "$SCRIPTS/run_scenario.py" --inputs "$REVIEW_DIR/inputs.json" --instruments "$REVIEW_DIR/instruments.json" --cap-state "$REVIEW_DIR/cap_state.json" --scenarios-input "$REVIEW_DIR/scenario_requests.json" --run-id "$RUN_ID" -o "$REVIEW_DIR/scenarios.json"
 python3 "$SCRIPTS/rule_audit.py" --phase=post_math --inputs "$REVIEW_DIR/inputs.json" --scenarios "$REVIEW_DIR/scenarios.json" --run-id "$RUN_ID" -o "$REVIEW_DIR/rule_audit.json"
-python3 "$SCRIPTS/concise_report.py" --inputs "$REVIEW_DIR/inputs.json" --scenarios "$REVIEW_DIR/scenarios.json" --rule-audit "$REVIEW_DIR/rule_audit.json" --run-id "$RUN_ID" -o "$REVIEW_DIR/report_concise.md"
+python3 "$SCRIPTS/concise_report.py" --inputs "$REVIEW_DIR/inputs.json" --scenarios "$REVIEW_DIR/scenarios.json" --rule-audit "$REVIEW_DIR/rule_audit.json" --cap-state "$REVIEW_DIR/cap_state.json" --run-id "$RUN_ID" -o "$REVIEW_DIR/report_concise.md"
 ```
+
+Pass `--cap-state` so the concise answer surfaces any anti-dilution recovery warning — a standalone anti-dilution question routes here, and without it the recovery is silently dropped on this route.
 
 Present `report_concise.md` verbatim — never re-derive its numbers in chat. Concise mode writes the real `cap_state.json` + `scenarios.json` (so downstream consumers detect cap-table ran). Then jump to **Step 12: Deliver Artifacts** and offer the full review as a follow-up.
 

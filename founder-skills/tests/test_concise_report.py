@@ -107,3 +107,25 @@ def test_blocked_scenario_surfaces_blocker():
     md = CR.render(INPUTS, doc, rule_audit=None)
     assert "E_SAFE_CIRCULAR_MFN" in md
     assert "Blocked" in md
+
+
+def test_concise_render_surfaces_anti_dilution_warning():
+    """Part A: the standalone-anti-dilution scenario routes to concise mode (SKILL.md:187), but
+    concise_report never loaded cap_state — so the AD recovery warning was dropped on the dominant
+    route. render() must accept cap_state and surface the W_ANTI_DILUTION_* family (interpolated
+    sentences) as a founder-facing callout."""
+    cap_state = {
+        "warnings": [
+            "W_ANTI_DILUTION_NONCANONICAL: preferred series 'Series Seed' specified anti-dilution under "
+            "the wrong key `anti_dilution`='bbwa' — recovered as 'broad_based_weighted_average'."
+        ]
+    }
+    md = CR.render(INPUTS, FULL_SCENARIO, rule_audit=None, cap_state=cap_state)
+    assert "anti-dilution" in md.lower()
+    assert "broad_based_weighted_average" in md  # the recovery detail reaches the founder
+
+
+def test_concise_render_no_cap_state_is_fine():
+    """cap_state is optional — omitting it (or passing None) renders no warning block, no crash."""
+    md = CR.render(INPUTS, FULL_SCENARIO, rule_audit=None, cap_state=None)
+    assert "anti-dilution" not in md.lower()

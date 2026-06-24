@@ -18,9 +18,35 @@ python3, not uv run, so PEP 723 inline deps aren't honored at runtime.
 
 from __future__ import annotations
 
+import difflib
+from collections.abc import Iterable
 from typing import Any
 
 _TypeSpec = type | tuple[type, ...]
+
+
+def _did_you_mean(missing: str, present_keys: Iterable[str]) -> str | None:
+    """If a present sibling key resembles a missing REQUIRED field (a wrong-key typo the model writes,
+    e.g. `authorized_shares` for `authorized`), return it so the rejection can hint the founder rather
+    than dead-end. Conservative: a prefix relationship (after stripping a common suffix) or high string
+    similarity (SequenceMatcher ratio ≥ 0.7) only — an unrelated sibling returns None."""
+    best: str | None = None
+    best_ratio = 0.0
+    for k in present_keys:
+        if k == missing:
+            continue
+        stripped = k
+        for suf in ("_shares", "_count", "_amount", "_total", "_value"):
+            if stripped.endswith(suf):
+                stripped = stripped[: -len(suf)]
+                break
+        if stripped == missing or k.startswith(missing) or missing.startswith(k):
+            return k
+        ratio = difflib.SequenceMatcher(None, k, missing).ratio()
+        if ratio > best_ratio:
+            best, best_ratio = k, ratio
+    return best if best_ratio >= 0.7 else None
+
 
 _TYPE_CHECKS: dict[str, _TypeSpec] = {
     "object": dict,
@@ -85,7 +111,11 @@ def validate(data: Any, schema: dict[str, Any], path: str = "") -> list[str]:
     if effective_type == "object" and isinstance(data, dict):
         for required_key in schema.get("required", []):
             if required_key not in data:
-                errors.append(f"{path or '<root>'}: required field '{required_key}' missing")
+                msg = f"{path or '<root>'}: required field '{required_key}' missing"
+                hint = _did_you_mean(required_key, data.keys())
+                if hint:
+                    msg += f" — did you write '{hint}'?"
+                errors.append(msg)
         for key, sub_schema in schema.get("properties", {}).items():
             if key in data:
                 sub_path = f"{path}.{key}" if path else key

@@ -132,10 +132,21 @@ def _flag_lines(rule_audit: dict | None) -> list[str]:
     return out
 
 
-def render(inputs: dict, scenarios_doc: dict, rule_audit: dict | None) -> str:
+def render(inputs: dict, scenarios_doc: dict, rule_audit: dict | None, cap_state: dict | None = None) -> str:
     company = inputs.get("company_name", "Your company")
     scenarios = scenarios_doc.get("scenarios", []) or []
     lines = [f"# {company} — concise cap-table answer", ""]
+    # Anti-dilution recovery warnings (W_ANTI_DILUTION_*, interpolated sentences). A standalone
+    # anti-dilution question routes to concise mode (SKILL.md Step-5-concise), so this is the only
+    # path it takes — without surfacing them here the recovery is silently dropped on that route.
+    ad_warnings = [w for w in ((cap_state or {}).get("warnings") or []) if w.startswith("W_ANTI_DILUTION")]
+    if ad_warnings:
+        lines.append("> ⚠ **Anti-dilution input recovered — confirm with counsel.** Not supplied in the")
+        lines.append("> canonical field; recovered (or flagged) so it isn't silently dropped:")
+        for w in ad_warnings:
+            detail = w.split(":", 1)[1].strip() if ":" in w else w
+            lines.append(f"> - {detail}")
+        lines.append("")
     for sc in scenarios:
         lines.extend(_scenario_block(sc))
     flags = _flag_lines(rule_audit)
@@ -155,6 +166,11 @@ def main() -> int:
     p.add_argument("--inputs", required=True, help="inputs.json")
     p.add_argument("--scenarios", required=True, help="scenarios.json (run_scenario output)")
     p.add_argument("--rule-audit", default=None, help="rule_audit.json (optional — adds counsel/date flags)")
+    p.add_argument(
+        "--cap-state",
+        default=None,
+        help="cap_state.json (optional — surfaces anti-dilution recovery warnings on the concise route)",
+    )
     p.add_argument("--run-id", default=None)
     p.add_argument("-o", "--output-md", required=True, help="path to write the concise markdown")
     p.add_argument("--pretty", action="store_true")
@@ -164,11 +180,12 @@ def main() -> int:
         inputs = _load(args.inputs)
         scenarios_doc = _load(args.scenarios)
         rule_audit = _load(args.rule_audit) if args.rule_audit else None
+        cap_state = _load(args.cap_state) if args.cap_state else None
     except (OSError, json.JSONDecodeError) as e:
         print(json.dumps({"error": f"could not load inputs: {e}"}), file=sys.stderr)
         return 2
 
-    md = render(inputs, scenarios_doc, rule_audit)
+    md = render(inputs, scenarios_doc, rule_audit, cap_state=cap_state)
     with open(args.output_md, "w", encoding="utf-8") as fh:
         fh.write(md)
 

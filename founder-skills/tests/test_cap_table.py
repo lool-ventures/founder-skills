@@ -3769,6 +3769,59 @@ class TestPrivacyAssertion:
         compose_report._assert_coaching_payload_privacy_clean(payload, instruments=instruments, inputs=inputs)
 
 
+class TestComposeReportWarningCallouts:
+    """Part A: cap_state warnings render as founder-facing callouts. The AD recovery warnings
+    (W_ANTI_DILUTION_*) are interpolated SENTENCES, so the renderer must match by PREFIX, not the
+    exact-`==` the existing bare-code callouts use — otherwise the already-shipped AD fix stays
+    invisible to founders."""
+
+    def test_renders_anti_dilution_warning_by_prefix(self) -> None:
+        import compose_report  # type: ignore[import-not-found]
+
+        warn = (
+            "W_ANTI_DILUTION_NONCANONICAL: preferred series 'Series Seed' specified anti-dilution "
+            "under the wrong key `anti_dilution`='bbwa' — recovered as 'broad_based_weighted_average'."
+        )
+        body = "\n".join(compose_report._render_warning_callouts([warn]))
+        assert "anti-dilution" in body.lower()
+        assert "broad_based_weighted_average" in body  # the recovery detail reaches the founder
+
+    def test_existing_bare_code_warnings_still_render(self) -> None:
+        import compose_report  # type: ignore[import-not-found]
+
+        body = "\n".join(compose_report._render_warning_callouts(["W_CAP_BASE_ASSUMED"]))
+        assert "Cap base ASSUMED" in body
+
+    def test_no_warnings_renders_nothing(self) -> None:
+        import compose_report  # type: ignore[import-not-found]
+
+        assert compose_report._render_warning_callouts([]) == []
+
+
+class TestValidatorRequiredMissingHint:
+    """Part B: option_pool fields are `required`, so a mis-keyed `authorized_shares` is REJECTED at
+    validation (not silently zeroed). The required-missing error should HINT the resembling sibling
+    the founder actually wrote, so the rejection isn't a dead-end."""
+
+    def test_required_missing_emits_near_miss_hint(self) -> None:
+        import _cap_table_schema_validator as v  # type: ignore[import-not-found]
+
+        schema = {"type": "object", "required": ["authorized"], "properties": {"authorized": {"type": "integer"}}}
+        errs = v.validate({"authorized_shares": 1_000_000}, schema, "option_pool")
+        joined = " ".join(errs)
+        assert "authorized" in joined and "missing" in joined
+        assert "authorized_shares" in joined  # the hint names the sibling the founder actually wrote
+
+    def test_required_missing_no_spurious_hint(self) -> None:
+        import _cap_table_schema_validator as v  # type: ignore[import-not-found]
+
+        schema = {"type": "object", "required": ["authorized"], "properties": {}}
+        errs = v.validate({"plan_type": "iso"}, schema, "option_pool")
+        joined = " ".join(errs)
+        assert "authorized" in joined and "missing" in joined
+        assert "did you" not in joined.lower()  # nothing resembles 'authorized' → no bogus hint
+
+
 class TestEvidenceVerifierIntegration:
     """extract_instrument.py --verify --source-doc integration.
 
