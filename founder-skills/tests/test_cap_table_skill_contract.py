@@ -903,6 +903,13 @@ def test_vision_image_pdf_guard_wired() -> None:
     assert "extraction_mode" in props and props["extraction_mode"]["type"] == "string"
 
 
+def test_ocr_image_pdf_path_wired() -> None:
+    # B2/A3: the OCR producer exists, SKILL routes image-only PDFs through it (→ freeform grid),
+    # and the ocr_image_pdf path is documented.
+    assert (SCRIPTS_DIR / "extract_pdf_tables.py").exists()
+    assert "extract_pdf_tables" in _SKILL_TEXT and "ocr_image_pdf" in _SKILL_TEXT
+
+
 def test_s5_fast_assess_warnings_field_and_boundary() -> None:
     # sentinel schema declares warnings (optional, not required) so the render validates
     assert "warnings" in _FAST_ASSESS_SCHEMA["properties"]
