@@ -59,6 +59,15 @@ Consequences for authoring:
   *order* is nondeterministic, so `choose: first` can land on a dead-end option (e.g. "I'll type them
   below"), stalling the run with `result: success` but no artifact. For an unavoidable select gate,
   match the specific usable option (e.g. `choose: "Use anonymized names"`) instead of `first`.
+- **Anchor-discipline rule (the decision procedure for the two bullets above).** The model paraphrases
+  question text AND invents option labels run-to-run, so a `choose:` label anchor is fragile — a re-record
+  flakes when the anchor matches no offered option. Therefore: **label-anchor a `choose:` ONLY for a gate
+  whose choice changes an `assert:` outcome** (e.g. the scenario-type gate when a dilution/AD assert depends
+  on the priced round). For **every other gate, use the global `on_unanswered: first`** — it is
+  paraphrase-proof (option-1, no label to drift) — UNLESS option 1 is a known dead-end for that gate, in
+  which case anchor the specific usable option. A label anchor is a liability you take on only to protect a
+  specific assert; default to `first`. Validate any anchor *drop* with `verify-run` answer-coverage against
+  a kept run **before** the re-record — the re-record is the only place a broken anchor otherwise surfaces.
 
 *Audit (2026-06-21):* all 11 cassettes' asserts are already parity / extraction / structural-presence
 — zero deterministic-pytest duplicates. No trims needed. (The 12th, `cap-table-lane3-freeform`, and the

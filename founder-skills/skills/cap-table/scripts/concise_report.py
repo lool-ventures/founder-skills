@@ -25,8 +25,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import Any
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _warning_callouts  # noqa: E402
 
 # aggregate_ownership_by_class keys -> founder-facing labels (same data the full
 # report renders; only the presentation is lighter).
@@ -136,17 +140,12 @@ def render(inputs: dict, scenarios_doc: dict, rule_audit: dict | None, cap_state
     company = inputs.get("company_name", "Your company")
     scenarios = scenarios_doc.get("scenarios", []) or []
     lines = [f"# {company} — concise cap-table answer", ""]
-    # Anti-dilution recovery warnings (W_ANTI_DILUTION_*, interpolated sentences). A standalone
-    # anti-dilution question routes to concise mode (SKILL.md Step-5-concise), so this is the only
-    # path it takes — without surfacing them here the recovery is silently dropped on that route.
-    ad_warnings = [w for w in ((cap_state or {}).get("warnings") or []) if w.startswith("W_ANTI_DILUTION")]
-    if ad_warnings:
-        lines.append("> ⚠ **Anti-dilution input recovered — confirm with counsel.** Not supplied in the")
-        lines.append("> canonical field; recovered (or flagged) so it isn't silently dropped:")
-        for w in ad_warnings:
-            detail = w.split(":", 1)[1].strip() if ":" in w else w
-            lines.append(f"> - {detail}")
-        lines.append("")
+    # cap_state warnings → founder-facing callouts via the SHARED renderer (single source of truth with
+    # compose_report). A standalone quick question routes to concise mode (SKILL.md Step-5-concise), so
+    # this is the only path it takes — surfacing the full family set here (not just W_ANTI_DILUTION) keeps
+    # W_CAP_BASE_ASSUMED / W_AOA_ONLY_NO_INSTRUMENTS / W_FOUNDER_LOOKS_LIKE_INVESTOR from being silently
+    # dropped on that route.
+    lines.extend(_warning_callouts.render_warning_callouts((cap_state or {}).get("warnings") or []))
     for sc in scenarios:
         lines.extend(_scenario_block(sc))
     flags = _flag_lines(rule_audit)

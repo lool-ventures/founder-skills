@@ -843,6 +843,8 @@ def test_instrument_type_enum_matches_extract_instrument() -> None:
 
 _CAP_STATE_SRC = (SCRIPTS_DIR / "cap_state.py").read_text(encoding="utf-8")
 _COMPOSE_SRC = (SCRIPTS_DIR / "compose_report.py").read_text(encoding="utf-8")
+# Warning callouts were extracted to a shared renderer (Issue C); compose + concise both delegate to it.
+_WARNING_CALLOUTS_SRC = (SCRIPTS_DIR / "_warning_callouts.py").read_text(encoding="utf-8")
 _QUICK_ASSESS_SRC = (SCRIPTS_DIR / "quick_assess.py").read_text(encoding="utf-8")
 _SKILL_TEXT = SKILL_MD.read_text(encoding="utf-8")
 _INPUTS_SCHEMA = json.loads((CAP_TABLE_DIR / "references" / "schemas" / "inputs.schema.json").read_text())
@@ -852,16 +854,18 @@ _FAST_ASSESS_SCHEMA = json.loads(
 
 
 def test_s3_investor_founder_warning_wired() -> None:
-    # producer emits it, compose renders it, SKILL documents the exclusion
+    # producer emits it, the shared renderer renders it (compose delegates), SKILL documents the exclusion
     assert "W_FOUNDER_LOOKS_LIKE_INVESTOR" in _CAP_STATE_SRC
     assert "looks_like_investor_entity" in _CAP_STATE_SRC
-    assert "W_FOUNDER_LOOKS_LIKE_INVESTOR" in _COMPOSE_SRC
+    assert "W_FOUNDER_LOOKS_LIKE_INVESTOR" in _WARNING_CALLOUTS_SRC
+    assert "_warning_callouts" in _COMPOSE_SRC  # compose delegates rendering to the shared module
     assert "investor" in _SKILL_TEXT.lower() and "founder candidate" in _SKILL_TEXT.lower()
 
 
 def test_s2_cap_base_assumed_wired() -> None:
     assert "W_CAP_BASE_ASSUMED" in _CAP_STATE_SRC
-    assert "W_CAP_BASE_ASSUMED" in _COMPOSE_SRC
+    assert "W_CAP_BASE_ASSUMED" in _WARNING_CALLOUTS_SRC
+    assert "_warning_callouts" in _COMPOSE_SRC  # compose delegates rendering to the shared module
     assert "cap_base_source" in _SKILL_TEXT
     # schema declares the enum (present-key enforcement)
     props = _INPUTS_SCHEMA["properties"]["metadata"]["properties"]

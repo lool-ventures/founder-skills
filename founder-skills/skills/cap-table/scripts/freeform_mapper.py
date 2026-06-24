@@ -94,6 +94,10 @@ def map_freeform(
     inputs.setdefault("metadata", {})
     inputs["metadata"]["run_id"] = run_id
     inputs["metadata"].setdefault("schema_version", _INPUTS_SCHEMA_VERSION)
+    # Lane-3 carve-out for the cap_state default-to-assumed warn (Issue B): the founder's sheet IS the
+    # cap-base source of truth, so a freeform-mapped base is confirmed, not assumed. setdefault keeps an
+    # explicit pre-existing value (e.g. an upstream "assumed") rather than overriding it.
+    inputs["metadata"].setdefault("cap_base_source", "confirmed")
 
     instruments: dict[str, Any] = {
         "safes": [],

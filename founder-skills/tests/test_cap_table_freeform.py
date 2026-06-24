@@ -70,6 +70,23 @@ def test_founders_block_happy() -> None:
     assert r["inputs"]["metadata"]["schema_version"] == "v0.5.0-inputs"
 
 
+def test_freeform_emit_stamps_cap_base_confirmed() -> None:
+    # Lane-3 carve-out for Issue B (default-to-assumed): the sheet IS the source of truth, so the
+    # freeform emit must stamp metadata.cap_base_source="confirmed" — otherwise the cap_state
+    # default-to-assumed warn fires spuriously on every sheet-sourced base.
+    blocks = [
+        {
+            "block_type": "founders_block",
+            "sheet": "Cap",
+            "cell_range": "A2:B3",
+            "column_role_map": {"A": "holder_name", "B": "shares"},
+        }
+    ]
+    grid = _grid({"Cap": [["Name", "Shares"], ["Alice", 5000000], ["Bob", 5000000]]})
+    r = fm.map_freeform(blocks, grid, existing_inputs=_meta_inputs(), run_id=RUN)
+    assert r["inputs"]["metadata"]["cap_base_source"] == "confirmed"
+
+
 def test_blank_rows_in_range_skipped() -> None:
     blocks = [
         {

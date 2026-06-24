@@ -129,3 +129,14 @@ def test_concise_render_no_cap_state_is_fine():
     """cap_state is optional — omitting it (or passing None) renders no warning block, no crash."""
     md = CR.render(INPUTS, FULL_SCENARIO, rule_audit=None, cap_state=None)
     assert "anti-dilution" not in md.lower()
+
+
+def test_concise_render_surfaces_cap_base_assumed() -> None:
+    """Issue C: concise mode rendered ONLY the W_ANTI_DILUTION family, silently dropping the other three
+    warning families. A standalone quick question routes to concise — so a founder querying on an
+    ASSUMED/unconfirmed cap base saw no 'DIRECTIONAL, not founder-confirmed' caveat. render() must surface
+    W_CAP_BASE_ASSUMED via the shared renderer (the same wording compose uses)."""
+    cap_state = {"warnings": ["W_CAP_BASE_ASSUMED"]}
+    md = CR.render(INPUTS, FULL_SCENARIO, rule_audit=None, cap_state=cap_state)
+    assert "Cap base ASSUMED" in md
+    assert "DIRECTIONAL" in md

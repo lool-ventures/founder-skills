@@ -3798,6 +3798,34 @@ class TestComposeReportWarningCallouts:
         assert compose_report._render_warning_callouts([]) == []
 
 
+class TestWarningsSharedRenderer:
+    """Issue C: the four warning families render from ONE shared module
+    (`_warning_callouts.render_warning_callouts`) so compose and concise cannot diverge. AD matches by PREFIX
+    (interpolated sentence); the other three by exact code."""
+
+    def test_renders_all_four_families(self) -> None:
+        import _warning_callouts  # type: ignore[import-not-found]
+
+        warnings = [
+            "W_AOA_ONLY_NO_INSTRUMENTS",
+            "W_CAP_BASE_ASSUMED",
+            "W_FOUNDER_LOOKS_LIKE_INVESTOR",
+            "W_ANTI_DILUTION_NONCANONICAL: preferred series 'Series Seed' specified anti-dilution "
+            "under the wrong key `anti_dilution`='bbwa' — recovered as 'broad_based_weighted_average'.",
+        ]
+        body = "\n".join(_warning_callouts.render_warning_callouts(warnings))
+        assert "AoA-only engagement" in body
+        assert "Cap base ASSUMED" in body
+        assert "resembles an investment entity" in body
+        assert "Anti-dilution input recovered" in body
+        assert "broad_based_weighted_average" in body  # AD recovery detail (prefix match)
+
+    def test_no_warnings_renders_nothing(self) -> None:
+        import _warning_callouts  # type: ignore[import-not-found]
+
+        assert _warning_callouts.render_warning_callouts([]) == []
+
+
 class TestValidatorRequiredMissingHint:
     """Part B: option_pool fields are `required`, so a mis-keyed `authorized_shares` is REJECTED at
     validation (not silently zeroed). The required-missing error should HINT the resembling sibling
@@ -8352,8 +8380,30 @@ class TestAssumedCapBaseWarning:
         cs = cap_state_mod.build_cap_state(_inputs_named(["Founder A", "Founder B"]), self.NO_INST)
         assert "W_CAP_BASE_ASSUMED" in cs.get("warnings", [])
 
-    def test_bare_founder_and_real_names_silent(self) -> None:
-        cs = cap_state_mod.build_cap_state(_inputs_named(["Founder", "Jane Doe"]), self.NO_INST)
+    def test_full_pipeline_real_names_no_flag_warns(self) -> None:
+        # Issue B (default-to-assumed): an equity base (founders/pool) present with cap_base_source
+        # neither set nor "confirmed" now WARNS regardless of names — the model must affirmatively set
+        # "confirmed" to suppress, flipping the compliance burden to the safe side. (Inverts the prior
+        # real-names-stay-silent contract, under which a model that skipped the gate, used real inline
+        # names, and never set "assumed" emitted NO caveat at all.)
+        cs = cap_state_mod.build_cap_state(_inputs_named(["Jane Doe", "John Smith"]), self.NO_INST)
+        assert "W_CAP_BASE_ASSUMED" in cs.get("warnings", [])
+
+    def test_no_equity_base_does_not_warn(self) -> None:
+        # Nothing to assume: no founders, no option_pool, no instruments → default-to-assumed must NOT fire.
+        inputs = {
+            "company_name": "TestCo",
+            "analysis_date": "2026-06-21",
+            "jurisdiction": {"structure": "delaware"},
+            "metadata": {"run_id": "20260621T000000Z", "schema_version": "v0.5.0-inputs"},
+        }
+        cs = cap_state_mod.build_cap_state(inputs, self.NO_INST)
+        assert "W_CAP_BASE_ASSUMED" not in cs.get("warnings", [])
+
+    def test_real_names_confirmed_suppresses_warn(self) -> None:
+        cs = cap_state_mod.build_cap_state(
+            _inputs_named(["Jane Doe", "John Smith"], cap_base_source="confirmed"), self.NO_INST
+        )
         assert "W_CAP_BASE_ASSUMED" not in cs.get("warnings", [])
 
     def test_explicit_assumed_flag_warns(self) -> None:

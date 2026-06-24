@@ -658,13 +658,17 @@ def build_cap_state(
     if any(looks_like_investor_entity(f.get("name", "")) for f in founders):
         warnings_list.append("W_FOUNDER_LOOKS_LIKE_INVESTOR")
 
-    # S2: the cap base looks ASSUMED rather than founder-confirmed — generic placeholder founder names
-    # (the model's tell when it assumes) OR an explicit metadata.cap_base_source == "assumed".
-    # Suppressed entirely when cap_base_source == "confirmed".
+    # S2 / Issue B: the cap base is treated as ASSUMED unless the model affirmatively confirms it.
+    # DEFAULT-TO-ASSUMED: any engagement with an equity base (founders / common / preferred / option
+    # pool) warns unless metadata.cap_base_source == "confirmed". This flips the compliance burden to
+    # the SAFE side — a model that skips the cap-base gate, uses the founder's real inline names, and
+    # never sets a flag now still surfaces the "DIRECTIONAL, not founder-confirmed" caveat, instead of
+    # the prior behavior where only generic placeholder names (the model's assume-tell) tripped it.
+    # Lane 3 stamps cap_base_source="confirmed" in the freeform emit (the sheet is the source of truth),
+    # so it is exempt by construction. No equity base → nothing to assume → silent.
     cap_base_source = (inputs.get("metadata") or {}).get("cap_base_source")
-    if cap_base_source != "confirmed" and (
-        cap_base_source == "assumed" or any(_is_placeholder_founder_name(f.get("name", "")) for f in founders)
-    ):
+    _has_equity_base = bool(founders or common_batches or preferred_series or option_pool)
+    if cap_base_source != "confirmed" and (cap_base_source == "assumed" or _has_equity_base):
         warnings_list.append("W_CAP_BASE_ASSUMED")
 
     cap_state: dict[str, Any] = {
