@@ -440,6 +440,64 @@ def _is_placeholder_founder_name(name: str) -> bool:
     return bool(name) and bool(_PLACEHOLDER_FOUNDER_RE.match(name.strip()))
 
 
+# Anti-dilution protection: the canonical inputs field is `anti_dilution_protection` with the
+# inputs.schema enum below. The model sometimes writes the intent under the WRONG key
+# (`anti_dilution`) or as an abbreviation (`bbwa`); since the schema permits extra keys, that
+# silently defaulted AD to "none" and SKIPPED the down-round adjustment a founder explicitly asked
+# for. We recover the intent (and flag it) so it is never silently dropped.
+_AD_CANON: dict[str, str] = {
+    "none": "none",
+    "broad_based_weighted_average": "broad_based_weighted_average",
+    "narrow_based_weighted_average": "narrow_based_weighted_average",
+    "full_ratchet": "full_ratchet",
+    # common abbreviations / variants the model writes
+    "bbwa": "broad_based_weighted_average",
+    "broad_based": "broad_based_weighted_average",
+    "broadbased": "broad_based_weighted_average",
+    "nbwa": "narrow_based_weighted_average",
+    "narrow_based": "narrow_based_weighted_average",
+    "narrowbased": "narrow_based_weighted_average",
+    "ratchet": "full_ratchet",
+    "fullratchet": "full_ratchet",
+}
+
+
+def _ad_token(v: Any) -> str:
+    return str(v).strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _resolve_anti_dilution(s: dict[str, Any]) -> tuple[str, str | None]:
+    """Resolve a preferred series' anti-dilution protection to the canonical enum, tolerating the
+    common model slips so a founder's explicit AD intent is NEVER silently dropped to 'none'.
+    Returns (canonical_value, warning_or_None). An unrecognized AD value is left 'none' but flagged."""
+    name = s.get("series_name", "?")
+    canon_field = s.get("anti_dilution_protection")
+    if canon_field not in (None, "", "none"):  # canonical field already set to a real value
+        mapped = _AD_CANON.get(_ad_token(canon_field))
+        if mapped and mapped != canon_field:
+            return mapped, (
+                f"W_ANTI_DILUTION_NONCANONICAL: preferred series {name!r} anti_dilution_protection="
+                f"{canon_field!r} is non-canonical — normalized to {mapped!r}; confirm with counsel."
+            )
+        return str(canon_field), None
+    # canonical absent/none → recover the founder's intent from the wrong key `anti_dilution`
+    stray = s.get("anti_dilution")
+    if stray in (None, "", "none"):
+        return "none", None
+    mapped = _AD_CANON.get(_ad_token(stray))
+    if mapped and mapped != "none":
+        return mapped, (
+            f"W_ANTI_DILUTION_NONCANONICAL: preferred series {name!r} specified anti-dilution under the "
+            f"wrong key `anti_dilution`={stray!r} (the canonical field is `anti_dilution_protection`) — "
+            f"recovered as {mapped!r} so the down-round adjustment is not silently skipped; confirm with counsel."
+        )
+    return "none", (
+        f"W_ANTI_DILUTION_UNRECOGNIZED: preferred series {name!r} has `anti_dilution`={stray!r}, which is not "
+        f"a recognized anti-dilution form and is absent from the canonical `anti_dilution_protection` field — "
+        f"treated as NONE; confirm whether anti-dilution applies."
+    )
+
+
 def build_cap_state(
     inputs: dict[str, Any],
     instruments: dict[str, Any],
@@ -498,6 +556,16 @@ def build_cap_state(
 
     canonical_batches = [_canonicalize_common_class(b) for b in common_batches]
 
+    # Recover anti-dilution intent the model may have written under the wrong key/abbreviation, so a
+    # founder's explicit AD request is never silently dropped to 'none' (which would skip the down-round
+    # adjustment). Mutate in place so the comprehension + the ad_a_denominator default below read it.
+    _ad_warnings: list[str] = []
+    for _s in preferred_series:
+        _resolved, _note = _resolve_anti_dilution(_s)
+        if _note:
+            _s["anti_dilution_protection"] = _resolved
+            _ad_warnings.append(_note)
+
     canonical_preferred = [
         {
             "series_id": s.get("series_id", s["series_name"].lower().replace(" ", "_")),
@@ -553,6 +621,7 @@ def build_cap_state(
     no_instruments = not (outstanding_options or outstanding_safes or outstanding_notes or outstanding_warrants)
     aoa_has_data = any(v is not None and v is not False for v in aoa_findings_mirror.values())
     warnings_list: list[str] = []
+    warnings_list.extend(_ad_warnings)  # anti-dilution recovery notes (never silently dropped)
     if no_instruments and aoa_has_data:
         warnings_list.append("W_AOA_ONLY_NO_INSTRUMENTS")
 
