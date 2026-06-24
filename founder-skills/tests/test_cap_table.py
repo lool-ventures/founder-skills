@@ -3803,7 +3803,7 @@ class TestWarningsSharedRenderer:
     (`_warning_callouts.render_warning_callouts`) so compose and concise cannot diverge. AD matches by PREFIX
     (interpolated sentence); the others by exact code."""
 
-    def test_renders_all_five_families(self) -> None:
+    def test_renders_all_six_families(self) -> None:
         import _warning_callouts  # type: ignore[import-not-found]
 
         warnings = [
@@ -3811,6 +3811,7 @@ class TestWarningsSharedRenderer:
             "W_CAP_BASE_ASSUMED",
             "W_FOUNDER_LOOKS_LIKE_INVESTOR",
             "W_CAP_BASE_RECONSTRUCTED",
+            "W_VISION_EXTRACTION_LOW_CONFIDENCE",
             "W_ANTI_DILUTION_NONCANONICAL: preferred series 'Series Seed' specified anti-dilution "
             "under the wrong key `anti_dilution`='bbwa' — recovered as 'broad_based_weighted_average'.",
         ]
@@ -3819,6 +3820,7 @@ class TestWarningsSharedRenderer:
         assert "Cap base ASSUMED" in body
         assert "resembles an investment entity" in body
         assert "deterministic spreadsheet mapper" in body  # W_CAP_BASE_RECONSTRUCTED (softened text)
+        assert "Image-only PDF read by vision" in body  # W_VISION_EXTRACTION_LOW_CONFIDENCE
         assert "Anti-dilution input recovered" in body
         assert "broad_based_weighted_average" in body  # AD recovery detail (prefix match)
 
@@ -8467,3 +8469,21 @@ class TestAssumedCapBaseWarning:
             assert f(n) is True, n
         for n in ["Founder", "Jane Doe", "Founder Jane", "Foundering"]:
             assert f(n) is False, n
+
+
+class TestVisionExtractionWarning:
+    """B3: an image-only PDF read by raw vision (no OCR) under-extracts dense tables silently (the
+    Siteaware P-1 failure). The pdf-probe sets metadata.extraction_mode='vision_image_pdf'; cap_state then
+    surfaces a low-confidence warning so the structured artifacts carry the same caveat the narrative does."""
+
+    NO_INST = {"safes": [], "convertible_notes": []}
+
+    def test_vision_image_pdf_warns(self) -> None:
+        inputs = _inputs_named(["Jane Doe", "John Smith"], cap_base_source="assumed")
+        inputs["metadata"]["extraction_mode"] = "vision_image_pdf"
+        cs = cap_state_mod.build_cap_state(inputs, self.NO_INST)
+        assert "W_VISION_EXTRACTION_LOW_CONFIDENCE" in cs.get("warnings", [])
+
+    def test_no_extraction_mode_no_vision_warn(self) -> None:
+        cs = cap_state_mod.build_cap_state(_inputs_named(["Jane Doe", "John Smith"]), self.NO_INST)
+        assert "W_VISION_EXTRACTION_LOW_CONFIDENCE" not in cs.get("warnings", [])

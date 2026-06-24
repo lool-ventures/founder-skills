@@ -36,6 +36,12 @@ def render_warning_callouts(cap_state_warnings: list[str]) -> list[str]:
         out.append("> Ventures/Capital/Fund). Confirm it is a founder, not an investor — mis-classifying an")
         out.append("> investor as a founder distorts the ownership table.")
         out.append("")
+    if any(w == "W_VISION_EXTRACTION_LOW_CONFIDENCE" for w in cap_state_warnings):
+        out.append("> ⚠ **Image-only PDF read by vision (no OCR).** The source PDF had no text layer, so these")
+        out.append("> figures were read from page images — dense tables are easily under-read or dropped. Treat")
+        out.append("> the cap table as LOW-CONFIDENCE and directional; confirm every holder/class against the")
+        out.append("> source before relying on these numbers.")
+        out.append("")
     if any(w == "W_CAP_BASE_RECONSTRUCTED" for w in cap_state_warnings):
         out.append("> ⚠ **Cap base was NOT produced by the deterministic spreadsheet mapper.** It was entered")
         out.append("> manually or extracted from a document (PDF / Carta / pasted), so it was not")

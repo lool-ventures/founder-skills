@@ -679,6 +679,13 @@ def build_cap_state(
     if cap_base_source == "confirmed" and _has_equity_base and cap_base_provenance != "deterministic_mapped":
         warnings_list.append("W_CAP_BASE_RECONSTRUCTED")
 
+    # B3: an image-only PDF (no text layer) read by raw model vision under-extracts dense tables silently.
+    # The pdf-probe sets metadata.extraction_mode="vision_image_pdf"; surface a low-confidence warning so
+    # the structured artifacts carry the same caveat the narrative does (the run still proceeds — degraded
+    # but honest, per the project's proceed-with-warning posture).
+    if (inputs.get("metadata") or {}).get("extraction_mode") == "vision_image_pdf":
+        warnings_list.append("W_VISION_EXTRACTION_LOW_CONFIDENCE")
+
     cap_state: dict[str, Any] = {
         "as_of_date": inputs.get("analysis_date", ""),
         "currency": currency,

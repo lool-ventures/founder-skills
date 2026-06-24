@@ -157,6 +157,10 @@
         "cap_base_provenance": {
           "type": "string",
           "description": "How the cap base was produced (lineage), distinct from whether it was confirmed. The freeform mapper stamps 'deterministic_mapped' when it produces the equity from the spreadsheet; a Lane-1/2/4 hand-build sets 'model_reconstructed' (or leaves it absent). cap_state emits W_CAP_BASE_RECONSTRUCTED when a 'confirmed' base is NOT 'deterministic_mapped' — so a model-built base can't masquerade as verified. Free string (no enum) so a model-set value never fails validation; the trigger keys on the absence of the exact 'deterministic_mapped' marker."
+        },
+        "extraction_mode": {
+          "type": "string",
+          "description": "How the source was read. Set to 'vision_image_pdf' when the pdf-probe detects an image-only PDF (no text layer) read by raw model vision (no OCR) — cap_state then emits W_VISION_EXTRACTION_LOW_CONFIDENCE so the structured artifacts carry the under-extraction caveat. Free string; the trigger keys on the exact 'vision_image_pdf' value."
         }
       }
     }

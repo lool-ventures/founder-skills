@@ -882,6 +882,17 @@ def test_cap_base_reconstructed_wired() -> None:
     assert "cap_base_provenance" in props and props["cap_base_provenance"]["type"] == "string"
 
 
+def test_vision_image_pdf_guard_wired() -> None:
+    # B0/B3: probe exists, cap_state emits the low-confidence warning, the renderer renders it, SKILL routes
+    assert (SCRIPTS_DIR / "pdf_probe.py").exists()
+    assert "W_VISION_EXTRACTION_LOW_CONFIDENCE" in _CAP_STATE_SRC
+    assert "W_VISION_EXTRACTION_LOW_CONFIDENCE" in _WARNING_CALLOUTS_SRC
+    assert "extraction_mode" in _CAP_STATE_SRC
+    assert "pdf_probe" in _SKILL_TEXT and "vision_image_pdf" in _SKILL_TEXT
+    props = _INPUTS_SCHEMA["properties"]["metadata"]["properties"]
+    assert "extraction_mode" in props and props["extraction_mode"]["type"] == "string"
+
+
 def test_s5_fast_assess_warnings_field_and_boundary() -> None:
     # sentinel schema declares warnings (optional, not required) so the render validates
     assert "warnings" in _FAST_ASSESS_SCHEMA["properties"]
