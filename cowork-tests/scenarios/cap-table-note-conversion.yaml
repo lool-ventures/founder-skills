@@ -30,11 +30,12 @@ prompt: |
   discount) and the resulting dilution for each holder — and build the interactive explorer.
 
 # The note's "Company Capitalization" denominator confirm-gate is the one gate this fires; pin it to the
-# (Recommended) fully-diluted pre-financing option by KEYWORD (label-stable, not positional `first`).
-# on_unanswered:first backstops any other variance gate.
+# fully-diluted pre-financing option by a stable FRAGMENT of the canonical label (SKILL.md Gate Catalog —
+# label starts "Fully-diluted pre-financing …", no "(Recommended)" suffix). on_unanswered:first backstops
+# any other variance gate.
 answers:
   - when_question: "Company Capitalization"
-    choose: recommended
+    choose: "Fully-diluted"
 
 assert:
   # End-to-end: the full pipeline ran and produced its deliverables (manifest-backed → survives replay).

@@ -936,12 +936,23 @@ def test_skill_canonical_gate_phrasing_present() -> None:
     Assertions are scoped to the canonical-phrasing BLOCK so they pin the new text,
     not pre-existing occurrences elsewhere in SKILL.md (e.g. the bolded scenario
     bullets above it or the S2 gate's own 'authorized / issued / unallocated')."""
-    start = _SKILL_TEXT.find("Canonical gate phrasing")
-    assert start != -1, "SKILL.md must carry a 'Canonical gate phrasing' block"
-    block = _SKILL_TEXT[start : start + 1500]
-    # scenario labels — within the canonical block
+    start = _SKILL_TEXT.find("Gate Catalog")
+    assert start != -1, "SKILL.md must carry a 'Gate Catalog' canonical-phrasing block"
+    block = _SKILL_TEXT[start : start + 3000]
+    # scenario labels — within the catalog
     for label in ("Cap-implied SAFE snapshot", "Series A priced round", "Convertible note conversion at financing"):
-        assert label in block, f"canonical scenario label missing from the canonical-phrasing block: {label!r}"
-    # option-pool labels + preserved free-text affordance — within the canonical block
+        assert label in block, f"canonical scenario label missing from the Gate Catalog: {label!r}"
+    # option-pool labels + preserved free-text affordance
     assert "No option pool" in block
     assert "authorized / issued / unallocated" in block
+    # expanded catalog (Tier-2 recurring gates) must be templated
+    assert "Convert at cap" in block and "Repay principal" in block, "note maturity-default labels missing"
+    assert "Use existing review" in block and "Start fresh" in block, "existing-review routing labels missing"
+    assert "Confirmed" in block, "cap-base confirmation label missing"
+    # The note-denominator label MUST NOT carry a '(Recommended)' suffix — that suffix is what made the
+    # note cassette's choose-anchor fragile (the leading 'Fully-diluted' is the stable anchor).
+    assert "Fully-diluted pre-financing" in block, "canonical denominator label missing"
+    denom_idx = block.find("Fully-diluted pre-financing")
+    assert "(Recommended)" not in block[denom_idx : denom_idx + 120], (
+        "the denominator label must not append '(Recommended)' — it breaks the cassette anchor"
+    )
