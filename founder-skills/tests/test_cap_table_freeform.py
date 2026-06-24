@@ -681,6 +681,124 @@ def test_answerable_blocker_keeps_founder_next_action(tmp_path) -> None:
     assert "re-dispatch" not in na
 
 
+# --- Silent-empty guards (real-doc finding): the mapper must NEVER report success with an empty/
+#     partially-dropped cap base. A live freeform run wrote 0 founders/0 safes as ok:true because the
+#     structure sub-agent emitted row_range/columns instead of cell_range/column_role_map. -----------
+
+
+def test_emit_wrong_field_schema_blocks_not_silent_empty() -> None:
+    # (1a) Model drift: block keyed row_range/columns instead of cell_range/column_role_map.
+    blocks = [
+        {
+            "block_type": "founders_block",
+            "sheet": "Cap",
+            "row_range": [2, 3],
+            "columns": {"B": "holder_name", "C": "shares"},
+        }
+    ]
+    grid = _grid({"Cap": [["Name", "Shares"], ["Alice", 5000000], ["Bob", 5000000]]})
+    r = fm.map_freeform(blocks, grid, existing_inputs=_meta_inputs(), run_id=RUN)
+    assert r["blockers"], "wrong field schema must raise a blocker, not silently map nothing"
+    assert {"cell_range", "column_role_map"} & {b["field"] for b in r["blockers"]}
+    assert "founders" not in r["inputs"]  # nothing silently written
+
+
+def test_emit_valid_schema_blank_rows_global_emit_blocker() -> None:
+    # (1b) Valid field schema, but cell_range points at blank rows → 0 records → must fail loud.
+    blocks = [
+        {
+            "block_type": "founders_block",
+            "sheet": "Cap",
+            "cell_range": "A2:C3",
+            "column_role_map": {"B": "holder_name", "C": "shares"},
+        }
+    ]
+    grid = _grid({"Cap": [["Name", "Shares"], [None, None, None], [None, None, None]]})
+    r = fm.map_freeform(blocks, grid, existing_inputs=_meta_inputs(), run_id=RUN)
+    assert any(b["field"] == "emit" for b in r["blockers"]), "0 records from an equity block must fail loud (1b)"
+
+
+def test_emit_keep_existing_founders_no_false_emit_blocker() -> None:
+    # (1b) false-fire guard: founders parsed from the sheet but dropped at merge (existing wins) still
+    # count as "mapped this call" (accumulators are pre-merge) → NO global emit blocker.
+    existing = _meta_inputs()
+    existing["founders"] = [{"name": "Alice", "common_shares": 5000000}]
+    blocks = [
+        {
+            "block_type": "founders_block",
+            "sheet": "Cap",
+            "cell_range": "A2:B2",
+            "column_role_map": {"A": "holder_name", "B": "shares"},
+        }
+    ]
+    grid = _grid({"Cap": [["Name", "Shares"], ["Alice", 5000000]]})
+    r = fm.map_freeform(blocks, grid, existing_inputs=existing, run_id=RUN)
+    assert not any(b["field"] == "emit" for b in r["blockers"])
+
+
+def test_emit_mixed_partial_drop_warns_not_silent() -> None:
+    # MR-2: a populated founders block + a safes block whose range is blank. 1b can't fire (founders
+    # mapped), so the dropped safes block must surface as a WARNING, never a silent drop.
+    blocks = [
+        {
+            "block_type": "founders_block",
+            "sheet": "Cap",
+            "cell_range": "A2:B2",
+            "column_role_map": {"A": "holder_name", "B": "shares"},
+        },
+        {
+            "block_type": "safes_block",
+            "sheet": "Cap",
+            "cell_range": "A5:B6",
+            "column_role_map": {"A": "investor_name", "B": "amount"},
+        },
+    ]
+    grid = _grid(
+        {"Cap": [["Name", "Shares"], ["Alice", 5000000], [None, None], [None, None], [None, None], [None, None]]}
+    )
+    r = fm.map_freeform(blocks, grid, existing_inputs=_meta_inputs(), run_id=RUN)
+    assert r["inputs"].get("founders"), "founders should map"
+    assert any("safes_block" in w and "0 data rows" in w for w in r["warnings"]), r["warnings"]
+
+
+def test_emit_empty_does_not_stamp_cap_base_confirmed() -> None:
+    # F3: nothing maps (wrong schema) → must NOT stamp cap_base_source=confirmed on an empty base.
+    blocks = [
+        {
+            "block_type": "founders_block",
+            "sheet": "Cap",
+            "row_range": [2, 2],
+            "columns": {"A": "holder_name", "B": "shares"},
+        }
+    ]
+    grid = _grid({"Cap": [["Name", "Shares"], ["Alice", 5000000]]})
+    r = fm.map_freeform(blocks, grid, existing_inputs=_meta_inputs(), run_id=RUN)
+    assert (r["inputs"].get("metadata") or {}).get("cap_base_source") != "confirmed"
+
+
+def test_wrong_field_schema_next_action_says_redispatch(tmp_path) -> None:
+    # CLI: the schema/empty blocker steers to a re-dispatch with the right field names — NOT the founder.
+    receipt = _emit_cli(
+        tmp_path,
+        [["Name", "Shares"], ["Alice", 5000000]],
+        {
+            "blocks": [
+                {
+                    "block_type": "founders_block",
+                    "sheet": "S",
+                    "row_range": [2, 2],
+                    "columns": {"A": "holder_name", "B": "shares"},
+                }
+            ]
+        },
+    )
+    assert receipt["ok"] is False
+    na = receipt["next_action"].lower()
+    assert "cell_range" in na and "column_role_map" in na
+    assert "re-dispatch" in na
+    assert "--answer" not in na
+
+
 def test_offcontract_role_next_action_says_redispatch(tmp_path) -> None:
     # Off-contract ROLE (not block_type): the block_type is valid (founders_block) but a
     # column-role value is off-contract. This must hit the "off-contract" reason discriminator,

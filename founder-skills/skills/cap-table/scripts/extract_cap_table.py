@@ -966,12 +966,25 @@ def _mode_freeform_emit(args: argparse.Namespace) -> int:
     )
 
     if result["blockers"]:
+        # A schema/empty blocker (a block carried the wrong field schema — row_range/columns instead of
+        # cell_range/column_role_map — or equity blocks mapped 0 records) is NOT founder-answerable: it
+        # needs a re-dispatch with the correct field names. Check this FIRST (its field values are
+        # disjoint from the off-contract test below, and its reasons never contain "off-contract").
+        schema_empty = any(b.get("field") in {"cell_range", "column_role_map", "emit"} for b in result["blockers"])
         # An off-contract blocker (the sub-agent emitted a block_type/role outside the closed
         # vocabulary) is NOT founder-answerable — steer it to a re-dispatch, not an AskUserQuestion.
         off_contract = any(
             b.get("field") == "block_type" or "off-contract" in str(b.get("reason", "")) for b in result["blockers"]
         )
-        if off_contract:
+        if schema_empty:
+            next_action = (
+                "One or more SPREADSHEET_STRUCTURE_DETECTION blocks used the wrong field schema or mapped "
+                "zero rows: each block must carry `cell_range` (the DATA rows, e.g. 'A5:F12') and "
+                "`column_role_map` (column-letter -> role) — NOT `row_range`/`columns`/`rows`. Re-dispatch "
+                "SPREADSHEET_STRUCTURE_DETECTION with the correct field names and ranges that point at the "
+                "data rows (not headers/blank rows); do not ask the founder about these."
+            )
+        elif off_contract:
             next_action = (
                 "One or more blocks are off-contract: the SPREADSHEET_STRUCTURE_DETECTION sub-agent used a "
                 "block_type or column-role value outside the closed vocabulary (see the contract in "

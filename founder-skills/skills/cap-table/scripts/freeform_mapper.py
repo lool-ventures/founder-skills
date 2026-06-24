@@ -94,10 +94,7 @@ def map_freeform(
     inputs.setdefault("metadata", {})
     inputs["metadata"]["run_id"] = run_id
     inputs["metadata"].setdefault("schema_version", _INPUTS_SCHEMA_VERSION)
-    # Lane-3 carve-out for the cap_state default-to-assumed warn (Issue B): the founder's sheet IS the
-    # cap-base source of truth, so a freeform-mapped base is confirmed, not assumed. setdefault keeps an
-    # explicit pre-existing value (e.g. an upstream "assumed") rather than overriding it.
-    inputs["metadata"].setdefault("cap_base_source", "confirmed")
+    # (cap_base_source is stamped AFTER mapping — only when an equity base was actually produced; see end.)
 
     instruments: dict[str, Any] = {
         "safes": [],
@@ -134,6 +131,31 @@ def map_freeform(
             block_blocker(i, bt, "block_type", f"unknown block_type {bt!r} (off-contract)")
             continue
 
+        # (1a) Required block-field schema. An equity block MUST carry a non-empty cell_range AND a
+        # non-empty column_role_map. The structure sub-agent sometimes drifts to row_range/columns; an
+        # empty column_role_map then skips every row, silently mapping nothing — so fail loud and name
+        # the correct field names instead of writing an empty cap base.
+        cell_range = block.get("cell_range")
+        role_map = block.get("column_role_map")
+        if not (isinstance(cell_range, str) and cell_range.strip()):
+            block_blocker(
+                i,
+                bt,
+                "cell_range",
+                "required field 'cell_range' (data rows, e.g. 'A5:F12') missing or empty; got keys "
+                f"{sorted(block.keys())}. Emit cell_range + column_role_map, not row_range/columns.",
+            )
+            continue
+        if not (isinstance(role_map, dict) and role_map):
+            block_blocker(
+                i,
+                bt,
+                "column_role_map",
+                "required field 'column_role_map' (column-letter -> role) missing or empty; got keys "
+                f"{sorted(block.keys())}. Emit cell_range + column_role_map, not row_range/columns.",
+            )
+            continue
+
         defn = bt_defs[bt]
         roles = defn["roles"]
         # Contract: every column_role_map value must be a known role for this block.
@@ -146,6 +168,14 @@ def map_freeform(
         rows = _block_rows(block, grid)
         cr_bare = str(block.get("cell_range", "")).split("!", 1)[-1]
         src = f"freeform:{block.get('sheet')}!{cr_bare}"
+        if not rows:
+            # MR-2: an equity block whose cell_range maps to zero data rows is a silent drop in the
+            # MIXED case (the global 0-records backstop only fires when EVERY equity block is empty).
+            # Surface it so a partially-dropped sheet is never reported as a clean success.
+            warnings.append(
+                f"block {i} ({bt}): cell_range {cr_bare!r} yielded 0 data rows — verify it points at the "
+                "data rows (not headers/blank rows); this block contributed nothing."
+            )
 
         if bt == "founders_block":
             for raw in rows:
@@ -302,6 +332,24 @@ def map_freeform(
                 note_n += 1
                 instruments["convertible_notes"].append(rec)
 
+    # (1b) Global silent-empty backstop. ≥1 equity block was declared but produced ZERO records this
+    # call (accumulators are pre-merge, so keep-existing duplicates still count as mapped) and no
+    # per-block blocker already explains it → fail loud instead of writing an empty cap base. Catches a
+    # well-formed block whose cell_range points at blank rows, which (1a)'s field-presence check cannot
+    # see.
+    if (
+        any(b.get("block_type") in bt_defs for b in blocks)
+        and not (founders_acc or preferred_acc or option_pool_new or safe_n or note_n)
+        and not blockers
+    ):
+        block_blocker(
+            -1,
+            "*",
+            "emit",
+            "equity block(s) were declared but 0 records mapped — verify each cell_range points at the "
+            "data rows and column_role_map names the columns; no rows were extracted.",
+        )
+
     # --- merge equity into inputs (keep-existing-on-conflict + warn) ---
     if founders_acc:
         if (existing_inputs or {}).get("founders"):
@@ -315,6 +363,18 @@ def map_freeform(
             warnings.append("option_pool already present in inputs.json — keeping existing, ignoring sheet pool")
         else:
             inputs["option_pool"] = option_pool_new
+
+    # Lane-3 carve-out for the cap_state default-to-assumed warn: the founder's sheet IS the cap-base
+    # source of truth, so a freeform-mapped base is confirmed — but ONLY when the emit actually produced
+    # or merged an equity base, never on an empty/partial result (so a downstream consumer can't read
+    # "confirmed" off an empty cap base). setdefault keeps an explicit pre-existing value (e.g. "assumed").
+    if (
+        inputs.get("founders")
+        or inputs.get("common_batches")
+        or inputs.get("preferred_series")
+        or inputs.get("option_pool")
+    ):
+        inputs["metadata"].setdefault("cap_base_source", "confirmed")
 
     blockers.sort(key=lambda b: (b["block_index"], b["field"]))
     return {"inputs": inputs, "instruments": instruments, "blockers": blockers, "warnings": warnings}

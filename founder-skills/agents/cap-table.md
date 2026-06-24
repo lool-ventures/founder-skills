@@ -374,7 +374,9 @@ fields the sheet lacks become founder-confirmation blockers downstream (never fa
 For each block return: `block_type`, `sheet` + `cell_range` (the **data rows only**, headers
 excluded; bare `"A5:F12"` or sheet-qualified `"Cap Table!A5:F12"` both accepted),
 `column_role_map` (column-letter → role value), `confidence` (high/medium/low) + `evidence`,
-and `ambiguities`.
+and `ambiguities`. The range/columns field names are EXACTLY `cell_range` and `column_role_map` —
+never `row_range`, `columns`, or `rows`; a mis-keyed block maps zero rows and is rejected with a
+blocker telling you to re-emit with the correct field names.
 
 **Return shape (for `SPREADSHEET_STRUCTURE_DETECTION`):**
 
