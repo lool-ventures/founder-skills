@@ -872,6 +872,16 @@ def test_s2_cap_base_assumed_wired() -> None:
     assert props["cap_base_source"]["enum"] == ["confirmed", "assumed"]
 
 
+def test_cap_base_reconstructed_wired() -> None:
+    # provenance: producer emits the warning, the shared renderer renders it, SKILL + schema document the field
+    assert "W_CAP_BASE_RECONSTRUCTED" in _CAP_STATE_SRC
+    assert "W_CAP_BASE_RECONSTRUCTED" in _WARNING_CALLOUTS_SRC
+    assert "cap_base_provenance" in _CAP_STATE_SRC
+    assert "cap_base_provenance" in _SKILL_TEXT
+    props = _INPUTS_SCHEMA["properties"]["metadata"]["properties"]
+    assert "cap_base_provenance" in props and props["cap_base_provenance"]["type"] == "string"
+
+
 def test_s5_fast_assess_warnings_field_and_boundary() -> None:
     # sentinel schema declares warnings (optional, not required) so the render validates
     assert "warnings" in _FAST_ASSESS_SCHEMA["properties"]

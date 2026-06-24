@@ -27,6 +27,10 @@ from openpyxl.utils import column_index_from_string, range_boundaries  # type: i
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROLE_MAP_PATH = os.path.join(_HERE, "..", "references", "schemas", "freeform-role-map.json")
 _DATE_SENTINEL = "1900-01-01"
+# Provenance marker stamped ONLY when this mapper genuinely produced the equity base from the sheet.
+# Its ABSENCE on a confirmed base is what cap_state uses to flag a model-reconstructed base — so keep this
+# spelling in lock-step with cap_state.py's check (a typo here would silently make every freeform run warn).
+_PROVENANCE_DETERMINISTIC = "deterministic_mapped"
 _INPUTS_SCHEMA_VERSION = "v0.5.0-inputs"
 _INSTRUMENTS_SCHEMA_VERSION = "v0.5.0-instruments"
 
@@ -382,6 +386,12 @@ def map_freeform(
         or inputs.get("option_pool")
     ):
         inputs["metadata"].setdefault("cap_base_source", "confirmed")
+
+    # Provenance: stamp deterministic_mapped ONLY when the mapper itself produced equity THIS call
+    # (the accumulators) — NOT merely when inputs.get(...) is truthy, which would inherit equity merged
+    # from existing_inputs and falsely claim a model-built base was deterministically mapped.
+    if founders_acc or preferred_acc or option_pool_new or safe_n or note_n:
+        inputs["metadata"].setdefault("cap_base_provenance", _PROVENANCE_DETERMINISTIC)
 
     blockers.sort(key=lambda b: (b["block_index"], b["field"]))
     return {"inputs": inputs, "instruments": instruments, "blockers": blockers, "warnings": warnings}

@@ -3799,17 +3799,18 @@ class TestComposeReportWarningCallouts:
 
 
 class TestWarningsSharedRenderer:
-    """Issue C: the four warning families render from ONE shared module
+    """Issue C: the warning families render from ONE shared module
     (`_warning_callouts.render_warning_callouts`) so compose and concise cannot diverge. AD matches by PREFIX
-    (interpolated sentence); the other three by exact code."""
+    (interpolated sentence); the others by exact code."""
 
-    def test_renders_all_four_families(self) -> None:
+    def test_renders_all_five_families(self) -> None:
         import _warning_callouts  # type: ignore[import-not-found]
 
         warnings = [
             "W_AOA_ONLY_NO_INSTRUMENTS",
             "W_CAP_BASE_ASSUMED",
             "W_FOUNDER_LOOKS_LIKE_INVESTOR",
+            "W_CAP_BASE_RECONSTRUCTED",
             "W_ANTI_DILUTION_NONCANONICAL: preferred series 'Series Seed' specified anti-dilution "
             "under the wrong key `anti_dilution`='bbwa' — recovered as 'broad_based_weighted_average'.",
         ]
@@ -3817,6 +3818,7 @@ class TestWarningsSharedRenderer:
         assert "AoA-only engagement" in body
         assert "Cap base ASSUMED" in body
         assert "resembles an investment entity" in body
+        assert "deterministic spreadsheet mapper" in body  # W_CAP_BASE_RECONSTRUCTED (softened text)
         assert "Anti-dilution input recovered" in body
         assert "broad_based_weighted_average" in body  # AD recovery detail (prefix match)
 
@@ -8417,6 +8419,47 @@ class TestAssumedCapBaseWarning:
             _inputs_named(["Founder A", "Founder B"], cap_base_source="confirmed"), self.NO_INST
         )
         assert "W_CAP_BASE_ASSUMED" not in cs.get("warnings", [])
+
+    def _inputs_prov(self, names: list[str], cap_base_source: str, provenance: str | None) -> dict[str, Any]:
+        d = _inputs_named(names, cap_base_source=cap_base_source)
+        if provenance is not None:
+            d["metadata"]["cap_base_provenance"] = provenance
+        return d
+
+    def test_confirmed_non_deterministic_provenance_warns_reconstructed(self) -> None:
+        # NakAI shape: a confirmed base with NO deterministic_mapped marker = model-built → flag it, so a
+        # hand-built base can't masquerade as verified. (The case the explicit-only trigger would miss.)
+        cs = cap_state_mod.build_cap_state(
+            self._inputs_prov(["Jane Doe", "John Smith"], "confirmed", None), self.NO_INST
+        )
+        assert "W_CAP_BASE_RECONSTRUCTED" in cs.get("warnings", [])
+
+    def test_deterministic_mapped_suppresses_reconstructed(self) -> None:
+        cs = cap_state_mod.build_cap_state(
+            self._inputs_prov(["Jane Doe", "John Smith"], "confirmed", "deterministic_mapped"), self.NO_INST
+        )
+        assert "W_CAP_BASE_RECONSTRUCTED" not in cs.get("warnings", [])
+
+    def test_assumed_does_not_warn_reconstructed(self) -> None:
+        # mutually exclusive with W_CAP_BASE_ASSUMED (which requires != confirmed)
+        cs = cap_state_mod.build_cap_state(_inputs_named(["Jane Doe", "John Smith"]), self.NO_INST)
+        w = cs.get("warnings", [])
+        assert "W_CAP_BASE_RECONSTRUCTED" not in w
+        assert "W_CAP_BASE_ASSUMED" in w
+
+    def test_no_equity_base_no_reconstructed(self) -> None:
+        inputs = {
+            "company_name": "TestCo",
+            "analysis_date": "2026-06-21",
+            "jurisdiction": {"structure": "delaware"},
+            "metadata": {
+                "run_id": "20260621T000000Z",
+                "schema_version": "v0.5.0-inputs",
+                "cap_base_source": "confirmed",
+            },
+        }
+        cs = cap_state_mod.build_cap_state(inputs, self.NO_INST)
+        assert "W_CAP_BASE_RECONSTRUCTED" not in cs.get("warnings", [])
 
     def test_is_placeholder_founder_name_truth_table(self) -> None:
         f = cap_state_mod._is_placeholder_founder_name

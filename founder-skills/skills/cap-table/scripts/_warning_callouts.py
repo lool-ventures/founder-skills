@@ -16,7 +16,7 @@ from __future__ import annotations
 
 
 def render_warning_callouts(cap_state_warnings: list[str]) -> list[str]:
-    """Render the four cap_state warning families as a founder-facing markdown callout block.
+    """Render the cap_state warning families as a founder-facing markdown callout block.
 
     Returns a list of markdown lines (empty list when there are no matching warnings)."""
     out: list[str] = []
@@ -35,6 +35,12 @@ def render_warning_callouts(cap_state_warnings: list[str]) -> list[str]:
         out.append("> ⚠ **A listed founder resembles an investment entity** (name contains")
         out.append("> Ventures/Capital/Fund). Confirm it is a founder, not an investor — mis-classifying an")
         out.append("> investor as a founder distorts the ownership table.")
+        out.append("")
+    if any(w == "W_CAP_BASE_RECONSTRUCTED" for w in cap_state_warnings):
+        out.append("> ⚠ **Cap base was NOT produced by the deterministic spreadsheet mapper.** It was entered")
+        out.append("> manually or extracted from a document (PDF / Carta / pasted), so it was not")
+        out.append("> mechanically verified against a structured source. Confirm each holder/class against the")
+        out.append("> source before relying on these numbers.")
         out.append("")
     ad = [w for w in cap_state_warnings if w.startswith("W_ANTI_DILUTION")]
     if ad:

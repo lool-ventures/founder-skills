@@ -671,6 +671,14 @@ def build_cap_state(
     if cap_base_source != "confirmed" and (cap_base_source == "assumed" or _has_equity_base):
         warnings_list.append("W_CAP_BASE_ASSUMED")
 
+    # A confirmed base whose provenance is NOT the deterministic mapper's marker was model-built (Lane-1/2/4
+    # hand-build / vision) — flag it so a hand-built base can't masquerade as verified. The marker is set
+    # only by freeform_mapper (machine-set), so its ABSENCE is the trustworthy signal (no model self-report
+    # needed). Mutually exclusive with W_CAP_BASE_ASSUMED, which requires cap_base_source != "confirmed".
+    cap_base_provenance = (inputs.get("metadata") or {}).get("cap_base_provenance")
+    if cap_base_source == "confirmed" and _has_equity_base and cap_base_provenance != "deterministic_mapped":
+        warnings_list.append("W_CAP_BASE_RECONSTRUCTED")
+
     cap_state: dict[str, Any] = {
         "as_of_date": inputs.get("analysis_date", ""),
         "currency": currency,

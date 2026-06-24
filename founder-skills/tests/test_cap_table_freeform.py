@@ -70,6 +70,32 @@ def test_founders_block_happy() -> None:
     assert r["inputs"]["metadata"]["schema_version"] == "v0.5.0-inputs"
 
 
+def test_freeform_emit_stamps_provenance_deterministic() -> None:
+    # The mapper genuinely produced the equity from the sheet → stamp cap_base_provenance so a downstream
+    # consumer knows this base was deterministically mapped (not model-reconstructed).
+    blocks = [
+        {
+            "block_type": "founders_block",
+            "sheet": "Cap",
+            "cell_range": "A2:B3",
+            "column_role_map": {"A": "holder_name", "B": "shares"},
+        }
+    ]
+    grid = _grid({"Cap": [["Name", "Shares"], ["Alice", 5000000], ["Bob", 5000000]]})
+    r = fm.map_freeform(blocks, grid, existing_inputs=_meta_inputs(), run_id=RUN)
+    assert r["inputs"]["metadata"]["cap_base_provenance"] == "deterministic_mapped"
+
+
+def test_freeform_all_preexisting_equity_no_deterministic_provenance() -> None:
+    # Accumulator-gated: the equity is entirely PRE-EXISTING (the mapper produced nothing this call), so it
+    # must NOT claim deterministic_mapped — otherwise a model-built base inherits a false provenance.
+    existing = _meta_inputs()
+    existing["founders"] = [{"name": "Alice", "common_shares": 5000000}]
+    r = fm.map_freeform([], _grid({"Cap": [["x"]]}), existing_inputs=existing, run_id=RUN)
+    assert r["inputs"].get("founders")  # equity present (from existing)
+    assert (r["inputs"].get("metadata") or {}).get("cap_base_provenance") != "deterministic_mapped"
+
+
 def test_freeform_emit_stamps_cap_base_confirmed() -> None:
     # Lane-3 carve-out for Issue B (default-to-assumed): the sheet IS the source of truth, so the
     # freeform emit must stamp metadata.cap_base_source="confirmed" — otherwise the cap_state
