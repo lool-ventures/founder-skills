@@ -13,14 +13,9 @@ prompt: |
   pre-money. Use the cap-table skill to give me a directional read on my founder dilution — just the
   fast assessment, I don't need the full review, report, or explorer yet.
 
-answers:
-  # Label-pinned (exact option labels) on the option-1 choice the prior catch-all `first` recorded.
-  - when_question: "common shares"
-    choose: "8,000,000"
-  - when_question: "authorized size"
-    choose: "No pool yet"
-  - when_question: "top.up"
-    choose: "No top-up planned"
+# No scripted answers: the assert (fast_assess_only.json produced + no host-path leak) does NOT depend on
+# the founder-share / pool / top-up gate choices, so on_unanswered:first (option 1 each) is the robust
+# choice — it survives label paraphrase that brittle full-label anchors don't.
 
 assert:
   - result: success

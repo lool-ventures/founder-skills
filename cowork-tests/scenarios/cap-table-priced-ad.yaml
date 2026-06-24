@@ -1,8 +1,15 @@
 name: cap-table-priced-ad
 session: ../sessions/default.yaml
 fidelity: cowork
-on_unanswered: fail
+on_unanswered: first   # the MANDATORY cap-base gate (S2) fires even with inline data; label-pin it + backstop variance gates with option 1
 skills: [cap-table]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
+
+# Known gates (canonical SKILL.md Gate Catalog phrasing), anchored on a stable fragment:
+answers:
+  - when_question: "cap-table base"
+    choose: "Confirmed"
+  - when_question: "scenarios.*model"
+    choose: "priced round"          # this scenario models the down (priced) round
 
 # P2-b — priced round + broad-based weighted-average (BBWA) anti-dilution (Gotcha #2). Lane 4
 # conversational with a prior preferred series and a DOWN round that triggers anti-dilution. Synthetic.

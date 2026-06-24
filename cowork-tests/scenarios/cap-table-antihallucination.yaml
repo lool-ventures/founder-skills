@@ -13,14 +13,10 @@ prompt: |
   term sheet I received. Please review the uploaded term sheet — extract its terms and tell me what to
   watch out for.
 
-answers:
-  # Label-pinned (exact option labels, order-independent). Anchored on the option-1 choice the prior
-  # catch-all `first` recorded, so behavior is preserved. The cap-base gates are a backstop — the prompt
-  # usually suppresses them; on_unanswered:first covers any other variance gate.
-  - when_question: "founders"
-    choose: "2 equal founders"
-  - when_question: "option pool|ESOP"
-    choose: "Yes — ~10% of cap table"
+# No scripted answers: this scenario's asserts (the exclusivity-blank flag) do NOT depend on the cap-base /
+# option-pool / pool-top-up gate choices, so on_unanswered:first (option 1 each) is the robust choice — it
+# survives label paraphrase that brittle full-label anchors don't (the gates' option-1 = Confirmed / No
+# pool / No top-up, none of which affect the anti-hallucination assert).
 
 assert:
   - result: success

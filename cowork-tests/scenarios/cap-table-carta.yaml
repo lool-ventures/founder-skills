@@ -14,18 +14,10 @@ prompt: |
   1,000,000-share option pool (none issued yet). I've uploaded our Carta cap-table export of the
   convertible instruments. Please review it (map the Carta sheets to instruments) and give me the full cap-table review.
 
-answers:
-  # Label-pinned (exact option labels) on the option-1 choice the prior catch-all `first` recorded.
-  - when_question: "cap base"
-    choose: "Confirmed"
-  - when_question: "convertible note"
-    choose: "Convert at cap"
-  - when_question: "qualified financing"
-    choose: "$1,000,000"
-  - when_question: "Company Capitalization|denominator"
-    choose: "Fully diluted"
-  - when_question: "scenarios should I model"
-    choose: "Cap-implied SAFE snapshot"
+# No scripted answers: this scenario's asserts (run succeeds + instruments.json produced from the Carta
+# sheet mapping) do NOT depend on the note-conversion gate choices (denominator / maturity / qualified
+# financing), so on_unanswered:first (option 1 each) is the robust choice — it survives the label
+# paraphrase that brittle full-label anchors don't.
 
 assert:
   - result: success

@@ -29,13 +29,11 @@ prompt: |
   Give me the full cap-table review — show how the convertible note converts at this round (cap vs
   discount) and the resulting dilution for each holder — and build the interactive explorer.
 
-# The note's "Company Capitalization" denominator confirm-gate is the one gate this fires; pin it to the
-# fully-diluted pre-financing option by a stable FRAGMENT of the canonical label (SKILL.md Gate Catalog —
-# label starts "Fully-diluted pre-financing …", no "(Recommended)" suffix). on_unanswered:first backstops
-# any other variance gate.
-answers:
-  - when_question: "Company Capitalization"
-    choose: "Fully-diluted"
+# No scripted answers: the asserts (note principal/valuation_cap extraction + as-converted FD shares > 0) do
+# NOT depend on the "Company Capitalization" denominator choice (the denominator drives the conversion price
+# at the financing, not the pre-financing FD snapshot or the extracted note fields). So on_unanswered:first
+# (option 1 = the canonical fully-diluted pre-financing denominator) is the robust choice — it survives the
+# label paraphrase that broke a "Fully-diluted" fragment anchor during re-record (Issue A).
 
 assert:
   # End-to-end: the full pipeline ran and produced its deliverables (manifest-backed → survives replay).
