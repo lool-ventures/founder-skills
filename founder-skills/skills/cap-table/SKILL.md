@@ -408,7 +408,7 @@ Inputs are built from the founder's conversational description via `AskUserQuest
 3. Present the updated `report.md` numbers verbatim
 Never hand-estimate a new scenario in chat.
 
-Total wall-clock: under 60 seconds. Then jump to **Step 12: Deliver Artifacts** with the fast-assess deliverable. Offer the founder a follow-up: "I gave you the directional answer — want the full review with counsel packet and interactive explorer?"
+Total wall-clock: under 60 seconds. Then jump to **Step 12: Deliver Artifacts** with the fast-assess deliverable. Close with a STATEMENT offering the next step, not a trailing question (a final turn ending in a bare "?" with no tool call is a stall) — e.g. "That's the directional answer. The full review — counsel packet and interactive explorer — is ready whenever you want to go deeper; just say the word."
 
 ### Step 5-lookup (RULE-LOOKUP MODE ONLY): Run `verify_one.py` and exit
 
@@ -439,7 +439,7 @@ python3 "$SCRIPTS/concise_report.py" --inputs "$REVIEW_DIR/inputs.json" --scenar
 
 Pass `--cap-state` so the concise answer surfaces any anti-dilution recovery warning — a standalone anti-dilution question routes here, and without it the recovery is silently dropped on this route.
 
-Present `report_concise.md` verbatim — never re-derive its numbers in chat. Concise mode writes the real `cap_state.json` + `scenarios.json` (so downstream consumers detect cap-table ran). Then jump to **Step 12: Deliver Artifacts** and offer the full review as a follow-up.
+Present `report_concise.md` verbatim — never re-derive its numbers in chat. Concise mode writes the real `cap_state.json` + `scenarios.json` (so downstream consumers detect cap-table ran). Then jump to **Step 12: Deliver Artifacts** and close with a STATEMENT offering the full review as a follow-up (not a trailing question — a final turn ending in a bare "?" with no tool call is a stall), e.g. "The full review with counsel packet and interactive explorer is available if you want to go deeper."
 
 ### Step 5: Determine Scenarios + Run Math → `scenarios.json`
 
