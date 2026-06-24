@@ -191,6 +191,10 @@ exit-code contract: a run green on `assert:` can now exit **`1`** on an answer m
 declares answers but the kept run dir has no `events.jsonl`, it exits **`2`** (refuses rather than vacuously
 passing). Assert-only scenarios (no `answers:`) are unaffected. Use this to validate `answers:` edits off a
 kept run before committing — it's the cheap guard for the gate-phrasing-drift class of re-record flake.
+**0.12.0 adds a second exit-`2` trigger:** answer-coverage also refuses ("the kept run predates the current
+skill") when the skill *source* changed since the run was recorded — so verifying a freshly edited skill
+against an old kept run fails loud instead of false-greening against outdated gates. Re-record (or verify
+against a run captured after the edit) to clear it.
 
 ## Replay (CI / token-free)
 ```bash
@@ -211,9 +215,12 @@ cowork-harness verify-cassettes cassettes/ --skip-staleness "${ALLOW[@]}"
 > replay-only and cannot re-record, so a hard gate would block every skill PR on a manual local re-record.
 > With 0.5.0 per-skill scoping (`skills: [<name>]`) the signal is now **precise**: a `[stale] skill/plugin
 > dir contents changed` finding means *that skill's* dir (or a shared root — `scripts/`, `references/`,
-> `agents/`) changed without a re-record. A `[stale] baseline moved …` finding **locally** is expected
-> when your Cowork Desktop is ahead of the harness's shipped baseline; a hosted CI runner has no newer
-> Desktop, so it doesn't fire.
+> `agents/`) changed without a re-record. A `[stale] baseline moved …` finding fires whenever the cassette's
+> recorded baseline is behind the **harness's shipped baseline constant** — the harness carries that
+> constant, it does **not** read the local Cowork Desktop, so this fires identically on CI and locally. After
+> a harness bump that moves the baseline (e.g. 0.12.0: `1.14271.0 → 1.15200.0`) every committed cassette
+> reads `[stale] baseline moved …` on the WARN lane until the next release-cadence `rerecord.sh`; because the
+> lane is `continue-on-error`, it does not fail the PR gate.
 
 ## Constraints (do not break)
 1. **Whole-plugin mount** — the session mounts `../../founder-skills` (the plugin root) so the rule pack +
