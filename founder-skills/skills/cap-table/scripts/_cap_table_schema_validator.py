@@ -9,6 +9,16 @@ Unsupported keywords are silently ignored: $ref, oneOf, anyOf, allOf,
 additionalProperties, patternProperties, pattern, minLength/maxLength,
 minimum/maximum, format. Schema authors must not rely on them.
 
+DEFERRED (Phase 3): enforcing `additionalProperties: false` end-to-end is the
+generic catch-all for mis-keyed input fields (today an unknown key passes
+silently and is ignored by the consumer). Prereqs before flipping it on:
+(1) this validator gains real `additionalProperties` support; (2) the
+producer-wide intentional-extras inventory is complete — see
+`cap_state._INTENTIONAL_NON_SCHEMA_KEYS` (currently cap_state-only); (3) every
+inventory key becomes a declared schema property or a documented exception.
+Otherwise reject-mode would fail VALID inputs. Phase 1 instead handles the one
+observed mis-key (anti_dilution) via a targeted recovery in cap_state.py.
+
 Type-mismatch errors short-circuit further checks for that subtree to
 avoid cascading errors on the wrong shape.
 

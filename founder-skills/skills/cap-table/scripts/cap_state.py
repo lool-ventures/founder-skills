@@ -56,6 +56,24 @@ _SCHEMA_DIR = os.path.join(
 
 CAP_STATE_SCHEMA_VERSION = "v0.5.0-cap-state"
 
+# Phase-3 readiness inventory (DEFERRED — see `_cap_table_schema_validator.py` and the cap-table
+# hardening notes). Keys that producers legitimately READ off inputs/instruments objects but that are
+# NOT declared schema properties. Today the schemas leave `additionalProperties` unset (and the
+# hand-rolled validator can't enforce it anyway), so unknown keys pass silently. WHEN
+# `additionalProperties: false` is eventually enforced (Phase 3), every key below must first become a
+# declared schema property (or a documented exception) — otherwise reject-mode would fail valid inputs.
+# Recording it here (git-tracked + test-locked, see test_intentional_non_schema_keys_*) is the
+# down-payment that makes Phase 3 a mechanical follow-through. NOT exhaustive: a full producer-wide
+# sweep (safe_conversion/note_conversion/warrant_exercise/priced_round/freeform_mapper/extractors) is a
+# Phase-3 prerequisite. Underscore-prefixed in-memory shadow keys (priced_round `_mfn_*`) are never
+# persisted to a validated file, so they are intentionally excluded.
+_INTENTIONAL_NON_SCHEMA_KEYS: dict[str, frozenset[str]] = {
+    "preferred_series": frozenset({"oip", "ocp", "anti_dilution", "voting_rights_multiple"}),
+    "founders": frozenset({"vesting"}),
+    "option_pool": frozenset({"exercised", "expired_or_forfeited"}),
+    "warrants": frozenset({"exercised_flag"}),
+}
+
 
 class CapStateInvariantError(ValueError):
     """Raised when a semantic invariant fails at canonicalization."""

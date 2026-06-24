@@ -3822,6 +3822,51 @@ class TestValidatorRequiredMissingHint:
         assert "did you" not in joined.lower()  # nothing resembles 'authorized' → no bogus hint
 
 
+class TestIntentionalNonSchemaKeysInventory:
+    """Phase-3 down-payment: the inventory of legit non-schema keys is git-tracked + test-locked so
+    Phase-3 (additionalProperties: false) consumes it instead of re-deriving — and so it can't silently
+    lose an entry or list a real schema property (the founder_id mistake the plan's reviews caught)."""
+
+    _SCHEMAS = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "skills",
+        "cap-table",
+        "references",
+        "schemas",
+    )
+
+    def _props(self, schema_file: str, obj: str) -> set:
+        with open(os.path.join(self._SCHEMAS, schema_file)) as fh:
+            node = json.load(fh)["properties"][obj]
+        node = node.get("items", node)
+        return set((node.get("properties") or {}).keys())
+
+    def test_pins_known_extras(self) -> None:
+        import cap_state  # type: ignore[import-not-found]
+
+        inv = cap_state._INTENTIONAL_NON_SCHEMA_KEYS
+        assert {"oip", "ocp", "anti_dilution"} <= inv["preferred_series"]
+        assert "vesting" in inv["founders"]
+        assert {"exercised", "expired_or_forfeited"} <= inv["option_pool"]
+        assert "exercised_flag" in inv["warrants"]
+
+    def test_inventory_keys_are_genuinely_non_schema(self) -> None:
+        """Every inventory key must NOT be a declared schema property — else it isn't an 'extra'.
+        This is exactly the `founder_id` mis-classification the plan's reviews caught."""
+        import cap_state  # type: ignore[import-not-found]
+
+        schema_obj = {
+            "preferred_series": ("inputs.schema.json", "preferred_series"),
+            "founders": ("inputs.schema.json", "founders"),
+            "option_pool": ("inputs.schema.json", "option_pool"),
+            "warrants": ("instruments.schema.json", "warrants"),
+        }
+        for obj, extras in cap_state._INTENTIONAL_NON_SCHEMA_KEYS.items():
+            schema_file, name = schema_obj[obj]
+            overlap = set(extras) & self._props(schema_file, name)
+            assert not overlap, f"{obj}: inventory lists declared schema props as extras: {overlap}"
+
+
 class TestEvidenceVerifierIntegration:
     """extract_instrument.py --verify --source-doc integration.
 
