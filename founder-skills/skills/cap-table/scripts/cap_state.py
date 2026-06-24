@@ -516,6 +516,12 @@ def _resolve_anti_dilution(s: dict[str, Any]) -> tuple[str, str | None]:
     )
 
 
+# A1: relative-ppm threshold for the FD reconciliation residual. 1000 ppm = 0.1% — comfortably above
+# legitimate multi-series conversion-ratio rounding (a real Carta export's delta was ~3 ppm) and well below
+# a genuine dropped-holder divergence (~%). RELATIVE so it scales with cap-table size.
+_FD_RECONCILE_PPM_THRESHOLD = 1000
+
+
 def build_cap_state(
     inputs: dict[str, Any],
     instruments: dict[str, Any],
@@ -686,6 +692,30 @@ def build_cap_state(
     if (inputs.get("metadata") or {}).get("extraction_mode") == "vision_image_pdf":
         warnings_list.append("W_VISION_EXTRACTION_LOW_CONFIDENCE")
 
+    # A1: cross-foot the computed FD against an INDEPENDENT source-stated grand total (e.g. Carta's printed
+    # "Totals" row), captured in inputs.stated_totals. A divergence beyond the relative-ppm threshold means
+    # a holder/class was likely dropped or mis-entered during a manual rebuild. Suppressible warning.
+    _act: dict[str, Any] = _compute_as_converted_totals(
+        canonical_founders, canonical_preferred, canonical_option_pool, canonical_batches, outstanding_warrants
+    )
+    _stated = (inputs.get("stated_totals") or {}).get("fully_diluted")
+    if isinstance(_stated, (int, float)) and not isinstance(_stated, bool) and _stated > 0:
+        _computed = _act["fully_diluted_shares"]
+        _resid = _computed - int(_stated)
+        _ppm = round(1_000_000 * _resid / _stated)
+        _act["reconciliation"] = {
+            "stated_fully_diluted": int(_stated),
+            "residual_abs": _resid,
+            "residual_ppm": _ppm,
+            "source": (inputs.get("stated_totals") or {}).get("source"),
+        }
+        if abs(_ppm) > _FD_RECONCILE_PPM_THRESHOLD:
+            warnings_list.append(
+                f"W_FD_RECONCILE_DELTA: computed fully-diluted {_computed:,} vs source-stated "
+                f"{int(_stated):,} (Δ {_resid:+,}, {_ppm:+} ppm) exceeds {_FD_RECONCILE_PPM_THRESHOLD} ppm "
+                "— a holder/class may be dropped or mis-entered."
+            )
+
     cap_state: dict[str, Any] = {
         "as_of_date": inputs.get("analysis_date", ""),
         "currency": currency,
@@ -699,9 +729,7 @@ def build_cap_state(
         "outstanding_notes": outstanding_notes,
         "outstanding_warrants": outstanding_warrants,
         "aoa_findings": aoa_findings_mirror,
-        "as_converted_totals": _compute_as_converted_totals(
-            canonical_founders, canonical_preferred, canonical_option_pool, canonical_batches, outstanding_warrants
-        ),
+        "as_converted_totals": _act,
         "metadata": {
             "produced_by": "cap_state.py",
             "source_inputs": ["inputs.json", "instruments.json"],

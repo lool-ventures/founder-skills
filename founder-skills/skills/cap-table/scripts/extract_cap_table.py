@@ -393,6 +393,37 @@ def _convertible_record_to_instrument(rec: dict[str, Any], idx: int) -> tuple[st
     )
 
 
+def _extract_carta_fd_total(rows: list[Any]) -> int | None:
+    """Carta's INDEPENDENT printed grand fully-diluted total from the Summary Cap Table rows.
+
+    Locates the 'Fully Diluted Shares' header column (EXACT normalized match, so the sibling
+    'Fully Diluted Shares with …' column is not picked), then the grand-total row labeled 'Totals',
+    and returns its value in that column. None if either isn't found. Pure (takes row tuples)."""
+
+    def _norm(s: Any) -> str:
+        return " ".join(str(s).split()).lower() if s is not None else ""
+
+    fd_col = None
+    for row in rows:
+        for j, cell in enumerate(row):
+            if _norm(cell) == "fully diluted shares":
+                fd_col = j
+                break
+        if fd_col is not None:
+            break
+    if fd_col is None:
+        return None
+    for row in rows:
+        label = next((c for c in row if c is not None and str(c).strip()), None)
+        if label is not None and _norm(label) == "totals":
+            val = row[fd_col] if fd_col < len(row) else None
+            try:
+                return int(round(float(val)))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
 def _carta_extract(xlsx_path: str) -> dict[str, Any]:
     """Extract structured data from a Carta XLSX into our canonical format.
 
@@ -426,6 +457,7 @@ def _carta_extract(xlsx_path: str) -> dict[str, Any]:
 
     # 1. Read Summary Cap Table for share-class totals
     summary_totals: dict[str, Any] = {}
+    fd_total = None
     if "Summary Cap Table" in sheet_names:
         sheets_consumed.append("Summary Cap Table")
         ws = wb["Summary Cap Table"]
@@ -455,6 +487,12 @@ def _carta_extract(xlsx_path: str) -> dict[str, Any]:
                     summary_totals["as_of_date"] = date_str
         except StopIteration:
             pass
+        # A1: capture Carta's INDEPENDENT printed grand fully-diluted total (the 'Totals' row) so cap_state
+        # can cross-foot the computed FD against it. Independent because Carta computes it, not the rebuilt
+        # rows — the one non-circular reconciliation anchor.
+        fd_total = _extract_carta_fd_total(list(ws.iter_rows(values_only=True)))
+        if fd_total is not None:
+            summary_totals["fully_diluted"] = fd_total
 
     # 2. Extract convertibles from Convertible Ledger (if present)
     instruments_safes = []

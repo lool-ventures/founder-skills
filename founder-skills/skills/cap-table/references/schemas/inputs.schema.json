@@ -163,6 +163,14 @@
           "description": "How the source was read. Set to 'vision_image_pdf' when the pdf-probe detects an image-only PDF (no text layer) read by raw model vision (no OCR) — cap_state then emits W_VISION_EXTRACTION_LOW_CONFIDENCE so the structured artifacts carry the under-extraction caveat. Free string; the trigger keys on the exact 'vision_image_pdf' value."
         }
       }
+    },
+    "stated_totals": {
+      "type": "object",
+      "description": "Independent totals the SOURCE document itself prints (e.g. Carta's 'Totals' row fully-diluted figure), captured to cross-foot against the computed cap state. cap_state compares fully_diluted to as_converted_totals.fully_diluted_shares and emits a suppressible W_FD_RECONCILE_DELTA when they diverge beyond 0.1%. Optional; populate ONLY from a total the source prints independently of the entered holder/class rows (so the check is non-circular).",
+      "properties": {
+        "fully_diluted": {"type": "integer"},
+        "source": {"type": "string"}
+      }
     }
   }
 }

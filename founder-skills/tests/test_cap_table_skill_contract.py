@@ -882,6 +882,16 @@ def test_cap_base_reconstructed_wired() -> None:
     assert "cap_base_provenance" in props and props["cap_base_provenance"]["type"] == "string"
 
 
+def test_fd_reconciliation_wired() -> None:
+    # A1: cap_state emits the reconcile warning, the renderer renders it, the carta extractor captures the
+    # independent total, SKILL routes it, schema declares stated_totals.
+    assert "W_FD_RECONCILE_DELTA" in _CAP_STATE_SRC
+    assert "W_FD_RECONCILE_DELTA" in _WARNING_CALLOUTS_SRC
+    assert "_extract_carta_fd_total" in (SCRIPTS_DIR / "extract_cap_table.py").read_text(encoding="utf-8")
+    assert "stated_totals" in _SKILL_TEXT
+    assert "stated_totals" in _INPUTS_SCHEMA["properties"]
+
+
 def test_vision_image_pdf_guard_wired() -> None:
     # B0/B3: probe exists, cap_state emits the low-confidence warning, the renderer renders it, SKILL routes
     assert (SCRIPTS_DIR / "pdf_probe.py").exists()

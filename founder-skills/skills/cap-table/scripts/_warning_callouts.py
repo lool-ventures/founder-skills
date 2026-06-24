@@ -48,6 +48,16 @@ def render_warning_callouts(cap_state_warnings: list[str]) -> list[str]:
         out.append("> mechanically verified against a structured source. Confirm each holder/class against the")
         out.append("> source before relying on these numbers.")
         out.append("")
+    fd_rec = [w for w in cap_state_warnings if w.startswith("W_FD_RECONCILE_DELTA")]
+    if fd_rec:
+        out.append("> ⚠ **Computed total does not match the source-stated total.** The fully-diluted total")
+        out.append("> computed from the entered holders/classes diverges from the figure the source document")
+        out.append("> itself states — a holder or class may have been dropped or mis-entered. Reconcile before")
+        out.append("> relying on ownership math:")
+        for w in fd_rec:
+            detail = w.split(":", 1)[1].strip() if ":" in w else w
+            out.append(f"> - {detail}")
+        out.append("")
     ad = [w for w in cap_state_warnings if w.startswith("W_ANTI_DILUTION")]
     if ad:
         out.append("> ⚠ **Anti-dilution input recovered — confirm with counsel.** The anti-dilution intent")

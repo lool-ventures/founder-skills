@@ -3803,7 +3803,7 @@ class TestWarningsSharedRenderer:
     (`_warning_callouts.render_warning_callouts`) so compose and concise cannot diverge. AD matches by PREFIX
     (interpolated sentence); the others by exact code."""
 
-    def test_renders_all_six_families(self) -> None:
+    def test_renders_all_seven_families(self) -> None:
         import _warning_callouts  # type: ignore[import-not-found]
 
         warnings = [
@@ -3812,6 +3812,8 @@ class TestWarningsSharedRenderer:
             "W_FOUNDER_LOOKS_LIKE_INVESTOR",
             "W_CAP_BASE_RECONSTRUCTED",
             "W_VISION_EXTRACTION_LOW_CONFIDENCE",
+            "W_FD_RECONCILE_DELTA: computed fully-diluted 10,000,000 vs source-stated 9,000,000 "
+            "(Δ +1,000,000, +100000 ppm) exceeds 1000 ppm — a holder/class may be dropped or mis-entered.",
             "W_ANTI_DILUTION_NONCANONICAL: preferred series 'Series Seed' specified anti-dilution "
             "under the wrong key `anti_dilution`='bbwa' — recovered as 'broad_based_weighted_average'.",
         ]
@@ -3821,6 +3823,7 @@ class TestWarningsSharedRenderer:
         assert "resembles an investment entity" in body
         assert "deterministic spreadsheet mapper" in body  # W_CAP_BASE_RECONSTRUCTED (softened text)
         assert "Image-only PDF read by vision" in body  # W_VISION_EXTRACTION_LOW_CONFIDENCE
+        assert "does not match the source-stated total" in body  # W_FD_RECONCILE_DELTA (prefix match)
         assert "Anti-dilution input recovered" in body
         assert "broad_based_weighted_average" in body  # AD recovery detail (prefix match)
 
@@ -8469,6 +8472,93 @@ class TestAssumedCapBaseWarning:
             assert f(n) is True, n
         for n in ["Founder", "Jane Doe", "Founder Jane", "Foundering"]:
             assert f(n) is False, n
+
+
+class TestCartaFdTotalCapture:
+    """A1 capture: parse Carta's INDEPENDENT printed grand fully-diluted total (the 'Totals' row, Fully
+    Diluted Shares column) from the Summary Cap Table — the figure cap_state cross-foots against. Built
+    against the real Carta Summary layout; tested with synthetic numbers (the column labels are Carta's
+    generic headers, not company data)."""
+
+    HEADER = (
+        None,
+        "Shares Authorized",
+        "Shares Issued\nand Outstanding",
+        "Fully Diluted Shares",
+        "Fully Diluted\nOwnership",
+    )
+
+    def test_captures_totals_row_fd(self) -> None:
+        import extract_cap_table  # type: ignore[import-not-found]
+
+        rows = [
+            (None,),
+            (None, "Acmecorp Summary Cap Table"),
+            (None, "As of 1/1/2026"),
+            (),
+            self.HEADER,
+            ("Common (CS) Stock", 9_000_000, 8_000_000, 9_000_000, 0.9),
+            ("Total Common Stock issued", 0, 0, 9_000_000, 0.9),
+            ("Totals", None, None, 10_000_000, 1.0),
+        ]
+        assert extract_cap_table._extract_carta_fd_total(rows) == 10_000_000
+
+    def test_picks_exact_fd_column_not_the_with_variant(self) -> None:
+        import extract_cap_table  # type: ignore[import-not-found]
+
+        # Carta also prints a "Fully Diluted Shares with ..." column — must pick the EXACT one, not that.
+        header = (
+            None,
+            "Shares Authorized",
+            "Fully Diluted Shares",
+            "Fully Diluted Ownership",
+            "Fully Diluted Shares with X",
+        )
+        rows = [self.HEADER and header, ("Totals", None, 7_000_000, 1.0, 9_999_999)]
+        assert extract_cap_table._extract_carta_fd_total(rows) == 7_000_000
+
+    def test_no_totals_row_returns_none(self) -> None:
+        import extract_cap_table  # type: ignore[import-not-found]
+
+        rows = [self.HEADER, ("Common (CS) Stock", 9_000_000, 8_000_000, 9_000_000, 0.9)]
+        assert extract_cap_table._extract_carta_fd_total(rows) is None
+
+
+class TestFdReconciliation:
+    """A1: when the source document prints an INDEPENDENT grand fully-diluted total (e.g. Carta's 'Totals'
+    row), captured into inputs.stated_totals, cap_state cross-checks the computed FD against it and warns
+    (suppressibly) on a divergence beyond a relative-ppm threshold — catching a dropped/mis-entered
+    holder/class that a manual rebuild would otherwise hide."""
+
+    NO_INST = {"safes": [], "convertible_notes": []}
+
+    def _fd(self) -> int:
+        cs = cap_state_mod.build_cap_state(_inputs_with_founders(["Jane Doe", "John Smith"]), self.NO_INST)
+        return cs["as_converted_totals"]["fully_diluted_shares"]
+
+    def _cs(self, stated: int) -> dict[str, Any]:
+        inp = _inputs_with_founders(["Jane Doe", "John Smith"])
+        inp["stated_totals"] = {"fully_diluted": stated, "source": "carta_summary"}
+        return cap_state_mod.build_cap_state(inp, self.NO_INST)
+
+    def test_within_threshold_no_warn(self) -> None:
+        cs = self._cs(self._fd())  # exact match
+        assert not any(w.startswith("W_FD_RECONCILE_DELTA") for w in cs.get("warnings", []))
+        assert cs["as_converted_totals"]["reconciliation"]["residual_abs"] == 0
+
+    def test_small_rounding_delta_no_warn(self) -> None:
+        # a Home365-style sub-0.1% rounding delta must NOT fire
+        cs = self._cs(self._fd() + 50)  # ~4.5 ppm on an 11M base
+        assert not any(w.startswith("W_FD_RECONCILE_DELTA") for w in cs.get("warnings", []))
+
+    def test_large_delta_warns(self) -> None:
+        cs = self._cs(int(self._fd() * 0.9))  # 10% off → fires
+        assert any(w.startswith("W_FD_RECONCILE_DELTA") for w in cs.get("warnings", []))
+
+    def test_no_stated_totals_no_reconciliation(self) -> None:
+        cs = cap_state_mod.build_cap_state(_inputs_with_founders(["Jane Doe", "John Smith"]), self.NO_INST)
+        assert "reconciliation" not in cs["as_converted_totals"]
+        assert not any(w.startswith("W_FD_RECONCILE_DELTA") for w in cs.get("warnings", []))
 
 
 class TestVisionExtractionWarning:
