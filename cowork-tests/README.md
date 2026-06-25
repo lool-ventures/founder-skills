@@ -2,10 +2,17 @@
 
 Token-free **replay** PR gate (`.github/workflows/cowork-replay.yml`) over committed cassettes that
 exercise the founder-skills skills under Claude Cowork's runtime via
-[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (**pinned to `0.10.0`** — see the note).
+[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (**pinned to `0.15.0`** — see the note).
 Recording is **live** (needs the staged agent + Docker); replay/verify are **token/agent-free** (stock CI).
 
-> **0.10.0 note (current pin).** Cassette format is still **v6** — the upgrade forces no re-record.
+> **0.15.0 note (current pin).** Cassette format is still **v6**, baseline still `1.15200.0`, agent ELF still
+> `2.1.181` — the 0.12→0.15 bump is purely additive (no breaking change), forces no re-record (verified: the
+> token-free gate is green on 0.15.0). New since 0.12.0: `inspect <run>` + partial-run salvage + capability
+> pre-flight (0.13; `runs gc`→`prune`); `replay --output-format json` `staleness[]` + a `--fail-on-skill-drift`
+> gate (0.14; NOT adopted — it reds all 13 on any shared-root edit while the skill is under active change, so
+> the staleness lane stays WARN-only); refined staleness diagnosis reporting both skill + shared-root drift (0.15).
+>
+> **Historical (0.10.0).** Cassette format is still **v6** — the upgrade forces no re-record.
 > New in 0.10.0: `record` can answer gates **live** (`--decider-llm` / `--decider-dir` / `--on-unanswered`)
 > for one-pass cassette authoring (see "Record" below); `verify-run` now also checks `answers:` coverage —
 > a drifted `when_question`/`choose` fails in ~1s instead of on a paid record (exits `1` on answer mismatch,

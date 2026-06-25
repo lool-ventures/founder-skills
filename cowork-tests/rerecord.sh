@@ -13,11 +13,11 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# Floor is >=0.12.0, not just any recent minor: 0.12.0 ships baseline Desktop 1.15200.0. A re-record on an
-# older harness would capture the PRIOR baseline (1.14271.0) and be [stale] the instant it lands — the
-# refresh would no-op its own purpose. Pin the floor to the baseline-carrying release.
+# Floor is >=0.15.0 (the current CI pin). 0.13/0.14/0.15 are additive (no breaking change, cassette format
+# still v6, baseline still 1.15200.0), so re-recording on any of them is fine — but pin the floor to the
+# CI version so a refresh + CI replay agree, and so a re-record never lands on a pre-baseline harness.
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
-{ [ "$major" -gt 0 ] || [ "$minor" -ge 12 ]; } || { echo "FATAL: need >=0.12.0 (have $ver)"; exit 1; }
+{ [ "$major" -gt 0 ] || [ "$minor" -ge 15 ]; } || { echo "FATAL: need >=0.15.0 (have $ver)"; exit 1; }
 : "${COWORK_AGENT_BINARY:?FATAL: set COWORK_AGENT_BINARY to the staged claude ELF (claude-code-vm/<ver>/claude)}"
 [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 docker info >/dev/null 2>&1 || { echo "FATAL: Docker not running (live lane needs it)"; exit 1; }
