@@ -46,11 +46,107 @@ def _is_blank(v: Any) -> bool:
 
 
 def _f(v: Any) -> float | None:
-    return None if _is_blank(v) else float(v)
+    # Crash-safe (L1-A): a non-numeric value in a numeric role returns None (→ the caller's
+    # required-field blocker fires) instead of an uncaught ValueError. Blank also → None.
+    if _is_blank(v):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _i(v: Any) -> int | None:
-    return None if _is_blank(v) else int(round(float(v)))
+    f = _f(v)
+    return None if f is None else int(round(f))
+
+
+# L1-A — orientation/type-coherence guard. A transposed sheet (holders/series as COLUMNS) mis-mapped to a
+# normal vertical block produces records where a numeric-role column is text, or the name column is numeric
+# / holds field labels. These sets drive the per-role coherence check in _orientation_blocker.
+_NUMERIC_ROLES = {
+    "shares",
+    "common_shares",
+    "amount",
+    "principal",
+    "issue_price",
+    "original_conversion_price",
+    "current_conversion_price",
+    "authorized",
+    "issued",
+    "unallocated",
+    "annual_interest_rate",
+    "interest_rate",
+    "discount",
+    "discount_multiplier",
+    "valuation_cap",
+}
+_NAME_ROLES = {"holder_name", "series_name", "investor_name"}
+# Whole-cell, lowercased: unambiguous column-header terms that are never a real holder/series name.
+_FIELD_LABEL_STOPLIST = {
+    "shares",
+    "total",
+    "subtotal",
+    "price",
+    "issue price",
+    "ownership",
+    "fully diluted",
+    "authorized",
+    "issued",
+    "unallocated",
+    "%",
+}
+
+
+def _looks_numeric(v: Any) -> bool:
+    if _is_blank(v):
+        return False
+    try:
+        float(v)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _orientation_blocker(rows: list[dict[str, Any]]) -> str | None:
+    """Detect a transposed / mis-mapped block by per-role TYPE COHERENCE.
+
+    A numeric role whose column is predominantly non-numeric, or a name role whose column is
+    predominantly numeric or holds a whole-cell field-label, signals a transposed/mis-mapped sheet
+    (holders/series as COLUMNS). Returns a blocker reason, or None if correctly oriented. WHOLE-CELL
+    match only (never substring), so legit entity names ("Class A Holdings", "500 Startups") pass.
+    Does NOT catch the section-label all-numeric transpose (name col = arbitrary text, data numeric) —
+    that residual is owned by L1-B (correct transpose mapping), per the reliability plan."""
+    cols: dict[str, list[Any]] = {}
+    for raw in rows:
+        for role, val in raw.items():
+            if not _is_blank(val):
+                cols.setdefault(role, []).append(val)
+    for role, vals in cols.items():
+        if role in _NUMERIC_ROLES and vals:
+            non_numeric = sum(1 for v in vals if not _looks_numeric(v))
+            if non_numeric * 2 > len(vals):
+                return (
+                    f"column mapped to numeric role {role!r} is predominantly non-numeric "
+                    f"({non_numeric}/{len(vals)} cells) — likely a transposed/mis-mapped sheet "
+                    "(holders/series laid out as COLUMNS). Re-emit cell_range + column_role_map with the "
+                    "correct orientation, or fall back to Lane 4."
+                )
+    for role, vals in cols.items():
+        if role in _NAME_ROLES and vals:
+            numeric = sum(1 for v in vals if _looks_numeric(v))
+            if numeric * 2 > len(vals):
+                return (
+                    f"column mapped to name role {role!r} is predominantly numeric — likely a "
+                    "transposed/mis-mapped sheet. Re-emit with the correct orientation."
+                )
+            for v in vals:
+                if isinstance(v, str) and v.strip().lower() in _FIELD_LABEL_STOPLIST:
+                    return (
+                        f"name role {role!r} contains the field-label {v!r} as a holder/series name — "
+                        "likely a transposed sheet (field labels down the name column). Re-emit correctly."
+                    )
+    return None
 
 
 def _block_rows(block: dict[str, Any], grid: dict[str, Any]) -> list[dict[str, Any]]:
@@ -180,6 +276,13 @@ def map_freeform(
                 f"block {i} ({bt}): cell_range {cr_bare!r} yielded 0 data rows — verify it points at the "
                 "data rows (not headers/blank rows); this block contributed nothing."
             )
+
+        # L1-A: fail loud on a transposed / type-incoherent block instead of crashing or silently
+        # emitting garbage records. (Section-label all-numeric transpose remains a residual — L1-B.)
+        _orient = _orientation_blocker(rows)
+        if _orient:
+            block_blocker(i, bt, "orientation", _orient)
+            continue
 
         if bt == "founders_block":
             for raw in rows:

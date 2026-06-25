@@ -109,6 +109,8 @@ Insert this block after `founders`:
 
 Omit the whole `common_batches` array if not applicable. `purpose` enum: `founder_issuance | restricted_stock_purchase | exercise | conversion | other`.
 
+**Field-name discipline (avoids the recurring schema-thrash):** the holder reference is **`holder_id`** — there is **no `batch_id`** field on `common_batches` (a common mis-key; using `batch_id` is silently ignored / fails validation depending on the field). The only canonical item fields are: `holder_id`, `shares`, `issuance_date`, `consideration`, `purpose`, `common_class`, `voting_rights_multiple`. Warrants are **NOT** a top-level `inputs.json` array — they live in `instruments.json` (`warrants[]`); do not add a `warrants` key to `inputs.json`. `option_pool.plan_type` must be one of the §102/jurisdiction enums below — `iso | nso | section_102_cg | section_102_oi | section_3i | mixed` (not `102_cg` / `israeli_102` / `none`).
+
 ## Option-pool plan_type by jurisdiction
 
 | Jurisdiction | Typical plan_type |

@@ -74,3 +74,48 @@ def test_ocr_pdf_to_grid_end_to_end(tmp_path) -> None:
     flat = " ".join(c for sheet in grid.values() for row in sheet for c in row)
     assert "Alice" in flat and "Bob" in flat
     assert "5000000" in flat.replace("'", "").replace(" ", "") or "5000000" in flat
+
+
+@pytest.mark.skipif(
+    not (shutil.which("tesseract") and shutil.which("pdftoppm")),
+    reason="needs tesseract + pdftoppm (present in the full-parity agent image)",
+)
+def test_cov_a_synthetic_scanned_cap_table(tmp_path) -> None:
+    """COV-A — a synthetic MULTI-HOLDER cap table rasterized to a TRUE image-only PDF, OCR'd end-to-end.
+
+    Closes the coverage gap: B2's table path had only met a tiny 2-col image + a prose note, never a
+    realistic multi-holder cap table. Synthetic names only (no real data). Asserts the image-only
+    PRECONDITION first (a text-layer PDF would route to pdftotext and silently defeat the fixture)."""
+    import sys
+
+    sys.path.insert(0, SCRIPTS)
+    import pdf_probe  # type: ignore[import-not-found]
+    from PIL import Image, ImageDraw
+
+    rows = [
+        ("Holder", "Common", "Preferred"),
+        ("Acmecorp", "4000000", "0"),
+        ("Cadence VC", "0", "2000000"),
+        ("Foobar Ltd", "1500000", "500000"),
+    ]
+    img = Image.new("RGB", (640, 260), "white")
+    d = ImageDraw.Draw(img)
+    for r, (a, b, c) in enumerate(rows):
+        y = 24 + r * 50
+        d.text((24, y), a, fill="black")
+        d.text((320, y), b, fill="black")
+        d.text((500, y), c, fill="black")
+    pdf = tmp_path / "scanned_captable.pdf"
+    img.save(str(pdf), "PDF")
+
+    # PRECONDITION: it must be image-only, else the test isn't exercising OCR.
+    probe = pdf_probe.probe_pdf(str(pdf))
+    assert probe["image_only"] is True, f"fixture not image-only (would defeat OCR): {probe}"
+
+    grid = ept.ocr_pdf_to_grid(str(pdf))
+    flat = " ".join(c for sheet in grid.values() for row in sheet for c in row)
+    # Holders recovered (OCR is lossy — assert the distinctive tokens survive)
+    assert "Acmecorp" in flat
+    assert "Cadence" in flat and "Foobar" in flat
+    # at least one share figure recovered
+    assert any(n in flat.replace(",", "").replace(" ", "") for n in ("4000000", "2000000", "1500000"))

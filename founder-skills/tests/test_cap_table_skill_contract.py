@@ -980,7 +980,7 @@ def test_skill_canonical_gate_phrasing_present() -> None:
     bullets above it or the S2 gate's own 'authorized / issued / unallocated')."""
     start = _SKILL_TEXT.find("Gate Catalog")
     assert start != -1, "SKILL.md must carry a 'Gate Catalog' canonical-phrasing block"
-    block = _SKILL_TEXT[start : start + 3000]
+    block = _SKILL_TEXT[start : start + 4800]
     # scenario labels — within the catalog
     for label in ("Cap-implied SAFE snapshot", "Series A priced round", "Convertible note conversion at financing"):
         assert label in block, f"canonical scenario label missing from the Gate Catalog: {label!r}"
@@ -994,6 +994,13 @@ def test_skill_canonical_gate_phrasing_present() -> None:
     # The note-denominator label MUST NOT carry a '(Recommended)' suffix — that suffix is what made the
     # note cassette's choose-anchor fragile (the leading 'Fully-diluted' is the stable anchor).
     assert "Fully-diluted pre-financing" in block, "canonical denominator label missing"
+    # GATE-A: the expanded company-context gates (the ones that drifted in live runs) must be canonical.
+    assert "What stage is [Company] at?" in block, "canonical Stage gate missing"
+    assert "Delaware with Israeli subsidiary" in block and "Mid-flip" in block, "canonical Jurisdiction labels missing"
+    assert "IIA (Israel Innovation Authority" in block, "canonical IIA-grants gate missing"
+    assert "Don't have the terms handy" in block, "canonical SAFE-terms gate missing"
+    # GATE-B (folded in): the no-embellishment rule must be present.
+    assert "NEVER append run-specific text to a catalog label" in block, "no-embellishment rule missing"
     denom_idx = block.find("Fully-diluted pre-financing")
     assert "(Recommended)" not in block[denom_idx : denom_idx + 120], (
         "the denominator label must not append '(Recommended)' — it breaks the cassette anchor"

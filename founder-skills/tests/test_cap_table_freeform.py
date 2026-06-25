@@ -942,3 +942,49 @@ def test_role_map_vocab_present_in_agent_prompt() -> None:
         text = f.read()
     missing = [t for t in sorted(terms) if not re.search(r"\b" + re.escape(t) + r"\b", text)]
     assert not missing, f"closed-contract terms absent from agents/cap-table.md: {missing}"
+
+
+# --- L1-A: transposed / mis-mapped-orientation blocks must FAIL LOUD (not crash, not silent) ----------
+# Scope (honest, per the reliability plan): L1-A closes the crash (text in a numeric role) and the
+# type-incoherent / field-label-in-name mis-map. The section-label transpose (name col = arbitrary text
+# like "RowA"/"Founders", data all-numeric) is a documented RESIDUAL owned by L1-B (correct mapping),
+# NOT claimed here.
+
+
+class TestTransposeFailLoud:
+    def _founders(self, rows):
+        blocks = [
+            {
+                "block_type": "founders_block",
+                "sheet": "Cap",
+                "cell_range": f"A1:B{len(rows)}",
+                "column_role_map": {"A": "holder_name", "B": "shares"},
+            }
+        ]
+        return fm.map_freeform(blocks, _grid({"Cap": rows}), existing_inputs=_meta_inputs(), run_id=RUN)
+
+    def test_text_in_numeric_role_blocks_not_crashes(self) -> None:
+        # Was an uncaught ValueError at _i(float("Bob")). Must become a blocker.
+        r = self._founders([["Alice", "Bob"], ["Carol", "Dave"]])  # shares col entirely text
+        assert not (r.get("inputs", {}).get("founders"))
+        assert _blockers_for(r, "orientation"), "transposed (text-in-numeric) block must fail loud"
+
+    def test_name_col_all_numeric_blocks(self) -> None:
+        r = self._founders([[100, 5000000], [200, 4000000]])  # name col numeric
+        assert _blockers_for(r, "orientation")
+
+    def test_field_label_in_name_blocks(self) -> None:
+        # holders-as-columns transpose: name col holds field labels
+        r = self._founders([["Shares", 5000000], ["Total", 4000000]])
+        assert _blockers_for(r, "orientation")
+
+    def test_legit_two_founder_block_still_maps(self) -> None:
+        r = self._founders([["Alice", 5000000], ["Bob", 4000000]])
+        assert len(r["inputs"]["founders"]) == 2
+        assert not r["blockers"]
+
+    def test_entity_names_not_false_blocked(self) -> None:
+        # whole-cell match, not substring: entity/number-bearing names must pass
+        r = self._founders([["Class A Holdings LLC", 5000000], ["500 Startups", 4000000], ["7 Stars Ventures", 1000]])
+        assert len(r["inputs"]["founders"]) == 3
+        assert not r["blockers"]
