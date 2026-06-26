@@ -3803,7 +3803,7 @@ class TestWarningsSharedRenderer:
     (`_warning_callouts.render_warning_callouts`) so compose and concise cannot diverge. AD matches by PREFIX
     (interpolated sentence); the others by exact code."""
 
-    def test_renders_all_seven_families(self) -> None:
+    def test_renders_all_families(self) -> None:
         import _warning_callouts  # type: ignore[import-not-found]
 
         warnings = [
@@ -3812,6 +3812,7 @@ class TestWarningsSharedRenderer:
             "W_FOUNDER_LOOKS_LIKE_INVESTOR",
             "W_CAP_BASE_RECONSTRUCTED",
             "W_VISION_EXTRACTION_LOW_CONFIDENCE",
+            "W_BASE_VACUOUS",
             "W_FD_RECONCILE_DELTA: computed fully-diluted 10,000,000 vs source-stated 9,000,000 "
             "(Δ +1,000,000, +100000 ppm) exceeds 1000 ppm — a holder/class may be dropped or mis-entered.",
             "W_ANTI_DILUTION_NONCANONICAL: preferred series 'Series Seed' specified anti-dilution "
@@ -3823,6 +3824,7 @@ class TestWarningsSharedRenderer:
         assert "resembles an investment entity" in body
         assert "deterministic spreadsheet mapper" in body  # W_CAP_BASE_RECONSTRUCTED (softened text)
         assert "Image-only PDF read by vision" in body  # W_VISION_EXTRACTION_LOW_CONFIDENCE
+        assert "No real cap-table base" in body  # W_BASE_VACUOUS
         assert "does not match the source-stated total" in body  # W_FD_RECONCILE_DELTA (prefix match)
         assert "Anti-dilution input recovered" in body
         assert "broad_based_weighted_average" in body  # AD recovery detail (prefix match)
@@ -8522,6 +8524,41 @@ class TestCartaFdTotalCapture:
 
         rows = [self.HEADER, ("Common (CS) Stock", 9_000_000, 8_000_000, 9_000_000, 0.9)]
         assert extract_cap_table._extract_carta_fd_total(rows) is None
+
+
+def _vacuous_inputs() -> dict[str, Any]:
+    """A base with NO equity holders — just an unallocated option pool (the humans/Flip R-5 shape)."""
+    return {
+        "company_name": "TestCo",
+        "analysis_date": "2026-06-21",
+        "jurisdiction": {"structure": "delaware"},
+        "founders": [],
+        "option_pool": {"plan_type": "iso", "authorized": 1_000_000, "issued": 0, "unallocated": 1_000_000},
+        "metadata": {"run_id": "20260621T000000Z", "schema_version": "v0.5.0-inputs"},
+    }
+
+
+class TestBaseVacuous:
+    """R-5: a deliverable built on a base with 0 founders / 0 common / 0 preferred — essentially just an
+    unallocated option pool — is confidently misleading (donut/FD/%s are meaningless). cap_state flags it
+    with W_BASE_VACUOUS, INDEPENDENT of confirmed/assumed."""
+
+    NO_INST = {"safes": [], "convertible_notes": []}
+
+    def test_vacuous_base_warns(self) -> None:
+        cs = cap_state_mod.build_cap_state(_vacuous_inputs(), self.NO_INST)
+        assert "W_BASE_VACUOUS" in cs.get("warnings", [])
+
+    def test_vacuous_even_when_confirmed(self) -> None:
+        # vacuity is independent of cap_base_source — a CONFIRMED empty base is still vacuous
+        inp = _vacuous_inputs()
+        inp["metadata"]["cap_base_source"] = "confirmed"
+        cs = cap_state_mod.build_cap_state(inp, self.NO_INST)
+        assert "W_BASE_VACUOUS" in cs.get("warnings", [])
+
+    def test_normal_base_no_vacuous(self) -> None:
+        cs = cap_state_mod.build_cap_state(_inputs_with_founders(["Jane Doe"]), self.NO_INST)
+        assert "W_BASE_VACUOUS" not in cs.get("warnings", [])
 
 
 class TestFdReconciliation:

@@ -48,6 +48,12 @@ def render_warning_callouts(cap_state_warnings: list[str]) -> list[str]:
         out.append("> mechanically verified against a structured source. Confirm each holder/class against the")
         out.append("> source before relying on these numbers.")
         out.append("")
+    if any(w == "W_BASE_VACUOUS" for w in cap_state_warnings):
+        out.append("> ⚠ **No real cap-table base — this deliverable is not meaningful yet.** The cap base has")
+        out.append("> NO founders, common, or preferred holders — the fully-diluted total is essentially just an")
+        out.append("> unallocated option pool. The ownership %s, the fully-diluted figure, and the donut do NOT")
+        out.append("> describe a real company until the actual holder base (founders + share counts) is provided.")
+        out.append("")
     fd_rec = [w for w in cap_state_warnings if w.startswith("W_FD_RECONCILE_DELTA")]
     if fd_rec:
         out.append("> ⚠ **Computed total does not match the source-stated total.** The fully-diluted total")

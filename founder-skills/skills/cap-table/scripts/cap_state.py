@@ -716,6 +716,17 @@ def build_cap_state(
                 "— a holder/class may be dropped or mis-entered."
             )
 
+    # R-5: a base with NO equity holders (0 common AND 0 preferred) but a positive fully-diluted total —
+    # i.e. the FD is entirely an option pool — is a confidently-misleading deliverable (the donut, FD, and
+    # ownership %s describe an empty company). Flag it INDEPENDENT of cap_base_source: a CONFIRMED empty
+    # base is still vacuous. (The real holder base wasn't captured — e.g. a Carta export with 0 issued.)
+    if (
+        _act.get("common_shares", 0) == 0
+        and _act.get("preferred_shares_as_converted", 0) == 0
+        and _act.get("fully_diluted_shares", 0) > 0
+    ):
+        warnings_list.append("W_BASE_VACUOUS")
+
     cap_state: dict[str, Any] = {
         "as_of_date": inputs.get("analysis_date", ""),
         "currency": currency,
