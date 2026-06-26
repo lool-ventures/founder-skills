@@ -13,11 +13,15 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# Floor is >=0.15.0 (the current CI pin). 0.13/0.14/0.15 are additive (no breaking change, cassette format
-# still v6, baseline still 1.15200.0), so re-recording on any of them is fine — but pin the floor to the
-# CI version so a refresh + CI replay agree, and so a re-record never lands on a pre-baseline harness.
+# Floor is >=0.16.0 (the current CI pin). 0.13/0.14/0.15/0.16 are additive (no breaking change, cassette
+# format still v6, baseline still 1.15200.0), so re-recording on any of them is fine — but pin the floor to
+# the CI version so a refresh + CI replay agree, and so a re-record never lands on a pre-baseline harness.
+# CAVEAT (0.16): 0.16 added a scripted-`choose:` PREFIX-anchor tier (lowest priority; prefix-only, fails loud
+# on ambiguity). It fires only at RECORD time (replay re-emits recorded answers), so the FIRST re-record on
+# 0.16 must `git diff cassettes/` for CHANGED recorded gate answers — a prefix anchor could now bind a
+# different option than the 0.15-era cassette — not just confirm "synthetic-only."
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
-{ [ "$major" -gt 0 ] || [ "$minor" -ge 15 ]; } || { echo "FATAL: need >=0.15.0 (have $ver)"; exit 1; }
+{ [ "$major" -gt 0 ] || [ "$minor" -ge 16 ]; } || { echo "FATAL: need >=0.16.0 (have $ver)"; exit 1; }
 : "${COWORK_AGENT_BINARY:?FATAL: set COWORK_AGENT_BINARY to the staged claude ELF (claude-code-vm/<ver>/claude)}"
 [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 docker info >/dev/null 2>&1 || { echo "FATAL: Docker not running (live lane needs it)"; exit 1; }

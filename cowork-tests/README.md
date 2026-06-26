@@ -2,10 +2,20 @@
 
 Token-free **replay** PR gate (`.github/workflows/cowork-replay.yml`) over committed cassettes that
 exercise the founder-skills skills under Claude Cowork's runtime via
-[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (**pinned to `0.15.0`** — see the note).
+[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (**pinned to `0.16.0`** — see the note).
 Recording is **live** (needs the staged agent + Docker); replay/verify are **token/agent-free** (stock CI).
 
-> **0.15.0 note (current pin).** Cassette format is still **v6**, baseline still `1.15200.0`, agent ELF still
+> **0.16.0 note (current pin).** Cassette format is still **v6**, baseline still `1.15200.0`, agent ELF still
+> `2.1.181` — the 0.15→0.16 bump is purely additive, forces no re-record (verified: the token-free gate — lint +
+> privacy + email-canary + replay — is green on 0.16.0 against the committed cassettes; replay re-emits recorded
+> answers and does not run the decider, so it proves format compat). 0.16.0 is the **H10 decider** work:
+> `--decider-llm` now replies by option **number** (kills the option-echo whiff) and answers **multiSelect** gates;
+> new **`--decider-model <id>`** overrides the answering model (live/authoring only — never reaches a committed
+> cassette); scripted `choose:`/`--answer` gains a **prefix anchor** (boundary-anchored `startsWith`, uniqueness-
+> guarded, fails loud on ambiguity — **prefix-only, not substring/word-order**, so keep anchors to a stable label
+> prefix). New `docs/debugging.md` on-ramp. `--fail-on-skill-drift` still **NOT adopted** (see the 0.14 note below).
+>
+> **0.15.0 note (prior pin).** Cassette format is still **v6**, baseline still `1.15200.0`, agent ELF still
 > `2.1.181` — the 0.12→0.15 bump is purely additive (no breaking change), forces no re-record (verified: the
 > token-free gate is green on 0.15.0). New since 0.12.0: `inspect <run>` + partial-run salvage + capability
 > pre-flight (0.13; `runs gc`→`prune`); `replay --output-format json` `staleness[]` + a `--fail-on-skill-drift`
