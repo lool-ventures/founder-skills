@@ -111,6 +111,8 @@ Omit the whole `common_batches` array if not applicable. `purpose` enum: `founde
 
 **Field-name discipline (avoids the recurring schema-thrash):** the holder reference is **`holder_id`** — there is **no `batch_id`** field on `common_batches` (a common mis-key; using `batch_id` is silently ignored / fails validation depending on the field). The only canonical item fields are: `holder_id`, `shares`, `issuance_date`, `consideration`, `purpose`, `common_class`, `voting_rights_multiple`. Warrants are **NOT** a top-level `inputs.json` array — they live in `instruments.json` (`warrants[]`); do not add a `warrants` key to `inputs.json`. `option_pool.plan_type` must be one of the §102/jurisdiction enums below — `iso | nso | section_102_cg | section_102_oi | section_3i | mixed` (not `102_cg` / `israeli_102` / `none`).
 
+**`option_grants[]` — usually leave it EMPTY.** Individual option grants live in `instruments.json` `option_grants[]`, NOT `inputs.json`. You almost never need them: the **`option_pool` aggregate** (authorized / issued / unallocated) in `inputs.json` already captures the pool for cap-table math. Only populate `option_grants[]` for genuine per-grant detail (e.g. a specific §102 grant's vesting/tax analysis). In **Lane 3 (freeform)** individual grants are **not supported** — use an `option_pool_block`. If you DO build a grant, the required fields are exactly `id, holder_id, grant_date, shares_granted, strike_price, plan_type` (NOT `quantity` / `exercise_price` / `name` — those mis-keys fail validation). When in doubt, write `"option_grants": []` and rely on the pool aggregate.
+
 ## Option-pool plan_type by jurisdiction
 
 | Jurisdiction | Typical plan_type |
