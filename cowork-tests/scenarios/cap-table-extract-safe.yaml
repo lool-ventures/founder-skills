@@ -1,0 +1,105 @@
+name: cap-table-extract-safe
+session: ../sessions/safe-cap-discount.yaml
+fidelity: cowork
+on_unanswered: first   # variance-gate backstop = option 1 (a LOCAL pick — no host token needed, unlike the llm-decider); known gates label-pinned below (0.10.0 lint flags positional `choose: first` in answers)
+skills: [cap-table]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
+
+# P1-b (Lane-1 extraction happy path) + P0-c (canonical-enum). Synthetic cap-plus-discount SAFE PDF
+# (ACMECORP / Foobar). Founder framing MATCHES the doc's company and supplies the cap structure inline,
+# so only the SAFE instrument is extracted from the doc and gating is minimal.
+prompt: |
+  I'm a founder at Acmecorp Inc., a US Delaware seed-stage B2B SaaS company. My cap table: two
+  founders, Dana Levin and Omri Shapira, splitting 10,000,000 common shares evenly (5,000,000 each),
+  plus a 1,000,000-share option pool (none issued yet). I've uploaded a SAFE I'm about to sign. Please
+  review the uploaded SAFE — extract its terms, show how it converts, and give me the full cap-table review.
+
+answers:
+  # These two gates are driven by the RULE PACK (`safe.mfn_package_only`,
+  # `safe.pro_rata_rights_side_letter` in `references/cap-table-rules.json`), not by a SKILL.md site or
+  # a Gate Catalog row — verified: the labels below have never appeared in cap-table/SKILL.md in its
+  # whole history (`git log -S`). So they are one run's IMPROVISED labels, harvested from the recording,
+  # and they are the least stable anchors in this file: nothing pins them, so nothing stops them
+  # drifting. Anchors are leading substrings, so the SHORT uniqueness-guarded prefix is the
+  # drift-resistant form — it survives any rewording after the first two words.
+  # Do NOT delete these. This lane DOES set `on_unanswered: first`, so deletion would not hard-fail —
+  # it would do something worse: silently answer slot 1 of a gate whose options are improvised and
+  # therefore unknowable in advance, recording whichever MFN/pro-rata branch that run happened to
+  # order first. A wrong branch recorded silently beats a loud failure only in the sense that you
+  # never find out. (A catalog row per rule-pack prompt is the durable fix; logged as a post-0.6.0
+  # successor item, not this lane's job.)
+  - when_question: "MFN"
+    choose: "No MFN"
+  - when_question: "pro-rata"
+    choose: "No pro-rata"
+  - when_question: "scenarios? should I model"   # optional s: a single-scenario run phrases this in the singular (A-05: a count-dependent anchor cost a full paid recording)
+    choose: "Cap-implied SAFE snapshot"
+
+  # Jurisdiction + IIA pinned by LABEL, not position. `b752162` reordered the Gate Catalog's
+  # jurisdiction row to `israeli | delaware | ...`, so `on_unanswered: first` now resolves to
+  # "Israeli company" — the opposite of this prompt's US-Delaware company. Anchors are leading
+  # substrings and are uniqueness-guarded: the full "Delaware (already flipped)" is required, since a
+  # bare "Delaware" also prefixes "Delaware with Israeli subsidiary" and would be ambiguous.
+  - when_question: "jurisdiction structure"
+    choose: "Delaware (already flipped)"
+  # Benign at slot 1 today ("No IIA grants" leads the row) — pinned anyway so the same reorder class
+  # cannot un-benign it silently.
+  - when_question: "IIA"
+    choose: "No IIA grants"
+
+assert:
+  - result: success
+  # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
+  # the deliverable but stranded steps, which result:success alone misses.
+  - all_tasks_completed: true
+  # P1-b — the SAFE terms were extracted from the doc (cap $20M, 20% discount → multiplier 0.8).
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-acmecorp-inc/instruments.json
+      path: safes.0.post_money_valuation_cap
+      equals: 20000000
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-acmecorp-inc/instruments.json
+      path: safes.0.discount_multiplier
+      equals: 0.8
+  # P0-c — the form maps to a CANONICAL enum (not a free-text invention). `in:` is stable across re-records.
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-acmecorp-inc/instruments.json
+      path: safes.0.form
+      in: ["cap_plus_discount", "post_money_cap_and_discount"]
+  # Uploaded input is read-only — the extractor must READ the uploaded SAFE, never mutate it. Guard the
+  # upload's content hash (0.29.0 captures uploads as a read-only input root, so input_unmodified now
+  # reaches the upload lanes). Evaluable only after a re-record captures the upload root.
+  - input_unmodified: 'uploads/**'
+  # host-path posture: hostloop exposes real host paths by design; the leak class is covered
+  # by the container-tier host-path-canary scenario + the privacy scan's path class on cassettes.
+  # --- fleet contract asserts (adopted at the 0.24.0 pin; budgets tightened from discovery actuals) ---
+  # The pipeline entered through the Skill tool (prefix-tolerant; id shape confirmed at discovery).
+  - skill_triggered: '(founder-skills:)?cap-table$'
+  # Every computer:// deliverable link shared with the founder must resolve (zero links pass).
+  - computer_links_resolve: true
+  # No delete under outputs/ (live-lane key; replay skips it loudly).
+  - no_delete_in_outputs: true
+  # Dispatch contract: sub-agents declare no Bash (agents/*.md) — regression tripwire.
+  - subagent_tool_absent: 'Bash'
+  # Scripted answers reached the model non-error whenever a gate fired (0.25.0: vacuous-passes
+  # when zero gates fire, so it's safe despite model-dependent gating — see README pin note).
+  - gate_answers_delivered: true
+  # Usability budget: gates asked before value (observed + headroom, from discovery).
+  - questions_count_max: 10
+  # Author-chosen dispatch budget (production has NO Task-fan-out cap; this is an
+  # efficiency tripwire, not a platform mirror). tightened from discovery actuals (observed x1.5).
+  - dispatch_count_max: 6
+  # Efficiency budgets — generous ceilings; tightened to observed x1.5 post-record.
+  - max_turns: 105
+  - tool_calls_max: 100
+  # Stray-file guard (new-files-only; overwrite-in-place is covered by producer stamps).
+  # Allowlist = artifact namespace (incl. handoff/**) + founder-context sidecar + promoted
+  # deliverables. Pre-0.24 cassettes exclude loudly (no preRunPaths). tightened from discovery actuals (observed x1.5).
+  - no_unexpected_files:
+      - 'outputs/artifacts/cap-table-acmecorp-inc/**'
+      - 'outputs/artifacts/founder-context-acmecorp-inc.json'
+      - 'outputs/Acmecorp_*'   # loosened to match the sibling lanes: the Step-12 snippet derives Acmecorp_Inc_* from the slug, but the model paraphrases the copy step and emits Acmecorp_* — a naming inconsistency in cap-table SKILL.md (:1144 says `{Company}_Cap_Table.md`, :1048 derives `${SLUG_TITLE}`) that is the skill lane's to resolve, not this allowlist's to pin
+  # GATE FLOOR — the presence companion this lane was missing. `gate_answers_delivered` above passes
+  # VACUOUSLY when zero gates fire, so on its own it is satisfied by a run that asked nothing. Floor is
+  # deliberately 1, below the count observed at record time: gate firing is model-dependent, and a floor
+  # set AT the observed count turns ordinary variance into a red suite.
+  - gate_answer_count_min: 1

@@ -150,9 +150,170 @@ VALID_IDS = {item["id"] for item in CHECKLIST_ITEMS}
 VALID_STATUSES = {"pass", "fail", "warn", "not_applicable"}
 ITEM_LOOKUP = {item["id"]: item for item in CHECKLIST_ITEMS}
 
+# The 4 AI-criteria IDs that are gated by ai_company_status.
+_AI_CRITERIA_IDS = frozenset(
+    {
+        "ai_retention_rebased",
+        "ai_cost_to_serve_shown",
+        "ai_defensibility_beyond_model",
+        "ai_responsible_controls",
+    }
+)
 
-def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], list[str]]:
-    """Validate checklist input and produce scored summary. Returns (result, errors)."""
+# The 5 Design & Readability IDs that are gated by input_format=="text" — a deck
+# described in conversation has no slides to score for visual design, so scoring
+# them fail/warn would penalize the founder for evidence that cannot exist.
+_DESIGN_CRITERIA_IDS = frozenset(
+    {
+        "one_idea_per_slide",
+        "minimal_text",
+        "slide_count_appropriate",
+        "consistent_design",
+        "mobile_readable",
+    }
+)
+
+
+def _recompute_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Recompute the summary block from a (possibly gated) items list."""
+    pass_count = 0
+    fail_count = 0
+    warn_count = 0
+    na_count = 0
+    failed_items: list[dict[str, Any]] = []
+    warned_items: list[dict[str, Any]] = []
+    categories: dict[str, dict[str, int]] = {}
+
+    for item in items:
+        status = item["status"]
+        item_id = item["id"]
+        meta = ITEM_LOOKUP.get(item_id, {})
+        category = item.get("category", meta.get("category", "Unknown"))
+        evidence = item.get("evidence")
+        notes = item.get("notes")
+
+        if category not in categories:
+            categories[category] = {"pass": 0, "fail": 0, "warn": 0, "not_applicable": 0}
+
+        if status == "pass":
+            pass_count += 1
+            categories[category]["pass"] += 1
+        elif status == "fail":
+            fail_count += 1
+            categories[category]["fail"] += 1
+            failed_items.append(
+                {
+                    "id": item_id,
+                    "category": category,
+                    "label": item.get("label", ""),
+                    "evidence": evidence,
+                    "notes": notes,
+                }
+            )
+        elif status == "warn":
+            warn_count += 1
+            categories[category]["warn"] += 1
+            warned_items.append(
+                {
+                    "id": item_id,
+                    "category": category,
+                    "label": item.get("label", ""),
+                    "evidence": evidence,
+                    "notes": notes,
+                }
+            )
+        elif status == "not_applicable":
+            na_count += 1
+            categories[category]["not_applicable"] += 1
+
+    applicable = len(CHECKLIST_ITEMS) - na_count
+    score_pct = round((pass_count / applicable) * 100, 1) if applicable > 0 else 0.0
+
+    if score_pct >= 85:
+        overall_status = "strong"
+    elif score_pct >= 70:
+        overall_status = "solid"
+    elif score_pct >= 50:
+        overall_status = "needs_work"
+    else:
+        overall_status = "major_revision"
+
+    return {
+        "total": len(CHECKLIST_ITEMS),
+        "pass": pass_count,
+        "fail": fail_count,
+        "warn": warn_count,
+        "not_applicable": na_count,
+        "score_pct": score_pct,
+        "overall_status": overall_status,
+        "by_category": categories,
+        "failed_items": failed_items,
+        "warned_items": warned_items,
+    }
+
+
+def _force_not_applicable(items: list[dict[str, Any]], criteria_ids: frozenset[str], auto_evidence: str) -> None:
+    """Force the given criteria ids to not_applicable, stamping Auto-gated evidence
+    and dropping any stale sub-agent notes. Mutates items in place."""
+    for item in items:
+        if item.get("id") in criteria_ids:
+            item["status"] = "not_applicable"
+            item["evidence"] = auto_evidence
+            item.pop("notes", None)
+
+
+def _apply_ai_gating(result: dict[str, Any], ai_company_status: str) -> dict[str, Any]:
+    """Apply deterministic AI-criteria gating based on ai_company_status.
+
+    Rules:
+    - not_ai: force the 4 AI criteria to not_applicable with Auto-gated evidence.
+    - ai_core: keep sub-agent statuses (scored).
+    - ai_claimed_unverified: keep sub-agent statuses (scored; they will likely
+      fail for lack of evidence — the bar is relevant because they claim it).
+
+    Evidence prefix 'Auto-gated:' distinguishes producer gating from sub-agent phrasing.
+    """
+    if ai_company_status not in ("not_ai",):
+        # ai_core and ai_claimed_unverified: keep sub-agent statuses unchanged.
+        return result
+
+    items: list[dict[str, Any]] = result.get("items", [])
+    _force_not_applicable(items, _AI_CRITERIA_IDS, "Auto-gated: not_applicable — ai_company_status=not_ai")
+
+    if result.get("summary") is not None:
+        result["summary"] = _recompute_summary(items)
+    return result
+
+
+def _apply_design_gating(result: dict[str, Any], input_format: str) -> dict[str, Any]:
+    """Apply deterministic Design & Readability gating based on input_format.
+
+    When the founder described the deck in conversation (input_format=="text")
+    rather than uploading a file, there is no rendered slide to assess visual
+    design against — force the 5 Design & Readability criteria to
+    not_applicable rather than letting them score fail for lack of evidence
+    that structurally cannot exist. Any other input_format (or none) is a
+    no-op: the sub-agent's scored statuses pass through unchanged.
+    """
+    if input_format != "text":
+        return result
+
+    items: list[dict[str, Any]] = result.get("items", [])
+    _force_not_applicable(items, _DESIGN_CRITERIA_IDS, "Auto-gated: not_applicable — input_format=text")
+
+    if result.get("summary") is not None:
+        result["summary"] = _recompute_summary(items)
+    return result
+
+
+def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], list[str], list[str]]:
+    """Validate checklist input and produce scored summary. Returns (result, errors, warnings).
+
+    `errors` is fatal (missing/duplicate/unknown IDs, invalid status, or a
+    fail/warn item with no evidence) — a non-empty `errors` blocks the run.
+    `warnings` is advisory only and never blocks the run; it currently covers
+    `pass` items with no evidence (a self-graded pass costs nothing to fabricate,
+    so it gets a warning rather than the silent free pass it had before)."""
     errors: list[str] = []
     seen_ids: set[str] = set()
     for i, item in enumerate(items):
@@ -177,7 +338,7 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
         errors.append(f"Missing checklist items: {sorted(missing)}")
 
     if errors:
-        return {"items": [], "summary": None}, errors
+        return {"items": [], "summary": None}, errors, []
 
     # Build enriched items and summary
     enriched: list[dict[str, Any]] = []
@@ -199,16 +360,21 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
         notes = item.get("notes")
         category = meta["category"]
 
-        enriched.append(
-            {
-                "id": item_id,
-                "category": category,
-                "label": meta["label"],
-                "status": status,
-                "evidence": evidence,
-                "notes": notes,
-            }
-        )
+        # Omit evidence/notes when absent — the schema types both as plain
+        # strings (no null), so emitting None would trip a false-positive
+        # SCHEMA_VIOLATION in compose_report. Evidence is only required for
+        # fail/warn items (checked below).
+        enriched_item: dict[str, Any] = {
+            "id": item_id,
+            "category": category,
+            "label": meta["label"],
+            "status": status,
+        }
+        if evidence is not None:
+            enriched_item["evidence"] = evidence
+        if notes is not None:
+            enriched_item["notes"] = notes
+        enriched.append(enriched_item)
 
         # Initialize category counters
         if category not in categories:
@@ -247,6 +413,10 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
 
     # Evidence is required for fail/warn items at checklist generation time.
     evidence_errors: list[str] = []
+    # Pass items get the same emptiness check, but advisory-only: a self-graded
+    # 'pass' with no evidence is the cheapest way to inflate a score, and unlike
+    # fail/warn (scrutinized above) it was previously never checked at all.
+    pass_evidence_warnings: list[str] = []
     for item in enriched:
         if item["status"] in ("fail", "warn"):
             ev = item.get("evidence")
@@ -254,6 +424,12 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
                 msg = f"{item['id']} has status '{item['status']}' but no evidence"
                 print(f"Warning: {msg}", file=sys.stderr)
                 evidence_errors.append(msg)
+        elif item["status"] == "pass":
+            ev = item.get("evidence")
+            if not ev or (isinstance(ev, str) and not ev.strip()):
+                msg = f"{item['id']} has status 'pass' but no evidence"
+                print(f"Warning: {msg}", file=sys.stderr)
+                pass_evidence_warnings.append(msg)
 
     # Score: pass / (total - not_applicable) * 100
     # Why no weighting: keeps scoring simple and defensible — each applicable
@@ -272,28 +448,40 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
     else:
         overall_status = "major_revision"
 
-    return {
-        "items": enriched,
-        "summary": {
-            "total": len(CHECKLIST_ITEMS),
-            "pass": pass_count,
-            "fail": fail_count,
-            "warn": warn_count,
-            "not_applicable": na_count,
-            "score_pct": score_pct,
-            "overall_status": overall_status,
-            "by_category": categories,
-            "failed_items": failed_items,
-            "warned_items": warned_items,
+    return (
+        {
+            "items": enriched,
+            "summary": {
+                "total": len(CHECKLIST_ITEMS),
+                "pass": pass_count,
+                "fail": fail_count,
+                "warn": warn_count,
+                "not_applicable": na_count,
+                "score_pct": score_pct,
+                "overall_status": overall_status,
+                "by_category": categories,
+                "failed_items": failed_items,
+                "warned_items": warned_items,
+            },
         },
-    }, evidence_errors
+        evidence_errors,
+        pass_evidence_warnings,
+    )
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Deck review checklist scorer (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
-    p.add_argument("--run-id", help="Inject metadata.run_id into output")
+    p.add_argument("--run-id", required=True, help="Inject metadata.run_id into output")
+    p.add_argument(
+        "--inventory",
+        help=(
+            "Path to deck_inventory.json; when provided, applies deterministic"
+            " AI-criteria gating from ai_company_status and deterministic"
+            " Design-criteria gating from input_format"
+        ),
+    )
     return p.parse_args()
 
 
@@ -320,27 +508,58 @@ def main() -> None:
 
     indent = 2 if args.pretty else None
 
-    # --- Validation (JSON error dict, exit 0) ---
+    # --- Validation ---
+    # On stdout (no -o): emit the JSON error dict and exit 0 (the caller pipes
+    # and inspects it). On -o (artifact-producer mode): match the sibling
+    # producers — print errors to stderr, write NO artifact, exit 1. Writing an
+    # error-shaped artifact with an "ok": true receipt would let a caller that
+    # checks the exit code or receipt proceed with a broken checklist.json.
     errors: list[str] = []
+    pass_warnings: list[str] = []
     if "items" not in data:
         errors.append("Missing required key: 'items'")
     elif not isinstance(data["items"], list):
         errors.append("'items' must be an array")
 
+    if not errors:
+        result, errors, pass_warnings = validate_checklist(data["items"])
+    else:
+        result = {"items": [], "summary": None}
+
     if errors:
-        result: dict[str, Any] = {"validation": {"status": "invalid", "errors": errors}, "items": [], "summary": None}
-        _write_output(json.dumps(result, indent=indent) + "\n", args.output)
+        if args.output:
+            for err in errors:
+                print(f"Error: checklist validation failed: {err}", file=sys.stderr)
+            sys.exit(1)
+        result["validation"] = {"status": "invalid", "errors": errors, "warnings": pass_warnings}
+        _write_output(json.dumps(result, indent=indent) + "\n", None)
         return
 
-    result, errors = validate_checklist(data["items"])
+    result["validation"] = {"status": "valid", "errors": [], "warnings": pass_warnings}
+    result["metadata"] = {"run_id": args.run_id}
 
-    if errors:
-        result["validation"] = {"status": "invalid", "errors": errors}
-    else:
-        result["validation"] = {"status": "valid", "errors": []}
-
-    if args.run_id:
-        result["metadata"] = {"run_id": args.run_id}
+    # Apply deterministic gating when --inventory is provided. Gating belongs to
+    # the producer, not the sub-agent; the sub-agent scores all 35 criteria and
+    # does not self-gate — this covers both AI-criteria gating (ai_company_status)
+    # and Design-criteria gating (input_format=="text": a text-described deck has
+    # no rendered slide to score visual design against).
+    if args.inventory:
+        try:
+            with open(args.inventory, encoding="utf-8") as inv_f:
+                inventory_data = json.load(inv_f)
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"Warning: could not read --inventory file: {e} — gating skipped", file=sys.stderr)
+        else:
+            ai_company_status = inventory_data.get("ai_company_status", "")
+            if ai_company_status in ("not_ai", "ai_core", "ai_claimed_unverified"):
+                result = _apply_ai_gating(result, ai_company_status)
+            else:
+                print(
+                    f"Warning: --inventory ai_company_status '{ai_company_status}'"
+                    " is not a recognised value — gating skipped",
+                    file=sys.stderr,
+                )
+            result = _apply_design_gating(result, inventory_data.get("input_format", ""))
 
     out = json.dumps(result, indent=indent) + "\n"
     s = result["summary"]

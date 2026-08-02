@@ -65,8 +65,26 @@ def cmd_answer(args: argparse.Namespace) -> int:
     if not os.path.isfile(args.file):
         print(f"Error: gate_state file not found: {args.file}", file=sys.stderr)
         return 1
-    with open(args.file, encoding="utf-8") as f:
-        gate = json.load(f)
+    try:
+        with open(args.file, encoding="utf-8") as f:
+            gate = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"Error: gate_state file is not valid JSON: {e}", file=sys.stderr)
+        return 1
+    if not isinstance(gate, dict):
+        print("Error: gate_state file must contain a JSON object", file=sys.stderr)
+        return 1
+
+    # Run-id parity: if a --run-id was supplied, refuse to answer a gate from a different run (matches the
+    # skill's resume-parity rule — never answer a stale gate left by a prior completed run).
+    gate_run_id = gate.get("metadata", {}).get("run_id", "")
+    if getattr(args, "run_id", None) and gate_run_id and args.run_id != gate_run_id:
+        print(
+            f"Error: --run-id {args.run_id!r} does not match gate_state metadata.run_id {gate_run_id!r} "
+            "(refusing to answer a gate from a different run)",
+            file=sys.stderr,
+        )
+        return 1
 
     options = gate.get("options", [])
     if args.answer not in options:
@@ -78,6 +96,7 @@ def cmd_answer(args: argparse.Namespace) -> int:
 
     gate["answer"] = args.answer
 
+    pretty = getattr(args, "pretty", True)
     schema = load_schema(_schema_path())
     try:
         receipt = write_artifact(
@@ -85,7 +104,7 @@ def cmd_answer(args: argparse.Namespace) -> int:
             schema=schema,
             run_id=gate.get("metadata", {}).get("run_id", ""),
             output_path=args.file,
-            pretty=True,
+            pretty=pretty,
         )
     except ArtifactValidationError as e:
         print(f"Error: gate_state validation failed after answer: {e}", file=sys.stderr)
@@ -105,8 +124,13 @@ def main() -> int:
     sp_emit.set_defaults(func=cmd_emit)
 
     sp_ans = sub.add_parser("answer", help="Set the founder's answer on an existing gate_state.json")
-    sp_ans.add_argument("--file", required=True)
+    # Accept `-o`/`--output` as aliases for `--file`: the model naturally copies `emit`'s `-o` flag onto
+    # `answer`. And accept `--run-id` (used for a parity check below) — it is likewise carried over from
+    # `emit`. Without these, an `answer -o <path> --run-id <id>` invocation errored (argparse exit 2).
+    sp_ans.add_argument("--file", "-o", dest="file", required=True)
     sp_ans.add_argument("--answer", required=True)
+    sp_ans.add_argument("--run-id", dest="run_id", default=None, help="If given, must match the gate's metadata.run_id")
+    sp_ans.add_argument("--pretty", action="store_true", help="Pretty-print the artifact JSON")
     sp_ans.set_defaults(func=cmd_answer)
 
     args = p.parse_args()

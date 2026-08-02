@@ -86,17 +86,55 @@ DIMENSION_ITEMS: list[dict[str, str]] = [
 ]
 
 VALID_IDS = {item["id"] for item in DIMENSION_ITEMS}
-VALID_STATUSES = {"strong_conviction", "moderate_conviction", "concern", "dealbreaker", "not_applicable"}
+VALID_STATUSES = {
+    "strong_conviction",
+    "moderate_conviction",
+    "concern",
+    "dealbreaker",
+    "not_applicable",
+    # IC-11: the deck genuinely does not disclose the data to judge this dimension — UNKNOWN,
+    # needs founder confirmation. NOT a negative judgment (that is `concern`) and NOT structurally
+    # inapplicable (that is `not_applicable`). Excluded from the conviction denominator so honest
+    # non-disclosure doesn't deflate the score; guarded by the coverage cap below so it can't
+    # inflate it either.
+    "to_confirm",
+}
+
+# Coverage guard: when more than this many dimensions are `to_confirm` (mirrors HIGH_NA_COUNT's
+# >6), too much is unconfirmed to responsibly reach `invest` — cap the verdict at more_diligence.
+# Structural `not_applicable` is NOT counted here (it's inapplicability, not a data gap).
+HIGH_TO_CONFIRM_COUNT = 6
+
+# Minimum applicable dimensions for a conviction PERCENTAGE to carry meaning. The
+# 28 dimensions span 7 categories, so 8 is "more than one category's worth on
+# average" — below that the percentage is arithmetic on a handful of points and its
+# decimal place overstates the evidence. This gates PRESENTATION, never the score
+# itself and never the verdict.
+MIN_APPLICABLE_FOR_SCORE = 8
 ITEM_LOOKUP = {item["id"]: item for item in DIMENSION_ITEMS}
 
+# The Fund Fit dimensions (thesis/portfolio/stage/value-add) are the ones whose
+# evidence derives from the FUND PROFILE. In generic mode that profile is a
+# synthesized/illustrative persona (invented portfolio, check size, thesis), so a
+# dealbreaker on one of these is "simulated" and must NOT override the merits-based
+# verdict. Every other category is STARTUP-side evidence and always blocks.
+FUND_FIT_CATEGORY = "Fund Fit"
 
-def validate_dimensions(items: list[dict[str, Any]]) -> dict[str, Any]:
-    """Validate dimension input and produce scored summary."""
+
+def validate_dimensions(items: list[dict[str, Any]], fund_mode: str = "fund_specific") -> dict[str, Any]:
+    """Validate dimension input and produce scored summary.
+
+    fund_mode: "fund_specific" (default, back-compat) or "generic". In generic
+    mode the fund profile is a synthesized/illustrative persona, not a real
+    fund's actual holdings — a dealbreaker sourced from a fabricated portfolio
+    conflict must not override the merits-based verdict. In fund_specific mode
+    (a real, named fund) a dealbreaker always forces hard_pass, unchanged.
+    """
     errors: list[str] = []
     seen_ids: set[str] = set()
-    for item in items:
+    for idx, item in enumerate(items):
         if not isinstance(item, dict):
-            errors.append(f"Item {len(seen_ids)} must be an object (got {type(item).__name__})")
+            errors.append(f"Item {idx} must be an object (got {type(item).__name__})")
             continue
         item_id = item.get("id", "")
         if item_id not in VALID_IDS:
@@ -123,6 +161,7 @@ def validate_dimensions(items: list[dict[str, Any]]) -> dict[str, Any]:
     concern_count = 0
     dealbreaker_count = 0
     na_count = 0
+    to_confirm_count = 0
     dealbreakers: list[dict[str, Any]] = []
     top_concerns: list[dict[str, Any]] = []
 
@@ -156,6 +195,7 @@ def validate_dimensions(items: list[dict[str, Any]]) -> dict[str, Any]:
                 "concern": 0,
                 "dealbreaker": 0,
                 "not_applicable": 0,
+                "to_confirm": 0,
             }
 
         categories[category][status] += 1
@@ -188,8 +228,12 @@ def validate_dimensions(items: list[dict[str, Any]]) -> dict[str, Any]:
             )
         elif status == "not_applicable":
             na_count += 1
+        elif status == "to_confirm":
+            to_confirm_count += 1
 
-    applicable = len(DIMENSION_ITEMS) - na_count
+    # to_confirm is excluded from the denominator (like not_applicable) so honest non-disclosure
+    # neither earns credit nor deflates the score.
+    applicable = len(DIMENSION_ITEMS) - na_count - to_confirm_count
     warnings: list[str] = []
 
     # Conviction score: (strong*1.0 + moderate*0.5) / applicable * 100
@@ -199,8 +243,41 @@ def validate_dimensions(items: list[dict[str, Any]]) -> dict[str, Any]:
         conviction_score = 0.0
         warnings.append("ZERO_APPLICABLE_DIMENSIONS")
 
-    # Verdict determination
-    if dealbreaker_count > 0:
+    # Basis guard — MISLEADING PRECISION, which the verdict cap and floor do not
+    # address. Those guard the verdict; this guards the SCORE. One strong dimension
+    # out of two applicable is "50.0%", and a founder reads that as a considered
+    # midpoint arrived at across the whole framework rather than a coin-flip over
+    # two data points. The decimal place is the problem: it implies more evidence
+    # than exists.
+    #
+    # The score is still reported unchanged (transparency), and the verdict is
+    # untouched — a thin base is not itself a reason to move a verdict. What changes
+    # is that the score must never be presented without its denominator.
+    conviction_basis = {
+        "applicable": applicable,
+        "total": len(DIMENSION_ITEMS),
+        "sufficient": applicable >= MIN_APPLICABLE_FOR_SCORE,
+    }
+    if 0 < applicable < MIN_APPLICABLE_FOR_SCORE:
+        warnings.append("LOW_CONVICTION_BASIS")
+
+    # Verdict determination — SOURCE-BASED dealbreaker capping (WB-2).
+    # A dealbreaker forces hard_pass UNLESS it is "simulated": in generic mode a
+    # dealbreaker on a FUND FIT dimension derives from the synthesized fund persona
+    # (invented portfolio/check-size/thesis), not real fund data, so it must not
+    # override the merits-based verdict. STARTUP-side dealbreakers (Team, Market,
+    # Product, Business Model, Financials, Risk) always block, in EVERY mode — a real
+    # fatal flaw (zero traction, no unit economics) is a real decline. In
+    # fund_specific mode the fund is real, so Fund Fit dealbreakers block too.
+    if fund_mode == "generic":
+        simulated_dealbreakers = [d for d in dealbreakers if d["category"] == FUND_FIT_CATEGORY]
+        blocking_dealbreakers = [d for d in dealbreakers if d["category"] != FUND_FIT_CATEGORY]
+    else:
+        simulated_dealbreakers = []
+        blocking_dealbreakers = list(dealbreakers)
+    dealbreaker_blocking = len(blocking_dealbreakers) > 0
+
+    if dealbreaker_blocking:
         verdict = "hard_pass"
     elif applicable == 0:
         verdict = "more_diligence"
@@ -211,6 +288,47 @@ def validate_dimensions(items: list[dict[str, Any]]) -> dict[str, Any]:
     else:
         verdict = "pass"
 
+    if simulated_dealbreakers:
+        warnings.append("GENERIC_MODE_DEALBREAKER_NON_BLOCKING")
+
+    # IC-11 coverage cap: too much undisclosed to responsibly reach `invest`. The excluded-
+    # denominator can inflate conviction on a thin deck (e.g. 3 strong + 24 to_confirm = 100%);
+    # when to_confirm exceeds the threshold, cap the verdict at more_diligence. The conviction
+    # SCORE is left unchanged (transparent); only the verdict is capped, and we flag it so
+    # compose can exempt the VERDICT_SCORE_MISMATCH check for this intentional divergence.
+    # IC-11 coverage guards. THIN COVERAGE IS THE CONDITION — not the verdict.
+    #
+    # The cap and the floor were each conditioned on the verdict they moved
+    # (`== "invest"` / `== "pass"`), which left the middle uncovered: a run with 23
+    # of 28 dimensions undisclosed and only 2 applicable scored 50.0%, landed in the
+    # `more_diligence` band on its own, and so tripped neither guard. It was reported
+    # as "More Diligence — promising but needs more evidence" with zero warnings —
+    # reassuring language on a scorecard nobody had filled in. Conditioning on
+    # coverage instead closes the middle, and makes the three cases one family.
+    #
+    # `applicable` is part of the condition, not just `to_confirm`: a company can be
+    # thinly covered because almost everything was marked not_applicable, which the
+    # to_confirm count alone does not see.
+    thin_coverage = to_confirm_count > HIGH_TO_CONFIRM_COUNT or 0 < applicable < MIN_APPLICABLE_FOR_SCORE
+
+    # A blocking dealbreaker is a substantive finding about the company, never an
+    # absence of information, and must survive thin coverage untouched.
+    coverage_capped = thin_coverage and verdict == "invest" and not dealbreaker_blocking
+    coverage_floored = thin_coverage and verdict == "pass" and not dealbreaker_blocking
+    # The third case: already more_diligence, but arrived there under coverage so
+    # thin that "promising but needs more evidence" overstates what was assessed.
+    # Nothing moves; the LABEL has to change, which is what this flag is for.
+    coverage_held = thin_coverage and verdict == "more_diligence" and not dealbreaker_blocking
+
+    if coverage_capped:
+        verdict = "more_diligence"
+        warnings.append("LOW_COVERAGE_VERDICT_CAP")
+    if coverage_floored:
+        verdict = "more_diligence"
+        warnings.append("LOW_COVERAGE_VERDICT_FLOOR")
+    if coverage_held:
+        warnings.append("LOW_COVERAGE_VERDICT_HELD")
+
     return {
         "items": enriched,
         "summary": {
@@ -220,9 +338,18 @@ def validate_dimensions(items: list[dict[str, Any]]) -> dict[str, Any]:
             "concern": concern_count,
             "dealbreaker": dealbreaker_count,
             "not_applicable": na_count,
+            "to_confirm": to_confirm_count,
             "applicable": applicable,
             "conviction_score": conviction_score,
+            "conviction_basis": conviction_basis,
             "verdict": verdict,
+            "coverage_capped": coverage_capped,
+            "coverage_floored": coverage_floored,
+            "coverage_held": coverage_held,
+            "fund_mode": fund_mode,
+            "dealbreaker_blocking": dealbreaker_blocking,
+            "blocking_dealbreaker_count": len(blocking_dealbreakers),
+            "simulated_dealbreaker_ids": [d["id"] for d in simulated_dealbreakers],
             "by_category": categories,
             "dealbreakers": dealbreakers,
             "top_concerns": top_concerns,
@@ -235,6 +362,17 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="IC dimension scorer (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
+    p.add_argument("--run-id", required=True, help="Run identifier injected into metadata.run_id")
+    p.add_argument(
+        "--fund-mode",
+        choices=["generic", "fund_specific"],
+        default="fund_specific",
+        help=(
+            "fund_profile.json's mode. 'fund_specific' (default, back-compat): a dealbreaker "
+            "always forces hard_pass. 'generic': the fund is a synthesized/illustrative persona, "
+            "so a dealbreaker is simulated/non-blocking and does not override the merits-based verdict."
+        ),
+    )
     return p.parse_args()
 
 
@@ -263,7 +401,10 @@ def main() -> None:
         print("Error: 'items' must be an array", file=sys.stderr)
         sys.exit(1)
 
-    result = validate_dimensions(data["items"])
+    result = validate_dimensions(data["items"], fund_mode=args.fund_mode)
+
+    # Inject metadata.run_id as the last step before serialization (overrides any stdin metadata).
+    result["metadata"] = {"run_id": args.run_id}
 
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"

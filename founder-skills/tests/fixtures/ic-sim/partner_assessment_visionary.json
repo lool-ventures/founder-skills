@@ -1,0 +1,23 @@
+{
+  "partner": "visionary",
+  "verdict": "invest",
+  "rationale": "SMB bookkeeping automation is a large, underserved category and the timing is right — QuickBooks/Xero haven't moved fast on AI-native workflows. Early traction (300 customers, 18% MoM) suggests real category-creation pull.",
+  "conviction_points": [
+    "Large underserved SMB accounting category with weak incumbent AI response",
+    "18% MoM growth with no paid acquisition suggests organic category pull",
+    "Founding team has domain credibility (ex-Intuit, ex-PwC)"
+  ],
+  "key_concerns": [
+    "Category timing bets are inherently hard to verify this early",
+    "No named incumbent has publicly failed at this yet, so the 'why now' is inferred rather than evidenced"
+  ],
+  "questions_for_founders": [
+    "What would make QuickBooks or Xero unable to copy this in 12 months?",
+    "How do you define the category you're creating vs. just a feature of existing tools?"
+  ],
+  "diligence_requirements": [
+    "Competitive teardown of QuickBooks/Xero AI roadmap",
+    "3 customer reference calls on why they switched"
+  ],
+  "metadata": {"run_id": "fixture-ic-sim-001"}
+}

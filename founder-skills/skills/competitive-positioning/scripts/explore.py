@@ -4,10 +4,16 @@
 # dependencies = []
 # ///
 """
-Generate self-contained interactive HTML explorer for competitive positioning.
+Generate an interactive HTML explorer for competitive positioning.
 
-Outputs HTML (not JSON). Embeds Chart.js (vendored) for interactive scatter
+Outputs HTML (not JSON). Embeds Chart.js (vendored) for the interactive scatter
 plot with view switching, bubble encoding controls, and company detail panels.
+
+The 2D scatter, tables, and detail panels are fully self-contained (no network
+access required). The OPTIONAL "3D View" tab is the one exception: it lazily
+loads Plotly from a third-party CDN (cdn.plot.ly) on demand, so that single tab
+requires network access. A graceful fallback card is shown if the CDN load
+fails. Everything else works offline.
 
 Usage:
     python explore.py --dir ./competitive-positioning-secureflow/
@@ -45,9 +51,14 @@ def _load_artifact(dir_path: str, name: str) -> dict[str, Any] | None:
         return None
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)  # type: ignore[no-any-return]
+            loaded = json.load(f)
     except (json.JSONDecodeError, OSError):
         return _CORRUPT
+    # Wrong-shape valid JSON (list/string/number) degrades to the corrupt path
+    # rather than crashing downstream `.get()` access.
+    if not isinstance(loaded, dict):
+        return _CORRUPT
+    return loaded
 
 
 def _is_stub(data: dict[str, Any] | None) -> bool:
@@ -91,17 +102,17 @@ def _safe_json_embed(data: dict[str, Any]) -> str:
 
 _CATEGORY_COLORS: dict[str, str] = {
     "_startup": "#e11d48",
-    "direct": "#1e40af",
+    "direct": "#0D549D",
     "adjacent": "#ea580c",
-    "do_nothing": "#9ca3af",
+    "do_nothing": "#A6AEB5",
     "emerging": "#8b5cf6",
     "custom": "#14b8a6",
 }
 
 _DEFENSIBILITY_COLORS: dict[str, str] = {
-    "high": "#10b981",
-    "moderate": "#f59e0b",
-    "low": "#ef4444",
+    "high": "#2F8A56",
+    "moderate": "#C9892B",
+    "low": "#C0392B",
 }
 
 
@@ -154,10 +165,27 @@ def _build_data_payload(dir_path: str) -> dict[str, Any]:
             if isinstance(co_data, dict):
                 company_moats[slug] = co_data
 
-    # Differentiation claims
+    # Differentiation claims — prefer the scored file, where the sub-agent's actual
+    # stress-test verdicts land. positioning.json only carries the pre-scoring draft
+    # (placeholder claims, written before POSITIONING_SCORING runs), so it's a fallback
+    # for when the scored file is absent, unusable, or carries no claims.
     diff_claims: list[dict[str, Any]] = []
-    if _usable(positioning):
+    if _usable(positioning_scores):
+        diff_claims = [c for c in _as_list(positioning_scores.get("differentiation_claims")) if isinstance(c, dict)]
+    if not diff_claims and _usable(positioning):
         diff_claims = [c for c in _as_list(positioning.get("differentiation_claims")) if isinstance(c, dict)]
+
+    # Scoring basis — the declared convention for what the map coordinates represent
+    # (shipped/verifiable surface vs. claimed/roadmap capability). Prefer the scored
+    # file; fall back to positioning.json for the founder-override re-pipe path, which
+    # writes positioning.json views back through the scorer and can carry it there too.
+    # Absent must render as "not declared", never silently assumed to be "shipped" —
+    # an artifact from before this convention existed has a genuinely undefined basis.
+    scoring_basis: Any = None
+    if _usable(positioning_scores) and "scoring_basis" in positioning_scores:
+        scoring_basis = positioning_scores.get("scoring_basis")
+    elif _usable(positioning) and "scoring_basis" in positioning:
+        scoring_basis = positioning.get("scoring_basis")
 
     return {
         "company_name": company_name,
@@ -166,6 +194,7 @@ def _build_data_payload(dir_path: str) -> dict[str, Any]:
         "competitors": competitors,
         "company_moats": company_moats,
         "diff_claims": diff_claims,
+        "scoring_basis": scoring_basis,
         "category_colors": _CATEGORY_COLORS,
         "defensibility_colors": _DEFENSIBILITY_COLORS,
     }
@@ -185,70 +214,88 @@ def _chartjs_source() -> str:
     return js_path.read_text(encoding="utf-8")
 
 
-def _css() -> str:
+def _css(brand_css: str) -> str:
     """Return embedded CSS for the explorer."""
-    return """
-    <style>
+    return (
+        "\n    <style>\n"
+        + brand_css
+        + """
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-           background: #f8fafc; color: #1e293b; line-height: 1.5; }
-    .header { padding: 1.5rem 2rem; background: #fff; border-bottom: 1px solid #e2e8f0; }
-    .header h1 { font-size: 1.5rem; color: #0d549d; }
-    .header .subtitle { font-size: 0.875rem; color: #64748b; }
+    body { font-family: var(--font-body);
+           background: var(--lool-white); color: var(--lool-ink); line-height: 1.5;
+           -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+    a { color: var(--lool-azure); }
+    a:hover { color: var(--lool-azure-deep); }
+    .header { padding: 1.5rem 2rem; background: var(--lool-white);
+              border-bottom: 1px solid var(--lool-line-2); }
+    .header h1 { font-size: 1.5rem; font-weight: 400; color: var(--lool-blue); }
+    .header .subtitle { font-size: 0.875rem; color: var(--lool-mute); }
     .toolbar { display: flex; flex-wrap: wrap; gap: 1rem; padding: 1rem 2rem;
-               background: #fff; border-bottom: 1px solid #e2e8f0; align-items: center; }
-    .toolbar label { font-size: 0.8rem; color: #475569; font-weight: 500; }
-    .toolbar select { font-size: 0.8rem; padding: 4px 8px; border: 1px solid #cbd5e1;
-                      border-radius: 4px; background: #fff; }
+               background: var(--lool-white); border-bottom: 1px solid var(--lool-line-2);
+               align-items: center; }
+    .toolbar label { font-size: 0.8rem; color: var(--lool-nav); font-weight: 500; }
+    .toolbar select { font-size: 0.8rem; padding: 4px 8px; border: 1px solid var(--lool-line-form);
+                      border-radius: var(--r-input); background: var(--lool-white);
+                      font-family: var(--font-body); color: var(--lool-ink); }
     .main { display: flex; gap: 0; height: calc(100vh - 180px); overflow: hidden; }
     .chart-area { flex: 1; padding: 1rem 1.5rem; min-width: 0; display: flex;
                   flex-direction: column; overflow-y: auto; }
     .chart-area canvas { flex: 1; min-height: 300px; }
-    .sidebar { width: 320px; border-left: 1px solid #e2e8f0; background: #fff;
+    .sidebar { width: 320px; border-left: 1px solid var(--lool-line-2); background: var(--lool-paper);
                overflow-y: auto; padding: 1rem; }
-    .sidebar h3 { font-size: 0.85rem; color: #374151; margin-bottom: 0.5rem; padding-bottom: 0.25rem;
-                  border-bottom: 1px solid #e5e7eb; }
-    .company-item { padding: 0.5rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem;
+    .sidebar h3 { font-size: 0.85rem; font-weight: 500; color: var(--lool-royal);
+                  margin-bottom: 0.5rem; padding-bottom: 0.25rem;
+                  border-bottom: 1px solid var(--lool-line-2); }
+    .company-item { padding: 0.5rem; border-radius: var(--r-input); cursor: pointer; font-size: 0.8rem;
                     display: flex; align-items: center; gap: 8px; transition: background 0.15s; }
-    .company-item:hover { background: #f1f5f9; }
+    .company-item:hover { background: var(--lool-paper-2); }
     .company-item.dimmed { opacity: 0.4; }
     .company-item .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
     .company-item .name { font-weight: 500; }
-    .company-item .cat { font-size: 0.7rem; color: #94a3b8; }
+    .company-item .cat { font-size: 0.7rem; color: var(--lool-faint); }
     .detail-panel { margin-top: 1rem; }
-    .detail-panel h4 { font-size: 0.85rem; color: #0d549d; margin-bottom: 0.5rem; }
+    .detail-panel h4 { font-size: 0.85rem; color: var(--lool-blue); margin-bottom: 0.5rem; }
     .detail-row { display: flex; justify-content: space-between; font-size: 0.75rem;
-                  padding: 0.25rem 0; border-bottom: 1px solid #f1f5f9; }
-    .detail-row .label { color: #64748b; }
-    .detail-row .value { color: #1e293b; font-weight: 500; }
-    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px;
+                  padding: 0.25rem 0; border-bottom: 1px solid var(--lool-line-2); }
+    .detail-row .label { color: var(--lool-mute); }
+    .detail-row .value { color: var(--lool-ink); font-weight: 500; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: var(--r-pill);
              font-size: 0.7rem; font-weight: 600; color: #fff; }
     .legend-bar { display: flex; flex-wrap: wrap; gap: 1rem; padding: 0.75rem 2rem;
-                  background: #fff; border-bottom: 1px solid #e2e8f0; font-size: 0.75rem; }
+                  background: var(--lool-white); border-bottom: 1px solid var(--lool-line-2);
+                  font-size: 0.75rem; }
     .legend-item { display: flex; align-items: center; gap: 4px; }
     .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
-    .placeholder { padding: 3rem; text-align: center; color: #94a3b8; font-size: 0.9rem; }
-    .tab-bar { display: flex; gap: 0; background: #fff; border-bottom: 1px solid #e2e8f0; }
+    .placeholder { padding: 3rem; text-align: center; color: var(--lool-faint); font-size: 0.9rem; }
+    .tab-bar { display: flex; gap: 0; background: var(--lool-white);
+               border-bottom: 1px solid var(--lool-line-2); }
     .tab { padding: 0.5rem 1.5rem; font-size: 0.85rem; cursor: pointer; border: none;
-           background: none; color: #64748b; border-bottom: 2px solid transparent; }
-    .tab.active { color: #0d549d; border-bottom-color: #0d549d; font-weight: 600; }
-    .tab:disabled { color: #cbd5e1; cursor: not-allowed; }
+           background: none; color: var(--lool-nav); border-bottom: 2px solid transparent;
+           font-family: var(--font-body); }
+    .tab:hover { color: var(--lool-blue); }
+    .tab.active { color: var(--lool-blue); border-bottom-color: var(--lool-azure); font-weight: 600; }
+    .tab:disabled { color: var(--lool-faint); cursor: not-allowed; }
     .tab-panel { display: none; }
     .tab-panel.active { display: block; }
     #chart-3d-container { width: 100%; height: calc(100vh - 100px); min-height: 400px; }
-    .spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid #e2e8f0;
-               border-top-color: #0d549d; border-radius: 50%; animation: spin 0.6s linear infinite; }
+    .spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--lool-line-2);
+               border-top-color: var(--lool-blue); border-radius: 50%;
+               animation: spin 0.6s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .not-scored { font-size: 0.7rem; color: #94a3b8; font-style: italic; }
+    .not-scored { font-size: 0.7rem; color: var(--lool-faint); font-style: italic; }
     .axis-rationale {
-        font-size: 0.75rem; color: #64748b; background: #f8fafc;
-        border: 1px solid #e5e7eb; border-radius: 6px;
+        font-size: 0.75rem; color: var(--lool-mute); background: var(--lool-paper);
+        border: 1px solid var(--lool-line-2);
         padding: 0.75rem; margin-top: 0.5rem; line-height: 1.5;
     }
-    .axis-rationale strong { color: #374151; }
+    .axis-rationale strong { color: var(--lool-slate); }
+    .scoring-basis-caption { font-size: 0.75rem; color: var(--lool-mute);
+        padding: 0.5rem 2rem; background: var(--lool-paper);
+        border-bottom: 1px solid var(--lool-line-2); }
+    .scoring-basis-caption strong { color: var(--lool-slate); }
     @media (max-width: 768px) {
       .main { flex-direction: column; }
-      .sidebar { width: 100%; border-left: none; border-top: 1px solid #e2e8f0; }
+      .sidebar { width: 100%; border-left: none; border-top: 1px solid var(--lool-line-2); }
       .toolbar { flex-direction: column; }
     }
     @media print {
@@ -257,10 +304,19 @@ def _css() -> str:
     }
     </style>
     """
+    )
 
 
 def compose_explorer(dir_path: str) -> str:
     """Build the full interactive explorer HTML."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _theme
+
+    brand_css = _theme.brand_css()
+    footer_credit = _theme.FOOTER_CREDIT_HTML
+
     payload = _build_data_payload(dir_path)
     data_json = _safe_json_embed(payload)
     company_name = _esc(payload["company_name"])
@@ -287,7 +343,7 @@ def compose_explorer(dir_path: str) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Competitive Explorer: {company_name}</title>
 <script>{_chartjs_source()}</script>
-{_css()}
+{_css(brand_css)}
 </head>
 <body>
 <div class="header">
@@ -326,6 +382,8 @@ def compose_explorer(dir_path: str) -> str:
 {legend_html}
 </div>
 
+<div class="scoring-basis-caption" id="scoring-basis-caption"></div>
+
 <div class="tab-panel active" id="panel-2d">
   <div class="main">
     <div class="chart-area">
@@ -341,25 +399,25 @@ def compose_explorer(dir_path: str) -> str:
 </div>
 
 <div class="tab-panel" id="panel-3d">
-  <div id="3d-axes-bar" style="display:none; padding: 0.5rem 2rem; background: #fff;
-       border-bottom: 1px solid #e2e8f0; font-size: 0.8rem; color: #475569;
-       display: flex; gap: 2rem; flex-wrap: wrap;">
+  <div id="3d-axes-bar" style="display:none; padding: 0.5rem 2rem; background: var(--lool-white);
+       border-bottom: 1px solid var(--lool-line-2); font-size: 0.8rem; color: var(--lool-mute);
+       gap: 2rem; flex-wrap: wrap;">
   </div>
   <div id="chart-3d-container">
     <div class="placeholder" id="3d-placeholder">
       <span class="spinner"></span> Loading 3D view&hellip;
     </div>
     <div id="3d-fallback" style="display:none; padding: 3rem 2rem; text-align: center;">
-      <div style="max-width: 480px; margin: 0 auto; background: #fff; border: 1px solid #e2e8f0;
-                  border-radius: 12px; padding: 2.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+      <div style="max-width: 480px; margin: 0 auto; background: var(--lool-paper);
+                  border: 1px solid var(--lool-line-2); padding: 2.5rem;">
         <div style="font-size: 2.5rem; margin-bottom: 1rem;">&#127760;</div>
-        <h3 style="font-size: 1.1rem; color: #1e293b; margin-bottom: 0.75rem;">
+        <h3 style="font-size: 1.1rem; color: var(--lool-ink); margin-bottom: 0.75rem;">
           3D View &mdash; Open in Browser</h3>
-        <p style="font-size: 0.9rem; color: #64748b; line-height: 1.6; margin-bottom: 1.25rem;">
+        <p style="font-size: 0.9rem; color: var(--lool-mute); line-height: 1.6; margin-bottom: 1.25rem;">
           The interactive 3D positioning map requires a full browser environment.
           It cannot load inside embedded viewers like Claude Cowork.</p>
-        <p style="font-size: 0.85rem; color: #475569; background: #f1f5f9;
-                  border-radius: 8px; padding: 0.75rem 1rem; line-height: 1.5;">
+        <p style="font-size: 0.85rem; color: var(--lool-mute); background: var(--lool-paper-2);
+                  border-radius: var(--r-input); padding: 0.75rem 1rem; line-height: 1.5;">
           <strong>To use 3D:</strong> Open the <code>explore.html</code> file
           directly in Chrome, Firefox, or Safari.</p>
       </div>
@@ -373,6 +431,11 @@ const DATA = {data_json};
 /*DATA_END*/
 const CATEGORY_COLORS = DATA.category_colors;
 const DEFENSIBILITY_COLORS = DATA.defensibility_colors;
+const SCORING_BASIS_LABELS = {{
+  shipped: 'Shipped / verifiable surface',
+  roadmap_12mo: '12-month roadmap',
+  mixed: 'Mixed'
+}};
 const DEFENSIBILITY_RADII = {{high: 12, moderate: 8, low: 5}};
 const STARTUP_MIN_RADIUS = 8;
 
@@ -435,7 +498,7 @@ function getCompanyStyle(slug) {{
   if (colorMode === 'category') {{
     color = CATEGORY_COLORS[cat] || CATEGORY_COLORS['direct'];
   }} else {{
-    color = DEFENSIBILITY_COLORS[def] || '#9ca3af';
+    color = DEFENSIBILITY_COLORS[def] || '#A6AEB5';
   }}
 
   return {{
@@ -447,6 +510,17 @@ function getCompanyStyle(slug) {{
     borderColor: isStartup ? '#ffffff' : 'transparent',
     borderWidth: isStartup ? 2 : 0
   }};
+}}
+
+// ---- Scoring Basis Caption ----
+
+function renderScoringBasisCaption() {{
+  // Absent/unrecognized always renders as "Not declared" — never silently
+  // assumed to be "shipped" — so a reader never has to guess what the plotted
+  // coordinates mean, and a pre-convention artifact isn't misrepresented.
+  var label = SCORING_BASIS_LABELS[DATA.scoring_basis] || 'Not declared';
+  var el = document.getElementById('scoring-basis-caption');
+  el.innerHTML = '<strong>Scoring basis:</strong> ' + escHtml(label);
 }}
 
 // ---- View Selector ----
@@ -515,7 +589,7 @@ function selectCompany(slug) {{
 
   // Highlight in list
   document.querySelectorAll('.company-item').forEach(function(el) {{
-    el.style.background = el.getAttribute('data-slug') === slug ? '#eff6ff' : '';
+    el.style.background = el.getAttribute('data-slug') === slug ? 'var(--lool-line-2)' : '';
   }});
 
   // Show detail
@@ -543,15 +617,16 @@ function selectCompany(slug) {{
 
   // Key differentiators
   if (comp.key_differentiators && comp.key_differentiators.length) {{
-    h += '<div style="margin-top:0.5rem;font-size:0.75rem;color:#475569;font-weight:500;">Key Differentiators</div>';
+    h += '<div style="margin-top:0.5rem;font-size:0.75rem;color:var(--lool-slate);font-weight:500;">' +
+      'Key Differentiators</div>';
     comp.key_differentiators.forEach(function(d) {{
-      h += '<div style="font-size:0.75rem;color:#64748b;padding:2px 0;">&bull; ' + escHtml(d) + '</div>';
+      h += '<div style="font-size:0.75rem;color:var(--lool-mute);padding:2px 0;">&bull; ' + escHtml(d) + '</div>';
     }});
   }}
 
   // Moat summary
   if (moatData && moatData.moats) {{
-    h += '<div style="margin-top:0.5rem;font-size:0.75rem;color:#475569;font-weight:500;">Moats</div>';
+    h += '<div style="margin-top:0.5rem;font-size:0.75rem;color:var(--lool-slate);font-weight:500;">Moats</div>';
     moatData.moats.forEach(function(m) {{
       if (m.status !== 'absent' && m.status !== 'not_applicable') {{
         h += '<div class="detail-row"><span class="label">' + humanize(m.id) + '</span>';
@@ -565,10 +640,11 @@ function selectCompany(slug) {{
     var points = DATA.views[currentView].points || [];
     for (var i = 0; i < points.length; i++) {{
       if (points[i].competitor === slug) {{
-        h += '<div style="margin-top:0.5rem;font-size:0.75rem;color:#475569;font-weight:500;">Position Evidence</div>';
-        h += '<div style="font-size:0.7rem;color:#64748b;padding:2px 0;">' +
+        h += '<div style="margin-top:0.5rem;font-size:0.75rem;color:var(--lool-slate);font-weight:500;">' +
+          'Position Evidence</div>';
+        h += '<div style="font-size:0.7rem;color:var(--lool-mute);padding:2px 0;">' +
           '<b>X:</b> ' + escHtml(points[i].x_evidence || 'N/A') + '</div>';
-        h += '<div style="font-size:0.7rem;color:#64748b;padding:2px 0;">' +
+        h += '<div style="font-size:0.7rem;color:var(--lool-mute);padding:2px 0;">' +
           '<b>Y:</b> ' + escHtml(points[i].y_evidence || 'N/A') + '</div>';
         break;
       }}
@@ -789,14 +865,14 @@ function render3D() {{
   var axesBar = document.getElementById('3d-axes-bar');
   axesBar.innerHTML =
     '<span style="display:inline-flex;align-items:center;gap:6px;">' +
-      '<span style="width:14px;height:3px;background:#1e40af;border-radius:2px;"></span>' +
-      '<strong style="color:#1e40af;">X:</strong> ' + escHtml(xName) + '</span>' +
+      '<span style="width:14px;height:3px;background:#0D549D;border-radius:2px;"></span>' +
+      '<strong style="color:#0D549D;">X:</strong> ' + escHtml(xName) + '</span>' +
     '<span style="display:inline-flex;align-items:center;gap:6px;">' +
       '<span style="width:14px;height:3px;background:#ea580c;border-radius:2px;"></span>' +
       '<strong style="color:#ea580c;">Y:</strong> ' + escHtml(yName) + '</span>' +
     '<span style="display:inline-flex;align-items:center;gap:6px;">' +
-      '<span style="width:14px;height:3px;background:#10b981;border-radius:2px;"></span>' +
-      '<strong style="color:#10b981;">Z:</strong> Defensibility</span>';
+      '<span style="width:14px;height:3px;background:#2F8A56;border-radius:2px;"></span>' +
+      '<strong style="color:#2F8A56;">Z:</strong> Defensibility</span>';
   axesBar.style.display = 'flex';
 
   // Build custom hover text with axis names and defensibility label
@@ -826,18 +902,18 @@ function render3D() {{
   }}], {{
     scene: {{
       xaxis: {{ title: '', range: [0, 100],
-               tickfont: {{ color: '#1e40af' }},
-               gridcolor: 'rgba(30, 64, 175, 0.15)',
-               linecolor: '#1e40af' }},
+               tickfont: {{ color: '#0D549D' }},
+               gridcolor: 'rgba(13, 84, 157, 0.15)',
+               linecolor: '#0D549D' }},
       yaxis: {{ title: '', range: [0, 100],
                tickfont: {{ color: '#ea580c' }},
                gridcolor: 'rgba(234, 88, 12, 0.15)',
                linecolor: '#ea580c' }},
       zaxis: {{ title: '', range: [0, 4],
                tickvals: [1, 2, 3], ticktext: ['Low', 'Moderate', 'High'],
-               tickfont: {{ color: '#10b981' }},
-               gridcolor: 'rgba(16, 185, 129, 0.15)',
-               linecolor: '#10b981' }},
+               tickfont: {{ color: '#2F8A56' }},
+               gridcolor: 'rgba(47, 138, 86, 0.15)',
+               linecolor: '#2F8A56' }},
       camera: {{ eye: {{ x: 1.5, y: 1.5, z: 1.2 }} }},
       aspectmode: 'cube',
       annotations: []
@@ -852,6 +928,7 @@ function render3D() {{
 
 populateViewSelector();
 buildCompanyList();
+renderScoringBasisCaption();
 if (DATA.views.length > 0) {{
   render2D();
 }} else {{
@@ -859,6 +936,7 @@ if (DATA.views.length > 0) {{
     '<div class="placeholder">No positioning views available.</div>';
 }}
 </script>
+{footer_credit}
 </body>
 </html>"""
 

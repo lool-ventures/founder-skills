@@ -1,0 +1,143 @@
+{
+  "schema_version": "v0.5.0-freeform-role-map",
+  "description": "Closed contract for Lane-3 freeform spreadsheet extraction. The SPREADSHEET_STRUCTURE_DETECTION sub-agent (agents/cap-table.md) MUST emit block_type from `block_types` (or a hard_block/ignore type) and column_role_map values ONLY from that block's `roles` keys. extract_cap_table.py --mode=freeform-emit imports this file as the single source of truth: it maps role -> target schema field deterministically, so the agent and producer can never drift. Roles not listed here are rejected as blockers (the agent violated contract), never silently skipped.",
+  "discount_convention": "A `discount` column states the discount RATE in Carta form: `20` or `0.20` both mean a 20% discount (multiplier 0.80). The producer normalizes via _normalize_discount. A value already expressed as a multiplier (e.g. `0.80` to mean an 80% multiplier = 20% discount) is NOT supported and would be misread as an 80% discount — state discounts as rates.",
+  "answerable_blocker_fields": {
+    "interest_rate_type": "enum",
+    "plan_type": "enum",
+    "original_issue_price": "number",
+    "pricing_unknown": "bool"
+  },
+  "optional_block_keys": {
+    "description": "Additional OPTIONAL keys a detected block may carry, validated by extract_cap_table.py --mode=freeform-emit / freeform_mapper.py. Off-contract usage (a role not already in that block's `roles`, or `aggregate` on a block_type other than preferred_series_block) is rejected as a blocker, exactly like an off-contract column_role_map value — never silently accepted.",
+    "role_constants": "object mapping a role name (must already be a key in that block's `roles`) to a literal value stamped onto EVERY data row of the block. For a wide-matrix sheet where a share class's identity lives in the COLUMN HEADER rather than a per-row cell, emit {\"series_name\": \"<header text>\"} (and optionally {\"issue_price\": <uniform price>} when the sheet states one price for the whole column).",
+    "aggregate": {
+      "sum_by_constant": "opt-in, preferred_series_block ONLY (never founders_block — founders is per-holder with no constant identity to sum by). Collapses all of the block's rows into ONE series record: the shares role is SUMMED across rows; the series identity comes from role_constants.series_name (or a per-row series_name column)."
+    },
+    "stated_block_total": "number; aggregated `preferred_series_block` ONLY. The column's own printed Total-row value, which MUST be EXCLUDED from `cell_range`. Producer blocks if the summed shares != this value."
+  },
+  "ignore_block_types": ["header_metadata", "derived_calculation", "noise"],
+  "hard_block_block_types": {
+    "warrants_block": "Warrants are not supported in freeform extraction: required fields (warrant_type, settlement_type, vested_flag, exercise_price) have no reliable spreadsheet column. Provide warrants via Lane 1 (PDF/DOCX) or conversationally.",
+    "options_grants_block": "Individual option grants are not supported in freeform extraction: each grant requires grant_date, strike_price, and per-grant plan_type. Provide the option POOL via an option_pool_block; provide individual grants via Lane 1 or conversationally."
+  },
+  "block_types": {
+    "founders_block": {
+      "target": "inputs.founders",
+      "kind": "array",
+      "roles": {
+        "holder_name": "name",
+        "shares": "common_shares",
+        "founder_id": "founder_id",
+        "common_class": "common_class",
+        "voting_multiple": "voting_rights_multiple"
+      },
+      "required_fields": ["name", "common_shares"]
+    },
+    "common_holders_block": {
+      "target": "inputs.common_batches",
+      "kind": "array",
+      "description": "Non-founder common/ordinary shareholders (angels, ex-employees, nominee trusts holding ordinary shares). Distinct from founders_block so they are classified accurately instead of conflated with founders. holder_id is auto-assigned when not mapped; issuance_date sentinels to 1900-01-01 when the sheet has no date column.",
+      "roles": {
+        "holder_name": "holder_name",
+        "shares": "shares",
+        "holder_id": "holder_id",
+        "issue_date": "issuance_date",
+        "common_class": "common_class",
+        "voting_multiple": "voting_rights_multiple"
+      },
+      "required_fields": ["shares"],
+      "field_handling": {
+        "holder_id": "assign:per_array_index_when_absent",
+        "issuance_date": "sentinel:1900-01-01"
+      }
+    },
+    "preferred_series_block": {
+      "target": "inputs.preferred_series",
+      "kind": "array",
+      "merge_key": "series_name",
+      "roles": {
+        "series_name": "series_name",
+        "shares": "shares",
+        "issue_price": "original_issue_price",
+        "original_conversion_price": "original_conversion_price",
+        "current_conversion_price": "current_conversion_price",
+        "issue_date": "issuance_date",
+        "row_label": "row_label"
+      },
+      "required_fields": ["series_name", "shares", "original_issue_price", "original_conversion_price", "current_conversion_price", "issuance_date"],
+      "field_handling": {
+        "original_conversion_price": "default_to:original_issue_price",
+        "current_conversion_price": "default_to:original_conversion_price",
+        "original_issue_price": "answerable_via_--answer_or_pricing_unknown_flag_else_blocker_if_absent",
+        "pricing_unknown": "answer_only:--answer_N.pricing_unknown=true_sets_OIP=OCP=CCP=1.0_and_anti_dilution_protection=none",
+        "row_label": "discriminator_only:never_written_to_inputs;map_the_holder-name_column_to_it_so_the_producer_can_skip_a_row_whose_label_whole-cell-matches_the_stoplist_(e.g._Total/Subtotal)"
+      }
+    },
+    "option_pool_block": {
+      "target": "inputs.option_pool",
+      "kind": "object",
+      "roles": {
+        "plan_type": "plan_type",
+        "authorized": "authorized",
+        "issued": "issued",
+        "unallocated": "unallocated"
+      },
+      "required_fields": ["plan_type", "authorized", "issued", "unallocated"],
+      "enum_fields": {
+        "plan_type": ["iso", "nso", "section_102_cg", "section_102_oi", "section_3i", "mixed"]
+      },
+      "field_handling": {
+        "unallocated": "compute:authorized_minus_issued",
+        "plan_type": "blocker_if_absent_or_non_enum"
+      }
+    },
+    "safes_block": {
+      "target": "instruments.safes",
+      "kind": "array",
+      "roles": {
+        "investor_name": "investor_name",
+        "amount": "purchase_amount",
+        "post_money_cap": "post_money_valuation_cap",
+        "pre_money_cap": "pre_money_valuation_cap",
+        "discount": "discount_multiplier",
+        "issue_date": "issuance_date"
+      },
+      "required_fields": ["id", "investor_name", "purchase_amount", "issuance_date", "form", "extraction_confidence"],
+      "field_handling": {
+        "id": "assign:per_array_index",
+        "form": "infer:_infer_safe_form(post_money_valuation_cap, discount)",
+        "extraction_confidence": "constant:medium",
+        "issuance_date": "sentinel:1900-01-01",
+        "discount_multiplier": "normalize:_normalize_discount",
+        "source_document": "constant:freeform:<sheet>!<cell_range>"
+      }
+    },
+    "notes_block": {
+      "target": "instruments.convertible_notes",
+      "kind": "array",
+      "roles": {
+        "investor_name": "investor_name",
+        "principal": "principal",
+        "interest_rate": "annual_interest_rate",
+        "interest_rate_type": "interest_rate_type",
+        "valuation_cap": "valuation_cap",
+        "discount": "discount_multiplier",
+        "issue_date": "issuance_date",
+        "maturity_date": "maturity_date"
+      },
+      "required_fields": ["id", "investor_name", "principal", "interest_rate_type", "issuance_date", "extraction_confidence"],
+      "enum_fields": {
+        "interest_rate_type": ["fixed_numeric", "fixed_numeric_simple", "statutory_ita_section_3j", "none"]
+      },
+      "field_handling": {
+        "id": "assign:per_array_index",
+        "extraction_confidence": "constant:medium",
+        "issuance_date": "sentinel:1900-01-01",
+        "discount_multiplier": "normalize:_normalize_discount",
+        "interest_rate_type": "blocker_if_absent_or_non_enum",
+        "source_document": "constant:freeform:<sheet>!<cell_range>"
+      }
+    }
+  }
+}

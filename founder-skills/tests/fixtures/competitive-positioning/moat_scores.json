@@ -1,0 +1,421 @@
+{
+  "companies": {
+    "_startup": {
+      "moats": [
+        {
+          "id": "network_effects",
+          "status": "not_applicable",
+          "evidence": "Single-tenant SMB accounting product with no multi-sided network dynamics.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "data_advantages",
+          "status": "weak",
+          "evidence": "Only 300 customers and 9 months of transaction data; too small a dataset yet to claim a categorization-model edge.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "building"
+        },
+        {
+          "id": "switching_costs",
+          "status": "moderate",
+          "evidence": "Once a company's chart of accounts and bank feeds are set up, switching means re-onboarding an accountant \u2014 moderate friction, not yet contractual lock-in.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "building"
+        },
+        {
+          "id": "regulatory_barriers",
+          "status": "not_applicable",
+          "evidence": "No licensing or regulatory barrier protects generic SMB bookkeeping software.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "cost_structure",
+          "status": "weak",
+          "evidence": "No demonstrated cost-to-serve advantage over incumbents yet; still building automation coverage.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "building"
+        },
+        {
+          "id": "brand_reputation",
+          "status": "absent",
+          "evidence": "Pre-Series-A company with 300 customers; no meaningful brand recognition outside its own customer base yet.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "building"
+        }
+      ],
+      "moat_count": 3,
+      "strongest_moat": "switching_costs",
+      "overall_defensibility": "low"
+    },
+    "quickbooks-online": {
+      "moats": [
+        {
+          "id": "network_effects",
+          "status": "moderate",
+          "evidence": "Accountant/bookkeeper ecosystem creates two-sided pull: accountants push clients toward the tool they already know.",
+          "evidence_source": "researched",
+          "trajectory": "stable",
+          "source": "G2 category overview, 2026"
+        },
+        {
+          "id": "data_advantages",
+          "status": "strong",
+          "evidence": "Decades of transaction data across millions of SMBs feeds categorization and benchmarking features competitors can't match.",
+          "evidence_source": "researched",
+          "trajectory": "stable",
+          "source": "Intuit investor day materials"
+        },
+        {
+          "id": "switching_costs",
+          "status": "strong",
+          "evidence": "Deeply embedded in accountant workflows and historical books; multi-year switching costs for firms with years of data.",
+          "evidence_source": "researched",
+          "trajectory": "stable"
+        },
+        {
+          "id": "regulatory_barriers",
+          "status": "not_applicable",
+          "evidence": "No regulatory licensing requirement for SMB bookkeeping software.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "cost_structure",
+          "status": "moderate",
+          "evidence": "Scale gives Intuit lower per-customer support cost, but no unique cost advantage beyond scale.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "brand_reputation",
+          "status": "strong",
+          "evidence": "Category-defining brand; 'QuickBooks' is often used generically for SMB accounting software.",
+          "evidence_source": "researched",
+          "trajectory": "stable",
+          "source": "Brand awareness surveys cited in analyst coverage"
+        }
+      ],
+      "moat_count": 5,
+      "strongest_moat": "data_advantages",
+      "overall_defensibility": "high"
+    },
+    "xero": {
+      "moats": [
+        {
+          "id": "network_effects",
+          "status": "moderate",
+          "evidence": "Similar accountant-ecosystem dynamic to QuickBooks, strongest outside the US.",
+          "evidence_source": "researched",
+          "trajectory": "stable"
+        },
+        {
+          "id": "data_advantages",
+          "status": "moderate",
+          "evidence": "Large international transaction dataset, though smaller than QuickBooks' US base.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "switching_costs",
+          "status": "strong",
+          "evidence": "Same historical-books lock-in dynamic as QuickBooks for its installed base.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "regulatory_barriers",
+          "status": "not_applicable",
+          "evidence": "No licensing barrier.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "cost_structure",
+          "status": "moderate",
+          "evidence": "Public-company scale advantages, no unique structural edge beyond scale.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "brand_reputation",
+          "status": "moderate",
+          "evidence": "Strong brand in UK/AU/NZ; weaker recognition in the US market.",
+          "evidence_source": "researched",
+          "trajectory": "stable"
+        }
+      ],
+      "moat_count": 5,
+      "strongest_moat": "switching_costs",
+      "overall_defensibility": "moderate"
+    },
+    "freshbooks": {
+      "moats": [
+        {
+          "id": "network_effects",
+          "status": "absent",
+          "evidence": "No accountant-ecosystem play; targets freelancers directly rather than through a professional channel.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "data_advantages",
+          "status": "weak",
+          "evidence": "Smaller, invoicing-centric dataset; not positioned around categorization intelligence.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "switching_costs",
+          "status": "weak",
+          "evidence": "Freelancer users typically have simpler books, so switching cost is lower than for multi-employee SMBs.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "regulatory_barriers",
+          "status": "not_applicable",
+          "evidence": "No licensing barrier.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "cost_structure",
+          "status": "not_applicable",
+          "evidence": "No disclosed cost-to-serve advantage or disadvantage identified.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "brand_reputation",
+          "status": "moderate",
+          "evidence": "Recognized brand among freelancers and solo service providers specifically.",
+          "evidence_source": "researched",
+          "trajectory": "stable"
+        }
+      ],
+      "moat_count": 3,
+      "strongest_moat": "brand_reputation",
+      "overall_defensibility": "low"
+    },
+    "pilot-com": {
+      "moats": [
+        {
+          "id": "network_effects",
+          "status": "absent",
+          "evidence": "Service-delivery model (human + software); no multi-sided network effect identified.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "data_advantages",
+          "status": "moderate",
+          "evidence": "Aggregated bookkeeping data across many VC-backed startups could inform benchmarking, though not confirmed as productized.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "building"
+        },
+        {
+          "id": "switching_costs",
+          "status": "strong",
+          "evidence": "Once Pilot's team is doing the actual bookkeeping and month-end close, switching means re-hiring/re-training an entire finance function.",
+          "evidence_source": "researched",
+          "trajectory": "stable",
+          "source": "Company case studies"
+        },
+        {
+          "id": "regulatory_barriers",
+          "status": "not_applicable",
+          "evidence": "No licensing barrier for the bookkeeping-as-a-service model itself.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "cost_structure",
+          "status": "weak",
+          "evidence": "Human-in-the-loop model has structurally higher cost-to-serve than pure software.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "brand_reputation",
+          "status": "moderate",
+          "evidence": "Well known specifically within the VC-backed-startup segment.",
+          "evidence_source": "researched",
+          "trajectory": "stable"
+        }
+      ],
+      "moat_count": 4,
+      "strongest_moat": "switching_costs",
+      "overall_defensibility": "moderate"
+    },
+    "manual-spreadsheets": {
+      "moats": [
+        {
+          "id": "network_effects",
+          "status": "not_applicable",
+          "evidence": "Status quo alternative, not a company \u2014 no network dynamics apply.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "data_advantages",
+          "status": "not_applicable",
+          "evidence": "No shared or cumulative dataset exists for a manual/status-quo alternative.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "switching_costs",
+          "status": "absent",
+          "evidence": "No vendor lock-in by definition; a spreadsheet can be abandoned at any time.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "regulatory_barriers",
+          "status": "not_applicable",
+          "evidence": "Not a regulated product.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "cost_structure",
+          "status": "absent",
+          "evidence": "No software cost, but no automation-driven cost advantage either \u2014 the cost is founder/bookkeeper time.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        },
+        {
+          "id": "brand_reputation",
+          "status": "not_applicable",
+          "evidence": "Not a company; no brand to assess.",
+          "evidence_source": "agent_estimate",
+          "trajectory": "stable"
+        }
+      ],
+      "moat_count": 0,
+      "strongest_moat": null,
+      "overall_defensibility": "low"
+    }
+  },
+  "comparison": {
+    "by_dimension": {
+      "network_effects": {
+        "_startup": "not_applicable",
+        "quickbooks-online": "moderate",
+        "xero": "moderate",
+        "freshbooks": "absent",
+        "pilot-com": "absent",
+        "manual-spreadsheets": "not_applicable"
+      },
+      "data_advantages": {
+        "_startup": "weak",
+        "quickbooks-online": "strong",
+        "xero": "moderate",
+        "freshbooks": "weak",
+        "pilot-com": "moderate",
+        "manual-spreadsheets": "not_applicable"
+      },
+      "switching_costs": {
+        "_startup": "moderate",
+        "quickbooks-online": "strong",
+        "xero": "strong",
+        "freshbooks": "weak",
+        "pilot-com": "strong",
+        "manual-spreadsheets": "absent"
+      },
+      "regulatory_barriers": {
+        "_startup": "not_applicable",
+        "quickbooks-online": "not_applicable",
+        "xero": "not_applicable",
+        "freshbooks": "not_applicable",
+        "pilot-com": "not_applicable",
+        "manual-spreadsheets": "not_applicable"
+      },
+      "cost_structure": {
+        "_startup": "weak",
+        "quickbooks-online": "moderate",
+        "xero": "moderate",
+        "freshbooks": "not_applicable",
+        "pilot-com": "weak",
+        "manual-spreadsheets": "absent"
+      },
+      "brand_reputation": {
+        "_startup": "absent",
+        "quickbooks-online": "strong",
+        "xero": "moderate",
+        "freshbooks": "moderate",
+        "pilot-com": "moderate",
+        "manual-spreadsheets": "not_applicable"
+      }
+    },
+    "startup_rank": {
+      "network_effects": {
+        "rank": -1,
+        "total": 0
+      },
+      "data_advantages": {
+        "rank": 4,
+        "total": 5
+      },
+      "switching_costs": {
+        "rank": 4,
+        "total": 6
+      },
+      "regulatory_barriers": {
+        "rank": -1,
+        "total": 0
+      },
+      "cost_structure": {
+        "rank": 3,
+        "total": 5
+      },
+      "brand_reputation": {
+        "rank": 5,
+        "total": 5
+      }
+    }
+  },
+  "warnings": [
+    {
+      "code": "RESEARCHED_WITHOUT_SOURCE",
+      "severity": "medium",
+      "message": "quickbooks-online: switching_costs evidence_source is 'researched' but no source (URL or search query) was provided \u2014 this claim can't be spot-checked",
+      "company": "quickbooks-online",
+      "moat_id": "switching_costs"
+    },
+    {
+      "code": "RESEARCHED_WITHOUT_SOURCE",
+      "severity": "medium",
+      "message": "xero: network_effects evidence_source is 'researched' but no source (URL or search query) was provided \u2014 this claim can't be spot-checked",
+      "company": "xero",
+      "moat_id": "network_effects"
+    },
+    {
+      "code": "RESEARCHED_WITHOUT_SOURCE",
+      "severity": "medium",
+      "message": "xero: brand_reputation evidence_source is 'researched' but no source (URL or search query) was provided \u2014 this claim can't be spot-checked",
+      "company": "xero",
+      "moat_id": "brand_reputation"
+    },
+    {
+      "code": "RESEARCHED_WITHOUT_SOURCE",
+      "severity": "medium",
+      "message": "freshbooks: brand_reputation evidence_source is 'researched' but no source (URL or search query) was provided \u2014 this claim can't be spot-checked",
+      "company": "freshbooks",
+      "moat_id": "brand_reputation"
+    },
+    {
+      "code": "RESEARCHED_WITHOUT_SOURCE",
+      "severity": "medium",
+      "message": "pilot-com: brand_reputation evidence_source is 'researched' but no source (URL or search query) was provided \u2014 this claim can't be spot-checked",
+      "company": "pilot-com",
+      "moat_id": "brand_reputation"
+    }
+  ],
+  "_produced_by": "score_moats",
+  "metadata": {
+    "run_id": "fixture-competitive-positioning-001"
+  }
+}

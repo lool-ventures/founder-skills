@@ -1,0 +1,100 @@
+name: competitive-positioning-recall-adoption
+session: ../sessions/default.yaml
+fidelity: cowork
+skills: [competitive-positioning]
+
+# Recall ADOPTION lane. The smoke lane exercises the blind recall check's DETECTION half —
+# candidates are found and presented — but it answers Gate 1 with "Looks good", so the founder never
+# takes one up and the adoption path never runs. That path is where the interesting failure lives:
+# an approved candidate has to enter `landscape_draft.json` as a draft entry and be enriched by
+# Step 4 like any other, and it must NOT be routed through Step 4's suggested_additions promotion
+# path (which operates on Step 4's own output and does not exist yet at Gate 1). Getting that wrong
+# fails LOUDLY at the producer's required-field check, so a run that completes is real evidence the
+# right route was taken.
+#
+# The prompt deliberately UNDER-specifies the set: it names two competitors in a market with several
+# obvious others, and — unlike the smoke lane — does NOT pin the set, so additions are permitted.
+# The founder then explicitly asks for what is missing to be added.
+#
+# NO scripted answers, and none are possible. This lane is driven with `--decider-dir`, where the
+# harness blocks on each gate and the driving agent answers it live, with the real labels in hand.
+# That is not a convenience here — it is forced by the skill's behaviour. A first attempt scripted
+# `choose: "Missing competitors"` against SKILL.md's documented Gate 1 options and failed, because
+# the gate that actually fired offered:
+#     "Looks good, add FieldPulse" | "Looks good as-is (keep 7)"
+#     "Add both FieldPulse and Service Fusion" | "Remove or swap a competitor"
+# The model rewrites all four labels around whatever the recall check found. That is good founder UX
+# and it makes the labels unpredictable by construction, so no scripted string can name the adoption
+# branch in advance. It also means `on_unanswered: first` is UNSAFE for this lane specifically:
+# option 1 was "Looks good, ADD FieldPulse", so a fallback would silently adopt and the run would
+# look like it tested the accept path while testing adoption, or the reverse on a different run.
+#
+# Drive it with:
+#   GATES=$(mktemp -d)
+#   cowork-harness run scenarios/competitive-positioning-recall-adoption.yaml \
+#     --decider-dir "$GATES" --output-format json &
+#   cowork-harness gates "$GATES" --follow        # stream gates
+#   cowork-harness answer "$GATES" --gate N --choose "<a label from that gate>"
+# At Gate 1 choose the option that ADDS the recall candidate(s) — that is the branch this lane
+# exists to exercise. The run is flagged non-deterministic, which is correct and expected: this lane
+# measures whether a path is reachable, it is not a reproducibility fixture.
+
+prompt: |
+  I'm the founder of Cadence, a US seed-stage B2B SaaS company selling field-service scheduling and
+  dispatch software to SMB service businesses — plumbers, HVAC and electrical contractors running
+  2-15 technicians. The two competitors I hear about most in deals are Jobber and Housecall Pro.
+  Use the competitive-positioning skill to map our competitive landscape and moats. I know my list
+  is probably incomplete, so tell me who else belongs in it and add the ones that genuinely compete
+  for my buyer. Then produce the positioning report and the explorer.
+
+assert:
+  - result: success
+  - all_tasks_completed: true
+  - file_exists: outputs/artifacts/competitive-positioning-cadence/report.json
+
+  # The blind agent ran and produced a set.
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-cadence/competitor_verification.json
+      path: recall_gaps.blind_set_size
+      gt: 0
+
+  # THE POINT OF THIS LANE: the final landscape holds more competitors than the two the founder
+  # named. Anything above 2 means at least one came from somewhere other than the prompt, and the
+  # only mechanisms that add one are the recall check and Step 4's gap detection — both of which
+  # must route an approved addition through enrichment. A raw candidate piped straight into
+  # competitors[] fails validate_landscape.py's required-field check, so reaching a composed
+  # report at all proves the promotion path was taken correctly.
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-cadence/landscape.json
+      path: competitors.2.slug
+      exists: true
+  # An adopted competitor is a fully enriched entry, not a stub: the field validate_landscape.py
+  # requires and that a raw recall candidate does not carry.
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-cadence/landscape.json
+      path: competitors.2.research_depth
+      exists: true
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-cadence/landscape.json
+      path: landscape_as_of
+      exists: true
+
+  # --- fleet contract asserts ---
+  - subagent_dispatched: 'competitive-positioning'
+  - subagent_file_write:
+      path_suffix: coaching.md
+  - skill_triggered: '(founder-skills:)?competitive-positioning$'
+  - computer_links_resolve: true
+  - no_delete_in_outputs: true
+  - subagent_tool_absent: 'Bash'
+  # One more gate than the smoke lane (the additions sub-prompt), plus headroom.
+  - questions_count_max: 8
+  # The smoke lane measured 6 dispatches / 65 tools. Adoption adds a scoped re-dispatch of
+  # LANDSCAPE_RESEARCH to enrich the approved candidate, so budget above that rather than at it.
+  - dispatch_count_max: 12
+  - max_turns: 170
+  - tool_calls_max: 160
+  - no_unexpected_files:
+      - 'outputs/artifacts/competitive-positioning-cadence/**'
+      - 'outputs/artifacts/founder-context-cadence.json'
+      - 'outputs/Cadence_*'

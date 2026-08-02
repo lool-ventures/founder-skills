@@ -1,0 +1,22 @@
+{
+  "partner": "analyst",
+  "verdict": "more_diligence",
+  "rationale": "Unit economics are emerging but not yet proven at scale. $400K ARR at 300 customers implies ~$1,333 ACV, consistent with the stated $150/mo pricing, but no LTV/CAC or gross margin figures were shared.",
+  "conviction_points": [
+    "Revenue and customer count are internally consistent with stated pricing",
+    "18% MoM growth with modest headcount suggests reasonable capital efficiency so far"
+  ],
+  "key_concerns": [
+    "No LTV/CAC or gross margin figures disclosed",
+    "18-month runway claim not yet cross-checked against burn rate"
+  ],
+  "questions_for_founders": [
+    "What's your current gross margin, and what's driving cost-to-serve?",
+    "What's your fully-loaded CAC across all channels combined?"
+  ],
+  "diligence_requirements": [
+    "Full unit economics workup (LTV/CAC, gross margin, payback period)",
+    "12-month burn and runway model"
+  ],
+  "metadata": {"run_id": "fixture-ic-sim-001"}
+}

@@ -163,7 +163,9 @@ def _cli() -> int:
             {
                 "ok": True,
                 "output": args.output,
-                "ad_events_added": len(out.get("cap_table_history", [])) - len(cap_state.get("cap_table_history", [])),
+                "ad_events_added": (
+                    len(out.get("cap_table_history") or []) - len(cap_state.get("cap_table_history") or [])
+                ),
             }
         )
     )

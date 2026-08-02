@@ -7,16 +7,17 @@ JSON schemas for all artifacts deposited during the competitive positioning work
 These decisions were deferred from the design spec and are resolved here. Scripts and agent implementations must follow these exactly.
 
 1. **Stress-tests live as top-level `differentiation_claims[]` in `positioning.json`** — claims span axes, so they are not nested under `views[]`.
-2. **`suggested_axes` in `landscape_enriched.json` is informational only** — they inform the agent's axis selection but are NOT copied into `positioning.json`. Only the agent's canonical selection appears in `positioning.json`.
-3. **`suggested_additions` entries carry a `merged: true/false` audit trail** — after the mini-gate, approved additions have `merged: true`; declined ones have `merged: false`. Both remain in `landscape_enriched.json` for audit. `validate_landscape.py` reads only the main `competitors[]` list (where merged additions have already been placed by the agent), never `suggested_additions`.
+2. **`suggested_axes` in the LANDSCAPE_RESEARCH return payload is informational only** — they inform the agent's axis selection but are NOT copied into `positioning.json`. Only the agent's canonical selection appears in `positioning.json`.
+3. **`suggested_additions` entries carry a `merged: true/false` flag, but `merged: true` never persists on an entry.** The sub-agent always writes `merged: false` at hand-off time (promotion hasn't happened yet). After the mini-gate, the main thread — not the sub-agent — relocates each APPROVED entry into `competitors[]` and removes it from `suggested_additions[]` entirely; an approved entry is never left behind stamped `merged: true`. A DECLINED entry is left in place with its already-`false` value untouched. `validate_landscape.py` reads only the main `competitors[]` list (where approved additions have already been placed by the main thread), never `suggested_additions`.
 4. **Vanity axis calculation excludes `_startup`** — the ">80% within 20% range" check counts only competitor points (not `_startup`). A lone differentiated startup should not flip the vanity metric.
 5. **Rank-based differentiation uses competitor-only ranking** — `_startup` is excluded from the ranking pool. The differentiation score measures where the startup would rank among competitors on each axis. If the startup would be ranked 1st among N competitors on both axes, differentiation is high.
 6. **Adjacent category alone suppresses `MISSING_DO_NOTHING`** — having at least one competitor with `category: "adjacent"` or `category: "do_nothing"` is sufficient. The warning fires only when neither category is present.
 7. **`research_depth` allowed values: `full`, `partial`, `founder_provided`** — `full` = enriched in Phase A+B of research. `partial` = added via `suggested_additions` mini-gate with only gap-detection evidence. `founder_provided` = no web research was performed (search tools unavailable or agent knowledge only). `SHALLOW_COMPETITOR_PROFILE` fires for `partial` competitors with <3 `sourced_fields_count`. `RESEARCH_DEPTH_LOW` fires when the global `research_depth` is `founder_provided` AND fewer than 4 competitors have `sourced_fields_count >= 3`.
-8. **Agent must score every landscape slug for moats** — every competitor in `landscape.json` (by slug) must have an entry in `positioning.json`'s `moat_assessments`. `_startup` must also be scored. Individual moat dimensions may be `not_applicable` but require explicit `evidence` explaining why (e.g., "Network effects do not apply to single-player productivity tools").
-9. **High-severity warning codes** (block under `--strict`): `MISSING_LANDSCAPE`, `MISSING_POSITIONING_SCORES`, `MISSING_MOAT_SCORES`, `MISSING_CHECKLIST`, `CORRUPT_ARTIFACT`, `STALE_ARTIFACT`. Medium-severity codes (reportable, can be accepted): `MISSING_DO_NOTHING`, `SHALLOW_COMPETITOR_PROFILE`, `VANITY_AXIS_WARNING`, `MOAT_WITHOUT_EVIDENCE`, `RESEARCH_DEPTH_LOW`. Low-severity: `FOUNDER_OVERRIDE_COUNT`. Info: `SEQUENTIAL_FALLBACK`.
-10. **Provenance fields** — `positioning.json` points carry `x_evidence_source` and `y_evidence_source` (values: `"researched"`, `"agent_estimate"`, `"founder_override"`). Moat entries carry `evidence_source` with the same value set. `compose_report.py` counts `founder_override` occurrences and emits `FOUNDER_OVERRIDE_COUNT` as a low-severity metric.
-11. **`input_mode` lives in `landscape.json` metadata** — `validate_landscape.py` passes through `input_mode` from `landscape_enriched.json`. Values: `"deck"`, `"conversation"`, `"document"`. `checklist.py` reads `input_mode` from `landscape.json` to apply mode-based gating.
+8. **Agent must score every landscape slug for moats — in `moat_scores.json`.** Every competitor in `landscape.json` (by slug), plus `_startup`, must have an entry in `moat_scores.json`'s `companies` (post-MOAT_SCORING, authoritative). Individual moat dimensions may be `not_applicable` but require explicit `evidence` explaining why (e.g., "Network effects do not apply to single-player productivity tools"). This every-slug requirement does NOT apply to `positioning.json`'s pre-dispatch `moat_assessments` block, which is optional — see that field's entry below.
+9. **Warning codes by severity** — see the full Warning Severity Reference table near the end of this document for the authoritative list and triggers. High-severity (block under `--strict`): `MISSING_LANDSCAPE`, `MISSING_POSITIONING`, `MISSING_POSITIONING_SCORES`, `MISSING_MOAT_SCORES`, `MISSING_CHECKLIST`, `CORRUPT_ARTIFACT`, `STALE_ARTIFACT`, `UNVALIDATED_ARTIFACT`. Medium-severity (reportable, any can be accepted): `MISSING_DO_NOTHING`, `SHALLOW_COMPETITOR_PROFILE`, `VANITY_AXIS_WARNING`, `MOAT_WITHOUT_EVIDENCE`, `RESEARCH_DEPTH_LOW`, `MISSING_CANONICAL_MOAT`, `INCOMPLETE_SCORING`, `RESEARCHED_WITHOUT_SOURCE`, `NO_RECENT_DEVELOPMENTS`. Low-severity: `FOUNDER_OVERRIDE_COUNT`, `MARKER_COLLISION`. Info: `SEQUENTIAL_FALLBACK`, `CHECKLIST_ALL_PASS`.
+10. **Provenance fields** — `positioning.json` points carry `x_evidence_source` and `y_evidence_source` (values: `"researched"`, `"agent_estimate"`, `"founder_override"`). Moat entries carry `evidence_source` with the same value set. `compose_report.py` counts `founder_override` occurrences and emits `FOUNDER_OVERRIDE_COUNT` as a low-severity metric. A `"researched"` value should carry a citation beside it — `source` on moat entries, a per-field `sources` dict on competitors — so the main thread can spot-check it; `score_moats.py` / `validate_landscape.py` warn (`RESEARCHED_WITHOUT_SOURCE`, medium, acceptable) rather than fail when it's missing, since a source may legitimately be a search query, not a URL.
+11. **`input_mode` lives in `landscape.json`** — `validate_landscape.py` passes through `input_mode` from the LANDSCAPE_RESEARCH return payload into `landscape.json`. Values: `"deck"`, `"conversation"`, `"document"`. `checklist.py` applies mode-based gating from the `--input-mode` flag the main thread stamps (established in Steps 1-2), not from `landscape.json`.
+12. **`scoring_basis` is optional and per-artifact — absence is never rendered as `"shipped"`.** `positioning.json` and `positioning_scores.json` may carry a top-level `scoring_basis` (`"shipped"` | `"roadmap_12mo"` | `"mixed"` — see `competitive-analysis-methodology.md` §7 for the convention). When the field is absent, the basis was not declared; treat it as "not declared" for display purposes, never as an implicit default. An artifact predating this field has a genuinely undefined basis, not an unstated `"shipped"` one.
 
 ---
 
@@ -47,6 +48,8 @@ Every artifact includes a `metadata` object:
 | `business_model` | string | yes | Revenue model (SaaS, marketplace, etc.) |
 | `input_mode` | string | yes | `"deck"`, `"conversation"`, or `"document"` — how the analysis was initiated |
 | `source_materials` | string[] | yes | What was provided (e.g., `["pitch deck (PDF)", "founder conversation"]`) |
+| `deck_axes` | object[] | no | Deck-mode only: positioning axes the deck's competition slide used, captured for potential reuse as a secondary positioning view. Each entry: `{x_axis, y_axis, source_slide}`. Informational — no script reads it. See also `deck_competition_slide` below for the fuller capture of the same slide. |
+| `deck_competition_slide` | object | no | Deck-mode only: a fuller, generalized capture of the deck's competition slide than `deck_axes` — the axes, which competitors the deck plots and how it categorizes them, and the claimed position, so the CHECKLIST dispatch can assess `NARR_03` (competition-slide alignment) against something concrete. `{axes: {x, y}, plotted: [{name, category}], claimed_position, source_slide}`. Script-inert like `deck_axes` — read only by the CHECKLIST sub-agent dispatch (see `agents/competitive-positioning.md`). |
 | `metadata` | object | yes | `{run_id}` |
 
 **Example:**
@@ -147,19 +150,90 @@ Contains the initial competitor identification and candidate axis pairs. Updated
 
 ---
 
-## landscape_enriched.json
+## competitor_verification.json
 
-**Producer:** Research sub-agent (Step 4) or main agent in sequential mode
+**Producer:** `verify_competitors.py`, fed by TWO parallel Context A hand-offs — COMPETITOR_VERIFICATION (Step 3.5, precision) and COMPETITOR_RECALL (Step 3.6, recall). An independent (fresh-context) precision check that runs BEFORE Gate 1: the sub-agent re-characterizes each competitor from its own research and judges genuine overlap against the startup on a substitution test. The producer is a **validator, not a detector** — it validates structure, enforces the show-your-work gate, cross-checks landscape slug coverage, and computes the summary; it never authors a verdict.
 
-Contains enriched competitor profiles with sourced evidence. The main agent merges approved `suggested_additions` into `competitors[]` before writing the final version that `validate_landscape.py` reads.
+**Sub-agent input shape** (what the agent writes to OUTPUT_PATH):
+
+```json
+{
+  "startup_characterization": {
+    "buyer": "SMB field-service operators (5-50 techs)",
+    "job_to_be_done": "schedule + dispatch technicians to job sites",
+    "category": "field service management software",
+    "monetization": "per-seat SaaS",
+    "evidence_source": "founder_provided"
+  },
+  "verdicts": [
+    {
+      "slug": "calendly",
+      "verdict": "not_a_competitor",
+      "independent_characterization": {
+        "buyer": "individual knowledge workers / sales teams",
+        "job_to_be_done": "let external parties self-book a meeting",
+        "category": "meeting scheduling link tool",
+        "monetization": "per-seat SaaS, freemium",
+        "evidence_source": "researched"
+      },
+      "overlap": {"buyer": false, "job_to_be_done": false, "category": false},
+      "reasoning": "Shares the word 'scheduling' but schedules meetings for knowledge workers; does not dispatch field techs. No shared consideration set.",
+      "confidence": "high",
+      "recommended_action": "challenge_removal"
+    }
+  ],
+  "metadata": {"run_id": "..."}
+}
+```
+
+**Field rules (enforced by the producer):**
+- `verdict` ∈ `genuine` | `adjacent` | `not_a_competitor`.
+- `recommended_action` ∈ `keep` | `reclassify_adjacent` | `reclassify_direct` | `challenge_removal`.
+- `evidence_source` ∈ `researched` | `agent_estimate` | `founder_provided`.
+- **Show-your-work gate:** any verdict that is NOT `genuine` MUST carry a non-empty `reasoning` AND a populated `independent_characterization` with non-empty `buyer` and `job_to_be_done`. A flag with no independent characterization is the "stayed high-level" failure — rejected (exit 1).
+- One verdict per competitor slug in `landscape_draft.json`; `--landscape` flags missing or extra slugs.
+
+**Producer output** adds a computed `summary` (`total`, `genuine`, `adjacent`, `not_a_competitor`, `flagged`, `flagged_slugs[]`, `show_your_work_violations[]`, `category_disagreements[]`), a `validation` block (`status` ok|error, `errors[]`), and a `_produced_by` stamp. Gate 1's chat message reads `summary.flagged_slugs` + each flagged verdict's `reasoning` to present the challenges. **Not a composed artifact** — `compose_report.py` does not read it; it is a Gate-1 input only.
+
+**`recall_gaps`** — present only when `--blind-set` is passed; produced by diffing the COMPETITOR_RECALL agent's independently-derived candidate set against the drafted set. That agent is dispatched with a **redacted** product summary (no `deck_competition_slide`, `deck_axes`, or `differentiation_claims`) and never receives `ANALYSIS_DIR`, so its set is derived without sight of the draft. The diff is a deterministic slug comparison — never an agent judgment.
+
+| Field | Meaning |
+|---|---|
+| `blind_set_size` | candidates that survived validation |
+| `matched` | slugs present in both sets |
+| `unmatched` | candidates found blind but absent from the draft — **the recall-gap signal**, carried through whole (name, why_considered, sources) so Gate 1 can show the founder the reasoning and the citation |
+| `draft_only` | slugs in the draft the blind agent did not surface — **diagnostic only** |
+| `dropped` | candidates rejected for missing sources or reasoning, with the reason |
+
+**`draft_only` is not a verdict and must never be presented to the founder as one.** A blind agent failing to surface a competitor is weak evidence of nothing; Step 3.5's verdicts are the instrument for "is this a real competitor," and they carry independent characterization to back it. Unsourced candidates are dropped rather than shown, on the same principle that governs the rest of this skill: an unsourced claim does not reach the founder.
+
+**`summary.category_disagreements[]`** — additive; `flagged` and `flagged_slugs` keep their existing meaning ("not a genuine competitor") unchanged. Each entry compares a verdict to the competitor's `landscape_draft.json` category and fires in exactly two directions:
+
+| `direction` | Fires when | What it means |
+|---|---|---|
+| `upgrade` | verdict `genuine`, draft category `adjacent` | Independent verification found *stronger* overlap than the draft credited — the competitor is a closer rival than the analysis assumed. This is the decision-relevant direction the plain `flagged`/`flagged_slugs` fields cannot surface, since they only ever contain non-`genuine` verdicts. |
+| `downgrade` | verdict `adjacent`, draft category `direct` | Independent verification found *weaker* overlap than the draft credited. |
+
+Deliberately does NOT fire on a draft category of `do_nothing`, `emerging`, or `custom` — those categories encode the competitor's *market role* (status quo, horizon entrant, sui generis), not its *degree of overlap*, so a `genuine` verdict against a correctly-categorized `do_nothing` or `emerging` entry is not a disagreement.
+
+Each entry: `{slug, draft_category, verdict, direction}`. `recommended_action: "reclassify_direct"` is the `upgrade`-side counterpart to `reclassify_adjacent`.
+
+---
+
+## LANDSCAPE_RESEARCH sub-agent return shape
+
+**Producer:** Research sub-agent (Step 4) or main agent in sequential mode. **Not persisted to disk** — this is the JSON the sub-agent returns to the main thread, which pipes it straight through `validate_landscape.py -o landscape.json`. There is no `landscape_enriched.json` file on disk.
+
+Contains enriched competitor profiles with sourced evidence. The main agent merges approved `suggested_additions` into `competitors[]` before piping the payload to `validate_landscape.py`.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `competitors` | object[] | yes | Enriched competitor profiles (includes any merged suggested additions) |
-| `suggested_additions` | object[] | no | Competitors discovered during gap detection (audit trail) |
+| `suggested_additions` | object[] | no | Competitors discovered during gap detection; presented to the founder at the mini-gate. Approved entries are merged into `competitors[]` before the payload is piped to `validate_landscape.py` |
 | `suggested_axes` | object[] | no | Additional axis pairs suggested by research findings (informational only) |
 | `assessment_mode` | string | yes | `"sub-agent"` or `"sequential"` |
 | `research_depth` | string | yes | Global research depth: `"full"`, `"partial"`, or `"founder_provided"` |
+| `landscape_as_of` | string | yes | `YYYY-MM-DD` the research was validated as-of (`validate_landscape.py --as-of`, default today UTC). Stamped so a consumer of this artifact can tell week-old research from year-old, and used as the reference clock for the `recent_developments` recency window. |
 | `input_mode` | string | yes | Passed through from `product_profile.json`: `"deck"`, `"conversation"`, `"document"` |
 | `metadata` | object | yes | `{run_id}` |
 
@@ -179,7 +253,9 @@ Contains enriched competitor profiles with sourced evidence. The main agent merg
 | `strengths` | string[] | no | Competitive strengths |
 | `weaknesses` | string[] | no | Competitive weaknesses |
 | `evidence_source` | object | yes | Per-field evidence provenance. Keys are field names, values are `"researched"`, `"agent_estimate"`, or `"founder_provided"`. |
+| `sources` | object | no (soft-required for fields with `evidence_source: "researched"`) | Per-field citation, parallel to `evidence_source`. Keys are the same field names; values are the URL or the exact search query that produced a `"researched"` value. `validate_landscape.py` warns (`RESEARCHED_WITHOUT_SOURCE`, medium, acceptable) — not fails — when a `"researched"` field has no matching entry here. |
 | `research_depth` | string | yes | Per-competitor: `"full"`, `"partial"`, or `"founder_provided"` |
+| `recent_developments` | object[] | no | Discrete, DATED competitor moves. Each entry: `date` (`YYYY-MM` or `YYYY-MM-DD`, within the 18-month window ending at `landscape_as_of`, never future-dated), `type` (one of `funding`, `pricing_change`, `product_launch`, `market_move`, `acquisition`, `leadership`, `layoff`), `summary`, `source` (**URL required** — unlike moat `source`, a search query is not acceptable for a dated claim about a named company), and optional `relevance`. `evidence_source: "agent_estimate"` is REJECTED for this field: a remembered event is not a researched one. **Absent or `[]` is valid and expected** — most competitors have not visibly moved, and inventing movement is worse than reporting none. `NO_RECENT_DEVELOPMENTS` (medium) fires only when EVERY competitor is empty, which indicates shallow research rather than a static market. |
 | `sourced_fields_count` | integer | yes | Number of fields with `evidence_source: "researched"` |
 
 ### suggested_additions[] entry
@@ -191,7 +267,7 @@ Contains enriched competitor profiles with sourced evidence. The main agent merg
 | `category` | string | yes | Proposed category |
 | `rationale` | string | yes | Why this competitor was identified during gap detection |
 | `partial_profile` | object | no | Whatever evidence was gathered during detection |
-| `merged` | boolean | yes | `true` if founder approved and competitor was merged into `competitors[]`; `false` if declined. Set by the main agent after the mini-gate. |
+| `merged` | boolean | yes | The sub-agent always writes `false` here — promotion hasn't happened yet at hand-off time. After the mini-gate, the main thread relocates each APPROVED entry into `competitors[]` and removes it from this array, so `merged: true` never appears on a persisted entry; a DECLINED entry simply stays in this array with its `false` value unchanged. |
 
 ### suggested_axes[] entry
 
@@ -239,7 +315,7 @@ Contains enriched competitor profiles with sourced evidence. The main agent merg
         "description": "API security and WAAP platform",
         "funding": "Series A, $10M"
       },
-      "merged": true
+      "merged": false
     }
   ],
   "suggested_axes": [
@@ -267,12 +343,13 @@ Contains the canonical positioning views, moat assessments, differentiation stre
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `views` | object[] | yes | 1-2 canonical positioning views (primary + optional secondary) |
-| `moat_assessments` | object | yes | Keyed by company slug (including `_startup`). Every slug in `landscape.json` must have an entry. |
-| `differentiation_claims` | object[] | yes | Stress-test results for each differentiation claim (top-level, spans axes) |
+| `moat_assessments` | object | no | **Optional. DRAFT ONLY — superseded by `moat_scores.json`, which is authoritative and where every slug is required (see resolution #8 above).** When present, keyed by company slug (including `_startup`). The main thread may write `{}` or omit the key entirely rather than authoring a per-slug draft before MOAT_SCORING runs — omitting it is safe. For `FOUNDER_OVERRIDE_COUNT`, `compose_report.py` counts the **union** of `founder_override` evidence sources found in `moat_scores.json` and in this block, deduplicated by `(slug, moat_id)` — not a fallback that only reads this block when the other is unusable, which would silently drop an override recorded in only one of the two. Two edge cases make the `(slug, moat_id)` key imperfect, and both require non-compliant data to occur (`id` is schema-required on a moat entry, so a compliant artifact never hits either one): the same override recorded in both files double-counts if `id` is present on one copy and missing on the other (the key falls back to a positional index, which won't match across files); and two different id-less overridden moats at the same list index in the two files falsely dedup against each other. Do not read scores from here, and do not spend effort perfecting it — every downstream consumer (`compose_report.py`, `visualize.py`, `explore.py`) reads `moat_scores.json` for scores. Unlike `points[]`, there is deliberately no merge-back step. |
+| `differentiation_claims` | object[] | yes | **DRAFT — claim text only, verdict-free.** Written in Step 5 before the POSITIONING_SCORING dispatch runs, so a compliant draft carries `claim` text but not a stress-tested verdict (assigning one before the stress-test runs would be content authoring). Only `claim` is required in this block; `verifiable`/`evidence`/`challenge`/`verdict` are populated by the POSITIONING_SCORING sub-agent and land in `positioning_scores.json`, which is **authoritative for stress-tested claims** — read verdicts from there, not from this block. See the `differentiation_claims[]` entry below for the per-field required/optional split. |
+| `scoring_basis` | string | no | `"shipped"` \| `"roadmap_12mo"` \| `"mixed"` — see `competitive-analysis-methodology.md` §7. Absence means not declared; never rendered as `"shipped"` by default (resolution #12 above). |
 | `accepted_warnings` | object[] | no | Warnings the agent acknowledges. Only medium-severity codes can be accepted. |
 | `metadata` | object | yes | `{run_id}` |
 
-> **⚠ Common mistake — `moat_assessments`:** This MUST be a **dict keyed by company slug**, NOT an array of objects. `score_moats.py` has a compatibility shim that normalizes arrays, but canonical artifacts must use the dict format. Scoring scripts have compatibility shims, but always use canonical format — other consumers may not normalize.
+> **⚠ Common mistake — `moat_assessments`:** When present, this MUST be a **dict keyed by company slug**, NOT an array of objects. `score_moats.py` has a compatibility shim that normalizes arrays, but canonical artifacts must use the dict format. Scoring scripts have compatibility shims, but always use canonical format — other consumers may not normalize.
 > ```json
 > "moat_assessments": {
 >   "_startup": {"moats": [...]},
@@ -325,28 +402,32 @@ Contains the canonical positioning views, moat assessments, differentiation stre
 | `evidence` | string | yes | Evidence supporting the rating. Required even for `not_applicable` (must explain why). |
 | `evidence_source` | string | yes | `"researched"`, `"agent_estimate"`, or `"founder_override"` |
 | `trajectory` | string | yes | `"building"`, `"stable"`, or `"eroding"` |
+| `source` | string | no (soft-required when `evidence_source` is `"researched"`) | URL or the exact search query that produced a `"researched"` value — lets the main thread spot-check the claim later. `score_moats.py` warns (`RESEARCHED_WITHOUT_SOURCE`, medium, acceptable) rather than fails when missing, since a source may legitimately be a query string, not a URL. |
 
 ### differentiation_claims[] entry
 
-| Field | Type | Required | Description |
+In the pre-dispatch draft (what the main thread writes into `positioning.json` in Step 5), only `claim` is required — see the DRAFT note on the top-level field above. The remaining columns describe the fully stress-tested shape as it appears in `positioning_scores.json`.
+
+| Field | Type | Required (draft) | Description |
 |-------|------|----------|-------------|
 | `claim` | string | yes | The differentiation claim being tested |
-| `verifiable` | boolean | yes | Can this claim be independently verified? |
-| `evidence` | string | yes | Evidence supporting or challenging the claim |
-| `challenge` | string | yes | What an investor would push on |
-| `verdict` | string | yes | `"holds"`, `"partially_holds"`, or `"does_not_hold"` |
+| `verifiable` | boolean | no (draft) | Can this claim be independently verified? Populated by POSITIONING_SCORING; absent in the pre-dispatch draft. |
+| `evidence` | string | no (draft) | Evidence supporting or challenging the claim. Populated by POSITIONING_SCORING; absent in the pre-dispatch draft. |
+| `challenge` | string | no (draft) | What an investor would push on. Populated by POSITIONING_SCORING; absent in the pre-dispatch draft. |
+| `verdict` | string | no (draft) | `"holds"`, `"partially_holds"`, or `"does_not_hold"`. Populated by POSITIONING_SCORING; absent in the pre-dispatch draft. **Read stress-tested verdicts from `positioning_scores.json`, not from a draft absent this field.** |
 
 ### accepted_warnings[] entry
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `code` | string | yes | Warning code (medium-severity only: `MISSING_DO_NOTHING`, `SHALLOW_COMPETITOR_PROFILE`, `VANITY_AXIS_WARNING`, `MOAT_WITHOUT_EVIDENCE`, `RESEARCH_DEPTH_LOW`) |
+| `code` | string | yes | Warning code. Any medium-severity code can be accepted: `MISSING_DO_NOTHING`, `SHALLOW_COMPETITOR_PROFILE`, `VANITY_AXIS_WARNING`, `MOAT_WITHOUT_EVIDENCE`, `RESEARCH_DEPTH_LOW`, `MISSING_CANONICAL_MOAT`, `INCOMPLETE_SCORING`. High-severity codes are never acceptable. |
 | `match` | string | yes | Case-insensitive substring to match against warning message |
 | `reason` | string | yes | Why this warning is expected/acceptable |
 
-**Example:**
+**Example** (final, post-merge-back state — `points[]` and `differentiation_claims[]` carry the sub-agents' scored values after the Step 5 merges; the pre-dispatch draft that the main thread writes first has placeholder `points[]` and `claim`-only `differentiation_claims[]`, and typically omits `moat_assessments` entirely):
 ```json
 {
+  "scoring_basis": "shipped",
   "views": [
     {
       "id": "primary",
@@ -457,7 +538,7 @@ Contains the canonical positioning views, moat assessments, differentiation stre
 
 ## landscape.json
 
-**Producer:** `validate_landscape.py` (Step 6a)
+**Producer:** `validate_landscape.py` (Step 4)
 
 Validated, normalized competitor list. This is an **exported artifact** consumed by downstream skills (deck-review, fundraise-readiness). Does NOT contain `_startup` — only competitors.
 
@@ -466,6 +547,7 @@ Validated, normalized competitor list. This is an **exported artifact** consumed
 | `competitors` | object[] | yes | Validated competitor entries |
 | `input_mode` | string | yes | `"deck"`, `"conversation"`, or `"document"` |
 | `warnings` | object[] | yes | Validation warnings (may be empty) |
+| `suggested_additions` | object[] | no | Passed through verbatim from whatever the main thread piped into `validate_landscape.py` (same shape as the LANDSCAPE_RESEARCH payload's `suggested_additions[]` entry, above). By the time this is piped, approved entries have already been relocated into `competitors[]` and removed from this array by the main thread — so every entry that survives to `landscape.json` is a DECLINED one, still carrying `merged: false`. This is what lets coaching commentary cite "you flagged X as not-a-competitor" without the array also carrying redundant already-merged entries. `merged: true` should never appear in this array on a canonical artifact; its presence indicates a mis-executed merge. |
 | `metadata` | object | yes | `{run_id}` |
 
 ### competitors[] entry
@@ -479,6 +561,7 @@ Validated, normalized competitor list. This is an **exported artifact** consumed
 | `key_differentiators` | string[] | yes | Differentiators |
 | `research_depth` | string | yes | `"full"`, `"partial"`, or `"founder_provided"` (preserved from enriched) |
 | `evidence_source` | object | yes | Per-field provenance (preserved from enriched) |
+| `recent_developments` | object[] | no | Preserved from enriched; see the enriched-landscape table above for the entry shape and validation rules. |
 | `sourced_fields_count` | integer | yes | Count of researched fields (preserved from enriched) |
 
 ### warnings[] entry
@@ -516,6 +599,16 @@ Validated, normalized competitor list. This is an **exported artifact** consumed
   ],
   "input_mode": "conversation",
   "warnings": [],
+  "suggested_additions": [
+    {
+      "name": "Wallarm",
+      "slug": "wallarm",
+      "category": "direct",
+      "rationale": "Multiple G2 reviews mention Wallarm as a Salt Security alternative in API security",
+      "partial_profile": {"description": "API security and WAAP platform", "funding": "Series A, $10M"},
+      "merged": false
+    }
+  ],
   "metadata": {"run_id": "20260319T143045Z"}
 }
 ```
@@ -524,7 +617,7 @@ Validated, normalized competitor list. This is an **exported artifact** consumed
 
 ## moat_scores.json
 
-**Producer:** `score_moats.py` (Step 6b)
+**Producer:** `score_moats.py` (Step 5)
 
 Per-company moat scores with aggregates and cross-company comparison.
 
@@ -603,7 +696,7 @@ Per-company moat scores with aggregates and cross-company comparison.
 
 ## positioning_scores.json
 
-**Producer:** `score_positioning.py` (Step 6c)
+**Producer:** `score_positioning.py` (Step 5)
 
 Per-view positioning quality scores with vanity flags and rank-based differentiation.
 
@@ -611,7 +704,8 @@ Per-view positioning quality scores with vanity flags and rank-based differentia
 |-------|------|----------|-------------|
 | `views` | object[] | yes | Per-view scoring results |
 | `overall_differentiation` | number | yes | 0-100 aggregate differentiation score across all views |
-| `differentiation_claims` | object[] | yes | Passed through from `positioning.json` |
+| `differentiation_claims` | object[] | yes | **Authoritative** — the full stress-tested claims (with `verifiable`/`evidence`/`challenge`/`verdict`) from the POSITIONING_SCORING sub-agent's hand-off, passed through by `score_positioning.py`. `positioning.json`'s pre-dispatch draft carries `claim` text only (see that file's DRAFT note) — any consumer that needs stress-tested verdicts reads them from here, not from `positioning.json`. |
+| `scoring_basis` | string | no | Passed through from the hand-off. `"shipped"` \| `"roadmap_12mo"` \| `"mixed"` — see `competitive-analysis-methodology.md` §7. Absence means not declared; never rendered as `"shipped"` by default. |
 | `warnings` | object[] | yes | Quality warnings (may be empty) |
 | `metadata` | object | yes | `{run_id}` |
 
@@ -661,6 +755,7 @@ Per-view positioning quality scores with vanity flags and rank-based differentia
       "verdict": "holds"
     }
   ],
+  "scoring_basis": "shipped",
   "warnings": [],
   "metadata": {"run_id": "20260319T143045Z"}
 }
@@ -670,7 +765,7 @@ Per-view positioning quality scores with vanity flags and rank-based differentia
 
 ## checklist.json
 
-**Producer:** `checklist.py` (Step 6d)
+**Producer:** `checklist.py` (Step 6)
 
 Quality criteria evaluation for the competitive analysis.
 
@@ -737,7 +832,7 @@ Quality criteria evaluation for the competitive analysis.
 
 ## report.json
 
-**Producer:** `compose_report.py` (Step 6e)
+**Producer:** `compose_report.py` (Step 7)
 
 Final assembled report with cross-artifact validation.
 
@@ -853,7 +948,6 @@ Stubs are recognized by `compose_report.py` and bypass related validation checks
 It does NOT appear in:
 - `landscape.json` — which contains only competitors
 - `landscape_draft.json` — which contains only competitors
-- `landscape_enriched.json` — which contains only competitors
 
 All downstream scripts and cross-artifact validation exempt `_startup` from competitor-matching checks. It is not an orphan. Specifically:
 - `validate_landscape.py` — ignores `_startup` (it is not in the competitor list)
@@ -869,15 +963,25 @@ All downstream scripts and cross-artifact validation exempt `_startup` from comp
 | Code | Severity | Trigger | `--strict` |
 |------|----------|---------|------------|
 | `MISSING_LANDSCAPE` | high | `landscape.json` not found | exit 1 |
+| `MISSING_POSITIONING` | high | `positioning.json` not found | exit 1 |
 | `MISSING_POSITIONING_SCORES` | high | `positioning_scores.json` not found | exit 1 |
 | `MISSING_MOAT_SCORES` | high | `moat_scores.json` not found | exit 1 |
 | `MISSING_CHECKLIST` | high | `checklist.json` not found | exit 1 |
-| `CORRUPT_ARTIFACT` | high | Artifact exists but fails JSON parse or required field missing | exit 1 |
+| `CORRUPT_ARTIFACT` | high | Artifact exists but fails JSON parse, is not a JSON object, or fails a cross-artifact integrity check (orphan/axis mismatch) | exit 1 |
 | `STALE_ARTIFACT` | high | `run_id` mismatch across artifacts | exit 1 |
+| `UNVALIDATED_ARTIFACT` | high | Artifact exists but `_produced_by` does not match its producer script (written by hand instead of run through the script) | exit 1 |
 | `MISSING_DO_NOTHING` | medium | No `do_nothing` or `adjacent` competitor in landscape | can be accepted |
 | `SHALLOW_COMPETITOR_PROFILE` | medium | Competitor with `research_depth: "partial"` and `sourced_fields_count < 3` | can be accepted |
 | `VANITY_AXIS_WARNING` | medium | Axis flagged as vanity by `score_positioning.py` | can be accepted |
 | `MOAT_WITHOUT_EVIDENCE` | medium | Moat rated `strong` with evidence <20 chars | can be accepted |
 | `RESEARCH_DEPTH_LOW` | medium | Global `research_depth: "founder_provided"` with <4 competitors having `sourced_fields_count >= 3` | can be accepted |
+| `MISSING_CANONICAL_MOAT` | medium | A company is missing one of the 6 canonical moat dimensions | can be accepted |
+| `INCOMPLETE_SCORING` | medium | A landscape competitor is missing from `moat_scores` or positioning views | can be accepted |
+| `RESEARCHED_WITHOUT_SOURCE` | medium | A moat entry or competitor field is stamped `evidence_source: "researched"` with no matching `source`/`sources` citation | can be accepted |
+| `NO_RECENT_DEVELOPMENTS` | medium | EVERY competitor has an empty or absent `recent_developments` — a signal of shallow research, not of a static market | can be accepted |
 | `FOUNDER_OVERRIDE_COUNT` | low | N positioning coordinates or moat ratings have `evidence_source: "founder_override"` | report only |
-| `SEQUENTIAL_FALLBACK` | info | `assessment_mode: "sequential"` in `landscape_enriched.json` | report only |
+| `MARKER_COLLISION` | low | Report body contains the coaching-marker substring (informational; the per-run uuid prevents real collisions) | report only |
+| `SEQUENTIAL_FALLBACK` | info | `assessment_mode: "sequential"` in `positioning.json` or `landscape.json` | report only |
+| `CHECKLIST_ALL_PASS` | info | Every checklist item passed (flagged to review for self-grading bias) | report only |
+
+**Accepting medium-severity warnings:** `accepted_warnings[]` can accept *any* medium-severity code, not only the five most common ones — so `MISSING_CANONICAL_MOAT` and `INCOMPLETE_SCORING` are acceptable too. High-severity codes are integrity violations and can never be accepted.

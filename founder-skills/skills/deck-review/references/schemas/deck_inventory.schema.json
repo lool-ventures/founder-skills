@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "deck_inventory",
   "type": "object",
-  "required": ["metadata", "company_name", "review_date", "input_format", "total_slides", "slides"],
+  "required": ["metadata", "company_name", "review_date", "input_format", "total_slides", "slides", "ai_company_status"],
   "properties": {
     "metadata": {
       "type": "object",
@@ -17,9 +17,18 @@
     "review_date": {"type": "string"},
     "input_format": {"type": "string", "enum": ["pdf", "pptx", "markdown", "text"]},
     "total_slides": {"type": "integer"},
-    "claimed_stage": {"type": "string"},
-    "claimed_raise": {"type": "string"},
     "input_quality": {"type": "string", "enum": ["good", "image_only", "partial"]},
+    "claimed_stage": {"type": ["string", "null"], "description": "Stage the deck itself states, as a stage token (pre_seed, seed, series_a, series_b, growth). Omit or set null when the deck never states a stage — do not invent a descriptive value."},
+    "claimed_raise": {"type": "string"},
+    "ai_company_status": {
+      "type": "string",
+      "enum": ["ai_core", "ai_claimed_unverified", "not_ai"],
+      "description": "Deterministic AI classification: 'ai_core' if AI/ML is genuinely core to the product with evidence; 'ai_claimed_unverified' if the deck claims AI but no core-AI signals are present; 'not_ai' if no AI claim and not AI."
+    },
+    "ai_evidence": {
+      "type": "string",
+      "description": "Evidence or claim found for AI classification. Recommended when ai_company_status is not 'not_ai'."
+    },
     "slides": {
       "type": "array",
       "items": {

@@ -118,6 +118,18 @@ _STAGE_TABLE: dict[str, _StageEntry] = {
 }
 
 
+def _normalize_stage_arg(value: str) -> str:
+    """Coerce a stage CLI arg to this skill's canonical underscore form.
+
+    The shared founder context stores the hyphenated spelling, and sibling skills
+    mix separators for the same token. argparse applies type= BEFORE choices=, so
+    this accepts either spelling without widening the valid set. Without it, a
+    stage read from founder context reaches this flag in the wrong dialect and
+    argparse exits 2 — a break that only prose currently prevents.
+    """
+    return value.strip().lower().replace("-", "_").replace(" ", "_")
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Producer for stage_profile.json")
     p.add_argument("--run-id", required=True)
@@ -125,8 +137,16 @@ def main() -> int:
     p.add_argument("--pretty", action="store_true")
     p.add_argument(
         "--rebuild-stage",
+        type=_normalize_stage_arg,
         choices=sorted(_STAGE_TABLE.keys()),
         help="Rebuild for a founder-corrected stage; framework/benchmarks come from internal table",
+    )
+    p.add_argument(
+        "--confidence",
+        choices=["high", "low"],
+        default="high",
+        help="Confidence to record on a --rebuild-stage (high when founder picked a different "
+        "stage; low when they were unsure / proceeding best-effort)",
     )
     args = p.parse_args()
 
@@ -144,9 +164,12 @@ def main() -> int:
     if args.rebuild_stage:
         original_stage = data.get("detected_stage", "unknown")
         data["detected_stage"] = args.rebuild_stage
-        data["confidence"] = "high"
+        data["confidence"] = args.confidence
         evidence = list(data.get("evidence", []))
-        evidence.append(f"Founder corrected stage from {original_stage} to {args.rebuild_stage}")
+        if args.confidence == "low" and args.rebuild_stage == original_stage:
+            evidence.append("Founder unsure; proceeding with detected stage at low confidence")
+        else:
+            evidence.append(f"Founder corrected stage from {original_stage} to {args.rebuild_stage}")
         data["evidence"] = evidence
         data["expected_framework"] = list(_STAGE_TABLE[args.rebuild_stage]["expected_framework"])
         data["stage_benchmarks"] = dict(_STAGE_TABLE[args.rebuild_stage]["stage_benchmarks"])

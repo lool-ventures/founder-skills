@@ -1,0 +1,103 @@
+{
+  "views": [
+    {
+      "view_id": "primary",
+      "x_axis_name": "AI-Native Workflow Automation",
+      "y_axis_name": "Installed Base / Distribution Reach",
+      "x_axis_rationale": "Acmecorp's core differentiation claim is automated bookkeeping via AI; this axis directly tests that claim against incumbents' recently-added AI features and against Pilot's human-powered automation.",
+      "y_axis_rationale": "Distribution reach is the table-stakes dimension incumbents dominate; pairing it with automation depth shows whether Acmecorp's product edge is offset by a distribution disadvantage.",
+      "x_axis_vanity_flag": false,
+      "y_axis_vanity_flag": false,
+      "differentiation_score": 36.2,
+      "startup_x_rank": 1,
+      "startup_y_rank": 5,
+      "competitor_count": 5,
+      "points": [
+        {
+          "competitor": "_startup",
+          "x": 85,
+          "y": 30,
+          "x_evidence": "AI-assisted categorization covers ~70% of transactions automatically at launch, positioned as the core product wedge.",
+          "y_evidence": "300 customers, 9 months live \u2014 limited installed base and no accountant-channel distribution yet.",
+          "x_evidence_source": "founder_override",
+          "y_evidence_source": "researched"
+        },
+        {
+          "competitor": "quickbooks-online",
+          "x": 40,
+          "y": 95,
+          "x_evidence": "New AI categorization feature launched 2025-09 but layered onto an otherwise manual-entry-heavy legacy workflow.",
+          "y_evidence": "Largest SMB accounting install base by a wide margin, decades of accountant-channel distribution.",
+          "x_evidence_source": "researched",
+          "y_evidence_source": "researched"
+        },
+        {
+          "competitor": "xero",
+          "x": 35,
+          "y": 75,
+          "x_evidence": "Bank-feed reconciliation is strong but categorization automation is comparable to QuickBooks, not more advanced.",
+          "y_evidence": "Large international installed base, weaker specifically in the US.",
+          "x_evidence_source": "agent_estimate",
+          "y_evidence_source": "researched"
+        },
+        {
+          "competitor": "freshbooks",
+          "x": 25,
+          "y": 40,
+          "x_evidence": "Invoicing-first tool; minimal automated bookkeeping categorization beyond basic rules.",
+          "y_evidence": "Meaningful base among freelancers but far smaller than the two leaders and not the same buyer segment.",
+          "x_evidence_source": "agent_estimate",
+          "y_evidence_source": "agent_estimate"
+        },
+        {
+          "competitor": "pilot-com",
+          "x": 60,
+          "y": 20,
+          "x_evidence": "High automation of outcomes, but achieved via a human bookkeeping team layered on software rather than pure AI automation.",
+          "y_evidence": "Reaches a meaningful slice of VC-backed startups but a much smaller addressable base than SMB-wide players.",
+          "x_evidence_source": "researched",
+          "y_evidence_source": "agent_estimate"
+        },
+        {
+          "competitor": "manual-spreadsheets",
+          "x": 5,
+          "y": 50,
+          "x_evidence": "No automation by definition \u2014 a spreadsheet plus a human bookkeeper.",
+          "y_evidence": "Still the most common approach among very early-stage SMBs, so nominal 'installed base' is large but diffuse and unbranded.",
+          "x_evidence_source": "agent_estimate",
+          "y_evidence_source": "agent_estimate"
+        }
+      ]
+    }
+  ],
+  "overall_differentiation": 36.2,
+  "differentiation_claims": [
+    {
+      "claim": "AI-powered bookkeeping automates 70%+ of transaction categorization with no manual rules setup",
+      "verifiable": true,
+      "evidence": "Founder-reported figure from internal product metrics; QuickBooks' comparable AI categorization feature (launched 2025-09) has not published an equivalent automation-rate figure, so no independent competitor benchmark exists.",
+      "challenge": "70% is self-reported and unaudited. What's the false-categorization rate, and how was 70% measured \u2014 all transactions, or only ones the model had prior training exposure to?",
+      "verdict": "partially_holds"
+    },
+    {
+      "claim": "Cuts SMB bookkeeping time by 80% versus manual methods",
+      "verifiable": true,
+      "evidence": "Consistent directionally with the AI-categorization claim and with the reported 18% MoM growth, but no time-motion study or customer-reported before/after benchmark was provided.",
+      "challenge": "80% is a strong, specific number with no independent measurement behind it. Can you show a time-tracked before/after case study from an actual customer?",
+      "verdict": "partially_holds"
+    },
+    {
+      "claim": "Differentiated from QuickBooks/Xero because they are legacy manual-entry tools",
+      "verifiable": true,
+      "evidence": "QuickBooks shipped an AI-assisted categorization feature in September 2025 across all tiers \u2014 the 'legacy manual-entry' framing is now dated by roughly 8 months as of this analysis.",
+      "challenge": "QuickBooks has already shipped a comparable AI feature. What is the actual gap between your categorization accuracy/coverage and theirs, rather than the binary 'they're manual, we're not' framing?",
+      "verdict": "does_not_hold"
+    }
+  ],
+  "warnings": [],
+  "_produced_by": "score_positioning",
+  "metadata": {
+    "run_id": "fixture-competitive-positioning-001"
+  },
+  "scoring_basis": "shipped"
+}

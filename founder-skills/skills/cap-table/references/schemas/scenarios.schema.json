@@ -14,7 +14,25 @@
           "label": {"type": "string"},
           "type": {"enum": ["safe_conversion", "note_conversion", "priced_round", "flip"]},
           "chained_from_scenario_id": {"type": ["string", "null"], "default": null, "description": "If set, this scenario runs against the post-round cap_state from the named parent scenario (§6.7). If null, runs against original pre-financing cap_state. Validator rejects cycles with E_SCENARIO_CHAIN_CYCLE."},
-          "parameters": {"type": "object"},
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "mfn_elections": {
+                "description": "Optional map {electing_safe_id: elected_against_safe_id} directing each yc_uncapped_mfn SAFE to inherit a specific sibling's terms for this scenario. Documentation only: shape is enforced at runtime in priced_round._apply_mfn_election_overrides (E_MFN_ELECTIONS_BAD_SHAPE), NOT by this schema (the local validator declares no 'type' here so a malformed value reaches the runtime guard instead of failing artifact validation)."
+              },
+              "pre_money_basis": { "enum": ["includes_safe_conversion", "excludes_safe_conversion"], "default": "includes_safe_conversion" },
+              "pool_consideration_basis": { "enum": ["include", "exclude"], "default": "include" },
+              "acquisition": {
+                "type": "object",
+                "properties": {
+                  "acquired_entity": { "type": "string" },
+                  "consideration_pct": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+                  "consideration_form": { "const": "shares" },
+                  "acquisition_timing": { "enum": ["concurrent_with_round", "pre_round_closed"] }
+                }
+              }
+            }
+          },
           "computed_outputs": {
             "type": "object",
             "required": ["completeness", "math_provenance", "blockers"],

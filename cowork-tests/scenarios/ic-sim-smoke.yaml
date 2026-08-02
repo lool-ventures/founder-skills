@@ -1,0 +1,78 @@
+name: ic-sim-smoke
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: first   # gates here are immaterial to the asserts; option-1 is paraphrase-proof (anchor-discipline rule)
+skills: [ic-sim]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
+
+# Phase 1 fleet-parity smoke — ic-sim (conversational lane, Cadence deal).
+# ic-sim dispatches THREE partner archetypes in parallel (visionary/operator/analyst) plus sequential
+# conflict/score/coaching dispatches — a multi-dispatch shape; do not assert a single-dispatch pattern.
+# Rich, self-sufficient prompt so no gate fires (matches the prior live run where gateDeliveries was
+# empty); on_unanswered: first backstops any confirmation gate.
+# Slug + gate shape confirmed at the 0.24.0 discovery re-record.
+prompt: |
+  Simulate a VC investment-committee discussion for a seed deal in Cadence, a US Delaware C-corp
+  building field-service scheduling/dispatch SaaS for SMB service businesses. Deal: $4,000,000 round
+  at a $16,000,000 pre-money. Traction: $40K MRR, 18% MoM growth over the last 4 months, 120 paying
+  customers, ~$1,200 CAC, gross margin ~80%. Team: two technical co-founders (ex-Stripe eng, ex-Notion
+  product). Use the ic-sim skill to run the full IC simulation across all three partner archetypes and
+  produce the report.
+
+assert:
+  - result: success
+  # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
+  # the deliverable but stranded steps, which result:success alone misses.
+  - all_tasks_completed: true
+  - file_exists: outputs/artifacts/ic-sim-cadence/report.json
+  # artifact_json reads the artifact BODY, which the cassette truncates above 64KB. ic-sim's report.json
+  # runs ~44KB (closest of the fleet to the cap; verbosity drifts upward), so assert a SMALL bounded
+  # artifact instead — fund_profile.json is ~3KB — to keep clear of the cap + the 0.5.0 record-time
+  # truncation guard. file_exists above (manifest-backed) still proves report.json at the resolver path.
+  - artifact_json:
+      artifact: outputs/artifacts/ic-sim-cadence/fund_profile.json
+      path: fund_name
+      exists: true
+  # ic-sim dispatches with agentType 'unknown' (no subagent_type), so match the dispatch
+  # DESCRIPTION (per SKILL.md gotcha #5): the 3-partner fan-out + IC scoring/coaching.
+  - subagent_dispatched: 'archetype|Partner analysis|IC simulation|IC dimensions|coaching commentary'
+  # Context-B coaching hand-off: the coaching sub-agent WRITES its commentary to the
+  # handoff file (file transport, not the message channel) with a paired non-error
+  # result — guards the first leg of the "## Coaching Commentary" insertion chain.
+  # Tier-agnostic + replay-checkable. NOTE: the hand-off filename is `coaching.md`
+  # (raw markdown, wrapped by md_to_commentary.py). It was
+  # `coaching_commentary_output.json` when the current cassettes were recorded, so this
+  # assert FAILS under `--reassert` until the next re-record and passes after it — the
+  # same expected-until-re-record class as the `input_unmodified` upload guards.
+  - subagent_file_write:
+      path_suffix: coaching.md
+  # Per-dispatch correlation: ties THIS dispatch's resolved type to ITS OWN delivered
+  # write via parentToolUseId, which subagent_file_write (matching ANY sub-agent write)
+  # cannot do.
+  - subagent_dispatch_healthy:
+      type: 'ic-sim'
+  # host-path posture: hostloop exposes real host paths by design; the leak class is covered
+  # by the container-tier host-path-canary scenario + the privacy scan's path class on cassettes.
+  # --- fleet contract asserts (adopted at the 0.24.0 pin; budgets tightened from discovery actuals) ---
+  # The pipeline entered through the Skill tool (prefix-tolerant; id shape confirmed at discovery).
+  - skill_triggered: '(founder-skills:)?ic-sim$'
+  # Every computer:// deliverable link shared with the founder must resolve (zero links pass).
+  - computer_links_resolve: true
+  # No delete under outputs/ (live-lane key; replay skips it loudly).
+  - no_delete_in_outputs: true
+  # Dispatch contract: sub-agents declare no Bash (agents/*.md) — regression tripwire.
+  - subagent_tool_absent: 'Bash'
+  # Usability budget: gates asked before value (observed + headroom, from discovery).
+  - questions_count_max: 8
+  # Author-chosen dispatch budget (production has NO Task-fan-out cap; this is an
+  # efficiency tripwire, not a platform mirror). tightened from discovery actuals (observed x1.5).
+  - dispatch_count_max: 9
+  # Efficiency budgets — generous ceilings; tightened to observed x1.5 post-record.
+  - max_turns: 130
+  - tool_calls_max: 120
+  # Stray-file guard (new-files-only; overwrite-in-place is covered by producer stamps).
+  # Allowlist = artifact namespace (incl. handoff/**) + founder-context sidecar + promoted
+  # deliverables. Pre-0.24 cassettes exclude loudly (no preRunPaths). tightened from discovery actuals (observed x1.5).
+  - no_unexpected_files:
+      - 'outputs/artifacts/ic-sim-cadence/**'
+      - 'outputs/artifacts/founder-context-cadence.json'
+      - 'outputs/Cadence_IC_Simulation.*'

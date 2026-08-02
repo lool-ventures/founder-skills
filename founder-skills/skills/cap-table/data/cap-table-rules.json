@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "version": "0.4.0",
+    "version": "0.4.1",
     "generated_date": "2026-05-21",
     "purpose": "Verified source-backed rule pack for the cap-table skill: SAFE conversion, convertible-note math, option-pool top-up, anti-dilution (including coupled-AD priced-round variants), Israeli equity-tax + AoA gotchas, Delaware cross-border / flip mechanics, and founder benchmarks. Every rule cites a primary or near-primary source (NVCA Model Certificate of Incorporation, Y Combinator SAFE primer / documents, Cooley GO down-round article, Israeli Companies Law / Income Tax Ordinance, Carta benchmarks, etc.). Version history lives in CHANGELOG.md.",
     "source_policy": "Rules cite original quotable legal documents, issuer documents, official agency pages, law-firm publications, and benchmark datasets. AI research notes and intermediate consolidated files are excluded from final references."
@@ -23,7 +23,25 @@
       "url": "https://www.ycombinator.com/documents",
       "source_type": "primary",
       "accessed_date": "2026-05-18",
-      "notes": "Primary source for current YC SAFE forms, including post-money valuation cap, discount, MFN, and pro rata side letter forms."
+      "notes": "Primary source for current (post-money) YC SAFE forms, including post-money valuation cap, discount, MFN, and pro rata side letter forms. The pre-Oct-2018 pre-money forms are no longer hosted at this URL; see YC-PREMONEY-SAFE-CAP-ARCHIVED and YC-PREMONEY-SAFE-PRIMER-ARCHIVED for archived copies."
+    },
+    {
+      "source_id": "YC-PREMONEY-SAFE-CAP-ARCHIVED",
+      "title": "YC Pre-Money SAFE (Valuation Cap) — archived form document",
+      "publisher": "Y Combinator",
+      "url": "https://web.archive.org/web/2018/https://www.ycombinator.com/docs/SAFE_Cap.rtf",
+      "source_type": "primary",
+      "accessed_date": "2026-06-13",
+      "notes": "Wayback-archived copy of the original YC pre-money SAFE with Valuation Cap (pre-Oct-2018 form). Authoritative for §(a)(1)/(a)(2) conversion branch logic and the Company Capitalization definition (which includes in-connection pool top-up). Primary source for rule safe.pre_money_cap_conversion."
+    },
+    {
+      "source_id": "YC-PREMONEY-SAFE-PRIMER-ARCHIVED",
+      "title": "YC Pre-Money SAFE Primer — archived explanatory document",
+      "publisher": "Y Combinator",
+      "url": "https://web.archive.org/web/2018/https://www.ycombinator.com/docs/SAFE_Primer.rtf",
+      "source_type": "primary",
+      "accessed_date": "2026-06-13",
+      "notes": "Wayback-archived copy of the original YC pre-money SAFE Primer. Corroborates the §(a)(1) branch (round price when pre-money ≤ cap) and the pool-increase inclusion in Company Capitalization. Primary source for rule safe.pre_money_cap_conversion."
     },
     {
       "source_id": "YC-STANDARD-DEAL",
@@ -120,14 +138,24 @@
       "notes": "Benchmark dataset for US seed/post-seed note terms. Source-of-truth for conversion-trigger prevalence, maturity ranges, interest-rate distributions, and qualified-financing thresholds. Companion quarterly PDFs at https://www.wsgr.com/a/web/oFpGWcMXTLsUML5oSHyxfm/entrepreneurs-report-q2-2025.pdf and https://ecvc.wsgr.com/a/web/vgnKwoeAkUKT6MTc96jYem/entrepreneurs-report-q1-2025.pdf."
     },
     {
-      "source_id": "ITA-SAFE-2025-MASLAW",
-      "title": "Israeli Tax Authority Issues New Guidelines on SAFE",
-      "publisher": "Maslaw",
-      "url": "https://www.maslaw.co.il/wp-content/uploads/2025/02/Israeli-Tax-Authority-Issues-New-Guidelines-on-SAFE.pdf",
+      "source_id": "ITA-SAFE-2025-PRIMARY",
+      "title": "Income Tax Authority procedures 290125 — SAFE taxation guidance (Hebrew)",
+      "publisher": "Israel Tax Authority (gov.il)",
+      "url": "https://www.gov.il/BlobFolder/policy/procedures-290125/he/IncomeTax_procedures-290125.pdf",
+      "source_type": "primary",
+      "publication_date": "2025-01-29",
+      "accessed_date": "2026-06-13",
+      "notes": "Primary ITA circular (Hebrew, gov.il-hosted PDF dated 29 Jan 2025; content-type application/pdf, verified reachable 2026-06-13). Applies to SAFEs signed Jan 1 2025 through Dec 31 2026 unless superseded; sets the safe-harbor conditions (advance-payment-for-shares treatment when the instrument is not titled/structured as debt, and a 12-month-from-signing or 9-month-from-allocation holding period). English law-firm summaries Herzog (ITA-SAFE-2025-HERZOG) and Pearl Cohen (PEARLCOHEN-SAFE-2025) corroborate. Hebrew text controls; use counsel review before implementation."
+    },
+    {
+      "source_id": "ITA-SAFE-2025-HERZOG",
+      "title": "The ITA Publishes an Updated Version of Its Guidance and Safe Harbor for SAFEs",
+      "publisher": "Herzog Law",
+      "url": "https://herzoglaw.co.il/en/news-and-insights/the-ita-publishes-an-updated-version-of-its-guidance-and-safe-harbor-for-safes/",
       "source_type": "strong_secondary",
       "publication_date": "2025-02",
-      "accessed_date": "2026-05-18",
-      "notes": "English law-firm summary of the January 2025 ITA SAFE guidance. Use counsel review before implementation."
+      "accessed_date": "2026-06-12",
+      "notes": "English law-firm summary of the January 2025 ITA SAFE guidance. Verbatim: 'The Updated Guidance applies to SAFEs signed between January 1, 2025, and December 31, 2026, unless revised guidance is issued prior to that date.' Corroborated by Arnon Tadmor-Levy (https://arnontl.com/news/updated-guidelines-israel-tax-authority-regarding-safe-transactions/): '...from January 1, 2025, to December 31, 2026, or until the publication of a new directive...whichever is earlier.' Use counsel review before implementation."
     },
     {
       "source_id": "PEARLCOHEN-SAFE-2025",
@@ -250,7 +278,7 @@
       "source_type": "benchmark_dataset",
       "publication_date": "2026",
       "accessed_date": "2026-05-18",
-      "notes": "Founder ownership benchmark dataset through IPO and by stage."
+      "notes": "Founder ownership benchmark dataset by stage and sector. carta.com 403-blocks automated fetchers; verified live in-browser 2026-06-13 — the 2026 report states median founder ownership ~56% at seed and ~36% at Series A (rounds raised 2021-2025), and at Series B 27.3% for AI vs 21.8% for non-AI founding teams. Cited as benchmark-only/observational; no hardcoded figure relies on it."
     },
     {
       "source_id": "CARTA-FOUNDER-2025",
@@ -260,7 +288,7 @@
       "source_type": "benchmark_dataset",
       "publication_date": "2025",
       "accessed_date": "2026-05-18",
-      "notes": "Earlier founder ownership benchmark dataset used for trend comparison."
+      "notes": "Earlier founder ownership benchmark dataset used for trend comparison. carta.com 403-blocks automated fetchers; verified live in-browser 2026-06-13 — the 2025 report (>45,000 startups incorporated 2015-2024) states the median founding team owns 56.2% after seed, 36.1% after Series A, and 23% after Series B. Cited as benchmark-only/observational; no hardcoded figure relies on it."
     },
     {
       "source_id": "F2-ISRAEL-2024",
@@ -481,11 +509,12 @@
         "domain": "safe",
         "behavior_target": "script_formula",
         "title": "Pre-money (legacy) SAFE cap conversion",
-        "summary": "For a YC pre-money SAFE (legacy form, used by YC pre-Oct-2018) with a valuation cap, the conversion price equals the pre-money valuation cap divided by the PRE-FINANCING fully-diluted snapshot. Unlike post-money SAFEs, the SAFE's percentage of post-money is NOT fixed at purchase/cap; the SAFE dilutes alongside founders when new money and any pool refresh land.",
+        "summary": "For a YC pre-money SAFE (legacy form, used by YC pre-Oct-2018) with a valuation cap, the equity-financing conversion has two branches per §(a)(1)/(a)(2): (1) if the round pre-money valuation ≤ cap, the investor receives Standard Preferred Stock at the round price; (2) if the round pre-money valuation > cap, the investor receives Safe Preferred Stock at the Safe Price = cap / Company Capitalization, where Company Capitalization includes shares reserved for issuance under any equity incentive plan to be created or increased in connection with the Equity Financing (the in-connection pool top-up). The SAFE's percentage of post-money is NOT fixed; pre-money SAFEs dilute alongside founders when new money and pool refresh land.",
         "implementation_action": "hardcode",
         "confidence": "high",
         "source_ids": [
-          "YC-SAFE-DOCUMENTS"
+          "YC-PREMONEY-SAFE-CAP-ARCHIVED",
+          "YC-PREMONEY-SAFE-PRIMER-ARCHIVED"
         ],
         "source_basis": "primary",
         "counsel_review": false,
@@ -505,9 +534,15 @@
             "required": true
           },
           {
+            "name": "pre_money_valuation",
+            "type": "money",
+            "description": "Pre-money valuation of the equity financing round. Required to select the §(a)(1) branch (≤ cap → round price) vs §(a)(2) branch (> cap → Safe Price). When absent the §(a)(2) cap-price path is used as a conservative fallback.",
+            "required": false
+          },
+          {
             "name": "pre_money_fully_diluted_shares",
             "type": "decimal",
-            "description": "Pre-financing fully-diluted snapshot: founders + issued preferred (as-converted) + outstanding options + unissued option pool, BEFORE the SAFE itself converts and BEFORE new money and any pool refresh.",
+            "description": "Company Capitalization immediately prior to the Equity Financing per the YC pre-money SAFE document: founders + issued preferred (as-converted) + outstanding options + unissued option pool, BEFORE the SAFE itself converts and BEFORE new money, AND INCLUDING shares reserved for any equity incentive plan to be created or increased in connection with the Equity Financing (the in-connection pool top-up). The pool top-up term means this denominator is larger than the pre-financing FD snapshot when a pool refresh accompanies the round.",
             "required": true
           },
           {
@@ -519,7 +554,7 @@
           {
             "name": "equity_financing_price",
             "type": "money",
-            "description": "Cash price per share paid by new money investors in the equity financing. Required for the discount candidate.",
+            "description": "Cash price per share paid by new money investors in the equity financing (Standard Preferred Stock price). Used as the conversion price in the §(a)(1) branch and as the basis for the discount candidate.",
             "required": false
           }
         ],
@@ -527,13 +562,13 @@
           {
             "name": "safe_price",
             "type": "money",
-            "description": "Pre-money valuation cap divided by pre-financing fully-diluted shares.",
+            "description": "Safe Price per §(a)(2): pre_money_valuation_cap divided by Company Capitalization (pre_money_fully_diluted_shares including in-connection pool top-up). Only used when pre_money_valuation > cap.",
             "required": true
           },
           {
             "name": "conversion_price",
             "type": "money",
-            "description": "Lowest valid conversion price under the document's cap (or cap-and-discount) branch.",
+            "description": "Effective conversion price: round price under §(a)(1) (pre_money_valuation ≤ cap), or lowest of Safe Price / discount price under §(a)(2) (pre_money_valuation > cap).",
             "required": true
           },
           {
@@ -544,20 +579,28 @@
           }
         ],
         "formula": [
-          "safe_price = pre_money_valuation_cap / pre_money_fully_diluted_shares",
-          "discount_price = equity_financing_price * discount_multiplier",
-          "conversion_price = min(valid_price_candidates)",
+          "if pre_money_valuation <= pre_money_valuation_cap:  # §(a)(1)",
+          "  conversion_price = equity_financing_price  (Standard Preferred round price)",
+          "  if discount_multiplier is not None:  # cap price disregarded; discount still competes",
+          "    discount_price = equity_financing_price * discount_multiplier",
+          "    conversion_price = min(equity_financing_price, discount_price)",
+          "else:  # §(a)(2)",
+          "  safe_price = pre_money_valuation_cap / pre_money_fully_diluted_shares",
+          "  discount_price = equity_financing_price * discount_multiplier",
+          "  conversion_price = min(valid_price_candidates)",
           "safe_shares = purchase_amount / conversion_price"
         ],
         "rounding_policy": "Keep internal calculations at decimal precision. Apply only the SAFE document's fractional-share or cash-in-lieu rule at issuance.",
         "parameterization_points": [
-          "pre_money_fully_diluted_shares definition (whether multiple converting SAFEs are included on an as-converted basis is document-specific; v0.1 uses pre-existing snapshot interpretation)",
-          "conversion branch priority",
+          "pre_money_fully_diluted_shares definition (whether multiple converting SAFEs are included on an as-converted basis is document-specific; implementation uses pre-existing snapshot interpretation)",
+          "conversion branch selection (requires round pre_money_valuation to resolve §(a)(1) vs §(a)(2))",
           "discount multiplier presence"
         ],
         "warnings": [
-          "Do not reuse post-money SAFE denominator logic for a pre-money SAFE. Post-money SAFEs lock `purchase/cap` of post-money FD; pre-money SAFEs lock `purchase/cap` of PRE-money FD and dilute downstream from new money / pool refresh.",
-          "Multi-SAFE pre-money scenarios with simultaneous conversion have a known ambiguity in the YC primer: each SAFE's denominator may or may not include the OTHER converting SAFEs on an as-converted basis. v0.1 uses the pre-existing-snapshot interpretation (each SAFE prices off the same pre-financing FD). Counsel may need to confirm against the actual SAFE document language for scenarios with 2+ pre-money SAFEs.",
+          "Do not reuse post-money SAFE denominator logic for a pre-money SAFE. Post-money SAFEs lock `purchase/cap` of post-money FD; pre-money SAFEs dilute downstream from new money / pool refresh.",
+          "The §(a)(1) branch (pre_money_valuation ≤ cap) converts at the round price, NOT the cap price. This branch is investor-favorable relative to the cap-price path and must not be silently skipped when the round valuation is at or below the cap.",
+          "The in-connection pool top-up is INCLUDED in the pre-money Company Capitalization denominator per the document text. Passing the pre-financing FD without the top-up understates the denominator, raising the Safe Price and under-allocating shares to the investor.",
+          "Multi-SAFE pre-money scenarios with simultaneous conversion have a known ambiguity: each SAFE's denominator may or may not include the OTHER converting SAFEs on an as-converted basis. Implementation uses the pre-existing-snapshot interpretation (each SAFE prices off the same pre-financing FD). Counsel may need to confirm against the actual SAFE document language for scenarios with 2+ pre-money SAFEs.",
           "Pre-money SAFEs are friendlier to founders, less friendly to early investors than post-money SAFEs (which is why YC changed the default in October 2018). Confirm form classification when extracting from documents pre-dating that switch."
         ]
       },
@@ -692,14 +735,15 @@
         "domain": "safe",
         "behavior_target": "counsel_review_flag",
         "title": "Israel 2025 SAFE temporary guidance",
-        "summary": "English law-firm summaries report that the January 2025 ITA SAFE guidance applies to qualifying Israeli-company SAFEs during 2025-2026 and uses quantitative conditions such as investment caps, ownership limits, minimum discounts, and conversion timing constraints.",
+        "summary": "The January 2025 ITA SAFE circular (gov.il primary, corroborated by Herzog and Pearl Cohen) applies to qualifying Israeli-company SAFEs signed during 2025-2026 and uses quantitative conditions such as investment caps, ownership limits, minimum discounts, and conversion timing constraints.",
         "implementation_action": "counsel_review",
         "confidence": "medium",
         "source_ids": [
-          "ITA-SAFE-2025-MASLAW",
+          "ITA-SAFE-2025-PRIMARY",
+          "ITA-SAFE-2025-HERZOG",
           "PEARLCOHEN-SAFE-2025"
         ],
-        "source_basis": "strong_secondary",
+        "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "Israel",
         "applies_when": "Use only as a preliminary checklist for Israeli-company SAFEs; require Israeli tax counsel before tax classification, reporting, or withholding conclusions.",
@@ -707,7 +751,7 @@
           "start": "2025-01-01",
           "end": "2026-12-31",
           "event_date_field": "safe_investment_date",
-          "notes": "Temporary ITA guidance period as summarized by law firms."
+          "notes": "Temporary ITA guidance period ending 2026-12-31 or until earlier publication of new ITA directive, whichever is earlier (per Herzog and Arnon Tadmor-Levy)."
         },
         "warnings": [
           "Counsel review required before treating a SAFE as equity-like for Israeli tax purposes.",
@@ -720,14 +764,15 @@
         "domain": "safe",
         "behavior_target": "counsel_review_flag",
         "title": "Non-qualifying Israeli SAFE facts-and-circumstances review",
-        "summary": "If a SAFE does not satisfy the reported 2025 ITA guidance conditions, the instrument remains facts-and-circumstances dependent and may be treated as debt, equity, or another instrument for tax purposes.",
+        "summary": "If a SAFE does not satisfy the January 2025 ITA SAFE circular's conditions (gov.il primary), the instrument remains facts-and-circumstances dependent and may be treated as debt, equity, or another instrument for tax purposes.",
         "implementation_action": "counsel_review",
         "confidence": "medium",
         "source_ids": [
-          "ITA-SAFE-2025-MASLAW",
+          "ITA-SAFE-2025-PRIMARY",
+          "ITA-SAFE-2025-HERZOG",
           "PEARLCOHEN-SAFE-2025"
         ],
-        "source_basis": "strong_secondary",
+        "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "Israel",
         "applies_when": "Use when any reported Israeli SAFE safe-harbor condition is missing, unclear, or breached.",
@@ -735,7 +780,7 @@
           "start": "2025-01-01",
           "end": "2026-12-31",
           "event_date_field": "safe_investment_date",
-          "notes": "Temporary guidance period; check for later ITA updates."
+          "notes": "Temporary guidance period ending 2026-12-31 or until earlier publication of new ITA directive, whichever is earlier (per Herzog and Arnon Tadmor-Levy); check for later ITA updates."
         },
         "warnings": [
           "Escalate to Israeli tax counsel before modeling tax, withholding, or financial-statement treatment."
@@ -1393,8 +1438,49 @@
         "rule_id": "anti_dilution.trigger_basis_original_issue_price",
         "domain": "anti_dilution",
         "behavior_target": "validation_rule",
-        "title": "NVCA-default AD trigger threshold is the series' OIP",
-        "summary": "Per NVCA §4.4.4(b), the dilutive-issuance trigger price is the series' original_issue_price (OIP), not its current_conversion_price (CCP). For a series that has not previously experienced an AD adjustment, OIP == CCP; for a series with prior AD, OIP > CCP, so OIP is the stricter (higher) threshold. Defaults to OIP per NVCA.",
+        "title": "OIP-based AD trigger threshold (term-sheet variant)",
+        "summary": "The NVCA Model COI §4.4.4 trigger compares the new issuance price against 'the Series A Conversion Price in effect immediately prior to such issuance' (= the current conversion price CP1). Some term sheets and charters instead trigger on the series' original_issue_price (OIP). When OIP == CP1 (no prior AD) the two are equivalent; when a prior AD round has already reduced CP1 below OIP, the OIP basis fires on a wider window of down-rounds (any price below OIP, including prices above CP1). This implementation defaults ad_trigger_basis to 'original_issue_price' as a conservative charter-specific variant. Note: the BBWA formula's B-divisor and the inner new_pps >= CP1 guard both use CP1 regardless of this trigger flag, so the computed CP2 is always anchored to CP1; the trigger flag only governs whether AD fires at all for a given new_pps.",
+        "implementation_action": "parameterize",
+        "confidence": "medium",
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
+        "source_basis": "primary",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; charter-specific",
+        "applies_when": "Use when the founder's charter specifies an OIP-based trigger. Not the NVCA model default — the NVCA model text triggers on the Conversion Price in effect immediately prior (CP1). Counsel should confirm the actual trigger language.",
+        "warnings": [
+          "This is NOT the NVCA model default. NVCA §4.4.4 triggers on the Conversion Price in effect immediately prior (CP1). OIP-based triggers are a charter-level variant.",
+          "When OIP == CP1 (no prior AD adjustments) the two trigger bases produce identical results. Divergence only appears after a prior AD round has reduced CP1 below OIP.",
+          "The B-divisor in the BBWA formula and the internal new_pps >= CP1 guard both use CP1 regardless of this flag. The trigger_basis flag governs only the fire/no-fire decision, not the CP2 math."
+        ]
+      },
+      {
+        "rule_id": "anti_dilution.trigger_basis_current_conversion_price",
+        "domain": "anti_dilution",
+        "behavior_target": "validation_rule",
+        "title": "NVCA-model AD trigger threshold: Conversion Price in effect immediately prior (CP1)",
+        "summary": "NVCA Model COI §4.4.4 triggers anti-dilution when shares are issued 'for a consideration per share less than the Series A Conversion Price in effect immediately prior to such issuance' — that is, the current conversion price (CP1), not the original issue price (OIP). Per-series ad_trigger_basis=current_conversion_price implements this NVCA model trigger. When CCP < OIP (post-prior-AD state), the CP1 trigger fires on a narrower window than the OIP trigger: only prices below CP1 (not merely below OIP) trigger AD. This is the stricter (less founder-dilutive) trigger from the investor's perspective in a multi-round context.",
+        "implementation_action": "parameterize",
+        "confidence": "high",
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
+        "source_basis": "primary",
+        "counsel_review": true,
+        "jurisdiction": "US startup market; NVCA-form COIs",
+        "applies_when": "Use when the founder's charter follows the NVCA model text. The NVCA default trigger is CP1. Counsel should confirm whether the charter adopts the NVCA model language or a charter-specific variant.",
+        "warnings": [
+          "When CCP == OIP (no prior AD), this trigger and the OIP trigger are equivalent.",
+          "When CCP < OIP (post-prior-AD), this trigger fires on a narrower set of new-issuance prices (only prices below CP1), producing fewer AD adjustments than the OIP trigger across a series of down rounds."
+        ]
+      },
+      {
+        "rule_id": "anti_dilution.a_denominator_nvca_broad",
+        "domain": "anti_dilution",
+        "behavior_target": "validation_rule",
+        "title": "Broad-based A denominator components (NVCA §4.4.4 core + market broad variant)",
+        "summary": "This implementation's nvca_broad A = common stock outstanding + preferred stock outstanding (as-converted) + options and warrants outstanding + shares reserved but unissued under equity plans (the option pool). The NVCA Model COI §4.4.4 A definition includes 'shares of Common Stock outstanding immediately prior' treating as outstanding all shares issuable upon exercise of 'Options outstanding' (where Option is defined to include warrants) and upon conversion of 'Convertible Securities (including the Series A Preferred Stock) outstanding'. A NVCA §4.4.4 footnote describes including 'all shares reserved under stock plans, whether or not subject to outstanding options' as 'an even broader formula' beyond the model text. This implementation adopts the footnote's broader variant by including the unallocated pool. Default when anti_dilution_protection=broad_based_weighted_average.",
         "implementation_action": "parameterize",
         "confidence": "high",
         "source_ids": [
@@ -1403,57 +1489,24 @@
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; NVCA-form COIs",
-        "applies_when": "Use as the default ad_trigger_basis when documents do not specify otherwise."
-      },
-      {
-        "rule_id": "anti_dilution.trigger_basis_current_conversion_price",
-        "domain": "anti_dilution",
-        "behavior_target": "validation_rule",
-        "title": "Non-NVCA AD trigger threshold using current CCP",
-        "summary": "Some custom charters trigger AD based on the current conversion price (CCP) rather than OIP. This produces a looser trigger when CCP < OIP (post-prior-AD state). Per-series ad_trigger_basis=current_conversion_price enables this variant.",
-        "implementation_action": "parameterize",
-        "confidence": "medium",
-        "source_ids": [
-          "NVCA-CERT-OF-INC"
-        ],
-        "source_basis": "primary",
-        "counsel_review": true,
-        "jurisdiction": "US startup market; charter-specific",
-        "applies_when": "Use when the founder's actual charter specifies a CCP-based trigger threshold (rare; counsel must verify).",
-        "warnings": [
-          "Counsel verifies the founder's charter language explicitly elects CCP-based trigger; NVCA-form COIs default to OIP."
-        ]
-      },
-      {
-        "rule_id": "anti_dilution.a_denominator_nvca_broad",
-        "domain": "anti_dilution",
-        "behavior_target": "validation_rule",
-        "title": "Broad-based A denominator components per NVCA §4.4.4(a)(i)-(v)",
-        "summary": "Broad-based weighted-average A = common stock + preferred-as-converted + options outstanding + options reserved (and other deemed-issued convertibles). Per NVCA Model COI §4.4.4(a)(i)-(v). Default when anti_dilution_protection=broad_based_weighted_average.",
-        "implementation_action": "parameterize",
-        "confidence": "high",
-        "source_ids": [
-          "NVCA-CERT-OF-INC"
-        ],
-        "source_basis": "primary",
-        "counsel_review": false,
-        "jurisdiction": "US startup market; NVCA-form COIs"
+        "notes": "The NVCA §4.4.4 model text (core) covers outstanding common, outstanding options and warrants (via the Option definition), and as-converted preferred. The reserved-but-unallocated pool inclusion is the 'even broader' market variant described in the NVCA footnote. Counsel should verify whether the founder's charter matches the model text or the broader variant. The enum value is retained for interface stability."
       },
       {
         "rule_id": "anti_dilution.a_denominator_nvca_narrow",
         "domain": "anti_dilution",
         "behavior_target": "validation_rule",
-        "title": "Narrow-based A denominator components",
-        "summary": "Narrow-based weighted-average A = common stock + preferred-as-converted only. Excludes options outstanding, options reserved, and other deemed-issued convertibles. Per NVCA §4.4.4 the broad-vs-narrow scope is a charter-level election. Default when anti_dilution_protection=narrow_based_weighted_average.",
+        "title": "Narrow-based A denominator components (NVCA footnote narrow variant)",
+        "summary": "This implementation's nvca_narrow A = common stock outstanding + preferred stock outstanding (as-converted) only. Excludes options, warrants, and reserved-pool shares. The NVCA §4.4.4 footnote describes a 'narrower formula' that 'might include…only those shares of Common Stock that are actually outstanding (i.e., excluding shares…issuable on conversion of options, warrants and, potentially, even the Preferred Stock itself)'. This implementation includes as-converted preferred (a moderate narrow variant that excludes options and warrants). Default when anti_dilution_protection=narrow_based_weighted_average.",
         "implementation_action": "parameterize",
-        "confidence": "high",
+        "confidence": "medium",
         "source_ids": [
           "NVCA-CERT-OF-INC",
           "COOLEY-ANTI-DILUTION"
         ],
         "source_basis": "mixed",
         "counsel_review": false,
-        "jurisdiction": "US startup market; charter-specific"
+        "jurisdiction": "US startup market; charter-specific",
+        "notes": "The NVCA footnote sketches the narrowest variant as common-only (excluding even the preferred as-converted). This implementation uses common + as-converted preferred as the narrow variant, which is narrower than the broad model formula but wider than the footnote's narrowest example. Counsel verifies the founder's charter definition."
       },
       {
         "rule_id": "anti_dilution.cp2_floor_applicable",
@@ -2381,6 +2434,27 @@
           "Cap-table conversion economics here ignore any accruing dividend; founders should confirm with counsel whether the exit waterfall changes the conversion math.",
           "If the dividend is cumulative + PIK, the preferred-conversion shares grow over time and the founder dilution shown here may be understated."
         ]
+      },
+      {
+        "rule_id": "cap_table.pricing_unknown_disclosure",
+        "domain": "cap_table",
+        "behavior_target": "counsel_review_flag",
+        "title": "Preferred pricing unknown — anti-dilution and 1:1 conversion assumption disclosed to counsel",
+        "summary": "One or more preferred series is marked pricing_unknown because the founder/mapper could not confirm the actual original_issue_price / original_conversion_price / current_conversion_price. The skill substitutes a numeric $1.00 sentinel for all three prices (so the schema's required-numeric and >0 gates pass without fabricating a real price) and forces anti_dilution_protection to 'none' for that series, since anti-dilution adjustment formulas are defined against the original issue/conversion price and cannot be run against a placeholder. This means anti-dilution and liquidation preference are NOT modeled for the series, and the conversion ratio is assumed 1:1 (original_conversion_price == current_conversion_price == 1.0) — i.e. no historical down-round adjustment is reflected even if one in fact occurred. Counsel/founder must confirm the actual issuance terms before relying on ownership, dilution, or preference figures involving this series.",
+        "implementation_action": "counsel_review",
+        "confidence": "high",
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
+        "source_basis": "near_primary",
+        "counsel_review": true,
+        "surfaces": ["cap_table_adjacent_counsel"],
+        "jurisdiction": "Delaware and Israel",
+        "applies_when": "Use when any cap_state.preferred_series[*].pricing_unknown is true. Does not fire when every preferred series has confirmed pricing.",
+        "warnings": [
+          "Anti-dilution and liquidation preference are not modeled for a pricing-unknown series — the $1.00 sentinel price cannot support that math.",
+          "Conversion ratio is assumed 1:1 (no historical pricing) for a pricing-unknown series; a real down-round adjustment (current_conversion_price < original_conversion_price) would not be reflected until the actual terms are confirmed."
+        ]
       }
     ],
     "dual_class": [
@@ -2501,6 +2575,47 @@
         "jurisdiction": "Delaware and Israeli market practice",
         "applies_when": "Use when scenarios[*].computed_outputs.warrant_exercise_events is non-empty.",
         "warnings": []
+      }
+    ],
+    "acquisition": [
+      {
+        "rule_id": "acquisition.consideration_shares",
+        "domain": "acquisition",
+        "behavior_target": "script_formula",
+        "title": "Negotiated-% acquisition consideration shares",
+        "summary": "An acquired entity's holders receive consideration shares C equal to a negotiated percentage t of post-close fully-diluted; C = t * post_FD, solved inside the priced round via D = numerator/(1 - t*k), k = 1 + new_money/pre_money.",
+        "implementation_action": "hardcode",
+        "confidence": "medium",
+        "source_ids": ["YC-PMSAFE-PRIMER"],
+        "source_basis": "mixed",
+        "counsel_review": true,
+        "applies_when": "Concurrent negotiated-% share consideration in/around a priced round; t*k < 1."
+      },
+      {
+        "rule_id": "acquisition.pool_consideration_basis",
+        "domain": "acquisition",
+        "behavior_target": "script_formula",
+        "title": "Post-money pool denominator includes acquisition consideration",
+        "summary": "When the option pool target is post-money fully-diluted and an acquisition closes in connection with the round, the consideration shares C are part of the post-close denominator the pool is sized against (default include); excluding C is a negotiable term.",
+        "implementation_action": "parameterize",
+        "confidence": "medium",
+        "source_ids": ["COOLEY-PRICING-METHODS"],
+        "source_basis": "secondary",
+        "counsel_review": true,
+        "applies_when": "post_money option-pool target + concurrent acquisition consideration."
+      },
+      {
+        "rule_id": "acquisition.timing",
+        "domain": "acquisition",
+        "behavior_target": "script_formula",
+        "title": "Acquisition timing drives SAFE Company-Capitalization inclusion",
+        "summary": "A concurrent acquisition's consideration is excluded from the YC post-money SAFE Company Capitalization (so it dilutes the SAFE via post_fd only); a pre-round-closed acquisition is stock outstanding immediately prior (folded into Company Capitalization, protecting the SAFE).",
+        "implementation_action": "parameterize",
+        "confidence": "medium",
+        "source_ids": ["YC-PMSAFE-PRIMER", "YC-SAFE-DOCUMENTS"],
+        "source_basis": "primary",
+        "counsel_review": true,
+        "applies_when": "Post-money SAFE present alongside an acquisition; timing in {concurrent_with_round, pre_round_closed}."
       }
     ]
   }

@@ -25,9 +25,10 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["batch_id", "holder_id", "shares", "issuance_date"],
+        "required": ["holder_id", "shares", "issuance_date"],
         "properties": {
-          "batch_id": {"type": "string"},
+          "batch_id": {"type": ["string", "null"], "description": "Optional display label; holder_id is the canonical key. Absent when the agent supplied only holder_id (the skeleton-canonical shape)."},
+          "holder_name": {"type": ["string", "null"], "description": "Optional human-readable shareholder name; preferred over holder_id/batch_id in the ownership tables when present."},
           "holder_id": {"type": "string"},
           "shares": {"type": "integer"},
           "issuance_date": {"type": "string"},
@@ -60,6 +61,10 @@
           "ad_cp2_floor": {"type": ["number", "null"]},
           "ad_carve_outs": {"enum": ["nvca_default"]},
           "pro_rata_rights": {"type": "boolean"},
+          "pricing_unknown": {
+            "type": "boolean",
+            "description": "True when this series' actual issue/conversion pricing was not confirmed. Carried through from inputs by cap_state.py's canonicalizer (conditional spread, mirroring extraction_provenance) so the rule_audit matcher and the founder-facing disclosure banner (W_PRICING_UNKNOWN) can see it. When true, original_issue_price/original_conversion_price/current_conversion_price are a numeric 1.0 sentinel and anti_dilution_protection is enforced to 'none' at canonicalization."
+          },
           "extraction_provenance": {
             "type": ["object", "null"],
             "properties": {
@@ -132,8 +137,8 @@
         "properties": {
           "safe_id": {"type": "string"},
           "investor_name": {"type": ["string", "null"]},
-          "purchase_amount": {"type": "number"},
-          "issuance_date": {"type": "string"},
+          "purchase_amount": {"type": ["number", "null"]},
+          "issuance_date": {"type": ["string", "null"]},
           "mfn_status": {"enum": ["absent", "present_unelected", "elected", "cherry_pick_pending"], "default": "absent", "description": "Derived from instruments.safes[i].mfn_provision at canonicalization. Soft-default 'absent' when no mfn_provision object."},
           "source_doc": {"type": ["string", "null"]},
           "extraction_confidence": {"type": ["string", "null"], "enum": ["high", "medium", "low", "n_a", "user_asserted", null]}
@@ -148,8 +153,8 @@
         "properties": {
           "note_id": {"type": "string"},
           "investor_name": {"type": ["string", "null"]},
-          "principal": {"type": "number"},
-          "issuance_date": {"type": "string"},
+          "principal": {"type": ["number", "null"]},
+          "issuance_date": {"type": ["string", "null"]},
           "subtype": {"type": ["string", "null"], "enum": ["convertible_note", "convertible_loan_agreement", "convertible_security", null]},
           "governing_law": {"type": ["string", "null"], "enum": ["delaware", "israeli", "uk", "cayman", "other", null]},
           "source_doc": {"type": ["string", "null"]},
@@ -166,7 +171,7 @@
           "warrant_id": {"type": "string"},
           "investor_name": {"type": ["string", "null"]},
           "shares_underlying": {"type": "integer", "minimum": 1},
-          "exercise_price": {"type": "number", "minimum": 0.0},
+          "exercise_price": {"type": ["number", "null"], "minimum": 0.0},
           "warrant_type": {"enum": ["common_stock", "preferred_stock_series", "preferred_stock_blank_check"]},
           "preferred_series_id": {"type": ["string", "null"]},
           "vested_flag": {"type": "boolean"},

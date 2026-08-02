@@ -29,6 +29,7 @@ jobs:
       - run: uv run mypy founder-skills/skills/ic-sim/scripts/
       - run: uv run mypy founder-skills/skills/financial-model-review/scripts/
       - run: uv run mypy founder-skills/skills/competitive-positioning/scripts/
+      - run: uv run mypy founder-skills/skills/cap-table/scripts/
       - run: uv run mypy founder-skills/tests/
 
   test:
@@ -42,6 +43,21 @@ jobs:
       - run: uv python install ${{ matrix.python-version }}
       - run: uv sync --extra dev --python ${{ matrix.python-version }}
       - run: uv run pytest founder-skills/tests/ -v -m "not e2e"
+      - run: uv run pytest evals/cap-table/ -v
+
+  privacy:
+    runs-on: ubuntu-latest
+    name: Privacy leak guard (name-free)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.12
+      - run: uv sync --extra dev
+      # Layers 1+2 only: stray confidential documents + named-after-company
+      # provenance tags. The exact-name list (layer 3) is local-only and never
+      # present in CI, so --no-names is the correct CI mode (no name disclosure).
+      - run: uv run python scripts/privacy_guard.py --tree --no-names
+      - run: uv run pytest scripts/test_privacy_guard.py -q
 
   validate:
     runs-on: ubuntu-latest
@@ -51,7 +67,9 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Node 20 reached EOL 2026-04-30 and receives no security patches. Unrelated to
+          # cowork-harness (none runs in this job) — this installs the Claude Code CLI.
+          node-version: "22"
       - name: Install Claude Code CLI (pinned exact)
         # claude plugin validate was introduced in CLI v2.1.131. We pin to
         # an exact version (not ^ or ~) so CI is deterministic — bump

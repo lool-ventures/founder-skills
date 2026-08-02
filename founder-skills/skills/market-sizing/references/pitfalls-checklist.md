@@ -37,11 +37,20 @@ Use this checklist to review your market sizing analysis before presenting it. E
 **Label:** SOM backed by go-to-market plan
 **Pass:** The SOM figure connects to specific customer acquisition strategies, funnel metrics, or analogous company benchmarks.
 **Fail:** SOM is just a percentage pulled from thin air with no GTM justification.
+**Evidence source:** This step never reads the deck or model directly — score from `inputs.json`'s
+`gtm_evidence_notes` field (carried forward from materials extraction in Steps 2-3). If
+`gtm_evidence_notes` is `null` or absent, treat as no GTM evidence was found in the materials (fail),
+not as "not investigated."
 
 ### `som_consistent_with_projections`
 **Label:** SOM consistent with financial projections
 **Pass:** SOM revenue figure aligns with the startup's hiring plan, sales capacity, and burn rate.
 **Fail:** Disconnects between SOM and business plan destroy credibility. If SOM implies $10M revenue, but the team/ops can't support that, it fails.
+**Evidence source:** This step never reads the financial model directly — score from `inputs.json`'s
+`projections_alignment_notes` field (carried forward from materials extraction in Steps 2-3). If
+`projections_alignment_notes` is `null` or absent, treat as no alignment evidence was found in the
+materials (fail), not as "not investigated." Distinct from `gtm_evidence_notes` above — GTM evidence
+is about customer acquisition, this is about hiring/capacity/burn; one field can't serve both.
 
 ## Data Quality (6 items)
 
@@ -103,6 +112,10 @@ Use this checklist to review your market sizing analysis before presenting it. E
 **Label:** Competitive landscape acknowledged
 **Pass:** SOM accounts for existing competitors with realistic positioning.
 **Fail:** Ignores competition or claims "no competitors."
+**Evidence source:** This step never reads the deck directly — score from `inputs.json`'s
+`competitive_landscape_notes` field (carried forward from deck extraction in Steps 2-3). If
+`competitive_landscape_notes` is `null` or absent, treat as no competitive content was found in
+the deck (fail), not as "not investigated."
 
 ### `sam_expansion_path_noted`
 **Label:** SAM expansion path noted

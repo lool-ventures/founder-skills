@@ -1,0 +1,28 @@
+name: host-path-canary
+session: ../sessions/default.yaml
+fidelity: container          # deliberately NOT cowork: this canary exists to keep the
+                             # transcript_no_host_path leak class exercised at the tier where a host
+                             # path IS a regression (hostloop shows real host paths by design — see
+                             # the README hostloop posture note).
+on_unanswered: first
+skills: [cap-table]
+
+# Host-path-leak canary. Same synthetic fast-assess prompt as cap-table-fast-assess; the ONLY
+# signature assert here is transcript_no_host_path at container fidelity. Keep this scenario
+# minimal — it is a leak tripwire, not a feature test (the fast-assess feature surface is covered
+# by cap-table-fast-assess).
+prompt: |
+  Run a quick cap-table assessment for Cadence (US Delaware seed-stage B2B SaaS). I have one $500,000
+  post-money SAFE at a $10,000,000 cap and I'm about to raise a $4,000,000 round at a $16,000,000
+  pre-money. Use the cap-table skill to give me a directional read on my founder dilution — just the
+  fast assessment, I don't need the full review, report, or explorer yet.
+
+assert:
+  - result: success
+  # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
+  # the deliverable but stranded steps, which result:success alone misses.
+  - all_tasks_completed: true
+  # The signature assert: no host path in model-visible text — meaningful at container fidelity.
+  - transcript_no_host_path: true
+  - skill_triggered: '(founder-skills:)?cap-table$'
+  - no_delete_in_outputs: true

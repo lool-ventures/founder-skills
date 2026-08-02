@@ -28,6 +28,12 @@ jobs:
               founder-skills/tests/*) return 1 ;;
               .github/*) return 1 ;;
               docs/*) return 1 ;;
+              # In-plugin content ships to users and DOES require a bump, even
+              # though it is Markdown — list these before the generic *.md rule.
+              # (Per VERSIONING.md: SKILL.md / agent / reference changes = PATCH.)
+              founder-skills/skills/*/SKILL.md) return 0 ;;
+              founder-skills/skills/*/references/*.md) return 0 ;;
+              founder-skills/agents/*.md) return 0 ;;
               *.md) return 1 ;;
               .gitignore|.editorconfig) return 1 ;;
               uv.lock) return 1 ;;

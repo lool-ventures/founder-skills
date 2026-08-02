@@ -32,6 +32,28 @@ def _ratio(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
+def _edge_affix_only(a: str, b: str) -> bool:
+    """True when a and b differ only by characters added or dropped at the
+    word's edges. Such a pair is morphology (singular/plural, a shared root
+    with a leading or trailing affix), not a misspelling — misspellings of a
+    name alter its interior."""
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, a, b).get_opcodes():
+        if tag == "equal":
+            continue
+        if tag == "replace":
+            return False
+        at_start = i1 == 0 and j1 == 0
+        at_end = i2 == len(a) and j2 == len(b)
+        if not (at_start or at_end):
+            return False
+    return True
+
+
+# Emails, URLs, and dotted domains — spans a brand may legitimately appear
+# inside without it being name drift. Stripped before the NAME_DRIFT scan.
+_URL_EMAIL_RE = re.compile(r"\S+@\S+|https?://\S+|www\.\S+|\b[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b")
+
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _artifact_writer import load_schema  # noqa: E402
 from _schema_validator import validate as _schema_validate  # noqa: E402
@@ -55,6 +77,33 @@ _ARTIFACT_TO_SCHEMA = {
 _CORRUPT: dict[str, Any] = {"__corrupt__": True}
 KNOWN_STAGES = {"pre_seed", "seed", "series_a"}
 
+# Every stage the shared founder context admits (founder_context.VALID_STAGES),
+# underscore dialect to match this file's tokens. Mirrored rather than
+# imported — skill scripts are standalone and don't cross-import.
+_STAGE_LADDER = ("pre_seed", "seed", "series_a", "series_b", "series_c", "series_d", "later")
+
+# Stage tokens the cross-checks recognise as an actual stage assertion: every
+# ladder stage, DERIVED rather than hand-picked — a hand-written subset omits
+# whatever stage nobody thought of, and it fails silent: a token missing from
+# this set is treated as "not a stage assertion" and neither STAGE_MISMATCH
+# nor STAGE_OUT_OF_SCOPE ever fires for it, so a genuine late-stage claim goes
+# through with no founder-visible signal at all. Plus "growth", so a deck's
+# own "growth stage" language is recognized even though it isn't a
+# founder-context stage. Anything else in claimed_stage (descriptive text, a
+# "not stated" note, an omitted/null value) is not a stage assertion and is
+# skipped by the stage cross-checks.
+RECOGNIZED_STAGE_TOKENS = frozenset(_STAGE_LADDER) | {"growth"}
+
+
+def _stage_slug(value: Any) -> str:
+    """Normalize a stage value to its comparison token.
+
+    str() coercion keeps a non-string value from raising before the schema
+    check can report it; absence (None/"") normalizes to the empty string.
+    """
+    return str(value or "").lower().replace("-", "_").replace(" ", "_")
+
+
 WARNING_SEVERITY: dict[str, str] = {
     # High — structural integrity violations
     "CORRUPT_ARTIFACT": "high",
@@ -77,6 +126,18 @@ WARNING_SEVERITY: dict[str, str] = {
     "NAME_DRIFT": "medium",
     # v0.4.2 Mitigation 2 — informational only (uuid is per-run, won't collide)
     "MARKER_COLLISION": "low",
+    # AI classification quality
+    "UNSUBSTANTIATED_AI_CLAIM": "medium",
+    # Content-accuracy: two inventory slides share a number, so the per-slide
+    # heading's quoted headline is ambiguous (the report picks one). Not
+    # artifact corruption — the artifact is schema-valid and deck_inventory.py
+    # already emitted its own non-fatal producer-side note — and the blast
+    # radius is confined to the heading text (strengths/weaknesses/
+    # recommendations are keyed off the review, never mis-keyed). That puts it
+    # with NAME_DRIFT / STAGE_MISMATCH (medium: a founder-visible
+    # content-accuracy issue), not high (structural integrity) or low
+    # (MARKER_COLLISION-style, provably harmless).
+    "DUPLICATE_SLIDE_NUMBER": "medium",
 }
 
 ACCEPTIBLE_SEVERITIES = {"medium"}
@@ -100,6 +161,8 @@ WARNING_LABELS: dict[str, str] = {
     "CHECKLIST_VALIDATION_FAILED": "Checklist Validation Failed",
     "NAME_DRIFT": "Company Name Drift",
     "MARKER_COLLISION": "Marker Collision",
+    "UNSUBSTANTIATED_AI_CLAIM": "Unsubstantiated AI Claim",
+    "DUPLICATE_SLIDE_NUMBER": "Duplicate Slide Number",
 }
 
 
@@ -168,13 +231,27 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _warn(code: str, message: str) -> dict[str, str]:
-    """Create a warning dict with code, message, and severity."""
-    return {
+def _md_safe(text: Any) -> str:
+    """Escape text for safe markdown table cell interpolation."""
+    return str(text).replace("|", "\\|").replace("\n", " ")
+
+
+def _warn(code: str, message: str, founder_message: str | None = None) -> dict[str, str]:
+    """Create a warning dict with code, message, and severity.
+
+    `message` is agent-facing and unchanged in report.json. `founder_message`
+    is an OPTIONAL additive key stating the founder-visible consequence in
+    plain words (no artifact filename, no raw enum token) -- report.md
+    renders it instead of `message` when present.
+    """
+    w = {
         "code": code,
         "message": message,
         "severity": WARNING_SEVERITY.get(code, "medium"),
     }
+    if founder_message is not None:
+        w["founder_message"] = founder_message
+    return w
 
 
 def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict[str, str]]:
@@ -253,10 +330,11 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
 
     # 4. STAGE_MISMATCH — inventory signals suggest different stage than profile
     if _usable(inventory) and _usable(profile):
-        claimed = (inventory.get("claimed_stage") or "").lower().replace("-", "_").replace(" ", "_")
-        detected = (profile.get("detected_stage") or "").lower().replace("-", "_").replace(" ", "_")
-        # Only flag when both exist and differ
-        if claimed and detected and claimed != detected:
+        claimed = _stage_slug(inventory.get("claimed_stage"))
+        detected = _stage_slug(profile.get("detected_stage"))
+        # Only flag when the deck makes a recognised stage assertion that differs.
+        # A descriptive / absent claimed_stage is not a stage assertion.
+        if claimed in RECOGNIZED_STAGE_TOKENS and detected and claimed != detected:
             warnings.append(
                 _warn(
                     "STAGE_MISMATCH",
@@ -267,12 +345,14 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # 5. STAGE_OUT_OF_SCOPE — check both detected and claimed stage
     out_of_scope_stages: list[str] = []
     if _usable(profile):
-        detected = (profile.get("detected_stage") or "").lower().replace("-", "_").replace(" ", "_")
+        detected = _stage_slug(profile.get("detected_stage"))
         if detected and detected not in KNOWN_STAGES:
             out_of_scope_stages.append(detected)
     if _usable(inventory):
-        claimed = (inventory.get("claimed_stage") or "").lower().replace("-", "_").replace(" ", "_")
-        if claimed and claimed not in KNOWN_STAGES and claimed not in out_of_scope_stages:
+        claimed = _stage_slug(inventory.get("claimed_stage"))
+        # Only a recognised stage assertion can be out of scope — a descriptive
+        # or absent claimed_stage is neither mismatched nor out of scope.
+        if claimed in RECOGNIZED_STAGE_TOKENS and claimed not in KNOWN_STAGES and claimed not in out_of_scope_stages:
             out_of_scope_stages.append(claimed)
     if out_of_scope_stages:
         stages_str = ", ".join(out_of_scope_stages)
@@ -316,17 +396,27 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 )
 
     # 8. AI_CRITERIA_SKIPPED — AI company detected but AI criteria all not_applicable
-    if _usable(profile) and _usable(checklist):
-        is_ai = profile.get("is_ai_company", False)
-        if is_ai:
-            ai_ids = {
-                "ai_retention_rebased",
-                "ai_cost_to_serve_shown",
-                "ai_defensibility_beyond_model",
-                "ai_responsible_controls",
-            }
-            items = _as_list(checklist.get("items"))
-            ai_items = [i for i in items if i.get("id") in ai_ids]
+    # Read ai_company_status from deck_inventory.json (the authoritative source).
+    # Falls back to profile's is_ai_company for backward compatibility when inventory is absent.
+    _ai_ids = {
+        "ai_retention_rebased",
+        "ai_cost_to_serve_shown",
+        "ai_defensibility_beyond_model",
+        "ai_responsible_controls",
+    }
+    _ai_status = None
+    if _usable(inventory):
+        _ai_status = inventory.get("ai_company_status")
+    if _ai_status is None and _usable(profile):
+        # Backward-compat: if inventory has no ai_company_status, use profile boolean.
+        _profile_is_ai = profile.get("is_ai_company", False)
+        _ai_status = "ai_core" if _profile_is_ai else "not_ai"
+
+    if _usable(checklist) and _ai_status is not None:
+        is_ai_for_check = _ai_status in ("ai_core", "ai_claimed_unverified")
+        items = _as_list(checklist.get("items"))
+        ai_items = [i for i in items if i.get("id") in _ai_ids]
+        if is_ai_for_check:
             if len(ai_items) < 4:
                 warnings.append(
                     _warn(
@@ -339,21 +429,16 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                     _warn(
                         "AI_CRITERIA_SKIPPED",
                         "Company detected as AI-first but all AI criteria marked not_applicable",
+                        founder_message=(
+                            "This deck was flagged as AI-first, but none of the AI-specific "
+                            "criteria could be evaluated — so the AI-related scoring doesn't "
+                            "reflect a real assessment. Treat it as unscored, not as a pass or "
+                            "a fail."
+                        ),
                     )
                 )
-
-    # 8b. AI_CRITERIA_ON_NON_AI — non-AI company penalized on AI-specific criteria
-    if _usable(profile) and _usable(checklist):
-        is_ai = profile.get("is_ai_company", False)
-        if not is_ai:
-            ai_ids = {
-                "ai_retention_rebased",
-                "ai_cost_to_serve_shown",
-                "ai_defensibility_beyond_model",
-                "ai_responsible_controls",
-            }
-            items = _as_list(checklist.get("items"))
-            ai_items = [i for i in items if i.get("id") in ai_ids]
+        else:
+            # 8b. AI_CRITERIA_ON_NON_AI — not_ai company penalized on AI criteria
             penalized = [i.get("id", "?") for i in ai_items if i.get("status") in ("fail", "warn")]
             if penalized:
                 ids_str = ", ".join(penalized)
@@ -361,6 +446,12 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                     _warn(
                         "AI_CRITERIA_ON_NON_AI",
                         f"Non-AI company penalized on AI-specific criteria: {ids_str}",
+                        founder_message=(
+                            "This deck was scored against a few AI-specific criteria even "
+                            "though the company isn't AI-first. Any deductions from those "
+                            "criteria shouldn't count against the overall score and can be "
+                            "disregarded."
+                        ),
                     )
                 )
 
@@ -393,6 +484,20 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 )
             )
 
+    # 11b. UNSUBSTANTIATED_AI_CLAIM — deck claims AI but shows no AI-core evidence
+    if _usable(inventory):
+        ai_status = inventory.get("ai_company_status", "")
+        if ai_status == "ai_claimed_unverified":
+            warnings.append(
+                _warn(
+                    "UNSUBSTANTIATED_AI_CLAIM",
+                    (
+                        "Deck positions as AI but shows no AI-core evidence (ai_claimed_unverified) "
+                        "— substantiate the AI claim or reframe; investors will probe it."
+                    ),
+                )
+            )
+
     # 11. NAME_DRIFT — variants of company_name appear in slide content
     if _usable(inventory):
         canonical = (inventory.get("company_name") or "").strip()
@@ -402,16 +507,31 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             for slide in _as_list(inventory.get("slides")):
                 for field in ("headline", "content_summary"):
                     text = str(slide.get(field, ""))
+                    # Emails, URLs, and dotted domains are conventionally
+                    # lowercase — a brand appearing inside them is not name
+                    # drift, so strip those spans before tokenizing.
+                    text = _URL_EMAIL_RE.sub(" ", text)
                     for token in re.findall(r"\b[A-Za-z][A-Za-z0-9]{2,}\b", text):
                         if token == canonical:
+                            continue
+                        # Lowercase is the conventional register for domains,
+                        # handles, and ordinary prose words; genuine drifted
+                        # variants of a brand are cased (ALL-CAPS or mixed).
+                        if token.islower():
                             continue
                         tl = token.lower()
                         if tl == canonical_lower:
                             # Same letters, different case — flag
                             seen_variants.add(token)
                             continue
-                        # Edit-distance check: same length ±1, ratio ≥ 0.80
-                        if abs(len(token) - len(canonical)) <= 1 and _ratio(tl, canonical_lower) >= 0.80:
+                        # Edit-distance check: same length ±1, ratio ≥ 0.80.
+                        # Exempt pairs that differ only by an edge affix
+                        # (singular/plural, shared root) — morphology, not drift.
+                        if (
+                            abs(len(token) - len(canonical)) <= 1
+                            and _ratio(tl, canonical_lower) >= 0.80
+                            and not _edge_affix_only(tl, canonical_lower)
+                        ):
                             seen_variants.add(token)
             if seen_variants:
                 variants_str = ", ".join(sorted(seen_variants))
@@ -421,6 +541,32 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                         f"Company name '{canonical}' appears as variants in deck content: {variants_str}",
                     )
                 )
+
+    # 12. DUPLICATE_SLIDE_NUMBER — two inventory slides share a number. The
+    # per-slide heading below (_section_slide_feedback) quotes whichever
+    # headline wins the first-occurrence tie-break, so a founder can see a
+    # heading whose quoted headline came from a different slide than the one
+    # whose analysis follows it. deck_inventory.py already logs a producer-side
+    # note for this; this is the compose-side, founder-facing surface of it.
+    if _usable(inventory):
+        seen_numbers: set[int] = set()
+        dup_numbers: list[int] = []
+        for slide in _as_list(inventory.get("slides")):
+            if isinstance(slide, dict):
+                n = slide.get("number")
+                if isinstance(n, int):
+                    if n in seen_numbers and n not in dup_numbers:
+                        dup_numbers.append(n)
+                    seen_numbers.add(n)
+        if dup_numbers:
+            nums_str = ", ".join(str(n) for n in sorted(dup_numbers))
+            warnings.append(
+                _warn(
+                    "DUPLICATE_SLIDE_NUMBER",
+                    f"Inventory has duplicate slide number(s): {nums_str} — the quoted "
+                    f"headline for that slide reflects only the first occurrence.",
+                )
+            )
 
     return warnings
 
@@ -453,10 +599,7 @@ def _section_executive_summary(
     if profile is not None and not _is_stub(profile):
         stage = (profile.get("detected_stage") or "unknown").replace("_", " ").title()
         confidence = profile.get("confidence", "unknown")
-        is_ai = profile.get("is_ai_company", False)
         lines.append(f"**Stage:** {stage} (confidence: {confidence})")
-        if is_ai:
-            lines.append("**AI Company:** Yes")
 
     if inventory is not None and not _is_stub(inventory):
         total = inventory.get("total_slides", "?")
@@ -480,6 +623,15 @@ def _section_executive_summary(
 
         lines.append(f"**Overall Score:** {score}% — {status_label}")
         lines.append(f"**Breakdown:** {pass_c} pass, {fail_c} fail, {warn_c} warn, {na_c} N/A")
+
+        # Scoring footnote: formula + score-if-all-fixed
+        applicable = summary.get("total", 0) - na_c
+        if applicable > 0:
+            score_if_fixed = round((pass_c + fail_c + warn_c) / applicable * 100, 1)
+            lines.append(
+                f"\n*Score = pass ÷ applicable (warn and fail earn no credit). "
+                f"If all fixable items were resolved: {score_if_fixed}%.*"
+            )
 
     return "\n".join(lines) + "\n"
 
@@ -519,10 +671,26 @@ def _section_stage_context(profile: dict[str, Any] | None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _section_slide_feedback(reviews: dict[str, Any] | None) -> str:
+def _section_slide_feedback(reviews: dict[str, Any] | None, inventory: dict[str, Any] | None = None) -> str:
     """Per-slide feedback with strengths, areas to improve, and recommendations."""
     if reviews is None or _is_stub(reviews):
         return "## Slide-by-Slide Feedback\n\n*No slide reviews available.*\n"
+
+    # Build slide-number → headline lookup from inventory. Keep the FIRST
+    # occurrence on a duplicate slide number (last-write-wins previously let a
+    # later duplicate silently overwrite the heading's quoted headline) — this
+    # matches visualize.py's `_chart_slide_map`, which also keeps first
+    # occurrence, so the two surfaces agree on which headline a duplicated
+    # slide number shows. See the DUPLICATE_SLIDE_NUMBER warning above for the
+    # founder-visible signal that a tie-break happened at all.
+    headline_by_num: dict[int, str] = {}
+    if inventory is not None and not _is_stub(inventory):
+        for slide in _as_list(inventory.get("slides")):
+            if isinstance(slide, dict):
+                n = slide.get("number")
+                h = slide.get("headline", "")
+                if isinstance(n, int) and h and n not in headline_by_num:
+                    headline_by_num[n] = str(h)
 
     lines = ["## Slide-by-Slide Feedback\n"]
     lines.append(
@@ -530,10 +698,15 @@ def _section_slide_feedback(reviews: dict[str, Any] | None) -> str:
         "Strengths and weaknesses are the agent's analysis, not investor quotes.*\n"
     )
 
-    for review in _as_list(reviews.get("reviews")):
+    for raw_review in _as_list(reviews.get("reviews")):
+        review = _as_dict(raw_review)
         num = review.get("slide_number", "?")
         maps_to = review.get("maps_to", "unknown")
-        lines.append(f"### Slide {num} ({maps_to})\n")
+        headline = headline_by_num.get(num) if isinstance(num, int) else None
+        if headline:
+            lines.append(f'### Slide {num}: "{headline}" ({maps_to})\n')
+        else:
+            lines.append(f"### Slide {num} ({maps_to})\n")
 
         strengths = _as_list(review.get("strengths"))
         if strengths:
@@ -564,8 +737,9 @@ def _section_slide_feedback(reviews: dict[str, Any] | None) -> str:
     if missing:
         lines.append("### Slides to Add\n")
         lines.append("Investors at your stage will expect these:\n")
-        for m in missing:
-            imp = m.get("importance", "important")
+        for raw_m in missing:
+            m = _as_dict(raw_m)
+            imp = str(m.get("importance", "important"))
             expected = m.get("expected_type", "unknown")
             rec = m.get("recommendation", "")
             lines.append(f"- **[{imp.upper()}]** {expected}: {rec}")
@@ -592,7 +766,8 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
     # Category summary table
     lines.append("| Category | Pass | Fail | Warn | N/A |")
     lines.append("|----------|------|------|------|-----|")
-    for cat, counts in by_cat.items():
+    for cat, raw_counts in by_cat.items():
+        counts = _as_dict(raw_counts)
         lines.append(
             f"| {cat} | {counts.get('pass', 0)} | {counts.get('fail', 0)} "
             f"| {counts.get('warn', 0)} | {counts.get('not_applicable', 0)} |"
@@ -603,7 +778,8 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
     failed = _as_list(summary.get("failed_items"))
     if failed:
         lines.append("### Areas That Need Attention\n")
-        for f in failed:
+        for raw_f in failed:
+            f = _as_dict(raw_f)
             notes = f.get("notes", "")
             evidence = f.get("evidence", "")
             lines.append(f"- **{f.get('label', f.get('id', '?'))}** ({f.get('category', '?')})")
@@ -617,11 +793,15 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
     warned = _as_list(summary.get("warned_items"))
     if warned:
         lines.append("### Items Needing Attention\n")
-        for w in warned:
+        for raw_w in warned:
+            w = _as_dict(raw_w)
             notes = w.get("notes", "")
+            evidence = w.get("evidence", "")
             lines.append(f"- **{w.get('label', w.get('id', '?'))}** ({w.get('category', '?')})")
             if notes:
                 lines.append(f"  - {notes}")
+            if evidence:
+                lines.append(f"  - *Basis: {evidence}*")
         lines.append("")
 
     return "\n".join(lines) + "\n"
@@ -639,7 +819,8 @@ def _section_priority_fixes(
 
     # Draw from failed checklist items (highest priority)
     if checklist is not None and not _is_stub(checklist):
-        for f in _as_list(_as_dict(checklist.get("summary")).get("failed_items")):
+        for raw_f in _as_list(_as_dict(checklist.get("summary")).get("failed_items")):
+            f = _as_dict(raw_f)
             label = f.get("label", f.get("id", "?"))
             notes = f.get("notes", "")
             fix = f"{label}: {notes}" if notes else label
@@ -647,13 +828,15 @@ def _section_priority_fixes(
 
     # Draw from missing slides
     if reviews is not None and not _is_stub(reviews):
-        for m in _as_list(reviews.get("missing_slides")):
+        for raw_m in _as_list(reviews.get("missing_slides")):
+            m = _as_dict(raw_m)
             if m.get("importance") == "critical":
                 fixes.append(f"Add missing {m.get('expected_type', 'slide')}: {m.get('recommendation', '')}")
 
     # Draw from warned items
     if checklist is not None and not _is_stub(checklist):
-        for w in _as_list(_as_dict(checklist.get("summary")).get("warned_items")):
+        for raw_w in _as_list(_as_dict(checklist.get("summary")).get("warned_items")):
+            w = _as_dict(raw_w)
             label = w.get("label", w.get("id", "?"))
             notes = w.get("notes", "")
             fix = f"{label}: {notes}" if notes else label
@@ -674,12 +857,12 @@ def _section_warnings(warnings: list[dict[str, str]]) -> str:
     if not warnings:
         return ""
 
-    sev_icons = {"high": "!!!", "medium": "!!", "acknowledged": "~", "low": "i", "info": "~"}
+    sev_icons = {"high": "!!!", "medium": "!!", "acknowledged": "~", "low": "i"}
     lines = ["## Warnings\n"]
     for w in warnings:
         sev = w.get("severity", "?")
         code = w.get("code", "?")
-        msg = w.get("message", "?")
+        msg = w.get("founder_message") or w.get("message", "?")
         label = _humanize_warning(code)
         icon = sev_icons.get(sev, "")
         prefix = f"[{icon}] " if icon else ""
@@ -697,16 +880,18 @@ def _section_full_checklist(checklist: dict[str, Any] | None) -> str:
         return ""
 
     lines = ["## Appendix: Full Checklist\n"]
-    lines.append("| # | Category | Criterion | Status |")
-    lines.append("|---|----------|-----------|--------|")
+    lines.append("| # | Category | Criterion | Status | Evidence |")
+    lines.append("|---|----------|-----------|--------|----------|")
 
     status_icons = {"pass": "PASS", "fail": "FAIL", "warn": "WARN", "not_applicable": "N/A"}
 
-    for i, item in enumerate(items, 1):
+    for i, raw_item in enumerate(items, 1):
+        item = _as_dict(raw_item)
         cat = item.get("category", "?")
         label = item.get("label", item.get("id", "?"))
         status = status_icons.get(item.get("status", "?"), "?")
-        lines.append(f"| {i} | {cat} | {label} | {status} |")
+        evidence = _md_safe(item.get("evidence", "") or "")
+        lines.append(f"| {i} | {cat} | {label} | {status} | {evidence} |")
 
     return "\n".join(lines) + "\n"
 
@@ -740,7 +925,7 @@ def _emit_coaching_payload(
         "warned_items": summary.get("warned_items", []),
         "high_severity_warnings": [w["code"] for w in validation_warnings if w.get("severity") == "high"],
         "stage": stage_profile.get("detected_stage") or inventory.get("claimed_stage"),
-        "is_ai_company": stage_profile.get("is_ai_company", False),
+        "ai_company_status": inventory.get("ai_company_status"),
         "company_name": inventory.get("company_name"),
         "review_dir": review_dir,
         "report_path": report_path,
@@ -792,8 +977,6 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
                     w["message"] += f" [Accepted: {acc['reason']}]"
                     break
 
-    status = "clean" if not warnings else "warnings"
-
     # Assemble report sections — treat corrupt artifacts as None for rendering
     def _render_safe(data: dict[str, Any] | None) -> dict[str, Any] | None:
         return None if data is _CORRUPT else data
@@ -803,27 +986,29 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     slide_reviews = _render_safe(artifacts.get("slide_reviews.json"))
     checklist_data = _render_safe(artifacts.get("checklist.json"))
 
-    sections = [
+    # Render every section EXCEPT Warnings first, so we can pre-scan the body
+    # for a marker collision and append MARKER_COLLISION before status and the
+    # Warnings section are computed. Otherwise status could read "clean" while
+    # a MARKER_COLLISION warning sits in the warnings list (and is missing from
+    # the rendered Warnings section).
+    body_sections = [
         _section_title(inventory),
         _section_executive_summary(stage_profile, checklist_data, inventory),
         _section_stage_context(stage_profile),
-        _section_slide_feedback(slide_reviews),
+        _section_slide_feedback(slide_reviews, inventory),
         _section_checklist(checklist_data),
         _section_priority_fixes(checklist_data, slide_reviews),
-        _section_warnings(warnings),
-        _section_full_checklist(checklist_data),
     ]
-
-    report_markdown = "\n".join(sections)
+    appendix = _section_full_checklist(checklist_data)
+    body_markdown = "\n".join(body_sections)
 
     # v0.4.2 Mitigation 2: per-run uuid marker for Context B's Edit
     marker = f"<!-- COACHING_INSERTION_POINT_{uuid.uuid4().hex[:8]} -->"
 
-    # Pre-scan: check assembled body BEFORE appending the marker (otherwise we
-    # always find our own emission). Agent post-Edit verification uses the
-    # EXACT uuid (per-run), so substring collisions with body content are
-    # informational only — but worth flagging so authors can sanitize.
-    if "<!-- COACHING_INSERTION_POINT_" in report_markdown:
+    # Pre-scan: check the assembled body BEFORE appending the marker (otherwise
+    # we always find our own emission). The appendix is rendered below the
+    # marker but is part of the body content, so include it in the scan.
+    if "<!-- COACHING_INSERTION_POINT_" in (body_markdown + appendix):
         warnings.append(
             _warn(
                 "MARKER_COLLISION",
@@ -835,11 +1020,17 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
             )
         )
 
+    # Compute status AFTER MARKER_COLLISION can be appended, then splice the
+    # Warnings section (which now reflects the final warnings list) into place.
+    status = "clean" if not warnings else "warnings"
+    report_markdown = "\n".join([body_markdown, _section_warnings(warnings), appendix])
+
     report_markdown += (
         f"\n\n{marker}\n\n---\n"
         "*Generated by [founder skills](https://github.com/lool-ventures/founder-skills)"
         " by [lool ventures](https://lool.vc)"
-        " — Deck Review Agent*\n"
+        " — Deck Review Agent"
+        " · [Share feedback](https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback)*\n"
     )
 
     # Stderr summary
@@ -848,8 +1039,14 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         high = [w for w in warnings if w["severity"] == "high"]
         medium = [w for w in warnings if w["severity"] == "medium"]
         low = [w for w in warnings if w["severity"] == "low"]
-        info = [w for w in warnings if w["severity"] == "info"]
-        print(f"Warnings: {len(high)} high, {len(medium)} medium, {len(low)} low, {len(info)} info", file=sys.stderr)
+        # accepted_warnings re-marks medium warnings as 'acknowledged' — count
+        # them so the summary line totals match the per-warning lines below.
+        # There is no 'info' severity, so no info bucket.
+        acknowledged = [w for w in warnings if w["severity"] == "acknowledged"]
+        print(
+            f"Warnings: {len(high)} high, {len(medium)} medium, {len(low)} low, {len(acknowledged)} acknowledged",
+            file=sys.stderr,
+        )
         for w in warnings:
             print(f"  [{w['severity'].upper()}] {w['code']}: {w['message']}", file=sys.stderr)
     else:

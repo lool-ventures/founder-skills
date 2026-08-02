@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lool.vc/founderskills/cap-table/schemas/extraction_only.schema.json",
+  "title": "Cap-Table Extraction-Only Sentinel",
+  "description": "Marker file written by compose_extraction_report.py to indicate that the cap-table skill ran in extraction-only mode (instrument terms rendered from inputs.json + instruments.json only; no equity base was supplied, so no ownership/dilution math and no canonical JSON artifacts were produced). Cross-skill consumers reading a {company_slug}-extraction REVIEW_DIR should check for this file before treating a missing report.json as 'never ran'.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "mode",
+    "run_id",
+    "company_name",
+    "company_slug",
+    "created_at",
+    "rule_pack_version",
+    "produces_canonical_artifacts",
+    "extraction_report_path",
+    "instruments_summary",
+    "rerun_hint"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "v0.1.0-cap-table-extraction-only",
+      "description": "Sentinel schema version. Distinct from the main cap-table report schema (v0.5.0-cap-table) and the fast-assess sentinel (v0.1.0-cap-table-fast-assess)."
+    },
+    "mode": {
+      "type": "string",
+      "const": "extraction_only"
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Run identifier (ISO-8601 timestamp with separators stripped). Unique per extraction-only invocation."
+    },
+    "company_name": {
+      "type": "string"
+    },
+    "company_slug": {
+      "type": "string",
+      "description": "Kebab-case slug derived from company_name. The REVIEW_DIR is conventionally `cap-table-{company_slug}-extraction/`."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "rule_pack_version": {
+      "type": "string",
+      "description": "Version of cap-table-rules.json in effect when the sentinel was written. Lets consumers detect rule-pack drift since the sentinel was written."
+    },
+    "produces_canonical_artifacts": {
+      "type": "boolean",
+      "const": false,
+      "description": "Always false in extraction-only mode. Marker that no cap_state.json / scenarios.json / rule_audit.json / counsel_packet.json / report.json was produced."
+    },
+    "note": {
+      "type": "string",
+      "description": "Human-readable explanation of the extraction-only contract."
+    },
+    "extraction_report_path": {
+      "type": "string",
+      "description": "Absolute path to the founder-facing markdown report (`report_extraction_only.md`)."
+    },
+    "instruments_summary": {
+      "type": "object",
+      "description": "Counts of financing instruments found in instruments.json.",
+      "required": ["safes", "convertible_notes", "warrants"],
+      "properties": {
+        "safes": {"type": "integer", "minimum": 0},
+        "convertible_notes": {"type": "integer", "minimum": 0},
+        "warrants": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "rerun_hint": {
+      "type": "string",
+      "description": "Human-readable instruction for getting full artifacts once an equity base is supplied."
+    }
+  },
+  "additionalProperties": false
+}

@@ -12,10 +12,11 @@ When a pipeline step is skipped (e.g., insufficient data for unit economics), de
 |-------|------|----------|-------------|
 | `skipped` | boolean | yes | Always `true` |
 | `reason` | string | yes | Human-readable explanation |
+| `metadata` | object | yes | Must carry `metadata.run_id` matching the run's other artifacts (run_id-parity exempts the stub from the value check but still requires the key to be present) |
 
 Example:
 
-    {"skipped": true, "reason": "Insufficient quantitative data for unit economics computation"}
+    {"skipped": true, "reason": "Insufficient quantitative data for unit economics computation", "metadata": {"run_id": "<RUN_ID>"}}
 
 `compose_report.py` detects stubs via `_is_stub()` and renders them as informational notes in the report. Stubs are valid for: `unit_economics.json`, `runway.json`, `model_data.json`.
 
@@ -23,13 +24,14 @@ Example:
 
 ## inputs.json
 
-**Producer:** Agent (heredoc, Step 3)
+**Producer:** Context A dispatch (INPUTS_REVIEW) → `apply_corrections.py` → promoted to `inputs.json`. A direct heredoc write of `inputs.json` is the last-resort fallback only.
 
 Canonical structured input for all downstream scripts. The `company` block is required; all other blocks are optional and populated based on what the model contains.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `company` | object | yes | Company profile |
+| `currency` | string | no | ISO 4217 currency code for the model's native currency (e.g., `"USD"`, `"INR"`, `"ILS"`). **Absent ⇒ treated as USD-equivalent** (back-compat default; all downstream USD-denominated benchmarks apply unchanged). See "currency" below for the preserve-native rule. |
 | `metadata` | object | no | Extraction metadata (periodicity, conversion, overrides) |
 | `revenue` | object | no | Revenue and growth data |
 | `expenses` | object | no | Headcount, OpEx, COGS |
@@ -58,6 +60,23 @@ Canonical structured input for all downstream scripts. The `company` block is re
 | `reviewed_by` | string | yes | One of: `"agent"`, `"founder"` |
 | `timestamp` | string | yes | ISO 8601 timestamp |
 
+### currency
+
+The model's native currency, as an ISO 4217 code (`"USD"`, `"INR"`, `"ILS"`, `"EUR"`, ...).
+
+**Rule: PRESERVE the model's native currency — never force-convert to USD.** Set `currency` to whatever currency the source model is denominated in; do not translate values to USD during extraction, even if the model states its own FX rate. If the model states an FX rate, record it as a note (e.g., in `metadata`) for downstream reference — do NOT apply it to convert any monetary values. Converting on some runs and preserving native currency on others is what produces cross-run magnitude divergence (e.g., a model appearing ~80x larger on one run than another) — always preserving is what removes the coin-flip.
+
+**Absent `currency` ⇒ USD-equivalent.** This is the back-compat default: existing `inputs.json` files without a `currency` field are treated exactly as before, and all USD-denominated benchmarks (e.g., the burn-multiple and Rule of 40 ARR floors below) apply unchanged.
+
+**When `currency` is present and not `"USD"`:**
+
+- `unit_economics.py` and `runway.py` do not compare native-denominated values against hardcoded USD thresholds — see "ARR Floor Behavior" under `unit_economics` below.
+- Every dollar-formatted evidence/warning string across `unit_economics.py` and `runway.py` (CAC, LTV, ARR/FTE, cash balance, monthly burn, runway warnings, IIA grant amounts) is currency-tagged (e.g. `"1.5M INR"`) instead of a bare `$` sign. The only bare-`$` strings left in either script are the USD ARR-floor "not meaningful below" / "not benchmark-compared below" messages (the `$500K` burn-multiple floor, the `$1M` and `$5M` Rule-of-40 floors), and they are unreachable for a non-USD model: each of those floor gates is skipped for non-USD currencies (see below), so those strings only ever render when currency is absent/`"USD"`.
+- `unit_economics.json` and `runway.json` both echo the resolved `currency` in their own output, so downstream consumers don't need to re-read `inputs.json`.
+- `compose_report.py` (report.md) and `visualize.py` (the HTML artifact) read that echoed `currency` and format every dollar-denominated figure the same way — CAC/LTV in the Unit Economics table, net cash/monthly burn/monthly revenue/raise amounts in the Runway section, and the ARR figures in the executive summary and charts.
+- `runway.py`'s burn-based cash-sensitivity table (used when `cash.current_balance` is missing) is a fixed grid of round-number USD cash levels ($500K–$5M) — a USD-hypothetical illustration, not a native-currency one. For a non-USD model this table is skipped (with an explanatory warning) rather than mislabeling those USD figures as native-currency amounts.
+- `validate_extraction.py`'s SCALE_PLAUSIBILITY check skips its USD-absolute floors (cash-balance stage range, $2K/person/month gross expense, $10K/year salary) for a non-USD model, and its `--fix` auto-correction path can never trigger off a USD floor applied to non-USD data. The scale-indicator text-pattern match (e.g. `"($000)"`) is unaffected, since it describes display scale, not currency.
+
 ### company
 
 | Field | Type | Required | Description |
@@ -67,9 +86,22 @@ Canonical structured input for all downstream scripts. The `company` block is re
 | `stage` | string | yes | One of: `"pre-seed"`, `"seed"`, `"series-a"`, `"series-b"`, `"later"` |
 | `sector` | string | yes | Normalized sector string |
 | `geography` | string | yes | Primary geography |
-| `revenue_model_type` | string | yes | One of: `"saas-plg"`, `"saas-sales-led"`, `"marketplace"`, `"usage-based"`, `"ai-native"`, `"hardware"`, `"hardware-subscription"`, `"consumer-subscription"`, `"transactional-fintech"`, `"annual-contracts"` |
+| `revenue_model_type` | string | yes | One of: `"saas-plg"`, `"saas-sales-led"`, `"marketplace"`, `"usage-based"`, `"ai-native"`, `"hardware"`, `"hardware-subscription"`, `"consumer-subscription"`, `"transactional-fintech"`, `"annual-contracts"`, `"retail"` |
 | `model_format` | string | no | One of: `"spreadsheet"`, `"deck"`, `"conversational"`, `"partial"`. Defaults to `"spreadsheet"`. Controls which checklist items are applicable. |
 | `data_confidence` | string | no | One of: `"exact"`, `"estimated"`, `"mixed"`. Indicates reliability of input values. |
+
+**Choosing `revenue_model_type` when the founder just says "B2B SaaS".** The enum has two SaaS variants and
+picking wrong changes which benchmarks apply, silently. Decide on **motion, not product**: a named
+salesperson or AE in the loop, or a stated ACV above ~$25k, or "we do demos/pilots" ⇒ `saas-sales-led`.
+Self-serve signup, free tier, or product-led trial ⇒ `saas-plg`. **No signal either way ⇒
+`saas-sales-led`** (the more conservative CAC-payback band) **and record it in `agent_supplied`** so the
+choice is disclosed rather than invisible.
+
+**Choosing `data_confidence` for conversational input.** A figure the founder stated from memory in chat is
+`estimated`, not `exact`. Reserve `exact` for a value read off a document — a spreadsheet cell, a bank
+statement, a deck slide. If some figures came from a document and some from conversation, that is what
+`mixed` is for. Getting this wrong is not cosmetic: `unit_economics.py` appends a confidence qualifier to
+rated metrics, so a conversational estimate labelled `exact` presents a remembered number as a measured one.
 | `traits` | string[] | no | Boolean trait flags: `"multi-currency"`, `"multi-entity"`, `"multi-market"`, `"annual-contracts"`, `"ai-powered"` — product uses AI/ML inference as a core feature (triggers AI cost scrutiny regardless of revenue model) |
 
 #### `model_format` pipeline effects
@@ -94,7 +126,7 @@ Additional effects for `deck` / `conversational`:
 | `arr` | object | no | Annual recurring revenue snapshot |
 | `mrr` | object | no | Monthly recurring revenue snapshot |
 | `monthly_total` | number | no | Fallback when `mrr` is absent for non-SaaS models |
-| `growth_rate_monthly` | number | no | Month-over-month growth rate (decimal) |
+| `growth_rate_monthly` | number | no | Month-over-month growth rate (decimal). **NET of churn** — the observed month-over-month change in MRR, which is what a founder means by "growing 4% a month". Do NOT subtract a churn figure from it: `net_new_ARR = mrr × growth_rate_monthly × 12` already. Subtracting churn again double-counts it and understates net-new ARR. If the founder gives a GROSS new-business rate, net it yourself before writing this field, and note that in `metadata`. |
 | `churn_monthly` | number | no | Monthly churn rate (decimal) |
 | `nrr` | number | no | Net revenue retention (decimal) |
 | `grr` | number | no | Gross revenue retention (decimal) |
@@ -181,6 +213,13 @@ Additional effects for `deck` / `conversational`:
 | `target_raise` | number | yes | Target raise amount |
 | `expected_close` | string | yes | `"YYYY-MM"` expected close date |
 
+**Top-level `agent_supplied`** (array of dotted field paths, conversational/deck runs): the fields **you**
+supplied rather than the founder. `[]` means the founder stated everything; **absent** means the question
+was never answered, which `validate_inputs.py` flags as `UNDECLARED_AGENT_VALUE`. Every entry must also
+appear in the Step 3.6 Path B confirmation table before math runs on it. Currently checked against:
+`bridge.runway_target_months`, `bridge.raise_amount`, `fundraising.target_raise`,
+`fundraising.expected_close`, `growth.growth_rate_monthly`.
+
 #### grants
 
 | Field | Type | Required | Description |
@@ -199,7 +238,23 @@ Additional effects for `deck` / `conversational`:
 | `ltv` | object | no | Lifetime value |
 | `payback_months` | number | no | CAC payback period in months |
 | `gross_margin` | number | no | Gross margin (decimal) |
+| `gross_margin_basis` | string | no | What the `gross_margin` figure measures. One of: `"product"` (revenue minus cost of goods/service delivery — the default assumption), `"store_contribution"` (store/restaurant-level margin after location labor and occupancy), `"net_revenue"`, `"gross_revenue"`, `"blended"`. Benchmarks assume `product`; any other declared basis rates `contextual` because it is not comparable to the product-GM tables. Set this for store/franchise rollouts so a store-level margin is not judged against a merchandise-margin bar. |
 | `burn_multiple` | number | no | Optional; used as fallback when computation inputs (`monthly_net_burn`, `mrr`, `growth_rate_monthly`) are missing. When present alongside compute inputs, the computed value takes precedence |
+
+#### ARR Floor Behavior (currency-aware)
+
+burn_multiple and rule_of_40 are currency-agnostic RATIOS (net burn ÷ net-new ARR; growth% + margin%) — only their materiality floors and stage-benchmark tables are USD-denominated: burn multiple gates on a $500K ARR floor, Rule of 40 on a $1M ARR floor (and a $5M floor below which it is shown but not benchmark-compared on the operating-margin path), and both then rate against a USD-calibrated stage-benchmark table.
+
+When top-level `currency` is present and not `"USD"`, `unit_economics.py` cannot verify either the ARR floor or the stage benchmark against a native-currency ARR value — but the ratio itself is still valid and still computed. Both floor-gates are skipped for a non-USD model (never gating the metric to `not_applicable` off a raw non-USD number), the ratio is computed exactly as it would be for USD, and the resulting rating is downgraded from a benchmark grade (`strong`/`acceptable`/`warning`/`fail`) to `contextual` with a caveat noting the benchmark/floor couldn't be verified. This is applied uniformly whether or not `revenue.arr.value` happens to be present — the currency-aware treatment must not depend on ARR presence, since basing it on a field the model may or may not carry would make the review's rigor a function of which fields the extraction happened to fill in, not of the actual data. When `currency` is absent or `"USD"`, both metrics rate exactly as before.
+
+**The withheld grade is preserved as a reference.** Suppressing both floors at once left a non-USD review with numbers and no assessment, which matters most for the founders most likely to file in a local currency. So the grade the comparison already produced is kept on the metric as `benchmark_reference_rating`, alongside `benchmark_reference` (the threshold), `benchmark_reference_source`, `benchmark_reference_as_of`, and a `benchmark_reference_note` that labels it. Rules:
+
+- The **primary `rating` stays `contextual`** — it is a reliance boundary, not a confidence score. The reference never becomes the verdict.
+- **No FX rate is involved, and none is invented.** These stage thresholds are *dimensionless* (burn multiple 2.0x/2.5x/3.0x, gross margin 0.70/0.60/0.50, Rule of 40 as a sum of percentages), so the comparison is exact rather than converted. What genuinely needs a rate is any **absolute** threshold — the $500K/$1M/$5M ARR materiality floors, and the ACV-tier boundaries that select a CAC-payback band — and those stay suppressed.
+- The withholding is therefore about USD-market **calibration**, not unit incompatibility. The note says so, so a founder is not left thinking the ratio was unmeasurable.
+- **USD reviews gain no reference fields at all** — this is purely additive.
+
+**Scope:** the caveat is applied to `burn_multiple` and `rule_of_40` only. `ltv_cac` is a dimensionless ratio with no ARR floor attached and keeps its ordinary grade in any currency — it was never suppressed.
 
 #### cac
 
@@ -372,9 +427,10 @@ Additional effects for `deck` / `conversational`:
 | `usage-based` | Consumption-based pricing | Twilio, Snowflake |
 | `hardware` | Physical product | Peloton, Ring |
 | `hardware-subscription` | Hardware with recurring revenue | Tesla FSD, Apple One |
-| `consumer-subscription` | Consumer subscription | Netflix, Spotify |
+| `consumer-subscription` | Consumer subscription (digital/app/media; physical subscription boxes fit `retail` better) | Netflix, Spotify |
 | `transactional-fintech` | Payment/transaction-fee revenue | Stripe, Wise |
 | `annual-contracts` | Enterprise annual/multi-year | Workday, ServiceNow |
+| `retail` | Physical-store/franchise rollout or D2C physical goods | Sweetgreen, Warby Parker |
 
 ### Sector Gate Mapping
 
@@ -384,6 +440,7 @@ Additional effects for `deck` / `conversational`:
 - `SECTOR_42` (usage-based margin): triggers for `usage-based`
 - `SECTOR_43` (consumer retention): triggers for `consumer-subscription`
 - `SECTOR_44` (deferred revenue): triggers for `annual-contracts`
+- `retail` maps to sector type `retail` and — like the SaaS types — matches no sector-specific item; the mapping exists so retail companies are not forced into `hardware` to satisfy gating. Gross margin is benchmarked against the retail sector table regardless.
 
 ### LTV Cap Behavior
 

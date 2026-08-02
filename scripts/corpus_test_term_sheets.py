@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["pdfplumber", "python-docx>=1.2.0"]
+# ///
 """Corpus test: Term Sheet / SPA document extraction simulation.
 
 Handles: PDF, DOCX, DOC (via antiword/catdoc fallback).
@@ -359,22 +363,22 @@ def classify_doc_type(text: str) -> str:
     SAFE conversions. Use the most specific markers first.
     """
     header = text[:500]
-    if any(re.search(p, text) for p in SPA_MARKERS):
+    if any(re.search(p, text, re.IGNORECASE) for p in SPA_MARKERS):
         return "spa"
-    if any(re.search(p, text) for p in SAFE_MARKERS):
+    if any(re.search(p, text, re.IGNORECASE) for p in SAFE_MARKERS):
         return "safe"
     # SAFE form title heuristic: "SAFE" in header but no other markers
-    if re.search(r"\bSAFE\b", header) and "term sheet" not in header.lower():
+    if re.search(r"\bSAFE\b", header, re.IGNORECASE) and "term sheet" not in header.lower():
         return "safe"
-    if any(re.search(p, text) for p in TERM_SHEET_MARKERS):
+    if any(re.search(p, text, re.IGNORECASE) for p in TERM_SHEET_MARKERS):
         return "term_sheet"
     return "unknown"
 
 
 def classify_jurisdiction(text: str) -> str:
     """Returns: israeli | delaware | israeli_likely | delaware_likely | unknown."""
-    israeli_hits = sum(1 for p in ISRAELI_MARKERS if re.search(p, text))
-    delaware_hits = sum(1 for p in DELAWARE_MARKERS if re.search(p, text))
+    israeli_hits = sum(1 for p in ISRAELI_MARKERS if re.search(p, text, re.IGNORECASE))
+    delaware_hits = sum(1 for p in DELAWARE_MARKERS if re.search(p, text, re.IGNORECASE))
     if israeli_hits >= 2 and israeli_hits > delaware_hits:
         return "israeli"
     if delaware_hits >= 2 and delaware_hits > israeli_hits:
@@ -389,7 +393,7 @@ def classify_jurisdiction(text: str) -> str:
 def detect_law_firms(text: str) -> list[str]:
     found = []
     for pattern in ISRAELI_MARKERS[:25]:
-        m = re.search(pattern, text)
+        m = re.search(pattern, text, re.IGNORECASE)
         if m:
             found.append(m.group(0))
     return list(dict.fromkeys(found))[:3]  # dedupe, max 3
@@ -596,7 +600,7 @@ def main() -> int:
         return 1
 
     paths = sorted(p for p in corpus.iterdir() if p.suffix.lower() in (".pdf", ".docx", ".doc"))
-    print(f"Analyzing {len(paths)} documents in {corpus}")
+    print(f"Analyzing {len(paths)} documents in {corpus}", file=sys.stderr)
 
     results = []
     for p in paths:
@@ -636,73 +640,100 @@ def main() -> int:
                 file=sys.stderr,
             )
 
-    # Summary
-    print("\n" + "=" * 70)
-    print("TERM-SHEET CORPUS TEST SUMMARY")
-    print("=" * 70)
+    # ------------------------------------------------------------------
+    # Aggregate findings (mirrors the sibling corpus scripts' report shape)
+    # ------------------------------------------------------------------
     total = len(results)
     loadable = [r for r in results if r.get("loadable")]
-    print(f"Total files: {total}  |  Loadable: {len(loadable)}/{total}")
 
-    print("\nDocument types:")
-    for dt, n in Counter(r["doc_type"] for r in loadable).most_common():
-        print(f"  {n:3} x {dt}")
-
-    print("\nJurisdiction:")
-    for j, n in Counter(r["jurisdiction"] for r in loadable).most_common():
-        print(f"  {n:3} x {j}")
-
-    print("\nLaw firm attribution:")
+    doc_type_counts = Counter(r["doc_type"] for r in loadable)
+    jurisdiction_counts = Counter(r["jurisdiction"] for r in loadable)
     firms_counter: Counter[str] = Counter()
     for r in loadable:
         for f in r.get("law_firms") or []:
             firms_counter[f] += 1
-    for f, n in firms_counter.most_common():
-        print(f"  {n:3} x {f}")
+    series_counts = Counter(r.get("series") or "unknown" for r in loadable)
 
-    print("\nRound series:")
-    for s, n in Counter(r.get("series") or "unknown" for r in loadable).most_common():
-        print(f"  {n:3} x {s}")
+    fields = [
+        ("investment_amount_usd", "investment_amount"),
+        ("pre_money_valuation_usd", "pre_money"),
+        ("post_money_valuation_usd", "post_money"),
+        ("option_pool_pct", "option_pool_pct"),
+        ("liq_pref_multiple", "liq_pref_multiple"),
+        ("liq_pref_type", "liq_pref_type"),
+        ("anti_dilution", "anti_dilution"),
+        ("drag_along_pct", "drag_along_pct"),
+        ("exclusivity_days", "exclusivity_days"),
+        ("expense_cap_usd", "expense_cap_usd"),
+    ]
+    field_extraction = {label: sum(1 for r in loadable if r.get(key) is not None) for key, label in fields}
+
+    flags = [
+        ("has_tag_along", "tag_along"),
+        ("has_protective_provisions", "protective_provisions"),
+        ("has_pro_rata", "pro_rata"),
+        ("has_rofr", "ROFR"),
+    ]
+    boolean_signals = {label: sum(1 for r in loadable if r.get(key)) for key, label in flags}
+    anti_dilution_distribution = Counter(r.get("anti_dilution") or "not_detected" for r in loadable)
+
+    report: dict[str, Any] = {
+        "corpus_dir": str(corpus),
+        "total_files": total,
+        "loadable": len(loadable),
+        "document_types": dict(doc_type_counts),
+        "jurisdiction": dict(jurisdiction_counts),
+        "law_firm_attribution": dict(firms_counter),
+        "round_series": dict(series_counts),
+        "field_extraction_counts": field_extraction,
+        "boolean_signals": boolean_signals,
+        "anti_dilution_distribution": dict(anti_dilution_distribution),
+        "per_file": results,
+    }
+
+    # ------------------------------------------------------------------
+    # Human-readable summary — stderr only (stdout/-o is for the report)
+    # ------------------------------------------------------------------
+    print("\n" + "=" * 70, file=sys.stderr)
+    print("TERM-SHEET CORPUS TEST SUMMARY", file=sys.stderr)
+    print("=" * 70, file=sys.stderr)
+    print(f"Total files: {total}  |  Loadable: {len(loadable)}/{total}", file=sys.stderr)
+
+    print("\nDocument types:", file=sys.stderr)
+    for dt, n in doc_type_counts.most_common():
+        print(f"  {n:3} x {dt}", file=sys.stderr)
+
+    print("\nJurisdiction:", file=sys.stderr)
+    for j, n in jurisdiction_counts.most_common():
+        print(f"  {n:3} x {j}", file=sys.stderr)
+
+    print("\nLaw firm attribution:", file=sys.stderr)
+    for f, n in firms_counter.most_common():
+        print(f"  {n:3} x {f}", file=sys.stderr)
+
+    print("\nRound series:", file=sys.stderr)
+    for s, n in series_counts.most_common():
+        print(f"  {n:3} x {s}", file=sys.stderr)
 
     if loadable:
-        print(f"\nField extraction rates (out of {len(loadable)} loadable):")
-        fields = [
-            ("investment_amount_usd", "investment_amount"),
-            ("pre_money_valuation_usd", "pre_money"),
-            ("post_money_valuation_usd", "post_money"),
-            ("option_pool_pct", "option_pool_pct"),
-            ("liq_pref_multiple", "liq_pref_multiple"),
-            ("liq_pref_type", "liq_pref_type"),
-            ("anti_dilution", "anti_dilution"),
-            ("drag_along_pct", "drag_along_pct"),
-            ("exclusivity_days", "exclusivity_days"),
-            ("expense_cap_usd", "expense_cap_usd"),
-        ]
-        for key, label in fields:
-            n = sum(1 for r in loadable if r.get(key) is not None)
+        print(f"\nField extraction rates (out of {len(loadable)} loadable):", file=sys.stderr)
+        for _key, label in fields:
+            n = field_extraction[label]
             pct = 100 * n / len(loadable)
-            print(f"  {n:2}/{len(loadable)} ({pct:5.1f}%) {label}")
+            print(f"  {n:2}/{len(loadable)} ({pct:5.1f}%) {label}", file=sys.stderr)
 
-        # Boolean flags
-        print("\nBoolean signals (out of loadable):")
-        flags = [
-            ("has_tag_along", "tag_along"),
-            ("has_protective_provisions", "protective_provisions"),
-            ("has_pro_rata", "pro_rata"),
-            ("has_rofr", "ROFR"),
-        ]
-        for key, label in flags:
-            n = sum(1 for r in loadable if r.get(key))
-            print(f"  {n:2}/{len(loadable)} {label}")
+        print("\nBoolean signals (out of loadable):", file=sys.stderr)
+        for _key, label in flags:
+            n = boolean_signals[label]
+            print(f"  {n:2}/{len(loadable)} {label}", file=sys.stderr)
 
-        # Anti-dilution distribution
-        print("\nAnti-dilution distribution:")
-        for ad, n in Counter(r.get("anti_dilution") or "not_detected" for r in loadable).most_common():
-            print(f"  {n:3} x {ad}")
+        print("\nAnti-dilution distribution:", file=sys.stderr)
+        for ad, n in anti_dilution_distribution.most_common():
+            print(f"  {n:3} x {ad}", file=sys.stderr)
 
     if args.output:
-        Path(args.output).write_text(json.dumps(results, indent=2, default=str))
-        print(f"\nReport written to {args.output}")
+        Path(args.output).write_text(json.dumps(report, indent=2, default=str))
+        print(f"\nReport written to {args.output}", file=sys.stderr)
     return 0
 
 

@@ -231,6 +231,27 @@ def _gate1_artifacts() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+class TestStrayFiles:
+    """The Gate-2 stray-file allowlist must recognise the skill's own mandated
+    workflow artifacts (Steps 3.5/3.6) and still flag genuinely-unknown files."""
+
+    def test_review_html_not_flagged_stray(self) -> None:
+        arts = {**_full_artifacts(), "review.html": "<html></html>"}
+        rc, out, _ = _run(arts)
+        assert not any("review.html" in cc["message"] for cc in out["cross_checks"])
+
+    def test_extraction_validation_json_not_flagged_stray(self) -> None:
+        arts = {**_full_artifacts(), "extraction_validation.json": {"status": "pass", "checks": []}}
+        rc, out, _ = _run(arts)
+        assert not any("extraction_validation.json" in cc["message"] for cc in out["cross_checks"])
+
+    def test_unknown_file_still_flagged_stray(self) -> None:
+        arts = {**_full_artifacts(), "scratch_notes.txt": "tmp"}
+        rc, out, _ = _run(arts)
+        assert rc == 0
+        assert any("scratch_notes.txt" in cc["message"] and cc["severity"] == "warning" for cc in out["cross_checks"])
+
+
 class TestFullPass:
     def test_complete_review_passes(self) -> None:
         """A complete review with all valid artifacts passes."""
@@ -494,15 +515,140 @@ class TestContentQuality:
         inputs_issues = out["artifacts"]["inputs.json"]["issues"]
         assert any("stage" in i["message"] for i in inputs_issues)
 
-    def test_null_mrr_fails(self) -> None:
-        """Null MRR value in inputs.json is an error."""
+    def test_null_mrr_with_series_warns(self) -> None:
+        """Null MRR scalar but a populated monthly revenue series is honest
+        degradation — a warning, not a blocking error (the series is real evidence)."""
         arts = _full_artifacts()
-        arts["inputs.json"] = json.loads(json.dumps(_INPUTS))
+        arts["inputs.json"] = json.loads(json.dumps(_INPUTS))  # _INPUTS retains revenue.monthly
         arts["inputs.json"]["revenue"]["mrr"]["value"] = None
         rc, out, stderr = _run(arts)
-        assert rc == 1
+        assert rc == 0, stderr
+        assert out["status"] == "pass"
         inputs_issues = out["artifacts"]["inputs.json"]["issues"]
-        assert any("mrr" in i["message"].lower() for i in inputs_issues)
+        assert any("revenue" in i["message"].lower() and i["severity"] == "warning" for i in inputs_issues)
+
+    def _inputs_missing_revenue(self) -> dict[str, Any]:
+        inp: dict[str, Any] = json.loads(json.dumps(_INPUTS))
+        inp["revenue"]["mrr"]["value"] = None
+        inp["revenue"].pop("arr", None)
+        inp["revenue"].pop("monthly", None)
+        return inp
+
+    def test_missing_revenue_warns_with_estimated_confidence(self) -> None:
+        arts = _full_artifacts()
+        inp = self._inputs_missing_revenue()
+        inp["company"]["data_confidence"] = "estimated"
+        arts["inputs.json"] = inp
+        rc, out, stderr = _run(arts)
+        assert rc == 0, stderr
+        assert out["status"] == "pass"
+        issues = out["artifacts"]["inputs.json"]["issues"]
+        assert any("revenue" in i["message"].lower() and i["severity"] == "warning" for i in issues)
+
+    def test_missing_revenue_warns_with_mixed_confidence(self) -> None:
+        arts = _full_artifacts()
+        inp = self._inputs_missing_revenue()
+        inp["company"]["data_confidence"] = "mixed"
+        arts["inputs.json"] = inp
+        rc, out, _ = _run(arts)
+        assert rc == 0
+        issues = out["artifacts"]["inputs.json"]["issues"]
+        assert any("revenue" in i["message"].lower() and i["severity"] == "warning" for i in issues)
+
+    def test_missing_revenue_warns_with_monthly_series(self) -> None:
+        arts = _full_artifacts()
+        inp = self._inputs_missing_revenue()
+        inp["revenue"]["monthly"] = [{"month": "2026-01", "total": 50000, "actual": True}]
+        arts["inputs.json"] = inp
+        rc, out, _ = _run(arts)
+        assert rc == 0
+        assert any(i["severity"] == "warning" for i in out["artifacts"]["inputs.json"]["issues"])
+
+    def test_missing_revenue_warns_with_quarterly_series(self) -> None:
+        arts = _full_artifacts()
+        inp = self._inputs_missing_revenue()
+        inp["revenue"]["quarterly"] = [{"quarter": "2026-Q1", "total": 150000, "actual": True}]
+        arts["inputs.json"] = inp
+        rc, out, _ = _run(arts)
+        assert rc == 0
+        assert any(i["severity"] == "warning" for i in out["artifacts"]["inputs.json"]["issues"])
+
+    def test_missing_revenue_still_fails_without_honest_signal(self) -> None:
+        """Fabricated-empty backstop: no series, no estimated/mixed confidence -> hard error."""
+        arts = _full_artifacts()
+        arts["inputs.json"] = self._inputs_missing_revenue()
+        rc, out, _ = _run(arts)
+        assert rc == 1
+        assert any(
+            "revenue" in i["message"].lower() and i["severity"] == "error"
+            for i in out["artifacts"]["inputs.json"]["issues"]
+        )
+
+    def test_empty_monthly_series_does_not_downgrade(self) -> None:
+        arts = _full_artifacts()
+        inp = self._inputs_missing_revenue()
+        inp["revenue"]["monthly"] = []
+        arts["inputs.json"] = inp
+        rc, _out, _ = _run(arts)
+        assert rc == 1
+
+    def test_monthly_series_without_totals_does_not_downgrade(self) -> None:
+        arts = _full_artifacts()
+        inp = self._inputs_missing_revenue()
+        inp["revenue"]["monthly"] = [{"month": "2026-01"}]
+        arts["inputs.json"] = inp
+        rc, _out, _ = _run(arts)
+        assert rc == 1
+
+    def test_ue_insufficient_data_flag_warns(self) -> None:
+        arts = _full_artifacts()
+        arts["unit_economics.json"] = {
+            "metrics": [
+                {
+                    "name": "cac",
+                    "value": None,
+                    "rating": "not_rated",
+                    "evidence": "",
+                    "benchmark_source": "",
+                    "benchmark_as_of": "",
+                }
+            ],
+            "summary": {
+                "computed": 0,
+                "strong": 0,
+                "acceptable": 0,
+                "warning": 0,
+                "fail": 0,
+                "not_rated": 1,
+                "not_applicable": 0,
+                "contextual": 0,
+            },
+            "insufficient_data": True,
+            "metadata": {"run_id": _RUN_ID},
+        }
+        rc, out, _ = _run(arts)
+        assert rc == 0
+        assert any(i["severity"] == "warning" for i in out["artifacts"]["unit_economics.json"]["issues"])
+
+    def test_ue_partial_analysis_flag_warns(self) -> None:
+        arts = _full_artifacts()
+        ue = _make_ue()
+        ue["metrics"] = [
+            {
+                "name": "cac",
+                "value": None,
+                "rating": "not_rated",
+                "evidence": "",
+                "benchmark_source": "",
+                "benchmark_as_of": "",
+            }
+        ]
+        ue["summary"]["computed"] = 0
+        ue["partial_analysis"] = True
+        arts["unit_economics.json"] = ue
+        rc, out, _ = _run(arts)
+        assert rc == 0
+        assert any(i["severity"] == "warning" for i in out["artifacts"]["unit_economics.json"]["issues"])
 
     def test_null_cash_balance_warns(self) -> None:
         """Null cash.current_balance produces a warning but still passes (exit 0)."""
@@ -699,13 +845,14 @@ class TestEdgeCases:
             assert "\n  " in result.stdout
 
     def test_output_to_file(self) -> None:
-        """The -o flag writes output to a file."""
+        """The -o flag writes output to a file and emits a JSON receipt on
+        stdout (per the shared script convention)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             for name, data in _full_artifacts().items():
                 with open(os.path.join(tmpdir, name), "w") as f:
                     json.dump(data, f)
             out_path = os.path.join(tmpdir, "verification.json")
-            subprocess.run(
+            result = subprocess.run(
                 [sys.executable, _SCRIPT, "--dir", tmpdir, "-o", out_path],
                 capture_output=True,
                 text=True,
@@ -714,6 +861,11 @@ class TestEdgeCases:
             with open(out_path) as f:
                 data = json.load(f)
             assert data["status"] == "pass"
+            # stdout carries the receipt, not the raw result JSON.
+            receipt = json.loads(result.stdout)
+            assert receipt["ok"] is True
+            assert receipt["path"] == os.path.abspath(out_path)
+            assert receipt["bytes"] > 0
 
     def test_gate1_flag(self) -> None:
         """--gate 1 skips commentary check."""

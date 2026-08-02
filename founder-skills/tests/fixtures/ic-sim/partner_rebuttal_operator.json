@@ -1,0 +1,17 @@
+{
+  "partner": "operator",
+  "revised_verdict": "more_diligence",
+  "verdict_changed": false,
+  "changed_because": "",
+  "responses": [
+    {"to": "visionary", "point": "The category-timing story is compelling but it's not GTM proof without channel-level economics — I'd want the same evidence before calling this repeatable.", "concedes": false},
+    {"to": "analyst", "point": "Agreed we need cohort and margin data before committing — that reinforces rather than changes my position.", "concedes": false}
+  ],
+  "dealbreakers": [],
+  "diligence_requirements": [
+    "Channel-level unit economics",
+    "Cohort retention curves (monthly, by acquisition channel)",
+    "Reference calls with 3 customers"
+  ],
+  "metadata": {"run_id": "fixture-ic-sim-001"}
+}

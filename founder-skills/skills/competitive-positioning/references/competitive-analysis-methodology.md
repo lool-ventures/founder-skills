@@ -1,6 +1,6 @@
 # Competitive Analysis Methodology
 
-Reference for the competitive positioning agent. Covers axis selection, competitor categorization, stress-testing claims, investor expectations, and common mistakes. The agent MUST read this file before Step 3 (Competitor Identification) and Step 5 (Positioning & Moat Assessment).
+Reference for the competitive positioning agent. Covers axis selection, competitor categorization, stress-testing claims, scoring basis, investor expectations, and common mistakes. The agent MUST read this file before Step 3 (Competitor Identification) and Step 5 (Positioning & Moat Assessment).
 
 ---
 
@@ -202,7 +202,12 @@ DocSend data shows that VCs spend 88% more time on the competition section of su
 
 The traditional 2x2 competitive matrix (four quadrants, startup in top-right) is outdated. Investors have seen thousands of these and recognize the pattern: founders choose axes that put themselves in the "best" quadrant. What works better:
 
-- **Dynamic positioning** that shows how positions are shifting over time (trajectory arrows)
+- **Dated, sourced movement** alongside the current-state map — who raised, repriced, launched, or
+  retreated, with a date and a link. This skill captures that as `recent_developments[]` per
+  competitor and surfaces it as a "What's changed recently" section. It deliberately does NOT draw
+  trajectory arrows or plot where a competitor sat 12 months ago: those need historical coordinates
+  on axes chosen this week, which cannot be sourced, and an unsourceable coordinate is a fabricated
+  one. Dated events are checkable; reconstructed positions are not.
 - **Multiple views** that show the landscape from different buyer perspectives
 - **Evidence-backed positions** where each coordinate has a specific data point, not just a gut-feel placement
 - **Honest trade-offs** that show where competitors genuinely win (and why it does not matter to the target buyer, or how the startup plans to close the gap)
@@ -309,6 +314,48 @@ To prevent raw search results from accumulating in context:
 2. **Phase B (Targeted cross-referencing):** Using Phase A profiles, run comparative and validation queries. Summarize findings and update profiles. Discard raw search results.
 
 3. **Evidence tagging:** For each data point in the final profile, record whether it was `researched` (found via search), `agent_estimate` (inferred from training data), or `founder_provided` (stated by the founder).
+
+---
+
+## 7. Scoring Basis: Shipped Surface vs. Claimed Capability
+
+Every positioning coordinate is a rating of *something*, and "something" is ambiguous unless declared. A startup's own narrative typically blends what is live today with what the roadmap promises over the next 12 months. Scoring the wrong one silently changes the entire map — the axes stay the same, the competitors stay the same, and the conclusions still invert.
+
+### The default: shipped / verifiable surface
+
+Unless the founder or the dispatch instructions say otherwise, score every competitor and the startup on **what is actually shipped and independently verifiable today** — not on the roadmap, and not on the full stack the pitch describes. This is not a stylistic preference: the map exists to survive investor diligence, and a roadmap position does not survive diligence. An investor who asks "show me" cannot be answered by pointing at a slide.
+
+### Legal values
+
+| Value | Meaning |
+|---|---|
+| `shipped` | Coordinates reflect only what is live and independently verifiable today. This is the default. |
+| `roadmap_12mo` | Coordinates reflect the startup's stated 12-month roadmap alongside competitors' shipped capability. Use only when explicitly instructed — it compares a promise to competitors' reality, and the report must flag that asymmetry rather than let it read as an apples-to-apples map. |
+| `mixed` | Different views (or different claims within a view) are scored on different bases, each labeled individually. See below for when this is the honest choice rather than a hedge. |
+
+### The corollary: a low ranking driven by stage is a finding, not a defect
+
+If a startup scores low because most of its stack is still roadmap while competitors have already shipped comparable breadth, **that is a finding about the startup's stage — not a defect in the analysis, and not a verdict on the company's quality.** The report must say so explicitly, in those terms, rather than let a last-place ranking read as "this company is weak." For example: a seed-stage company that has shipped one module of a six-layer planned platform will correctly rank behind competitors who have shipped a comparable breadth of the same layers. The honest response is to name the gap plainly — "N of M planned layers are live; the rest is roadmap" — not to soften the score so the map looks more flattering, and not to omit the framing so the score reads as an unexplained verdict.
+
+### Why the basis must be declared
+
+Two analysts scoring identical inputs — same deck, same competitor set, same axes — can produce **opposite maps** if one scores shipped surface and the other scores claimed capability. Nothing in the coordinates themselves reveals which convention produced them. A reader who does not know the basis cannot tell whether "last of N" means "genuinely behind" or "hasn't built the roadmap yet, which is expected at this stage." Declaring the basis up front, and keeping it visible in the delivered report, is what makes the map falsifiable: a founder or investor who disagrees with a coordinate can check it against the stated convention instead of against an invisible assumption.
+
+### When `mixed` is appropriate
+
+Use `mixed` when a single convention would misrepresent the analysis — for example, a primary view scored on shipped surface (to survive diligence) paired with a secondary view that intentionally scores the founder's roadmap-inclusive self-assessment (to show intended trajectory). Label each view's basis individually rather than declaring one basis for the report as a whole. A `mixed` report without per-view labels is worse than a wrong `shipped` declaration, because it invites the reader to assume every view shares one convention when they don't.
+
+### When the basis diverges from the founder's deck
+
+If the basis is `shipped` and the founder's own competition slide plots the company in a materially different position — because the deck plots roadmap-inclusive capability, or simply asserts a favorable position without qualifying it — the report must **state the delta explicitly**: "on shipped surface, this analysis places the company at X; the deck's competition slide places it at Y because [reason]." Do not silently contradict the deck, and do not silently adopt the deck's position without explaining why the two differ. An unexplained contradiction reads as a mistake; an explained one reads as rigor.
+
+### Common confusions
+
+| Confusion | Resolution |
+|---|---|
+| "The startup ranked last, so the analysis must be wrong." | See "The corollary" above — check the basis first, then treat a low `shipped` rank as a stage finding, not a bug. |
+| "Scoring shipped surface is unfair to early-stage founders." | It is the founder-protective choice, not the harsh one: a map built on unverifiable roadmap claims collapses the first time an investor asks a specific question, which does far more damage than an honest low score with clear framing. |
+| "The deck already has a competition slide, so we don't need to declare a basis." | See "When the basis diverges from the founder's deck" above — the slide's own convention is very likely different, and only a declared basis lets the two be compared honestly instead of silently disagreeing. |
 
 ---
 

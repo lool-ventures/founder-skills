@@ -2,12 +2,15 @@
 
 JSON schemas for all artifacts deposited during the IC simulation workflow. Each artifact is a JSON file written to the `SIM_DIR` working directory.
 
+**Every artifact must carry a `metadata.run_id` block** at the top level: `"metadata": {"run_id": "<RUN_ID>"}`. For agent-written artifacts (heredocs), include it inline. For producer-script artifacts (`fund_profile.py`, `detect_conflicts.py`, `score_dimensions.py`), pass `--run-id "$RUN_ID"` and the script injects the block. `compose_report.py` checks that all artifact run IDs match — a mismatch triggers a `STALE_ARTIFACT` warning. The `metadata.run_id` row and example are shown per artifact below.
+
 ## startup_profile.json
 
-**Producer:** Agent (heredoc, Step 1)
+**Producer:** Agent (heredoc, Step 2)
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `metadata` | object | yes | `{run_id}` — must match the run's `RUN_ID` |
 | `company_name` | string | yes | Company name |
 | `simulation_date` | string | yes | ISO date (YYYY-MM-DD) |
 | `stage` | string | yes | String. Expected values: `"pre_seed"`, `"seed"`, `"series_a"` (calibrated). For later-stage companies use `"series_b"` or `"growth"` — the compose report will flag these as out of calibrated scope. |
@@ -36,7 +39,8 @@ JSON schemas for all artifacts deposited during the IC simulation workflow. Each
   ],
   "current_raise": {"amount": "$4M", "valuation": "$20M pre"},
   "key_metrics": {"arr": "$800K", "mrr_growth": "15% MoM", "customers": 120, "ndr": "115%"},
-  "materials_provided": ["pitch deck (PDF)", "financial model"]
+  "materials_provided": ["pitch deck (PDF)", "financial model"],
+  "metadata": {"run_id": "20260222T140000Z"}
 }
 ```
 
@@ -44,12 +48,13 @@ JSON schemas for all artifacts deposited during the IC simulation workflow. Each
 
 ## prior_artifacts.json
 
-**Producer:** Agent (heredoc, Step 2, optional)
+**Producer:** Agent (heredoc, Step 3, optional)
 
-Contains imported artifacts from prior market-sizing or deck-review analyses. If no prior artifacts exist, deposit a stub: `{"imported": []}`.
+Contains imported artifacts from prior market-sizing or deck-review analyses. If no prior artifacts exist, deposit a stub: `{"imported": [], "skipped": true, "reason": "..."}`.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `metadata` | object | yes | `{run_id}` — must match the run's `RUN_ID` |
 | `imported` | object[] | yes | List of imported artifact summaries |
 
 ### imported[] entry
@@ -87,7 +92,8 @@ Contains imported artifacts from prior market-sizing or deck-review analyses. If
         "key_failures": ["competition_honest", "gtm_has_proof"]
       }
     }
-  ]
+  ],
+  "metadata": {"run_id": "20260222T140000Z"}
 }
 ```
 
@@ -95,18 +101,19 @@ Contains imported artifacts from prior market-sizing or deck-review analyses. If
 
 ## fund_profile.json
 
-**Producer:** `fund_profile.py` validates agent-provided JSON (Step 3)
+**Producer:** `fund_profile.py` validates agent-provided JSON and injects `metadata.run_id` (Step 4)
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `metadata` | object | output | Injected by `fund_profile.py` from `--run-id`: `{run_id}` |
 | `fund_name` | string | yes | Fund name (or "Generic Early-Stage Fund" for generic mode) |
 | `mode` | string | yes | `"generic"` or `"fund_specific"` |
 | `thesis_areas` | string[] | yes | At least 1 investment thesis area |
 | `check_size_range` | object | yes | `{min: number, max: number, currency: string}` |
 | `stage_focus` | string[] | yes | Stages the fund invests in |
 | `archetypes` | object[] | yes | Exactly 3 partner archetypes |
-| `portfolio` | object[] | yes | Portfolio companies (for conflict checking) |
-| `sources` | string[] | conditional | Required when `mode == "fund_specific"` |
+| `portfolio` | object[] | conditional | Required when `mode == "fund_specific"` (a real fund's actual holdings). OPTIONAL in generic mode — a synthesized/illustrative fund has no real holdings, and forcing this field would manufacture a fabricated portfolio (and fabricated conflicts against it downstream). `fund_profile.py` and `compose_report.py` both treat it this way. |
+| `sources` | object[] | conditional | Required when `mode == "fund_specific"`. Each entry is an object with at least `url` or `title`: `{url, title}` |
 | `validation` | object | output | Added by `fund_profile.py`: `{status, errors}` |
 | `accepted_warnings` | object[] | no | Warnings to acknowledge: `[{code, match, reason}]`. Match is case-insensitive substring. Only medium-severity codes can be accepted. |
 
@@ -127,6 +134,13 @@ Contains imported artifacts from prior market-sizing or deck-review analyses. If
 | `sector` | string | no | Industry/vertical |
 | `status` | string | no | `"active"`, `"exited"`, `"written_off"` |
 
+### sources[] entry
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `url` | string | conditional | At least one of `url` or `title` is required |
+| `title` | string | conditional | At least one of `url` or `title` is required |
+
 **Example:**
 ```json
 {
@@ -140,20 +154,20 @@ Contains imported artifacts from prior market-sizing or deck-review analyses. If
     {"role": "operator", "name": "The Operator", "background": "Former operating executive", "focus_areas": ["GTM motion", "execution speed", "customer evidence"]},
     {"role": "analyst", "name": "The Analyst", "background": "Former investment banker", "focus_areas": ["unit economics", "capital efficiency", "financial modeling"]}
   ],
-  "portfolio": [
-    {"name": "FinLedger", "sector": "Fintech", "status": "active"},
-    {"name": "DataPipe", "sector": "Data Infrastructure", "status": "active"}
-  ],
   "sources": [],
-  "validation": {"status": "valid", "errors": []}
+  "validation": {"status": "valid", "errors": []},
+  "metadata": {"run_id": "20260222T140000Z"}
 }
 ```
+`portfolio` is omitted deliberately here — this example is `mode: "generic"`, and SKILL.md Step 4
+instructs the agent to omit `portfolio` entirely in generic mode rather than fabricate holdings. A
+`mode: "fund_specific"` profile would include a real, researched `portfolio` array instead.
 
 ---
 
 ## conflict_check.json
 
-**Producer:** Agent assesses conflicts (heredoc) then `detect_conflicts.py` validates + summarizes (Step 4)
+**Producer:** Context A dispatch (DETECT_CONFLICTS) returns conflict JSON, piped through `detect_conflicts.py`, which validates + summarizes and injects `metadata.run_id` from `--run-id` (Step 5)
 
 ### Input (agent-produced, piped to detect_conflicts.py)
 
@@ -179,6 +193,7 @@ Additional fields added by the script:
 |-------|------|-------------|
 | `summary` | object | Computed summary statistics |
 | `validation` | object | `{status: "valid"|"invalid", errors: [...]}` |
+| `metadata` | object | Injected by `detect_conflicts.py` from `--run-id`: `{run_id}` |
 
 ### summary
 
@@ -207,7 +222,8 @@ Additional fields added by the script:
     "has_blocking_conflict": false,
     "overall_severity": "manageable"
   },
-  "validation": {"status": "valid", "errors": []}
+  "validation": {"status": "valid", "errors": []},
+  "metadata": {"run_id": "20260222T140000Z"}
 }
 ```
 
@@ -215,10 +231,11 @@ Additional fields added by the script:
 
 ## partner_assessment_{visionary|operator|analyst}.json
 
-**Producer:** Sub-agent (Task, general-purpose) or main agent in sequential mode (Step 5a-5c)
+**Producer:** Context A dispatch (PARTNER_ANALYSIS) — the ic-sim agent dispatched three times in parallel, one per archetype; the main thread writes each return with `metadata.run_id` injected (Step 6)
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `metadata` | object | yes | `{run_id}` — injected by the main thread when writing the return |
 | `partner` | string | yes | `"visionary"`, `"operator"`, or `"analyst"` |
 | `verdict` | string | yes | `"invest"`, `"more_diligence"`, `"pass"`, or `"hard_pass"` |
 | `rationale` | string | yes | Free-text rationale grounded in archetype's focus areas |
@@ -252,7 +269,58 @@ Additional fields added by the script:
     "Channel-level unit economics",
     "Cohort retention curves (monthly, by acquisition channel)",
     "Reference calls with 3 customers"
-  ]
+  ],
+  "metadata": {"run_id": "20260222T140000Z"}
+}
+```
+
+---
+
+## partner_rebuttal_{visionary|operator|analyst}.json
+
+**Producer:** Context A dispatch (PARTNER_REBUTTAL) — the ic-sim agent dispatched three times in parallel, one per archetype, each shown its own round-1 assessment plus the other two's; the main thread writes each return with `metadata.run_id` injected (Step 6b). This is round 2 of the debate — round 1 is `partner_assessment_*.json` above, where the three archetypes ran with no sight of each other.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `metadata` | object | yes | `{run_id}` — injected by the main thread when writing the return |
+| `partner` | string | yes | `"visionary"`, `"operator"`, or `"analyst"` — must match the archetype this dispatch was made for; `compose_discussion.py` rejects a mismatch |
+| `revised_verdict` | string | yes | `"invest"`, `"more_diligence"`, `"pass"`, or `"hard_pass"` — this partner's verdict AFTER reading the other two's round-1 assessments |
+| `verdict_changed` | boolean | yes | Whether `revised_verdict` differs from this partner's round-1 `verdict` |
+| `changed_because` | string | conditional | Required and non-empty when `verdict_changed` is `true` — must name the specific evidence in another partner's assessment that moved this one. `compose_discussion.py` rejects `verdict_changed: true` with an empty value. |
+| `responses` | object[] | yes | This partner's response to each of the other two — see below. Source of `discussion.json`'s `debate_sections`. |
+| `dealbreakers` | object[] | yes | New dealbreakers raised in the rebuttal (may be empty). Round-1 `partner_assessment_*.json` has no `dealbreakers` field at all — every entry here is new. |
+| `diligence_requirements` | string[] | yes | Updated diligence list after hearing the other two partners |
+
+### responses[] entry
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `to` | string | yes | The archetype being responded to (`"visionary"`, `"operator"`, or `"analyst"`) |
+| `point` | string | yes | The response itself, in this partner's own words |
+| `concedes` | boolean | yes | `true` only when this specific response gives ground on the partner's own prior position |
+
+### dealbreakers[] entry
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `dimension` | string | yes | A real dimension id from the 28-id set `score_dimensions.py` defines (imported by `compose_discussion.py`, never hardcoded) — an unrecognized id is rejected |
+| `reason` | string | yes | Why this is fatal |
+| `evidence` | string | yes | The specific evidence — `compose_discussion.py` rejects an empty value |
+
+**Example:**
+```json
+{
+  "partner": "operator",
+  "revised_verdict": "more_diligence",
+  "verdict_changed": false,
+  "changed_because": "",
+  "responses": [
+    {"to": "visionary", "point": "The 15% MoM growth is encouraging but it's not GTM proof without knowing the channel mix — I'd want the same evidence before calling this repeatable.", "concedes": false},
+    {"to": "analyst", "point": "Agreed on needing cohort data before committing.", "concedes": true}
+  ],
+  "dealbreakers": [],
+  "diligence_requirements": ["Channel-level unit economics", "Cohort retention curves (monthly, by acquisition channel)"],
+  "metadata": {"run_id": "20260222T140000Z"}
 }
 ```
 
@@ -260,39 +328,45 @@ Additional fields added by the script:
 
 ## discussion.json
 
-**Producer:** Main agent (Step 5d — composes from partner assessments + debate)
+**Producer:** `compose_discussion.py` (Step 7) — derives from the 3 `partner_assessment_*.json` + 3 `partner_rebuttal_*.json` files. Nothing in this artifact is authored by the main thread; every field is copied or mechanically combined from those six files.
+
+**Consensus rule:** `consensus_verdict` is the value shared by at least 2 of the 3 partners' `revised_verdict`. With exactly three partners, a value with count >= 2 is unique whenever one exists. If all three revised verdicts are distinct (no majority), `consensus_verdict` is `"more_diligence"` — a genuine three-way split cannot be presented as a decision.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `assessment_mode` | string | yes | `"sub-agent"` or `"sequential"` |
-| `assessment_mode_intentional` | boolean | no | Set `true` when sequential mode is deliberate (suppresses SEQUENTIAL_FALLBACK warning) |
-| `partner_verdicts` | object[] | yes | Summary of each partner's position |
-| `debate_sections` | object[] | yes | Partners responding to each other |
-| `consensus_verdict` | string | yes | `"invest"`, `"more_diligence"`, `"pass"`, or `"hard_pass"` |
-| `key_concerns` | string[] | yes | Concerns that survived the debate |
-| `diligence_requirements` | string[] | yes | Combined diligence list from all partners |
+| `metadata` | object | yes | `{run_id}` — must match the run's `RUN_ID` |
+| `_produced_by` | string | yes | Always `"compose_discussion"` — `compose_report.py`'s `UNVALIDATED_ARTIFACT` check flags a `discussion.json` missing this stamp or carrying a different one (a hand-written or otherwise non-derived file) |
+| `assessment_mode` | string | yes | `"sub-agent"` or `"sequential"`. `compose_discussion.py` always writes `"sub-agent"` — the round-2 rebuttal architecture has no main-thread-authored fallback path. |
+| `assessment_mode_intentional` | boolean | no | Legacy field from the pre-rebuttal architecture; no longer written by `compose_discussion.py` but still tolerated on older artifacts |
+| `partner_verdicts` | object[] | yes | Each partner's `revised_verdict` and rationale, copied from the matching `partner_rebuttal_*.json` (rationale falls back to the round-1 assessment's rationale when the verdict did not change) |
+| `debate_sections` | object[] | no | Derived from every rebuttal's `responses` array, grouped by the archetype being addressed. Expected shape, and `compose_discussion.py` always composes it from real responses — but `compose_report.py`'s `REQUIRED_KEYS` for `discussion.json` does not enforce its presence, so a `discussion.json` missing it is not schema-invalid. |
+| `consensus_verdict` | string | yes | `"invest"`, `"more_diligence"`, `"pass"`, or `"hard_pass"` — see the consensus rule above |
+| `debated_dealbreakers` | object[] | yes | `{dimension, raised_by[], evidence[]}` per round-2 dealbreaker, deduped by **dimension id** — the channel `compose_report.py` compares against `score_dimensions.json` to label each scored dealbreaker partner-argued or scoring-only (`key_concerns` keeps only the prose `reason`, so it cannot). Scoring may legitimately flag a dimension the debate never raised; this discloses, never suppresses. Empty = none debated; **absent** (older or hand-written file) = no channel, raising `DEALBREAKER_PROVENANCE_UNVERIFIABLE` — never read as "none debated". |
+| `key_concerns` | string[] | yes | Union of round-1 `key_concerns` plus round-2 dealbreaker reasons |
+| `diligence_requirements` | string[] | yes | Union of the 3 rebuttals' (post-debate) diligence lists |
+| `warnings` | string[] | no | `compose_discussion.py`'s own signals — currently only `"POSSIBLE_CAPITULATION"` (>=2 of 3 verdicts changed and converged on the same value; uncalibrated, never blocking — see that script's module docstring). Empty array when nothing fired. |
 
 ### partner_verdicts[] entry
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `partner` | string | yes | `"visionary"`, `"operator"`, or `"analyst"` |
-| `verdict` | string | yes | Individual partner verdict |
-| `rationale` | string | yes | Summary rationale |
+| `verdict` | string | yes | This partner's `revised_verdict` from round 2 |
+| `rationale` | string | yes | `changed_because` if the verdict changed, else the round-1 `rationale` |
 
 ### debate_sections[] entry
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `topic` | string | yes | What's being debated (e.g., "Market Size", "GTM Viability") |
-| `exchanges` | object[] | yes | Back-and-forth between partners |
+| `topic` | string | yes | `"Responses to <Archetype>"` — mechanically generated from which archetype the grouped responses addressed |
+| `exchanges` | object[] | yes | Back-and-forth between partners, one entry per `responses[]` item addressed to this section's target |
 
 ### exchanges[] entry
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `partner` | string | yes | Who is speaking |
-| `position` | string | yes | What they're saying |
+| `partner` | string | yes | Who is speaking (the rebuttal's own `partner`) |
+| `position` | string | yes | The responding partner's `point`, verbatim, with `" (concedes this point)"` appended when `concedes` was `true` |
 
 **Example:**
 ```json
@@ -305,17 +379,19 @@ Additional fields added by the script:
   ],
   "debate_sections": [
     {
-      "topic": "GTM Motion",
+      "topic": "Responses to Visionary",
       "exchanges": [
         {"partner": "operator", "position": "The GTM story is 'inbound plus partnerships' but there's no data on channel economics..."},
-        {"partner": "visionary", "position": "At this stage, the 15% MoM growth IS the GTM proof. They're clearly doing something right..."},
         {"partner": "analyst", "position": "Growth is encouraging but I need to see if it's sustainable. What's the CAC trend?"}
       ]
     }
   ],
   "consensus_verdict": "more_diligence",
   "key_concerns": ["GTM channel economics unproven", "Need cohort retention data"],
-  "diligence_requirements": ["Channel-level CAC", "6-month cohort curves", "3 customer references"]
+  "diligence_requirements": ["Channel-level CAC", "6-month cohort curves", "3 customer references"],
+  "warnings": [],
+  "_produced_by": "compose_discussion",
+  "metadata": {"run_id": "20260222T140000Z"}
 }
 ```
 
@@ -323,7 +399,7 @@ Additional fields added by the script:
 
 ## score_dimensions.json
 
-**Producer:** `score_dimensions.py` (Step 6)
+**Producer:** `score_dimensions.py`, which injects `metadata.run_id` from `--run-id` (Step 8)
 
 ### Input (piped via stdin)
 
@@ -347,6 +423,7 @@ Additional fields added by the script:
 |-------|------|-------------|
 | `items` | object[] | All 28 items enriched with category and label |
 | `summary` | object | Aggregate scores and verdict |
+| `metadata` | object | Injected by `score_dimensions.py` from `--run-id`: `{run_id}` |
 
 ### summary
 

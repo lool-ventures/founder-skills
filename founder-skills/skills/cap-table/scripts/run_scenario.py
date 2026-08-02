@@ -27,12 +27,18 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact  # noqa: E402
+from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 from flip_scenario import flip_share_for_share  # noqa: E402
-from note_conversion import convert_note, derive_scenario_completeness  # noqa: E402
+from note_conversion import (  # noqa: E402
+    convert_note,
+    derive_scenario_completeness,
+    note_has_usable_math_inputs,
+)
 from priced_round import solve_priced_round  # noqa: E402
 from safe_conversion import (  # noqa: E402
     convert_safe_cap_implied,
     detect_mfn_cycles,
+    safe_has_usable_purchase_amount,
 )
 
 _SCHEMA_DIR = os.path.join(
@@ -40,6 +46,37 @@ _SCHEMA_DIR = os.path.join(
     "references",
     "schemas",
 )
+
+
+def _resolve_target_basis(params: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
+    """Resolve the priced-round solver's `target_basis` for one scenario request.
+
+    Mirrors note_conversion.py's `maturity_default_treatment_defaulted` disclosure pattern:
+    when the founder's scenario request omits `target_basis`, the solver still needs a definite
+    denominator string to run — but pre-money vs post-money vs post-money-excluding-converting-
+    securities is a term-sheet-specific negotiation point, not a settled default. Silently
+    defaulting to pre_money would present an assumption as a founder-confirmed input.
+
+    Returns `(basis, warning_or_None)`. No target_pool_percent means no pool top-up is being
+    modeled, so target_basis has no math effect — defaulting it is a no-op, not an assumption,
+    and no warning is emitted.
+    """
+    if "target_basis" in params:
+        return params["target_basis"], None
+    if not params.get("target_pool_percent"):
+        return "pre_money", None
+    warning = {
+        "code": "target_basis_defaulted",
+        "severity": "medium",
+        "message": (
+            "target_basis was not specified for this priced-round scenario; the solver "
+            "defaulted to 'pre_money'. Option-pool denominator choice (pre-money vs post-money "
+            "vs post-money-excluding-converting-securities) is a term-sheet-specific negotiation "
+            "point, not a settled default — confirm which basis applies before relying on the "
+            "resulting pool top-up shares and post-round ownership figures."
+        ),
+    }
+    return "pre_money", warning
 
 
 def _compute_founder_impact(
@@ -75,7 +112,7 @@ def run_safe_conversion_scenario(
 ) -> dict[str, Any]:
     params = scenario.get("parameters", {}) or {}
     safes_filter = params.get("safe_ids")
-    all_safes = instruments.get("safes", [])
+    all_safes = [s for s in instruments.get("safes", []) if safe_has_usable_purchase_amount(s)]
     safes = [s for s in all_safes if not safes_filter or s["id"] in safes_filter]
 
     blockers: list[dict[str, Any]] = []
@@ -97,7 +134,18 @@ def run_safe_conversion_scenario(
 
     per_safe: dict[str, dict[str, Any]] = {}
     if priced_pre is None or priced_new is None:
-        # Cap-implied path only
+        # Cap-implied path only. MFN elections need a priced round to resolve against
+        # (convert_safe_cap_implied has no election path) — surface a blocker once rather
+        # than silently dropping the param.
+        if params.get("mfn_elections"):
+            blockers.append(
+                {
+                    "code": "E_SAFE_MFN_ELECTION_REQUIRES_PRICED_ROUND",
+                    "instance_id": None,
+                    "remedy": "mfn_elections requires a priced round (priced_round_pre_money / "
+                    "priced_round_new_money); the cap-implied path cannot resolve an MFN election.",
+                }
+            )
         for s in safes:
             r = convert_safe_cap_implied(
                 purchase_amount=s["purchase_amount"],
@@ -124,7 +172,7 @@ def run_safe_conversion_scenario(
                     "output_field": "cap_implied_outputs",
                     "source_type": "rule",
                     "rule_id": "safe.post_money_cap_conversion",
-                    "rule_pack_version": "0.3.2",
+                    "rule_pack_version": RULE_PACK_VERSION,
                     "source_ref": None,
                 }
             ],
@@ -132,16 +180,22 @@ def run_safe_conversion_scenario(
         return outputs
 
     # Has a priced round — delegate to solver
-    return solve_priced_round(
+    target_basis, tb_warning = _resolve_target_basis(params)
+    priced_outputs = solve_priced_round(
         cap_state=cap_state,
         safes=safes,
         notes=[],
         pre_money=priced_pre,
         new_money=priced_new,
         target_pool_percent=params.get("target_pool_percent"),
-        target_basis=params.get("target_basis", "pre_money"),
+        target_basis=target_basis,
         conversion_event_date=params.get("transaction_event_date"),
+        mfn_elections=params.get("mfn_elections"),
     )
+    if tb_warning:
+        priced_outputs.setdefault("warnings", [])
+        priced_outputs["warnings"].append(tb_warning)
+    return priced_outputs
 
 
 def run_note_conversion_scenario(
@@ -154,6 +208,10 @@ def run_note_conversion_scenario(
     notes_filter = params.get("note_ids")
     all_notes = instruments.get("convertible_notes", [])
     notes = [n for n in all_notes if not notes_filter or n["id"] in notes_filter]
+    # Partial/blank notes (null principal / missing issuance_date) would crash convert_note; exclude
+    # them from the math and surface them as terms-only, never silently dropped.
+    usable_notes = [n for n in notes if note_has_usable_math_inputs(n)]
+    terms_only_notes = [n for n in notes if not note_has_usable_math_inputs(n)]
 
     conv_date = params.get("transaction_event_date")
     if not conv_date:
@@ -174,7 +232,7 @@ def run_note_conversion_scenario(
     qfp = params.get("qualified_financing_price")
     per_note: dict[str, dict[str, Any]] = {}
     blockers: list[dict[str, Any]] = []
-    for n in notes:
+    for n in usable_notes:
         r = convert_note(
             n,
             conversion_event_date=conv_date,
@@ -192,6 +250,13 @@ def run_note_conversion_scenario(
             )
 
     completeness = derive_scenario_completeness(per_note)
+
+    # Surface terms-only notes (excluded from math above) so they never vanish silently.
+    for n in terms_only_notes:
+        per_note[n["id"]] = {
+            "branch": "terms_only_excluded",
+            "reason": "principal or issuance_date absent in the document — terms-only, not converted",
+        }
     out: dict[str, Any] = {
         "completeness": completeness,
         "blockers": blockers,
@@ -242,6 +307,41 @@ def run_priced_round_scenario(
             "math_provenance": [],
         }
 
+    # The coverage detector (detect_structure.py) emits a priced-round request whose `parameters`
+    # it CANNOT populate: pre_money and new_money are the founder's round terms, absent from
+    # inputs.json/instruments.json by construction. SKILL.md tells the caller to extend the route's
+    # request with those answers -- but a caller that runs it verbatim used to reach the bare
+    # subscripts below and die on an uncaught KeyError traceback. A missing round term is a normal
+    # not-enough-information state, so report it the way every other such state is reported: a typed
+    # blocker on a structural_only result.
+    _missing = [k for k in ("pre_money", "new_money") if params.get(k) is None]
+    if _missing:
+        return {
+            "completeness": "structural_only",
+            "blockers": [
+                {
+                    "code": "E_MISSING_PARAMETER",
+                    "instance_id": None,
+                    "remedy": (
+                        "priced_round needs " + " and ".join(_missing) + " in scenario_requests.json. "
+                        "The coverage route cannot supply round terms -- add the founder's stated "
+                        "pre-money and new-money before running this scenario."
+                    ),
+                }
+            ],
+            "math_provenance": [],
+        }
+
+    _acq = params.get("acquisition")
+    _acq_for_solver = (
+        _acq
+        if (
+            isinstance(_acq, dict)
+            and _acq.get("acquisition_timing", "concurrent_with_round") == "concurrent_with_round"
+        )
+        else None
+    )
+    target_basis, tb_warning = _resolve_target_basis(params)
     result = solve_priced_round(
         cap_state=cap_state_post_pump,
         safes=instruments.get("safes", []),
@@ -249,9 +349,16 @@ def run_priced_round_scenario(
         pre_money=params["pre_money"],
         new_money=params["new_money"],
         target_pool_percent=params.get("target_pool_percent"),
-        target_basis=params.get("target_basis", "pre_money"),
+        target_basis=target_basis,
         conversion_event_date=params.get("transaction_event_date"),
+        mfn_elections=params.get("mfn_elections"),
+        pre_money_basis=params.get("pre_money_basis", "includes_safe_conversion"),
+        acquisition={"consideration_pct": _acq_for_solver["consideration_pct"]} if _acq_for_solver else None,
+        pool_consideration_basis=params.get("pool_consideration_basis", "include"),
     )
+    if tb_warning:
+        result.setdefault("warnings", [])
+        result["warnings"].append(tb_warning)
 
     if warrant_events:
         result["warrant_exercise_events"] = warrant_events
@@ -278,10 +385,12 @@ def run_flip_scenario(
     scenario: dict[str, Any],
     *,
     cap_state: dict[str, Any],
+    instruments: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     params = scenario.get("parameters", {}) or {}
     return flip_share_for_share(
         cap_state,
+        instruments=instruments,
         iia_grants_in_history=params.get("iia_grants_in_history", False),
         section_102_grants_outstanding=params.get("section_102_grants_outstanding", 0),
     )
@@ -296,16 +405,25 @@ def run_all_scenarios(
 ) -> list[dict[str, Any]]:
     """Dispatch each scenario_request to the right runner and collect outputs."""
     results = []
+    flip_outputs: dict[str, dict[str, Any]] = {}
     for req in scenario_requests:
         stype = req.get("type")
+        step_cap_state = cap_state
+        step_instruments = instruments
+        chained = req.get("chained_from_scenario_id")
+        if chained and chained in flip_outputs:
+            fo = flip_outputs[chained]
+            step_cap_state = fo.get("post_flip_cap_state", cap_state)
+            step_instruments = fo.get("post_flip_instruments") or instruments
         if stype == "safe_conversion":
-            outputs = run_safe_conversion_scenario(req, instruments=instruments, cap_state=cap_state)
+            outputs = run_safe_conversion_scenario(req, instruments=step_instruments, cap_state=step_cap_state)
         elif stype == "note_conversion":
-            outputs = run_note_conversion_scenario(req, instruments=instruments, cap_state=cap_state)
+            outputs = run_note_conversion_scenario(req, instruments=step_instruments, cap_state=step_cap_state)
         elif stype == "priced_round":
-            outputs = run_priced_round_scenario(req, instruments=instruments, cap_state=cap_state)
+            outputs = run_priced_round_scenario(req, instruments=step_instruments, cap_state=step_cap_state)
         elif stype == "flip":
-            outputs = run_flip_scenario(req, cap_state=cap_state)
+            outputs = run_flip_scenario(req, cap_state=step_cap_state, instruments=step_instruments)
+            flip_outputs[req["scenario_id"]] = outputs
         else:
             outputs = {
                 "completeness": "structural_only",

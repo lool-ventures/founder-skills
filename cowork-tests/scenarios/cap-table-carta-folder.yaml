@@ -1,0 +1,94 @@
+name: cap-table-carta-folder
+session: ../sessions/carta-folder.yaml
+fidelity: cowork
+on_unanswered: first   # variance-gate backstop = option 1; asserts don't depend on the note-conversion gate choices
+skills: [cap-table]                # scope the staleness hash to this skill + shared roots
+
+# Lane-2 Carta extraction through a READ-ONLY CONNECTED FOLDER — this scenario's unique coverage is
+# the `folders:` mount shape (in-guest `mnt/carta-folder/…`, basename-derived), which no other
+# cassette exercises: the skill must DISCOVER the export inside the connected folder rather than
+# receive it as an upload. Same synthetic Carta multi-sheet export + inline cap structure as
+# cap-table-carta (Carta exports carry no founder identities or pool, so the cap structure is
+# supplied inline to suppress the batched founder gate).
+prompt: |
+  I'm a founder at Cadence, a US Delaware seed-stage B2B SaaS company. My cap table: two founders,
+  Maya Gold and Ofer Tal, splitting 8,000,000 common shares evenly (4,000,000 each), plus a
+  1,000,000-share option pool (none issued yet). I've connected a folder containing our Carta
+  cap-table export of the convertible instruments. Please review it (map the Carta sheets to
+  instruments) and give me the full cap-table review.
+
+# Scripted answers are LIMITED to jurisdiction + IIA (below), which are pinned because
+# `on_unanswered: first` no longer resolves to this prompt's jurisdiction. Otherwise this
+# scenario's asserts (run succeeds + instruments.json produced from the Carta
+# sheet mapping) do NOT depend on the note-conversion gate choices (denominator / maturity / qualified
+# financing), so on_unanswered:first (option 1 each) is the robust choice — it survives the label
+# paraphrase that brittle full-label anchors don't.
+
+answers:
+  # Jurisdiction + IIA pinned by LABEL, not position. `b752162` reordered the Gate Catalog's
+  # jurisdiction row to `israeli | delaware | ...`, so `on_unanswered: first` now resolves to
+  # "Israeli company" — the opposite of this prompt's US-Delaware company. Anchors are leading
+  # substrings and are uniqueness-guarded: the full "Delaware (already flipped)" is required, since a
+  # bare "Delaware" also prefixes "Delaware with Israeli subsidiary" and would be ambiguous.
+  - when_question: "jurisdiction structure"
+    choose: "Delaware (already flipped)"
+  # Benign at slot 1 today ("No IIA grants" leads the row) — pinned anyway so the same reorder class
+  # cannot un-benign it silently.
+  - when_question: "IIA"
+    choose: "No IIA grants"
+
+assert:
+  - result: success
+  # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
+  # the deliverable but stranded steps, which result:success alone misses.
+  - all_tasks_completed: true
+  - file_exists: outputs/artifacts/cap-table-cadence/instruments.json
+  # The connected folder is mounted read-only (mode: r) — the skill must READ the Carta export, never
+  # mutate it. Guard the input's content hash across the run (0.28.0 also fixed mode:r mutation
+  # attribution). This is the one lane with a classified pre-existing input; the upload lanes don't
+  # surface one to the pre-run walk. As of 0.29.0 the upload lanes are ALSO guardable (uploads captured as
+  # a read-only input root — see the input_unmodified adds on the upload scenarios); this connected-folder
+  # guard remains the only one covering a `folders:` mount. (0.29.0 accepts a single glob string.)
+  - input_unmodified: 'carta-folder/**'
+  # host-path posture: hostloop exposes real host paths by design; the leak class is covered
+  # by the container-tier host-path-canary scenario + the privacy scan's path class on cassettes.
+  # --- fleet contract asserts (adopted at the 0.24.0 pin; budgets tightened from discovery actuals) ---
+  # The pipeline entered through the Skill tool (prefix-tolerant; id shape confirmed at discovery).
+  - skill_triggered: '(founder-skills:)?cap-table$'
+  # Every computer:// deliverable link shared with the founder must resolve (zero links pass).
+  - computer_links_resolve: true
+  # NOTE: no_delete_in_outputs is deliberately OMITTED here (kept on the other 15 scenarios). With a
+  # read-only connected folder, the agent probes outputs/ writability by creating and rm-ing a
+  # transient `test_write` file — a benign writability check that destroys no deliverable but trips
+  # this delete guard. The probe is specific to the read-only-mount shape; scoping the assertion out
+  # of this one scenario keeps the guard meaningful everywhere it isn't a known false-positive.
+  # Dispatch contract: sub-agents declare no Bash (agents/*.md) — regression tripwire.
+  - subagent_tool_absent: 'Bash'
+  # Usability budget: gates asked before value (observed + headroom, from discovery).
+  - questions_count_max: 14
+  # Author-chosen dispatch budget (production has NO Task-fan-out cap; this is an
+  # efficiency tripwire, not a platform mirror). tightened from discovery actuals (observed x1.5).
+  - dispatch_count_max: 6
+  # Efficiency budgets — generous ceilings; tightened to observed x1.5 post-record.
+  - max_turns: 105
+  - tool_calls_max: 100
+  # Stray-file guard (new-files-only) — HIGHEST-value here: the most plausible real miss is a
+  # sub-agent Write landing NEXT to the inputs inside the connected folder (mode: r blocks it at
+  # the mount; this key catches a regression if the mount mode ever loosens). Allowlist = artifact
+  # namespace (incl. handoff/**) + founder-context sidecar + promoted deliverables. tightened from discovery actuals (observed x1.5).
+  - no_unexpected_files:
+      - 'outputs/artifacts/cap-table-cadence/**'
+      - 'outputs/artifacts/founder-context-cadence.json'
+      - 'outputs/Cadence_*'
+  # GATE FLOOR. `questions_count_max` above is a CEILING — it caps interruption but has never once
+  # asserted that the skill asked anything at all. A run that silently skips its confirmation gates and
+  # assumes the answers produces a well-formed report, a green suite, and a founder who was never
+  # consulted. Measured: a committed cassette for this fleet once froze exactly that (0 gates) and went
+  # green for weeks. `gate_answers_delivered` alone does NOT close it — it passes VACUOUSLY when zero
+  # gates fire, which is why the two are always paired.
+  # Floor is deliberately 1, well BELOW the count observed at record time: gate firing is
+  # model-dependent (the same batch saw one cap-table lane fire the founder-context pack and another
+  # skip it), so a floor set AT the observed count converts ordinary variance into a red suite. This
+  # asserts the property — "it asked" — not the model's exact behaviour.
+  - gate_answers_delivered: true
+  - gate_answer_count_min: 1

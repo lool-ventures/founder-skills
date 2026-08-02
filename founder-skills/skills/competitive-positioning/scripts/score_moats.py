@@ -63,7 +63,11 @@ CANONICAL_MOAT_SET = set(CANONICAL_MOAT_IDS)
 
 VALID_STATUSES = {"strong", "moderate", "weak", "absent", "not_applicable"}
 VALID_TRAJECTORIES = {"building", "stable", "eroding"}
-VALID_EVIDENCE_SOURCES = {"researched", "agent_estimate", "founder_override"}
+# Provenance of a moat's evidence. "founder_provided" (a value the founder stated) is the
+# vocabulary the methodology reference + startup_characterization use; it is DISTINCT from
+# "founder_override" (a founder manually overriding a coordinate/rating — counted separately in
+# compose). Both are accepted so a founder-stated moat isn't rejected into a wasted repair dispatch.
+VALID_EVIDENCE_SOURCES = {"researched", "agent_estimate", "founder_provided", "founder_override"}
 
 # Status ordering for ranking (higher = stronger)
 STATUS_RANK: dict[str, int] = {
@@ -96,21 +100,36 @@ def _validate_moat_entry(entry: dict[str, Any], company: str, errors: list[str])
 
     status = entry.get("status", "")
     if status not in VALID_STATUSES:
-        errors.append(f"{company}: invalid status '{status}' for moat '{moat_id}'")
+        errors.append(
+            f"{company}: invalid status '{status}' for moat '{moat_id}' (must be one of {sorted(VALID_STATUSES)})"
+        )
         return False
 
     trajectory = entry.get("trajectory", "")
     if trajectory not in VALID_TRAJECTORIES:
-        errors.append(f"{company}: invalid trajectory '{trajectory}' for moat '{moat_id}'")
+        errors.append(
+            f"{company}: invalid trajectory '{trajectory}' for moat '{moat_id}'"
+            f" (must be one of {sorted(VALID_TRAJECTORIES)} — this is the trajectory enum,"
+            " NOT the moat status set; if you meant 'absent', that's a status value,"
+            " so use the 'status' field instead)"
+        )
         return False
 
     evidence_source = entry.get("evidence_source", "")
     if evidence_source not in VALID_EVIDENCE_SOURCES:
-        errors.append(f"{company}: invalid evidence_source '{evidence_source}' for moat '{moat_id}'")
+        errors.append(
+            f"{company}: invalid evidence_source '{evidence_source}' for moat '{moat_id}'"
+            f" (must be one of {sorted(VALID_EVIDENCE_SOURCES)})"
+        )
         return False
 
     if "evidence" not in entry:
         errors.append(f"{company}: missing 'evidence' for moat '{moat_id}'")
+        return False
+    if not isinstance(entry["evidence"], str):
+        errors.append(
+            f"{company}: 'evidence' for moat '{moat_id}' must be a string (got {type(entry['evidence']).__name__})"
+        )
         return False
 
     return True
@@ -298,6 +317,13 @@ def score_moats(data: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]
                 "evidence_source": entry["evidence_source"],
                 "trajectory": entry["trajectory"],
             }
+            # Optional citation for "researched" evidence — a URL or the exact search query,
+            # so a factual claim (funding round, M&A, exec change) can be spot-checked later.
+            # Not a schema requirement (source may legitimately be a query string, not a URL);
+            # the RESEARCHED_WITHOUT_SOURCE warning below flags it as a quality issue instead.
+            source = entry.get("source")
+            if isinstance(source, str) and source.strip():
+                out_moat["source"] = source
             valid_moats.append(out_moat)
 
             # Quality check: strong with short evidence
@@ -309,6 +335,23 @@ def score_moats(data: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]
                         "severity": "medium",
                         "message": (
                             f"{slug}: {moat_id} rated 'strong' with insufficient evidence ({len(raw_evidence)} chars)"
+                        ),
+                        "company": slug,
+                        "moat_id": moat_id,
+                    }
+                )
+
+            # Verifiability check: "researched" evidence with no source citation is
+            # indistinguishable from a plausible-sounding fabrication to the main thread,
+            # which never sees the sub-agent's WebSearch results — only its artifact.
+            if entry["evidence_source"] == "researched" and "source" not in out_moat:
+                warnings.append(
+                    {
+                        "code": "RESEARCHED_WITHOUT_SOURCE",
+                        "severity": "medium",
+                        "message": (
+                            f"{slug}: {moat_id} evidence_source is 'researched' but no source"
+                            " (URL or search query) was provided — this claim can't be spot-checked"
                         ),
                         "company": slug,
                         "moat_id": moat_id,
@@ -350,10 +393,26 @@ def score_moats(data: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]
     }, []
 
 
+def _apply_run_id(result: dict, run_id: str | None) -> None:
+    """CLI run_id overrides stdin-passthrough metadata.run_id (CLI > stdin)."""
+    if not run_id:
+        return
+    md = result.get("metadata")
+    if not isinstance(md, dict):
+        md = {}
+    md["run_id"] = run_id
+    result["metadata"] = md
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Moat scorer (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
+    p.add_argument(
+        "--run-id",
+        default=None,
+        help="Stamp metadata.run_id (overrides any run_id from stdin metadata)",
+    )
     return p.parse_args()
 
 
@@ -385,6 +444,7 @@ def main() -> None:
         sys.exit(1)
 
     assert result is not None  # guaranteed by errs check above
+    _apply_run_id(result, args.run_id)
 
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"

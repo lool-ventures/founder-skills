@@ -1,0 +1,6 @@
+{
+  "approach_chosen": "bottom_up",
+  "rationale": "No reliable third-party industry report exists for this narrow SMB accounting-automation niche; company has clean customer-count and ARPU data from its own funnel, so bottom-up is the more defensible anchor.",
+  "accepted_warnings": [],
+  "metadata": {"run_id": "fixture-market-sizing-001"}
+}

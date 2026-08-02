@@ -1,0 +1,117 @@
+name: cap-table-antihallucination
+session: ../sessions/term-sheet-blank.yaml
+fidelity: cowork
+on_unanswered: first   # variance-gate backstop = option 1 (preserves the old catch-all); known gates label-pinned below (0.10.0 lint flags positional `choose: first` in answers)
+skills: [cap-table]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
+
+# P0-b — anti-hallucination negative (cap-table's signature property). Synthetic term sheet (ACMECORP)
+# whose EXCLUSIVITY clause has a template BLANK ("during a period of  days") — no number. A
+# hallucinating extractor fills "45 days"; the correct extraction is null/absent. Founder framing
+# matches the doc's company (Acmecorp) + complete context to suppress the founder-context gate.
+prompt: |
+  I'm a founder at Acmecorp Inc., a US Delaware seed-stage B2B SaaS company. I've uploaded a Series A
+  term sheet I received. Please review the uploaded term sheet — extract its terms and tell me what to
+  watch out for.
+
+# Scripted answers are LIMITED to jurisdiction + IIA (below), which are pinned because
+# `on_unanswered: first` no longer resolves to this prompt's jurisdiction. Otherwise this
+# scenario's asserts (the exclusivity-blank flag) do NOT depend on the cap-base /
+# option-pool / pool-top-up gate choices, so on_unanswered:first (option 1 each) is the robust choice — it
+# survives label paraphrase that brittle full-label anchors don't (the gates' option-1 = Confirmed / No
+# pool / No top-up, none of which affect the anti-hallucination assert).
+
+answers:
+  # Jurisdiction + IIA pinned by LABEL, not position. `b752162` reordered the Gate Catalog's
+  # jurisdiction row to `israeli | delaware | ...`, so `on_unanswered: first` now resolves to
+  # "Israeli company" — the opposite of this prompt's US-Delaware company. Anchors are leading
+  # substrings and are uniqueness-guarded: the full "Delaware (already flipped)" is required, since a
+  # bare "Delaware" also prefixes "Delaware with Israeli subsidiary" and would be ambiguous.
+  - when_question: "jurisdiction structure"
+    choose: "Delaware (already flipped)"
+  # Benign at slot 1 today ("No IIA grants" leads the row) — pinned anyway so the same reorder class
+  # cannot un-benign it silently.
+  - when_question: "IIA"
+    choose: "No IIA grants"
+
+  # The no-cap-base FORK (Gate Catalog "No-cap-base fork", SKILL.md:809). This lane exists to exercise
+  # the extraction-only branch, but never scripted the gate that chooses it — so `on_unanswered: first`
+  # picked slot 1, "Provide the cap base — full review", steering into the branch that needs founder
+  # share counts, which an unattended record cannot supply. Result: two follow-up questions (breaching
+  # questions_count_max) and then a stall mid-cap-base.
+  # ANCHOR NOTE, learned the hard way: the catalog's phrasing is "No cap base found in your
+  # document(s)" but the model PARAPHRASES it — the fired question ends with a term-sheet summary and
+  # "How should I proceed?", and contains no "No cap base" at all. Anchoring on the catalog text would
+  # have matched only the SKILL.md prose the model echoes into the transcript, never the gate. Verified
+  # against the real fired question: "How should I proceed" appears in 1 of 7 questions in this run.
+  - when_question: "How should I proceed"
+    choose: "Instrument terms only"
+
+assert:
+  - result: success
+  # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
+  # the deliverable but stranded steps, which result:success alone misses.
+  - all_tasks_completed: true
+  # The signature negative, asserted POSITIVELY: the skill must explicitly flag the exclusivity field
+  # as blank/absent — proving it recognized the absence instead of fabricating a value. (A
+  # transcript_not_matches on "45" is too brittle: the skill legitimately COACHES "negotiate 30-45
+  # days" once a value is filled in, which is correct advice, not a hallucinated extraction.)
+  # Phrasing varies run-to-run ("___ days", "nothing filled in", "the number of days is blank",
+  # "not specified"), so the alternation is broad and the window wide — the skill ALWAYS flags the blank;
+  # only the wording moves.
+  - transcript_matches: 'exclusivit[\s\S]{0,150}(blank|___|nothing (is )?(filled|specified)|(not|nothing) filled|filled in|no (number|value|duration|days)|missing|not (specified|stated|provided|given)|empty|left blank|unspecified)'
+  # Uploaded input is read-only — the extractor must READ the uploaded term sheet, never mutate it. Guard
+  # the upload's content hash (0.29.0 captures uploads as a read-only input root, so input_unmodified now
+  # reaches the upload lanes). Evaluable only after a re-record captures the upload root.
+  - input_unmodified: 'uploads/**'
+  # host-path posture: hostloop exposes real host paths by design; the leak class is covered
+  # by the container-tier host-path-canary scenario + the privacy scan's path class on cassettes.
+  # The cap-table coaching flow legitimately ENDS on a question ("want me to model the round?") after
+  # answering the founder-context gate, with no tool call after it. cowork-harness's H3 stall detector
+  # (0.19.0) flags that as `stalledOnQuestion`, which would fail the run despite the deliverable being
+  # produced. The deliverable here IS independently asserted above (the exclusivity-blank flag via
+  # transcript_matches), so suppressing the stall signal is safe and correct — this is an intended
+  # question-terminal, not an incomplete run.
+  - allow_stall: true
+  # --- fleet contract asserts (adopted at the 0.24.0 pin; budgets tightened from discovery actuals) ---
+  # The pipeline entered through the Skill tool (prefix-tolerant; id shape confirmed at discovery).
+  - skill_triggered: '(founder-skills:)?cap-table$'
+  # Every computer:// deliverable link shared with the founder must resolve (zero links pass).
+  # This flow is question-terminal (allow_stall above): it surfaces extraction challenges and stalls
+  # on a gate before emitting a deliverable link, so a computer:// link may be absent. Assert link
+  # *resolution* only if one is present (0.27.0 made the bare form fail on zero links).
+  - computer_links_resolve_if_present: true
+  # No delete under outputs/ (live-lane key; replay skips it loudly).
+  - no_delete_in_outputs: true
+  # Dispatch contract: sub-agents declare no Bash (agents/*.md) — regression tripwire.
+  - subagent_tool_absent: 'Bash'
+  # Usability budget: gates asked before value (observed + headroom, from discovery).
+  - questions_count_max: 6
+  # Efficiency budgets — generous ceilings; tightened to observed x1.5 post-record.
+  - max_turns: 70
+  - tool_calls_max: 65
+  # Stray-file guard (new-files-only; overwrite-in-place is covered by producer stamps).
+  # Allowlist = artifact namespace (incl. handoff/**) + founder-context sidecar + promoted
+  # deliverables. Pre-0.24 cassettes exclude loudly (no preRunPaths). tightened from discovery actuals (observed x1.5).
+  - no_unexpected_files:
+      - 'outputs/artifacts/cap-table-acmecorp-inc/**'
+      # The no-cap-base fork legitimately writes to `cap-table-<slug>-extraction/` — the documented
+      # convention (SKILL.md's --review-dir for the extraction-only renderer, and
+      # compose_extraction_report.py's "Directory convention" docstring). This scenario EXISTS to
+      # exercise that fork, so its own output directory has to be allowlisted; without it the assert
+      # fails on correct behaviour. The full-pipeline dir stays listed because the fork is a live
+      # branch — the founder can also supply a cap base and continue.
+      - 'outputs/artifacts/cap-table-acmecorp-inc-extraction/**'
+      - 'outputs/artifacts/founder-context-acmecorp-inc.json'
+      - 'outputs/Acmecorp_*'
+  # GATE FLOOR. `questions_count_max` above is a CEILING — it caps interruption but has never once
+  # asserted that the skill asked anything at all. A run that silently skips its confirmation gates and
+  # assumes the answers produces a well-formed report, a green suite, and a founder who was never
+  # consulted. Measured: a committed cassette for this fleet once froze exactly that (0 gates) and went
+  # green for weeks. `gate_answers_delivered` alone does NOT close it — it passes VACUOUSLY when zero
+  # gates fire, which is why the two are always paired.
+  # Floor is deliberately 1, well BELOW the count observed at record time: gate firing is
+  # model-dependent (the same batch saw one cap-table lane fire the founder-context pack and another
+  # skip it), so a floor set AT the observed count converts ordinary variance into a red suite. This
+  # asserts the property — "it asked" — not the model's exact behaviour.
+  - gate_answers_delivered: true
+  - gate_answer_count_min: 1

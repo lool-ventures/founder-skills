@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Install Founder Skills in Claude Desktop</title>
+<title>Install Founder Skills in Claude</title>
 <style>
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #f9f5f1; color: #3d3929; }
 .card { text-align: center; padding: 3rem; max-width: 480px; }
@@ -11,16 +11,26 @@ p { color: #6b5e4f; line-height: 1.6; }
 a { color: #d97757; text-decoration: none; font-weight: 600; }
 a:hover { text-decoration: underline; }
 .fallback { display: none; }
+ol.manual { text-align: left; color: #6b5e4f; line-height: 1.7; padding-left: 1.4rem; }
+ol.manual li { margin-bottom: 0.35rem; }
+p.manual { margin-bottom: 0.4rem; }
 </style>
 </head>
 <body>
 <div class="card">
 <h1>Installing Founder Skills</h1>
-<p id="status">Opening Claude Desktop...</p>
+<p id="status">Opening Claude…</p>
 <div id="fallback" class="fallback">
-<p>Claude Desktop didn't open. You can:</p>
+<p>Claude didn&rsquo;t open. You can:</p>
 <p><a href="claude://claude.ai/customize/plugins/new?marketplace=https://github.com/lool-ventures/founder-skills&plugin=founder-skills">Try again</a></p>
-<p>Or install manually: open Claude Desktop, click <strong>Customize</strong>, then <strong>Browse Plugins</strong>, add marketplace <code>lool-ventures/founder-skills</code>.</p>
+<p class="manual">Or install it by hand, in the Claude desktop app:</p>
+<ol class="manual">
+<li>Click <strong>Customize</strong> in the sidebar, then <strong>Plugins</strong>.</li>
+<li>Click <strong>Add &#8964;</strong> &rarr; <strong>Add marketplace</strong>.</li>
+<li>Enter <code>lool-ventures/founder-skills</code> and leave <strong>Sync automatically</strong> on.</li>
+<li>Click <strong>Sync</strong>.</li>
+<li>In the <strong>Directory</strong>, click <strong>+</strong> on the <strong>Founder skills</strong> card. Syncing alone does not install it.</li>
+</ol>
 </div>
 <p><a href="https://github.com/lool-ventures/founder-skills">Back to Founder Skills on GitHub</a></p>
 </div>

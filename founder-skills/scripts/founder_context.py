@@ -5,9 +5,9 @@
 # ///
 """Per-company founder context manager.
 
-Manages founder-context-{slug}.json files with init/read/merge/validate
-subcommands. Each file stores stable identity fields, key metrics with
-provenance, fundraising data, and prior skill run history.
+Manages founder-context-{slug}.json files with init/read/merge/validate/
+update-identity subcommands. Each file stores stable identity fields, key
+metrics with provenance, fundraising data, and prior skill run history.
 
 Usage:
     python founder_context.py init --company-name "Acme Corp" --stage seed \
@@ -19,6 +19,9 @@ Usage:
         --data '{"team_size": 12}' --artifacts-root ./artifacts
 
     python founder_context.py validate --slug acme-corp --artifacts-root ./artifacts
+
+    python founder_context.py update-identity --slug acme-corp --stage series-a \
+        --sector "ai-native" --artifacts-root ./artifacts
 
 Exit codes:
     0 = success
@@ -57,7 +60,19 @@ PROTECTED_KEY_METRICS = frozenset(
 
 PROTECTED_FUNDRAISING = frozenset({"current_cash"})
 
-VALID_STAGES = {"pre-seed", "seed", "series-a", "series-b", "later"}
+VALID_STAGES = {"pre-seed", "seed", "series-a", "series-b", "series-c", "series-d", "later"}
+
+
+def _normalize_enum_arg(value: str) -> str:
+    """Coerce an enum-valued CLI arg to canonical form before choices-validation.
+
+    Callers and sibling scripts mix separators and case for the same token — e.g.
+    'Series A' / 'series_a' for the canonical hyphenated 'series-a', or 'AI_Native'
+    for 'ai-native'. argparse applies type= BEFORE choices=, so this accepts the
+    natural spelling without widening the valid set (the stored value stays canonical).
+    """
+    return value.strip().lower().replace("_", "-").replace(" ", "-")
+
 
 CANONICAL_SECTOR_TYPES = frozenset(
     {
@@ -69,6 +84,7 @@ CANONICAL_SECTOR_TYPES = frozenset(
         "consumer-subscription",
         "usage-based",
         "transactional-fintech",
+        "retail",
     }
 )
 
@@ -96,6 +112,10 @@ _SECTOR_ALIASES: dict[str, str] = {
     "cybersecurity": "saas",
     "transactional fintech": "transactional-fintech",
     "payment processing": "transactional-fintech",
+    "retail": "retail",
+    "d2c": "retail",
+    "e-commerce": "retail",
+    "ecommerce": "retail",
 }
 
 # Precedence for substring extraction; most specific first.
@@ -115,6 +135,10 @@ _SECTOR_SUBSTRING_PRECEDENCE: list[tuple[str, str]] = [
     ("usage-based", "usage-based"),
     ("marketplace", "marketplace"),
     ("hardware", "hardware"),
+    ("retail", "retail"),
+    ("d2c", "retail"),
+    ("e-commerce", "retail"),
+    ("ecommerce", "retail"),
     ("payment processing", "transactional-fintech"),
     ("payments", "transactional-fintech"),
     ("fintech", "saas"),
@@ -294,6 +318,19 @@ def _check_protected_fields(merge_data: dict[str, Any], source: str, force: bool
     return False
 
 
+def _deep_merge(target: dict[str, Any], updates: dict[str, Any]) -> None:
+    """Recursively merge ``updates`` into ``target`` in place.
+
+    For keys present in both whose values are dicts, recurse so nested
+    sub-dicts are merged rather than clobbered. Otherwise overwrite.
+    """
+    for key, val in updates.items():
+        if key in target and isinstance(target[key], dict) and isinstance(val, dict):
+            _deep_merge(target[key], val)
+        else:
+            target[key] = val
+
+
 def _stamp_key_metrics_source(km: dict[str, Any], source: str) -> dict[str, Any]:
     """Add source provenance to each key_metrics entry."""
     stamped: dict[str, Any] = {}
@@ -378,7 +415,16 @@ def cmd_read(args: argparse.Namespace) -> None:
 
 
 def cmd_merge(args: argparse.Namespace) -> None:
-    """Merge data into an existing founder context file."""
+    """Merge data into an existing founder context file.
+
+    NOT currently invoked by any skill workflow — skills only ``init`` the context
+    once (from the deck basics) and ``read``/import it. ``merge`` is the retained,
+    provenance-gated write-back primitive for updating a shared per-company context
+    (e.g. a later skill persisting a refined metric); protected metrics require
+    ``--source user`` or ``--force``. Cross-skill data currently flows via artifact
+    import, not through here. Keep it: it is the write path a deterministic
+    cross-artifact consistency check would build on. Do not treat it as dead code.
+    """
     artifacts_root: str = args.artifacts_root
     rc, slug = _resolve_slug(artifacts_root, args.slug)
     if rc != 0:
@@ -414,12 +460,10 @@ def cmd_merge(args: argparse.Namespace) -> None:
     if "key_metrics" in merge_data and isinstance(merge_data["key_metrics"], dict):
         merge_data["key_metrics"] = _stamp_key_metrics_source(merge_data["key_metrics"], source)
 
-    # Deep merge: for dict values, merge recursively; otherwise overwrite
-    for key, val in merge_data.items():
-        if key in context and isinstance(context[key], dict) and isinstance(val, dict):
-            context[key].update(val)
-        else:
-            context[key] = val
+    # Deep merge: for dict values, merge recursively; otherwise overwrite.
+    # Protected fields are gated by _check_protected_fields above, so recursion
+    # here only touches user-confirmed or non-protected nested data.
+    _deep_merge(context, merge_data)
 
     # Handle --add-skill-run
     if args.add_skill_run:
@@ -487,7 +531,7 @@ def cmd_validate(args: argparse.Namespace) -> None:
             print(f"Validation error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Valid — output the context
+    # Valid — this is a gate (no -o/--pretty); report status to stderr, no stdout.
     print("Valid", file=sys.stderr)
 
 
@@ -596,6 +640,7 @@ def parse_args() -> argparse.Namespace:
     sp_init.add_argument(
         "--stage",
         required=True,
+        type=_normalize_enum_arg,
         choices=sorted(VALID_STAGES),
         help="Funding stage",
     )
@@ -603,6 +648,7 @@ def parse_args() -> argparse.Namespace:
     sp_init.add_argument("--geography", required=True, help="Geographic region")
     sp_init.add_argument(
         "--sector-type",
+        type=_normalize_enum_arg,
         choices=sorted(CANONICAL_SECTOR_TYPES),
         help="Override auto-derived sector type",
     )
@@ -648,12 +694,14 @@ def parse_args() -> argparse.Namespace:
     sp_update.add_argument("--sector", help="New sector value")
     sp_update.add_argument(
         "--stage",
+        type=_normalize_enum_arg,
         choices=sorted(VALID_STAGES),
         help="New funding stage",
     )
     sp_update.add_argument("--geography", help="New geographic region")
     sp_update.add_argument(
         "--sector-type",
+        type=_normalize_enum_arg,
         choices=sorted(CANONICAL_SECTOR_TYPES),
         help="Override auto-derived sector type",
     )

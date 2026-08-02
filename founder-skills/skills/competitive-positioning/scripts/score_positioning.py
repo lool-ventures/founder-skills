@@ -182,6 +182,12 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
         "startup_x_rank": rank_x,
         "startup_y_rank": rank_y,
         "competitor_count": n,
+        # Passthrough of the input view's per-competitor coordinates. Coordinates are
+        # assigned upstream (by the founder/main thread, or refined by the POSITIONING_SCORING
+        # sub-agent) and validated, never recomputed here — this just makes
+        # positioning_scores.json a self-contained record of them alongside the aggregates,
+        # instead of forcing every downstream consumer back to positioning.json for points[].
+        "points": points,
     }
     return scored_view, warnings
 
@@ -248,10 +254,17 @@ def _normalize_positioning_input(data: dict[str, Any]) -> list[str]:
 # Validation
 # ---------------------------------------------------------------------------
 
+_VALID_SCORING_BASIS = ("shipped", "roadmap_12mo", "mixed")
+
 
 def _validate_input(data: dict[str, Any]) -> list[str]:
     """Validate input structure. Returns list of error messages."""
     errors: list[str] = []
+
+    if "scoring_basis" in data and data["scoring_basis"] not in _VALID_SCORING_BASIS:
+        errors.append(
+            "'scoring_basis' must be one of: " + ", ".join(_VALID_SCORING_BASIS) + f" (got {data['scoring_basis']!r})"
+        )
 
     if "views" not in data or not isinstance(data.get("views"), list):
         errors.append("'views' must be a non-empty array")
@@ -334,10 +347,26 @@ def _validate_input(data: dict[str, Any]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _apply_run_id(result: dict, run_id: str | None) -> None:
+    """CLI run_id overrides stdin-passthrough metadata.run_id (CLI > stdin)."""
+    if not run_id:
+        return
+    md = result.get("metadata")
+    if not isinstance(md, dict):
+        md = {}
+    md["run_id"] = run_id
+    result["metadata"] = md
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Positioning scorer (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
+    p.add_argument(
+        "--run-id",
+        default=None,
+        help="Stamp metadata.run_id (overrides any run_id from stdin metadata)",
+    )
     return p.parse_args()
 
 
@@ -401,6 +430,15 @@ def main() -> None:
     # Passthrough data_confidence if present
     if "data_confidence" in data:
         result["data_confidence"] = data["data_confidence"]
+
+    # Passthrough scoring_basis if present. Deliberately NOT defaulted when absent —
+    # artifacts produced before this convention existed have a genuinely undefined
+    # basis, and stamping "shipped" on them would assert a convention that was never
+    # in force. Absence must stay distinguishable from an explicit declaration.
+    if "scoring_basis" in data:
+        result["scoring_basis"] = data["scoring_basis"]
+
+    _apply_run_id(result, args.run_id)
 
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"

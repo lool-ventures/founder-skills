@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["pdfplumber"]
+# ///
 """Corpus test: Articles of Association PDF extraction simulation.
 
 AOAs are the legal-document source of truth for share class terms (Original
@@ -138,21 +142,32 @@ OIP_DEFN_RE = re.compile(
 )
 PAR_VALUE_THRESHOLD = 0.02  # NIS 0.01 is par value; anything <= this is not OIP
 
-# AD patterns — extend with Israeli phrasing variants
+# AD patterns — extend with Israeli phrasing variants.
+#
+# Order matters: detect_anti_dilution_type returns on the first matching type,
+# so full_ratchet must be checked BEFORE broad_based_weighted_average. The
+# broad-based bucket carries generic conversion-price-adjustment phrasings
+# (r"Adjustment of...Conversion Price") that appear in essentially every AOA
+# with any anti-dilution clause — including full-ratchet ones — so checking
+# broad-based first would misclassify full-ratchet AOAs as broad-based.
+# Full-ratchet therefore leads with specific markers ("lowest price",
+# "reduced to the price") that do not appear in weighted-average clauses.
 AD_TYPE_MARKERS = {
+    "full_ratchet": [
+        r"full\s+ratchet",
+        r"lowest\s+price",
+        r"reduced\s+to\s+the\s+price",
+    ],
+    "narrow_based_weighted_average": [
+        r"narrow[- ]?based\s+weighted\s+average",
+        r"narrow[- ]?based",
+    ],
     "broad_based_weighted_average": [
         r"broad[- ]?based\s+weighted\s+average",
         r"broad[- ]?based",
         r"Adjustment of.{0,20}Conversion Price",
         r"Conversion Price.{0,30}shall be adjusted",
         r"adjustment.{0,30}weighted\s+average",
-    ],
-    "narrow_based_weighted_average": [
-        r"narrow[- ]?based\s+weighted\s+average",
-        r"narrow[- ]?based",
-    ],
-    "full_ratchet": [
-        r"full\s+ratchet",
     ],
 }
 

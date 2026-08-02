@@ -1,0 +1,58 @@
+{
+  "fund_name": "Generic Early-Stage Fund",
+  "mode": "generic",
+  "thesis_areas": [
+    "B2B SaaS",
+    "Fintech",
+    "Developer Tools"
+  ],
+  "check_size_range": {
+    "min": 500000,
+    "max": 5000000,
+    "currency": "USD"
+  },
+  "stage_focus": [
+    "pre_seed",
+    "seed"
+  ],
+  "archetypes": [
+    {
+      "role": "visionary",
+      "name": "The Visionary",
+      "background": "Former founder, market analyst",
+      "focus_areas": [
+        "market size",
+        "timing",
+        "category creation"
+      ]
+    },
+    {
+      "role": "operator",
+      "name": "The Operator",
+      "background": "Former operating executive",
+      "focus_areas": [
+        "GTM motion",
+        "execution speed",
+        "customer evidence"
+      ]
+    },
+    {
+      "role": "analyst",
+      "name": "The Analyst",
+      "background": "Former investment banker",
+      "focus_areas": [
+        "unit economics",
+        "capital efficiency",
+        "financial modeling"
+      ]
+    }
+  ],
+  "sources": [],
+  "validation": {
+    "status": "valid",
+    "errors": []
+  },
+  "metadata": {
+    "run_id": "fixture-ic-sim-001"
+  }
+}

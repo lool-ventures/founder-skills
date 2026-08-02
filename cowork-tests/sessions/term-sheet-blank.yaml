@@ -1,0 +1,11 @@
+# Session for the P0-b anti-hallucination negative.
+# Whole-plugin mount + the synthetic term sheet with a BLANK exclusivity field (the template-blank
+# archetype — a hallucinating extractor would fill "45 days"; the correct extraction is null/absent).
+model: claude-sonnet-4-6
+plugins:
+  local_plugins:
+    - ../../founder-skills
+  enabled:
+    - founder-skills@local
+uploads:
+  - ../fixtures/term_sheet_blank_exclusivity.pdf

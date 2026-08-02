@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.10"
-# dependencies = []
+# dependencies = ["pdfplumber", "python-docx", "openpyxl"]
 # ///
 """Anti-hallucination validator for Lane-1 instrument extraction.
 
@@ -10,10 +10,11 @@ script validates the returned JSON, enforces form-dependent required-field
 gates (per SKILL.md §5.1), surfaces ambiguities for AskUserQuestion, and
 appends the validated instrument into instruments.json.
 
-Per Gotcha #3: this script also normalizes discount values: if a value > 1
-is given for discount_multiplier, treat it as percent and convert to
-multiplier form (90 → 0.90 = 10% discount; 80 → 0.80 = 20% discount; etc.)
-with a warning.
+Per Gotcha #3: this script also normalizes discount values to the canonical
+multiplier form. A value >= 50 is read as a percent-multiplier (80 → 0.80 =
+20% discount); a value in (1, 50) is read as a discount-rate percent (20 →
+0.80 multiplier); a value in (0, 1] passes through as an already-canonical
+multiplier; <= 0 is rejected. See normalize_discount_multiplier.
 """
 
 from __future__ import annotations
@@ -27,8 +28,12 @@ from typing import Any
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact  # noqa: E402
 from cross_checker import cross_check as _cross_check  # noqa: E402
+from evidence_verifier import (  # noqa: E402
+    MissingDependencyError,  # noqa: E402
+    report_to_dict,
+    verify_extraction,
+)
 from evidence_verifier import _load_doc_text as _ev_load_doc_text  # noqa: E402
-from evidence_verifier import report_to_dict, verify_extraction  # noqa: E402
 from extractors import ExtractionContext as _ExtractionContext  # noqa: E402
 from invariant_checker import check_instrument as _invariant_check  # noqa: E402
 from invariant_checker import report_to_dict as _invariant_report_to_dict  # noqa: E402
@@ -97,29 +102,93 @@ INTEREST_RATE_TYPES_REQUIRING_NUMERIC = {"fixed_numeric", "fixed_numeric_simple"
 INTEREST_RATE_TYPES_ALLOWING_NULL = {"statutory_ita_section_3j", "none"}
 INTEREST_RATE_TYPES_ALL = INTEREST_RATE_TYPES_REQUIRING_NUMERIC | INTEREST_RATE_TYPES_ALLOWING_NULL
 
+# Non-extractable doc types: classified + surfaced, never forced through the SAFE/note gate and
+# (for non_instrument / amendment) never persisted to a math array. `warrant` is persisted to
+# warrants[] separately. An `amendment` restates one clause of an existing instrument and leaves
+# every other term legitimately absent, so it must not land as an all-null note in convertible_notes.
+# Single source of truth so the routing / classified / verify-skip / invariants-skip sets can't drift.
+NON_EXTRACTABLE_ITYPES = {"warrant", "non_instrument", "amendment"}
+# Terms docs (term_sheet / option_plan): no strict field schema and no math-consumable shape. Their
+# content is persisted to the RECEIPT (never a math array) and display-rendered by the extraction-only
+# renderer via --audit. Verifier / invariant FINDINGS surface as per-field markers + attention_needed
+# entries, never a block; input-integrity errors (missing source doc, bad JSON, schema-write) still
+# fail loud.
+TERMS_DOC_ITYPES = frozenset({"term_sheet", "option_plan"})
+
+# Relaxable-absence sets: a required field that is missing WITH confidence.level == "absent" is a
+# warning (the instrument persists as a partial), not a hard error — but ONLY for these fields, per
+# instrument type. Everything else stays strict: the per-form required_non_null cap gate, must_be_null,
+# the interest_rate_type enum, must_have_mfn, the Gotcha-#5 branch check, and day_count_basis /
+# annual_interest_rate (the note math filter / day_count coalesce handle those nulls, so they are not
+# relaxed at the validation gate). Every relaxable MATH-CONSUMED field here must be covered by a math
+# usable-predicate (test_relaxable_note_fields_covered_by_usable_predicate enforces this).
+SAFE_RELAXABLE_ABSENT_FIELDS = frozenset({"purchase_amount", "issuance_date", "investor_name"})
+NOTE_RELAXABLE_ABSENT_FIELDS = frozenset(
+    {"principal", "issuance_date", "investor_name", "maturity_date", "maturity_default_treatment"}
+)
+# A warrant whose share count is confirmed but whose strike is genuinely not stated persists as a
+# partial (exercise_price documented-absent) instead of being dropped from fully-diluted math. The
+# math usable-predicate (warrant_exercise.warrant_has_usable_exercise_price) must cover every
+# math-consumed field here (test_relaxable_warrant_fields_covered_by_usable_predicate enforces this).
+WARRANT_RELAXABLE_ABSENT_FIELDS = frozenset({"exercise_price"})
+
 
 def normalize_discount_multiplier(d: float | None) -> tuple[float | None, str | None]:
-    """If discount looks like percent (>1), convert to multiplier and warn."""
+    """Normalize a discount input to the canonical multiplier form (Gotcha #3).
+
+    The canonical field stores the MULTIPLIER (0.80 = a 20% discount). YC SAFEs
+    phrase the "Discount Rate" as the multiplier itself (e.g. "Discount Rate is
+    80%"), so a raw value >= 50 is interpreted as a percent-multiplier
+    (80 -> 0.80); a value in (1, 50) is interpreted as a discount-rate percent
+    (20 -> 0.80 multiplier); a value in (0, 1] is already a multiplier and passes
+    through (with a warning below 0.5, since that is an unusually deep discount).
+    Matches extractors/safe/discount_multiplier.py and the backward_verifier
+    prompt template so the three never disagree.
+
+    Returns (multiplier_or_None, warning_or_error_message).
+    """
     if d is None:
         return None, None
-    if d > 1.0 and d <= 100.0:
-        # Treat as percent — e.g., 20 → 0.80 (20% discount)
-        multiplier = 1.0 - (d / 100.0)
-        return multiplier, (
-            f"discount value {d} > 1 — interpreted as a percent and converted to "
-            f"multiplier form {multiplier:.4f}. Per Gotcha #3, the canonical field "
-            f"is the multiplier (0.80 = 20% discount); confirm with founder."
-        )
-    if d > 100.0:
+    if d <= 0:
         return None, (
-            f"discount value {d} > 100 — uninterpretable. Field is the multiplier "
+            f"discount value {d} <= 0 is invalid. The canonical field is the multiplier "
             f"(0.80 = 20% discount); ask founder for clarification."
         )
-    return d, None
+    if d <= 1.0:
+        # Already a multiplier (0.80 = 20% discount). Pass through.
+        if d < 0.5:
+            return d, (
+                f"discount multiplier {d:.4f} implies a discount deeper than 50% — unusual; "
+                f"confirm with founder (the field is the multiplier, not the discount rate)."
+            )
+        return d, None
+    if d < 50.0:
+        # Discount-RATE percent (e.g. 20 means a 20% discount → 0.80 multiplier).
+        multiplier = 1.0 - (d / 100.0)
+        return multiplier, (
+            f"discount value {d} interpreted as a discount-rate percent and converted to "
+            f"multiplier form {multiplier:.4f}. Per Gotcha #3 the canonical field is the "
+            f"multiplier (0.80 = 20% discount); confirm with founder."
+        )
+    if d <= 100.0:
+        # Percent-MULTIPLIER (e.g. 80 means the multiplier is 0.80, a 20% discount).
+        multiplier = d / 100.0
+        return multiplier, (
+            f"discount value {d} interpreted as a percent-multiplier and converted to "
+            f"multiplier form {multiplier:.4f}. Per Gotcha #3 the canonical field is the "
+            f"multiplier (0.80 = 20% discount); confirm with founder."
+        )
+    return None, (
+        f"discount value {d} > 100 — uninterpretable. The field is the multiplier "
+        f"(0.80 = 20% discount); ask founder for clarification."
+    )
 
 
-def validate_safe(fields: dict[str, Any]) -> list[str]:
+def validate_safe(fields: dict[str, Any], confidence: dict[str, Any] | None = None) -> list[str]:
     errors = []
+    # Relaxable fields the extractor affirmatively documented as absent (level == "absent") become
+    # warnings at the call site rather than errors — a blank/template SAFE persists as a partial.
+    absent = documented_absent_fields(fields, confidence or {}) & SAFE_RELAXABLE_ABSENT_FIELDS
     form = fields.get("form", "other")
     if form not in SAFE_FORM_GATES:
         errors.append(f"unknown SAFE form: {form}")
@@ -135,9 +204,9 @@ def validate_safe(fields: dict[str, Any]) -> list[str]:
         mfn = fields.get("mfn_provision") or {}
         if not mfn.get("present"):
             errors.append(f"form={form} requires mfn_provision.present == true")
-    if not fields.get("purchase_amount"):
+    if not fields.get("purchase_amount") and "purchase_amount" not in absent:
         errors.append("purchase_amount is required")
-    if not fields.get("issuance_date"):
+    if not fields.get("issuance_date") and "issuance_date" not in absent:
         errors.append("issuance_date is required")
     return errors
 
@@ -188,8 +257,13 @@ CONVERTIBLE_SUBTYPE_GATES: dict[str, dict[str, Any]] = {
 }
 
 
-def validate_note(fields: dict[str, Any], *, subtype: str | None = None) -> list[str]:
+def validate_note(
+    fields: dict[str, Any], *, subtype: str | None = None, confidence: dict[str, Any] | None = None
+) -> list[str]:
     errors = []
+    # Relaxable fields the extractor affirmatively documented as absent (level == "absent") become
+    # warnings at the call site rather than errors — a partial/blank note persists as a partial.
+    absent = documented_absent_fields(fields, confidence or {}) & NOTE_RELAXABLE_ABSENT_FIELDS
     # interest_rate_type drives whether annual_interest_rate must be numeric.
     # Default to fixed_numeric for backward compatibility with extractions that
     # don't return the type explicitly.
@@ -201,7 +275,7 @@ def validate_note(fields: dict[str, Any], *, subtype: str | None = None) -> list
     gate_key = subtype if subtype in CONVERTIBLE_SUBTYPE_GATES else "convertible_note"
     gate = CONVERTIBLE_SUBTYPE_GATES[gate_key]
     for r in gate["always_required"]:
-        if fields.get(r) is None:
+        if fields.get(r) is None and r not in absent:
             errors.append(f"required field {r} is missing (subtype={gate_key!r})")
     # annual_interest_rate is conditionally required, also routed by subtype:
     #   - fixed_numeric / fixed_numeric_simple: numeric rate required
@@ -259,6 +333,29 @@ def build_verifier_input(fields: dict[str, Any], confidence: dict[str, Any]) -> 
     return {"fields": verifier_fields}
 
 
+def documented_absent_fields(fields: dict[str, Any], confidence: dict[str, Any]) -> set[str]:
+    """Field names the extractor deliberately reported as absent from the
+    document: a falsy value (None/False/"") paired with confidence level
+    "absent". There is no evidence quote for the absence of something, so
+    these are not hallucination candidates — the verifier's "value present
+    but no evidence_quote" fail path should not apply to them.
+
+    Only matches on the explicit "absent" level, not merely a falsy value —
+    a real `False`/`None` the model is otherwise confident about (e.g.
+    level "high" with a quote, or a falsy value with no absence signal at
+    all) still goes through normal verification.
+    """
+    out: set[str] = set()
+    for fname, fvalue in fields.items():
+        if not (fvalue is None or fvalue is False or fvalue == ""):
+            continue
+        conf = confidence.get(fname) if isinstance(confidence, dict) else None
+        level = conf.get("level") if isinstance(conf, dict) else conf
+        if level == "absent":
+            out.add(fname)
+    return out
+
+
 # Synthesized fields that don't have verbatim source quotes. Tuned against
 # the eval set — these are fields where the model produces a classification
 # (enum) or derived count, not a verbatim extraction. The forward verifier
@@ -290,6 +387,11 @@ SYNTHESIZED_FIELDS_SKIP_VERIFICATION = {
     "preferred_series",
     "authorized_share_classes",
     "expected_absent",
+    # Partial-instrument state, stamped by the script after validation (never sub-agent-extracted,
+    # so they carry no evidence_quote by design — verifying them would flip a clean partial to 'fail').
+    "completeness",
+    "missing_required_fields",
+    "to_confirm",
     # Metadata / non-extraction fields
     "extraction_confidence",
     "id",
@@ -301,12 +403,24 @@ SYNTHESIZED_FIELDS_SKIP_VERIFICATION = {
 }
 
 
-def filter_verifier_report(report_dict: dict[str, Any]) -> dict[str, Any]:
-    """Demote failures on synthesized fields to 'skipped'. Prevents the most
-    common false-positive class from cluttering verification reports."""
+def filter_verifier_report(
+    report_dict: dict[str, Any], absent_fields: set[str] | None = None, no_quote_soft: bool = False
+) -> dict[str, Any]:
+    """Demote failures on synthesized fields to 'skipped', and failures on
+    documented-absent fields (see documented_absent_fields) to
+    'skipped_documented_absence'. Prevents the two most common
+    false-positive classes from cluttering verification reports.
+
+    `no_quote_soft` (terms docs): a `fail` whose ONLY reason is the missing-quote
+    reason demotes to `unverified_no_quote` — a schema-less terms doc paraphrases
+    narrative fields, so a missing verbatim quote is not a hallucination signal.
+    A genuine `value_in_doc failed` is never softened."""
+    absent_fields = absent_fields or set()
     filtered_per_field = []
     n_skipped_synth = 0
+    n_skipped_absence = 0
     for r in report_dict.get("per_field", []):
+        _reasons_txt = " ".join(r.get("reasons", []))
         if r["field"] in SYNTHESIZED_FIELDS_SKIP_VERIFICATION:
             r = {
                 **r,
@@ -314,11 +428,32 @@ def filter_verifier_report(report_dict: dict[str, Any]) -> dict[str, Any]:
                 "reasons": r.get("reasons", []) + ["field is synthesized; skipping evidence check"],
             }
             n_skipped_synth += 1
+        elif (
+            no_quote_soft
+            and r["status"] == "fail"
+            and "evidence_quote is null/empty" in _reasons_txt
+            and "value_in_doc failed" not in _reasons_txt
+        ):
+            r = {
+                **r,
+                "status": "unverified_no_quote",
+                "reasons": r.get("reasons", [])
+                + ["terms doc: no evidence quote — surfaced to-confirm, not a hard fail"],
+            }
+        elif r["status"] == "fail" and r["field"] in absent_fields:
+            r = {
+                **r,
+                "status": "skipped_documented_absence",
+                "reasons": r.get("reasons", [])
+                + ["extractor reported field absent from document; no evidence to quote for an absence"],
+            }
+            n_skipped_absence += 1
         filtered_per_field.append(r)
     out = {**report_dict, "per_field": filtered_per_field}
     out["n_skipped_synthesized"] = n_skipped_synth
-    # Recompute overall_status excluding synthesized fields
-    real = [r for r in filtered_per_field if r["status"] != "skipped_synthesized"]
+    out["n_skipped_absence"] = n_skipped_absence
+    # Recompute overall_status excluding synthesized and documented-absence fields
+    real = [r for r in filtered_per_field if r["status"] not in ("skipped_synthesized", "skipped_documented_absence")]
     n_fail = sum(1 for r in real if r["status"] == "fail")
     n_pass = sum(1 for r in real if r["status"] == "pass")
     n_unver = sum(1 for r in real if r["status"] == "unverifiable")
@@ -327,6 +462,7 @@ def filter_verifier_report(report_dict: dict[str, Any]) -> dict[str, Any]:
         "n_fail": n_fail,
         "n_unverifiable": n_unver,
         "n_skipped_synthesized": n_skipped_synth,
+        "n_skipped_absence": n_skipped_absence,
     }
     if out.get("overall_status") == "unverifiable_doc":
         pass  # leave as-is
@@ -408,7 +544,18 @@ def main() -> int:
         "(E_DUPLICATE_INSTRUMENT_ID) and the file is left unchanged.",
     )
     p.add_argument("--pretty", action="store_true")
+    p.add_argument("-o", "--output", default=None, help="Write the receipt to this file; emit a receipt to stdout")
     args = p.parse_args()
+
+    # Fail loud if a --source-doc path was given but does not exist: a missing file is an agent
+    # plumbing error (e.g. a host/VM path mismatch), NOT an image-only doc. Silently degrading to
+    # unverifiable_doc / ok:true hides the failure. Checked at argument-validation
+    # time, before write_artifact, so nothing is persisted on a bad path.
+    if args.source_doc and not os.path.isfile(args.source_doc):
+        sys.stderr.write(
+            f"extract_instrument.py: E_SOURCE_DOC_NOT_FOUND: --source-doc file not found: {args.source_doc}\n"
+        )
+        return 1
 
     extraction = json.load(sys.stdin)
     if not isinstance(extraction, dict):
@@ -430,13 +577,16 @@ def main() -> int:
         "convertible_security",  # YC pre-SAFE convertible security — SAFE-equivalent
         "term_sheet",
         "option_plan",
-        # warrant + non_instrument let misfiled docs (e.g., a warrant that
-        # ended up in the safes/ folder, or a financing-notice letter mistaken
-        # for a SAFE) return cleanly classified rather than forcing an
-        # invalid SAFE/note classification.
+        # warrant + non_instrument + amendment let misfiled or clause-only docs (a warrant that
+        # ended up in the safes/ folder, a financing-notice letter mistaken for a SAFE, or an
+        # amendment that only restates one clause of an existing instrument) return cleanly
+        # classified rather than forcing an invalid SAFE/note classification. These are exactly
+        # NON_EXTRACTABLE_ITYPES (kept as literals here so the enum is greppable).
         "warrant",
         "non_instrument",
+        "amendment",
     }
+    assert valid_itypes.issuperset(NON_EXTRACTABLE_ITYPES)  # keep the two in sync
     if itype not in valid_itypes:
         sys.stderr.write(f"extract_instrument.py: unknown instrument_type: {itype}\n")
         return 1
@@ -471,10 +621,10 @@ def main() -> int:
 
     # Validate by type
     if itype == "safe":
-        errors = validate_safe(fields)
+        errors = validate_safe(fields, confidence=confidence)
     elif itype == "convertible_note":
-        errors = validate_note(fields, subtype=subtype)
-    elif itype in {"warrant", "non_instrument"}:
+        errors = validate_note(fields, subtype=subtype, confidence=confidence)
+    elif itype in NON_EXTRACTABLE_ITYPES:
         errors = validate_non_extractable(fields)
     else:
         errors = []  # term_sheet / option_plan: caller routes elsewhere
@@ -517,6 +667,29 @@ def main() -> int:
             field_level = "medium"
     fields.setdefault("extraction_confidence", field_level)
 
+    # Partial instrument: relaxable required fields the extractor documented as absent were relaxed to
+    # warnings (not errors) above. Stamp the partiality INSIDE the artifact (so it travels with the
+    # data, not just the receipt), demote extraction_confidence, and emit a per-field warning. The
+    # value stays null — never fabricated; the founder confirms via the downstream CONFIRM-GATE.
+    relaxable = (
+        SAFE_RELAXABLE_ABSENT_FIELDS
+        if itype == "safe"
+        else NOTE_RELAXABLE_ABSENT_FIELDS
+        if itype == "convertible_note"
+        else WARRANT_RELAXABLE_ABSENT_FIELDS
+        if itype == "warrant"
+        else frozenset()
+    )
+    absent_relaxed = sorted(documented_absent_fields(fields, confidence) & relaxable)
+    if absent_relaxed:
+        amb_map = {a.get("field"): a.get("reason") for a in ambiguities if isinstance(a, dict) and a.get("field")}
+        fields["completeness"] = "partial"
+        fields["missing_required_fields"] = absent_relaxed
+        fields["to_confirm"] = {fld: amb_map.get(fld) or "not stated in document; confirm" for fld in absent_relaxed}
+        fields["extraction_confidence"] = "low"  # a documented-absent partial is not high-confidence
+        for fld in absent_relaxed:
+            warnings.append(f"W_FIELD_ABSENT_IN_DOC:{fld}")
+
     def _upsert_or_error(
         array: list[Any],
         entry: dict[str, Any],
@@ -546,9 +719,32 @@ def main() -> int:
         array.append(entry)
         return None
 
+    def _looks_like_content_duplicate(
+        array: list[dict[str, Any]], entry: dict[str, Any], keys: tuple[str, ...]
+    ) -> bool:
+        """A prior entry with a DIFFERENT id but identical content — the signature of
+        a re-piped correction that got a fresh sequential id instead of overwriting.
+        Different-id only, so a deliberate same-id `--replace` upsert never trips it."""
+        eid = entry.get("id")
+        for existing in array:
+            if existing.get("id") == eid:
+                continue
+            if all(existing.get(k) is not None and existing.get(k) == entry.get(k) for k in keys):
+                return True
+        return False
+
     if itype == "safe":
         # Allocate next id
         fields.setdefault("id", f"safe_{len(instruments['safes']) + 1:03d}")
+        if _looks_like_content_duplicate(
+            instruments["safes"], fields, ("investor_name", "purchase_amount", "issuance_date")
+        ):
+            warnings.append(
+                "W_POSSIBLE_DUPLICATE_INSTRUMENT: a safes[] entry with the same "
+                "investor_name / purchase_amount / issuance_date already exists — this looks like a "
+                "re-piped correction that was appended under a new id; reset the array or reuse the "
+                "same id with --replace to avoid a duplicate."
+            )
         dup_err = _upsert_or_error(instruments["safes"], fields, array_name="safes")
         if dup_err:
             sys.stderr.write(f"extract_instrument.py: {dup_err}\n")
@@ -561,6 +757,15 @@ def main() -> int:
         # framing (Israeli CLA / YC convertible_security / standard note).
         if subtype:
             fields["subtype"] = subtype
+        if _looks_like_content_duplicate(
+            instruments["convertible_notes"], fields, ("investor_name", "principal", "issuance_date")
+        ):
+            warnings.append(
+                "W_POSSIBLE_DUPLICATE_INSTRUMENT: a convertible_notes[] entry with the same "
+                "investor_name / principal / issuance_date already exists — this looks like a "
+                "re-piped correction that was appended under a new id; reset the array or reuse the "
+                "same id with --replace to avoid a duplicate."
+            )
         dup_err = _upsert_or_error(instruments["convertible_notes"], fields, array_name="convertible_notes")
         if dup_err:
             sys.stderr.write(f"extract_instrument.py: {dup_err}\n")
@@ -574,6 +779,21 @@ def main() -> int:
         # fields are present. Otherwise, surface as a non-instrument
         # classification and let the founder re-extract via the Lane-2 Carta
         # warrant ledger path.
+        # A present-but-null exercise_price is only legitimate when its absence is DOCUMENTED
+        # (confidence.level == "absent" + ambiguities entry) — that path stamped the warrant partial
+        # above (absent_relaxed). An undocumented null is a fabrication-inviting gap: fail loud. Guard on
+        # key-PRESENT-and-null, never key-absent: a missing key is the empty-fields misfile escape hatch
+        # below, which must keep its rc-0 "NOT persisted" behavior.
+        if "exercise_price" in fields and fields["exercise_price"] is None and "exercise_price" not in absent_relaxed:
+            _werr = (
+                "E_WARRANT_EXERCISE_PRICE_UNDOCUMENTED_NULL: warrant exercise_price is null but its "
+                "absence is not documented. To capture a warrant whose strike is genuinely not stated, "
+                "mark exercise_price with confidence.level='absent' and add an ambiguities entry; "
+                "otherwise supply the strike. Never fabricate."
+            )
+            sys.stderr.write(f"extract_instrument.py: {_werr}\n")
+            print(json.dumps({"error": "E_WARRANT_EXERCISE_PRICE_UNDOCUMENTED_NULL", "detail": _werr}))
+            return 1
         required_warrant_keys = (
             "shares_underlying",
             "exercise_price",
@@ -616,16 +836,25 @@ def main() -> int:
     receipt["ambiguities"] = ambiguities
     receipt["low_confidence_fields"] = low_confidence
     receipt["classified_doc_type"] = itype
-    if itype in {"warrant", "non_instrument"}:
+    if itype in NON_EXTRACTABLE_ITYPES:
         # Surface so downstream consumers know to skip math producers for this doc
         receipt["classified_as_non_extractable"] = True
+    elif itype in TERMS_DOC_ITYPES:
+        # Content lives in the receipt (never a math array). Strip synthesized stamps so the renderer's
+        # flat table shows only real extracted fields (M1: extraction_confidence is stamped at ~:637).
+        _synth = {"extraction_confidence", "completeness", "missing_required_fields", "to_confirm"}
+        receipt["classified_as_terms_doc"] = True
+        receipt["terms_doc"] = {
+            "fields": {k: v for k, v in fields.items() if k not in _synth},
+            "confidence": confidence,
+        }
 
     # Evidence verification. --verify-blocking exits non-zero on failure (default ON).
     if args.verify:
         if not args.source_doc:
             sys.stderr.write("extract_instrument.py: --verify requires --source-doc\n")
             return 1
-        if itype in {"warrant", "non_instrument"}:
+        if itype in NON_EXTRACTABLE_ITYPES:
             # Non-extractable classifications have no fields to verify.
             receipt["evidence_verification"] = {
                 "overall_status": "skipped_non_instrument",
@@ -634,11 +863,25 @@ def main() -> int:
         else:
             from pathlib import Path as _Path
 
-            doc_text = _ev_load_doc_text(_Path(args.source_doc))
+            try:
+                doc_text = _ev_load_doc_text(_Path(args.source_doc))
+            except MissingDependencyError as _e:
+                # Blocking gate must fail loudly on a missing parser, not
+                # silently degrade to 'unverifiable_doc' (which would pass).
+                receipt["evidence_verification"] = {
+                    "overall_status": "error",
+                    "error": "E_MISSING_DEPENDENCY",
+                    "dependency": _e.dependency,
+                    "detail": str(_e),
+                }
+                sys.stderr.write(str(_e) + "\n")
+                print(json.dumps(receipt, indent=2 if args.pretty else None))
+                return 1
             verifier_input = build_verifier_input(fields, confidence)
             verification_report = verify_extraction(verifier_input, doc_text)
             raw_report = report_to_dict(verification_report)
-            filtered = filter_verifier_report(raw_report)
+            absent_fields = documented_absent_fields(fields, confidence)
+            filtered = filter_verifier_report(raw_report, absent_fields, no_quote_soft=itype in TERMS_DOC_ITYPES)
             receipt["evidence_verification"] = filtered
 
             # Structured rejection contract: when there are real value_in_doc
@@ -650,8 +893,11 @@ def main() -> int:
                 if r["status"] == "fail" and "value_in_doc failed" in " ".join(r.get("reasons", []))
             ]
             if real_failures:
+                # Terms docs never block on a finding: the receipt records the rejection (so a
+                # dispatcher may still repair) and the renderer marks the rows; only exit 1 otherwise.
+                _blocks = args.verify_blocking and itype not in TERMS_DOC_ITYPES
                 receipt["evidence_verification"]["rejection"] = {
-                    "rejected": args.verify_blocking,
+                    "rejected": _blocks,
                     "reason": "value_in_doc_failures",
                     "failed_fields": [r["field"] for r in real_failures],
                     "retry_hint": (
@@ -661,7 +907,7 @@ def main() -> int:
                         "Fields: " + ", ".join(r["field"] for r in real_failures)
                     ),
                 }
-                if args.verify_blocking:
+                if _blocks:
                     sys.stderr.write(
                         "extract_instrument.py: evidence verification failed (blocking mode). "
                         "Fields with value_in_doc failures: " + ", ".join(r["field"] for r in real_failures) + "\n"
@@ -672,13 +918,16 @@ def main() -> int:
     # Invariant checking. Default ON via --invariants. Hard math invariants
     # block (e.g. options_granted > total_authorized); soft bounds violations
     # warn-only.
-    if args.invariants and itype not in {"warrant", "non_instrument"}:
+    if args.invariants and itype not in NON_EXTRACTABLE_ITYPES:
         # invariant_checker takes the flat {name: value} form; build_verifier_input
         # only adapts to the evidence-verifier shape.
         invariant_input = {"instrument_type": itype, "fields": fields}
         inv_report = _invariant_check(invariant_input)
         receipt["invariant_check"] = _invariant_report_to_dict(inv_report)
-        if inv_report.n_hard_violations > 0:
+        # Terms docs never block on an invariant FINDING: it is recorded + surfaced in
+        # attention_needed_fields + marked by the renderer (a false-positive-prone cross-field check on
+        # display-only content must not empty the deliverable). Other itypes still block.
+        if inv_report.n_hard_violations > 0 and itype not in TERMS_DOC_ITYPES:
             sys.stderr.write(
                 "extract_instrument.py: invariant_checker found hard violations: "
                 + "; ".join(v.reason for v in inv_report.violations if v.stake == "hard")
@@ -700,8 +949,13 @@ def main() -> int:
             _backstop_extractors = []
         if _backstop_extractors:
             # Reuse doc_text from the verify block if available; otherwise reload.
-            # Using locals() avoids ruff F823 on the unbound-name path.
-            _doc_text = locals().get("doc_text") or _ev_load_doc_text(_Path(args.source_doc))
+            # Using locals() avoids ruff F823 on the unbound-name path. Cross-check
+            # is informational; a missing parser here downgrades to no-op rather
+            # than crashing (the blocking gate already covers the loud path).
+            try:
+                _doc_text = locals().get("doc_text") or _ev_load_doc_text(_Path(args.source_doc))
+            except MissingDependencyError:
+                _doc_text = ""
             ctx = _ExtractionContext(instrument_type=itype, source_text=_doc_text, source_path=args.source_doc)
             per_field_cross: list[dict[str, Any]] = []
             n_demotions = 0
@@ -745,14 +999,17 @@ def main() -> int:
     # Includes low/medium-confidence fields + any soft invariant warnings
     # + unverifiable evidence fields.
     attention_fields = set(low_confidence)
+    _is_terms_doc = itype in TERMS_DOC_ITYPES
     if "invariant_check" in receipt:
         for v in receipt["invariant_check"]["violations"]:
-            if v["stake"] == "soft":
+            # soft always; for terms docs the hard violations no longer block, so surface them here.
+            if v["stake"] == "soft" or (_is_terms_doc and v["stake"] == "hard"):
                 attention_fields.add(v["field"])
     if "evidence_verification" in receipt:
         per_field = receipt["evidence_verification"].get("per_field", [])
         for r in per_field:
-            if r.get("status") == "unverifiable":
+            # unverifiable always; for terms docs the non-blocking value_in_doc fails surface here too.
+            if r.get("status") == "unverifiable" or (_is_terms_doc and r.get("status") == "fail"):
                 attention_fields.add(r["field"])
     if "cross_check" in receipt:
         for r in receipt["cross_check"]["per_field"]:
@@ -760,7 +1017,12 @@ def main() -> int:
                 attention_fields.add(r["field_name"])
     receipt["attention_needed_fields"] = sorted(attention_fields)
 
-    print(json.dumps(receipt, indent=2 if args.pretty else None))
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as _fh:
+            json.dump(receipt, _fh, indent=2 if args.pretty else None)
+        print(json.dumps({"ok": True, "output": os.path.abspath(args.output)}, indent=2 if args.pretty else None))
+    else:
+        print(json.dumps(receipt, indent=2 if args.pretty else None))
     return 0
 
 

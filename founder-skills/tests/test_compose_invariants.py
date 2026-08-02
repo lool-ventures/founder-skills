@@ -21,23 +21,22 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_DIR = REPO_ROOT / "founder-skills" / "skills"
 
 # Skills with on-disk fixtures populated AND wired into compose_invocations'
-# INVOKERS registry. Start with deck-review only; expand AS each skill's
-# fixtures land. DO NOT list a skill here before its fixtures exist —
+# INVOKERS registry. DO NOT list a skill here before its fixtures exist —
 # `pytest.skip` on missing fixtures looks identical to "all pass" in CI,
 # masking silent regressions for unfixtured skills.
 #
-# All 5 skills emit coaching_payload as of v0.4.2; the per-skill expansion
-# is tracked separately. When you add a skill here, also add it to:
+# All 6 skills emit coaching_payload as of v0.4.2. When you add a skill here,
+# also add it to:
 #   - compose_invocations.py: _COMPOSE_FLAGS
 #   - compose_invocations.py: _RUN_ID_MUTATION_TARGET
 #   - founder-skills/tests/fixtures/<skill>/   (the fixture set)
 COACHING_SKILLS = [
     "deck-review",
     "cap-table",
-    # "market-sizing",            # add when fixtures populated
-    # "ic-sim",                   # add when fixtures populated
+    "market-sizing",
+    "ic-sim",
     "financial-model-review",
-    # "competitive-positioning",  # add when fixtures populated
+    "competitive-positioning",
 ]
 
 

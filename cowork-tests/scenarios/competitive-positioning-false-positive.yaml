@@ -1,0 +1,71 @@
+name: competitive-positioning-false-positive
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: first   # Gate 1's proceed path is option 1 ("Looks good"); paraphrase-proof (anchor-discipline rule)
+skills: [competitive-positioning]
+
+# Adversarial competitor-set verification (Step 3.5) — POSITIVE regression.
+# The prompt seeds Cadence (SMB field-service dispatch) with three GENUINE FSM
+# competitors AND Calendly — a planted FALSE POSITIVE (shares the word "scheduling"
+# but schedules meetings for knowledge workers; no shared buyer/job). The wired
+# COMPETITOR_VERIFICATION dispatch must flag Calendly and surface the challenge at
+# Gate 1. Asserted positively (like cap-table-antihallucination's exclusivity-blank):
+# competitor_verification.json exists with summary.flagged >= 1, AND the transcript
+# carries a Calendly-specific "not a genuine competitor" challenge. on_unanswered:first
+# drives Gate 1's proceed branch (option 1); the fixed competitor set suppresses the
+# additions sub-prompt.
+prompt: |
+  I'm the founder of Cadence, a US seed-stage B2B SaaS company selling field-service
+  scheduling and dispatch software to SMB service businesses (HVAC, plumbing, electrical).
+  Use the competitive-positioning skill to map our competitive landscape and moats. Use
+  exactly these four competitors — do not add others: ServiceTitan, Jobber, Housecall Pro,
+  and Calendly. Then produce the positioning report.
+
+assert:
+  - result: success
+  # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
+  # the deliverable but stranded steps, which result:success alone misses.
+  - all_tasks_completed: true
+  # The verification artifact was produced and it flagged at least one company.
+  - file_exists: outputs/artifacts/competitive-positioning-cadence/competitor_verification.json
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-cadence/competitor_verification.json
+      path: summary.flagged
+      gt: 0
+  # The signature assert: Calendly is specifically challenged as not genuinely competing.
+  # Phrasing varies run-to-run, so the alternation is broad and the window wide.
+  - transcript_matches: 'calendly[\s\S]{0,220}(not (a |genuine )?(competitor|competing|compete)|different (buyer|market|job)|meeting[\s-]?schedul|doesn.?t (really |genuinely )?compete|challenge|drop|surface)'
+  - subagent_dispatched: 'competitive-positioning'
+  # --- fleet contract asserts (mirror the smoke) ---
+  - skill_triggered: '(founder-skills:)?competitive-positioning$'
+  # Question-terminal flow (allow_stall below): may stall on the Gate-1 challenge before emitting a
+  # deliverable link, so assert link resolution only if one is present (0.27.0 fails the bare form on
+  # zero links). Deliverables are covered by the artifact/file asserts above.
+  - computer_links_resolve_if_present: true
+  - no_delete_in_outputs: true
+  - subagent_tool_absent: 'Bash'
+  # Gate 1 may become question-terminal in the headless proceed flow (H3 stall). The
+  # deliverables are independently asserted above, so suppressing the stall is correct.
+  - allow_stall: true
+  # Usability + efficiency budgets — generous pre-record ceilings (one extra dispatch +
+  # per-competitor WebSearch vs the smoke); tighten to observed x1.5 after recording.
+  - questions_count_max: 8
+  - dispatch_count_max: 12
+  - max_turns: 160
+  - tool_calls_max: 150
+  - no_unexpected_files:
+      - 'outputs/artifacts/competitive-positioning-cadence/**'
+      - 'outputs/artifacts/founder-context-cadence.json'
+      - 'outputs/Cadence_Competitive_*'
+  # GATE FLOOR. `questions_count_max` above is a CEILING — it caps interruption but has never once
+  # asserted that the skill asked anything at all. A run that silently skips its confirmation gates and
+  # assumes the answers produces a well-formed report, a green suite, and a founder who was never
+  # consulted. Measured: a committed cassette for this fleet once froze exactly that (0 gates) and went
+  # green for weeks. `gate_answers_delivered` alone does NOT close it — it passes VACUOUSLY when zero
+  # gates fire, which is why the two are always paired.
+  # Floor is deliberately 1, well BELOW the count observed at record time: gate firing is
+  # model-dependent (the same batch saw one cap-table lane fire the founder-context pack and another
+  # skip it), so a floor set AT the observed count converts ordinary variance into a red suite. This
+  # asserts the property — "it asked" — not the model's exact behaviour.
+  - gate_answers_delivered: true
+  - gate_answer_count_min: 1

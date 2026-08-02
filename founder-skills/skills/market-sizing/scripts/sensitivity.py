@@ -21,6 +21,15 @@ Usage:
       }
     }' | python sensitivity.py --pretty
 
+Optional top-level key ``validation_confidence``: a ``{parameter_name:
+confidence_tier}`` map, typically built from validation.json's
+``assumptions[].category``. It is consulted only when a range omits its own
+``confidence`` key, so a parameter tagged 'derived'/'agent_estimate' there
+still gets its auto-widening floor even if the range didn't repeat the tag.
+It never overrides a range's explicit ``confidence``, and omitting it
+entirely preserves the pre-existing 'sourced' default (with a stderr
+warning) for a range with no confidence anywhere.
+
 Output: JSON with scenario table and sensitivity ranking.
 """
 
@@ -88,35 +97,45 @@ def fmt(v: float) -> float:
     return round(v, 2)
 
 
-def _validate_config(data: dict[str, Any]) -> tuple[str, dict[str, float], dict[str, dict[str, float]], list[str]]:
-    """Validate sensitivity config. Returns (approach, base_params, ranges, errors).
+def _validate_config(
+    data: dict[str, Any],
+) -> tuple[str, dict[str, float], dict[str, dict[str, float]], dict[str, str], list[str]]:
+    """Validate sensitivity config. Returns (approach, base_params, ranges, validation_confidence, errors).
 
     Consolidates all validation from main() and run_sensitivity() into one pass.
+
+    ``validation_confidence`` is an optional top-level input key: a
+    ``{parameter_name: confidence_tier}`` map the caller builds from
+    ``validation.json``'s ``assumptions[].category`` (the authoritative
+    per-parameter confidence source per the skill's SENSITIVITY_TEST dispatch
+    contract). When a range omits its own ``confidence``, run_sensitivity()
+    cross-references this map before falling back to the 'sourced' default —
+    see run_sensitivity() for the fallback chain.
     """
     errors: list[str] = []
 
     # Validate 'base' key
     if "base" not in data:
         errors.append("Missing required key: 'base'")
-        return "", {}, {}, errors
+        return "", {}, {}, {}, errors
 
     if not isinstance(data["base"], dict):
         errors.append(f"'base' must be an object (got {type(data['base']).__name__})")
-        return "", {}, {}, errors
+        return "", {}, {}, {}, errors
 
     if "ranges" in data and not isinstance(data["ranges"], dict):
         errors.append(f"'ranges' must be an object (got {type(data['ranges']).__name__})")
-        return "", {}, {}, errors
+        return "", {}, {}, {}, errors
 
     # Normalize approach
     approach_raw = data.get("approach", "bottom_up")
     if not isinstance(approach_raw, str):
         errors.append(f"'approach' must be a string (got {type(approach_raw).__name__})")
-        return "", {}, {}, errors
+        return "", {}, {}, {}, errors
     approach = approach_raw.replace("-", "_")
     if approach not in VALID_APPROACHES:
         errors.append(f"approach must be one of {sorted(VALID_APPROACHES)} (got '{approach}')")
-        return approach, {}, {}, errors
+        return approach, {}, {}, {}, errors
 
     base_params = data["base"]
     ranges = data.get("ranges", {})
@@ -210,18 +229,46 @@ def _validate_config(data: dict[str, Any]) -> tuple[str, dict[str, float], dict[
     if not errors and approach != "both" and ranges and relevant_range_count == 0:
         errors.append(f"no relevant parameters for {approach} approach")
 
-    return approach, base_params, ranges, errors
+    # Validate optional 'validation_confidence' cross-reference map. Malformed
+    # entries are dropped (not fatal) so a caller's typo in one param doesn't
+    # block the whole run — the per-range 'confidence' key is still authoritative
+    # and unaffected by problems here.
+    validation_confidence: dict[str, str] = {}
+    raw_validation_confidence = data.get("validation_confidence", {})
+    if raw_validation_confidence and not isinstance(raw_validation_confidence, dict):
+        errors.append(f"'validation_confidence' must be an object (got {type(raw_validation_confidence).__name__})")
+    elif raw_validation_confidence:
+        for param_name, raw_conf in raw_validation_confidence.items():
+            conf = str(raw_conf)
+            if conf not in CONFIDENCE_MIN_RANGE:
+                errors.append(
+                    f"validation_confidence.{param_name} must be one of {list(CONFIDENCE_MIN_RANGE)} (got '{conf}')"
+                )
+                continue
+            validation_confidence[param_name] = conf
+
+    return approach, base_params, ranges, validation_confidence, errors
 
 
 def run_sensitivity(
     approach: str,
     base_params: dict[str, float],
     ranges: dict[str, dict[str, float]],
+    validation_confidence: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Run sensitivity analysis by varying each parameter independently.
 
     Assumes inputs are pre-validated by _validate_config().
+
+    ``validation_confidence`` (optional): a ``{parameter_name: confidence_tier}``
+    fallback map, cross-referenced when a range omits its own ``confidence`` key.
+    Intended to be built by the caller from ``validation.json``'s
+    ``assumptions[].category``, so a parameter tagged 'derived' or 'agent_estimate'
+    there doesn't silently lose its auto-widening floor just because the range
+    itself didn't repeat the tag. Plain missing-everywhere (no range confidence
+    AND no entry here) keeps the documented 'sourced' backward-compatible default.
     """
+    validation_confidence = validation_confidence or {}
     if approach == "both":
         td_base = {k: base_params[k] for k in TD_PARAMS}
         bu_base = {k: base_params[k] for k in BU_PARAMS}
@@ -266,8 +313,17 @@ def run_sensitivity(
         # Confidence-based range widening
         raw_confidence = range_spec.get("confidence")
         if raw_confidence is None:
-            print(f"Warning: '{param_name}' missing confidence level, defaulting to 'sourced'", file=sys.stderr)
-            confidence = "sourced"
+            xref_confidence = validation_confidence.get(param_name)
+            if xref_confidence is not None:
+                print(
+                    f"Note: '{param_name}' missing confidence level in range; "
+                    f"using '{xref_confidence}' cross-referenced from validation_confidence",
+                    file=sys.stderr,
+                )
+                confidence = xref_confidence
+            else:
+                print(f"Warning: '{param_name}' missing confidence level, defaulting to 'sourced'", file=sys.stderr)
+                confidence = "sourced"
         else:
             confidence = str(raw_confidence)
         min_range = CONFIDENCE_MIN_RANGE[confidence]
@@ -389,6 +445,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Market sizing sensitivity analysis (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
+    p.add_argument("--run-id", help="Inject metadata.run_id into output (for stale-artifact detection)")
     return p.parse_args()
 
 
@@ -413,19 +470,27 @@ def main() -> None:
         sys.exit(1)
 
     # --- Validation (JSON error dict, exit 0) ---
-    approach, base_params, ranges, errors = _validate_config(data)
+    approach, base_params, ranges, validation_confidence, errors = _validate_config(data)
 
     if errors:
         result: dict[str, Any] = {"validation": {"status": "invalid", "errors": errors}}
+        # On the error path no scenarios are produced — report 0 analyzed params.
+        analyzed_params = 0
     else:
-        result = run_sensitivity(approach, base_params, ranges)
+        result = run_sensitivity(approach, base_params, ranges, validation_confidence)
         result["validation"] = {"status": "valid", "errors": []}
+        # Count scenarios actually analyzed (irrelevant range params are filtered
+        # out with stderr warnings inside run_sensitivity), not the raw input count.
+        analyzed_params = len(result.get("scenarios", []))
+
+    if args.run_id:
+        result["metadata"] = {"run_id": args.run_id}
 
     out = json.dumps(result, indent=indent) + "\n"
     _write_output(
         out,
         args.output,
-        summary={"approach": approach, "parameters": len(ranges)},
+        summary={"approach": approach, "parameters": analyzed_params},
     )
 
 

@@ -1,0 +1,29 @@
+{
+  "company_name": "Acmecorp",
+  "analysis_date": "2026-01-01",
+  "mode": "flip_focused",
+  "jurisdiction": {"structure": "mid_flip"},
+  "founders": [
+    {"founder_id": "f1", "name": "Alex Stone", "common_shares": 4000000},
+    {"founder_id": "f2", "name": "Sam Lee", "common_shares": 3500000}
+  ],
+  "preferred_series": [],
+  "option_pool": {
+    "plan_type": "nso",
+    "authorized": 1500000,
+    "issued": 500000,
+    "unallocated": 1000000
+  },
+  "acquisition": {
+    "acquired_entity": "TargetCo",
+    "consideration_pct": 0.2,
+    "consideration_form": "shares",
+    "acquisition_timing": "concurrent_with_round"
+  },
+  "metadata": {
+    "run_id": "R-acq-synthetic-01",
+    "schema_version": "v0.5.0-inputs",
+    "cap_base_source": "confirmed",
+    "cap_base_provenance": "model_reconstructed"
+  }
+}

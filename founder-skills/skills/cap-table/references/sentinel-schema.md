@@ -4,24 +4,28 @@ This document defines the contract between cap-table's fast-assess mode and down
 
 ## What the sentinel marks
 
-`fast_assess_only.json` is written by `scripts/quick_assess.py` to indicate that the cap-table skill ran in fast-assess mode — a 1-page directional founder-facing review that does NOT produce the canonical JSON artifact set. Without this sentinel, a future consumer that finds a missing `report.json` cannot distinguish three states:
+`fast_assess_only.json` is written by `scripts/quick_assess.py` to indicate that the cap-table skill ran in fast-assess mode — a 1-page directional founder-facing review that does NOT produce the canonical JSON artifact set. Without this sentinel, a future consumer that finds a missing `report.json` cannot distinguish four states:
 
 | State | Signal | Consumer action |
 |---|---|---|
-| Cap-table never ran | No `report.json`, no `fast_assess_only.json`, no `report_fast_assess.md` | Prompt founder to run cap-table |
+| Cap-table never ran | No `report.json`, no `fast_assess_only.json`, no `report_fast_assess.md`, no `extraction_only.json` | Prompt founder to run cap-table |
 | Cap-table ran in full pipeline | `report.json` exists with full schema; structured artifact set present | Consume normally |
 | Cap-table ran in fast-assess mode | `fast_assess_only.json` exists; `report_fast_assess.md` exists; `report.json` absent | Either use sentinel's `headline_data` directly, or prompt founder for a full re-run |
+| Cap-table ran in extraction-only mode | `extraction_only.json` exists; `report_extraction_only.md` exists; `report.json` absent | No ownership/dilution data is available (no equity base was supplied) — either present the instrument terms as-is, or prompt the founder for the founder/pool cap base and re-run the full pipeline |
+
+Extraction-only mode is produced by `scripts/compose_extraction_report.py` when a founder supplies one or more financing instruments (SAFE / note / warrant) with no surrounding equity base (no founders, pool, or preferred), so `cap_state.py` / `rule_audit.py` / `compose_report.py` have no base to build a cap state from. It writes to `cap-table-{slug}-extraction/` (single-dash suffix — same naming pin as `-fastassess`; see below).
 
 ## Directory convention
 
-Fast-assess writes to `cap-table-{slug}-fastassess/` (single-dash suffix). The full pipeline writes to `cap-table-{slug}/`. Both directories can coexist for the same slug; consumers pick the directory matching what they need:
+Fast-assess writes to `cap-table-{slug}-fastassess/` (single-dash suffix). Extraction-only writes to `cap-table-{slug}-extraction/` (same single-dash convention). The full pipeline writes to `cap-table-{slug}/`. All three directories can coexist for the same slug; consumers pick the directory matching what they need:
 
 - A consumer needing structured artifacts (counsel packet, scenarios, rule audit) looks at `cap-table-{slug}/` first
 - A consumer that can degrade to headline numbers (founder %, PPS) can fall back to `cap-table-{slug}-fastassess/fast_assess_only.json` if the full review is absent
+- A consumer that only needs raw instrument terms (no ownership math) can read `cap-table-{slug}-extraction/extraction_only.json`
 
 **Precedence:** full pipeline beats fast-assess. Fast-assess is by design directional; full is by design authoritative.
 
-**Naming pin:** `-fastassess` is a single-dash suffix, NOT `--fastassess` (double-dash). The single dash means `find_artifact.py`'s rerun-separator parser (`{slug}--{run_id}`) treats `{slug}-fastassess` as a complete slug — distinct from the full-pipeline slug — so a `find_artifact --skill cap-table --artifact cap_state.json --slug {slug}` lookup naturally won't pick up the fast-assess dir. This is a load-bearing property: don't change the naming without updating the helper.
+**Naming pin:** `-fastassess` (and, by the same rule, `-extraction`) is a single-dash suffix, NOT `--fastassess` / `--extraction` (double-dash). The single dash means `find_artifact.py`'s rerun-separator parser (`{slug}--{run_id}`) treats `{slug}-fastassess` / `{slug}-extraction` as a complete slug — distinct from the full-pipeline slug — so a `find_artifact --skill cap-table --artifact cap_state.json --slug {slug}` lookup naturally won't pick up the fast-assess or extraction-only dir. This is a load-bearing property: don't change the naming without updating the helper.
 
 ## Sentinel schema
 

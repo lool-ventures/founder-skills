@@ -1,0 +1,119 @@
+SLIDE 1: TITLE
+Acmecorp — one CLI for the whole indie SaaS stack
+Seed round · 2026
+founders@acmecorp.example · acmecorp.example
+
+SLIDE 2: PROBLEM
+A one-person SaaS team loses a fifth of its engineering week to glue work.
+Indie SaaS founders run their business across four or five tools that do not talk
+to each other: GitHub for code, Linear for issues, Stripe for billing, Vercel for
+deploys. Shipping one feature means context-switching between all of them and
+hand-wiring the connections.
+
+In our survey of 210 solo and two-person SaaS teams, respondents put integration
+and tool-switching at 12-20 hours a week.
+
+SLIDE 3: SOLUTION
+One command replaces four dashboards.
+Acmecorp is a single CLI and AI agent that spans the stack. Describe the change in
+plain language; Acmecorp opens the branch, files the issue, wires the Stripe
+product, and ships the preview deploy.
+
+    $ acme ship "add annual billing at 20% off"
+
+One command, four systems updated, one PR to review.
+
+SLIDE 4: TRACTION
+$42K MRR, compounding 11% a month for six straight months.
+- 140 paying teams
+- Net revenue retention 104%
+- Logo churn 2.2% monthly
+- Gross margin 78%
+
+Growth is entirely inbound so far. We have never run paid acquisition.
+
+SLIDE 5: WHY NOW
+Agents only became reliable enough for multi-tool writes in the last 18 months.
+Cross-tool automation has been attempted before and failed on two things that
+changed recently: models could not be trusted to take destructive actions across
+systems, and the four platforms did not expose the write APIs required. Both are
+now true. GitHub, Linear, Stripe and Vercel all shipped write-capable APIs in the
+last two years, and tool-use reliability crossed the threshold where a founder
+will let an agent open a PR unattended.
+
+The window is open and it is not permanently open — the platforms could close it.
+
+SLIDE 6: PRODUCT
+The agent shows its work before it touches anything.
+- CLI with an AI agent that plans multi-tool changes and shows a diff first
+- Bidirectional sync across GitHub, Linear, Stripe and Vercel
+- Rollback across all four when a deploy is reverted
+- Self-hosted runner for teams that will not send code to a third party
+
+SLIDE 7: MARKET
+The developer tools market is $30B and growing 22% a year.
+We are targeting the indie and small-team segment within it.
+
+SLIDE 8: BUSINESS MODEL
+Flat $300/month per team — because our customer is a team of one.
+No seat pricing. Our users are teams of one to three, and seat pricing punishes
+exactly the customer we want. Gross margin is 78%; the cost is inference and CI
+minutes.
+
+SLIDE 9: COMPETITION
+No one else does cross-tool automation for this segment.
+                        Acmecorp   GitHub   Linear   Stripe   Vercel
+Cross-tool automation      YES       no       no       no       no
+AI-native workflow         YES      partial   no       no      partial
+Built for teams of 1-3     YES       no      partial   no       no
+Single CLI surface         YES       no       no       no       no
+
+SLIDE 10: GO TO MARKET
+Developers find the CLI before they ever see a sales page.
+Bottom-up. Developers arrive through the CLI, our docs, and listings in the four
+marketplaces. The free tier for solo projects converts at 6%.
+
+Current CAC is $2,600, payback 11.1 months.
+
+SLIDE 11: TEAM
+Two founders who built the platforms this product depends on.
+- Founder 1, CEO — engineering, ex-Stripe, six years on payments infrastructure
+- Founder 2, CTO — product, ex-Notion, led the integrations platform
+- 7 more: four engineering, two support, one design
+
+Advisors: a former VP Engineering at a public developer-tools company, and the
+founder of a bootstrapped SaaS acquired in 2024.
+
+SLIDE 12: FINANCIALS
+$183K MRR by month 18 on a plan that assumes growth decays, not holds.
+Currently $42K MRR against $118K monthly operating expense; net burn $85K, with
+$980,000 in the bank. The 18-month plan assumes month-over-month growth decays
+from 11% toward 7% as we move past the earliest adopters.
+
+SLIDE 13: ASK
+Raising $3,000,000 at a $12,000,000 pre-money valuation.
+
+Use of funds, and what it buys:
+- $1.5M engineering (5 hires) → self-hosted enterprise runner shipped by month 9
+- $0.8M go-to-market (2 hires) → first paid channel proven at CAC under $2,000
+- $0.7M reserve → 24 months of runway
+
+Milestone for the next round: $150K MRR and one platform partnership signed,
+which is Series A readiness on current benchmarks.
+
+We have $750,000 outstanding on two SAFEs from the pre-seed.
+
+founders@acmecorp.example
+
+
+[Synthetic fixture. Acmecorp is fictional; no real founder, company or deal data
+appears here. GitHub, Linear, Notion, Stripe and Vercel are real companies used as
+market context.
+
+Deliberate, retained gaps — a realistic deck is not a perfect one, and the gallery
+should show the tool finding real problems:
+  - Slide 7 market sizing is top-down only, with no bottom-up build and no SAM/SOM.
+  - Slide 9 competition is a self-scoring checklist on axes chosen to favour us.
+  - No retention curve rebased past the novelty window.
+  - No responsible-AI or data-handling disclosure.
+  - The slide-2 survey is self-run and unsourced.]

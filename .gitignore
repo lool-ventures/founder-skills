@@ -12,9 +12,21 @@ docs/internal/
 uv.lock
 .worktrees/
 artifacts/
+runs/
 cap-table-workspace/
 docs/plans/
 test-feedback-plugin/
 scripts/sync-test-repo.sh
 .superpowers/
 docs/superpowers/
+.playwright-mcp/
+# Local-only evals (may derive from private deal data — never commit)
+evals-local/
+
+# Office lock/owner files. Excel writes `~$<name>.xlsx` beside any workbook it
+# opens, and that file embeds the OPENER'S REAL NAME. They appear in
+# fixtures/ the moment anyone double-clicks a test workbook, and a wildcard
+# stage would put a real name into public history. privacy_guard.py cannot
+# save us here: it reports clean while the file is merely untracked.
+~$*
+.~lock.*#

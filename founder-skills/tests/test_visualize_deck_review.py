@@ -12,11 +12,13 @@ All tests use subprocess to exercise the script exactly as the agent does.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import types
 from typing import Any
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -41,6 +43,8 @@ _VALID_INVENTORY = {
     "total_slides": 11,
     "claimed_stage": "seed",
     "claimed_raise": "$4M",
+    "ai_company_status": "not_ai",
+    "ai_evidence": "No AI claim.",
     "slides": [
         {
             "number": 1,
@@ -346,7 +350,11 @@ def test_self_contained() -> None:
     # Allow xmlns references and internal anchors
     import re
 
-    allowed = {"https://github.com/lool-ventures/founder-skills", "https://lool.vc"}
+    allowed = {
+        "https://github.com/lool-ventures/founder-skills",
+        "https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback",
+        "https://lool.vc",
+    }
     src_refs = re.findall(r'(?:src|href)="([^"]*)"', stdout)
     for ref in src_refs:
         if ref in allowed:
@@ -449,8 +457,8 @@ def test_slide_map_diverging_bars() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, _ = _run_viz(d)
     assert rc == 0
-    assert "#10b981" in stdout, "Expected green (strength) bars"
-    assert "#ef4444" in stdout, "Expected red (weakness) bars"
+    assert "#2F8A56" in stdout, "Expected green (strength) bars"
+    assert "#C0392B" in stdout, "Expected red (weakness) bars"
     assert "Purpose" in stdout
     assert "Problem" in stdout
     assert "Solution" in stdout
@@ -506,6 +514,19 @@ def test_slide_map_legend() -> None:
     assert "Weaknesses" in stdout
 
 
+def test_slide_map_legend_missing_color_matches_chart() -> None:
+    """The 'Missing expected slide' legend swatch color must match the chart's dashed-line stroke."""
+    arts = _all_artifacts()
+    arts["slide_reviews.json"] = _VALID_REVIEWS_RICH
+    arts["stage_profile.json"] = _VALID_PROFILE_WITH_FRAMEWORK
+    d = _make_artifact_dir(arts)
+    rc, stdout, _ = _run_viz(d)
+    assert rc == 0
+    # The missing-slide dashed lines use stroke #A6AEB5; the legend swatch must too.
+    assert "#A6AEB5" in stdout
+    assert "#52525b" not in stdout
+
+
 def test_malformed_list_elements() -> None:
     """Non-dict items in slide reviews list don't crash."""
     arts = dict(_all_artifacts())
@@ -538,9 +559,9 @@ def test_duplicate_slide_number_keeps_first() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, _ = _run_viz(d)
     assert rc == 0
-    # First entry: 2 strengths, 0 weaknesses -> green (#10b981)
+    # First entry: 2 strengths, 0 weaknesses -> green (#2F8A56)
     # If second entry overwrote: 0 strengths, 3 weaknesses -> red
-    assert "#10b981" in stdout, "First slide entry (green) should be kept"
+    assert "#2F8A56" in stdout, "First slide entry (green) should be kept"
 
 
 # ---------------------------------------------------------------------------
@@ -574,3 +595,193 @@ def test_visualize_agent_framing() -> None:
     rc, stdout, _stderr = _run_viz(d)
     assert rc == 0
     assert "agent-generated" in stdout
+
+
+# ===========================================================================
+# Key-coverage tests: producer output keys ⊆ renderer known sets
+# ===========================================================================
+#
+# Invariant: when a new maps_to framework key or checklist category is added
+# to the producer, visualize.py's _FRAMEWORK_LABELS / _CANONICAL_CATEGORIES
+# must be updated. These tests pin the current complete sets so any new
+# emitted key causes a loud failure with the offending name listed.
+# ===========================================================================
+
+_DR_VISUALIZE_SCRIPT = os.path.join(DECK_REVIEW_DIR, "visualize.py")
+_DR_STAGE_PROFILE_SCRIPT = os.path.join(DECK_REVIEW_DIR, "stage_profile.py")
+_DR_CHECKLIST_SCRIPT = os.path.join(DECK_REVIEW_DIR, "checklist.py")
+
+
+def _load_dr_visualize() -> types.ModuleType:
+    """Import deck-review visualize.py with a unique sys.modules key.
+
+    _theme is imported lazily inside a render function, so no stub is needed
+    at module load time.
+    """
+    key = "_dr_keycov_visualize"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    spec = importlib.util.spec_from_file_location(key, _DR_VISUALIZE_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = _DR_VISUALIZE_SCRIPT  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def _load_dr_stage_profile() -> types.ModuleType:
+    """Import deck-review stage_profile.py with a unique sys.modules key.
+
+    stage_profile imports _artifact_writer at module level; stub it so
+    the import succeeds without the real filesystem dependencies.
+    """
+    key = "_dr_keycov_stage_profile"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+
+    # Stub _artifact_writer so stage_profile's top-level import succeeds.
+    aw_stub = types.ModuleType("_artifact_writer")
+    aw_stub.ArtifactValidationError = ValueError  # type: ignore[attr-defined]
+    aw_stub.load_schema = lambda _path: {}  # type: ignore[attr-defined]
+    aw_stub.write_artifact = lambda **_kw: {}  # type: ignore[attr-defined]
+    sys.modules.setdefault("_artifact_writer", aw_stub)
+
+    spec = importlib.util.spec_from_file_location(key, _DR_STAGE_PROFILE_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = _DR_STAGE_PROFILE_SCRIPT  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def _load_dr_checklist() -> types.ModuleType:
+    """Import deck-review checklist.py with a unique sys.modules key.
+
+    Uses a key prefixed with the skill name so it cannot collide with the
+    market-sizing checklist that shares the same filename.
+    """
+    key = "_dr_keycov_checklist"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    spec = importlib.util.spec_from_file_location(key, _DR_CHECKLIST_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = _DR_CHECKLIST_SCRIPT  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+# ---------------------------------------------------------------------------
+# Test A: slide maps_to keys → visualize._FRAMEWORK_LABELS coverage
+# ---------------------------------------------------------------------------
+
+
+class TestDeckReviewFrameworkLabelCoverage:
+    """Every maps_to key that the stage-profile producer can emit must appear
+    in visualize.py's _FRAMEWORK_LABELS so the renderer shows a curated label
+    instead of the mechanical title-cased fallback (e.g. "Ltv Cac").
+
+    Produced set is derived live from stage_profile._STAGE_TABLE: union of all
+    expected_framework lists across stages, plus the "extra" and "appendix"
+    special values that slide_reviews.py can emit.
+    """
+
+    @staticmethod
+    def _producer_maps_to() -> set[str]:
+        """Derive all emittable maps_to values from stage_profile._STAGE_TABLE."""
+        sp = _load_dr_stage_profile()
+        produced: set[str] = set()
+        for stage_entry in sp._STAGE_TABLE.values():
+            produced.update(stage_entry["expected_framework"])
+        # slide_reviews.py can also emit "extra" and "appendix" for unmatched slides
+        produced.add("extra")
+        produced.add("appendix")
+        return produced
+
+    def test_all_producer_maps_to_keys_in_framework_labels(self) -> None:
+        """Every maps_to value the producer emits must have a display label."""
+        produced = self._producer_maps_to()
+        viz = _load_dr_visualize()
+        label_keys: set[str] = set(viz._FRAMEWORK_LABELS.keys())
+
+        missing = produced - label_keys
+        assert not missing, (
+            f"visualize._FRAMEWORK_LABELS is missing a display label for maps_to value(s) "
+            f"emitted by the slide-review producer: {sorted(missing)}. "
+            f"Add entries to _FRAMEWORK_LABELS for each."
+        )
+
+    def test_producer_maps_to_min_count(self) -> None:
+        """Guard against vacuous tests: produced set must have at least 19 distinct keys.
+
+        Union across pre_seed (8) + seed (12) + series_a (14) + extra + appendix,
+        after deduplication, yields >= 19 distinct values.
+        """
+        produced = self._producer_maps_to()
+        assert len(produced) >= 19, (
+            f"PRODUCER_MAPS_TO expected >= 19 entries after union across all stages, "
+            f"got {len(produced)}. Check stage_profile._STAGE_TABLE."
+        )
+
+    def test_framework_labels_min_count(self) -> None:
+        """_FRAMEWORK_LABELS must cover at least as many keys as the produced set."""
+        produced = self._producer_maps_to()
+        viz = _load_dr_visualize()
+        label_keys: set[str] = set(viz._FRAMEWORK_LABELS.keys())
+        assert len(label_keys) >= len(produced), (
+            f"visualize._FRAMEWORK_LABELS has only {len(label_keys)} entries; "
+            f"expected >= {len(produced)} (produced set size)."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test B: checklist category names → visualize._CANONICAL_CATEGORIES coverage
+# ---------------------------------------------------------------------------
+
+
+class TestDeckReviewCategoryCoverage:
+    """Every category name that checklist.py can emit must appear in
+    visualize.py's _CANONICAL_CATEGORIES so the category-breakdown chart
+    renders all bars in the correct order.
+
+    Produced set is derived live from checklist.CHECKLIST_ITEMS.
+    """
+
+    @staticmethod
+    def _producer_categories() -> set[str]:
+        """Derive emittable category names live from checklist.CHECKLIST_ITEMS."""
+        cl = _load_dr_checklist()
+        return {item["category"] for item in cl.CHECKLIST_ITEMS}
+
+    def test_all_producer_categories_in_canonical_list(self) -> None:
+        """Every category the checklist emits must appear in _CANONICAL_CATEGORIES."""
+        produced = self._producer_categories()
+        viz = _load_dr_visualize()
+        canonical: set[str] = set(viz._CANONICAL_CATEGORIES)
+
+        missing = produced - canonical
+        assert not missing, (
+            f"visualize._CANONICAL_CATEGORIES is missing category(ies) "
+            f"emitted by checklist.py: {sorted(missing)}. "
+            f"Add them to _CANONICAL_CATEGORIES in the correct order."
+        )
+
+    def test_producer_categories_min_count(self) -> None:
+        """Guard against vacuous tests: produced set must have at least 7 categories."""
+        produced = self._producer_categories()
+        assert len(produced) >= 7, (
+            f"CHECKLIST_ITEMS expected >= 7 distinct categories, got {len(produced)}. Check checklist.CHECKLIST_ITEMS."
+        )
+
+    def test_canonical_categories_min_count(self) -> None:
+        """_CANONICAL_CATEGORIES must list at least the 7 producer categories."""
+        viz = _load_dr_visualize()
+        assert len(viz._CANONICAL_CATEGORIES) >= 7, (
+            f"visualize._CANONICAL_CATEGORIES has only {len(viz._CANONICAL_CATEGORIES)} entries; expected >= 7."
+        )

@@ -1,0 +1,21 @@
+{
+  "company_name": "Acmecorp",
+  "slug": "acmecorp",
+  "product_description": "Cloud-based accounting software for SMBs that uses AI to automate transaction categorization and bookkeeping busywork.",
+  "target_customers": ["Small businesses (1-50 employees)"],
+  "value_propositions": [
+    "Automates the bulk of monthly bookkeeping with no manual rules setup",
+    "Cuts SMB owner/bookkeeper time spent on books"
+  ],
+  "differentiation_claims": [
+    "AI-powered bookkeeping automates 70%+ of transaction categorization with no manual rules setup",
+    "Cuts SMB bookkeeping time by 80% versus manual methods",
+    "Differentiated from QuickBooks/Xero because they are legacy manual-entry tools"
+  ],
+  "stage": "seed",
+  "sector": "Fintech / Accounting",
+  "business_model": "SaaS",
+  "input_mode": "conversation",
+  "source_materials": ["founder conversation", "pitch deck"],
+  "metadata": {"run_id": "fixture-competitive-positioning-001"}
+}

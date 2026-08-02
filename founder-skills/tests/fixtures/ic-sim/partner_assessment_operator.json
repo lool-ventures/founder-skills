@@ -1,0 +1,25 @@
+{
+  "partner": "operator",
+  "verdict": "more_diligence",
+  "rationale": "Strong product-market fit signals with 300 paying customers and 18% MoM MRR growth. However, the GTM motion (inbound + accountant partnerships) isn't quantified by channel, so it's unclear how repeatable this is beyond the founders.",
+  "conviction_points": [
+    "300 paying customers with 112% NDR — customers are expanding usage",
+    "18% MoM growth suggests organic pull",
+    "Founding team has domain expertise (ex-Intuit, ex-Stripe)"
+  ],
+  "key_concerns": [
+    "GTM motion is described but not proven — no channel-level economics",
+    "Unclear if the accountant-partnership channel is repeatable beyond the founders' existing relationships",
+    "No churn analysis shared — need cohort data"
+  ],
+  "questions_for_founders": [
+    "Walk me through your last 5 customer wins — how did you find them and what closed the deal?",
+    "What's your CAC by channel (inbound vs. accountant partnerships)?"
+  ],
+  "diligence_requirements": [
+    "Channel-level unit economics",
+    "Cohort retention curves (monthly, by acquisition channel)",
+    "Reference calls with 3 customers"
+  ],
+  "metadata": {"run_id": "fixture-ic-sim-001"}
+}

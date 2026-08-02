@@ -224,6 +224,46 @@ class TestWarnConditions:
         assert "candidates" in checks_by_id["COMPANY_NAME"]
         assert any("company name" in h.lower() or "Company name" in h for h in data["correction_hints"])
 
+    def test_company_name_absent_not_mismatch(self) -> None:
+        """When company name is absent from model (no plausible candidate strings),
+        the check should skip/pass-with-note rather than warn — absence is not a mismatch signal."""
+        # Model with only numeric rows and no company-name-like strings
+        model_numeric_only = {
+            "sheets": [
+                {
+                    "name": "P&L",
+                    "headers": ["Jan 2025", "Feb 2025", "Mar 2025"],
+                    "rows": [
+                        [50000, 55000, 60000],
+                        [120000, 120000, 120000],
+                        [840000, 920000, 1000000],
+                    ],
+                    "detected_type": "pnl",
+                    "periodicity": "monthly",
+                    "row_count": 3,
+                    "col_count": 3,
+                    "pre_header_rows": [],
+                }
+            ],
+            "source_format": "xlsx",
+            "source_file": "template-model.xlsx",
+            "periodicity_summary": "monthly",
+        }
+        inputs = {**_INPUTS, "company": {**_INPUTS["company"], "company_name": "MyStartup"}}
+        rc, data, _ = _run(inputs, model_numeric_only)
+        assert rc == 0
+        checks_by_id = {c["id"]: c for c in data["checks"]}
+        company_check = checks_by_id["COMPANY_NAME"]
+        # Absent name must NOT warn — only a conflicting candidate name warrants a warn
+        assert company_check["status"] != "warn", (
+            f"Company name absent from model should not warn; got status={company_check['status']!r}, "
+            f"message={company_check.get('message', '')!r}"
+        )
+        # Should be skip (nothing to cross-check) or pass
+        assert company_check["status"] in ("skip", "pass"), (
+            f"Expected skip or pass for absent company name, got {company_check['status']!r}"
+        )
+
     def test_salary_untraceable(self) -> None:
         """Warn when salary values aren't found in model_data."""
         inputs = json.loads(json.dumps(_INPUTS))
@@ -281,6 +321,91 @@ class TestWarnConditions:
         assert rc == 0
         checks_by_id = {c["id"]: c for c in data["checks"]}
         assert checks_by_id["SCALE_PLAUSIBILITY"]["status"] == "pass"
+
+
+class TestScalePlausibilityCurrency:
+    """SCALE_PLAUSIBILITY's absolute-dollar floors (cash-balance stage range,
+    $2K/person/month gross expense, $10K/year salary) are USD-tuned and don't
+    read `currency`. A legitimate non-USD value can look "too low" purely
+    because it's a different currency, not because the model is mis-scaled —
+    these floors must not fire (or feed --fix) for a non-USD model."""
+
+    def test_low_cash_balance_not_flagged_for_non_usd(self) -> None:
+        """$4K cash balance would warn for a USD seed-stage company (floor
+        $50K) — for a non-USD model the raw number isn't a USD reading, so
+        the floor must not fire."""
+        inputs = json.loads(json.dumps(_INPUTS))
+        inputs["currency"] = "INR"
+        inputs["cash"]["current_balance"] = 4000
+        rc, data, stderr = _run(inputs, _MODEL_DATA)
+        assert rc == 0, stderr
+        checks_by_id = {c["id"]: c for c in data["checks"]}
+        assert checks_by_id["SCALE_PLAUSIBILITY"]["status"] == "pass"
+
+    def test_low_salary_not_flagged_for_non_usd(self) -> None:
+        """A $5K/year salary would warn as implausibly low for USD (floor
+        $10K) — for a non-USD model the floor must not fire."""
+        inputs = json.loads(json.dumps(_INPUTS))
+        inputs["currency"] = "INR"
+        inputs["expenses"]["headcount"][0]["salary_annual"] = 5000
+        rc, data, stderr = _run(inputs, _MODEL_DATA)
+        assert rc == 0, stderr
+        checks_by_id = {c["id"]: c for c in data["checks"]}
+        assert checks_by_id["SCALE_PLAUSIBILITY"]["status"] == "pass"
+
+    def test_low_per_person_expense_not_flagged_for_non_usd(self) -> None:
+        """The $2K/person/month gross-expense floor must not fire for a
+        non-USD model."""
+        inputs = json.loads(json.dumps(_INPUTS))
+        inputs["currency"] = "INR"
+        inputs["expenses"]["headcount"] = [
+            {"role": "R&D", "count": 5, "salary_annual": 6000},
+        ]
+        rc, data, stderr = _run(inputs, _MODEL_DATA)
+        assert rc == 0, stderr
+        checks_by_id = {c["id"]: c for c in data["checks"]}
+        assert checks_by_id["SCALE_PLAUSIBILITY"]["status"] == "pass"
+
+    def test_scale_plausibility_usd_explicit_matches_absent(self) -> None:
+        """Back-compat: currency: 'USD' behaves identically to absent."""
+        inputs = json.loads(json.dumps(_INPUTS))
+        inputs["cash"]["current_balance"] = 4000
+        rc1, data1, stderr1 = _run(inputs, _MODEL_DATA)
+        inputs_usd = json.loads(json.dumps(inputs))
+        inputs_usd["currency"] = "USD"
+        rc2, data2, stderr2 = _run(inputs_usd, _MODEL_DATA)
+        assert rc1 == 0, stderr1
+        assert rc2 == 0, stderr2
+        checks1 = {c["id"]: c for c in data1["checks"]}
+        checks2 = {c["id"]: c for c in data2["checks"]}
+        assert checks1["SCALE_PLAUSIBILITY"] == checks2["SCALE_PLAUSIBILITY"]
+
+    def test_plausibility_vote_non_usd_never_blocks_or_triggers_fix(self) -> None:
+        """The vote that gates --fix must return "plausible" (no USD floors
+        applied) for a non-USD model, even with USD-implausible raw numbers —
+        this is what prevents --fix from ever firing off a USD floor for a
+        non-USD model."""
+        mod = _load_validate_extraction_module()
+        non_usd_inputs = {
+            "company": {"stage": "seed"},
+            "currency": "INR",
+            "cash": {"current_balance": 4000, "monthly_net_burn": 500},
+            "revenue": {"mrr": {"value": 200}},
+            "expenses": {"headcount": [{"salary_annual": 5000}]},
+        }
+        ok, checked = mod._plausibility_vote(non_usd_inputs)
+        assert ok is True
+        assert checked == 0
+
+    def test_fix_never_triggers_for_non_usd_model(self) -> None:
+        """--fix must never scale a non-USD model off the USD plausibility
+        vote, even when a scale indicator (e.g. "($000)") is present."""
+        inputs_inr = json.loads(json.dumps(_INPUTS_UNSCALED))
+        inputs_inr["currency"] = "INR"
+        rc, data, modified, stderr = _run_fix(inputs_inr, _MODEL_THOUSANDS)
+        assert rc == 0, stderr
+        assert modified["cash"]["current_balance"] == 3900  # unchanged
+        assert not modified.get("metadata", {}).get("scale_correction")
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +551,53 @@ class TestBackwardCompat:
         rc, data, _ = _run(_INPUTS, model)
         assert rc == 0
         assert data["status"] in ("pass", "warn")
+
+
+class TestNullOptionalBlocks:
+    """Schema-legal null optional blocks (present with value null) must not crash.
+
+    dict.get(key, {}) returns None when the key is present-with-null (the default
+    only applies when the key is absent), so a downstream .get() raised
+    AttributeError. Null blocks are schema-legal (only company is required).
+    """
+
+    def test_plausibility_vote_null_blocks_no_crash(self) -> None:
+        mod = _load_validate_extraction_module()
+        ok, _n = mod._plausibility_vote({"company": {"stage": "seed"}, "cash": None, "revenue": None, "expenses": None})
+        # Nothing checkable -> never fix blindly; returns the "no vote" result.
+        assert ok is True
+
+    def test_fix_path_null_cash_block_no_crash(self) -> None:
+        inputs = json.loads(json.dumps(_INPUTS))
+        inputs["cash"] = None
+        rc, data, stderr = _run(inputs, _MODEL_DATA, extra_args=["--fix"])
+        assert rc == 0, stderr
+        assert "Traceback" not in stderr
+        assert data.get("status") in ("pass", "warn", "skip")
+
+    def test_validate_null_blocks_all_checks_no_crash(self) -> None:
+        inputs = json.loads(json.dumps(_INPUTS))
+        inputs["cash"] = None
+        inputs["revenue"] = None
+        inputs["expenses"] = None
+        rc, data, stderr = _run(inputs, _MODEL_DATA)
+        assert rc == 0, stderr
+        assert "Traceback" not in stderr
+        assert all("status" in c for c in data.get("checks", []))
+
+    def test_null_headcount_list_no_crash(self) -> None:
+        inputs = json.loads(json.dumps(_INPUTS))
+        inputs["expenses"] = {"headcount": None}
+        rc, data, stderr = _run(inputs, _MODEL_DATA)
+        assert rc == 0, stderr
+        assert "Traceback" not in stderr
+
+    def test_null_metadata_no_crash(self) -> None:
+        inputs = json.loads(json.dumps(_INPUTS))
+        inputs["metadata"] = None
+        rc, data, stderr = _run(inputs, _MODEL_DATA, extra_args=["--fix"])
+        assert rc == 0, stderr
+        assert "Traceback" not in stderr
 
 
 # ---------------------------------------------------------------------------
@@ -808,3 +980,52 @@ class TestMixedPeriodicity:
         assert mod._find_numeric_in_model(30_000, model_data, periodicity_aware=True), (
             "_find_numeric_in_model should find 30_000 via x12 in an 'unknown' model"
         )
+
+
+# ---------------------------------------------------------------------------
+# Null-coercion + anti-hallucination regressions
+# ---------------------------------------------------------------------------
+
+
+def test_null_headcount_count_does_not_crash() -> None:
+    """validate_extraction.py must not raise on a headcount entry with count: null
+    in the scale-plausibility headcount sum."""
+    inputs = {
+        "company": {"name": "TestCo", "stage": "seed"},
+        "cash": {"current_balance": 1_000_000, "monthly_net_burn": 100_000},
+        "expenses": {"headcount": [{"role": "eng", "count": None}]},
+    }
+    model_data = {
+        "sheets": [
+            {
+                "name": "S",
+                "headers": ["a"],
+                "rows": [["TestCo"]],
+                "detected_type": None,
+                "periodicity": None,
+                "row_count": 1,
+                "col_count": 1,
+                "pre_header_rows": [],
+                "cell_refs": [],
+            }
+        ],
+        "source_format": "xlsx",
+        "source_file": "x.xlsx",
+        "periodicity_summary": "unknown",
+    }
+    rc, data, stderr = _run(inputs, model_data)
+    assert rc in (0, 1), f"unexpected exit on null count: {stderr}"
+    assert data, f"validate_extraction emitted no JSON (likely crashed): {stderr}"
+
+
+def test_fuzzy_match_rejects_short_substring() -> None:
+    """A 1-2 char cell that is a substring of the company name must NOT fuzzy-
+    match — otherwise the COMPANY_NAME anti-hallucination gate false-passes."""
+    mod = _load_validate_extraction_module()
+    # '-' is a substring of any hyphenated name; must not match.
+    assert mod._fuzzy_match("-", "Acme-Corp Industries") is False
+    # 2-char fragment must not match.
+    assert mod._fuzzy_match("Ac", "Acme Corp") is False
+    # Legitimate full / first-word match still passes.
+    assert mod._fuzzy_match("Acme", "Acme Corp Ltd") is True
+    assert mod._fuzzy_match("Acme Corp", "Acme Corp Ltd Inc") is True

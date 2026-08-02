@@ -35,8 +35,9 @@ REQUIRED_ARTIFACTS = [
     "validation.json",
     "sizing.json",
     "checklist.json",
+    "sensitivity.json",
 ]
-OPTIONAL_ARTIFACTS = ["sensitivity.json"]
+OPTIONAL_ARTIFACTS: list[str] = []
 
 # Canonical category order for assumption confidence donut
 _CONFIDENCE_CATEGORIES: list[str] = ["sourced", "derived", "agent_estimate"]
@@ -125,15 +126,93 @@ def _num(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _fmt_usd(value: float | int) -> str:
-    """Format a number as compact USD currency string."""
+# Process-wide currency label, set once per run from the artifacts. See the
+# matching note in compose_report.py — a bare "$" on a non-USD analysis puts a
+# wrong unit on the headline chart labels.
+_CURRENCY: str = "USD"
+
+
+def _resolve_currency(*artifacts: dict[str, Any] | None) -> str:
+    """Return the analysis currency code from the first artifact carrying one."""
+    for artifact in artifacts:
+        if isinstance(artifact, dict):
+            currency = artifact.get("currency")
+            if isinstance(currency, str) and currency.strip():
+                return currency.strip().upper()
+    return "USD"
+
+
+def _set_currency(code: str) -> None:
+    """Set the process-wide default currency label for _fmt_usd."""
+    global _CURRENCY
+    _CURRENCY = code.strip().upper() if isinstance(code, str) and code.strip() else "USD"
+
+
+# Human-readable labels for the declared sizing_basis convention — see
+# references/tam-sam-som-methodology.md §5. Mirrors compose_report.py's copy
+# (standalone scripts can't import across skills).
+_SIZING_BASIS_LABELS: dict[str, str] = {
+    "current_year": "Current-year market size",
+    "forecast_year": "Forecast-year market size",
+    "mixed": "Mixed (current- and forecast-year figures)",
+}
+
+
+def _sizing_basis_label(value: Any) -> str:
+    """Human-readable label for sizing_basis — absence renders "Not declared",
+    never a silent default to "current_year" (see compose_report.py's copy for
+    the full rationale)."""
+    if isinstance(value, str) and value in _SIZING_BASIS_LABELS:
+        return _SIZING_BASIS_LABELS[value]
+    return "Not declared"
+
+
+def _resolve_sizing_basis(
+    sizing: dict[str, Any] | None,
+    inputs: dict[str, Any] | None,
+) -> str | None:
+    """Resolve the raw sizing_basis token — sizing.json first, inputs.json fallback."""
+    if _usable(sizing):
+        val = sizing.get("sizing_basis")
+        if isinstance(val, str) and val:
+            return val
+    if _usable(inputs):
+        val = inputs.get("sizing_basis")
+        if isinstance(val, str) and val:
+            return val
+    return None
+
+
+def _fmt_usd(value: float | int, currency_code: str | None = None) -> str:
+    """Format a number as a compact currency string, scaled with K/M/B suffixes.
+
+    Defaults to the process-wide currency (``_set_currency``). "USD" renders a
+    bare "$" prefix; any other ISO code is tagged as a suffix (e.g. "1.5M ILS").
+    """
+    code = _CURRENCY if currency_code is None else (currency_code or "USD")
+    if value < 0:
+        return "-" + _fmt_usd(-value, code)
+    prefix = "$" if code == "USD" else ""
+    suffix = "" if code == "USD" else f" {code}"
     if value >= 1_000_000_000:
-        return f"${value / 1_000_000_000:,.1f}B"
+        return f"{prefix}{value / 1_000_000_000:,.1f}B{suffix}"
     if value >= 1_000_000:
-        return f"${value / 1_000_000:,.1f}M"
+        return f"{prefix}{value / 1_000_000:,.1f}M{suffix}"
     if value >= 1_000:
-        return f"${value / 1_000:,.1f}K"
-    return f"${value:,.2f}"
+        return f"{prefix}{value / 1_000:,.1f}K{suffix}"
+    return f"{prefix}{value:,.2f}{suffix}"
+
+
+def _try_float(value: Any) -> float | None:
+    """Coerce to float, returning None on non-numeric input.
+
+    Mirrors the _compute_delta tolerance: a non-numeric deck claim (e.g. "$5B"
+    or "TBD") must be skipped, not crash the whole HTML render.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _compute_delta(calculated: float, deck_claim: Any) -> float | None:
@@ -199,8 +278,8 @@ def _compute_provenance(
                     breakdown[cat] += 1
 
             deck_claim = existing_claims.get(metric)
-            value = m.get("value", 0)
-            delta = _compute_delta(float(value), deck_claim) if deck_claim is not None else None
+            value_num = _try_float(m.get("value", 0))
+            delta = _compute_delta(value_num, deck_claim) if value_num is not None and deck_claim is not None else None
 
             approach_prov[metric] = {
                 "classification": classification,
@@ -226,12 +305,19 @@ _DASH_CLAMPED_CIRCLE = "3,2"  # floor-clamped circles ("not to scale")
 
 _SAM_LABEL_FONT = 10  # px, SAM label font size in funnel chart
 
-_CLR_PRIMARY = "#0d549d"
-_CLR_ACCENT = "#21a2e3"
-_CLR_PASS = "#10b981"
-_CLR_WARN = "#f59e0b"
-_CLR_FAIL = "#ef4444"
-_CLR_NA = "#9ca3af"
+_CLR_PRIMARY = "#0D549D"
+_CLR_ACCENT = "#21A2E3"
+_CLR_PASS = "#2F8A56"
+_CLR_WARN = "#C9892B"
+_CLR_FAIL = "#C0392B"
+_CLR_NA = "#A6AEB5"
+
+# SVG chrome greys (literal hex -- var(--x) does not resolve in SVG
+# presentation attributes)
+_SVG_TEXT_DARK = "#374B65"
+_SVG_TEXT_MUTE = "#7D90A3"
+_SVG_TEXT_FAINT = "#A6AEB5"
+_SVG_GRIDLINE = "#D7DBE0"
 
 _CONFIDENCE_COLORS: dict[str, str] = {
     "sourced": _CLR_PASS,
@@ -253,138 +339,142 @@ _CHECKLIST_COLORS: dict[str, str] = {
 
 def _css() -> str:
     """Return inline CSS for the report."""
-    return f"""
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-                         Helvetica, Arial, sans-serif;
+    return """
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: var(--font-body);
             line-height: 1.6;
-            color: #1f2937;
-            background: #f9fafb;
+            color: var(--lool-ink);
+            background: var(--lool-white);
             padding: 2rem;
             max-width: 960px;
             margin: 0 auto;
-        }}
-        header {{
-            border-bottom: 3px solid {_CLR_PRIMARY};
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        header {
+            border-bottom: 3px solid var(--lool-blue);
             padding-bottom: 1rem;
             margin-bottom: 2rem;
-        }}
-        header h1 {{
-            color: {_CLR_PRIMARY};
+        }
+        header h1 {
+            color: var(--lool-blue);
             font-size: 1.75rem;
-        }}
-        header p {{
-            color: #6b7280;
+            font-weight: 400;
+            letter-spacing: -0.01em;
+        }
+        header p {
+            color: var(--lool-mute);
             font-size: 0.875rem;
-        }}
-        main section {{
-            background: #ffffff;
-            border: 1px solid #e5e7eb;
-            border-radius: 0.5rem;
+        }
+        main section {
+            background: var(--lool-paper);
+            border: 1px solid var(--lool-line-2);
             padding: 1.5rem;
             margin-bottom: 1.5rem;
-        }}
-        main section h2 {{
-            color: {_CLR_PRIMARY};
+        }
+        main section h2 {
+            color: var(--lool-royal);
             font-size: 1.25rem;
+            font-weight: 500;
             margin-bottom: 1rem;
-            border-bottom: 1px solid #e5e7eb;
+            border-bottom: 1px solid var(--lool-line-2);
             padding-bottom: 0.5rem;
-        }}
-        .chart-container {{
+        }
+        .chart-container {
             display: flex;
             justify-content: center;
             align-items: center;
             flex-wrap: wrap;
             gap: 2rem;
-        }}
-        .placeholder {{
+        }
+        .placeholder {
             text-align: center;
-            color: #9ca3af;
+            color: var(--lool-faint);
             font-style: italic;
             padding: 2rem;
-            background: #f3f4f6;
-            border-radius: 0.25rem;
-        }}
-        .legend {{
+            background: var(--lool-paper-2);
+        }
+        .legend {
             display: flex;
             justify-content: center;
             gap: 1.5rem;
             flex-wrap: wrap;
             margin-top: 1rem;
             font-size: 0.85rem;
-        }}
-        .legend-item {{
+        }
+        .legend-item {
             display: flex;
             align-items: center;
             gap: 0.35rem;
-        }}
-        .legend-swatch {{
+        }
+        .legend-swatch {
             width: 14px;
             height: 14px;
-            border-radius: 3px;
             display: inline-block;
-        }}
-        footer {{
+        }
+        footer {
             text-align: center;
-            color: #9ca3af;
+            color: var(--lool-faint);
             font-size: 0.75rem;
             padding-top: 1rem;
-            border-top: 1px solid #e5e7eb;
-        }}
-        footer a, header a {{ color: {_CLR_ACCENT}; text-decoration: none; }}
-        footer a:hover, header a:hover {{ text-decoration: underline; }}
-        .collapsible-toggle {{
+            border-top: 1px solid var(--lool-line-2);
+        }
+        footer a, header a { color: var(--lool-azure); text-decoration: none; }
+        footer a:hover, header a:hover {
+            color: var(--lool-azure-deep);
+            text-decoration: underline;
+        }
+        .collapsible-toggle {
             cursor: pointer;
             user-select: none;
             display: flex;
             align-items: center;
             gap: 0.5rem;
             padding: 0.5rem 0;
-        }}
-        .collapsible-toggle:hover {{ background: #f3f4f6; border-radius: 0.25rem; }}
-        .chevron {{
+        }
+        .collapsible-toggle:hover { background: var(--lool-paper-2); }
+        .chevron {
             display: inline-block;
             transition: transform 0.2s;
             font-size: 0.75rem;
-            color: #9ca3af;
-        }}
-        .collapsible-content {{ padding-left: 1.5rem; }}
-        .finding-item {{
+            color: var(--lool-faint);
+        }
+        .collapsible-content { padding-left: 1.5rem; }
+        .finding-item {
             padding: 0.75rem;
-            border-left: 3px solid #e5e7eb;
+            border-left: 3px solid var(--lool-line-2);
             margin-bottom: 0.5rem;
-            border-radius: 0 0.25rem 0.25rem 0;
-        }}
-        .finding-strong {{ border-left-color: {_CLR_PASS}; }}
-        .finding-attention {{ border-left-color: {_CLR_FAIL}; }}
-        .finding-action {{ border-left-color: {_CLR_ACCENT}; }}
-        .findings-subsection {{ margin-bottom: 1rem; }}
-        .findings-subsection h3 {{
+        }
+        .finding-strong { border-left-color: var(--lool-success); }
+        .finding-attention { border-left-color: var(--lool-danger); }
+        .finding-action { border-left-color: var(--lool-azure); }
+        .findings-subsection { margin-bottom: 1rem; }
+        .findings-subsection h3 {
             font-size: 0.9rem;
-            color: #374151;
+            font-weight: 500;
+            color: var(--lool-slate);
             margin-bottom: 0.5rem;
-        }}
-        .confidence-badge {{
+        }
+        .confidence-badge {
             display: inline-block;
             padding: 0.1rem 0.4rem;
-            border-radius: 0.25rem;
+            border-radius: var(--r-input);
             font-size: 0.65rem;
             font-weight: 600;
-            color: #fff;
+            color: var(--lool-white);
             margin-left: 0.25rem;
             vertical-align: middle;
-        }}
-        @media print {{
-            body {{ background: #fff; padding: 0; }}
-            main section {{ break-inside: avoid; border: 1px solid #ccc; }}
-            header {{ border-bottom-color: #000; }}
-            header h1 {{ color: #000; }}
-            .collapsible-content {{ display: block !important; }}
-            .collapsible-toggle .chevron {{ display: none; }}
-            [data-tooltip] {{ cursor: default; }}
-        }}
+        }
+        @media print {
+            body { background: #fff; padding: 0; }
+            main section { break-inside: avoid; border: 1px solid #ccc; }
+            header { border-bottom-color: #000; }
+            header h1 { color: #000; }
+            .collapsible-content { display: block !important; }
+            .collapsible-toggle .chevron { display: none; }
+            [data-tooltip] { cursor: default; }
+        }
     """
 
 
@@ -399,8 +489,8 @@ def _tooltip_js() -> str:
         "<script>\n"
         "document.addEventListener('DOMContentLoaded', function() {\n"
         "    var tip = document.createElement('div');\n"
-        "    tip.style.cssText = 'position:fixed;padding:8px 12px;background:#1f2937;color:#fff;'\n"
-        "        + 'border-radius:6px;font-size:12px;max-width:300px;pointer-events:none;'\n"
+        "    tip.style.cssText = 'position:fixed;padding:8px 12px;background:#374B65;color:#fff;'\n"
+        "        + 'border-radius:4px;font-size:12px;max-width:300px;pointer-events:none;'\n"
         "        + 'z-index:1000;display:none;line-height:1.4;white-space:pre-line;'\n"
         "        + 'box-shadow:0 2px 8px rgba(0,0,0,0.15)';\n"
         "    document.body.appendChild(tip);\n"
@@ -466,7 +556,7 @@ def _svg_donut(
     """
     total = sum(v for _, v, _ in segments)
     if total <= 0:
-        return '<text x="100" y="100" text-anchor="middle" fill="#9ca3af">No data</text>'
+        return f'<text x="100" y="100" text-anchor="middle" fill="{_SVG_TEXT_FAINT}">No data</text>'
 
     total_int = int(total)
 
@@ -480,7 +570,7 @@ def _svg_donut(
         + "\n".join(p for p in _render_donut_paths_centered(segments, total, outer_radius, inner_radius))
         + f'\n<text x="0" y="0" text-anchor="middle" '
         f'dominant-baseline="central" font-size="24" font-weight="bold" '
-        f'fill="#1f2937">{_esc(str(total_int))}</text>'
+        f'fill="{_SVG_TEXT_DARK}">{_esc(str(total_int))}</text>'
         "\n</svg>"
     )
 
@@ -534,9 +624,9 @@ def _render_donut_paths_centered(
 # ---------------------------------------------------------------------------
 
 _FUNNEL_COLORS = {
-    "tam": "#0d549d",
-    "sam": "#1b5fb2",
-    "som": "#48b2e8",
+    "tam": "#0D549D",
+    "sam": "#1B5FB2",
+    "som": "#48B4EA",
 }
 
 
@@ -559,7 +649,10 @@ def _chart_funnel_single(
 
     # Radii proportional to value, with TAM as outermost
     if tam_val <= 0:
-        return f'<text x="{cx:.2f}" y="{cy:.2f}" text-anchor="middle" fill="#9ca3af" font-size="12">No TAM data</text>'
+        return (
+            f'<text x="{cx:.2f}" y="{cy:.2f}" text-anchor="middle" '
+            f'fill="{_SVG_TEXT_FAINT}" font-size="12">No TAM data</text>'
+        )
 
     r_tam = _num(max_r)
     r_sam_proportional = _num(max_r * math.sqrt(max(sam_val, 0) / tam_val)) if tam_val > 0 else 0.0
@@ -616,7 +709,7 @@ def _chart_funnel_single(
             # Text
             parts.append(
                 f'<text x="{label_x:.2f}" y="{y_pos:.2f}" text-anchor="{anchor}" '
-                f'dominant-baseline="central" font-size="10" fill="#1f2937" font-weight="bold">'
+                f'dominant-baseline="central" font-size="10" fill="{_SVG_TEXT_DARK}" font-weight="bold">'
                 f"{metric_label}: {_esc(_fmt_usd(metric_val))}</text>"
             )
             # Leader line from label to circle edge
@@ -626,14 +719,14 @@ def _chart_funnel_single(
             parts.append(
                 f'<line x1="{line_start_x:.2f}" y1="{y_pos:.2f}" '
                 f'x2="{line_end_x:.2f}" y2="{y_pos:.2f}" '
-                f'stroke="#9ca3af" stroke-width="1" stroke-dasharray="{_DASH_LEADER_LINE}" />'
+                f'stroke="{_SVG_TEXT_FAINT}" stroke-width="1" stroke-dasharray="{_DASH_LEADER_LINE}" />'
             )
     else:
         # Centered labels (single-approach mode)
         label_y_tam = _num(cy - r_tam - 8)
         parts.append(
             f'<text x="{cx:.2f}" y="{label_y_tam:.2f}" text-anchor="middle" '
-            f'font-size="11" fill="#1f2937" font-weight="bold">'
+            f'font-size="11" fill="{_SVG_TEXT_DARK}" font-weight="bold">'
             f"TAM: {_esc(_fmt_usd(tam_val))}</text>"
         )
 
@@ -645,18 +738,18 @@ def _chart_funnel_single(
             parts.append(
                 f'<line x1="{cx:.2f}" y1="{line_y_start:.2f}" '
                 f'x2="{cx:.2f}" y2="{line_y_end:.2f}" '
-                f'stroke="#9ca3af" stroke-width="1" stroke-dasharray="{_DASH_LEADER_LINE}" />'
+                f'stroke="{_SVG_TEXT_FAINT}" stroke-width="1" stroke-dasharray="{_DASH_LEADER_LINE}" />'
             )
         else:
             label_y_sam = _num(cy - r_sam + 14)
         parts.append(
             f'<text x="{cx:.2f}" y="{label_y_sam:.2f}" text-anchor="middle" '
-            f'font-size="{_SAM_LABEL_FONT}" fill="#1f2937">'
+            f'font-size="{_SAM_LABEL_FONT}" fill="{_SVG_TEXT_DARK}">'
             f"SAM: {_esc(_fmt_usd(sam_val))}</text>"
         )
         parts.append(
             f'<text x="{cx:.2f}" y="{cy:.2f}" text-anchor="middle" '
-            f'dominant-baseline="central" font-size="10" fill="#1f2937" font-weight="bold">'
+            f'dominant-baseline="central" font-size="10" fill="{_SVG_TEXT_DARK}" font-weight="bold">'
             f"SOM: {_esc(_fmt_usd(som_val))}</text>"
         )
 
@@ -768,11 +861,11 @@ def _render_tornado_svg(
     base_x = x_pos(base_som)
     parts.append(
         f'<line x1="{base_x:.2f}" y1="0" x2="{base_x:.2f}" y2="{_num(svg_h - 20):.2f}" '
-        f'stroke="#6b7280" stroke-width="1" stroke-dasharray="4,3" />'
+        f'stroke="{_SVG_TEXT_MUTE}" stroke-width="1" stroke-dasharray="4,3" />'
     )
     parts.append(
         f'<text x="{base_x:.2f}" y="{_num(svg_h - 5):.2f}" text-anchor="middle" '
-        f'font-size="9" fill="#6b7280">Base: {_esc(_fmt_usd(base_som))}</text>'
+        f'font-size="9" fill="{_SVG_TEXT_MUTE}">Base: {_esc(_fmt_usd(base_som))}</text>'
     )
 
     for i, (param, low_som, _b_som, high_som) in enumerate(bar_data):
@@ -782,7 +875,7 @@ def _render_tornado_svg(
         parts.append(
             f'<text x="{_num(label_width - 5):.2f}" y="{_num(y + bar_height / 2):.2f}" '
             f'text-anchor="end" dominant-baseline="central" font-size="11" '
-            f'fill="#1f2937">{display_param}</text>'
+            f'fill="{_SVG_TEXT_DARK}">{display_param}</text>'
         )
 
         # Bar from low to high
@@ -825,12 +918,12 @@ def _render_tornado_svg(
         parts.append(
             f'<text x="{low_label_x:.2f}" y="{_num(y - 2):.2f}" '
             f'text-anchor="middle" font-size="{_TORNADO_LABEL_FONT}" '
-            f'fill="#6b7280">{_esc(_fmt_usd(low_som))}</text>'
+            f'fill="{_SVG_TEXT_MUTE}">{_esc(_fmt_usd(low_som))}</text>'
         )
         parts.append(
             f'<text x="{high_label_x:.2f}" y="{_num(y - 2):.2f}" '
             f'text-anchor="middle" font-size="{_TORNADO_LABEL_FONT}" '
-            f'fill="#6b7280">{_esc(_fmt_usd(high_som))}</text>'
+            f'fill="{_SVG_TEXT_MUTE}">{_esc(_fmt_usd(high_som))}</text>'
         )
 
     parts.append("</svg>")
@@ -928,7 +1021,7 @@ def _chart_tornado(sensitivity: dict[str, Any] | None) -> str:
             if approach in approach_groups:
                 approach_groups[approach][param] = s
             else:
-                # Scenarios without a recognized approach_used are silently skipped
+                # Scenarios without a recognized approach_used are skipped with a stderr warning
                 print(
                     f"Warning: scenario '{param}' has unrecognized approach_used '{approach}', skipping",
                     file=sys.stderr,
@@ -1024,11 +1117,11 @@ def _chart_cross_validation(sizing: dict[str, Any] | None) -> str:
         parts.append(
             f'<line x1="{group_left:.2f}" y1="{ceiling_y:.2f}" '
             f'x2="{group_right:.2f}" y2="{ceiling_y:.2f}" '
-            f'stroke="#e5e7eb" stroke-width="1" />'
+            f'stroke="{_SVG_GRIDLINE}" stroke-width="1" />'
         )
         parts.append(
             f'<text x="{gx:.2f}" y="10.00" '
-            f'text-anchor="middle" font-size="7" fill="#9ca3af">'
+            f'text-anchor="middle" font-size="7" fill="{_SVG_TEXT_FAINT}">'
             f"max: {_esc(_fmt_usd(group_max))}</text>"
         )
 
@@ -1043,7 +1136,7 @@ def _chart_cross_validation(sizing: dict[str, Any] | None) -> str:
         # TD value label
         parts.append(
             f'<text x="{_num(td_x + bar_width / 2):.2f}" y="{_num(td_y - 5):.2f}" '
-            f'text-anchor="middle" font-size="8" fill="#1f2937">'
+            f'text-anchor="middle" font-size="8" fill="{_SVG_TEXT_DARK}">'
             f"{_esc(_fmt_usd(td_v))}</text>"
         )
 
@@ -1053,12 +1146,12 @@ def _chart_cross_validation(sizing: dict[str, Any] | None) -> str:
         parts.append(
             f'<rect x="{bu_x:.2f}" y="{bu_y:.2f}" '
             f'width="{_num(bar_width):.2f}" height="{_num(bu_h):.2f}" '
-            f'fill="#48b2e8" rx="3" />'
+            f'fill="#48B4EA" rx="3" />'
         )
         # BU value label
         parts.append(
             f'<text x="{_num(bu_x + bar_width / 2):.2f}" y="{_num(bu_y - 5):.2f}" '
-            f'text-anchor="middle" font-size="8" fill="#1f2937">'
+            f'text-anchor="middle" font-size="8" fill="{_SVG_TEXT_DARK}">'
             f"{_esc(_fmt_usd(bu_v))}</text>"
         )
 
@@ -1066,7 +1159,7 @@ def _chart_cross_validation(sizing: dict[str, Any] | None) -> str:
         label_y = _num(margin_top + chart_height + 15)
         parts.append(
             f'<text x="{gx:.2f}" y="{label_y:.2f}" '
-            f'text-anchor="middle" font-size="12" fill="#1f2937" '
+            f'text-anchor="middle" font-size="12" fill="{_SVG_TEXT_DARK}" '
             f'font-weight="bold">{_esc(metric.upper())}</text>'
         )
 
@@ -1078,7 +1171,7 @@ def _chart_cross_validation(sizing: dict[str, Any] | None) -> str:
         f'<span class="legend-swatch" style="background:{_CLR_PRIMARY}"></span>'
         " Top-Down</span>"
         '<span class="legend-item">'
-        '<span class="legend-swatch" style="background:#48b2e8"></span>'
+        '<span class="legend-swatch" style="background:#48B4EA"></span>'
         " Bottom-Up</span>"
         "</div>"
     )
@@ -1213,10 +1306,10 @@ def _chart_provenance_summary(
                 continue
 
             badge_colors = {
-                "sourced": "#10b981",
-                "derived": "#f59e0b",
-                "agent_estimate": "#ef4444",
-                "unknown": "#9ca3af",
+                "sourced": _CLR_PASS,
+                "derived": _CLR_WARN,
+                "agent_estimate": _CLR_FAIL,
+                "unknown": _CLR_NA,
             }
             badge_labels = {
                 "sourced": "Sourced",
@@ -1224,10 +1317,11 @@ def _chart_provenance_summary(
                 "agent_estimate": "Agent Estimate",
                 "unknown": "Unknown",
             }
-            color = badge_colors.get(classification, "#9ca3af")
+            color = badge_colors.get(classification, _CLR_NA)
             label = badge_labels.get(classification, classification)
 
-            deck_str = _esc(_fmt_usd(float(deck_claim))) if deck_claim is not None else "\u2014"
+            deck_claim_num = _try_float(deck_claim) if deck_claim is not None else None
+            deck_str = _esc(_fmt_usd(deck_claim_num)) if deck_claim_num is not None else "\u2014"
             delta_str = _esc(f"{delta:+.1f}%") if delta is not None else "\u2014"
 
             # Look up the agent's calculated estimate from sizing data
@@ -1235,9 +1329,9 @@ def _chart_provenance_summary(
             if sizing is not None:
                 approach_sizing = _as_dict(sizing.get(approach_key))
                 metric_data = _as_dict(approach_sizing.get(metric))
-                estimate_val = metric_data.get("value")
-                if estimate_val is not None:
-                    estimate_str = _esc(_fmt_usd(float(estimate_val)))
+                estimate_num = _try_float(metric_data.get("value"))
+                if estimate_num is not None:
+                    estimate_str = _esc(_fmt_usd(estimate_num))
 
             rows.append(
                 f"<tr>"
@@ -1252,16 +1346,15 @@ def _chart_provenance_summary(
     if not rows:
         return ""
 
+    th_style = "text-align:left;padding:0.4rem;border-bottom:1px solid var(--lool-line-2);color:var(--lool-subtle);"
+    headers = "".join(
+        f'<th style="{th_style}">{label}</th>'
+        for label in ("Metric", "Classification", "Our Estimate", "Deck Claim", "Delta")
+    )
     return (
         '<div style="margin-top:1rem;font-size:0.85rem;">'
         '<table style="width:100%;border-collapse:collapse;">'
-        "<tr>"
-        '<th style="text-align:left;padding:0.4rem;border-bottom:1px solid #e5e7eb;color:#6b7280;">Metric</th>'
-        '<th style="text-align:left;padding:0.4rem;border-bottom:1px solid #e5e7eb;color:#6b7280;">Classification</th>'
-        '<th style="text-align:left;padding:0.4rem;border-bottom:1px solid #e5e7eb;color:#6b7280;">Our Estimate</th>'
-        '<th style="text-align:left;padding:0.4rem;border-bottom:1px solid #e5e7eb;color:#6b7280;">Deck Claim</th>'
-        '<th style="text-align:left;padding:0.4rem;border-bottom:1px solid #e5e7eb;color:#6b7280;">Delta</th>'
-        "</tr>" + "".join(rows) + "</table></div>"
+        "<tr>" + headers + "</tr>" + "".join(rows) + "</table></div>"
     )
 
 
@@ -1287,7 +1380,8 @@ def _chart_key_findings(
                 continue
             if item.get("status") == "fail":
                 label = str(item.get("label", item.get("id", "Unknown")))
-                notes = str(item.get("notes", ""))
+                raw_notes = item.get("notes")
+                notes = str(raw_notes) if raw_notes is not None else ""
                 text = f"{label}: {notes}" if notes else label
                 attention.append(text)
                 actions.append(f"Address: {label}")
@@ -1305,7 +1399,8 @@ def _chart_key_findings(
                 confirmed += 1
             elif status in ("refuted", "unsupported"):
                 figure_name = str(fig.get("figure", "Unknown"))
-                notes = str(fig.get("notes", ""))
+                raw_notes = fig.get("notes")
+                notes = str(raw_notes) if raw_notes is not None else ""
                 prefix = "Refuted" if status == "refuted" else "Unsupported"
                 text = f"{prefix}: {figure_name}" + (f" — {notes}" if notes else "")
                 attention.append(text)
@@ -1352,8 +1447,8 @@ def _chart_key_findings(
         )
 
     return (
-        '<section><h2 style="color:#0d549d;font-size:1.25rem;margin-bottom:1rem;'
-        'border-bottom:1px solid #e5e7eb;padding-bottom:0.5rem;">Key Findings</h2>'
+        '<section><h2 style="color:var(--lool-royal);font-size:1.25rem;margin-bottom:1rem;'
+        'border-bottom:1px solid var(--lool-line-2);padding-bottom:0.5rem;">Key Findings</h2>'
         '<div style="font-size:0.9rem;">' + "".join(parts) + "</div></section>"
     )
 
@@ -1365,6 +1460,11 @@ def _chart_key_findings(
 
 def compose_html(dir_path: str) -> str:
     """Load artifacts and compose full HTML report."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _theme
+
     all_names = REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS
     artifacts: dict[str, dict[str, Any] | None] = {}
     for name in all_names:
@@ -1375,6 +1475,9 @@ def compose_html(dir_path: str) -> str:
     sensitivity = artifacts.get("sensitivity.json")
     validation = artifacts.get("validation.json")
     checklist = artifacts.get("checklist.json")
+
+    # Resolve the analysis currency before rendering any money label.
+    _set_currency(_resolve_currency(inputs, sizing))
 
     # Company name from inputs
     company_name = "Market Sizing Report"
@@ -1403,18 +1506,24 @@ def compose_html(dir_path: str) -> str:
     if analysis_date:
         date_line = f"<p>Analysis date: {_esc(analysis_date)}</p>"
 
+    basis_label = _sizing_basis_label(_resolve_sizing_basis(sizing, inputs))
+    sizing_basis_line = f"<p>Sizing basis: {_esc(basis_label)}</p>"
+
+    brand_css = _theme.brand_css()
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Market Sizing: {_esc(company_name)}</title>
-    <style>{_css()}</style>
+    <style>{brand_css}{_css()}</style>
 </head>
 <body>
     <header>
         <h1>Market Sizing: {_esc(company_name)}</h1>
         {date_line}
+        {sizing_basis_line}
         <p>Generated by <a href="https://github.com/lool-ventures/founder-skills">founder skills</a>
         by <a href="https://lool.vc">lool ventures</a> — Market Sizing Agent</p>
     </header>
@@ -1427,7 +1536,7 @@ def compose_html(dir_path: str) -> str:
         {key_findings_html}
         <section>
             <h2>Sensitivity Analysis</h2>
-            <p style="color:#6b7280;font-size:0.85rem;margin-bottom:1rem;">
+            <p style="color:var(--lool-mute);font-size:0.85rem;margin-bottom:1rem;">
             Wider bars = higher sensitivity. Parameters are ranked by
             impact on SOM. Focus on sourcing or validating the top
             parameters first.</p>
@@ -1450,6 +1559,7 @@ def compose_html(dir_path: str) -> str:
         Generated by <a href="https://github.com/lool-ventures/founder-skills">founder skills</a>
         by <a href="https://lool.vc">lool ventures</a> — Market Sizing Agent
     </footer>
+    {_theme.FOOTER_CREDIT_HTML}
     {_tooltip_js()}
     {_collapsible_js()}
 </body>

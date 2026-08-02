@@ -479,6 +479,41 @@ def test_data_payload_scenarios() -> None:
     assert len(data["scenarios"]) == 3
 
 
+def test_data_payload_carries_risk_assessment() -> None:
+    """runway.json's risk_assessment narrative must be threaded into DATA so
+    the runway lens can show the producer's own caveat (finding 20) — it was
+    a top-level runway.json field that never made it into the payload."""
+    d = _make_artifact_dir()
+    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    data = _extract_data_payload(stdout)
+    assert data["risk_assessment"] == _VALID_RUNWAY["risk_assessment"]
+
+
+def test_data_payload_risk_assessment_absent_when_runway_missing() -> None:
+    """No runway.json — risk_assessment must be null, not a KeyError."""
+    d = _make_artifact_dir(overrides={"runway.json": None})
+    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    data = _extract_data_payload(stdout)
+    assert data.get("risk_assessment") is None
+
+
+def test_render_runway_reads_static_runway_and_risk_assessment() -> None:
+    """renderRunway() must read the base scenario's static_runway_months
+    (already present in DATA.scenarios — finding 20's plumbing nuance: each
+    scenario dict is appended whole, so the field just needed reading) and
+    render DATA.risk_assessment, not only the live-projected runway."""
+    d = _make_artifact_dir()
+    rc, html, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    fn_start = html.find("function renderRunway()")
+    assert fn_start != -1, "renderRunway function not found in HTML output"
+    fn_body = html[fn_start : fn_start + 4000]
+    assert "static_runway_months" in fn_body
+    assert "DATA.risk_assessment" in fn_body
+
+
 def test_burn_multiple_method_field() -> None:
     """Burn multiple metric includes method field."""
     d = _make_artifact_dir()
@@ -774,12 +809,15 @@ def test_no_tornado_markup() -> None:
     assert "tornado" not in html.lower() or "tornado" not in html, "No tornado references should remain"
 
 
-def test_self_sustaining_badge() -> None:
-    """Self-sustaining companies show SELF-SUSTAINING badge text in stress test."""
+def test_default_alive_badge() -> None:
+    """default_alive companies show DEFAULT ALIVE badge text, not an
+    overstated profitability label (explore.py's JS engine sets default_alive
+    when cash never runs out; it does not compute became_profitable)."""
     d = _make_artifact_dir()
     rc, html, _ = run_script_raw("explore.py", ["--dir", d])
     assert rc == 0
-    assert "SELF-SUSTAINING" in html, "Badge text for default alive should be SELF-SUSTAINING"
+    assert "DEFAULT ALIVE" in html, "Badge text for default alive should be DEFAULT ALIVE"
+    assert "SELF-SUSTAINING" not in html, "Must not overstate default_alive as self-sustaining"
 
 
 def test_stress_slider_max_adapts() -> None:
@@ -863,3 +901,126 @@ def test_explorer_scenario_label_rendered_via_escape_helper() -> None:
     assert "function escHtml(" in html
     # Source-level pin: the concatenation site must use escHtml(label)
     assert "escHtml(label)" in html, "scenario table must wrap 'label' in escHtml() before HTML concatenation"
+
+
+# ---------------------------------------------------------------------------
+# Sector-aware gross margin benchmarks in the explorer payload
+# ---------------------------------------------------------------------------
+
+
+def _inputs_with_model_type(model_type: str, sector: str = "Retail", traits: list[str] | None = None) -> dict[str, Any]:
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["company"]["revenue_model_type"] = model_type
+    inputs["company"]["sector"] = sector
+    if traits is not None:
+        inputs["company"]["traits"] = traits
+    return dict(inputs)
+
+
+def test_data_payload_gm_benchmark_sector_selected() -> None:
+    """A retail company's explorer embeds the retail GM bar, not the SaaS 75% bar."""
+    d = _make_artifact_dir(overrides={"inputs.json": _inputs_with_model_type("retail")})
+    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    data = _extract_data_payload(stdout)
+    gm_bench = data["benchmarks"]["gross_margin"]
+    assert gm_bench["strong"] == 0.50, f"retail strong bar should be 0.50, got {gm_bench['strong']}"
+    assert "Damodaran" in gm_bench["source"]
+
+
+def test_data_payload_gm_benchmark_contextual_removed() -> None:
+    """A marketplace company's explorer has no GM benchmark (contextual — no client-side re-rating)."""
+    d = _make_artifact_dir(overrides={"inputs.json": _inputs_with_model_type("marketplace", sector="Marketplace")})
+    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    data = _extract_data_payload(stdout)
+    assert "gross_margin" not in data["benchmarks"], "contextual GM must not be re-ratable client-side"
+
+
+def test_data_payload_gm_benchmark_ai_adjusted() -> None:
+    """An AI company's explorer embeds the AI-adjusted GM bar (matching the server-side rating)."""
+    d = _make_artifact_dir(overrides={"inputs.json": _inputs_with_model_type("saas-sales-led", sector="ai-native")})
+    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    data = _extract_data_payload(stdout)
+    gm_bench = data["benchmarks"]["gross_margin"]
+    assert gm_bench["strong"] == 0.70, f"seed AI-adjusted strong bar should be 0.70, got {gm_bench['strong']}"
+
+
+def test_contextual_badge_css_present() -> None:
+    """The explorer styles the contextual rating badge."""
+    d = _make_artifact_dir()
+    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    assert ".badge.contextual" in stdout
+
+
+# ---------------------------------------------------------------------------
+# Fix E (finding 21): explorer must carry + render the non-USD reference grade
+# ---------------------------------------------------------------------------
+
+
+def test_build_metrics_carries_benchmark_reference_fields() -> None:
+    """A non-USD metric's benchmark_reference_rating/note/source/as_of (set by
+    unit_economics.py's _apply_non_usd_benchmark_caveat) must be threaded into
+    DATA.metrics — _build_metrics previously kept only `rating`, so the
+    explorer showed a bare 'contextual' where compose_report.py / visualize.py
+    both show a graded reference."""
+    ue = json.loads(json.dumps(_VALID_UNIT_ECONOMICS))
+    ue["metrics"][0]["rating"] = "contextual"
+    ue["metrics"][0]["benchmark_reference_rating"] = "strong"
+    ue["metrics"][0]["benchmark_reference_note"] = "Reference only, not a verdict."
+    ue["metrics"][0]["benchmark_reference_source"] = "test-bench"
+    ue["metrics"][0]["benchmark_reference_as_of"] = "2024"
+    d = _make_artifact_dir(overrides={"unit_economics.json": ue})
+    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    data = _extract_data_payload(stdout)
+    m = next(metric for metric in data["metrics"] if metric["id"] == ue["metrics"][0]["name"])
+    assert m["benchmark_reference_rating"] == "strong"
+    assert m["benchmark_reference_note"] == "Reference only, not a verdict."
+    assert m["benchmark_reference_source"] == "test-bench"
+    assert m["benchmark_reference_as_of"] == "2024"
+
+
+def test_build_metrics_reference_fields_absent_for_ordinary_usd_metric() -> None:
+    """An ordinary USD-rated metric carries no reference fields (None), so the
+    JS `if (referenceRating)` gate falls through to the ordinary rating badge."""
+    d = _make_artifact_dir()
+    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    data = _extract_data_payload(stdout)
+    for m in data["metrics"]:
+        assert m.get("benchmark_reference_rating") is None
+
+
+def test_unit_economics_table_renders_reference_grade_not_bare_contextual() -> None:
+    """The Lens 3 metrics table must be able to render 'X (ref)' for a
+    reference-graded metric, not a bare 'contextual' badge — matching how
+    compose_report.py / visualize.py both label it (reference)/(ref)."""
+    d = _make_artifact_dir()
+    rc, html, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    assert "m.benchmark_reference_rating" in html
+    assert "(ref)" in html
+
+
+def test_data_payload_gm_benchmark_removed_for_all_contextual_types() -> None:
+    """usage-based and hardware-subscription explorers also carry no GM bar."""
+    for model_type in ("usage-based", "hardware-subscription"):
+        d = _make_artifact_dir(overrides={"inputs.json": _inputs_with_model_type(model_type, sector="Infra")})
+        rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+        assert rc == 0
+        data = _extract_data_payload(stdout)
+        assert "gross_margin" not in data["benchmarks"], f"{model_type} GM must not be re-ratable client-side"
+
+
+def test_data_payload_gm_benchmark_removed_for_non_product_basis() -> None:
+    """A non-product gross_margin_basis removes the client-side GM bar (contextual)."""
+    inputs = _inputs_with_model_type("retail")
+    inputs["unit_economics"]["gross_margin_basis"] = "store_contribution"
+    d = _make_artifact_dir(overrides={"inputs.json": inputs})
+    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    data = _extract_data_payload(stdout)
+    assert "gross_margin" not in data["benchmarks"]

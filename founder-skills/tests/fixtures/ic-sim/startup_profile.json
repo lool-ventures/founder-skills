@@ -1,0 +1,16 @@
+{
+  "company_name": "Acmecorp",
+  "simulation_date": "2026-05-10",
+  "stage": "seed",
+  "one_liner": "Cloud accounting for SMBs that cuts bookkeeping time by 80%",
+  "sector": "Fintech / Accounting",
+  "geography": "United States",
+  "business_model": "SaaS",
+  "funding_history": [
+    {"round": "pre-seed", "amount": "$500K", "date": "2025-06", "lead_investor": "Angel syndicate"}
+  ],
+  "current_raise": {"amount": "$4M", "valuation": "$20M pre"},
+  "key_metrics": {"arr": "$400K", "mrr_growth": "18% MoM", "customers": 300, "ndr": "112%"},
+  "materials_provided": ["pitch deck (PDF)", "financial model"],
+  "metadata": {"run_id": "fixture-ic-sim-001"}
+}

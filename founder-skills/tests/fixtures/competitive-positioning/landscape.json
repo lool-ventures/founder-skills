@@ -1,0 +1,279 @@
+{
+  "competitors": [
+    {
+      "name": "QuickBooks Online",
+      "slug": "quickbooks-online",
+      "category": "direct",
+      "description": "Market-leading SMB accounting software with broad third-party integrations and accountant-firm distribution.",
+      "key_differentiators": [
+        "Largest SMB install base",
+        "Deep accountant/bookkeeper channel",
+        "Extensive app marketplace"
+      ],
+      "pricing_model": "$35-235/mo tiered plans",
+      "funding": "Public company (Intuit, NASDAQ: INTU)",
+      "team_size": "~18,000 employees (Intuit-wide)",
+      "target_customers": [
+        "SMBs 1-50 employees",
+        "Accounting firms"
+      ],
+      "strengths": [
+        "Brand trust",
+        "Accountant ecosystem",
+        "Integration breadth"
+      ],
+      "weaknesses": [
+        "Manual data entry still heavy",
+        "AI automation lags newer entrants",
+        "Support quality complaints"
+      ],
+      "evidence_source": {
+        "description": "researched",
+        "pricing_model": "researched",
+        "funding": "researched",
+        "team_size": "researched",
+        "strengths": "researched",
+        "weaknesses": "researched"
+      },
+      "sources": {
+        "pricing_model": "https://quickbooks.intuit.com/pricing/",
+        "funding": "Intuit 10-K filing",
+        "strengths": "G2 reviews, Capterra reviews Q1 2026"
+      },
+      "research_depth": "full",
+      "recent_developments": [
+        {
+          "date": "2025-09",
+          "type": "product_launch",
+          "summary": "Rolled out an AI-assisted transaction categorization feature to all tiers.",
+          "source": "https://quickbooks.intuit.com/blog/ai-categorization"
+        }
+      ],
+      "sourced_fields_count": 6
+    },
+    {
+      "name": "Xero",
+      "slug": "xero",
+      "category": "direct",
+      "description": "Cloud accounting platform popular with SMBs and their accountants, strong outside the US.",
+      "key_differentiators": [
+        "Strong bank-feed reconciliation",
+        "Popular with accountants internationally",
+        "Clean UI"
+      ],
+      "pricing_model": "$15-78/mo tiered plans",
+      "funding": "Public company (ASX: XRO)",
+      "team_size": "~4,700 employees",
+      "target_customers": [
+        "SMBs 1-50 employees",
+        "Accounting firms"
+      ],
+      "strengths": [
+        "International strength (UK/AU/NZ)",
+        "Bank-feed quality",
+        "Accountant partner program"
+      ],
+      "weaknesses": [
+        "Weaker US market share vs QuickBooks",
+        "Fewer US-specific integrations"
+      ],
+      "evidence_source": {
+        "description": "researched",
+        "pricing_model": "researched",
+        "funding": "researched",
+        "team_size": "researched",
+        "strengths": "researched",
+        "weaknesses": "agent_estimate"
+      },
+      "sources": {
+        "pricing_model": "https://www.xero.com/us/pricing/",
+        "funding": "Xero FY2025 annual report"
+      },
+      "research_depth": "full",
+      "recent_developments": [],
+      "sourced_fields_count": 5
+    },
+    {
+      "name": "FreshBooks",
+      "slug": "freshbooks",
+      "category": "adjacent",
+      "description": "Invoicing-first accounting tool aimed at freelancers and very small service businesses rather than full-book SMBs.",
+      "key_differentiators": [
+        "Invoicing-first UX",
+        "Strong for solo/freelance service businesses",
+        "Time tracking built in"
+      ],
+      "pricing_model": "$21-65/mo tiered plans",
+      "funding": "Private, reported $80M+ raised",
+      "target_customers": [
+        "Freelancers",
+        "Solo service providers"
+      ],
+      "strengths": [
+        "Simple invoicing UX",
+        "Good mobile app"
+      ],
+      "weaknesses": [
+        "Not built for multi-employee bookkeeping depth",
+        "Fewer accountant-facing features"
+      ],
+      "evidence_source": {
+        "description": "researched",
+        "pricing_model": "researched",
+        "funding": "agent_estimate",
+        "strengths": "researched",
+        "weaknesses": "agent_estimate"
+      },
+      "sources": {
+        "pricing_model": "https://www.freshbooks.com/pricing"
+      },
+      "research_depth": "full",
+      "recent_developments": [],
+      "sourced_fields_count": 3
+    },
+    {
+      "name": "Pilot.com",
+      "slug": "pilot-com",
+      "category": "emerging",
+      "description": "VC-backed bookkeeping-as-a-service that pairs software with a human bookkeeping team, targeting funded startups.",
+      "key_differentiators": [
+        "Human + software hybrid model",
+        "Targets VC-backed startups specifically",
+        "Handles month-end close end-to-end"
+      ],
+      "pricing_model": "$599+/mo",
+      "funding": "Series C, $100M+ total raised",
+      "target_customers": [
+        "VC-backed startups"
+      ],
+      "strengths": [
+        "Full-service positioning removes bookkeeping labor entirely",
+        "Strong startup-specific marketing"
+      ],
+      "weaknesses": [
+        "Higher price point",
+        "Less self-serve control over books"
+      ],
+      "evidence_source": {
+        "description": "researched",
+        "pricing_model": "researched",
+        "funding": "researched",
+        "strengths": "researched",
+        "weaknesses": "agent_estimate"
+      },
+      "sources": {
+        "pricing_model": "https://pilot.com/pricing",
+        "funding": "TechCrunch funding announcement, 2023",
+        "strengths": "Company website positioning page"
+      },
+      "research_depth": "full",
+      "recent_developments": [
+        {
+          "date": "2025-11",
+          "type": "pricing_change",
+          "summary": "Raised entry-tier pricing and repositioned toward larger seed/Series A startups.",
+          "source": "https://pilot.com/blog/pricing-update"
+        }
+      ],
+      "sourced_fields_count": 4
+    },
+    {
+      "name": "Manual spreadsheets + bookkeeper",
+      "slug": "manual-spreadsheets",
+      "category": "do_nothing",
+      "description": "Status quo for many pre-seed/seed SMBs: a spreadsheet plus a part-time or outsourced bookkeeper, no dedicated software.",
+      "key_differentiators": [
+        "Zero software cost",
+        "Full control",
+        "No vendor dependency"
+      ],
+      "target_customers": [
+        "Very early-stage SMBs"
+      ],
+      "strengths": [
+        "No subscription cost",
+        "Familiar tooling (Excel/Sheets)"
+      ],
+      "weaknesses": [
+        "Manual, error-prone",
+        "Doesn't scale past a handful of employees",
+        "No automation"
+      ],
+      "evidence_source": {
+        "description": "agent_estimate",
+        "strengths": "agent_estimate",
+        "weaknesses": "agent_estimate"
+      },
+      "research_depth": "founder_provided",
+      "recent_developments": [],
+      "sourced_fields_count": 0
+    }
+  ],
+  "input_mode": "conversation",
+  "warnings": [
+    {
+      "code": "RESEARCHED_WITHOUT_SOURCE",
+      "severity": "medium",
+      "message": "quickbooks-online: 'description' evidence_source is 'researched' but no source (URL or search query) was provided in 'sources' \u2014 this claim can't be spot-checked"
+    },
+    {
+      "code": "RESEARCHED_WITHOUT_SOURCE",
+      "severity": "medium",
+      "message": "quickbooks-online: 'team_size' evidence_source is 'researched' but no source (URL or search query) was provided in 'sources' \u2014 this claim can't be spot-checked"
+    },
+    {
+      "code": "RESEARCHED_WITHOUT_SOURCE",
+      "severity": "medium",
+      "message": "quickbooks-online: 'weaknesses' evidence_source is 'researched' but no source (URL or search query) was provided in 'sources' \u2014 this claim can't be spot-checked"
+    },
+    {
+      "code": "RESEARCHED_WITHOUT_SOURCE",
+      "severity": "medium",
+      "message": "xero: 'description' evidence_source is 'researched' but no source (URL or search query) was provided in 'sources' \u2014 this claim can't be spot-checked"
+    },
+    {
+      "code": "RESEARCHED_WITHOUT_SOURCE",
+      "severity": "medium",
+      "message": "xero: 'team_size' evidence_source is 'researched' but no source (URL or search query) was provided in 'sources' \u2014 this claim can't be spot-checked"
+    },
+    {
+      "code": "RESEARCHED_WITHOUT_SOURCE",
+      "severity": "medium",
+      "message": "xero: 'strengths' evidence_source is 'researched' but no source (URL or search query) was provided in 'sources' \u2014 this claim can't be spot-checked"
+    },
+    {
+      "code": "RESEARCHED_WITHOUT_SOURCE",
+      "severity": "medium",
+      "message": "freshbooks: 'description' evidence_source is 'researched' but no source (URL or search query) was provided in 'sources' \u2014 this claim can't be spot-checked"
+    },
+    {
+      "code": "RESEARCHED_WITHOUT_SOURCE",
+      "severity": "medium",
+      "message": "freshbooks: 'strengths' evidence_source is 'researched' but no source (URL or search query) was provided in 'sources' \u2014 this claim can't be spot-checked"
+    },
+    {
+      "code": "RESEARCHED_WITHOUT_SOURCE",
+      "severity": "medium",
+      "message": "pilot-com: 'description' evidence_source is 'researched' but no source (URL or search query) was provided in 'sources' \u2014 this claim can't be spot-checked"
+    }
+  ],
+  "_produced_by": "validate_landscape",
+  "metadata": {
+    "run_id": "fixture-competitive-positioning-001"
+  },
+  "landscape_as_of": "2026-05-10",
+  "research_depth": "full",
+  "assessment_mode": "sub-agent",
+  "suggested_additions": [
+    {
+      "name": "Bench Accounting",
+      "slug": "bench-accounting",
+      "category": "direct",
+      "rationale": "G2 comparison pages repeatedly list Bench as a Pilot.com alternative for outsourced bookkeeping",
+      "partial_profile": {
+        "description": "Outsourced bookkeeping service with software dashboard"
+      },
+      "merged": false
+    }
+  ]
+}

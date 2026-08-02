@@ -481,6 +481,11 @@ ITEM_LOOKUP: dict[str, dict[str, Any]] = {item["id"]: item for item in CHECKLIST
 
 # --- Profile normalization maps ---
 
+# Note: a few of these 2-letter codes are ambiguous outside a geography context
+# ("ca" -> California, "de" -> Delaware, "in" -> the English preposition "in",
+# not just Canada/Germany/India). Harmless today because only "israel" is
+# gated by any checklist item — but a future gate keyed on ca/de/in geography
+# would need a smarter disambiguation than this flat lookup.
 _GEOGRAPHY_NORMALIZATION: dict[str, str] = {
     "israel": "israel",
     "il": "israel",
@@ -491,9 +496,33 @@ _GEOGRAPHY_NORMALIZATION: dict[str, str] = {
     "united kingdom": "uk",
     "eu": "eu",
     "europe": "eu",
+    "india": "india",
+    "in": "india",
+    "germany": "germany",
+    "de": "germany",
+    "france": "france",
+    "fr": "france",
+    "canada": "canada",
+    "ca": "canada",
+    "singapore": "singapore",
+    "sg": "singapore",
+    "australia": "australia",
+    "au": "australia",
 }
 
-_SEED_PLUS_STAGES = {"seed", "series-a", "series_a", "series-b", "series_b", "later", "growth"}
+_SEED_PLUS_STAGES = {
+    "seed",
+    "series-a",
+    "series_a",
+    "series-b",
+    "series_b",
+    "series-c",
+    "series_c",
+    "series-d",
+    "series_d",
+    "later",
+    "growth",
+}
 
 _AI_COST_KEYS = {"inference_costs", "ai_infrastructure", "ai_compute", "gpu_costs", "model_inference"}
 
@@ -508,6 +537,9 @@ _REVENUE_MODEL_TO_SECTOR: dict[str, str] = {
     "consumer-subscription": "consumer-subscription",
     "transactional-fintech": "saas",
     "annual-contracts": "annual-contracts",
+    # Like "saas", "retail" matches no sector-specific item today — the mapping
+    # exists so retail companies stop mis-firing hardware gates or warnings.
+    "retail": "retail",
 }
 
 
@@ -594,7 +626,9 @@ def _item_applicable(meta: dict[str, Any], company: dict[str, Any]) -> tuple[boo
         gate_value = meta.get(gate_type, "all")
         if not _gate_matches(gate_value, gate_type, company):
             return False, f"{gate_type} '{gate_value}'"
-    # Model format gate: items gated to "spreadsheet" are N/A for deck/conversational
+    # Model format gate: items gated to "spreadsheet" are N/A for deck/conversational.
+    # "partial" = incomplete spreadsheet — structure is still assessable, so it evaluates
+    # all 46 items just like "spreadsheet". Only deck/conversational remain fully gated.
     model_format = company.get("model_format", "spreadsheet")
     mf_gate = meta.get("model_format_gate", "all")
     if mf_gate == "spreadsheet" and model_format in ("deck", "conversational"):
@@ -833,6 +867,11 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Financial model review checklist scorer (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
+    p.add_argument(
+        "--run-id",
+        default=None,
+        help="Stamp metadata.run_id (overrides any run_id from stdin metadata)",
+    )
     return p.parse_args()
 
 
@@ -884,6 +923,8 @@ def main() -> None:
     _input_metadata = data.get("metadata") or (data.get("inputs") or {}).get("metadata")
     if isinstance(_input_metadata, dict) and isinstance(_input_metadata.get("run_id"), str):
         result.setdefault("metadata", {})["run_id"] = _input_metadata["run_id"]
+    if getattr(args, "run_id", None):  # CLI run_id overrides stdin passthrough
+        result.setdefault("metadata", {})["run_id"] = args.run_id
 
     out = json.dumps(result, indent=indent) + "\n"
     s = result["summary"]

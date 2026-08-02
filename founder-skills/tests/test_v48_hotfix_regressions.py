@@ -24,6 +24,7 @@ These tests lock the fixes.
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 from typing import Any
 
@@ -279,3 +280,179 @@ def test_compose_report_ownership_block_skips_ad_meta_fields() -> None:
     # The fix skips this field, so we just verify the fix's constant set:
     # (no direct API for the closure; this test documents the contract.)
     assert agg["anti_dilution_delta_pct_points"] == -2.75
+
+
+# ---------------------------------------------------------------------------
+# Counsel items carry an additive, deterministic instances[] list and an honest
+# relevance tier derived from instrument/scenario presence.
+# ---------------------------------------------------------------------------
+
+
+def _gating_instances(rule_id: str, entries: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    return {rule_id: entries}
+
+
+def test_counsel_item_applies_when_instrument_matched() -> None:
+    rule_id = "safe.israeli_2025_safe_harbor"
+    gating = _gating_instances(
+        rule_id,
+        {
+            "safe:safe_001": {
+                "applies_when_matched": True,
+                "status": "in_window",
+                "instance_type": "safe",
+                "instance_id": "safe_001",
+            }
+        },
+    )
+    rules = {
+        "domains": {
+            "safe": [{"rule_id": rule_id, "domain": "safe", "title": "t", "summary": "s", "counsel_review": True}]
+        }
+    }
+    items = rule_audit.build_counsel_review_items(gating, rules, scenarios_data={}, inputs={})
+    assert len(items) == 1
+    it = items[0]
+    assert it["relevance_tier"] == "applies"
+    assert it["applies_to"] == "safe_001"
+    assert it["instances"] == [{"instance_type": "safe", "instance_id": "safe_001"}]
+
+
+def test_counsel_item_general_when_only_global() -> None:
+    rule_id = "delaware_cross_border.qsbs_date_sensitive"
+    gating = _gating_instances(
+        rule_id,
+        {
+            "global:": {
+                "applies_when_matched": True,
+                "status": "in_window",
+                "instance_type": "global",
+                "instance_id": None,
+            }
+        },
+    )
+    rules = {
+        "domains": {
+            "delaware_cross_border": [
+                {
+                    "rule_id": rule_id,
+                    "domain": "delaware_cross_border",
+                    "title": "t",
+                    "summary": "s",
+                    "counsel_review": True,
+                }
+            ]
+        }
+    }
+    items = rule_audit.build_counsel_review_items(gating, rules, scenarios_data={}, inputs={})
+    assert items[0]["relevance_tier"] == "general"
+    assert items[0]["applies_to"] == "all"
+
+
+def test_counsel_instances_none_id_sort_does_not_crash() -> None:
+    # instance_id is None for global/engagement items; the sort key must coerce
+    # it or sorting raises TypeError (None vs str).
+    rule_id = "safe.x"
+    gating = _gating_instances(
+        rule_id,
+        {
+            "safe:safe_002": {
+                "applies_when_matched": True,
+                "status": "in_window",
+                "instance_type": "safe",
+                "instance_id": "safe_002",
+            },
+            "global:": {
+                "applies_when_matched": True,
+                "status": "in_window",
+                "instance_type": "global",
+                "instance_id": None,
+            },
+            "safe:safe_001": {
+                "applies_when_matched": True,
+                "status": "in_window",
+                "instance_type": "safe",
+                "instance_id": "safe_001",
+            },
+        },
+    )
+    rules = {
+        "domains": {
+            "safe": [{"rule_id": rule_id, "domain": "safe", "title": "t", "summary": "s", "counsel_review": True}]
+        }
+    }
+    items = rule_audit.build_counsel_review_items(gating, rules, scenarios_data={}, inputs={})
+    # one item per rule (cardinality unchanged) despite 3 instances
+    assert len(items) == 1
+    inst = items[0]["instances"]
+    # deterministic order: (instance_type, instance_id) with None coerced to ""
+    assert inst == [
+        {"instance_type": "global", "instance_id": None},
+        {"instance_type": "safe", "instance_id": "safe_001"},
+        {"instance_type": "safe", "instance_id": "safe_002"},
+    ]
+    assert items[0]["applies_to"] == "safe_001, safe_002"
+
+
+def test_counsel_item_likely_tier_when_domain_present() -> None:
+    # A general-only item is "likely relevant" when another item in the SAME
+    # domain matched a specific instrument in this cap table.
+    rules = {
+        "domains": {
+            "safe": [
+                {"rule_id": "safe.specific", "domain": "safe", "title": "t", "summary": "s", "counsel_review": True},
+                {"rule_id": "safe.global_only", "domain": "safe", "title": "t", "summary": "s", "counsel_review": True},
+            ]
+        }
+    }
+    gating = {
+        "safe.specific": {
+            "safe:safe_001": {
+                "applies_when_matched": True,
+                "status": "in_window",
+                "instance_type": "safe",
+                "instance_id": "safe_001",
+            }
+        },
+        "safe.global_only": {
+            "global:": {
+                "applies_when_matched": True,
+                "status": "in_window",
+                "instance_type": "global",
+                "instance_id": None,
+            }
+        },
+    }
+    items = {
+        it["rule_id"]: it for it in rule_audit.build_counsel_review_items(gating, rules, scenarios_data={}, inputs={})
+    }
+    assert items["safe.specific"]["relevance_tier"] == "applies"
+    assert items["safe.global_only"]["relevance_tier"] == "likely"
+
+
+def test_counsel_packet_passthrough_and_determinism() -> None:
+    import counsel_packet  # type: ignore[import-not-found]
+
+    audit = {
+        "counsel_review_items": [
+            {
+                "rule_id": "safe.x",
+                "domain": "safe",
+                "title": "t",
+                "instances": [{"instance_type": "safe", "instance_id": "safe_001"}],
+                "relevance_tier": "applies",
+                "applies_to": "safe_001",
+            }
+        ]
+    }
+    # A flip counsel item has no instances/relevance_tier keys — heterogeneous list.
+    flip = [{"rule_id": "flip.y", "domain": "flip", "title": "flip item"}]
+    p1 = counsel_packet.build_packet(company_name="TestCo", rule_audit=audit, flip_counsel_items=flip)
+    p2 = counsel_packet.build_packet(company_name="TestCo", rule_audit=audit, flip_counsel_items=flip)
+    # additive fields survive the packet pass-through
+    by_id = {it["rule_id"]: it for it in p1["items"]}
+    assert by_id["safe.x"]["relevance_tier"] == "applies"
+    assert by_id["safe.x"]["instances"] == [{"instance_type": "safe", "instance_id": "safe_001"}]
+    assert "instances" not in by_id["flip.y"], "flip items legitimately lack instances (rendered as applies-to-all)"
+    # deterministic output
+    assert json.dumps(p1, sort_keys=True) == json.dumps(p2, sort_keys=True)

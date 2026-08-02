@@ -14,6 +14,8 @@ Items are tagged with applicability gates that determine when they should be eva
 - **Gate evaluation:** For each gate array, check if ANY value matches `company.geography` / `company.sector_type` OR appears in `company.traits`.
 - Items whose gate doesn't match are auto-scored as `not_applicable`.
 
+**Who applies the gates:** `checklist.py` (the producer script), AFTER the assessing agent returns its items. If you are the agent assessing these criteria, evaluate EVERY item on its merits and never mark an item `not_applicable` because of a gate — your statuses are pre-gating assessments, and self-gating double-applies (or mis-applies) the rules. Note in particular: "**Model format:** spreadsheet only" gates fire only for `deck` / `conversational` formats — `partial` models (incomplete spreadsheets) are evaluated in full.
+
 ## Scoring Formula
 
 - **pass** = 1 point
@@ -276,6 +278,10 @@ Thresholds: **strong** >= 85%, **solid** >= 70%, **needs_work** >= 50%, **major_
 **Label:** Burn multiple tracked
 **Stage:** seed+ | **Geography:** all | **Sector:** all | **Model format:** all
 **Pass:** Computed correctly (Net Burn / Net New ARR); improving.
+**Net New ARR is `mrr × growth_rate_monthly × 12`. Do NOT re-derive it by subtracting churn** —
+`growth_rate_monthly` is already net of churn (see schema-inputs.md), so subtracting a churn figure
+double-counts it. **Read the burn multiple off `unit_economics.json` rather than recomputing it** —
+`unit_economics.py` is the single source for it, and a figure the founder reads twice must be derived once.
 **Warn:** High but improving.
 **Fail:** Worsening with scale; >3x.
 
@@ -316,6 +322,8 @@ Thresholds: **strong** >= 85%, **solid** >= 70%, **needs_work** >= 50%, **major_
 ## Category 6 — Sector-Specific (6 items)
 
 Mark items as `not_applicable` if the company's sector or traits don't match the gate.
+
+Note: `saas` and `retail` sector types match no item in this category by design — such companies get all six auto-gated `not_applicable`, not force-fitted into the nearest gate. For `retail` companies, cover the sector-specific ground manually: assess store-level contribution, buildout capex and payback, inventory/working capital, and same-store vs new-store growth in the `notes` fields of the relevant Revenue & Unit Economics and Expenses/Cash items — a store rollout without a dedicated gate still needs its store economics reviewed.
 
 ### `SECTOR_39`
 **Label:** Marketplace: two-sided mechanics

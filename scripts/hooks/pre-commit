@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Canonical pre-commit hook (version-controlled). Activate with:
+#   git config core.hooksPath scripts/hooks
+#
+# Runs: (1) ruff format + lint on staged Python, (2) the privacy-leak guard on
+# all staged files. Bypass a confirmed false positive with `git commit --no-verify`.
+
+set -euo pipefail
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+# --- 1. ruff on staged Python -------------------------------------------------
+staged_py=$(git diff --cached --name-only --diff-filter=ACM -- '*.py' || true)
+if [ -n "$staged_py" ]; then
+  if ! uv run ruff format --check $staged_py; then
+    echo ""
+    echo "Pre-commit: ruff format failed. Run 'uv run ruff format .' to fix."
+    exit 1
+  fi
+  if ! uv run ruff check $staged_py; then
+    echo ""
+    echo "Pre-commit: ruff check failed. Run 'uv run ruff check --fix .' to fix."
+    exit 1
+  fi
+fi
+
+# --- 2. privacy-leak guard on all staged files --------------------------------
+# Layers: stray confidential documents, named-after-company provenance tags, and
+# exact names from the local (git-ignored) denylist. See scripts/privacy_guard.py.
+if ! uv run python scripts/privacy_guard.py --staged; then
+  exit 1
+fi

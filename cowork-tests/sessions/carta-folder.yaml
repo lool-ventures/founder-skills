@@ -1,0 +1,13 @@
+# Session for the Lane-2 Carta CONNECTED-FOLDER variant: same synthetic Carta multi-sheet export as
+# carta.yaml, but delivered through a read-only connected folder (`folders:`) instead of an upload —
+# the mount shape real Cowork users get when they connect a directory (in-guest path derives from the
+# folder basename: mnt/carta-folder/…). mode: r → a real :ro bind; no allow_host_writes needed at
+# hostloop. The fixture dir is git-tracked (the git-set boundary stages only tracked files into mounts).
+model: claude-sonnet-4-6
+plugins:
+  local_plugins:
+    - ../../founder-skills
+  enabled:
+    - founder-skills@local
+folders:
+  - { from: ../fixtures/carta-folder, mode: r }

@@ -13,7 +13,9 @@ Checks that agent-produced inputs.json values are traceable to the raw
 extraction in model_data.json.  High-confidence checks only — skips when
 ambiguous.
 
-Output: {"status": "pass"|"warn", "checks": [...], "summary": {...}, "correction_hints": [...]}
+Output: {"status": "pass"|"warn"|"skip", "checks": [...], "summary": {...}, "correction_hints": [...]}
+    ("skip" is returned with summary.skip_reason when model_data is missing,
+     has no sheets, is a stub, or model_format is conversational/deck.)
 """
 
 from __future__ import annotations
@@ -61,11 +63,14 @@ def _fuzzy_match(a: str, b: str) -> bool:
     na, nb = _normalize(a), _normalize(b)
     if not na or not nb:
         return False
-    if na in nb or nb in na:
+    # Minimum-length floor: a 1-2 char cell ('-', a currency symbol, 'Q1')
+    # that happens to be a substring of the company name must not pass this
+    # anti-hallucination gate. Mirror the len(s) > 2 candidate filter.
+    if (na in nb or nb in na) and min(len(na), len(nb)) > 2:
         return True
     # First-word match (e.g. "Acme" vs "Acme Corp Ltd")
     wa, wb = na.split()[0], nb.split()[0]
-    return wa == wb
+    return wa == wb and len(wa) > 2
 
 
 def _close_enough(a: float, b: float, tolerance: float = 0.05) -> bool:
@@ -73,6 +78,31 @@ def _close_enough(a: float, b: float, tolerance: float = 0.05) -> bool:
     if b == 0:
         return a == 0
     return abs(a - b) / abs(b) <= tolerance
+
+
+def _num(x: Any, default: float) -> float:
+    """Coerce x to a numeric value, falling back to default for null/non-numeric.
+
+    The dict.get() default only applies to missing keys, not to keys present
+    with an explicit JSON null (produced by the corrections coercion layer).
+    """
+    if isinstance(x, bool):
+        return default
+    if isinstance(x, (int, float)):
+        return x
+    return default
+
+
+def _currency_code(inputs: dict[str, Any]) -> str:
+    """Return the model's native currency code, defaulting to 'USD'.
+
+    Absent or non-string `currency` is the back-compat default (USD-equivalent);
+    the USD-absolute plausibility floors below apply unchanged in that case.
+    """
+    currency = inputs.get("currency")
+    if isinstance(currency, str) and currency.strip():
+        return currency.strip().upper()
+    return "USD"
 
 
 def _all_numeric_values(model_data: dict[str, Any]) -> list[float]:
@@ -172,6 +202,20 @@ def _find_numeric_in_model(
     return False
 
 
+def _cell_ref_col_key(headers: list[str], j: int) -> str:
+    """Collision-proof key for column ``j`` in ``cell_refs.cols``.
+
+    Twin of ``extract_model._cell_ref_col_key`` — the producer keys
+    ``cell_refs.cols`` by this and the consumer here reads it back by the same
+    rule, so duplicate-header columns each resolve to their own coordinate
+    instead of colliding on the bare header (last-duplicate-wins). Keep the two
+    copies in sync.
+    """
+    h = headers[j]
+    occurrence = headers[: j + 1].count(h)
+    return h if occurrence == 1 else f"{h}#{occurrence}"
+
+
 def _find_cell_ref(
     target: float,
     model_data: dict[str, Any],
@@ -227,8 +271,9 @@ def _find_cell_ref(
                 if not (isinstance(val, (int, float)) and not isinstance(val, bool)):
                     continue
                 fval = float(val)
-                col_header = headers[j] if j < len(headers) else ""
-                coord = cols.get(col_header, "")
+                if j >= len(headers):
+                    continue
+                coord = cols.get(_cell_ref_col_key(headers, j), "")
                 if not coord:
                     continue
                 ref_result = {"ref": f"{sheet['name']}!{coord}", "confidence": "best_match"}
@@ -247,7 +292,7 @@ def _find_cell_ref(
 
 def _check_company_name(inputs: dict[str, Any], model_data: dict[str, Any]) -> dict[str, Any]:
     """COMPANY_NAME: fuzzy-match company name against model_data strings."""
-    company_name = inputs.get("company", {}).get("company_name", "")
+    company_name = (inputs.get("company") or {}).get("company_name", "")
     if not company_name:
         return {
             "id": "COMPANY_NAME",
@@ -279,11 +324,22 @@ def _check_company_name(inputs: dict[str, Any], model_data: dict[str, Any]) -> d
         if len(unique) >= 5:
             break
 
+    if unique:
+        # A different plausible company name IS present — genuine mismatch signal
+        return {
+            "id": "COMPANY_NAME",
+            "status": "warn",
+            "message": f"Company name '{company_name}' not found in model data",
+            "candidates": unique,
+        }
+    # Name simply absent — common for template-derived models; nothing to cross-check
     return {
         "id": "COMPANY_NAME",
-        "status": "warn",
-        "message": f"Company name '{company_name}' not found in model data",
-        "candidates": unique,
+        "status": "skip",
+        "message": (
+            f"Company name '{company_name}' not present in model cells — "
+            "common for template-derived models; nothing to cross-check"
+        ),
     }
 
 
@@ -291,7 +347,7 @@ def _check_salary_traceability(
     inputs: dict[str, Any], model_data: dict[str, Any], *, scale_factor: int = 1
 ) -> dict[str, Any]:
     """SALARY_TRACEABILITY: check that headcount salary values appear in model_data."""
-    headcount = inputs.get("expenses", {}).get("headcount", [])
+    headcount = (inputs.get("expenses") or {}).get("headcount") or []
     if not headcount:
         return {
             "id": "SALARY_TRACEABILITY",
@@ -341,7 +397,7 @@ def _check_revenue_traceability(
     inputs: dict[str, Any], model_data: dict[str, Any], *, scale_factor: int = 1
 ) -> dict[str, Any]:
     """REVENUE_TRACEABILITY: check MRR/ARR/monthly totals against model_data."""
-    revenue = inputs.get("revenue", {})
+    revenue = inputs.get("revenue") or {}
     mrr_val = revenue.get("mrr", {}).get("value") if isinstance(revenue.get("mrr"), dict) else None
     arr_val = revenue.get("arr", {}).get("value") if isinstance(revenue.get("arr"), dict) else None
     monthly_total = revenue.get("monthly_total")
@@ -401,7 +457,7 @@ def _check_revenue_traceability(
 
 def _check_cash_balance(inputs: dict[str, Any], model_data: dict[str, Any], *, scale_factor: int = 1) -> dict[str, Any]:
     """CASH_BALANCE: check that cash balance (stock metric) appears in model_data."""
-    cash_val = inputs.get("cash", {}).get("current_balance")
+    cash_val = (inputs.get("cash") or {}).get("current_balance")
     if cash_val is None or cash_val == 0:
         return {
             "id": "CASH_BALANCE",
@@ -460,17 +516,87 @@ _STAGE_RANGES: dict[str, dict[str, tuple[float, float]]] = {
     "series-b": {"cash_balance": (1_000_000, 1_000_000_000), "monthly_burn": (100_000, 50_000_000)},
 }
 
+# Every stage the shared founder context admits, lowest to highest. _STAGE_RANGES
+# stops at series-b, so the stages above it need a stand-in.
+_STAGE_LADDER = (
+    "pre-seed",
+    "seed",
+    "series-a",
+    "series-b",
+    "series-c",
+    "series-d",
+    "later",
+)
+
+# Sentinel for "company.stage was absent entirely" — distinct from any real
+# stage token (including a genuinely unrecognized one) so _resolve_stage_ranges
+# can tell "nothing was said" apart from "something was said that we don't
+# know" and disclose each with its own reason. Not a key in _STAGE_RANGES or
+# _STAGE_LADDER, so it always falls through to this dedicated branch — and,
+# being plain English rather than a code-shaped token, it is also safe to
+# surface directly in a founder-facing message (callers use it as the display
+# value for `stage` too, not just as the lookup key).
+_STAGE_UNSPECIFIED = "unspecified"
+
+
+def _resolve_stage_ranges(
+    stage: str,
+) -> tuple[dict[str, tuple[float, float]], dict[str, str] | None]:
+    """Plausibility ranges for *stage*, plus the substitution when one was needed.
+
+    Substitute DOWNWARD along the ladder — the nearest lower stage that has
+    ranges — not toward a fixed default. These bounds are floors: only the low
+    end is compared. Standing in seed's $50K minimum for a Series C reads as
+    plausible almost regardless of the number, so the check quietly stops
+    checking. The nearest lower stage is the strictest floor the table can
+    honestly support.
+
+    A stage that is not on the ladder at all gets seed, as before: an
+    unrecognized token carries no ordering, so there is nothing to descend from.
+
+    A stage that was never supplied at all (see `_STAGE_UNSPECIFIED`) also gets
+    seed, but with a distinct reason — callers must not resolve a missing stage
+    to "seed" themselves before this function ever sees it (that path produces
+    no substitution record at all, since "seed" is a real, recognized entry in
+    _STAGE_RANGES).
+    """
+    if stage in _STAGE_RANGES:
+        return _STAGE_RANGES[stage], None
+    if stage in _STAGE_LADDER:
+        for candidate in reversed(_STAGE_LADDER[: _STAGE_LADDER.index(stage)]):
+            if candidate in _STAGE_RANGES:
+                return _STAGE_RANGES[candidate], {
+                    "requested": stage,
+                    "resolved_to": candidate,
+                    "reason": "no plausibility ranges published for this stage",
+                }
+    if stage == _STAGE_UNSPECIFIED:
+        return _STAGE_RANGES["seed"], {
+            "requested": stage,
+            "resolved_to": "seed",
+            "reason": "company.stage not provided",
+        }
+    return _STAGE_RANGES["seed"], {
+        "requested": stage,
+        "resolved_to": "seed",
+        "reason": "stage not recognized",
+    }
+
 
 def _check_scale_plausibility(inputs: dict[str, Any], model_data: dict[str, Any]) -> dict[str, Any]:
     """SCALE_PLAUSIBILITY: detect when monetary values look like they're still in thousands/millions."""
-    stage = inputs.get("company", {}).get("stage", "seed")
-    cash = inputs.get("cash", {}).get("current_balance")
-    burn = inputs.get("cash", {}).get("monthly_net_burn")
-    headcount_entries = inputs.get("expenses", {}).get("headcount", [])
-    total_headcount = sum(h.get("count", 0) for h in headcount_entries if isinstance(h, dict))
+    # A missing stage must not silently become "seed" here: that would hit
+    # `stage in _STAGE_RANGES` directly and return `stage_basis = None` below —
+    # no disclosure at all, unlike the unrecognized-token path which already
+    # discloses via stage_basis. Route it through the same resolver instead.
+    stage = (inputs.get("company") or {}).get("stage") or _STAGE_UNSPECIFIED
+    cash = (inputs.get("cash") or {}).get("current_balance")
+    burn = (inputs.get("cash") or {}).get("monthly_net_burn")
+    headcount_entries = (inputs.get("expenses") or {}).get("headcount") or []
+    total_headcount = sum(_num(h.get("count", 0), 0) for h in headcount_entries if isinstance(h, dict))
 
     # If scale correction was already applied, verify values are now plausible
-    scale_correction = inputs.get("metadata", {}).get("scale_correction")
+    scale_correction = (inputs.get("metadata") or {}).get("scale_correction")
     if scale_correction and _values_already_plausible(inputs):
         return {
             "id": "SCALE_PLAUSIBILITY",
@@ -480,69 +606,99 @@ def _check_scale_plausibility(inputs: dict[str, Any], model_data: dict[str, Any]
 
     signals: list[str] = []
 
-    # Check for explicit scale indicator in model
+    # Check for explicit scale indicator in model. This is a text-pattern
+    # match (e.g. "($000)", "(in thousands)") describing the DISPLAY SCALE of
+    # the numbers, not their currency — it applies regardless of currency, so
+    # it is checked unconditionally.
     scale_indicator = _detect_scale_indicator(model_data)
     if scale_indicator:
         signals.append(f"Model contains scale indicator: {scale_indicator}")
 
-    # Cash balance sanity
-    ranges = _STAGE_RANGES.get(stage, _STAGE_RANGES["seed"])
-    if cash is not None and cash > 0:
-        low, _high = ranges["cash_balance"]
-        if cash < low:
-            signals.append(f"Cash balance ${cash:,.0f} implausibly low for {stage} stage (min ~${low:,.0f})")
+    # The checks below (cash-balance stage range, $2K/person/month gross
+    # expense, $10K/year salary) are absolute USD-denominated floors. For a
+    # non-USD model the raw number isn't a USD reading, so comparing it
+    # against a USD floor would produce false warnings (or false-negatives)
+    # that have nothing to do with actual mis-scaling — skip them entirely.
+    currency_code = _currency_code(inputs)
+    stage_basis: dict[str, str] | None = None
+    if currency_code == "USD":
+        # Cash balance sanity
+        ranges, stage_basis = _resolve_stage_ranges(stage)
+        if cash is not None and cash > 0:
+            low, _high = ranges["cash_balance"]
+            if cash < low:
+                signals.append(f"Cash balance ${cash:,.0f} implausibly low for {stage} stage (min ~${low:,.0f})")
 
-    # Expense sanity — use gross expenses (headcount salary + opex), not net burn.
-    # Net burn can be tiny when revenue nearly covers expenses, causing false positives.
-    gross_monthly = 0.0
-    for h in headcount_entries:
-        sal = h.get("salary_annual", 0)
-        if isinstance(sal, (int, float)) and sal > 0:
-            burden = h.get("burden_pct", 0) or 0
-            count = h.get("count", 1) or 1
-            gross_monthly += (sal * (1 + burden) / 12) * count
-    for o in inputs.get("expenses", {}).get("opex_monthly", []):
-        amt = o.get("amount", 0)
-        if isinstance(amt, (int, float)) and amt > 0:
-            gross_monthly += amt
+        # Expense sanity — use gross expenses (headcount salary + opex), not net burn.
+        # Net burn can be tiny when revenue nearly covers expenses, causing false positives.
+        gross_monthly = 0.0
+        for h in headcount_entries:
+            sal = h.get("salary_annual", 0)
+            if isinstance(sal, (int, float)) and sal > 0:
+                burden = h.get("burden_pct", 0) or 0
+                count = h.get("count", 1) or 1
+                gross_monthly += (sal * (1 + burden) / 12) * count
+        for o in (inputs.get("expenses") or {}).get("opex_monthly") or []:
+            amt = o.get("amount", 0)
+            if isinstance(amt, (int, float)) and amt > 0:
+                gross_monthly += amt
 
-    if gross_monthly > 0 and total_headcount > 0:
-        per_person = gross_monthly / total_headcount
-        if per_person < 2_000:
-            signals.append(
-                f"Gross monthly expenses ${gross_monthly:,.0f} too low for {total_headcount} employees "
-                f"(implies ${per_person:,.0f}/person/month)"
-            )
-    elif burn is not None and burn > 0 and total_headcount > 0:
-        # Fallback to net burn only when no expense breakdown available
-        min_burn = total_headcount * 2_000
-        if burn < min_burn:
-            signals.append(
-                f"Monthly burn ${burn:,.0f} too low for {total_headcount} employees "
-                f"(implies ${burn / total_headcount:,.0f}/person/month)"
-            )
+        if gross_monthly > 0 and total_headcount > 0:
+            per_person = gross_monthly / total_headcount
+            if per_person < 2_000:
+                signals.append(
+                    f"Gross monthly expenses ${gross_monthly:,.0f} too low for {total_headcount} employees "
+                    f"(implies ${per_person:,.0f}/person/month)"
+                )
+        elif burn is not None and burn > 0 and total_headcount > 0:
+            # Fallback to net burn only when no expense breakdown available
+            min_burn = total_headcount * 2_000
+            if burn < min_burn:
+                signals.append(
+                    f"Monthly burn ${burn:,.0f} too low for {total_headcount} employees "
+                    f"(implies ${burn / total_headcount:,.0f}/person/month)"
+                )
 
-    # Salary sanity — check if any salary is implausibly low
-    for h in headcount_entries:
-        salary = h.get("salary_annual", 0)
-        if salary and salary > 0 and salary < 10_000:
-            signals.append(
-                f"Annual salary ${salary:,.0f} for '{h.get('role', '?')}' implausibly low — "
-                f"model may be in thousands (${salary * 1000:,.0f}?)"
-            )
+        # Salary sanity — check if any salary is implausibly low
+        for h in headcount_entries:
+            salary = h.get("salary_annual", 0)
+            if salary and salary > 0 and salary < 10_000:
+                signals.append(
+                    f"Annual salary ${salary:,.0f} for '{h.get('role', '?')}' implausibly low — "
+                    f"model may be in thousands (${salary * 1000:,.0f}?)"
+                )
 
     if signals:
-        return {
+        warn_result: dict[str, Any] = {
             "id": "SCALE_PLAUSIBILITY",
             "status": "warn",
             "message": "Values may not be converted from model denomination (thousands/millions)",
             "signals": signals,
         }
-    return {
+        if stage_basis is not None:
+            warn_result["stage_basis"] = stage_basis
+        return warn_result
+    if currency_code != "USD":
+        return {
+            "id": "SCALE_PLAUSIBILITY",
+            "status": "pass",
+            "message": (
+                f"USD-denominated monetary-value floors not checked for a {currency_code}-denominated "
+                "model; scale-indicator text patterns were still checked"
+            ),
+        }
+    pass_result: dict[str, Any] = {
         "id": "SCALE_PLAUSIBILITY",
         "status": "pass",
         "message": "Monetary values appear plausible for stated stage",
     }
+    if stage_basis is not None:
+        pass_result["stage_basis"] = stage_basis
+        pass_result["message"] = (
+            f"Monetary values appear plausible, judged against {stage_basis['resolved_to']} "
+            f"ranges — none are published for {stage_basis['requested']}"
+        )
+    return pass_result
 
 
 # ---------------------------------------------------------------------------
@@ -620,16 +776,25 @@ def _plausibility_vote(inputs: dict[str, Any]) -> tuple[bool, int]:
     """Majority-vote plausibility over the checked monetary fields.
 
     Returns (majority_plausible, checked_count). checked_count == 0 returns
-    (True, 0): nothing to check — never fix blindly.
+    (True, 0): nothing to check — never fix blindly. All of the fields voted
+    on below are checked against USD-absolute floors, which don't apply to a
+    non-USD model — for a non-USD model this returns (True, 0) unconditionally
+    so --fix (main(), which gates on `not plausible`) never triggers off a
+    USD floor applied to non-USD data.
     """
-    stage = inputs.get("company", {}).get("stage", "seed")
-    ranges = _STAGE_RANGES.get(stage, _STAGE_RANGES["seed"])
+    if _currency_code(inputs) != "USD":
+        return True, 0
+
+    # Same missing-stage routing as _check_scale_plausibility: don't default to
+    # "seed" before the resolver sees it (see comment there for why).
+    stage = (inputs.get("company") or {}).get("stage") or _STAGE_UNSPECIFIED
+    ranges, _basis = _resolve_stage_ranges(stage)
 
     plausible_count = 0
     checked_count = 0
 
     # Cash balance
-    cash = inputs.get("cash", {}).get("current_balance")
+    cash = (inputs.get("cash") or {}).get("current_balance")
     if cash is not None and cash > 0:
         checked_count += 1
         low, high = ranges["cash_balance"]
@@ -637,7 +802,7 @@ def _plausibility_vote(inputs: dict[str, Any]) -> tuple[bool, int]:
             plausible_count += 1
 
     # Burn
-    burn = inputs.get("cash", {}).get("monthly_net_burn")
+    burn = (inputs.get("cash") or {}).get("monthly_net_burn")
     if burn is not None and burn > 0:
         checked_count += 1
         low, high = ranges["monthly_burn"]
@@ -645,7 +810,7 @@ def _plausibility_vote(inputs: dict[str, Any]) -> tuple[bool, int]:
             plausible_count += 1
 
     # MRR — should be > $1K for any stage with revenue
-    mrr = inputs.get("revenue", {}).get("mrr", {})
+    mrr = (inputs.get("revenue") or {}).get("mrr", {})
     if isinstance(mrr, dict):
         mrr_val = mrr.get("value")
         if mrr_val is not None and mrr_val > 0:
@@ -654,7 +819,7 @@ def _plausibility_vote(inputs: dict[str, Any]) -> tuple[bool, int]:
                 plausible_count += 1
 
     # Salary — should be > $10K annual
-    for h in inputs.get("expenses", {}).get("headcount", []):
+    for h in (inputs.get("expenses") or {}).get("headcount") or []:
         salary = h.get("salary_annual", 0)
         if salary and salary > 0:
             checked_count += 1
@@ -749,7 +914,7 @@ def _should_skip(model_data: dict[str, Any] | None, inputs: dict[str, Any]) -> s
     if model_data.get("skipped"):
         return "model_data is a stub"
     # Conversational / deck — no extraction to validate
-    model_format = inputs.get("company", {}).get("model_format", "")
+    model_format = (inputs.get("company") or {}).get("model_format", "")
     if model_format in ("conversational", "deck"):
         return f"model_format is '{model_format}' — no extraction to validate"
     return None
@@ -855,7 +1020,7 @@ def main() -> None:
     # --fix: detect and apply scale correction before validation
     if args.fix and model_data is not None:
         indicator = _detect_scale_indicator(model_data)
-        already_corrected = bool(inputs.get("metadata", {}).get("scale_correction"))
+        already_corrected = bool((inputs.get("metadata") or {}).get("scale_correction"))
         plausible, checked = _plausibility_vote(inputs)
         if indicator and not already_corrected and not plausible and checked < 2:
             print(
@@ -888,7 +1053,7 @@ def main() -> None:
     # Add fix info to result if fix was applied
     if scale_factor > 1:
         result["fixed"] = True
-        result["scale_correction"] = inputs.get("metadata", {}).get("scale_correction", {})
+        result["scale_correction"] = (inputs.get("metadata") or {}).get("scale_correction", {})
 
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"

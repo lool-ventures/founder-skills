@@ -1,0 +1,114 @@
+name: financial-model-review-smoke
+session: ../sessions/fmr-model.yaml
+fidelity: cowork
+on_unanswered: first   # gates here are immaterial to the asserts; option-1 is paraphrase-proof (anchor-discipline rule)
+skills: [financial-model-review]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
+
+# Phase 1 fleet-parity smoke — financial-model-review (UPLOAD lane, synthetic Excel model).
+# TWO gates (verified in SKILL.md):
+#   1. numeric inputs confirm (cash / runway date / burn) — pre-state the numbers in the prompt so the
+#      AskUserQuestion is answerable (on_unanswered: first takes option 0);
+#   2. Step-3.6 extracted-values STOP — options "proceed" (reviewed, looks right) / "upload corrections".
+#      Headlessly there is NO corrections file to upload → must pick the PROCEED branch (option 0).
+#      Answered with a question-scoped label, not a blind catch-all.
+# review_inputs.py MUST run --static (the Cowork branch); the --workspace branch backgrounds an HTTP
+# server that never exits and would hang the record. The prompt states "you are in Cowork; use static
+# review mode" and we assert the transcript took --static (and NOT --workspace).
+# Also exercises the Phase-2a staging fix (scratch now lives in $STAGING_DIR under /tmp).
+# Slug + gate shape confirmed at the 0.24.0 discovery re-record.
+prompt: |
+  I'm the founder of Cadence, a US seed-stage B2B SaaS company. I've uploaded our financial model
+  (an Excel workbook). You are running in Cowork — use the static review mode for the extracted-values
+  review page (do not start a local server). Please use the financial-model-review skill to review the
+  model: validate the inputs, check unit economics, stress-test runway, and produce the report.
+
+  For the inputs the model doesn't state explicitly: current cash on hand is $1,500,000, monthly net
+  burn is about $120,000, and we want runway measured from 2026-06-01. When you show me the extracted
+  values for review, they look right — go ahead and proceed.
+
+answers:
+  # Step-3.6 extracted-values STOP — proceed (the values look right; nothing to upload headlessly).
+  # Prefix-anchored to the proceed option, whose label is `I reviewed the page — the values look right,
+  # proceed` (financial-model-review/SKILL.md:547). Anchors are LEADING substrings, so the previous
+  # anchor "They look right" matched nothing after that label was specified — it fell through to
+  # `on_unanswered: first`, which happened to be this same option, so the lane passed by accident while
+  # claiming a scripted answer it did not have. Anchor on the label's opening words, not on a phrase
+  # from its middle. Robust to option re-ordering (unlike positional `first`); this choice drives run
+  # completion vs the dead-end "correct values" branch, so it warrants a real anchor.
+  - when_question: 'review|extracted|values|proceed|looks right'
+    choose: "I reviewed the page"
+
+assert:
+  - result: success
+  # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
+  # the deliverable but stranded steps, which result:success alone misses.
+  - all_tasks_completed: true
+  - file_exists: outputs/artifacts/financial-model-review-cadence/report.json
+  - artifact_json:
+      artifact: outputs/artifacts/financial-model-review-cadence/report.json
+      path: coaching_payload.schema_version
+      exists: true
+  - subagent_dispatched: 'financial-model-review'
+  # Context-B coaching hand-off: the coaching sub-agent WRITES its commentary to the
+  # handoff file (file transport, not the message channel) with a paired non-error
+  # result — guards the first leg of the "## Coaching Commentary" insertion chain.
+  # Tier-agnostic + replay-checkable. NOTE: the hand-off filename is `coaching.md`
+  # (raw markdown, wrapped by md_to_commentary.py). It was
+  # `coaching_commentary_output.json` when the current cassettes were recorded, so this
+  # assert FAILS under `--reassert` until the next re-record and passes after it — the
+  # same expected-until-re-record class as the `input_unmodified` upload guards.
+  - subagent_file_write:
+      path_suffix: coaching.md
+  # Per-dispatch correlation: ties THIS dispatch's resolved type to ITS OWN delivered
+  # write via parentToolUseId, which subagent_file_write (matching ANY sub-agent write)
+  # cannot do.
+  - subagent_dispatch_healthy:
+      type: 'financial-model-review'
+  # review_inputs.py ran in static (Cowork) mode, not the hanging server mode:
+  #  - review.html exists → the static review page was generated (the --static branch writes the file;
+  #    the --workspace branch serves it live instead). The `--static` flag lives in the bash tool-call
+  #    input, not the model's prose, so a positive transcript_matches on it is unreliable — file_exists
+  #    is the robust proof.
+  #  - --workspace must NOT appear → the &-backgrounded HTTP server (which would hang the record) never ran.
+  - file_exists: outputs/artifacts/financial-model-review-cadence/review.html
+  - transcript_not_matches: '--workspace'
+  # The emitted review.html must carry NO write-back that is lost under Cowork: its /api/check +
+  # /api/feedback fetches are guarded by the build-time IS_STATIC flag (dead in the static/Cowork
+  # build) and the download path is the primary flow — so the static analyzer must find nothing
+  # error-severity. Locks the review_inputs.py fix in place. Live/verify-run only (skipped on replay);
+  # bakes in at the next re-record.
+  - no_lost_write_back: true
+  # Uploaded input is read-only — the review must READ the uploaded financial model, never mutate it.
+  # Guard the upload's content hash (0.29.0 captures uploads as a read-only input root, so input_unmodified
+  # now reaches the upload lanes). Evaluable only after a re-record captures the upload root.
+  - input_unmodified: 'uploads/**'
+  # host-path posture: hostloop exposes real host paths by design; the leak class is covered
+  # by the container-tier host-path-canary scenario + the privacy scan's path class on cassettes.
+  # --- fleet contract asserts (adopted at the 0.24.0 pin; budgets tightened from discovery actuals) ---
+  # The pipeline entered through the Skill tool (prefix-tolerant; id shape confirmed at discovery).
+  - skill_triggered: '(founder-skills:)?financial-model-review$'
+  # Negative control: shared VC/founder vocabulary must not mis-route to a sibling skill.
+  - no_skill_triggered: '(deck-review|cap-table)$'
+  # Every computer:// deliverable link shared with the founder must resolve (zero links pass).
+  - computer_links_resolve: true
+  # No delete under outputs/ (live-lane key; replay skips it loudly).
+  - no_delete_in_outputs: true
+  # Dispatch contract: sub-agents declare no Bash (agents/*.md) — regression tripwire.
+  - subagent_tool_absent: 'Bash'
+  # Scripted answers reached the model non-error whenever a gate fired (0.25.0: vacuous-passes
+  # when zero gates fire, so it's safe despite model-dependent gating — see README pin note).
+  - gate_answers_delivered: true
+  # Usability budget: gates asked before value (observed + headroom, from discovery).
+  - questions_count_max: 8
+  # Author-chosen dispatch budget (production has NO Task-fan-out cap; this is an
+  # efficiency tripwire, not a platform mirror). tightened from discovery actuals (observed x1.5).
+  - dispatch_count_max: 6
+  # Efficiency budgets — generous ceilings; tightened to observed x1.5 post-record.
+  - max_turns: 115
+  - tool_calls_max: 110
+  # Stray-file guard (new-files-only; overwrite-in-place is covered by producer stamps).
+  # Allowlist = artifact namespace (incl. handoff/**) + founder-context sidecar + promoted
+  # deliverables. Pre-0.24 cassettes exclude loudly (no preRunPaths). tightened from discovery actuals (observed x1.5).
+  - no_unexpected_files:
+      - 'outputs/artifacts/financial-model-review-cadence/**'
+      - 'outputs/artifacts/founder-context-cadence.json'

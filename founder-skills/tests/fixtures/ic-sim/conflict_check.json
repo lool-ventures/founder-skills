@@ -1,0 +1,17 @@
+{
+  "portfolio_size": 0,
+  "conflicts": [],
+  "summary": {
+    "total_checked": 0,
+    "conflict_count": 0,
+    "has_blocking_conflict": false,
+    "overall_severity": "clear"
+  },
+  "validation": {
+    "status": "valid",
+    "errors": []
+  },
+  "metadata": {
+    "run_id": "fixture-ic-sim-001"
+  }
+}

@@ -1,0 +1,8 @@
+# cowork-harness staleness hash_ignore (composes with session staleness.hash_ignore).
+# Paths here do NOT affect recorded skill behavior, so editing them must not re-stale cassettes.
+#
+# NOTE: 0.6.0 anchors a LEADING-SLASH pattern to the mount root, so `/tests` matches ONLY the
+# top-level founder-skills/tests/ (pytest only) — NOT a future skills/<x>/tests/ runtime-fixtures dir.
+# (A slash-free `tests` would match at ANY depth and could silently exclude such runtime fixtures.)
+# Do NOT add `**/*.md`: SKILL.md is runtime and must stay in the hash.
+/tests

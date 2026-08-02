@@ -1,0 +1,121 @@
+name: competitive-positioning-smoke
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: first   # NOT paraphrase-proof — see the option-1 caveat below; retained deliberately, with its risk stated
+skills: [competitive-positioning]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
+
+# Phase 1 fleet-parity smoke — competitive-positioning (conversational lane, Cadence).
+# Validation STOP gate(s): SKILL.md defines Gate 1 (competitor-set) and Gate 2 (axis-selection) as
+# "MANDATORY STOP"s, but the agent may MERGE them into one question ("Does this competitor set and these
+# axis pairs look right?") — DISCOVERED at record time.
+#
+# CAVEAT on `on_unanswered: first`, measured and NOT resolved. This lane used to assert that option 1 is
+# always the accept/proceed path. That is false. Gate 1's labels are regenerated per run from what the
+# blind recall check found, and across three live runs option 1 was:
+#     `Looks good`                                   (l6ngg0gbyr — accept, the assumed case)
+#     `Looks good, add FieldPulse`                   (l6niqzf5mo — ADOPTS a competitor)
+#     `Looks good — add both Kickserv and Service Fusion`  (l78j9nwiz4 — adopts two)
+# So the fallback can silently take an ADDITIONS branch while this comment claims it accepted the set as
+# drafted. The pinned competitor set in the prompt does NOT prevent this: the recall check never sees the
+# pin, so it still offers candidates and the gate still re-flows around them.
+#
+# Why `first` is kept anyway: every observed variant of option 1 begins "Looks good", so the run always
+# proceeds and this lane's asserts (which check the pipeline, not the competitor count) hold either way.
+# What is NOT safe is reading a green here as evidence about WHICH branch ran. Any assert that depends on
+# the set staying at three must not be added to this lane — drive it with `--decider-dir` instead, as
+# competitive-positioning-recall-adoption does.
+#
+# Multi-dispatch: Step 5 dispatches MOAT_SCORING + POSITIONING_SCORING in parallel.
+prompt: |
+  I'm the founder of Cadence, a US seed-stage B2B SaaS company selling field-service scheduling and
+  dispatch software to SMB service businesses. Use the competitive-positioning skill to map our
+  competitive landscape and moats. Use exactly these three competitors — do not add others:
+  ServiceTitan, Jobber, and Housecall Pro. Then produce the positioning report and the explorer.
+
+assert:
+  - result: success
+  # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
+  # the deliverable but stranded steps, which result:success alone misses.
+  - all_tasks_completed: true
+  - file_exists: outputs/artifacts/competitive-positioning-cadence/report.json
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-cadence/report.json
+      path: coaching_payload.schema_version
+      exists: true
+  - subagent_dispatched: 'competitive-positioning'
+  # --- blind recall check (Step 3.6) ---
+  # This prompt pins THREE competitors in a market with obvious other players, so the blind
+  # agent — which never sees the pinned set — should surface candidates the draft lacks. That
+  # makes this lane a real detection test, not a smoke one. Assert the block EXISTS and the
+  # blind agent produced a set; do NOT assert unmatched is non-empty (whether a specific gap is
+  # found is model judgment, and a genuinely complete draft returning zero gaps is correct).
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-cadence/competitor_verification.json
+      path: recall_gaps.blind_set_size
+      gt: 0
+  # The diff ran against the draft rather than silently no-op'ing.
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-cadence/competitor_verification.json
+      path: recall_gaps.note
+      exists: true
+  # --- recency (Step 4) ---
+  # landscape_as_of is stamped unconditionally by the producer, so this is a deterministic
+  # assert on the schema addition — unlike recent_developments, whose population depends on
+  # what research actually finds.
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-cadence/landscape.json
+      path: landscape_as_of
+      exists: true
+  # Context-B coaching hand-off: the coaching sub-agent WRITES its commentary to the
+  # handoff file (file transport, not the message channel) with a paired non-error
+  # result — guards the first leg of the "## Coaching Commentary" insertion chain.
+  # Tier-agnostic + replay-checkable. NOTE: the hand-off filename is `coaching.md`
+  # (raw markdown, wrapped by md_to_commentary.py). It was
+  # `coaching_commentary_output.json` when the current cassettes were recorded, so this
+  # assert FAILS under `--reassert` until the next re-record and passes after it — the
+  # same expected-until-re-record class as the `input_unmodified` upload guards.
+  - subagent_file_write:
+      path_suffix: coaching.md
+  # Per-dispatch correlation: ties THIS dispatch's resolved type to ITS OWN delivered
+  # write via parentToolUseId, which subagent_file_write (matching ANY sub-agent write)
+  # cannot do.
+  - subagent_dispatch_healthy:
+      type: 'competitive-positioning'
+  # host-path posture: hostloop exposes real host paths by design; the leak class is covered
+  # by the container-tier host-path-canary scenario + the privacy scan's path class on cassettes.
+  # --- fleet contract asserts (adopted at the 0.24.0 pin; budgets tightened from discovery actuals) ---
+  # The pipeline entered through the Skill tool (prefix-tolerant; id shape confirmed at discovery).
+  - skill_triggered: '(founder-skills:)?competitive-positioning$'
+  # Every computer:// deliverable link shared with the founder must resolve (zero links pass).
+  - computer_links_resolve: true
+  # No delete under outputs/ (live-lane key; replay skips it loudly).
+  - no_delete_in_outputs: true
+  # Dispatch contract: sub-agents declare no Bash (agents/*.md) — regression tripwire.
+  - subagent_tool_absent: 'Bash'
+  # Usability budget: gates asked before value (observed + headroom, from discovery).
+  - questions_count_max: 8
+  # Author-chosen dispatch budget (production has NO Task-fan-out cap; this is an
+  # efficiency tripwire, not a platform mirror). tightened from discovery actuals (observed x1.5).
+  - dispatch_count_max: 9
+  # Efficiency budgets — generous ceilings; tightened to observed x1.5 post-record.
+  - max_turns: 130
+  - tool_calls_max: 120
+  # Stray-file guard (new-files-only; overwrite-in-place is covered by producer stamps).
+  # Allowlist = artifact namespace (incl. handoff/**) + founder-context sidecar + promoted
+  # deliverables. Pre-0.24 cassettes exclude loudly (no preRunPaths). tightened from discovery actuals (observed x1.5).
+  - no_unexpected_files:
+      - 'outputs/artifacts/competitive-positioning-cadence/**'
+      - 'outputs/artifacts/founder-context-cadence.json'
+      - 'outputs/Cadence_Competitive_*'
+  # GATE FLOOR. `questions_count_max` above is a CEILING — it caps interruption but has never once
+  # asserted that the skill asked anything at all. A run that silently skips its confirmation gates and
+  # assumes the answers produces a well-formed report, a green suite, and a founder who was never
+  # consulted. Measured: a committed cassette for this fleet once froze exactly that (0 gates) and went
+  # green for weeks. `gate_answers_delivered` alone does NOT close it — it passes VACUOUSLY when zero
+  # gates fire, which is why the two are always paired.
+  # Floor is deliberately 1, well BELOW the count observed at record time: gate firing is
+  # model-dependent (the same batch saw one cap-table lane fire the founder-context pack and another
+  # skip it), so a floor set AT the observed count converts ordinary variance into a red suite. This
+  # asserts the property — "it asked" — not the model's exact behaviour.
+  - gate_answers_delivered: true
+  - gate_answer_count_min: 1

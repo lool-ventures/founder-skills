@@ -31,7 +31,74 @@ import sys
 import uuid
 from typing import Any
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _artifact_writer  # noqa: E402
+import _labels  # noqa: E402
+import _rules  # noqa: E402
+import _warning_callouts  # noqa: E402
+from compose_extraction_report import (  # noqa: E402
+    _load_ambiguity_map,
+    _load_amendment_deltas,
+    _load_terms_doc,
+    _terms_section,
+)
+
 SCHEMA_VERSION = "v0.5.0-cap-table"
+_SCHEMA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "references", "schemas")
+RECONCILIATION_TOLERANCE_PPM = 1000  # 0.1%; matches the W_FD_RECONCILE_DELTA threshold in cap_state.py
+
+# Markers that make a `stated_totals.source` string SELF-REFERENTIAL — i.e. it names one of the
+# skill's own artifacts/outputs rather than the founder's source document. Per SKILL.md
+# "Non-circularity rule": the whole point of the reconciliation cross-foot is that the stated figure
+# comes from a source INDEPENDENT of the skill's own math; a source that names the skill's own output
+# cannot back that up, even when it happens to be spelled correctly. Kept short and specific (rather
+# than generic tokens like "model") to avoid false-firing on legitimate sources such as
+# "carta_summary" / "freeform_grid" / "pro_forma_grid" / "term_sheet".
+_SELF_REFERENTIAL_SOURCE_MARKERS = (
+    "scenarios.json",
+    "scenario.json",
+    "report.json",
+    "cap_state.json",
+    "computed",
+    "calculated",
+    "derived",
+    "this report",
+    "this skill",
+    "the skill",
+    "skill output",
+    "skill_output",
+    "skill-output",
+    "model output",
+    "model_output",
+    "model-output",
+)
+
+
+def _rule_md(
+    rule_id: str,
+    *,
+    item_title: str | None = None,
+    item_source_ids: list[str] | None = None,
+    bold: bool = False,
+    compact: bool = False,
+) -> str:
+    """Readable rule reference for Markdown: title linked to its primary source.
+    Full form adds extra 'also' links + the raw rule_id; `compact=True` (for
+    dense tables) keeps just the linked title."""
+    ref = _rules.rule_ref(rule_id, item_title=item_title, item_source_ids=item_source_ids)
+    title = str(ref["title"])
+    links = ref["links"]
+    title_part = f"[{title}]({links[0][1]})" if links else title
+    if bold:
+        title_part = f"**{title_part}**"
+    if compact:
+        return title_part
+    out = title_part
+    if links and links[1:]:
+        out += " · " + " · ".join(f"[{p}]({u})" for p, u in links[1:])
+    out += f" (`{rule_id}`)"
+    return out
+
 
 # Required canonical artifacts per design §3.6
 REQUIRED_ARTIFACTS = [
@@ -51,6 +118,16 @@ def _load(path: str) -> dict[str, Any]:
 
 def _percent(p: float) -> str:
     return f"{p * 100:.1f}%"
+
+
+def _batch_label(b: dict[str, Any]) -> str:
+    """Display label for a common batch. common_batches has no name field like founders[].name, so
+    prefer an explicit holder_name; otherwise fall back to the 'Batch <id>' form (batch_id, else
+    holder_id)."""
+    name = b.get("holder_name")
+    if isinstance(name, str) and name.strip():
+        return name
+    return f"Batch {b.get('batch_id') or b.get('holder_id', '?')}"
 
 
 def _money(m: float, currency: str = "USD") -> str:
@@ -143,9 +220,10 @@ def build_scenario_digest(scenarios: list[dict[str, Any]]) -> list[dict[str, Any
         if params.get("pre_money"):
             drivers.append(f"{s['type'].replace('_', ' ').title()} at {_money(params['pre_money'])} pre-money")
         if params.get("target_pool_percent"):
-            drivers.append(
-                f"Pool top-up to {params['target_pool_percent']:.0%} {params.get('target_basis', 'pre-money').replace('_', ' ')}"
-            )
+            _tb_assumed = any((w or {}).get("code") == "target_basis_defaulted" for w in (co.get("warnings") or []))
+            _basis_label = params.get("target_basis", "pre_money").replace("_", " ")
+            _basis_suffix = " (basis assumed — not stated)" if _tb_assumed else ""
+            drivers.append(f"Pool top-up to {params['target_pool_percent']:.0%} {_basis_label}{_basis_suffix}")
         if branch_summary["structural_only_count"] > 0:
             drivers.append(f"{branch_summary['structural_only_count']} note(s) / SAFE(s) pending")
         digest.append(
@@ -211,9 +289,13 @@ def build_top_dilution_drivers(scenarios: list[dict[str, Any]]) -> list[dict[str
     for s in scenarios:
         co = s.get("computed_outputs", {}) or {}
         agg = co.get("aggregate_ownership_by_class") or {}
+        breakdown = co.get("shares_breakdown") or {}
+        post_fd = co.get("post_round_fully_diluted_shares") or 0
         scenario_id = s["scenario_id"]
         new_money_pct = agg.get("new_money_pct", 0.0)
         safe_pct = agg.get("safe_pct", 0.0)
+        note_pct = agg.get("note_pct", 0.0)
+        pool_topup = breakdown.get("pool_topup") or 0
         if new_money_pct > 0.01:
             drivers.append(
                 {
@@ -230,6 +312,24 @@ def build_top_dilution_drivers(scenarios: list[dict[str, Any]]) -> list[dict[str
                     "founder_impact_pp": round(safe_pct * 100, 1),
                 }
             )
+        if note_pct > 0.01:
+            drivers.append(
+                {
+                    "driver": "Note conversion",
+                    "scenarios": [scenario_id],
+                    "founder_impact_pp": round(note_pct * 100, 1),
+                }
+            )
+        if pool_topup > 0 and post_fd > 0:
+            pool_topup_pct = pool_topup / post_fd
+            if pool_topup_pct > 0.01:
+                drivers.append(
+                    {
+                        "driver": "Option pool top-up",
+                        "scenarios": [scenario_id],
+                        "founder_impact_pp": round(pool_topup_pct * 100, 1),
+                    }
+                )
     # Sort by impact desc, top 5
     drivers.sort(key=lambda d: d["founder_impact_pp"], reverse=True)
     return drivers[:5]
@@ -307,8 +407,19 @@ def build_coaching_payload(
     review_dir: str,
     report_path: str,
     insertion_marker: str,
+    reconciliation_status: str | None = None,
+    reconciliation_max_divergence_ppm: float | None = None,
 ) -> dict[str, Any]:
-    """Build the per-rev15 coaching_payload block."""
+    """Build the per-rev15 coaching_payload block.
+
+    `reconciliation_status` / `reconciliation_max_divergence_ppm` mirror the top-level
+    `report.json` fields of the same computation (`compute_reconciliation_status`) — passed in
+    by the caller rather than recomputed here so the coaching commentary can cite a computed
+    price-per-share / fully-diluted figure that disagrees with the founder's own source document.
+    Optional so existing callers/tests that don't care about reconciliation keep working; a caller
+    that omits them gets `"not_applicable"` / `0.0`, matching `compute_reconciliation_status`'s own
+    no-stated-terms result rather than a silent None.
+    """
     inputs = artifacts["inputs.json"]
     instruments = artifacts["instruments.json"]
     scenarios_doc = artifacts["scenarios.json"]
@@ -324,13 +435,20 @@ def build_coaching_payload(
         {"warning_id": b["code"], "severity": "high", "title": b["code"], "detail": b["remedy"]} for b in failed_items
     ]
 
+    # summary.passed / summary.failed are SCENARIO counts, not blocker counts. A
+    # single scenario can carry several blockers, so counting blockers here would
+    # let passed go negative (e.g. one scenario with 3 blockers in a 2-scenario
+    # run). A scenario is "failed" iff it carries at least one blocker.
+    failed_scenarios = sum(1 for s in scenarios if ((s.get("computed_outputs", {}) or {}).get("blockers") or []))
+    passed_scenarios = len(scenarios) - failed_scenarios
+
     digest = build_scenario_digest(scenarios)
 
     payload: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "summary": {
-            "passed": len(scenarios) - len(failed_items),
-            "failed": len(failed_items),
+            "passed": passed_scenarios,
+            "failed": failed_scenarios,
             "warned": 0,
             "score_percent": None,
         },
@@ -350,6 +468,16 @@ def build_coaching_payload(
         "extraction_confidence": build_extraction_confidence(instruments),
         "counsel_review_summary": build_counsel_review_summary(counsel_packet),
         "date_sensitive_summary": build_date_sensitive_summary(rule_audit),
+        # Same computation as the top-level report.json fields (see compute_reconciliation_status);
+        # threaded through so a computed PPS / fully-diluted figure that disagrees with the
+        # founder's own source document is reachable from the coaching commentary, not just a
+        # field the dispatch structurally never sees.
+        "reconciliation": {
+            "status": reconciliation_status if reconciliation_status is not None else "not_applicable",
+            "max_divergence_ppm": reconciliation_max_divergence_ppm
+            if reconciliation_max_divergence_ppm is not None
+            else 0.0,
+        },
     }
 
     # flip_specifics only when applicable
@@ -373,6 +501,9 @@ def build_coaching_payload(
             "_note": "Present when mode=flip_focused or a flip scenario is modeled",
             "iia_grants_in_history": iia,
             "section_102_grants_outstanding": section_102,
+            # Distinguishes "0 §102 grants" from "no per-grant data captured" — a flip that left
+            # option_grants[] empty reports 0, which the coaching layer must not read as "no §102 exposure".
+            "option_grant_detail_available": bool(cs.get("outstanding_options")),
             "estimated_holders_to_remap": founders_count + preferred_count,
             "warrants_outstanding_count": warrants_count,
             "preferred_class_count": preferred_count,
@@ -490,11 +621,305 @@ def _assert_coaching_payload_privacy_clean(
         )
 
 
+def build_disclosure_banner(*, covered: bool, reconciliation_status: str, max_divergence_ppm: float) -> str:
+    """Return a markdown blockquote banner for the report header, or '' when covered and passing.
+
+    Non-empty variants:
+    - uncovered: provisional/counsel language when the deal was not fully handled by the pipeline.
+    - covered+diverged: divergence percentage when computed terms differ from source-stated terms.
+    - covered+circular: a stated total exactly matches the computed figure but its provenance is
+      missing or self-referential — a false-green cross-foot (see
+      `refine_reconciliation_status_for_provenance`).
+    - covered+cannot_verify: a stated total has no usable provenance, so the match cannot be
+      trusted (degraded, not a confirmed match).
+    covered+pass returns an empty string (no banner emitted).
+    """
+    if not covered:
+        return (
+            "> ⚠️ **Computed outside the validated cap-table engine.** This deal combines primitives the "
+            "deterministic pipeline does not fully cover; figures are provisional — confirm with counsel."
+        )
+    if reconciliation_status == "diverged":
+        pct = max_divergence_ppm / 10_000.0
+        return f"> ⚠️ **Computed figures diverge from source-stated terms by ~{pct:.1f}%.** Review before relying."
+    if reconciliation_status == "circular":
+        return (
+            "> ⚠️ **Circular reconciliation detected.** A stated total matches the skill's own computed "
+            "figure exactly, but its source is missing or names the skill's own output — not an "
+            "independent confirmation. Treat the reconciliation section as unverified."
+        )
+    if reconciliation_status == "cannot_verify":
+        return (
+            "> ⚠️ **Reconciliation cannot be verified.** A stated total has no source citing which "
+            "document it was read from, so the match against computed figures is unconfirmed."
+        )
+    return ""
+
+
+def _render_warning_callouts(cap_state_warnings: list[str]) -> list[str]:
+    """Founder-facing callout block for cap_state warnings. Thin wrapper over the shared
+    `_warning_callouts.render_warning_callouts` (single source of truth shared with `concise_report`,
+    so the full and concise routes cannot diverge). Wrapper name kept for existing call sites/tests."""
+    return _warning_callouts.render_warning_callouts(cap_state_warnings)
+
+
+def build_pool_basis_note(
+    *,
+    target_pool_percent: float | None,
+    pool_consideration_basis: str,
+    realized_pool_pct: float,
+    acquisition_pct: float | None,
+) -> str:
+    """Labeled option-pool sizing-basis note. Returns '' unless there is BOTH an acquisition
+    (acquisition_pct truthy) AND a pool (target_pool_percent truthy). The negotiated headline is a
+    SIZING input, surfaced separately here; the ownership table keeps the true realized % (pool/post_fd)."""
+    if not acquisition_pct or not target_pool_percent:
+        return ""
+    if pool_consideration_basis == "exclude":
+        return (
+            f"Option pool sizing basis: sized to {target_pool_percent:.1%} of pre-consideration "
+            f"fully-diluted, which is {realized_pool_pct:.1%} of post-closing combined "
+            f"fully-diluted after the acquisition's consideration shares."
+        )
+    # "include" (or default)
+    return (
+        f"Option pool: {realized_pool_pct:.1%} of post-closing combined fully-diluted "
+        f"(sized including acquisition consideration)."
+    )
+
+
+def _stated_totals_provenance_ok(stated_totals: dict[str, Any]) -> tuple[bool, str | None]:
+    """Whether a `stated_totals` block names a usable, independent source.
+
+    Returns `(ok, reason)`. `reason` is populated (non-None) whenever `ok` is False, giving a
+    short diagnostic: `"no source given"` for a missing/blank `source`, or a message naming the
+    self-referential match for a `source` that names one of the skill's own artifacts (see
+    `_SELF_REFERENTIAL_SOURCE_MARKERS`).
+
+    This is a NECESSARY-but-not-SUFFICIENT check: a `source` that passes here (present, and
+    doesn't name our own outputs) is not thereby proven truthful — it just isn't structurally
+    circular. Closes the gap SKILL.md's "Non-circularity rule" documents as agent-instruction-only
+    with no deterministic guard: nothing previously stopped `stated_totals.source` from being
+    absent or from literally being `"computed"` / `"scenarios.json"`.
+    """
+    source = stated_totals.get("source")
+    if not isinstance(source, str) or not source.strip():
+        return False, "no source given"
+    normalized = source.strip().lower()
+    if any(marker in normalized for marker in _SELF_REFERENTIAL_SOURCE_MARKERS):
+        return False, f"source names the skill's own output: {source!r}"
+    return True, None
+
+
+def build_reconciliation_lines(
+    scenario: dict[str, Any], inputs: dict[str, Any], cap_state: dict[str, Any]
+) -> list[str]:
+    """Reconcile the skill's COMPUTED round terms (PPS, FD) against the SOURCE doc's stated terms, plus an
+    informational pre-money input-consistency row. Returns [] when no source-stated term is present
+    (opt-in — no empty section, no false rows). Currency is read from cap_state (no caller arg)."""
+    st = inputs.get("stated_totals") or {}
+    co = scenario.get("computed_outputs", {}) or {}
+    params = scenario.get("parameters", {}) or {}
+    currency = cap_state.get("currency", "USD")
+    PPM = 1000  # 0.1%, same threshold as cap_state's W_FD_RECONCILE_DELTA
+    rows, pps_diverged = [], False
+    # Set when a would-be "match" row can't be trusted because stated_totals carries no usable
+    # provenance — see _stated_totals_provenance_ok. `circular` (bit-for-bit identical value, bad
+    # provenance — the copy-the-computed-value-back-in pattern) is the stronger finding;
+    # `cannot_verify` (a near-but-not-exact match, bad provenance) is the softer degradation.
+    # Tracked separately from pps_diverged/fd so a genuine divergence still renders as before.
+    circular_fields: list[str] = []
+    cannot_verify_fields: list[str] = []
+    provenance_ok, provenance_reason = _stated_totals_provenance_ok(st) if st else (True, None)
+
+    def _num(x: Any) -> bool:
+        return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+    def _flag_suffix(*, diverged: bool, exact: bool, label: str) -> str:
+        if diverged:
+            return " ⚠"
+        if provenance_ok:
+            return ""
+        if exact:
+            circular_fields.append(label)
+            return " ⚠ CIRCULAR"
+        cannot_verify_fields.append(label)
+        return " ⚠ CANNOT VERIFY"
+
+    # Price per share — a genuine computed-vs-stated reconciliation (flagged on divergence > 0.1%).
+    # A row that would otherwise read as a clean match is NOT reported as one unless stated_totals
+    # carries usable provenance (see _stated_totals_provenance_ok / SKILL.md "Non-circularity rule").
+    stated_pps, computed_pps = st.get("price_per_share"), co.get("equity_financing_price")
+    if _num(stated_pps) and _num(computed_pps) and stated_pps > 0:  # type: ignore[operator]
+        d = (computed_pps - stated_pps) / stated_pps  # type: ignore[operator]
+        pps_diverged = abs(d) * 1_000_000 > PPM
+        flag = _flag_suffix(diverged=pps_diverged, exact=computed_pps == stated_pps, label="Price per share")
+        rows.append(f"| Price per share | ${stated_pps:,.4f} | ${computed_pps:,.4f} | {d:+.1%}{flag} |")
+
+    # Fully diluted — genuine computed-vs-stated (also surfaced as W_FD_RECONCILE_DELTA in warnings).
+    stated_fd = st.get("fully_diluted")
+    computed_fd = (cap_state.get("as_converted_totals") or {}).get("fully_diluted_shares")
+    if _num(stated_fd) and _num(computed_fd) and stated_fd > 0:  # type: ignore[operator]
+        d = (computed_fd - stated_fd) / stated_fd  # type: ignore[operator]
+        fd_diverged = abs(d) * 1_000_000 > PPM
+        flag = _flag_suffix(diverged=fd_diverged, exact=computed_fd == stated_fd, label="Fully diluted")
+        rows.append(f"| Fully diluted | {int(stated_fd):,} | {int(computed_fd):,} | {d:+.1%}{flag} |")  # type: ignore[arg-type]
+
+    # Pre-money — INFORMATIONAL only: the doc's stated pre-money vs the value USED as the round input (not a
+    # computed quantity, so never ⚠-flagged — a no-op when equal, a useful "did I use your number?" check when
+    # not). Read both priced-scenario param shapes (run_priced_round_scenario uses pre_money;
+    # run_safe_conversion_scenario's priced delegate uses priced_round_pre_money).
+    stated_pre = st.get("pre_money")
+    used_pre = params.get("pre_money")
+    if used_pre is None:
+        used_pre = params.get("priced_round_pre_money")
+    if _num(stated_pre) and _num(used_pre) and stated_pre > 0:  # type: ignore[operator]
+        rows.append(
+            f"| Pre-money (input check) | {_money(stated_pre, currency)} | {_money(used_pre, currency)} | informational |"  # type: ignore[arg-type]
+        )
+
+    if not rows:
+        return []
+    out: list[str] = [
+        "",
+        "**Reconciliation vs your source documents:**",
+        "",
+        "| Term | Stated (your doc) | Computed / used | Δ |",
+        "|---|---:|---:|---:|",
+        *rows,
+    ]
+    if circular_fields:
+        out += [
+            "",
+            f"> ⚠ **Circular reconciliation detected ({', '.join(circular_fields)}).** The stated figure above "
+            f"is bit-for-bit identical to the skill's own computed value, but its `source` "
+            f"({provenance_reason or 'no source given'}) doesn't name an independent document. A cross-foot "
+            "only means something when the two figures come from INDEPENDENT sources — treat this row as "
+            "**unverified**, not as a confirmed match, until `stated_totals` cites a figure the source "
+            "document itself prints.",
+        ]
+    elif cannot_verify_fields:
+        out += [
+            "",
+            f"> ⚠ **Cannot verify ({', '.join(cannot_verify_fields)}) — provenance missing.** "
+            f"`stated_totals` has no usable `source` ({provenance_reason or 'no source given'}), so this "
+            "reconciliation cannot confirm the figure came from an independent document. Degraded to "
+            "unverified rather than reported as a match; add a `source` naming the document/section it was "
+            "read from.",
+        ]
+    elif pps_diverged:
+        out += [
+            "",
+            "> The computed price uses a different basis than your stated figure — commonly a coupled "
+            "SAFE-conversion / anti-dilution solve rather than a straight pre-money ÷ fully-diluted, but it "
+            "can also be a different pre-money or fully-diluted denominator. Confirm which basis your round uses.",
+        ]
+    return out
+
+
+def compute_reconciliation_status(*, computed: dict[str, Any], stated: dict[str, Any] | None) -> tuple[str, float]:
+    """Compare computed PPS/FD against source-stated values. Returns (status, max_ppm).
+
+    not_applicable when the source states nothing comparable (stated is falsy or no
+    paired numeric value found). Threshold: RECONCILIATION_TOLERANCE_PPM (1000 ppm = 0.1%).
+
+    Mirrors the numeric logic inside build_reconciliation_lines — does NOT consume
+    the rendered markdown rows (which are str and would raise AttributeError on .get()).
+    """
+    if not stated:
+        return "not_applicable", 0.0
+    max_ppm = 0.0
+    compared = False
+    for key in ("pps", "fd"):
+        c_raw, s_raw = computed.get(key), stated.get(key)
+        if c_raw is None or s_raw is None or s_raw == 0:
+            continue
+        c_f, s_f = float(c_raw), float(s_raw)  # type: ignore[arg-type]
+        compared = True
+        max_ppm = max(max_ppm, abs(c_f - s_f) / abs(s_f) * 1_000_000.0)
+    if not compared:
+        return "not_applicable", 0.0
+    return ("pass" if max_ppm <= RECONCILIATION_TOLERANCE_PPM else "diverged"), max_ppm
+
+
+def refine_reconciliation_status_for_provenance(
+    *, status: str, max_ppm: float, stated_totals: dict[str, Any] | None
+) -> str:
+    """Downgrade a `compute_reconciliation_status` verdict when `stated_totals` provenance can't
+    back it up. See SKILL.md "Non-circularity rule" — the whole value of the reconciliation
+    cross-foot is that computed and stated figures come from INDEPENDENT sources; nothing
+    previously enforced that, so a copied-back computed value would trivially "pass".
+
+    Only a `"pass"` verdict (computed and stated agree within tolerance) can be downgraded here:
+
+    - Provenance missing or self-referential (see `_stated_totals_provenance_ok`) AND the stated
+      value is bit-for-bit identical to the computed one (`max_ppm == 0.0`) → `"circular"` — the
+      classic copy-the-computed-value-back-in pattern this closes.
+    - Provenance missing or self-referential but the match is close-not-exact (small nonzero
+      `max_ppm`, e.g. independent rounding) → `"cannot_verify"` — can't confirm an independent
+      source, but it isn't proven circular either.
+    - Provenance present and not self-referential → unchanged (`"pass"`); a legitimate exact match
+      IS possible and common (the skill's math SHOULD agree with the document) — exact-match alone
+      must never be the trigger.
+
+    `"diverged"` and `"not_applicable"` pass through unchanged: a genuine numeric divergence is a
+    real finding regardless of provenance, and `"not_applicable"` already means there was nothing
+    to compare.
+    """
+    if status != "pass" or not stated_totals:
+        return status
+    provenance_ok, _reason = _stated_totals_provenance_ok(stated_totals)
+    if provenance_ok:
+        return status
+    return "circular" if max_ppm == 0.0 else "cannot_verify"
+
+
+def build_reconciliation_provenance_warnings(
+    *, status: str, stated_totals: dict[str, Any] | None
+) -> list[dict[str, Any]]:
+    """Structured `{code, severity, message}` entries for a provenance-refined reconciliation
+    status — same shape as `validate_run_id_parity`'s warnings, so both feed the SAME
+    '## Validation Warnings' report.md section, the SAME `report.json` `validation.warnings` list,
+    and (for the circular code) the SAME `--strict` high-severity gate in `main()`.
+
+    Returns [] for any status other than "circular" / "cannot_verify" (including "pass" — a
+    legitimate, provenance-backed match raises no warning at all).
+    """
+    if status not in {"circular", "cannot_verify"} or not stated_totals:
+        return []
+    _ok, reason = _stated_totals_provenance_ok(stated_totals)
+    if status == "circular":
+        return [
+            {
+                "code": "E_CIRCULAR_RECONCILIATION",
+                "severity": "critical",
+                "message": (
+                    "stated_totals matches the skill's own computed figure bit-for-bit, but its `source` "
+                    f"is unusable ({reason}) — this is the copy-the-computed-value-back-in pattern the "
+                    "reconciliation cross-foot exists to catch. Treat as UNVERIFIED, not a confirmed match; "
+                    "re-derive stated_totals from a figure the source document itself prints."
+                ),
+            }
+        ]
+    return [
+        {
+            "code": "W_STATED_TOTALS_PROVENANCE_MISSING",
+            "severity": "medium",
+            "message": (
+                f"stated_totals has no usable source ({reason}) — the reconciliation cannot confirm the "
+                "figure came from an independent document. Degraded to 'cannot verify' rather than "
+                "reported as a match."
+            ),
+        }
+    ]
+
+
 def render_report_markdown(
     *,
     artifacts: dict[str, dict[str, Any]],
     validation_warnings: list[dict[str, Any]],
     insertion_marker: str,
+    extraction_audit_path: str | None = None,
 ) -> str:
     inputs = artifacts["inputs.json"]
     cap_state = artifacts["cap_state.json"]
@@ -515,13 +940,28 @@ def render_report_markdown(
     n = len(scenarios)
     completes = [s["computed_outputs"].get("completeness") for s in scenarios]
     full = sum(1 for c in completes if c == "full")
-    structural = sum(1 for c in completes if c == "structural_only")
     repay = sum(1 for c in completes if c == "repay_only")
     mixed = sum(1 for c in completes if c == "mixed")
-    lines.append(
-        f"Modeled {n} scenario(s) for {inputs.get('company_name', 'this company')}: "
-        f"{full} full, {mixed} mixed, {repay} repay-only, {structural} pending input."
+    # `structural_only` has EIGHT origins, and only one is working-as-intended: the cap-implied SAFE
+    # snapshot (stamped `cap_implied_only` by run_scenario.py). The other seven are genuinely blocked
+    # runs (missing note date, warrant-pump error, unknown type, priced-round solve with blockers).
+    # Counting them together and calling the total "pending input" labels a by-design result as an
+    # unfinished one -- a founder scanning the summary reads it as a defect. Split them on the same
+    # signal visualize.py already classifies with, and describe each in founder-facing words.
+    by_design = sum(
+        1
+        for s in scenarios
+        if (s["computed_outputs"].get("completeness") == "structural_only")
+        and s["computed_outputs"].get("cap_implied_only")
+        and s["computed_outputs"].get("per_safe")
     )
+    blocked = sum(1 for c in completes if c == "structural_only") - by_design
+    parts = [f"{full} full", f"{mixed} mixed", f"{repay} repay-only"]
+    if by_design:
+        parts.append(f"{by_design} priced-round terms not set yet")
+    if blocked:
+        parts.append(f"{blocked} needs more from you")
+    lines.append(f"Modeled {n} scenario(s) for {inputs.get('company_name', 'this company')}: " + ", ".join(parts) + ".")
     lines.append(
         f"{counsel_count} counsel-review item(s) surfaced. {watchlist_count} date-sensitive item(s) in watchlist."
     )
@@ -541,17 +981,9 @@ def render_report_markdown(
         )
     lines.append("")
 
-    # W_AOA_ONLY_NO_INSTRUMENTS banner — surfaces when the engagement has no
-    # instruments + has AoA findings. The cap_state.py warnings array carries
-    # the warning code; render it as a preamble above Current Cap State so the
-    # founder sees the engagement scope first.
-    cap_state_warnings = cap_state.get("warnings") or []
-    if any(w == "W_AOA_ONLY_NO_INSTRUMENTS" for w in cap_state_warnings):
-        lines.append("> **AoA-only engagement detected.** No instruments to convert; this report renders the")
-        lines.append("> Articles-of-Association findings and the current pre-financing cap state. To model")
-        lines.append("> dilution scenarios, add SAFEs, convertible notes, option grants, or warrants to")
-        lines.append("> `instruments.json`.")
-        lines.append("")
+    # cap_state.py warnings array → founder-facing callouts, rendered above Current Cap State so the
+    # founder sees engagement scope / data caveats first.
+    lines.extend(_render_warning_callouts(cap_state.get("warnings") or []))
 
     # 2. Current Cap State
     lines.append("## Current Cap State")
@@ -588,7 +1020,7 @@ def render_report_markdown(
             cls = b.get("common_class") or "class_a"
             vrm = float(b.get("voting_rights_multiple") or 1.0)
             shares = int(b.get("shares") or 0)
-            rows.append((f"Batch {b.get('batch_id') or b.get('holder_id', '?')}", cls, shares, vrm, shares * vrm))
+            rows.append((_batch_label(b), cls, shares, vrm, shares * vrm))
         # Preferred aggregated (v0.5.0 treats preferred VRM as 1.0)
         preferred_as_converted = int(cap_state["as_converted_totals"]["preferred_shares_as_converted"])
         if preferred_as_converted > 0:
@@ -624,19 +1056,33 @@ def render_report_markdown(
             "counsel item for investor-objection considerations at later rounds._"
         )
     else:
-        # Single-class engagement: keep the v0.4.x aggregate FD table.
-        lines.append("| Holder class | Shares (as-converted) | % of FD |")
+        # Single-class engagement: aggregate FD table + per-founder rows.
+        # Per-founder rows so founders see their own share counts by name.
+        lines.append("| Holder | Shares (as-converted) | % of FD |")
         lines.append("|---|---:|---:|")
-        pcts = {
-            "Founders (common)": cap_state["as_converted_totals"]["common_shares"],
+        # Per-founder rows (name, shares)
+        for f in founders_list:
+            fname = f.get("name") or "Founder"
+            fshares = int(f.get("common_shares") or 0)
+            fpct = fshares / fd if fd else 0.0
+            lines.append(f"| {fname} | {fshares:,} | {_percent(fpct)} |")
+        # Common batches (other common holders besides named founders)
+        for b in common_batches_list:
+            blabel = _batch_label(b)
+            bshares = int(b.get("shares") or 0)
+            bpct = bshares / fd if fd else 0.0
+            lines.append(f"| {blabel} | {bshares:,} | {_percent(bpct)} |")
+        # Aggregate remaining classes
+        aggregate_classes = {
             "Preferred (as-converted)": cap_state["as_converted_totals"]["preferred_shares_as_converted"],
             "Options outstanding": cap_state["as_converted_totals"]["options_outstanding"],
             "Options available": cap_state["as_converted_totals"]["options_available"],
             "Warrants outstanding (vested)": cap_state["as_converted_totals"].get("warrants_underlying_total", 0),
         }
-        for label, shares in pcts.items():
-            pct = shares / fd if fd else 0.0
-            lines.append(f"| {label} | {shares:,} | {_percent(pct)} |")
+        for label, shares in aggregate_classes.items():
+            if shares:
+                pct = shares / fd if fd else 0.0
+                lines.append(f"| {label} | {shares:,} | {_percent(pct)} |")
         lines.append(f"| **Total fully-diluted** | **{fd:,}** | **100.0%** |")
     lines.append("")
     safes = cap_state.get("outstanding_safes", [])
@@ -703,26 +1149,13 @@ def render_report_markdown(
         )
         lines.append("")
     for s in scenarios:
-        lines.append(f"### {s.get('label', s['scenario_id'])} ({s['type']})")
+        lines.append(f"### {s.get('label', s['scenario_id'])} ({_labels.humanize('scenario_type', s['type'])})")
         lines.append("")
         co = s["computed_outputs"]
         completeness = co.get("completeness", "structural_only")
-        completeness_human = {
-            "full": "full — share-producing math ran end-to-end",
-            "mixed": "mixed — some scenarios produced share outputs, others didn't",
-            "structural_only": (
-                "structural_only — schema and rule-applicability checks passed, but no "
-                "share-producing math ran (e.g. flip mode in v0.1 is share-for-share-only; "
-                "legal/tax math requires counsel)"
-            ),
-            "repay_only": "repay_only — note matured with repay treatment; no shares issued",
-            "cap_implied_only": "cap_implied_only — pre-financing cap-implied snapshot, no priced round",
-        }.get(completeness, completeness)
-        lines.append(
-            f"**Completeness:** `{completeness}` — {completeness_human.split(' — ', 1)[1] if ' — ' in completeness_human else completeness_human}"
-        )
+        lines.append(f"**Stage:** {_labels.md_term('completeness', completeness)}")
         if co.get("cap_implied_only"):
-            lines.append("**Sub-flag:** `cap_implied_only` — pre-financing snapshot only")
+            lines.append(f"_{_labels.CAP_IMPLIED_GLOSS}_")
         lines.append("")
         # Inputs
         params = s.get("parameters", {})
@@ -740,6 +1173,17 @@ def render_report_markdown(
                 lines.append(
                     f"- `{b['code']}`{(' on ' + b['instance_id']) if b.get('instance_id') else ''}: {b['remedy']}"
                 )
+            lines.append("")
+        # Assumed-basis disclosure: when target_basis was defaulted rather than supplied, it is
+        # absent from `params` above, so the Inputs list never mentions it. Render the assumption
+        # explicitly so a defaulted pool denominator never reads as a founder-confirmed input.
+        if any((w or {}).get("code") == "target_basis_defaulted" for w in (co.get("warnings") or [])):
+            lines.append(
+                "> ⚠ **Option pool basis ASSUMED, not stated.** No pool-sizing basis was confirmed "
+                "for this scenario — pre-money was assumed. Pre-money vs post-money changes the "
+                "pool top-up and post-round ownership; confirm which basis your term sheet uses "
+                "before relying on these figures."
+            )
             lines.append("")
         # Math outputs (when full/mixed)
         if completeness in {"full", "mixed"} and co.get("aggregate_ownership_by_class"):
@@ -775,7 +1219,7 @@ def render_report_markdown(
             }
             # founders_by_class is a map, not a scalar pct; render it
             # separately as a sub-list when dual-class is present.
-            _structured_fields = {"founders_by_class"}
+            _structured_fields = {"founders_by_class", "founders_by_holder"}
             for k, v in agg.items():
                 if k in _ad_meta_fields or k in _structured_fields:
                     continue
@@ -788,7 +1232,35 @@ def render_report_markdown(
                 lines.append("- founders by class:")
                 for cls, pct in sorted(fbc.items()):
                     lines.append(f"  - {cls}: {_percent(pct)}")
+            # Per-founder post-round ownership. Answers "what does this round do to ME", which the
+            # aggregate alone cannot -- and which must never be back-computed by splitting the
+            # aggregate in chat. Rendered only for more than one founder: a solo founder's number is
+            # the aggregate already printed above.
+            fbh = agg.get("founders_by_holder") or {}
+            if len(fbh) > 1:
+                lines.append("- each founder, post-round:")
+                for _fid, row in sorted(fbh.items(), key=lambda kv: -(kv[1].get("pct") or 0.0)):
+                    nm = row.get("name") or _fid
+                    shares = row.get("common_shares")
+                    lines.append(f"  - {nm}: {_percent(row.get('pct'))} ({shares:,} shares)")
+                # Scope disclosure: cap_state keeps `founders[]` and `common_batches[]` separate, so a
+                # shareholder whose stock sits in a batch (Carta rebuild, RSP, exercised employee) is
+                # absent here. Without this line they read their absence as "I hold nothing".
+                lines.append(
+                    "  - *(Founders only. Shares held through employee/other common batches are counted "
+                    "in the totals above but are not broken out per person here.)*"
+                )
             lines.append("")
+            # Option-pool sizing-basis note (acquisition deals only; ownership table unchanged)
+            _pool_note = build_pool_basis_note(
+                target_pool_percent=params.get("target_pool_percent"),
+                pool_consideration_basis=params.get("pool_consideration_basis", "include"),
+                realized_pool_pct=agg.get("option_pool_pct") or 0.0,
+                acquisition_pct=agg.get("acquisition_pct"),
+            )
+            if _pool_note:
+                lines.append(f"> _{_pool_note}_")
+                lines.append("")
             # Per-series AD breakdown
             if ad_breakdown:
                 lines.append("**Anti-dilution adjustments (per series):**")
@@ -805,6 +1277,7 @@ def render_report_markdown(
                 lines.append("")
             if co.get("equity_financing_price"):
                 lines.append(f"**Equity financing price:** ${co['equity_financing_price']:.4f}/share")
+                lines.extend(build_reconciliation_lines(s, inputs, cap_state))
                 lines.append("")
             fi = co.get("founder_impact")
             if fi:
@@ -825,13 +1298,50 @@ def render_report_markdown(
             lines.append(f"**Cash repayment:** {_money(co['aggregate_cash_repayment'])}")
             lines.append("")
 
-        # Per-instrument narrative for note_conversion + safe_conversion
-        # scenarios. Founders reading report.md for a note conversion need to
-        # see branch, accrued_interest, conversion_price, and
-        # conversion_shares — without these, the report only shows
-        # "completeness=full" and inputs.
+        # Shares breakdown (post-round composition table): pre-round FD → + converted
+        # SAFEs → + pool top-up → + new money → = post-FD. Rendered when available.
+        shares_breakdown = co.get("shares_breakdown") or {}
+        if shares_breakdown and isinstance(shares_breakdown, dict):
+            pre_fd = shares_breakdown.get("pre_round_fd")
+            safe_shares = shares_breakdown.get("safe_converted_shares") or shares_breakdown.get("safe_shares")
+            note_shares = shares_breakdown.get("note_converted_shares") or shares_breakdown.get("note_shares")
+            pool_shares = shares_breakdown.get("pool_topup_shares") or shares_breakdown.get("option_pool_shares")
+            new_money_shares = shares_breakdown.get("new_money_shares") or shares_breakdown.get("investor_shares")
+            post_fd = shares_breakdown.get("post_round_fd") or shares_breakdown.get("post_fd")
+            if pre_fd is not None or post_fd is not None:
+                lines.append("**Post-round share composition:**")
+                lines.append("")
+                lines.append("| Component | Shares | Post-round % |")
+                lines.append("|-----------|-------:|-------------:|")
+                _total_denom = post_fd if post_fd else None
+
+                def _pct(n: int | float | None, denom: int | float | None) -> str:
+                    if n is None or denom is None or denom == 0:
+                        return "—"
+                    return f"{n / denom * 100:.1f}%"
+
+                if pre_fd is not None:
+                    lines.append(f"| Pre-round FD | {int(pre_fd):,} | {_pct(pre_fd, _total_denom)} |")
+                if safe_shares:
+                    lines.append(f"| + SAFE converted | {int(safe_shares):,} | {_pct(safe_shares, _total_denom)} |")
+                if note_shares:
+                    lines.append(f"| + Notes converted | {int(note_shares):,} | {_pct(note_shares, _total_denom)} |")
+                if pool_shares:
+                    lines.append(f"| + Pool top-up | {int(pool_shares):,} | {_pct(pool_shares, _total_denom)} |")
+                if new_money_shares:
+                    lines.append(
+                        f"| + New money (investors) | {int(new_money_shares):,} | {_pct(new_money_shares, _total_denom)} |"
+                    )
+                if post_fd is not None:
+                    lines.append(f"| **= Post-round FD** | **{int(post_fd):,}** | **100.0%** |")
+                lines.append("")
+
+        # Per-instrument narrative — keyed on non-empty per_note/per_safe rather
+        # than scenario type so priced_round scenarios that populate these fields
+        # (fully-coupled solver produces per_safe/per_note for every instrument
+        # that participates in the round) also get the conversion-math tables.
         per_note = co.get("per_note") or {}
-        if s.get("type") == "note_conversion" and per_note:
+        if per_note:
             lines.append("**Per-note conversion math:**")
             lines.append("")
             lines.append("| Note | Branch | Accrued interest | Conversion price | Conversion shares |")
@@ -849,19 +1359,26 @@ def render_report_markdown(
                 )
             lines.append("")
         per_safe = co.get("per_safe") or {}
-        if s.get("type") == "safe_conversion" and per_safe:
+        # Render only when there are rows that are NOT the cap_implied_only snapshot
+        per_safe_rows = {sid: r for sid, r in per_safe.items() if "cap_implied_ownership" not in r}
+        if per_safe_rows:
             lines.append("**Per-SAFE conversion math:**")
             lines.append("")
-            lines.append("| SAFE | Branch | Conversion price | Conversion shares |")
-            lines.append("|---|---|---:|---:|")
-            for sid, r in per_safe.items():
-                if "cap_implied_ownership" in r:
-                    continue  # already rendered above for cap_implied_only
+            lines.append("| SAFE | Branch | Purchase ÷ Cap | Conversion price | Conversion shares |")
+            lines.append("|---|---|---|---:|---:|")
+            for sid, r in per_safe_rows.items():
                 branch = r.get("branch", "—")
                 cp = r.get("conversion_price")
                 shares = r.get("conversion_shares")
+                # Derivation sentence: purchase ÷ cap = % → shares
+                purchase = r.get("purchase_amount")
+                cap = r.get("post_money_cap") or r.get("valuation_cap")
+                deriv = "—"
+                if purchase is not None and cap is not None and cap > 0:
+                    pct_of_cap = purchase / cap
+                    deriv = f"{_money(purchase)} ÷ {_money(cap)} = {pct_of_cap * 100:.2f}%"
                 lines.append(
-                    f"| `{sid}` | `{branch}` | "
+                    f"| `{sid}` | `{branch}` | {deriv} | "
                     f"{('$' + format(cp, '.4f')) if cp is not None else '—'} | "
                     f"{(f'{int(shares):,}') if shares is not None else '—'} |"
                 )
@@ -916,15 +1433,42 @@ def render_report_markdown(
     if len(scenarios) >= 2:
         lines.append("## Scenario Comparison")
         lines.append("")
-        lines.append("| Scenario | Completeness | Founder %  | Equity Price |")
+        lines.append("| Scenario | Stage | Founder %  | Equity Price |")
         lines.append("|---|---|---:|---:|")
         for s in scenarios:
             co = s["computed_outputs"]
             agg = co.get("aggregate_ownership_by_class", {})
             fp = _percent(agg.get("founders_pct", 0.0)) if agg else "—"
             ep = f"${co.get('equity_financing_price', 0):.4f}" if co.get("equity_financing_price") else "—"
-            lines.append(f"| {s.get('label', s['scenario_id'])} | {co.get('completeness')} | {fp} | {ep} |")
+            stage = _labels.humanize("completeness", co.get("completeness"))
+            lines.append(f"| {s.get('label', s['scenario_id'])} | {stage} | {fp} | {ep} |")
         lines.append("")
+
+    # 4b. Additional document terms (optional — extraction_audit.json from a term sheet, option
+    # plan, or amendment uploaded alongside this engagement's cap base). Absent for the common
+    # case (a pure SAFE/note engagement with no terms-doc/amendment); a no-op then. This is the
+    # SAME content the no-cap-base fork's compose_extraction_report.py --audit renders — reused
+    # here so it isn't silently dropped just because a real cap base also happened to exist.
+    if extraction_audit_path:
+        _ambiguity_map = _load_ambiguity_map(extraction_audit_path)
+        _terms_doc = _load_terms_doc(extraction_audit_path)
+        _amendment_deltas = _load_amendment_deltas(extraction_audit_path)
+        if _terms_doc:
+            lines.extend(_terms_section(_terms_doc, _ambiguity_map))
+        if _amendment_deltas:
+            lines.append("## Amendments (terms modified)")
+            lines.append("")
+            lines.append(
+                "_This document amends a pre-existing instrument rather than defining a standalone "
+                "one; the clause changes below are surfaced as extracted and are NOT modeled against "
+                "the base instrument. Confirm against the original instrument._"
+            )
+            lines.append("")
+            for _delta in _amendment_deltas:
+                _field = _delta.get("field") or "clause"
+                _description = _delta.get("description") or ""
+                lines.append(f"- **{_field}** — {_description}")
+            lines.append("")
 
     # 5. Counsel Review Required
     if counsel_packet.get("items"):
@@ -936,7 +1480,9 @@ def render_report_markdown(
         for domain in sorted(by_domain.keys()):
             lines.append(f"### {domain.replace('_', ' ').title()}")
             for it in by_domain[domain]:
-                lines.append(f"- **{it['title']}** (`{it['rule_id']}`)")
+                lines.append(
+                    f"- {_rule_md(it['rule_id'], item_title=it.get('title'), item_source_ids=it.get('source_ids'), bold=True)}"
+                )
                 if it.get("counsel_question"):
                     lines.append(f"  - {it['counsel_question']}")
             lines.append("")
@@ -957,7 +1503,9 @@ def render_report_markdown(
         for domain in sorted(by_domain_sn.keys()):
             lines.append(f"### {domain.replace('_', ' ').title()}")
             for sn in by_domain_sn[domain]:
-                lines.append(f"- **{sn['title']}** (`{sn['rule_id']}`)")
+                lines.append(
+                    f"- {_rule_md(sn['rule_id'], item_title=sn.get('title'), item_source_ids=sn.get('source_ids'), bold=True)}"
+                )
                 if sn.get("summary"):
                     lines.append(f"  - {sn['summary']}")
             lines.append("")
@@ -973,24 +1521,29 @@ def render_report_markdown(
             # `false` means the rule is structurally inapplicable here —
             # surface as a for-reference annotation, not an action item, so
             # founders don't panic over 50 items that don't apply.
-            if w.get("applies_when_matched", True):
+            # Default FALSE for an absent key: "the producer did not say" must not
+            # mean "assume it applies" for a filter whose whole job is suppressing
+            # inapplicable rules. An older artifact without the field renders its
+            # watchlist as for-reference, which is the safe direction.
+            if w.get("applies_when_matched") is True:
                 active_items.append(w)
             else:
                 annotation_items.append(w)
 
         if active_items:
+            grouped = _rules.group_watchlist(active_items)
             lines.append("## Date-Sensitive Watchlist")
             lines.append("")
-            lines.append(f"_{len(active_items)} active item(s) — rules whose predicates match this engagement._")
+            lines.append(f"_{len(grouped)} rule(s) to watch (from {len(active_items)} matched instances)._")
             lines.append("")
-            lines.append("| Rule | Scope | Status | Date | Action |")
-            lines.append("|---|---|---|---|---|")
-            for w in active_items:
-                status_or_fresh = w.get("current_status") or w.get("freshness_status") or "—"
-                date_val = w.get("event_date_value") or "—"
+            lines.append("| Rule | Status | When | Action |")
+            lines.append("|---|---|---|---|")
+            for g in grouped:
+                status = _labels.humanize("status", g["status"]) + (f" · {g['count']}×" if g["count"] > 1 else "")
+                action = (g.get("action") or "").replace("|", "\\|")[:80]
                 lines.append(
-                    f"| `{w['rule_id']}` | {w['scope']} | {status_or_fresh} | {date_val} | "
-                    f"{w.get('action_required', '')[:60]} |"
+                    f"| {_rule_md(g['rule_id'], item_title=g['title'], compact=True)} | {status} | "
+                    f"{_rules.format_dates(g['dates'])} | {action} |"
                 )
             lines.append("")
         if annotation_items:
@@ -1031,7 +1584,11 @@ def render_report_markdown(
     lines.append("")
     lines.append("---")
     lines.append("")
-    lines.append("*Report generated by cap-table skill. Rule pack v0.2.8.*")
+    lines.append(
+        "*Generated by [founder skills](https://github.com/lool-ventures/founder-skills)"
+        " by [lool ventures](https://lool.vc) — Cap Table Agent"
+        " · [Share feedback](https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback)*"
+    )
 
     return "\n".join(lines) + "\n"
 
@@ -1062,11 +1619,57 @@ def main() -> int:
     run_uuid = uuid.uuid4().hex[:8]
     insertion_marker = f"<!-- COACHING_INSERTION_POINT_{run_uuid} -->"
 
+    # Optional: extraction_audit.json — a term sheet / option plan / amendment extracted
+    # alongside this engagement's cap base (Step 3's Lane-1 invocation always writes it via -o;
+    # absent for the common pure-SAFE/note case, where it's simply not there).
+    _extraction_audit_candidate = os.path.join(args.dir, "extraction_audit.json")
+    _extraction_audit_path: str | None = (
+        _extraction_audit_candidate if os.path.exists(_extraction_audit_candidate) else None
+    )
+
+    # Build reconciliation_status — compare computed PPS/FD against source-stated values.
+    # PPS: from the first priced-round scenario that produced equity_financing_price.
+    # FD:  PRE-round cap_state.as_converted_totals.fully_diluted_shares (mirrors compose_report.py
+    #      build_reconciliation_lines:587 which compares source-stated FD against pre-round FD, NOT
+    #      post_round_fully_diluted_shares — using post-round would spuriously flip status to "diverged").
+    # Computed BEFORE render_report_markdown / build_coaching_payload (below) so (a) a provenance
+    # finding can be folded into validation_warnings and land in the rendered '## Validation
+    # Warnings' section, and (b) a computed price-per-share disagreeing with the founder's own term
+    # sheet is exactly the kind of thing the Context-B coaching commentary should be able to cite.
+    _inputs_data = artifacts["inputs.json"]
+    _cap_state_data = artifacts["cap_state.json"]
+    _scenarios_data = artifacts["scenarios.json"]
+    _stated_raw = _inputs_data.get("stated_totals") or None
+    _stated: dict[str, Any] | None = (
+        {"pps": _stated_raw.get("price_per_share"), "fd": _stated_raw.get("fully_diluted")} if _stated_raw else None
+    )
+    _round_outputs: dict[str, Any] = {}
+    for _s in _scenarios_data.get("scenarios") or []:
+        _co = (_s.get("computed_outputs") or {}) if isinstance(_s, dict) else {}
+        if _co.get("equity_financing_price"):
+            _round_outputs = _co
+            break
+    _computed: dict[str, Any] = {
+        "pps": _round_outputs.get("equity_financing_price"),
+        "fd": _cap_state_data["as_converted_totals"]["fully_diluted_shares"],  # PRE-round
+    }
+    _recon_status, _max_ppm = compute_reconciliation_status(computed=_computed, stated=_stated)
+    # Non-circularity guard (finding 14): a "pass" verdict backed by missing/self-referential
+    # provenance is refused — downgraded to "circular" (exact-match copy-back) or "cannot_verify"
+    # (near-match, no usable source) — see refine_reconciliation_status_for_provenance.
+    _recon_status = refine_reconciliation_status_for_provenance(
+        status=_recon_status, max_ppm=_max_ppm, stated_totals=_stated_raw
+    )
+    validation_warnings = validation_warnings + build_reconciliation_provenance_warnings(
+        status=_recon_status, stated_totals=_stated_raw
+    )
+
     # Build report.md
     report_md = render_report_markdown(
         artifacts=artifacts,
         validation_warnings=validation_warnings,
         insertion_marker=insertion_marker,
+        extraction_audit_path=_extraction_audit_path,
     )
 
     # Write report.md
@@ -1082,6 +1685,39 @@ def main() -> int:
         review_dir=review_dir,
         report_path=md_path,
         insertion_marker=insertion_marker,
+        reconciliation_status=_recon_status,
+        reconciliation_max_divergence_ppm=_max_ppm,
+    )
+
+    # Build disclosure banner; prepend to report.md when non-empty
+    _banner = build_disclosure_banner(
+        covered=True,
+        reconciliation_status=_recon_status,
+        max_divergence_ppm=_max_ppm,
+    )
+    if _banner:
+        report_md = _banner + "\n\n" + report_md
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write(report_md)
+
+    # Write coverage_disclosure.json (deterministic pipeline = covered path)
+    _coverage_disclosure: dict[str, Any] = {
+        "schema_version": "v0.1-coverage-disclosure",
+        "covered": True,
+        "computation_method": "deterministic_pipeline",
+        "reconciliation": {
+            "status": _recon_status,
+            "max_divergence_ppm": _max_ppm,
+        },
+    }
+    _disclosure_schema = _artifact_writer.load_schema(os.path.join(_SCHEMA_DIR, "coverage-disclosure.schema.json"))
+    _disclosure_path = os.path.join(os.path.abspath(args.dir), "coverage_disclosure.json")
+    _artifact_writer.write_artifact(
+        data=_coverage_disclosure,
+        schema=_disclosure_schema,
+        run_id=args.run_id,
+        output_path=_disclosure_path,
+        pretty=args.pretty,
     )
 
     # Assemble report.json (pre-coaching markdown + coaching_payload)
@@ -1090,6 +1726,9 @@ def main() -> int:
         "validation": {"warnings": validation_warnings},
         "coaching_payload": coaching_payload,
         "metadata": {"run_id": args.run_id, "produced_by": "compose_report.py"},
+        "reconciliation_status": _recon_status,
+        "max_divergence_ppm": _max_ppm,
+        "disclosure_banner": _banner,
     }
 
     # Write report.json
@@ -1114,6 +1753,7 @@ def main() -> int:
         "ok": True,
         "report_json": json_path,
         "report_md": md_path,
+        "coverage_disclosure": _disclosure_path,
         "insertion_marker": insertion_marker,
         "validation_warnings": len(validation_warnings),
     }
@@ -1129,8 +1769,9 @@ def main() -> int:
             f"watchlist: {len(artifacts['rule_audit.json']['date_sensitive_watchlist'])}\n"
         )
 
-    # --strict exits 1 on any high-severity warning (currently MISSING_METADATA + STALE_ARTIFACT)
-    high_severity_codes = {"MISSING_METADATA", "STALE_ARTIFACT"}
+    # --strict exits 1 on any high-severity warning (MISSING_METADATA + STALE_ARTIFACT, plus the
+    # circular-reconciliation false-green guard — see build_reconciliation_provenance_warnings).
+    high_severity_codes = {"MISSING_METADATA", "STALE_ARTIFACT", "E_CIRCULAR_RECONCILIATION"}
     if args.strict and any(w.get("code") in high_severity_codes for w in validation_warnings):
         return 1
     return 0

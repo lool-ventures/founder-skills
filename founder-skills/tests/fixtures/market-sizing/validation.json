@@ -1,0 +1,35 @@
+{
+  "sources": [
+    {
+      "title": "SMB Software Adoption Benchmark 2025",
+      "publisher": "Gartner",
+      "url": "https://example.com/gartner-smb-2025",
+      "date_accessed": "2026-05-08",
+      "quality_tier": "analyst_firm",
+      "segment_match": "exact",
+      "supported": "customer_count, arpu"
+    },
+    {
+      "title": "US Small Business Count by Employee Band",
+      "publisher": "US Census Bureau",
+      "url": "https://example.com/census-smb",
+      "date_accessed": "2026-05-08",
+      "quality_tier": "government",
+      "segment_match": "exact",
+      "supported": "customer_count"
+    }
+  ],
+  "figure_validations": [
+    {"figure": "customer_count", "label": "Addressable SMB Count", "status": "validated", "source_count": 2},
+    {"figure": "arpu", "label": "Average Revenue Per Customer", "status": "validated", "source_count": 2},
+    {"figure": "serviceable_pct", "label": "Serviceable %", "status": "partially_supported", "source_count": 1, "notes": "Derived from Gartner's digital-adoption-readiness segment"}
+  ],
+  "assumptions": [
+    {"name": "customer_count", "label": "Addressable SMB Count", "value": 4500000, "category": "sourced", "source": "US Census Bureau, 2025"},
+    {"name": "arpu", "label": "Average Revenue Per Customer", "value": 1800, "category": "sourced", "source": "Gartner SMB Software Adoption Benchmark 2025"},
+    {"name": "serviceable_pct", "label": "Serviceable %", "value": 35, "category": "derived", "derivation": "Gartner digital-adoption-readiness segment applied to total SMB count"},
+    {"name": "target_pct", "label": "Target Capture %", "value": 5, "category": "agent_estimate"},
+    {"name": "market_growing", "value": true, "category": "sourced", "source": "Gartner SMB Software Adoption Benchmark 2025"}
+  ],
+  "metadata": {"run_id": "fixture-market-sizing-001"}
+}

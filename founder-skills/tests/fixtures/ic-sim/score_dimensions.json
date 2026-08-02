@@ -1,0 +1,331 @@
+{
+  "items": [
+    {
+      "id": "team_founder_market_fit",
+      "category": "Team",
+      "label": "Founder-Market Fit",
+      "status": "strong_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "team_complementary_skills",
+      "category": "Team",
+      "label": "Complementary Skills",
+      "status": "strong_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "team_execution_speed",
+      "category": "Team",
+      "label": "Execution Speed",
+      "status": "moderate_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "team_coachability",
+      "category": "Team",
+      "label": "Coachability",
+      "status": "moderate_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "market_size_credibility",
+      "category": "Market",
+      "label": "Size Credibility",
+      "status": "strong_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "market_timing",
+      "category": "Market",
+      "label": "Timing",
+      "status": "strong_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "market_growth_trajectory",
+      "category": "Market",
+      "label": "Growth Trajectory",
+      "status": "moderate_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "market_entry_barriers",
+      "category": "Market",
+      "label": "Entry Barriers",
+      "status": "moderate_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "product_differentiation",
+      "category": "Product",
+      "label": "Differentiation",
+      "status": "moderate_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "product_traction_evidence",
+      "category": "Product",
+      "label": "Traction Evidence",
+      "status": "strong_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "product_technical_moat",
+      "category": "Product",
+      "label": "Technical Moat",
+      "status": "moderate_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "product_user_love",
+      "category": "Product",
+      "label": "User Love",
+      "status": "strong_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "biz_unit_economics",
+      "category": "Business Model",
+      "label": "Unit Economics",
+      "status": "concern",
+      "evidence": "No LTV/CAC figures disclosed in materials provided",
+      "notes": null
+    },
+    {
+      "id": "biz_pricing_power",
+      "category": "Business Model",
+      "label": "Pricing Power",
+      "status": "moderate_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "biz_scalability",
+      "category": "Business Model",
+      "label": "Scalability",
+      "status": "moderate_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "biz_gross_margins",
+      "category": "Business Model",
+      "label": "Gross Margins",
+      "status": "concern",
+      "evidence": "Gross margin not broken out; cost-to-serve unclear",
+      "notes": null
+    },
+    {
+      "id": "fin_capital_efficiency",
+      "category": "Financials",
+      "label": "Capital Efficiency",
+      "status": "moderate_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "fin_runway_plan",
+      "category": "Financials",
+      "label": "Runway Plan",
+      "status": "moderate_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "fin_path_to_next_round",
+      "category": "Financials",
+      "label": "Path to Next Round",
+      "status": "moderate_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "fin_revenue_quality",
+      "category": "Financials",
+      "label": "Revenue Quality",
+      "status": "moderate_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "risk_single_point_failure",
+      "category": "Risk",
+      "label": "Single Point of Failure",
+      "status": "moderate_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "risk_regulatory",
+      "category": "Risk",
+      "label": "Regulatory Risk",
+      "status": "not_applicable",
+      "evidence": "No consumer financial data handled directly; standard SMB SaaS compliance only",
+      "notes": null
+    },
+    {
+      "id": "risk_competitive_response",
+      "category": "Risk",
+      "label": "Competitive Response",
+      "status": "moderate_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "risk_customer_concentration",
+      "category": "Risk",
+      "label": "Customer Concentration",
+      "status": "moderate_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "fit_thesis_alignment",
+      "category": "Fund Fit",
+      "label": "Thesis Alignment",
+      "status": "strong_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "fit_portfolio_conflict",
+      "category": "Fund Fit",
+      "label": "Portfolio Conflict",
+      "status": "strong_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "fit_stage_match",
+      "category": "Fund Fit",
+      "label": "Stage Match",
+      "status": "strong_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    },
+    {
+      "id": "fit_value_add",
+      "category": "Fund Fit",
+      "label": "Value-Add Potential",
+      "status": "moderate_conviction",
+      "evidence": "Assessed from pitch deck and financial model provided",
+      "notes": null
+    }
+  ],
+  "summary": {
+    "total": 28,
+    "strong_conviction": 9,
+    "moderate_conviction": 16,
+    "concern": 2,
+    "dealbreaker": 0,
+    "not_applicable": 1,
+    "to_confirm": 0,
+    "applicable": 27,
+    "conviction_score": 63.0,
+    "conviction_basis": {
+      "applicable": 27,
+      "total": 28,
+      "sufficient": true
+    },
+    "verdict": "more_diligence",
+    "coverage_capped": false,
+    "coverage_floored": false,
+    "coverage_held": false,
+    "fund_mode": "generic",
+    "dealbreaker_blocking": false,
+    "blocking_dealbreaker_count": 0,
+    "simulated_dealbreaker_ids": [],
+    "by_category": {
+      "Team": {
+        "strong_conviction": 2,
+        "moderate_conviction": 2,
+        "concern": 0,
+        "dealbreaker": 0,
+        "not_applicable": 0,
+        "to_confirm": 0
+      },
+      "Market": {
+        "strong_conviction": 2,
+        "moderate_conviction": 2,
+        "concern": 0,
+        "dealbreaker": 0,
+        "not_applicable": 0,
+        "to_confirm": 0
+      },
+      "Product": {
+        "strong_conviction": 2,
+        "moderate_conviction": 2,
+        "concern": 0,
+        "dealbreaker": 0,
+        "not_applicable": 0,
+        "to_confirm": 0
+      },
+      "Business Model": {
+        "strong_conviction": 0,
+        "moderate_conviction": 2,
+        "concern": 2,
+        "dealbreaker": 0,
+        "not_applicable": 0,
+        "to_confirm": 0
+      },
+      "Financials": {
+        "strong_conviction": 0,
+        "moderate_conviction": 4,
+        "concern": 0,
+        "dealbreaker": 0,
+        "not_applicable": 0,
+        "to_confirm": 0
+      },
+      "Risk": {
+        "strong_conviction": 0,
+        "moderate_conviction": 3,
+        "concern": 0,
+        "dealbreaker": 0,
+        "not_applicable": 1,
+        "to_confirm": 0
+      },
+      "Fund Fit": {
+        "strong_conviction": 3,
+        "moderate_conviction": 1,
+        "concern": 0,
+        "dealbreaker": 0,
+        "not_applicable": 0,
+        "to_confirm": 0
+      }
+    },
+    "dealbreakers": [],
+    "top_concerns": [
+      {
+        "id": "biz_unit_economics",
+        "category": "Business Model",
+        "label": "Unit Economics",
+        "evidence": "No LTV/CAC figures disclosed in materials provided",
+        "notes": null
+      },
+      {
+        "id": "biz_gross_margins",
+        "category": "Business Model",
+        "label": "Gross Margins",
+        "evidence": "Gross margin not broken out; cost-to-serve unclear",
+        "notes": null
+      }
+    ],
+    "warnings": []
+  },
+  "metadata": {
+    "run_id": "fixture-ic-sim-001"
+  }
+}

@@ -136,6 +136,12 @@
 
 ## Category 4 — Design & Readability (5 items)
 
+Score all 5 normally for an uploaded file (PDF/PPTX/markdown). When the deck was
+described in conversation rather than uploaded (`input_format` is `"text"`), the
+producer script forces all 5 to `not_applicable` after you return — there is no
+rendered slide to assess visual design against. Do not self-gate: assess every
+item as usual and let the producer apply the gate.
+
 ### `one_idea_per_slide`
 **Label:** One idea per slide
 **Pass:** Each slide communicates a single concept clearly.
@@ -153,8 +159,8 @@
 ### `slide_count_appropriate`
 **Label:** Core deck is 10-12 slides
 **Pass:** 10-12 core slides (not counting appendix).
-**Fail:** Fewer than 7 or more than 18 core slides.
-**Warn:** 8-9 or 13-15 slides — slightly outside ideal range.
+**Fail:** 6 or fewer, or 19 or more core slides.
+**Warn:** 7-9 or 13-18 slides — outside the ideal range.
 **Basis:** Storydoc data — ~10-slide decks achieve highest completion rate (32% vs. 22% average); sharp drop-off after ~18 slides.
 
 ### `consistent_design`

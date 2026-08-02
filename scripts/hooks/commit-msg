@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# DCO gate: refuse a commit that carries no valid `Signed-off-by:` trailer.
+#
+# WHY A HOOK AND NOT A HABIT: `DCO` is a required status check on `main`, but
+# `enforce_admins` is false, so direct pushes bypass it — which is how 155 of the first
+# 159 commits landed unsigned while CONTRIBUTING required sign-off. Most commits here are
+# authored by an agent on the maintainer's behalf, so "remember to pass -s" is not a
+# control. This hook is, because it runs regardless of who or what invoked `git commit`.
+#
+# This gate VALIDATES; it deliberately does NOT auto-append the trailer. A sign-off is a
+# certification that you have the right to submit the work — a hook that adds it silently
+# would certify on your behalf without you asserting anything, which defeats the point.
+#
+# Fix a rejected commit with:   git commit -s ...        (or: git commit --amend -s)
+# Bypass deliberately with:     git commit --no-verify   (skips this and every other hook)
+set -euo pipefail
+
+MSG_FILE="$1"
+
+# A merge in progress writes its own message; don't block a merge resolution on it.
+GIT_DIR_PATH="$(git rev-parse --git-dir)"
+if [ -f "$GIT_DIR_PATH/MERGE_HEAD" ]; then
+  exit 0
+fi
+
+# Ignore comment lines — git strips them after this hook runs, so the raw file still has them.
+body="$(grep -v '^#' "$MSG_FILE" || true)"
+
+if ! printf '%s\n' "$body" | grep -qi '^Signed-off-by:[[:space:]]*.\+<.\+@.\+>'; then
+  cat >&2 <<'ERR'
+commit-msg: REJECTED — no `Signed-off-by:` trailer.
+
+This repo requires a Developer Certificate of Origin sign-off on every commit
+(CONTRIBUTING.md → "DCO Sign-Off"); `DCO` is a required status check on `main`, so an
+unsigned commit blocks any PR that contains it.
+
+  git commit -s ...          # sign this commit
+  git commit --amend -s      # add the trailer to the commit you just wrote
+
+`-s` composes with every other flag, including `-F -` / heredoc messages: the trailer is
+appended to the existing trailer block.
+ERR
+  exit 1
+fi
+
+# The trailer must match the commit's own author, not just be present. Catches a copied or
+# stale sign-off — the same thing the DCO app checks.
+author_email="$(git var GIT_AUTHOR_IDENT | sed -n 's/.*<\(.*\)>.*/\1/p')"
+if ! printf '%s\n' "$body" | grep -qi "^Signed-off-by:.*<${author_email}>"; then
+  {
+    echo "commit-msg: REJECTED — no \`Signed-off-by:\` matching this commit's author."
+    echo
+    echo "  author:    <${author_email}>"
+    echo "  sign-offs: $(printf '%s\n' "$body" | grep -i '^Signed-off-by:' | sed 's/^/             /' || echo '(none)')"
+    echo
+    echo "The DCO app checks the sign-off against the commit author. Use \`git commit --amend -s\`,"
+    echo "or correct the author with \`--author\` if that is what is wrong."
+  } >&2
+  exit 1
+fi
+
+exit 0

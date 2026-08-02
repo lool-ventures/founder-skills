@@ -50,7 +50,7 @@ _SCHEMA_DIR = os.path.join(
 )
 _RULES_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "references",
+    "data",
     "cap-table-rules.json",
 )
 
@@ -120,11 +120,18 @@ def _evaluate_date_status(
     if event_date_value is None:
         return "missing_event_date", False, False
 
+    # Near-edge proximity is measured from the audit reference date (`today`,
+    # defaulting to the event_date when no override is supplied) — it answers
+    # "is this rule's window about to open/close relative to when we're
+    # auditing?", which is what the watchlist consumes. The --today CLI override
+    # exists so tests can pin the reference date deterministically.
+    reference = today if today is not None else event_date_value
+
     # Window-bounded
     if start is not None and event_date_value < start:
         # pre_effective; check near_start
-        delta_start = (start - event_date_value).days
-        near_start = delta_start <= near_start_days
+        delta_start = (start - reference).days
+        near_start = 0 <= delta_start <= near_start_days
         return "pre_effective", False, near_start
 
     if end is not None and event_date_value > end:
@@ -133,7 +140,7 @@ def _evaluate_date_status(
     # in_window — check near_end if end exists
     near_end = False
     if end is not None:
-        delta_end = (end - event_date_value).days
+        delta_end = (end - reference).days
         near_end = 0 <= delta_end <= near_end_days
 
     return "in_window", near_end, False
@@ -286,6 +293,38 @@ def _structure_includes_israel(inputs: dict[str, Any]) -> bool:
 def _structure_includes_delaware(inputs: dict[str, Any]) -> bool:
     structure = (inputs.get("jurisdiction") or {}).get("structure", "")
     return structure in {"delaware", "delaware_with_israeli_sub", "mid_flip"}
+
+
+#: Stages the early-stage benchmark sets are drawn from. A benchmark labelled for
+#: one stage is not evidence about another, so a rule scoped to these must not
+#: fire outside them.
+_EARLY_STAGES = {"pre-seed", "pre_seed", "preseed", "seed"}
+
+
+def _declared_stage(inputs: dict[str, Any]) -> str | None:
+    """The founder-declared funding stage, or None when it was never recorded.
+
+    Read from `metadata.stage` with a top-level `stage` fallback; both are
+    permitted by the open inputs schema. Returns None rather than a default —
+    "we were not told" and "they are pre-seed" must stay distinguishable, since
+    the whole point of the caller below is to not assert one from the other.
+    """
+    for candidate in ((inputs.get("metadata") or {}).get("stage"), inputs.get("stage")):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip().lower()
+    return None
+
+
+def _israel_early_stage_context(inputs: dict[str, Any]) -> bool:
+    """Israeli structure AND a declared early stage.
+
+    Geography alone used to carry this, which let a pre-seed/seed benchmark set
+    fire for an Israeli company at any stage — a Series B founder shown pre-seed
+    ranges as if they applied. Unknown stage does NOT fire: this is benchmark
+    context, so withholding it costs a note, while asserting it at the wrong
+    stage misinforms.
+    """
+    return _structure_includes_israel(inputs) and _declared_stage(inputs) in _EARLY_STAGES
 
 
 def _is_cross_border(inputs: dict[str, Any]) -> bool:
@@ -614,7 +653,11 @@ _RULE_MATCHERS: dict[str, Any] = {
     # Founder benchmarks — apply by context
     "founder_benchmarks.carta_stage_medians": lambda i, inst, cs: _structure_includes_delaware(i),
     "founder_benchmarks.no_hard_redlines": _matcher_always,
-    "founder_benchmarks.israel_preseed_context": lambda i, inst, cs: _structure_includes_israel(i),
+    # Stage-scoped by its own applies_when ("Israeli pre-seed or seed scenarios"),
+    # so it needs the stage, not just the geography. The rule_id keeps its name:
+    # it is cited in seven committed cassettes, and renaming it would only move
+    # the mismatch from the matcher into the identifier.
+    "founder_benchmarks.israel_preseed_context": lambda i, inst, cs: _israel_early_stage_context(i),
     "founder_benchmarks.stacked_safe_warning": lambda i, inst, cs: len(inst.get("safes") or []) > 1,
     # Warrants domain: state-readable matchers. The runtime-event subset
     # (net_share_pre_round_fmv_approximation, exercise_event_before_round_pump)
@@ -629,6 +672,18 @@ _RULE_MATCHERS: dict[str, Any] = {
     "dual_class.founder_super_voting": lambda i, inst, cs: _has_dual_class_holder(cs),
     # Cap-table domain: dividend handoff — gates on AoA-extracted finding
     "cap_table.dividend_provisions_in_aoa_handoff": lambda i, inst, cs: _aoa_has_dividend_provisions(cs),
+    # P5: pricing-unknown disclosure — gates on the flag actually being present on canonical
+    # cap_state.preferred_series (cap_state.py's flag-carry conditional spread). Without this
+    # matcher entry the rule defaults to _matcher_always and fires on every engagement.
+    "cap_table.pricing_unknown_disclosure": lambda i, inst, cs: any(
+        s.get("pricing_unknown") for s in (cs.get("preferred_series") or [])
+    ),
+    # Acquisition domain — apply only when the engagement models an
+    # acquisition (inputs.acquisition is a real top-level key per
+    # inputs.schema.json properties.acquisition). Absent block → suppressed.
+    "acquisition.consideration_shares": lambda i, inst, cs: bool(i.get("acquisition")),
+    "acquisition.pool_consideration_basis": lambda i, inst, cs: bool(i.get("acquisition")),
+    "acquisition.timing": lambda i, inst, cs: bool(i.get("acquisition")),
 }
 
 
@@ -834,6 +889,14 @@ def build_watchlist(
                 "rule_id": rule_id,
                 "title": rule.get("title", rule_id),
                 "scope": scope,
+                # Carry the static gate through. compose_report.py splits the
+                # watchlist on this into ACTIVE vs for-reference, and its default
+                # for an absent key is True — so dropping it here silently
+                # promoted every structurally-inapplicable rule to an action item.
+                # Observed: a Delaware-only company with no IIA grants was shown
+                # Israeli §102 / Registrar / SAFE-safe-harbour rows as things to
+                # watch. The gate itself was always correct; only the plumbing lost it.
+                "applies_when_matched": entry.get("applies_when_matched"),
                 "event_date_field": entry.get("event_date_field"),
                 "instance_type": entry.get("instance_type"),
                 "instance_id": entry.get("instance_id"),
@@ -857,10 +920,11 @@ def _action_for_status(entry: dict[str, Any], rule: dict[str, Any]) -> str:
         if f == "stale":
             return "Benchmark dataset is stale; refresh annually per rule notes."
         if f == "unknown":
-            return "Set benchmark_reference_date in inputs.event_dates to use current data."
+            return "Set a benchmark reference date in your inputs to use current data."
         return "Benchmark fresh; renders as context only."
     if status == "missing_event_date":
-        return f"Provide {entry.get('event_date_field')} on the relevant instance."
+        field = (entry.get("event_date_field") or "date").replace("_", " ")
+        return f"Provide the {field} for this instance."
     if status == "expired":
         return "Rule's applicability window has passed; counsel review for current regime."
     if status == "pre_effective":
@@ -1034,6 +1098,11 @@ def build_counsel_review_items(
         if rule_id in seen_rules:
             continue
         seen_rules.add(rule_id)
+        # Carry the (instance_type, instance_id) the gating already computed so
+        # downstream consumers can show what a counsel item applies to. Exactly
+        # one item per rule; the matched instances ride along as a
+        # deterministically-sorted list.
+        inst_list = _counsel_instances(instances)
         items.append(
             {
                 "rule_id": rule_id,
@@ -1044,9 +1113,66 @@ def build_counsel_review_items(
                 "counsel_question": rule.get("summary", ""),
                 "documents_needed": [],  # placeholder; design §17 promises richer field
                 "source_ids": rule.get("source_ids", []),
+                "instances": inst_list,
+                "relevance_tier": _counsel_relevance_tier(inst_list),
+                "applies_to": _counsel_applies_to(inst_list),
             }
         )
+    # A general-scoped item whose DOMAIN has a specific instrument/scenario match
+    # elsewhere in this cap table is "likely relevant": the class is present even
+    # though this rule matched no exact instance of its own. Deterministic
+    # (depends only on the assembled items).
+    specific_domains = {it["domain"] for it in items if it["relevance_tier"] == "applies" and it.get("domain")}
+    for it in items:
+        if it["relevance_tier"] == "general" and it.get("domain") and it["domain"] in specific_domains:
+            it["relevance_tier"] = "likely"
     return items
+
+
+# Instance types that are not tied to a specific instrument/scenario in this
+# cap table — counsel items scoped only to these read as "applies to all".
+_GENERAL_INSTANCE_TYPES = {"global", "engagement", None, ""}
+
+
+def _counsel_instances(instances: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Distinct (instance_type, instance_id) pairs for the gating entries that
+    actually matched, sorted None-safely for deterministic output."""
+    seen: set[tuple[Any, Any]] = set()
+    out: list[dict[str, Any]] = []
+    for e in instances.values():
+        if not (e.get("applies_when_matched") and e.get("status") not in {"pre_effective", "expired"}):
+            continue
+        key = (e.get("instance_type"), e.get("instance_id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"instance_type": e.get("instance_type"), "instance_id": e.get("instance_id")})
+    out.sort(key=lambda x: (x["instance_type"] or "", x["instance_id"] or ""))
+    return out
+
+
+def _counsel_relevance_tier(inst_list: list[dict[str, Any]]) -> str:
+    """ "applies" when the item matched a real instrument/scenario in this cap
+    table; "general" when only global/engagement-scoped. We do not invent a
+    per-scenario tier the data cannot support."""
+    has_specific = any(i.get("instance_type") not in _GENERAL_INSTANCE_TYPES for i in inst_list)
+    return "applies" if has_specific else "general"
+
+
+def _counsel_applies_to(inst_list: list[dict[str, Any]]) -> str:
+    """Short founder-facing label of what an item applies to."""
+    ids = [
+        i["instance_id"]
+        for i in inst_list
+        if i.get("instance_id") and i.get("instance_type") not in _GENERAL_INSTANCE_TYPES
+    ]
+    if not ids:
+        return "all"
+    uniq: list[str] = []
+    for x in ids:
+        if str(x) not in uniq:
+            uniq.append(str(x))
+    return ", ".join(uniq[:3]) + ("…" if len(uniq) > 3 else "")
 
 
 def build_source_notes(

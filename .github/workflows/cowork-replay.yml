@@ -1,0 +1,336 @@
+name: cowork-replay
+
+# Token-free, agent-free PR gate for the fleet cowork-harness cassettes, built on the packaged
+# cowork-harness GitHub Action (0.22.0+). Four gates, each rendering a verdict table into the
+# PR job summary:
+#   1. lint            — scenario no-silent-false-green invariants
+#   2. privacy gate    — HARD: PII/host-path scan (PII only — --skip-staleness AND
+#                        --skip-scenario-drift, so only a real PII finding fails the job).
+#                        Includes the email CANARY (inverted check — must trip; plain step below).
+#   3. staleness gate  — WARN: --skip-privacy under continue-on-error. A skill edit re-stales the
+#                        affected cassette(s) and CI can't re-record, so this stays warn-not-fail.
+#                        `fileSigs` names the exact changed file — a real drift points at the file.
+#                        Re-record on a cadence (see cowork-tests/README.md).
+#   4. replay          — content + manifest-backed file_exists/artifact_json across the whole dir.
+# No model tokens, no Docker, no staged agent binary → runs on a stock GitHub-hosted runner.
+#
+# Version policy: FLOOR, NOT PIN — track the newest 1.x harness, but never something older than the
+# floor. There are TWO independent CLI sources here, and a floor is applied per-site, only where a step
+# actually depends on a version:
+#   * the `replay` job's `uses: ...@v1` steps — the CLI comes from the packaged Action, which installs
+#     it from its own `version:` input (default `latest`). **Every step in this job now carries the
+#     floor.** The two verify-cassettes steps used to ride `latest` because they worked on any 1.x;
+#     that stopped being true at 1.16.0, because they READ the cassettes and a v11 cassette is refused
+#     by an older CLI (see THE FLOOR below). `replay` is the same case. The `lint` step carries it for
+#     an older, unrelated reason: it passes
+#     `--min-severity`, which needs >=1.11.0, so it carries `version: "^1.17.0"`. Without that floor a
+#     `latest` that resolved older would not degrade — it hard-fails, exit 2, "unrecognized arguments".
+#     (A RANGE in that input is DOCUMENTED as of harness 1.12.0 — `action.yml` now states `version`
+#     accepts an npm range, not only an exact pin. It was already mechanically sound: the value is
+#     interpolated as `cowork-harness@$v` into `npm install --global`.)
+#   * the `skill-static-analysis` job's standalone `npm i -g cowork-harness@^1.17.0` — a floor with a
+#     1.x ceiling. `^` (not a bare `>=`) because it FAILS LOUD if nothing >=1.16.0 is published
+#     (upstream SKILL.md: `@latest` can silently fetch an older CLI, and the new commands then fail as
+#     "unknown command"), AND because it cannot cross a future 2.0 the way `@latest` would. `^` is also
+#     shell-safe unquoted, where a bare `@>=1.16.0` would redirect stdout into a file named `=1.16.0`.
+# THE FLOOR IS 1.17.0. Two separate reasons, and they raise the floor for different steps:
+#   (a) 1.17.0 — RECORDING correctness on the remote lane. Before it, `undelivered_deliverables` fired on
+#       EVERY `lane: remote` run: the `presentedFiles` arm can never match there (no remote delivery tool
+#       is served, so the array is structurally empty), so a run that wrote a file still warned "never
+#       reached the user". A `deliveryObservable()` predicate now gates it, and the new
+#       `delivery_unobservable` warn states the gap instead of guessing. Recording below 1.17.0 freezes a
+#       warn set that asserts something false. 1.17.0 also adds plugin HOOK findings to `lint-skill`/`run`
+#       (`hooks-json-misplaced` / `hook-event-unknown` / `hook-event-not-served`) — verified clean here,
+#       since this plugin declares its SessionStart hook inline in plugin.json, not as a hooks/hooks.json.
+#       1.17.0 adds NO re-record debt: the pinned baseline's `spawn.tools`/`allowedTools`/`env`/
+#       `promptTemplate`/`subagentPrompt`/`options`/`effortDefault` are byte-identical to 1.16.0; its only
+#       baseline addition is a `hooks` object the harness itself labels a DRIFT TRIPWIRE, not an
+#       emulation source (`served: true` on PreToolUse:Task alone, which was already installed).
+#   (b) 1.16.0 — READING the cassettes, still the reason the floor cannot go BELOW 1.16.0. 1.16.0 stamps a
+# cassette whose scenario carries `lane: remote` at cassette format **v11**. An older CLI does not
+# silently mis-score such a cassette (the 1.14.0/1.15.0 hazard) — it REFUSES that file and the
+# invocation exits non-zero. So from the moment `market-sizing-remote-lane` is recorded, every step that
+# READS `cowork-tests/cassettes/` genuinely requires >=1.16.0. The conditional stamp is value-aware:
+# `lane: local` / omitted still stamps v10, so the other 16 cassettes are unaffected (verified: `rehash
+# --dry-run` reports "already at v10" for all 16).
+# Earlier floors, kept as history: 1.14.0 served `present_files` at hostloop (the tier our cassettes
+# record at) and added `lane:`, which an older LOADER rejects outright — that is what the "Scenario load
+# check" step depends on. 1.12.0 fixed a bug that made an UPLOAD-BEARING scenario impossible to record
+# while still spending the paid run (five scenarios here are upload-bearing); 1.11.0 stamps
+# `environment.harnessVersion` into every cassette it records; 1.10.0 is the first release whose sandbox
+# declares the skill/plugin discovery SDK-MCP servers (`mcp__skills__*` / `mcp__plugins__*`).
+# WHICH FLOORS HAVE TEETH: `rerecord.sh`'s (recording bakes the version into the artifact, and is what
+# stamps v11 in the first place); the load check's, once a `lane:` scenario exists; and — once a v11
+# cassette is committed — `replay`'s and both `verify-cassettes` steps'. The `lint` step's stays
+# documentary: it resolves no baseline and emits no staleness. The local replay lane
+# (`founder-skills/tests/test_cowork_cassette_replay.py`) SKIPS rather than replay under semantics it
+# cannot trust, so its `_MIN_HARNESS` must track a floor — but the READ floor (1.16.0, the v11 cassette
+# stamp), NOT the record floor above. They are deliberately different numbers: 1.17.0 is required to
+# RECORD correctly (the remote-lane warn fix) and nothing about it changes how an existing cassette
+# REPLAYS, so pinning the read path at 1.17.0 would skip the local lane on a CLI that reads it fine.
+# Raise `_MIN_HARNESS` only when a release changes cassette READ semantics.
+# Tracking-forward is safe because SPEC.md §12 freezes the COVERED surfaces across the 1.x line — CLI +
+# exit codes, every schema, and this Action's inputs/outputs — so a break to any of them needs a major
+# bump; only UNCOVERED surface (human-readable text output) can shift within 1.x, and this gate's
+# assertions are structural (they don't byte-compare that text). TRADEOFF: a new harness 1.x release can
+# still change this gate's result with no repo change — re-run a failing job to tell a real drift from a
+# harness update, and see cowork-tests/README.md's version note for the current state. CAVEAT: `@v1` and
+# `^1.12.0` both stay on 1.x, but the Action's default `latest` input would follow a future 2.0 major
+# (outside the §12 contract) — revisit at the 2.0 boundary.
+#
+# The LIVE lane (recording cassettes) needs the staged Cowork agent binaries (not redistributable,
+# not on hosted runners) → self-hosted/local only. See cowork-tests/README.md + rerecord.sh.
+
+on:
+  pull_request:
+    paths:
+      - 'founder-skills/skills/**'
+      - 'founder-skills/agents/**'
+      - 'founder-skills/scripts/**'
+      - 'founder-skills/references/**'
+      - 'cowork-tests/**'
+      - '.github/workflows/cowork-replay.yml'
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The privacy allowlist is a bash array in privacy-allowlist.sh (single source of truth,
+      # shared with rerecord.sh — the gate and the canary can never drift apart). The Action's
+      # extra-args input word-splits, so an allowlist entry containing a literal space would
+      # silently corrupt the flag vector — guard first, then flatten.
+      - name: Flatten privacy allowlist for the action
+        id: allow
+        run: |
+          source cowork-tests/privacy-allowlist.sh
+          for a in "${ALLOW[@]}"; do
+            case "$a" in *" "*)
+              echo "::error::privacy-allowlist entry contains a literal space; the action's extra-args word-splits: $a"
+              exit 1 ;;
+            esac
+          done
+          echo "args=${ALLOW[*]}" >> "$GITHUB_OUTPUT"
+
+      # `--min-severity WARN` drops the INFO floor from this gate's output. What it mutes today is
+      # exactly two rules, both emitted UNCONDITIONALLY (17 + 17 = all 34 of our INFOs):
+      # `manifest-needs-snapshot` and `gate-needs-controlout`. The linter is static — it cannot read a
+      # cassette to know whether they apply — so they fire on every run and bury signal: a genuinely new
+      # WARN would otherwise land in a 34-line INFO wall nobody reads. It can never mask an ERROR (the
+      # severity filter runs before the exit computation, and ERROR is above the floor).
+      # NOT free of cost: `positional-choose-order` is an existing, scenario-FIXABLE INFO rule that
+      # would also be muted the moment a scenario used a positional `choose:`. That advisory class is
+      # recovered at every re-record — rerecord.sh's own `lint` step keeps the default INFO floor, which
+      # is when "re-record so these evaluate" is actually actionable.
+      # `version:` is required here, not decorative: `--min-severity` needs >=1.11.0 and a pre-1.11.0
+      # CLI hard-fails (exit 2, "unrecognized arguments"), so this step cannot ride the Action's default
+      # `latest`. See the header's version policy.
+      - name: Lint scenarios (no silent false-greens)
+        uses: yaniv-golan/cowork-harness@v1
+        with:
+          command: lint
+          path: cowork-tests/scenarios/
+          version: "^1.17.0"
+          extra-args: "--min-severity WARN"
+
+      # The PII guard that actually matters here is **synthetic-only recording**: every cassette's
+      # subject is a fictional company (Cadence / Acmecorp), so no real founder/company data exists
+      # to leak. The allowlist tunes the scanner classes with CLASS-SCOPED flags (an allow can't
+      # bleed across classes): currency (synthetic dollar figures), domain (public third-party
+      # citations, wholesale), email (ONLY the synthetic acmecorp.com / example.com — any other
+      # email FAILS the gate: the live PII tripwire), path/machine-inventory (no allows — a local
+      # path or machine detail in a cassette is always a leak; record-time redaction via
+      # cowork-tests/.cowork-redact.json is the source-side counterpart).
+      #
+      # verify-cassettes has THREE independent classes: PII (privacy), staleness, and scenario-drift
+      # (the on-disk scenario `assert:` block diverging from the block frozen in the cassette). This
+      # HARD gate is PII-ONLY, so it skips BOTH non-PII classes — `--skip-staleness` AND
+      # `--skip-scenario-drift`. Scenario-drift, like staleness, is only fixable by re-recording, which
+      # CI can't do; it surfaces (WARN) in the staleness step below instead of reddening this gate.
+      - name: Privacy gate (HARD)
+        uses: yaniv-golan/cowork-harness@v1
+        with:
+          command: verify-cassettes
+          path: cowork-tests/cassettes/
+          version: "^1.17.0"
+          extra-args: "--skip-staleness --skip-scenario-drift ${{ steps.allow.outputs.args }}"
+
+      # Email canary: the SAME allowlist must still FLAG a non-synthetic email. The check asserts an
+      # [email] FINDING specifically (grep the scanner output), NOT a bare non-zero exit — so a
+      # cassette-version-floor refusal, a read error, or any other failure reads as a BROKEN tripwire
+      # (loud red), never as "tripped as expected." (A v1 canary silently fail-opened under 0.30.0's
+      # v9 read floor exactly this way: the refusal exited non-zero and the old inverted check misread
+      # it as the tripwire firing. Bump the canary envelope's cassetteVersion at every future floor
+      # raise — see cowork-tests/README.md.) The CLI is already on PATH (the Action installs it).
+      - name: Email canary (must flag an [email] finding)
+        run: |
+          source cowork-tests/privacy-allowlist.sh
+          out="$(cowork-harness verify-cassettes cowork-tests/canary/email-canary.cassette.json --skip-staleness --skip-scenario-drift "${ALLOW[@]}" 2>&1 || true)"
+          if echo "$out" | grep -q '\[email\]'; then
+            echo "email canary tripped as expected — email tripwire is live."
+          else
+            echo "::error:: email canary did NOT flag an [email] finding — the PII tripwire is not firing (a version-floor refusal, an over-broad --allow-email, or a generic --allow matching the address). Scanner output:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: Staleness gate (WARN — does not fail the job; CI cannot re-record)
+        continue-on-error: true
+        uses: yaniv-golan/cowork-harness@v1
+        with:
+          command: verify-cassettes
+          path: cowork-tests/cassettes/
+          version: "^1.17.0"
+          extra-args: "--skip-privacy"
+
+      # Floored, and NOT for a missing flag. An unknown top-level scenario key inside a frozen
+      # cassette is carried but never consulted — replay reads that object as passthrough and
+      # behaves as if the key were absent — so a below-floor CLI does not refuse the cassette,
+      # it can return the OPPOSITE verdict with no signal. Frozen assertions ARE validated and
+      # hard-reject, so this is not "replay validates nothing"; only the scenario object is loose.
+      - name: Replay content + manifest-backed assertions (token-free)
+        uses: yaniv-golan/cowork-harness@v1
+        with:
+          command: replay
+          path: cowork-tests/cassettes/
+          version: "^1.17.0"
+
+      # `cowork-tests/gate_prefix_check.py` and `delivery_check.py` are implemented and
+      # unit-tested (`founder-skills/tests/test_gate_prefix_check.py` /
+      # `test_delivery_check.py`) but were invoked nowhere until this step pair. Neither
+      # is a scenario `assert:` — each script's own module docstring explains why: no
+      # assertion in the harness vocabulary inspects emitted `AskUserQuestion` option
+      # LABELS, and `present_files_called` is `z.literal(true)` ("at least one file"),
+      # so it stays green across a PARTIAL-delivery regression. Both scripts read a run
+      # dir's `events.jsonl`; CI never produces one (`replay` is a deterministic cassette
+      # playback that never spawns an agent), so both now also accept a single committed
+      # cassette file directly — its frozen `events` array holds the identical JSON-line
+      # strings a live run writes, the same reading `leak_scan.py` already relies on for
+      # the same reason (see each script's `_event_lines`/module docstring). No new
+      # dependency: both are stdlib-only PEP 723 scripts, and ubuntu-latest's default
+      # python3 already satisfies their `>=3.10` floor.
+      #
+      # `gate_prefix_check.py --at-most-one` is used for EVERY cassette here, not the
+      # default exactly-one: the fleet mixes CONFIRM-gates (a legitimate no-change branch
+      # always exists) with DATA-ENTRY gates (asking for a fact — jurisdiction, stage,
+      # sector — where zero options carrying the token is correct, per the script's own
+      # docstring). Exactly-one blind across a mixed fleet manufactures a false failure on
+      # every data-entry gate; --at-most-one never does (0 or 1 carrying is fine) while
+      # still catching both real violation classes regardless of gate kind: MORE than one
+      # option carrying the token, and any MUTATING option wrongly carrying it. Measured
+      # against all 21 committed cassettes with --at-most-one (2026-08-01): 19 PASS, 2
+      # NOT-EXERCISED (no AskUserQuestion gate in that cassette) — zero violations, so this
+      # is wired as a HARD gate; exit 2 (not-exercised) is informational, never a failure.
+      - name: Gate no-change-prefix conformance (reserved-token contract)
+        run: |
+          set +e   # exit codes 1/2 are meaningful here; don't let errexit eat them
+          fail=0
+          for f in cowork-tests/cassettes/*.cassette.json; do
+            out="$(python3 cowork-tests/gate_prefix_check.py "$f" --at-most-one --pretty 2>&1)"
+            code=$?
+            case "$code" in
+              0) : ;;
+              2) echo "· $(basename "$f"): no AskUserQuestion gate fired (not-exercised, not a failure)" ;;
+              *)
+                echo "::error::$(basename "$f") violates the no-change-prefix contract:"
+                echo "$out"
+                fail=1
+                ;;
+            esac
+          done
+          exit "$fail"
+
+      # WARN, not hard-fail — unlike the gate above, this one is NOT clean today. Three of
+      # the 21 committed cassettes already read [undelivered]/[incomplete]:
+      # ic-sim-smoke / market-sizing-smoke were recorded at harness 1.12.0, before 1.14.0
+      # started serving `present_files` at the hostloop tier this fleet records at — a
+      # documented, deferred re-record debt (see CHANGELOG / rerecord.sh's floor note), not
+      # a defect introduced by any single PR. host-path-canary's gap is NOT explained by
+      # that (container tier, recorded at harness 1.16.0, where `present_files` was always
+      # served) and is a real, unexplained finding for whoever owns the cap-table
+      # fast-assess Deliver step — this job cannot fix it (no re-record, no skill-script
+      # edits authorized here) so it stays WARN rather than blocking every unrelated PR.
+      # Ratchet to a hard gate once a re-record (or a skill fix) clears the known cases.
+      - name: Delivery-completeness check (WARN — known pre-existing gaps, see comment)
+        continue-on-error: true
+        run: |
+          set +e
+          fail=0
+          for f in cowork-tests/cassettes/*.cassette.json; do
+            out="$(python3 cowork-tests/delivery_check.py "$f" --pretty 2>&1)"
+            code=$?
+            case "$code" in
+              0) : ;;
+              2) echo "· $(basename "$f"): NOT-EXERCISED (nothing produced/delivered by this cassette)" ;;
+              *)
+                echo "::warning::$(basename "$f") failed delivery-completeness:"
+                echo "$out"
+                fail=1
+                ;;
+            esac
+          done
+          exit "$fail"
+
+  # Token-free static gate (latest 1.x analyzers) for the Cowork host-loop /sessions path-fidelity class
+  # — the failure mode the Context A/B file-hand-off work fixed — plus skill-body footguns and a
+  # self-heal `find` that targets the wrong skill. The single plugin-root scan covers every
+  # contract-bearing file (all SKILL.md, agents/*, references/*, commands/*) — the OUTPUT_PATH /
+  # file-write contracts live across all of them. No model, no Docker, no cassettes.
+  #
+  # analyze-skill's /sessions→file-tool heuristic can over-flag a *teaching* example. As of 0.32.0 a
+  # directory/plugin-root target scans the UNION of contract-bearing markdown (references/, agents/,
+  # commands/ INCLUDED — the old "references not scanned" carve-out is gone). Silence a genuine
+  # teaching example with a SCOPED marker on the exact line/range — `analyze-skill: ignore-next-line`
+  # or an `analyze-skill: ignore-start` / `ignore-end` fence — and reserve the file-wide
+  # `analyze-skill: ignore` (silences the WHOLE file, blinding it to any other finding) as a last resort.
+  skill-static-analysis:
+    name: Skill static analysis (token-free path-fidelity + lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Node 24 (Active LTS). The harness declares a Node >=22 floor as of 1.14.0 — 20 is EOL and
+          # `doctor` fails on it. No job here runs `doctor`, so this is EOL hygiene, not a fix for a
+          # break; `npm i -g` on 20 would only warn EBADENGINE.
+          node-version: '24'
+      - uses: actions/setup-python@v5   # lint-skill bundles scenario.py (needs python3)
+        with:
+          python-version: '3.12'
+      - name: Install cowork-harness (floor ^1.17.0 — see header version policy)
+        run: npm i -g cowork-harness@^1.17.0
+      # The LOADER is the strict surface, and nothing else in CI reaches it:
+      #   * `lint` WARNS on an unknown/too-new top-level key and exits 0 (lenient by design);
+      #   * `replay` evaluates the scenario FROZEN in each cassette and never reads the on-disk YAML;
+      #   * the privacy gate runs --skip-scenario-drift, and the staleness gate is continue-on-error.
+      # So without this step a scenario with a typo'd or too-new key passes every gate we have and
+      # first fails at a PAID record. `record --dry-run` runs the real loader, is side-effect-free,
+      # and needs no token, no Docker and no staged agent binary (verified under an empty HOME: it
+      # reports both as absent and still exits 0). Exit 1 names each `✗ broken:` file; a single
+      # broken file exits 2.
+      # `--quiet` suppresses the readiness preview ONLY (functional as of 1.16.0; accepted-and-ignored
+      # before it). It does NOT mute `✗ broken:` lines and does NOT change an exit code — so this step
+      # is silent when green and loud and specific when not. Measured: 22 lines -> 0 on success.
+      # Without it the preview prints per-scenario lines plus a token/agent readiness pair; on a runner
+      # both read "(absent — fine for --dry-run; only a real record needs it)". Those are INFORMATIONAL
+      # — 1.16.0 reworded them precisely because the older `✗ MISSING` form read as a broken pipeline.
+      # Floor: `--dry-run` predates 1.14.0, but this step functionally requires >=1.14.0 now that a
+      # `lane:` scenario exists (an older loader exits 2 on the whole directory), and `--quiet` needs
+      # >=1.16.0 to do anything.
+      - name: Scenario load check (token-free — lint warns, the loader rejects)
+        run: cowork-harness record cowork-tests/scenarios/ --dry-run --quiet
+      - name: analyze-skill --strict (whole plugin) + lint-skill --strict
+        run: |
+          # `bash -eo pipefail`; the `|| fail=1` accumulator keeps one finding from aborting the run
+          # and hiding the rest. fail is initialised so `exit "$fail"` is always a real code.
+          # analyze-skill --strict / lint-skill --strict → exit 1 on a finding. A plugin-root target
+          # (0.32.0+) unions every contract-bearing file in one pass — no per-skill/per-agent loop.
+          fail=0
+          echo "::group::analyze-skill founder-skills/ (all SKILL.md + agents + references + commands)"
+          cowork-harness analyze-skill founder-skills/ --strict || fail=1
+          echo "::endgroup::"
+          echo "::group::lint-skill --strict (all skills)"
+          cowork-harness lint-skill founder-skills/skills/*/ --strict || fail=1
+          echo "::endgroup::"
+          exit "$fail"

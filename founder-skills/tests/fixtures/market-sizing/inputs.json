@@ -1,0 +1,21 @@
+{
+  "company_name": "Acmecorp",
+  "analysis_date": "2026-05-10",
+  "stage": "seed",
+  "sector": "B2B SaaS",
+  "materials_provided": ["pitch deck", "financial model"],
+  "product_description": "Cloud-based SMB accounting automation software",
+  "target_segments": ["Small businesses (1-50 employees)"],
+  "geography": "North America",
+  "pricing_model": "Monthly SaaS subscription, $150/month",
+  "revenue_model": "subscription",
+  "sizing_basis": "current_year",
+  "currency": "USD",
+  "existing_claims": {"tam": 8000000000, "sam": 2800000000, "som": 140000000},
+  "existing_claims_detail": null,
+  "competitive_landscape_notes": "Deck slide 7 names QuickBooks, Xero, and FreshBooks as incumbents and claims a differentiated AI-driven workflow.",
+  "gtm_evidence_notes": "Deck slide 8: inbound + accountant-partner channel, 300 customers acquired in 9 months.",
+  "projections_alignment_notes": "Financial model shows headcount and burn consistent with the SOM ramp over 3 years.",
+  "stated_metrics": {"arr": 400000, "customers": 300, "yoy_growth_pct": 216},
+  "metadata": {"run_id": "fixture-market-sizing-001"}
+}

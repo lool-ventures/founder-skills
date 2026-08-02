@@ -17,12 +17,15 @@ Or simply parsed by a sub-agent that calls this once and uses the values.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
 from datetime import datetime, timezone
 
 _CLEANABLE_NAMES = {
+    # Context B stages the coaching payload here for the sub-agent to Read.
+    "coaching_payload.json",
     "deck_inventory.json",
     "stage_profile.json",
     "slide_reviews.json",
@@ -30,12 +33,32 @@ _CLEANABLE_NAMES = {
     "report.json",
     "report.md",
     "report.html",
-    # NOTE: gate_state.json is NOT cleanable. Re-invocation after a gate
-    # answer depends on the file persisting across the second Step-0 call.
-    # Stale-state risk is handled by the agent comparing
-    # gate_state.json's metadata.run_id against the current RUN_ID before
-    # treating it as a resume signal — see SKILL.md Gate section.
+    "coaching_commentary.json",  # Context-B coaching scratch, now staged under the review dir (F4)
+    # gate_state.json is handled separately: it must persist across a gate
+    # round-trip (same run_id) but be deleted when --clean runs for a fresh
+    # run (resume is false). See _read_gate_state / the --clean block below.
 }
+_GATE_STATE_NAME = "gate_state.json"
+
+
+def _read_gate_state(review_dir: str) -> tuple[str, str]:
+    """Return (answer, run_id) from gate_state.json, ("", "") if absent/unreadable."""
+    path = os.path.join(review_dir, _GATE_STATE_NAME)
+    if not os.path.isfile(path):
+        return "", ""
+    try:
+        with open(path, encoding="utf-8") as f:
+            gate = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return "", ""
+    if not isinstance(gate, dict):
+        return "", ""
+    answer = gate.get("answer") or ""
+    run_id = ""
+    meta = gate.get("metadata")
+    if isinstance(meta, dict):
+        run_id = meta.get("run_id") or ""
+    return str(answer), str(run_id)
 
 
 def main() -> int:
@@ -51,19 +74,60 @@ def main() -> int:
     review_dir = os.path.join(artifacts_root, f"deck-review-{args.slug}")
     os.makedirs(review_dir, exist_ok=True)
 
-    if args.clean:
+    run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+    # Resume detection lives here (not in SKILL.md bash) so it cannot drift.
+    # A resume is ONLY valid when gate_state.json carries an answer AND its
+    # run_id matches the current run_id. An answered gate from a *prior*
+    # completed run (different run_id) is stale and must NOT trigger a resume —
+    # otherwise a fresh review of the same company reuses the old run's
+    # artifacts.
+    #
+    # Preservation contract: when resume is true, artifacts from _CLEANABLE_NAMES
+    # are same-run checkpoints (Steps 2-3 already ran for this run_id).  --clean
+    # must NOT delete them — skipping re-runs avoids redundant LLM calls on gate
+    # round-trips.  compose_report.py's run_id parity check is the safety net
+    # against stale content from a different run.  On a fresh (non-resume) run
+    # _CLEANABLE_NAMES are deleted unconditionally so no prior run's artifacts
+    # pollute the new run.
+    gate_answer, gate_run_id = _read_gate_state(review_dir)
+    resume = bool(gate_answer) and gate_run_id == run_id
+
+    if args.clean and not resume:
+        # Fresh run: remove all cleanable pipeline artifacts so no stale
+        # content from a prior run contaminates this invocation.
+        #
+        # In Cowork the review dir is the promoted outputs/ tree, where a delete
+        # can be DENIED ("Operation not permitted").  A denied delete must not be
+        # fatal: tolerate it and fall back to compose_report.py's run_id parity
+        # check (STALE_ARTIFACT) — the same backstop the other skills rely on for
+        # overwrite-in-place.  (Each pipeline step overwrites its artifact via -o
+        # with the fresh run_id, so a surviving prior-run artifact that a later
+        # step does not regenerate is caught as a run_id mismatch.)
         for name in _CLEANABLE_NAMES:
             path = os.path.join(review_dir, name)
             if os.path.isfile(path):
-                os.remove(path)
-
-    run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                with contextlib.suppress(OSError):
+                    os.remove(path)
+        # Also remove a stale answered gate_state.json so it cannot be
+        # misread as a resume signal on a later invocation.
+        gate_path = os.path.join(review_dir, _GATE_STATE_NAME)
+        if os.path.isfile(gate_path):
+            with contextlib.suppress(OSError):
+                os.remove(gate_path)
+            gate_answer, gate_run_id, resume = "", "", False
+    # resume is true: _CLEANABLE_NAMES artifacts are same-run checkpoints —
+    # leave them intact.  gate_state.json is also preserved (it holds the
+    # founder's answer that enabled resume detection).
 
     out = {
         "review_dir": review_dir,
         "run_id": run_id,
         "slug": args.slug,
         "artifacts_root": artifacts_root,
+        "gate_answer": gate_answer,
+        "gate_run_id": gate_run_id,
+        "resume": resume,
     }
     indent = 2 if args.pretty else None
     sys.stdout.write(json.dumps(out, indent=indent) + "\n")

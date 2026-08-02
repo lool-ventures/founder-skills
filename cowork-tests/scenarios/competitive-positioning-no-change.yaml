@@ -1,0 +1,107 @@
+name: competitive-positioning-no-change
+session: ../sessions/default.yaml
+fidelity: cowork
+skills: [competitive-positioning]
+
+# Runtime verification of the reserved `No changes — ` prefix. The contract test pins that SKILL.md
+# DECLARES the rule; only a run shows what the model does with it, and prose guidance about model
+# behaviour is the class this repo has shipped inert. This lane is that run.
+#
+# It is deliberately the MIRROR of competitive-positioning-recall-adoption: same under-specified
+# prompt, so the blind recall check has real candidates to offer, but the no-change branch is taken
+# at every gate. Adoption proved candidates CAN enter; this proves they do not when the founder
+# declines — which is the half that makes the gate trustworthy.
+#
+# ANSWERED BY SCRIPT, AND THAT IS THE POINT. `choose:` is not an exact match — the harness's scripted
+# anchor is a boundary-prefix predicate whose separator set is `:(,—–`
+# (`SCRIPTED_SEPARATORS`, `dist/decide/decider.js`), verified in source rather than assumed. So
+# `choose: "No changes"` matches `No changes — looks good as drafted` and rides drift in the tail,
+# which is exactly where the useful, candidate-naming part of the label lives.
+#
+# That makes this lane a STANDING TRIPWIRE rather than a one-time measurement: the moment a gate stops
+# offering the reserved token on the branch named here, the scripted answer matches nothing and the run
+# fails loudly — the way `local_l6niqzf5mo` died when `choose: "Missing competitors"` matched no
+# offered option. Every future paid run re-verifies the contract for free.
+#
+# What this does NOT check, stated plainly rather than implied: nothing here asserts "exactly one option
+# carries the token" or "no mutating option carries it". The harness cannot see emitted option labels at
+# all — `question_asked` matches question TEXT only, verified against a real run's trace sidecar. Those
+# two invariants need the post-run checker:
+#     python3 cowork-tests/gate_prefix_check.py <run-dir> --substance
+# Run it after any paid run of this lane. A green scenario alone is NOT evidence for them.
+#
+# Do NOT set `on_unanswered`. The fallback picks by POSITION, and this lane exists to verify a rule that
+# replaces positional matching — using it here would beg the question. An unscripted gate must fail.
+#
+# DESIGN evidence vs THIS FILE's evidence — do not conflate them, an adversarial review caught this
+# conflation once already. `local_l8n0mjjgrz` (PASS, $8.05) verified the RESERVED-PREFIX DESIGN: 4 of
+# 4 gates carried the token exactly once, none borrowed by a mutating option, none of the three
+# candidates recall offered reached the final set. But that run used an EARLIER `answers:` block
+# (per-question anchors, since replaced twice — see the block below and its own history). The current
+# single-rule wildcard config has not itself completed a live run as of this comment. Landed code is
+# not behavioural verification of that code specifically, even when an earlier version of the same
+# lane verified the underlying design — that is this repo's own standing lesson, applied to itself.
+# n=1 at the RUN level regardless — gates within a run share context and are not independent samples.
+
+prompt: |
+  I'm the founder of Cadence, a US seed-stage B2B SaaS company selling field-service scheduling and
+  dispatch software to SMB service businesses — plumbers, HVAC and electrical contractors running
+  2-15 technicians. The two competitors I hear about most in deals are Jobber and Housecall Pro.
+  Use the competitive-positioning skill to map our competitive landscape and moats, then produce the
+  positioning report and the explorer.
+
+answers:
+  # ONE rule, anchored entirely on the option label. `when_question` is a regex over the question
+  # text, so `.` matches every gate and does no selecting — that is deliberate. The label is the
+  # contract-bound half; the question wording is not, and anchoring on it is what broke run 2.
+  #
+  # The history is worth keeping, because the instinct to write a specific anchor is strong. The
+  # first draft used `include it`, copied verbatim from run 1 ("…during the enrichment pass —
+  # include it?"). Run 2 asked "…(FieldPulse and Service Fusion) — include any?" — research had
+  # found two candidates instead of one, so the grammar changed with the count. The run errored
+  # unanswered against a gate that was FINE: it offered `No changes — skip these`. A brittle
+  # question anchor red a run whose contract held, which is worse than no anchor, because it spends
+  # a paid run reporting a defect that does not exist.
+  #
+  # `choose:` is a boundary-prefix match (separators `:(,—–`, `dist/decide/decider.js`), so the short
+  # anchor below rides drift in the model-authored tail — the part that names whatever was actually
+  # found. If any gate ever stops offering the reserved option, no rule matches and the run fails
+  # loudly. That is the tripwire.
+  - when_question: "."
+    choose: "No changes"
+
+assert:
+  - result: success
+  - all_tasks_completed: true
+  - file_exists: outputs/artifacts/competitive-positioning-cadence/report.json
+
+  # Gates must actually have fired — otherwise the prefix invariants are vacuous and the checker
+  # would report evidence-unavailable rather than a pass.
+  - gate_answer_count_min: 2
+  - gate_answers_delivered: true
+
+  # The blind recall check ran and had something to offer. Without candidates, "the set was left
+  # unchanged" is untestable, so this is the precondition for the substance check.
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-cadence/competitor_verification.json
+      path: recall_gaps.unmatched.0.slug
+      exists: true
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-cadence/landscape.json
+      path: landscape_as_of
+      exists: true
+
+  # --- fleet contract asserts ---
+  - subagent_dispatched: 'competitive-positioning'
+  - skill_triggered: '(founder-skills:)?competitive-positioning$'
+  - computer_links_resolve: true
+  - no_delete_in_outputs: true
+  - subagent_tool_absent: 'Bash'
+  - questions_count_max: 8
+  - dispatch_count_max: 12
+  - max_turns: 170
+  - tool_calls_max: 160
+  - no_unexpected_files:
+      - 'outputs/artifacts/competitive-positioning-cadence/**'
+      - 'outputs/artifacts/founder-context-cadence.json'
+      - 'outputs/Cadence_*'

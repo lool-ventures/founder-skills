@@ -35,6 +35,13 @@ import os
 import sys
 from typing import Any
 
+# Convention this analysis' headline figures follow — see
+# references/tam-sam-som-methodology.md §5. Optional and NOT defaulted here: an
+# unset sizing_basis must surface downstream (compose_report.py / visualize.py)
+# as "not declared", never silently as "current_year" — see market_sizing.py's
+# resolution logic in main() for why no fallback value is assigned.
+VALID_SIZING_BASIS = {"current_year", "forecast_year", "mixed"}
+
 
 def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
     """Write JSON string to file or stdout."""
@@ -66,6 +73,27 @@ def validate_pct(name: str, value: float) -> str | None:
         return f"{name} cannot be negative (got {value})"
     if value > 100:
         return f"{name} cannot exceed 100% (got {value}%)"
+    return None
+
+
+def check_pct_plausibility(name: str, value: float) -> str | None:
+    """Flag a value that looks like a fraction mistaken for percentage POINTS.
+
+    All *_pct inputs are percentage POINTS (35 means 35%), not fractions (0.35).
+    A value strictly between 0 and 1 is the classic silent ~100x error: the caller
+    meant e.g. 35% and wrote 0.35, which this calculator would otherwise divide by
+    100 again, producing 0.35%. This is a WARNING, never a hard rejection — a
+    legitimate sub-1% share/segment value exists (e.g. share_pct=0.3 meaning 0.3%),
+    and this function cannot distinguish that case from the fraction mistake.
+    Returns a warning message or None.
+    """
+    if 0 < value < 1:
+        return (
+            f"{name}={value} is between 0 and 1 — percentage inputs are POINTS, not "
+            f"fractions (35 means 35%, not 0.35). If you meant {value * 100:g}%, pass "
+            f"{value * 100:g} instead. If {value} is really the intended value "
+            f"(e.g. a {value}% share), this warning is expected — no action needed."
+        )
     return None
 
 
@@ -229,34 +257,75 @@ def bottom_up(
 
 
 def compare(td: dict[str, Any], bu: dict[str, Any]) -> dict[str, Any]:
-    """Compare top-down and bottom-up TAM estimates."""
+    """Compare top-down and bottom-up TAM/SAM/SOM estimates.
+
+    TAM is always compared (both approaches always produce it). SAM and SOM are
+    compared whenever both approaches produced them (always true for top_down()/
+    bottom_up() output) — previously only TAM was gated, so an order-of-magnitude
+    SAM/SOM gap between the two methods could be presented as equally defensible.
+    """
     td_tam = td["tam"].get("raw_value", td["tam"]["value"])
     bu_tam = bu["tam"].get("raw_value", bu["tam"]["value"])
 
     if td_tam == 0 and bu_tam == 0:
-        return {"tam_delta_pct": 0, "note": "Both TAM values are zero."}
-
-    avg = (td_tam + bu_tam) / 2
-    delta_pct = abs(td_tam - bu_tam) / avg * 100 if avg != 0 else 0
-
-    result: dict[str, Any] = {
-        "top_down_tam": td_tam,
-        "bottom_up_tam": bu_tam,
-        "tam_delta_pct": round(delta_pct, 1),
-    }
-
-    if delta_pct > 30:
-        result["warning"] = (
-            f"Top-down and bottom-up TAM differ by {result['tam_delta_pct']}% "
-            f"(>{30}%). Review assumptions — one approach likely has a flawed input."
-        )
-    elif delta_pct > 15:
-        result["note"] = (
-            f"TAM estimates differ by {result['tam_delta_pct']}%. "
-            "Moderate discrepancy — worth investigating but not alarming."
-        )
+        result: dict[str, Any] = {"tam_delta_pct": 0, "note": "Both TAM values are zero."}
     else:
-        result["note"] = f"TAM estimates differ by only {result['tam_delta_pct']}%. Good convergence."
+        avg = (td_tam + bu_tam) / 2
+        delta_pct = abs(td_tam - bu_tam) / avg * 100 if avg != 0 else 0
+
+        result = {
+            "top_down_tam": td_tam,
+            "bottom_up_tam": bu_tam,
+            "tam_delta_pct": round(delta_pct, 1),
+        }
+
+        if delta_pct > 30:
+            result["warning"] = (
+                f"Top-down and bottom-up TAM differ by {result['tam_delta_pct']}% "
+                f"(>{30}%). Review assumptions — one approach likely has a flawed input."
+            )
+        elif delta_pct > 15:
+            result["note"] = (
+                f"TAM estimates differ by {result['tam_delta_pct']}%. "
+                "Moderate discrepancy — worth investigating but not alarming."
+            )
+        else:
+            result["note"] = f"TAM estimates differ by only {result['tam_delta_pct']}%. Good convergence."
+
+    for metric in ("sam", "som"):
+        td_metric = td.get(metric)
+        bu_metric = bu.get(metric)
+        if not td_metric or not bu_metric:
+            continue
+        td_val = td_metric.get("raw_value", td_metric.get("value"))
+        bu_val = bu_metric.get("raw_value", bu_metric.get("value"))
+
+        if td_val == 0 and bu_val == 0:
+            result[f"{metric}_delta_pct"] = 0
+            result[f"{metric}_note"] = f"Both {metric.upper()} values are zero."
+            continue
+
+        m_avg = (td_val + bu_val) / 2
+        m_delta_pct = abs(td_val - bu_val) / m_avg * 100 if m_avg != 0 else 0
+
+        result[f"top_down_{metric}"] = td_val
+        result[f"bottom_up_{metric}"] = bu_val
+        result[f"{metric}_delta_pct"] = round(m_delta_pct, 1)
+
+        if m_delta_pct > 30:
+            result[f"{metric}_warning"] = (
+                f"Top-down and bottom-up {metric.upper()} differ by {result[f'{metric}_delta_pct']}% "
+                f"(>{30}%). Review assumptions — one approach likely has a flawed input."
+            )
+        elif m_delta_pct > 15:
+            result[f"{metric}_note"] = (
+                f"{metric.upper()} estimates differ by {result[f'{metric}_delta_pct']}%. "
+                "Moderate discrepancy — worth investigating but not alarming."
+            )
+        else:
+            result[f"{metric}_note"] = (
+                f"{metric.upper()} estimates differ by only {result[f'{metric}_delta_pct']}%. Good convergence."
+            )
 
     return result
 
@@ -265,16 +334,35 @@ def _validate_inputs(
     data: dict[str, Any] | None,
     args: argparse.Namespace,
     approach: str,
-) -> tuple[dict[str, Any], list[str]]:
-    """Validate and parse all inputs. Returns (parsed, errors).
+) -> tuple[dict[str, Any], list[str], list[dict[str, str]]]:
+    """Validate and parse all inputs. Returns (parsed, errors, warnings).
 
     Handles coercion (stdin strings → numeric) and range validation.
     """
     errors: list[str] = []
+    warnings: list[dict[str, str]] = []
     parsed: dict[str, Any] = {}
+
+    def _pct_warn(field: str, value: float) -> None:
+        # WB-1: a fractional-percentage plausibility warning must PERSIST into the
+        # artifact (validation.warnings), not just stderr — a stderr-only warning
+        # leaves validation.status "valid" and the founder never sees it (the exact
+        # silent-100x class). Emit to both.
+        w = check_pct_plausibility(field, value)
+        if w:
+            warnings.append({"code": "IMPLAUSIBLE_PCT_SCALE", "field": field, "message": w})
+            print(f"Warning: {w}", file=sys.stderr)
 
     if not isinstance(args.currency, str) or not args.currency.strip():
         errors.append("currency must be a non-empty string")
+
+    # sizing_basis is optional — None (not declared) is valid. Only a non-None,
+    # non-enum value is an error; there is no "must be present" requirement here,
+    # unlike currency, because omission has a defined meaning downstream (render
+    # as "not declared") rather than needing a fallback.
+    sizing_basis = getattr(args, "sizing_basis", None)
+    if sizing_basis is not None and sizing_basis not in VALID_SIZING_BASIS:
+        errors.append(f"sizing_basis must be one of {sorted(VALID_SIZING_BASIS)} (got {sizing_basis!r})")
 
     if approach in ("top-down", "both"):
         if data is not None:
@@ -327,9 +415,13 @@ def _validate_inputs(
                 err = validate_pct("segment_pct", sp)
                 if err:
                     errors.append(err)
+                else:
+                    _pct_warn("segment_pct", sp)
                 err = validate_pct("share_pct", shp)
                 if err:
                     errors.append(err)
+                else:
+                    _pct_warn("share_pct", shp)
                 if gr is not None and gr < -100:
                     errors.append(f"growth_rate cannot be below -100% (got {gr}%)")
 
@@ -356,6 +448,13 @@ def _validate_inputs(
             else:
                 errors.append("bottom-up requires --customer-count, --arpu, --serviceable-pct, --target-pct")
         else:
+            # In "both" mode the top-down block already coerced and range-checked
+            # growth_rate/years from the same raw keys — reuse its result to avoid
+            # appending identical errors twice.
+            growth_already_validated = approach == "both" and "td" in parsed
+            if growth_already_validated:
+                gr, yr = parsed["td"][3], parsed["td"][4]
+
             # Coerce JSON string values to numeric types
             bu_ok = True
             if data is not None:
@@ -375,15 +474,16 @@ def _validate_inputs(
                 if err:
                     errors.append(err)
                     bu_ok = False
-                if gr is not None:
-                    gr, err = coerce_float("growth_rate", gr)
+                if not growth_already_validated:
+                    if gr is not None:
+                        gr, err = coerce_float("growth_rate", gr)
+                        if err:
+                            errors.append(err)
+                            bu_ok = False
+                    yr, err = coerce_int("years", yr)
                     if err:
                         errors.append(err)
                         bu_ok = False
-                yr, err = coerce_int("years", yr)
-                if err:
-                    errors.append(err)
-                    bu_ok = False
 
             # Validate ranges only if coercion succeeded
             if bu_ok:
@@ -396,15 +496,19 @@ def _validate_inputs(
                 err = validate_pct("serviceable_pct", svcp)
                 if err:
                     errors.append(err)
+                else:
+                    _pct_warn("serviceable_pct", svcp)
                 err = validate_pct("target_pct", tgtp)
                 if err:
                     errors.append(err)
-                if gr is not None and gr < -100:
+                else:
+                    _pct_warn("target_pct", tgtp)
+                if not growth_already_validated and gr is not None and gr < -100:
                     errors.append(f"growth_rate cannot be below -100% (got {gr}%)")
 
             parsed["bu"] = (cc, arpu, svcp, tgtp, gr, yr)
 
-    return parsed, errors
+    return parsed, errors, warnings
 
 
 def parse_args() -> argparse.Namespace:
@@ -433,11 +537,35 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--years", type=int, default=0, help="Years to project forward")
 
     # Output
-    p.add_argument("--currency", default="USD", help="Currency label (default: USD)")
+    p.add_argument(
+        "--currency",
+        default=None,
+        help=(
+            "ISO currency label for every money figure, e.g. EUR / ILS (default: USD). "
+            "No FX conversion is ever performed — this labels the figures you supply."
+        ),
+    )
+    p.add_argument(
+        "--sizing-basis",
+        default=None,
+        help=(
+            "Convention this analysis' figures follow: current_year | forecast_year | mixed. "
+            "No default — an unset basis is omitted from the output and must render as "
+            "'not declared' downstream, never silently as current_year."
+        ),
+    )
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
+    p.add_argument("--run-id", help="Inject metadata.run_id into output (for stale-artifact detection)")
 
     return p.parse_args()
+
+
+def _stamp_run_id(result: dict[str, Any], run_id: str | None) -> dict[str, Any]:
+    """Stamp metadata.run_id into a result dict (last step before serialization)."""
+    if run_id:
+        result["metadata"] = {"run_id": run_id}
+    return result
 
 
 def main() -> None:
@@ -464,7 +592,7 @@ def main() -> None:
                     "errors": [f"approach must be a string (got {type(raw_approach).__name__})"],
                 }
             }
-            _write_output(json.dumps(result, indent=indent) + "\n", args.output)
+            _write_output(json.dumps(_stamp_run_id(result, args.run_id), indent=indent) + "\n", args.output)
             return
         approach = raw_approach.replace("_", "-")
     else:
@@ -479,15 +607,39 @@ def main() -> None:
                 "errors": [f"approach must be one of {sorted(valid_approaches)} (got '{approach}')"],
             }
         }
-        _write_output(json.dumps(result, indent=indent) + "\n", args.output)
+        _write_output(json.dumps(_stamp_run_id(result, args.run_id), indent=indent) + "\n", args.output)
         return
 
-    parsed, errors = _validate_inputs(data, args, approach)
+    # Resolve the currency label. An explicit --currency always wins; otherwise a
+    # `currency` key in the piped JSON is honoured, so a sub-agent's hand-off (or a
+    # merge_json.py --set) can carry the analysis currency through without the
+    # caller having to remember the flag. Falls back to USD.
+    if args.currency is None:
+        stdin_currency = data.get("currency") if isinstance(data, dict) else None
+        args.currency = stdin_currency if isinstance(stdin_currency, str) and stdin_currency.strip() else "USD"
+    if isinstance(args.currency, str) and args.currency.strip():
+        args.currency = args.currency.strip().upper()
+
+    # Resolve sizing_basis the same way (explicit --flag wins, then the piped
+    # JSON's key) but WITHOUT a fallback default — unlike currency there is no
+    # "USD" equivalent to fall back to; an unset basis stays None and is simply
+    # omitted from the output (see VALID_SIZING_BASIS comment above).
+    if args.sizing_basis is None:
+        stdin_sizing_basis = data.get("sizing_basis") if isinstance(data, dict) else None
+        args.sizing_basis = (
+            stdin_sizing_basis if isinstance(stdin_sizing_basis, str) and stdin_sizing_basis.strip() else None
+        )
+    if isinstance(args.sizing_basis, str):
+        args.sizing_basis = args.sizing_basis.strip().lower() or None
+
+    parsed, errors, input_warnings = _validate_inputs(data, args, approach)
 
     if errors:
-        result = {"validation": {"status": "invalid", "errors": errors}}
+        result = {"validation": {"status": "invalid", "errors": errors, "warnings": input_warnings}}
     else:
         result = {"approach": approach, "currency": args.currency}
+        if args.sizing_basis is not None:
+            result["sizing_basis"] = args.sizing_basis
 
         if approach in ("top-down", "both"):
             it, sp, shp, gr, yr = parsed["td"]
@@ -500,8 +652,9 @@ def main() -> None:
         if approach == "both" and "top_down" in result and "bottom_up" in result:
             result["comparison"] = compare(result["top_down"], result["bottom_up"])
 
-        result["validation"] = {"status": "valid", "errors": []}
+        result["validation"] = {"status": "valid", "errors": [], "warnings": input_warnings}
 
+    _stamp_run_id(result, args.run_id)
     out = json.dumps(result, indent=indent) + "\n"
     _write_output(out, args.output, summary={"approach": approach})
 

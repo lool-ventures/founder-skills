@@ -29,14 +29,14 @@
 | ARR growth | 100-200% YoY | 200%+ (with proof) | <50% YoY | Bessemer 2024, SaaS Capital |
 | Burn multiple | <2.0x | <1.0x (AI-native often sub-1x) | >2.5x without path down | Craft/CFO Advisors 2025 (median 1.6x) |
 | Gross margin | 70-80% | >80% (pure software) | <60% (without explanation) | KeyBanc 2024 (median ~72%; top quartile ~81%) |
-| NRR | 100-110% | 110-130% | <90% | Mosaic 2023, ChartMogul 2024 |
+| NRR | 100-110% | 110-130% | <90% | ChartMogul 2024, High Alpha 2025 |
 | GRR | 85-90% | >90% | <80% | ChartMogul 2024 |
-| CAC payback | 12-18 months | <12 months (3-9 months per Mosaic "excellent") | >24 months | Mosaic/KeyBanc 2024 (varies significantly by ACV) |
+| CAC payback | 12-18 months | <12 months (single-digit months for low-ACV SMB) | >24 months | Benchmarkit 2025 / KeyBanc 2024 (varies significantly by ACV) |
 | Magic number | ~0.7 (median) | >=1.0 | <0.5 | KeyBanc/Sapphire 2024 |
 | Rule of 40 | >=30 (growth % + FCF margin %) | >=40 | <20 | Increasingly referenced at Series A |
 | ARR per FTE | $100-150K | >$150K | <$75K | Benchmarkit 2025 |
 
-### CAC payback by ACV tier (calibrate benchmarks accordingly)
+### CAC payback by ACV tier (calibrate benchmarks accordingly); Benchmarkit 2025 segments payback by ACV, KeyBanc/Sapphire 2024 anchors magnitude
 - SMB / <$5K ACV: median ~9 months
 - Mid-market / $10-25K ACV: median ~15 months
 - Enterprise / $25-50K ACV: median ~20 months
@@ -52,19 +52,19 @@
 - **Resolution:** Post-ZIRP bar is tighter. Treat <1.5x as good, <1.0x as excellent, 1.5-2.0x as acceptable, 2.0-2.5x as warning, >2.5x as fail without credible improvement path.
 
 ### CAC payback expectations
-- **Mosaic (Series A):** "Excellent" = 3-9 months; "Good" = 9-18 months
+- **Low-ACV SMB SaaS:** single-digit-month payback is excellent; 9-18 months is healthy
 - **KeyBanc 2024 survey:** Median ~20 months; top quartile ~14 months
-- **Resolution:** Highly ACV-dependent. Mosaic represents venture-quality mid-market SaaS ideal; KeyBanc reflects broader market reality. Always calibrate by ACV and GTM motion — enterprise field sales naturally has longer payback.
+- **Resolution:** Highly ACV-dependent. venture-quality mid-market SaaS targets the low end; KeyBanc reflects broader market reality. Always calibrate by ACV and GTM motion — enterprise field sales naturally has longer payback.
 
 ### LTV/CAC importance
 - **Traditional SaaS playbooks:** >=3:1 as primary metric
-- **Current consensus (Mosaic, multiple practitioners):** LTV:CAC fragile and often mis-computed at early stage; burn multiple, CAC payback, NRR/GRR, magic number are primary
+- **Current consensus (multiple practitioners):** LTV:CAC fragile and often mis-computed at early stage; burn multiple, CAC payback, NRR/GRR, magic number are primary
 - **Resolution:** Treat LTV:CAC as secondary sanity check. Anchor decisions on CAC payback, NRR, and burn multiple. The >=3:1 rule remains useful as a reference but should not be a hard pass/fail.
 
 ### Growth benchmarks
 - **SaaS Capital 2024:** Overall median ~30% YoY (includes many non-venture/mature companies)
 - **Bessemer cloud portfolio:** ~200% ARR growth at $1-10M ARR
-- **Resolution:** SaaS Capital reflects median private company reality. Bessemer reflects venture-quality outliers. Use SaaS Capital to flag fantasy (if far above even high percentiles without driver explanation); use Bessemer/Mosaic for "venture-scale" expectations.
+- **Resolution:** SaaS Capital reflects median private company reality. Bessemer reflects venture-quality outliers. Use SaaS Capital to flag fantasy (if far above even high percentiles without driver explanation); use Bessemer for "venture-scale" expectations.
 
 ### Model horizon length
 - **OpenVC:** "3 years minimum when speaking with professional investors"
@@ -75,6 +75,23 @@
 - **ConsulteFC/AscentCFO/Gemini:** Push full 3-statement for institutional diligence
 - **Kruze:** "Unnecessary complexity for most" until later stages
 - **Resolution:** P&L + cash flow + cohorts sufficient for ~80% of investors. Prepare full 3-statement if raising from growth funds or have complex operations (marketplace/hardware/fintech).
+
+---
+
+## Gross Margin by Sector
+
+The SaaS gross-margin bars above (KeyBanc/Sapphire) apply only to software-margin businesses. Physical-goods and consumer sectors are benchmarked against their own tables; tiers are derived from published sector aggregates (not stage-segmented, so the same bar applies at every stage):
+
+| Sector (`revenue_model_type`) | Strong | Acceptable | Warning floor | Anchors |
+| --- | --- | --- | --- | --- |
+| Hardware (pure device) | >=50% | >=40% | >=25% | Hardware >=50% GM rule (Barros, Adafruit hardware-startup guide — device-only scope); NYU Stern Damodaran sector margins Jan 2026: Electronics (Consumer & Office) 38.8%, Electronics (General) 26.8% |
+| Consumer subscription (digital) | >=65% | >=45% | >=30% | Damodaran Jan 2026 Software (Entertainment) 66.5%; FY2024 comps: Duolingo 72.8%, Netflix 46.1%, Spotify 30% consolidated |
+| Retail / D2C physical goods | >=50% | >=35% | >=25% | Damodaran Jan 2026: Apparel 56.9%, Household Products 51.0%, Retail (Special Lines) 35.3%, Retail (General) 33.2%, Grocery 26.3% |
+| Marketplace / transactional fintech | contextual — no threshold | | | GM depends on revenue-recognition basis (net take-rate vs gross GMV/GTV); healthy net-basis FY2024 comps span Airbnb ~83% to DoorDash ~46% |
+| Hardware-subscription | contextual — no threshold | | | The >=50% device rule explicitly excludes products with ongoing service revenue; a blend must be judged on its hardware vs service margin split |
+| Usage-based / consumption | contextual — no threshold | | | Healthy consumption models span passthrough-heavy CPaaS ~51% (Twilio FY2024 10-K, GAAP) to software-margin platforms (KeyBanc 2024 median ~72%) |
+
+All threshold tables assume product/service gross margin. A declared non-product `gross_margin_basis` (store contribution, gross-revenue booking, blended) rates `contextual` — a restaurant's ~20% store-level margin and its ~72% product margin are different metrics, and neither should be judged on the other's bar. The tiers are derived target bands (source aggregates rounded to 5pts), not tiers the sources publish.
 
 ---
 
@@ -124,7 +141,7 @@ Israeli cap tables at Seed/A often resemble US cap tables once global funds are 
 | Bessemer, "State of AI 2025" | 2025 | AI growth benchmarks, Q2T3, AI gross margins |
 | Craft Ventures, burn multiple framework | 2024 | Burn multiple tiers and interpretation |
 | CFO Advisors, "2025 Burn Multiple Benchmarks" | Feb 2026 | Burn multiple by stage, AI-native comparison |
-| Mosaic, "Series A Diligence" | Feb 2023 | LTV:CAC, CAC payback, benchmark ranges |
+| Mosaic, "Series A Diligence" (Feb 2023) | — | RETIRED: mosaic.tech gone post-HiBob acquisition; superseded by Benchmarkit 2025 (ACV-segmented payback) and ChartMogul/High Alpha (NRR) |
 | Benchmarkit, "2025 SaaS Performance Metrics" | 2025 | ARR per FTE, efficiency metrics |
 | High Alpha, "2025 SaaS Benchmarks Report" | 2025 | NRR by ARR band, growth metrics |
 | Carta, fundraising insights | 2024-2026 | Dilution benchmarks, time between rounds |

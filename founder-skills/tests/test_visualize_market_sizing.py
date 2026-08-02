@@ -12,12 +12,14 @@ All tests use subprocess to exercise the script exactly as the agent does.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import types
 from typing import Any
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -360,7 +362,11 @@ def test_self_contained() -> None:
     rc, stdout, _stderr = _run_visualize(d)
     assert rc == 0
     # Find all src="..." and href="..." attributes
-    allowed = {"https://github.com/lool-ventures/founder-skills", "https://lool.vc"}
+    allowed = {
+        "https://github.com/lool-ventures/founder-skills",
+        "https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback",
+        "https://lool.vc",
+    }
     src_matches = re.findall(r'(?:src|href)\s*=\s*"([^"]*)"', stdout)
     for url in src_matches:
         if url in allowed:
@@ -634,6 +640,67 @@ def test_provenance_table_shows_estimate_column() -> None:
     assert "$23.6B" in stdout
     # Bottom-up SOM = $118.1M
     assert "$118.1M" in stdout
+
+
+# ---------------------------------------------------------------------------
+# ic-sim+market-sizing-1: non-numeric deck claim must not crash HTML render
+# ---------------------------------------------------------------------------
+
+
+def test_non_numeric_deck_claim_does_not_crash() -> None:
+    """A string existing_claims figure (e.g. "$5B") must not abort the whole render.
+
+    Regression: _chart_provenance_summary called float(deck_claim) guarded only by
+    'is not None', so a non-numeric claim raised ValueError and aborted visualization.
+    The pipeline contract (_compute_delta returns None on non-numeric) is to tolerate.
+    """
+    arts = _all_artifacts()
+    arts["inputs.json"] = dict(_VALID_INPUTS)
+    arts["inputs.json"]["existing_claims"] = {"tam": "$5B", "sam": "TBD", "som": None}
+    d = _make_artifact_dir(arts)
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, f"render must not crash on non-numeric deck claim; stderr: {stderr}"
+    assert "<html" in stdout.lower()
+    # Non-numeric claim is rendered as em dash, not crashed.
+    assert "—" in stdout
+
+
+def test_non_numeric_sizing_value_does_not_crash() -> None:
+    """A non-numeric sizing 'value' must not abort the provenance summary render."""
+    import copy
+
+    arts = _all_artifacts()
+    sizing = copy.deepcopy(_VALID_SIZING)
+    sizing["top_down"]["tam"]["value"] = "not-a-number"
+    arts["sizing.json"] = sizing
+    arts["inputs.json"] = dict(_VALID_INPUTS)
+    arts["inputs.json"]["existing_claims"] = {"tam": 50000000000}
+    d = _make_artifact_dir(arts)
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, f"render must not crash on non-numeric sizing value; stderr: {stderr}"
+    assert "<html" in stdout.lower()
+
+
+def test_failed_checklist_item_null_notes_no_literal_none() -> None:
+    """A failed checklist item with notes:null must not render 'Label: None'.
+
+    Regression: _chart_key_findings did str(item.get("notes", "")), so a present
+    null became the string "None".
+    """
+    import copy
+
+    arts = _all_artifacts()
+    checklist = copy.deepcopy(_VALID_CHECKLIST)
+    items = checklist["items"]
+    items[0] = dict(items[0])
+    items[0]["status"] = "fail"
+    items[0]["notes"] = None
+    label = items[0].get("label", items[0]["id"])
+    arts["checklist.json"] = checklist
+    d = _make_artifact_dir(arts)
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, stderr
+    assert f"{label}: None" not in stdout, "null notes must not render as the literal string 'None'"
 
 
 # ---------------------------------------------------------------------------
@@ -1211,3 +1278,158 @@ def test_key_findings_structured_subsections() -> None:
     assert rc == 0
     assert "finding-attention" in stdout
     assert "Data is current" in stdout
+
+
+# ===========================================================================
+# Key-coverage tests: producer output keys ⊆ renderer known sets
+# ===========================================================================
+#
+# Invariant: when market_sizing.py or checklist.py adds a new confidence
+# level or checklist status, the visualize.py color/category maps must be
+# updated. These tests pin the current complete sets so any new emitted key
+# causes a loud failure with the offending name listed.
+# ===========================================================================
+
+_MS_VISUALIZE_SCRIPT = os.path.join(MARKET_SIZING_DIR, "visualize.py")
+_MS_CHECKLIST_SCRIPT = os.path.join(MARKET_SIZING_DIR, "checklist.py")
+
+
+def _load_ms_visualize() -> types.ModuleType:
+    """Import market-sizing visualize.py with a unique sys.modules key.
+
+    _theme is imported lazily inside a render function, so no stub is needed
+    at module load time.
+    """
+    key = "_ms_keycov_visualize"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    spec = importlib.util.spec_from_file_location(key, _MS_VISUALIZE_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = _MS_VISUALIZE_SCRIPT  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def _load_ms_checklist() -> types.ModuleType:
+    """Import market-sizing checklist.py with a unique sys.modules key.
+
+    Uses a key prefixed with the skill name so it cannot collide with the
+    deck-review checklist that shares the same filename.
+    """
+    key = "_ms_keycov_checklist"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    spec = importlib.util.spec_from_file_location(key, _MS_CHECKLIST_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = _MS_CHECKLIST_SCRIPT  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+# ---------------------------------------------------------------------------
+# Test A: confidence levels → visualize._CONFIDENCE_COLORS coverage
+# ---------------------------------------------------------------------------
+
+
+class TestMarketSizingConfidenceColorCoverage:
+    """Every confidence level that market_sizing.py / compose_report.py can
+    emit must appear in visualize.py's _CONFIDENCE_COLORS and
+    _CONFIDENCE_CATEGORIES so assumption bars receive the correct colour.
+
+    Derived from: the 3 confidence strings used in compose_report.py's
+    classification logic ("sourced", "derived", "agent_estimate").
+    """
+
+    # The 3 confidence levels emitted by the market-sizing producer pipeline.
+    PRODUCER_CONFIDENCE_LEVELS: set[str] = {
+        "sourced",
+        "derived",
+        "agent_estimate",
+    }
+
+    def test_all_confidence_levels_in_confidence_colors(self) -> None:
+        """Every confidence level the producer emits must map to a colour."""
+        viz = _load_ms_visualize()
+        color_keys: set[str] = set(viz._CONFIDENCE_COLORS.keys())
+
+        missing = self.PRODUCER_CONFIDENCE_LEVELS - color_keys
+        assert not missing, (
+            f"visualize._CONFIDENCE_COLORS is missing a colour entry for confidence level(s) "
+            f"emitted by the market-sizing producer: {sorted(missing)}. "
+            f"Add entries to _CONFIDENCE_COLORS for each."
+        )
+
+    def test_all_confidence_levels_in_confidence_categories(self) -> None:
+        """Every confidence level must also appear in _CONFIDENCE_CATEGORIES."""
+        viz = _load_ms_visualize()
+        cat_set: set[str] = set(viz._CONFIDENCE_CATEGORIES)
+
+        missing = self.PRODUCER_CONFIDENCE_LEVELS - cat_set
+        assert not missing, f"visualize._CONFIDENCE_CATEGORIES is missing confidence level(s): {sorted(missing)}."
+
+    def test_producer_confidence_levels_min_count(self) -> None:
+        """Guard against vacuous tests: producer set must have exactly 3 levels."""
+        assert len(self.PRODUCER_CONFIDENCE_LEVELS) == 3, (
+            f"PRODUCER_CONFIDENCE_LEVELS expected 3 entries, got {len(self.PRODUCER_CONFIDENCE_LEVELS)}."
+        )
+
+    def test_confidence_colors_min_count(self) -> None:
+        """_CONFIDENCE_COLORS must cover at least the 3 producer levels."""
+        viz = _load_ms_visualize()
+        assert len(viz._CONFIDENCE_COLORS) >= 3, (
+            f"visualize._CONFIDENCE_COLORS has only {len(viz._CONFIDENCE_COLORS)} entries; expected >= 3."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test B: checklist statuses → visualize._CHECKLIST_COLORS coverage
+# ---------------------------------------------------------------------------
+
+
+class TestMarketSizingChecklistColorCoverage:
+    """Every checklist status that market-sizing checklist.py can emit must
+    either appear in visualize._CHECKLIST_COLORS OR be documented as an
+    intentional exclusion (warn is excluded from the donut by design — the
+    donut reads only pass_ct / fail_ct / na_ct from the summary).
+
+    Produced set is derived live from market-sizing checklist.VALID_STATUSES.
+    Note that market-sizing checklist.py does NOT emit "warn" (unlike
+    deck-review); so there is no silent exclusion gap.
+    """
+
+    # Statuses intentionally excluded from the donut (none for market-sizing).
+    EXPLICIT_EXCLUSIONS: set[str] = set()
+
+    def test_all_checklist_statuses_covered(self) -> None:
+        """Every checklist status must either be in _CHECKLIST_COLORS or excluded."""
+        produced = _load_ms_checklist().VALID_STATUSES
+        viz = _load_ms_visualize()
+        color_keys: set[str] = set(viz._CHECKLIST_COLORS.keys())
+        covered = color_keys | self.EXPLICIT_EXCLUSIONS
+
+        missing = produced - covered
+        assert not missing, (
+            f"visualize._CHECKLIST_COLORS is missing a colour entry for checklist status(es): "
+            f"{sorted(missing)}. Add entries to _CHECKLIST_COLORS or EXPLICIT_EXCLUSIONS."
+        )
+
+    def test_producer_checklist_statuses_min_count(self) -> None:
+        """Guard against vacuous tests: VALID_STATUSES must have at least 3 statuses."""
+        produced = _load_ms_checklist().VALID_STATUSES
+        assert len(produced) >= 3, (
+            f"VALID_STATUSES expected >= 3 entries, got {len(produced)}. Check market-sizing checklist.VALID_STATUSES."
+        )
+
+    def test_checklist_colors_min_count(self) -> None:
+        """_CHECKLIST_COLORS must cover at least the producer statuses."""
+        produced = _load_ms_checklist().VALID_STATUSES
+        viz = _load_ms_visualize()
+        assert len(viz._CHECKLIST_COLORS) >= len(produced), (
+            f"visualize._CHECKLIST_COLORS has only {len(viz._CHECKLIST_COLORS)} entries; expected >= {len(produced)}."
+        )

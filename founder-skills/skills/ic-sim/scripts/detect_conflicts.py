@@ -10,11 +10,13 @@ Role: validator, not detector. The agent (LLM) determines conflicts using its
 judgment about market adjacency, customer overlap, etc. This script validates
 the structure and computes summary stats.
 
-Always reads JSON from stdin.
+Reads JSON from stdin, except in --generic-stub mode (which emits a deterministic
+empty "clear" result for a synthesized fund with no real holdings and reads no input).
 
 Usage:
     echo '{"portfolio_size": 15, "conflicts": [...]}' \
         | python detect_conflicts.py --pretty
+    python detect_conflicts.py --generic-stub --run-id "$RUN_ID" -o conflict_check.json
 
 Output: JSON with validated input + computed summary + validation.status/errors.
 """
@@ -91,8 +93,10 @@ def validate_conflicts(data: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(conflict, dict):
             deduped.append(conflict)  # let validation catch non-dict
             continue
-        company = _normalize_company(conflict.get("company") or "")
-        ctype = (conflict.get("type") or "").strip().lower()
+        raw_company = conflict.get("company")
+        company = _normalize_company(raw_company if isinstance(raw_company, str) else "")
+        raw_type = conflict.get("type")
+        ctype = (raw_type if isinstance(raw_type, str) else "").strip().lower()
         key = (company, ctype)
         if company and key in seen_keys:
             print(
@@ -169,11 +173,49 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Conflict check validator (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
+    p.add_argument("--run-id", required=True, help="Run identifier injected into metadata.run_id")
+    p.add_argument(
+        "--generic-stub",
+        action="store_true",
+        help=(
+            "Emit a deterministic empty 'clear' conflict check with no stdin input. "
+            "For a synthesized/illustrative (generic) fund with no real holdings, a "
+            "portfolio-conflict analysis against invented companies is circular, so "
+            "this stub is produced instead of dispatching a sub-agent."
+        ),
+    )
     return p.parse_args()
+
+
+def _write_result(result: dict[str, Any], args: argparse.Namespace) -> None:
+    """Stamp metadata.run_id, serialize, and write the result (file or stdout)."""
+    # Inject metadata.run_id as the last step before serialization (overrides any stdin metadata).
+    result["metadata"] = {"run_id": args.run_id}
+
+    indent = 2 if args.pretty else None
+    out = json.dumps(result, indent=indent) + "\n"
+    sm = result.get("summary")
+    _write_output(
+        out,
+        args.output,
+        summary={
+            "validation": result["validation"]["status"],
+            **({"conflicts": sm["conflict_count"]} if sm else {}),
+        },
+    )
 
 
 def main() -> None:
     args = parse_args()
+
+    # Generic-mode stub: no stdin at all. Delegate to validate_conflicts on the
+    # empty shape so the output is byte-for-byte schema-identical to the piped
+    # path (summary "clear", validation valid). Handled BEFORE the stdin gate so
+    # it never touches isatty()/json.load(stdin).
+    if args.generic_stub:
+        result = validate_conflicts({"portfolio_size": 0, "conflicts": []})
+        _write_result(result, args)
+        return
 
     if sys.stdin.isatty():
         print("Error: pipe JSON input via stdin", file=sys.stderr)
@@ -194,18 +236,7 @@ def main() -> None:
         sys.exit(1)
 
     result = validate_conflicts(data)
-
-    indent = 2 if args.pretty else None
-    out = json.dumps(result, indent=indent) + "\n"
-    sm = result.get("summary")
-    _write_output(
-        out,
-        args.output,
-        summary={
-            "validation": result["validation"]["status"],
-            **({"conflicts": sm["conflict_count"]} if sm else {}),
-        },
-    )
+    _write_result(result, args)
 
 
 if __name__ == "__main__":

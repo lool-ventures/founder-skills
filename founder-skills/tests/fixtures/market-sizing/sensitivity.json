@@ -1,0 +1,137 @@
+{
+  "approach": "bottom_up",
+  "base_result": {
+    "tam": 8100000000.0,
+    "sam": 2835000000.0,
+    "som": 141750000.0
+  },
+  "scenarios": [
+    {
+      "parameter": "customer_count",
+      "confidence": "sourced",
+      "original_range": {
+        "low_pct": -20.0,
+        "high_pct": 15.0
+      },
+      "effective_range": {
+        "low_pct": -20.0,
+        "high_pct": 15.0
+      },
+      "range_widened": false,
+      "base_value": 4500000.0,
+      "low": {
+        "adjustment_pct": -20.0,
+        "value": 3600000.0,
+        "tam": 6480000000.0,
+        "sam": 2268000000.0,
+        "som": 113400000.0
+      },
+      "base": {
+        "tam": 8100000000.0,
+        "sam": 2835000000.0,
+        "som": 141750000.0
+      },
+      "high": {
+        "adjustment_pct": 15.0,
+        "value": 5175000.0,
+        "tam": 9315000000.0,
+        "sam": 3260250000.0,
+        "som": 163012500.0
+      }
+    },
+    {
+      "parameter": "arpu",
+      "confidence": "sourced",
+      "original_range": {
+        "low_pct": -15.0,
+        "high_pct": 10.0
+      },
+      "effective_range": {
+        "low_pct": -15.0,
+        "high_pct": 10.0
+      },
+      "range_widened": false,
+      "base_value": 1800.0,
+      "low": {
+        "adjustment_pct": -15.0,
+        "value": 1530.0,
+        "tam": 6885000000.0,
+        "sam": 2409750000.0,
+        "som": 120487500.0
+      },
+      "base": {
+        "tam": 8100000000.0,
+        "sam": 2835000000.0,
+        "som": 141750000.0
+      },
+      "high": {
+        "adjustment_pct": 10.0,
+        "value": 1980.0,
+        "tam": 8910000000.0,
+        "sam": 3118500000.0,
+        "som": 155925000.0
+      }
+    },
+    {
+      "parameter": "target_pct",
+      "confidence": "agent_estimate",
+      "original_range": {
+        "low_pct": -40.0,
+        "high_pct": 40.0
+      },
+      "effective_range": {
+        "low_pct": -50,
+        "high_pct": 50
+      },
+      "range_widened": true,
+      "base_value": 5.0,
+      "low": {
+        "adjustment_pct": -50,
+        "value": 2.5,
+        "tam": 8100000000.0,
+        "sam": 2835000000.0,
+        "som": 70875000.0
+      },
+      "base": {
+        "tam": 8100000000.0,
+        "sam": 2835000000.0,
+        "som": 141750000.0
+      },
+      "high": {
+        "adjustment_pct": 50,
+        "value": 7.5,
+        "tam": 8100000000.0,
+        "sam": 2835000000.0,
+        "som": 212625000.0
+      }
+    }
+  ],
+  "sensitivity_ranking": [
+    {
+      "parameter": "target_pct",
+      "som_swing": 141750000.0,
+      "som_swing_pct": 100.0,
+      "tam_swing_pct": 0.0
+    },
+    {
+      "parameter": "customer_count",
+      "som_swing": 49612500.0,
+      "som_swing_pct": 35.0,
+      "tam_swing_pct": 35.0
+    },
+    {
+      "parameter": "arpu",
+      "som_swing": 35437500.0,
+      "som_swing_pct": 25.0,
+      "tam_swing_pct": 25.0
+    }
+  ],
+  "most_sensitive": "target_pct",
+  "validation": {
+    "status": "valid",
+    "errors": []
+  },
+  "metadata": {
+    "run_id": "fixture-market-sizing-001"
+  }
+}

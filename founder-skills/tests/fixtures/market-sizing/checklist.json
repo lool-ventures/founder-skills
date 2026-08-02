@@ -1,0 +1,174 @@
+{
+  "items": [
+    {
+      "id": "structural_tam_gt_sam_gt_som",
+      "category": "Structural Checks",
+      "label": "TAM > SAM > SOM",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "structural_definitions_correct",
+      "category": "Structural Checks",
+      "label": "Definitions used correctly",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "tam_matches_product_scope",
+      "category": "TAM Scoping",
+      "label": "TAM matches product scope",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "source_segments_match",
+      "category": "TAM Scoping",
+      "label": "Source segments match product segments",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "som_share_defensible",
+      "category": "SOM Realism",
+      "label": "SOM share is defensible",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "som_backed_by_gtm",
+      "category": "SOM Realism",
+      "label": "SOM backed by go-to-market plan",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "som_consistent_with_projections",
+      "category": "SOM Realism",
+      "label": "SOM consistent with financial projections",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "data_current",
+      "category": "Data Quality",
+      "label": "Data is current",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "sources_reputable",
+      "category": "Data Quality",
+      "label": "Sources are reputable",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "figures_triangulated",
+      "category": "Data Quality",
+      "label": "Key figures triangulated",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "unsupported_figures_flagged",
+      "category": "Data Quality",
+      "label": "Unsupported figures flagged",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "validated_used_precisely",
+      "category": "Data Quality",
+      "label": "Validated used precisely",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "assumptions_categorized",
+      "category": "Data Quality",
+      "label": "Assumptions categorized",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "both_approaches_used",
+      "category": "Methodology",
+      "label": "Both approaches used",
+      "status": "not_applicable",
+      "notes": "Bottom-up only; company has no reliable top-down industry report"
+    },
+    {
+      "id": "approaches_reconciled",
+      "category": "Methodology",
+      "label": "Top-down and bottom-up reconciled",
+      "status": "not_applicable",
+      "notes": "Single approach; no cross-check to reconcile"
+    },
+    {
+      "id": "growth_dynamics_considered",
+      "category": "Methodology",
+      "label": "Market growth dynamics considered",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "market_properly_segmented",
+      "category": "Market Understanding",
+      "label": "Market properly segmented",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "competitive_landscape_acknowledged",
+      "category": "Market Understanding",
+      "label": "Competitive landscape acknowledged",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "sam_expansion_path_noted",
+      "category": "Market Understanding",
+      "label": "SAM expansion path noted",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "assumptions_explicit",
+      "category": "Presentation",
+      "label": "Assumptions explicit",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "formulas_shown",
+      "category": "Presentation",
+      "label": "Formulas shown",
+      "status": "pass",
+      "notes": null
+    },
+    {
+      "id": "sources_cited",
+      "category": "Presentation",
+      "label": "Sources cited",
+      "status": "pass",
+      "notes": null
+    }
+  ],
+  "summary": {
+    "total": 22,
+    "pass": 20,
+    "fail": 0,
+    "not_applicable": 2,
+    "score_pct": 100.0,
+    "overall_status": "pass",
+    "failed_items": []
+  },
+  "validation": {
+    "status": "valid",
+    "errors": []
+  },
+  "metadata": {
+    "run_id": "fixture-market-sizing-001"
+  }
+}

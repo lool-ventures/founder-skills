@@ -112,6 +112,31 @@ def test_generates_html() -> None:
         assert "</html>" in stdout
 
 
+def test_3d_tab_degrades_gracefully_in_cowork() -> None:
+    """The optional 3D tab lazy-loads Plotly from a CDN (deliberately not
+    inlined — ~3 MB). In Cowork (embedded viewer, no CDN egress) that load
+    fails. This must degrade to a clear, Cowork-named fallback card, NOT a
+    silent blank tab. Regression guard: a refactor must not drop the
+    `#3d-fallback` card or the `onerror`/`catch` handlers that reveal it.
+
+    (The 2D map is vendored/offline and unaffected; only the 3D tab depends on
+    the CDN. See 2026-06-16-skills-live-test-findings.md Finding 1.)
+    """
+    arts = _all_artifacts()
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        # The fallback card element must exist...
+        assert 'id="3d-fallback"' in stdout, "missing #3d-fallback degradation card"
+        # ...both failure paths (CDN load error AND render error) must reveal it...
+        assert "script.onerror" in stdout, "missing CDN-load-failure (onerror) handler"
+        assert stdout.count("fallback.style.display = 'block'") >= 2, (
+            "both the onerror and the render-catch handlers must reveal the fallback card"
+        )
+        # ...and it must name Cowork so the user knows why and what to do.
+        assert "Cowork" in stdout, "fallback card must name Cowork (the embedded-viewer case)"
+
+
 def test_chartjs_loaded() -> None:
     """Chart.js must be inlined — the vendored source must appear in HTML."""
     arts = _all_artifacts()
@@ -286,3 +311,142 @@ def test_axis_rationale_in_embedded_data() -> None:
         assert len(data["views"]) >= 1
         v = data["views"][0]
         assert v.get("x_axis", {}).get("rationale"), "View should have x_axis rationale in DATA"
+
+
+# ---------------------------------------------------------------------------
+# Audit regression tests (a4: explore.py)
+# ---------------------------------------------------------------------------
+
+
+def test_non_dict_artifact_does_not_crash() -> None:
+    """A top-level JSON array artifact must degrade to the corrupt path, not
+    crash explore.py with AttributeError (audit cp-scripts-6)."""
+    with _make_artifact_dir(_all_artifacts()) as d:
+        with open(os.path.join(d, "report.json"), "w") as f:
+            f.write('["x"]')
+        rc, stdout, stderr = _run_explore(d)
+        assert "Traceback" not in stderr
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        assert "<html" in stdout.lower()
+
+
+def test_3d_axes_bar_initially_hidden() -> None:
+    """The #3d-axes-bar div must not carry a live 'display: flex' in its static
+    style — the dead duplicate that overrode the intended display:none is removed
+    (audit cp-scripts-8). render3D sets display='flex' at runtime instead."""
+    with _make_artifact_dir(_all_artifacts()) as d:
+        rc, stdout, _stderr = _run_explore(d)
+        assert rc == 0
+        # Isolate the axes-bar div's opening tag.
+        idx = stdout.find('id="3d-axes-bar"')
+        assert idx != -1
+        tag = stdout[idx : stdout.find(">", idx)]
+        assert "display:none" in tag
+        # The static style must not also declare display:flex (that masked the hide).
+        assert "display: flex" not in tag and "display:flex" not in tag
+
+
+def _extract_data_payload(stdout: str) -> dict[str, Any]:
+    """Extract and parse the embedded `const DATA = ...` JSON payload."""
+    import re
+
+    match = re.search(r"/\*DATA_START\*/\s*const DATA = (.*?);\s*/\*DATA_END\*/", stdout, re.DOTALL)
+    assert match is not None, "DATA sentinel comments not found"
+    payload = json.loads(match.group(1))
+    assert isinstance(payload, dict)
+    return payload
+
+
+def test_prefers_scored_differentiation_claims_over_draft_placeholder() -> None:
+    """positioning.json carries a DRAFT placeholder claim (written before
+    POSITIONING_SCORING runs); positioning_scores.json carries the real scored
+    claim with a verdict. The explorer must surface the scored claim and must
+    NOT carry the placeholder text — the placeholder was never meant to reach
+    the founder."""
+    arts = _all_artifacts()
+
+    pos = dict(arts["positioning.json"])
+    pos["differentiation_claims"] = [{"claim": "DRAFT — stress-tested in positioning_scores.json"}]
+    arts["positioning.json"] = pos
+
+    ps = dict(arts["positioning_scores.json"])
+    ps["differentiation_claims"] = [
+        {
+            "claim": "Sub-5ms latency vs. competitors' 50-200ms",
+            "verifiable": True,
+            "evidence": "SDK-based approach avoids network hop",
+            "challenge": "No independent benchmark found",
+            "verdict": "holds",
+        }
+    ]
+    arts["positioning_scores.json"] = ps
+
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        data = _extract_data_payload(stdout)
+        claims = data["diff_claims"]
+        assert any(c.get("claim") == "Sub-5ms latency vs. competitors' 50-200ms" for c in claims), (
+            f"scored claim missing from diff_claims: {claims}"
+        )
+        assert not any("DRAFT" in c.get("claim", "") for c in claims), (
+            f"draft placeholder claim leaked into diff_claims: {claims}"
+        )
+        assert "DRAFT — stress-tested in positioning_scores.json" not in stdout
+
+
+def test_falls_back_to_positioning_claims_when_scores_have_none() -> None:
+    """When positioning_scores.json carries no differentiation_claims, the
+    explorer must still fall back to positioning.json's claims rather than
+    shipping an empty stress-test section."""
+    arts = _all_artifacts()
+    ps = dict(arts["positioning_scores.json"])
+    ps["differentiation_claims"] = []
+    arts["positioning_scores.json"] = ps
+
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        data = _extract_data_payload(stdout)
+        claims = data["diff_claims"]
+        assert len(claims) >= 1, "fallback to positioning.json claims must not yield an empty section"
+        # VALID_POSITIONING's differentiation_claims (conftest fixture) includes this claim text.
+        assert any("2B+ API calls" in c.get("claim", "") for c in claims)
+
+
+def test_scoring_basis_absent_is_null_in_data_payload() -> None:
+    """Absent scoring_basis must be carried through as null/absent in DATA, not
+    silently defaulted — the JS caption renders 'Not declared' for exactly this
+    payload shape."""
+    arts = _all_artifacts()
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        data = _extract_data_payload(stdout)
+        assert data.get("scoring_basis") is None
+        assert 'id="scoring-basis-caption"' in stdout
+
+
+def test_scoring_basis_declared_value_carried_into_data_payload() -> None:
+    """A declared scoring_basis (from positioning_scores.json) must be carried
+    verbatim into the DATA payload so the JS caption can label it."""
+    arts = _all_artifacts()
+    ps = dict(arts["positioning_scores.json"])
+    ps["scoring_basis"] = "roadmap_12mo"
+    arts["positioning_scores.json"] = ps
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        data = _extract_data_payload(stdout)
+        assert data.get("scoring_basis") == "roadmap_12mo"
+
+
+def test_docstring_discloses_plotly_cdn() -> None:
+    """The explore.py module docstring must disclose the Plotly CDN dependency
+    for the 3D tab rather than claim blanket 'self-contained' (audit cp-scripts-4)."""
+    with open(SCRIPT, encoding="utf-8") as f:
+        src = f.read()
+    doc_end = src.index('"""', src.index('"""') + 3)
+    docstring = src[:doc_end]
+    assert "3D" in docstring or "Plotly" in docstring
+    assert "CDN" in docstring

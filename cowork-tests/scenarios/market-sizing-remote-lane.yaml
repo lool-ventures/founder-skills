@@ -1,0 +1,87 @@
+name: market-sizing-remote-lane
+session: ../sessions/default.yaml
+fidelity: cowork
+lane: remote                 # requires harness >=1.14.0 to LOAD (an older loader rejects the key
+                             # outright, exit 2) and >=1.16.0 to RECORD safely: 1.16.0 stamps a
+                             # lane: remote cassette at format v11, which older CLIs refuse loudly.
+                             # Recorded on 1.14.0/1.15.0 it would be a v10 cassette that an older
+                             # `replay` scores under `lane: local` in total silence — the hazard the
+                             # v11 stamp exists to close. See cowork-tests/README.md's v11 regime.
+                             # As of 1.16.0 `lane` is also in the --assert-from/--reassert drift guard,
+                             # so flipping it on disk and re-checking hard-fails instead of silently
+                             # re-validating under the wrong delivery contract.
+on_unanswered: first         # gates are immaterial to the asserts (same rationale as the smoke)
+skills: [market-sizing]      # scope the staleness hash to this skill + shared roots
+
+# DELIVERY-CONTRACT probe — deliberately minimal, like host-path-canary. This is not a second
+# market-sizing feature test (market-sizing-smoke owns that surface); it exists to answer ONE question:
+# does this fleet's delivery model survive the Cowork lane that most new sessions actually get?
+#
+# WHY IT MATTERS. Cowork picks a lane per session ("Run this task: In the cloud / On your computer"),
+# and CLOUD IS THE DEFAULT FOR NEW SESSIONS. The lanes disagree about what "delivered" means:
+#   * lane: local  — a file under a user-visible root IS delivered (outputs/ is durable, and Cowork's
+#                    own prompt tells the agent to save deliverables there).
+#   * lane: remote — location delivers NOTHING. A remote container has no auto-delivering outputs dir
+#                    and is reclaimed at session end; `present_files` is not served there at all.
+# STALE PREMISE, CORRECTED: this comment used to say every skill here "delivers BY LOCATION ... and never
+# calls a delivery tool". That was true before the shared delivery block landed; all six SKILL.mds now
+# carry it, and it instructs sending the finished set AS FILES (tool-agnostically — naming either
+# `present_files` or `SendUserFile` would strand the other lane, which a contract test enforces). What
+# remains true on this lane is narrower: location alone still delivers nothing, and the harness models no
+# remote delivery tool, so delivery here is UNOBSERVABLE rather than absent — see delivery_unobservable.
+#
+# WHAT THIS SCENARIO IS AND IS NOT. `lane:` is DECLARED INTENT: the harness records it as scenario
+# metadata because a real session's lane "leaves no trace in a run's evidence" (run-result schema).
+# So this run does not exercise different agent behaviour — it re-scores the same behaviour under the
+# other delivery contract. Read it as a committed REGRESSION GATE on the delivery model, not as a
+# discovery experiment.
+#
+# EXPECTED OUTCOME — REVISED AT HARNESS 1.17.0. The original prediction below was written against
+# 1.16.0 and is no longer correct; it is kept as a correction record because the cassette on disk was
+# recorded at 1.16.0 and still carries the old behaviour.
+#
+#   * `delivery_unobservable` (warn) FIRES — this is the signal to read. NEW IN 1.17.0.
+#   * `undelivered_deliverables` (warn) does NOT fire. It used to fire on every remote run, and that
+#     was a BUG, not the signal this scenario was built to observe. On remote the location arm of the
+#     delivery check is correctly off, but the `presentedFiles` arm can never match either — no remote
+#     delivery tool is served, so the array is structurally always empty. Every remote run that wrote a
+#     file warned "never reached the user", which the evidence cannot support. 1.17.0 gates it behind a
+#     `deliveryObservable()` predicate. The two warns are mutually exclusive.
+#   * `ended_with_question` (warn) MAY fire alongside it: 1.14.0 made that signal lane-aware, so an
+#     outputs/ file no longer suppresses it here.
+#   * The run still passes. All are warn-severity and never fail a run on their own.
+# When reading the result, pair silence with `result.json` -> `scratchpadEvidenceComplete: true`.
+# Silence WITHOUT it is "could not tell", never "clean".
+#
+# DELIBERATELY NOT SET: `allow_undelivered_deliverables`. Under 1.16.0 the spurious warn effectively
+# FORCED this key into every remote scenario; 1.17.0 removes that pressure. Leave it unset — setting it
+# now would suppress nothing this run produces, and would mask a real regression if the predicate broke.
+#
+# RE-RECORD NOTE: the committed cassette is `harnessVersion: 1.16.0`, so it froze a run whose warn set
+# asserts something false about delivery. Re-record this scenario on >=1.17.0 (rerecord.sh now floors
+# there) before treating its warn set as evidence.
+#
+# THREE ASSERTION KEYS CANNOT APPEAR ON THIS LANE — `user_visible_artifact`, `present_files_called`,
+# and `no_scratchpad_leak` are rejected at scenario-LOAD time (and flagged by `lint` as
+# lane-remote-incompatible-key). That is not an omission to be fixed later: on this lane location
+# proves nothing and the delivery tool does not exist, so those keys could only ever report
+# cannot-verify. The smoke asserts none of them, which is why this derives from it cleanly.
+prompt: |
+  I'm the founder of Cadence, a US-based seed-stage B2B SaaS company selling field-service scheduling
+  and dispatch software to small and mid-sized service businesses (HVAC, plumbing, electrical). Please
+  use the market-sizing skill to build a full TAM/SAM/SOM analysis for Cadence — top-down and
+  bottom-up — with a sensitivity test, and produce the written report. Keep all figures illustrative;
+  where you would cite an external market source, label it clearly.
+
+assert:
+  # The skill still WORKS on this lane — what the lane changes is whether its output counts as
+  # delivered, not whether the pipeline runs.
+  - result: success
+  - all_tasks_completed: true
+  # The deliverable is still PRODUCED at the contracted path. On lane: remote this asserts production
+  # only; it deliberately makes no delivery claim, which is the whole distinction under test.
+  - file_exists: outputs/artifacts/market-sizing-cadence/report.json
+  # Entered through the Skill tool (prefix-tolerant).
+  - skill_triggered: '(founder-skills:)?market-sizing$'
+  # Outputs mount is append-only (live-lane key; replay skips it loudly).
+  - no_delete_in_outputs: true

@@ -12,12 +12,17 @@ The actual mechanism (per gist update 2026-05-10):
        Bash, NotebookEdit, REPL, JavaScript, WebFetch
      These names don't exist in any sub-agent's tool surface.
 
-  2. Bash has an MCP replacement: `mcp__workspace__bash` (deferred-tier
-     MCP). Sub-agents that need shell can declare this name explicitly
-     in `tools:` AND use `ToolSearch` (immediate-tier) to load its
-     schema on demand. Inline skills (no fork) use it transparently via
-     the model's `ToolSearch` integration — no explicit declaration
-     required.
+  2. Bash has an MCP replacement: `mcp__workspace__bash`. Per the
+     v0.4.7 probe it is present in the default sub-agent toolset's MCP
+     tier: sub-agents that need shell can declare the name explicitly
+     in `tools:` (plus `ToolSearch` to load its deferred schema) and it
+     resolves. Declaring it is POSSIBLE but DISALLOWED by repo policy —
+     no founder-skills agent gets a shell (anti-fabrication +
+     portability; see references/skill-execution-model.md "Why
+     Inline"). This helper models resolution, not policy; the policy
+     lives in test_cowork_invariants.py. Inline skills (no fork) use
+     `mcp__workspace__bash` transparently via the model's ToolSearch
+     integration — no explicit declaration required.
 
   3. Other parent-only / non-sub-agent tool names (`Task`,
      `AskUserQuestion`, `SendMessage`) aren't scope-excluded but also
@@ -47,8 +52,8 @@ NOT extend this one.
 
 Reference: docs/internal/cowork-architecture-and-v0.4.x-learning.md, plus
 gist yaniv-golan/303b6213b7a33167b3f98b076a5f81ad (which corrects the earlier
-"filter strips Bash" framing — the mechanism is name-registration mismatch,
-not filtering).
+framing of a runtime filter removing Bash — the mechanism is
+name-registration mismatch, not filtering).
 Update the constant if the platform's sub-agent native-tool registry changes.
 """
 
@@ -59,8 +64,10 @@ from __future__ import annotations
 # Notable absences (the desktop-side scope exclusion removes 5 tools BEFORE
 # the CLI's runtime tool registry is built — these names don't exist in the
 # Cowork sub-agent registry at all):
-#   - Bash         (replaced by mcp__workspace__bash, deferred MCP tier;
-#                   reachable via explicit declaration + ToolSearch)
+#   - Bash         (the literal name; its MCP replacement
+#                   mcp__workspace__bash IS in the default sub-agent
+#                   toolset per the v0.4.7 probe, and mcp__* names take
+#                   the MCP fast-path in apply_filter below)
 #   - NotebookEdit (scope-excluded; no native replacement)
 #   - REPL         (scope-excluded)
 #   - JavaScript   (scope-excluded)
@@ -89,12 +96,13 @@ COWORK_ASYNC_SUBAGENT_ALLOWLIST: frozenset[str] = frozenset(
         # whether the name actually resolves in Cowork sub-agent
         # contexts is empirically verified in Task 4.5.
         "TaskStop",  # Lets a sub-agent terminate itself.
+        "ToolSearch",  # Immediate-tier; loads deferred MCP tool schemas.
     }
 )
 
 
 def apply_filter(declared_tools: list[str]) -> list[str]:
-    """Return the subset of `declared_tools` whose names resolve natively in
+    """Return the subset of `declared_tools` whose names resolve in
     Cowork's sub-agent tool registry.
 
     Mirrors the runtime name-resolution: names in `declared_tools` that are
@@ -102,8 +110,15 @@ def apply_filter(declared_tools: list[str]) -> list[str]:
     agent effectively has the filtered subset. (No error from the platform,
     no warning — the agent just can't see the unbound name.)
 
+    `mcp__*` names pass through unconditionally, matching the runtime's MCP
+    fast-path: MCP tool names resolve against the MCP server registry, not
+    the native-tool registry this allowlist models. (Whether a given MCP
+    server/tool actually exists in the session is a separate question this
+    helper doesn't answer — and repo policy forbids agents declaring any
+    `mcp__*` name regardless; see module docstring.)
+
     The function name retains "filter" terminology because that's what the
     operation does (set intersection); the underlying mechanism is
     name-registration, not post-binding stripping. See module docstring.
     """
-    return [t for t in declared_tools if t in COWORK_ASYNC_SUBAGENT_ALLOWLIST]
+    return [t for t in declared_tools if t.startswith("mcp__") or t in COWORK_ASYNC_SUBAGENT_ALLOWLIST]

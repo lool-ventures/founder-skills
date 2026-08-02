@@ -28,7 +28,10 @@ What you expected to happen instead.
 
 - [ ] Market Sizing
 - [ ] Deck Review
+- [ ] Financial Model Review
 - [ ] IC Simulation
+- [ ] Competitive Positioning
+- [ ] Cap Table
 - [ ] Other / not skill-specific
 
 ## Additional context

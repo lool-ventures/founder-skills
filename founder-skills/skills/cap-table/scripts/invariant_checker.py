@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = []
+# ///
 """Real-world-bounds invariant checker for cap-table Lane-1 extraction.
 
 Forward verification (`evidence_verifier`) catches HALLUCINATIONS:
@@ -33,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import dataclass, field
 from typing import Any
@@ -63,8 +68,10 @@ SOFT_BOUNDS: dict[str, dict[str, dict[str, Any]]] = {
         "annual_interest_rate": {"min": 0.0, "max": 0.20},
         "discount_multiplier": {"min": 0.50, "max": 1.0},
         "qualified_financing_threshold": {"min": 100_000, "max": 100_000_000},
-        # Maturity 6 months to 7 years. Most CLAs are 18-36 months.
-        "maturity_months": {"min": 6, "max": 84},
+        # NOTE: maturity is stored as maturity_date (ISO string), not a month
+        # count, so no numeric bound applies here — a maturity_months bound would
+        # be dead code (fields.get('maturity_months') is always None) and would
+        # over-count n_checks.
         "day_count_basis": {"min": 360, "max": 365},  # 360 (banker's) or 365
     },
     "term_sheet": {
@@ -310,6 +317,7 @@ def main() -> int:
     if args.output:
         with open(args.output, "w") as f:
             f.write(payload)
+        print(json.dumps({"ok": True, "output": os.path.abspath(args.output)}, indent=2 if args.pretty else None))
     else:
         print(payload)
 

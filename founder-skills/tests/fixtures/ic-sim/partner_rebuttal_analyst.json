@@ -1,0 +1,16 @@
+{
+  "partner": "analyst",
+  "revised_verdict": "more_diligence",
+  "verdict_changed": false,
+  "changed_because": "",
+  "responses": [
+    {"to": "visionary", "point": "I don't discount the category-timing thesis, but a timing bet doesn't substitute for a gross-margin figure — those are answering different questions.", "concedes": false},
+    {"to": "operator", "point": "Agreed on needing channel-level CAC before committing — that would also sharpen the LTV/CAC picture I'm missing.", "concedes": true}
+  ],
+  "dealbreakers": [],
+  "diligence_requirements": [
+    "Full unit economics workup (LTV/CAC, gross margin, payback period)",
+    "12-month burn and runway model"
+  ],
+  "metadata": {"run_id": "fixture-ic-sim-001"}
+}

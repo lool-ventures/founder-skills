@@ -120,3 +120,18 @@ Install -> registration -> trial -> pay conversion funnel with plan mix (monthly
 | Stage | What to check |
 | --- | --- |
 | Series A | Install -> registration -> trial -> pay conversion; retention cohorts; plan mix (monthly vs annual); CAC by channel |
+
+---
+
+## Retail / Physical Stores (D2C & Franchise)
+
+### Structure
+Store count (or order volume) x store-level P&L; gross margin on goods sold, not software margin. Rollout models are driven by new-store openings and buildout capex.
+
+### Checks by stage
+
+| Stage | What to check |
+| --- | --- |
+| Pre-Seed | Store-level (or per-order) contribution realism; buildout capex per location; gross margin consistent with the category (grocery-thin vs apparel-rich) |
+| Seed | Store payback period; same-store vs new-store revenue split; inventory and working-capital dynamics as runway risks |
+| Series A | Store-cohort maturation curves; rollout cadence vs capex and hiring capacity; shrinkage/returns in COGS; franchise vs owned-store margin mix |

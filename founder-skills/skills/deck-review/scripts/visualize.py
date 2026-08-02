@@ -112,23 +112,27 @@ def _num(value: Any, default: float = 0.0) -> float:
 # Color scheme
 # ---------------------------------------------------------------------------
 
-_COLOR_PRIMARY = "#0d549d"
-_CLR_ACCENT = "#21a2e3"
-_COLOR_PASS = "#10b981"
-_COLOR_WARN = "#f59e0b"
-_COLOR_FAIL = "#ef4444"
-_COLOR_NA = "#9ca3af"
+_COLOR_PRIMARY = "#0D549D"
+_CLR_ACCENT = "#21A2E3"
+_COLOR_PASS = "#2F8A56"
+_COLOR_WARN = "#C9892B"
+_COLOR_FAIL = "#C0392B"
+_COLOR_NA = "#A6AEB5"
 
 # ---------------------------------------------------------------------------
 # Framework type humanization
 # ---------------------------------------------------------------------------
 
 _FRAMEWORK_LABELS: dict[str, str] = {
+    "purpose": "Purpose",
     "purpose_traction": "Purpose",
     "problem": "Problem",
     "why_now": "Why Now",
     "solution_product": "Solution",
+    "early_signals": "Early Signals",
     "traction_kpis": "Traction",
+    "cohort_data": "Cohort Data",
+    "ltv_cac": "LTV / CAC",
     "market": "Market",
     "competition": "Competition",
     "business_model_pricing": "Business Model",
@@ -189,42 +193,47 @@ def _css() -> str:
     return f"""
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f9fafb;
-            color: #1f2937;
+            font-family: var(--font-body);
+            background: var(--lool-white);
+            color: var(--lool-ink);
             line-height: 1.6;
             padding: 2rem;
             max-width: 960px;
             margin: 0 auto;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }}
         header {{
             text-align: center;
             margin-bottom: 2rem;
             padding-bottom: 1.5rem;
-            border-bottom: 3px solid {_COLOR_PRIMARY};
+            border-bottom: 3px solid var(--lool-blue);
         }}
         header h1 {{
             font-size: 1.75rem;
-            color: {_COLOR_PRIMARY};
+            font-weight: 400;
+            color: var(--lool-blue);
+            letter-spacing: -0.01em;
             margin-bottom: 0.25rem;
         }}
         header .subtitle {{
             font-size: 0.9rem;
-            color: #6b7280;
+            color: var(--lool-mute);
         }}
         main {{ display: flex; flex-direction: column; gap: 2rem; }}
         .chart-section {{
-            background: #ffffff;
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
+            background: var(--lool-paper);
+            border: 1px solid var(--lool-line-2);
+            border-radius: 0;
             padding: 1.5rem;
         }}
         .chart-section h2 {{
             font-size: 1.1rem;
-            color: {_COLOR_PRIMARY};
+            font-weight: 500;
+            color: var(--lool-royal);
             margin-bottom: 1rem;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
+            letter-spacing: 0.06em;
         }}
         .chart-container {{
             display: flex;
@@ -233,23 +242,23 @@ def _css() -> str:
         }}
         .placeholder {{
             text-align: center;
-            color: #9ca3af;
+            color: var(--lool-faint);
             padding: 2rem;
             font-style: italic;
-            background: #f3f4f6;
-            border-radius: 0.25rem;
+            background: var(--lool-paper-2);
+            border-radius: 0;
         }}
         footer {{
             text-align: center;
             margin-top: 2rem;
             padding-top: 1rem;
-            border-top: 1px solid #e5e7eb;
-            color: #9ca3af;
+            border-top: 1px solid var(--lool-line-2);
+            color: var(--lool-faint);
             font-size: 0.8rem;
         }}
-        footer a, header a {{ color: {_CLR_ACCENT}; text-decoration: none; }}
-        footer a:hover, header a:hover {{ text-decoration: underline; }}
-        svg text {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }}
+        footer a, header a {{ color: var(--lool-azure); text-decoration: none; }}
+        footer a:hover, header a:hover {{ color: var(--lool-azure-deep); text-decoration: underline; }}
+        svg text {{ font-family: var(--font-body); }}
         .collapsible-toggle {{
             cursor: pointer;
             user-select: none;
@@ -258,19 +267,19 @@ def _css() -> str:
             gap: 0.5rem;
             padding: 0.5rem 0;
         }}
-        .collapsible-toggle:hover {{ background: #f3f4f6; border-radius: 0.25rem; }}
+        .collapsible-toggle:hover {{ background: var(--lool-paper-2); border-radius: var(--r-input); }}
         .chevron {{
             display: inline-block;
             transition: transform 0.2s;
             font-size: 0.75rem;
-            color: #9ca3af;
+            color: var(--lool-faint);
         }}
         .collapsible-content {{ padding-left: 1.5rem; }}
         .finding-item {{
             padding: 0.75rem;
-            border-left: 3px solid #e5e7eb;
+            border-left: 3px solid var(--lool-line-2);
             margin-bottom: 0.5rem;
-            border-radius: 0 0.25rem 0.25rem 0;
+            border-radius: 0;
         }}
         .finding-strong {{ border-left-color: {_COLOR_PASS}; }}
         .finding-attention {{ border-left-color: {_COLOR_FAIL}; }}
@@ -278,7 +287,8 @@ def _css() -> str:
         .findings-subsection {{ margin-bottom: 1rem; }}
         .findings-subsection h3 {{
             font-size: 0.9rem;
-            color: #374151;
+            font-weight: 500;
+            color: var(--lool-slate);
             margin-bottom: 0.5rem;
         }}
         @media print {{
@@ -304,8 +314,8 @@ def _tooltip_js() -> str:
         "<script>\n"
         "document.addEventListener('DOMContentLoaded', function() {\n"
         "    var tip = document.createElement('div');\n"
-        "    tip.style.cssText = 'position:fixed;padding:8px 12px;background:#1f2937;color:#fff;'\n"
-        "        + 'border-radius:6px;font-size:12px;max-width:300px;pointer-events:none;'\n"
+        "    tip.style.cssText = 'position:fixed;padding:8px 12px;background:#374B65;color:#fff;'\n"
+        "        + 'border-radius:4px;font-size:12px;max-width:300px;pointer-events:none;'\n"
         "        + 'z-index:1000;display:none;line-height:1.4;white-space:pre-line;'\n"
         "        + 'box-shadow:0 2px 8px rgba(0,0,0,0.15)';\n"
         "    document.body.appendChild(tip);\n"
@@ -439,9 +449,9 @@ def _key_findings(
 def _chart_score_gauge(checklist: dict[str, Any] | None) -> str:
     """Render a semi-circle score gauge SVG.
 
-    Uses stroked arcs inside an annular-semicircle clipPath.  The first
-    and last zone arcs (and the score arc) extend 2% past the baseline
-    so the clip hides endpoint artifacts.
+    Uses stroked zone arcs inside an annular-semicircle clipPath drawn at
+    exact ranges (the clipPath hides endpoint artifacts at the baseline).
+    The score is indicated by a needle, not an arc.
     """
     if checklist is None:
         return _placeholder("No data available")
@@ -497,7 +507,7 @@ def _chart_score_gauge(checklist: dict[str, Any] | None) -> str:
     zones = [
         (0, 50, _COLOR_FAIL),
         (50, 70, _COLOR_WARN),
-        (70, 85, "#34d399"),
+        (70, 85, "#71B48D"),
         (85, 100, _COLOR_PASS),
     ]
     arcs = []
@@ -524,10 +534,10 @@ def _chart_score_gauge(checklist: dict[str, Any] | None) -> str:
     score_text = (
         f'<text x="{cx:.2f}" y="{_num(cy - 30):.2f}" '
         f'text-anchor="middle" font-size="28" font-weight="700" '
-        f'fill="#1f2937">{_esc(f"{score_pct:.0f}")}%</text>'
+        f'fill="#374B65">{_esc(f"{score_pct:.0f}")}%</text>'
         f'<text x="{cx:.2f}" y="{_num(cy - 8):.2f}" '
         f'text-anchor="middle" font-size="13" '
-        f'fill="#6b7280">{overall_status}</text>'
+        f'fill="#7D90A3">{overall_status}</text>'
     )
 
     # Threshold labels
@@ -538,7 +548,7 @@ def _chart_score_gauge(checklist: dict[str, Any] | None) -> str:
         lx = _num(cx + label_r * math.cos(a))
         ly = _num(cy - label_r * math.sin(a))
         labels += (
-            f'<text x="{lx:.2f}" y="{ly:.2f}" text-anchor="middle" font-size="9" fill="#9ca3af">{_esc(label)}</text>'
+            f'<text x="{lx:.2f}" y="{ly:.2f}" text-anchor="middle" font-size="9" fill="#A6AEB5">{_esc(label)}</text>'
         )
 
     clipped = f'{clip}<g clip-path="url(#gc)">{"".join(arcs)}</g>'
@@ -610,7 +620,7 @@ def _chart_radar(checklist: dict[str, Any] | None) -> str:
             px = _num(cx + ring_r * math.cos(angle))
             py = _num(cy + ring_r * math.sin(angle))
             points_str += f"{px:.2f},{py:.2f} "
-        grid_lines += f'<polygon points="{_esc(points_str.strip())}" fill="none" stroke="#e5e7eb" stroke-width="1"/>'
+        grid_lines += f'<polygon points="{_esc(points_str.strip())}" fill="none" stroke="#D7DBE0" stroke-width="1"/>'
 
     # Axis lines
     axis_lines = ""
@@ -619,7 +629,7 @@ def _chart_radar(checklist: dict[str, Any] | None) -> str:
         ax = _num(cx + max_r * math.cos(angle))
         ay = _num(cy + max_r * math.sin(angle))
         axis_lines += (
-            f'<line x1="{cx:.2f}" y1="{cy:.2f}" x2="{ax:.2f}" y2="{ay:.2f}" stroke="#e5e7eb" stroke-width="1"/>'
+            f'<line x1="{cx:.2f}" y1="{cy:.2f}" x2="{ax:.2f}" y2="{ay:.2f}" stroke="#D7DBE0" stroke-width="1"/>'
         )
 
     # Data polygon
@@ -659,10 +669,10 @@ def _chart_radar(checklist: dict[str, Any] | None) -> str:
         rate_str = f"{pass_rates[i]:.0f}%"
         labels += (
             f'<text x="{lx:.2f}" y="{ly:.2f}" text-anchor="{_esc(anchor)}" '
-            f'font-size="10" fill="#6b7280">'
+            f'font-size="10" fill="#7D90A3">'
             f"{_esc(categories[i])}</text>"
             f'<text x="{lx:.2f}" y="{_num(ly + 13):.2f}" text-anchor="{_esc(anchor)}" '
-            f'font-size="9" fill="#9ca3af">{_esc(rate_str)}</text>'
+            f'font-size="9" fill="#A6AEB5">{_esc(rate_str)}</text>'
         )
 
     svg = (
@@ -727,7 +737,7 @@ def _chart_category_breakdown(checklist: dict[str, Any] | None) -> str:
         # Label
         bars_svg += (
             f'<text x="{_num(label_width - 8):.2f}" y="{_num(y + bar_height / 2 + 4):.2f}" '
-            f'text-anchor="end" font-size="11" fill="#6b7280">{_esc(cat)}</text>'
+            f'text-anchor="end" font-size="11" fill="#7D90A3">{_esc(cat)}</text>'
         )
 
         if total <= 0:
@@ -735,7 +745,7 @@ def _chart_category_breakdown(checklist: dict[str, Any] | None) -> str:
             bars_svg += (
                 f'<rect x="{_num(label_width):.2f}" y="{y:.2f}" '
                 f'width="{_num(bar_width):.2f}" height="{_num(bar_height):.2f}" '
-                f'rx="4" fill="#f3f4f6"/>'
+                f'rx="4" fill="#F1F4F4"/>'
             )
             continue
 
@@ -743,7 +753,7 @@ def _chart_category_breakdown(checklist: dict[str, Any] | None) -> str:
         bars_svg += (
             f'<rect x="{_num(label_width):.2f}" y="{y:.2f}" '
             f'width="{_num(bar_width):.2f}" height="{_num(bar_height):.2f}" '
-            f'rx="4" fill="#f3f4f6"/>'
+            f'rx="4" fill="#F1F4F4"/>'
         )
 
         # Stacked segments: pass, warn, fail, NA
@@ -780,7 +790,7 @@ def _chart_category_breakdown(checklist: dict[str, Any] | None) -> str:
             f'<rect x="{lx:.2f}" y="{legend_y:.2f}" width="12" height="12" rx="2" '
             f'fill="{_esc(color)}"/>'
             f'<text x="{_num(lx + 16):.2f}" y="{_num(legend_y + 10):.2f}" '
-            f'font-size="10" fill="#6b7280">{_esc(label)}</text>'
+            f'font-size="10" fill="#7D90A3">{_esc(label)}</text>'
         )
         lx = _num(lx + 60)
 
@@ -933,7 +943,7 @@ def _chart_slide_map(
     svg_parts.append(
         f'<line x1="{center_x:.1f}" y1="{padding_top}" '
         f'x2="{center_x:.1f}" y2="{_num(total_h - padding_bottom):.1f}" '
-        f'stroke="#d1d5db" stroke-width="1"/>'
+        f'stroke="#D7DBE0" stroke-width="1"/>'
     )
 
     for idx, row in enumerate(rows):
@@ -944,7 +954,7 @@ def _chart_slide_map(
         # Zebra striping
         if idx % 2 == 1:
             svg_parts.append(
-                f'<rect x="0" y="{y:.1f}" width="{total_w}" height="{row_h}" fill="#f3f4f6" fill-opacity="0.5" rx="4"/>'
+                f'<rect x="0" y="{y:.1f}" width="{total_w}" height="{row_h}" fill="#F1F4F4" fill-opacity="0.5" rx="4"/>'
             )
 
         if row["type"] == "present":
@@ -960,7 +970,7 @@ def _chart_slide_map(
                 label_text += f" \u00b7 {label}"
             svg_parts.append(
                 f'<text x="{_num(label_w - 8):.1f}" y="{text_y:.1f}" '
-                f'text-anchor="end" font-size="11" fill="#6b7280">'
+                f'text-anchor="end" font-size="11" fill="#7D90A3">'
                 f"{_esc(label_text)}</text>"
             )
 
@@ -1012,7 +1022,7 @@ def _chart_slide_map(
                 rec_x = _num(label_w + bar_area_w + 14)
                 svg_parts.append(
                     f'<text x="{rec_x:.1f}" y="{text_y:.1f}" '
-                    f'font-size="10" fill="#9ca3af">'
+                    f'font-size="10" fill="#A6AEB5">'
                     f"{r_count} rec{'s' if r_count != 1 else ''}</text>"
                 )
 
@@ -1023,14 +1033,14 @@ def _chart_slide_map(
 
             svg_parts.append(
                 f'<text x="{_num(label_w - 8):.1f}" y="{text_y:.1f}" '
-                f'text-anchor="end" font-size="11" fill="#6b7280">'
+                f'text-anchor="end" font-size="11" fill="#7D90A3">'
                 f"\u2014 \u00b7 {_esc(label)}</text>"
             )
 
             svg_parts.append(
                 f'<line x1="{label_w}" y1="{mid_y:.1f}" '
                 f'x2="{_num(label_w + bar_area_w):.1f}" y2="{mid_y:.1f}" '
-                f'stroke="#9ca3af" stroke-width="1" stroke-dasharray="6,4"/>'
+                f'stroke="#A6AEB5" stroke-width="1" stroke-dasharray="6,4"/>'
             )
 
             if importance:
@@ -1038,7 +1048,7 @@ def _chart_slide_map(
                 rec_x = _num(label_w + bar_area_w + 14)
                 svg_parts.append(
                     f'<text x="{rec_x:.1f}" y="{text_y:.1f}" '
-                    f'font-size="9" fill="#6b7280" font-style="italic">'
+                    f'font-size="9" fill="#7D90A3" font-style="italic">'
                     f"{_esc(badge_label)}</text>"
                 )
 
@@ -1047,7 +1057,7 @@ def _chart_slide_map(
     legend_items: list[tuple[str, str, str]] = [
         (_COLOR_PASS, "rect", "Strengths"),
         (_COLOR_FAIL, "rect", "Weaknesses"),
-        ("#52525b", "dash", "Missing expected slide"),
+        ("#A6AEB5", "dash", "Missing expected slide"),
     ]
     lx = _num(label_w)
     legend_svg = ""
@@ -1063,7 +1073,7 @@ def _chart_slide_map(
                 f'stroke="{_esc(color)}" stroke-width="2" stroke-dasharray="4,3"/>'
             )
         legend_svg += (
-            f'<text x="{_num(lx + 16):.1f}" y="{legend_y:.1f}" font-size="10" fill="#6b7280">{_esc(label)}</text>'
+            f'<text x="{_num(lx + 16):.1f}" y="{legend_y:.1f}" font-size="10" fill="#7D90A3">{_esc(label)}</text>'
         )
         lx = _num(lx + len(label) * 7 + 32)
 
@@ -1085,6 +1095,13 @@ def _chart_slide_map(
 
 def compose_html(dir_path: str) -> str:
     """Load artifacts and compose complete HTML report."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _theme
+
+    brand_css = _theme.brand_css()
+
     artifacts: dict[str, dict[str, Any] | None] = {}
     for name in REQUIRED_ARTIFACTS:
         artifacts[name] = _load_artifact(dir_path, name)
@@ -1156,7 +1173,7 @@ def compose_html(dir_path: str) -> str:
         '    <meta charset="UTF-8">\n'
         '    <meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
         f"    <title>Deck Review: {_esc(company_name)}</title>\n"
-        f"    <style>{_css()}</style>\n"
+        f"    <style>{brand_css}{_css()}</style>\n"
         "</head>\n"
         "<body>\n"
         f"{header}\n"
@@ -1164,6 +1181,7 @@ def compose_html(dir_path: str) -> str:
         f"{footer}\n"
         f"    {_tooltip_js()}\n"
         f"    {_collapsible_js()}\n"
+        f"{_theme.FOOTER_CREDIT_HTML}\n"
         "</body>\n"
         "</html>\n"
     )

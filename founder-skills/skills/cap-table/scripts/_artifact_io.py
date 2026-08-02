@@ -35,6 +35,9 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _cap_table_schema_validator import (  # type: ignore[import-not-found]  # noqa: E402
+    check_misplaced_top_level_keys as _check_misplaced_top_level_keys,
+)
 from _cap_table_schema_validator import validate as _validate_schema  # type: ignore[import-not-found]  # noqa: E402
 
 _SCHEMA_DIR = os.path.join(
@@ -288,6 +291,16 @@ def load_instruments(
                 f"instruments.json schema validation failed: {'; '.join(errors)}",
                 path=str(path),
             )
+    # Targeted mis-key guard: preferred_series belongs in inputs.json, not instruments.json. The
+    # instruments schema has no such property, so without this the key silently drops rather than
+    # rejecting (see `_cap_table_schema_validator.check_misplaced_top_level_keys`).
+    misplaced_errors = _check_misplaced_top_level_keys(data, "instruments.json")
+    if misplaced_errors:
+        raise ArtifactIOError(
+            "E_MISPLACED_KEY_PREFERRED_SERIES",
+            "; ".join(misplaced_errors),
+            path=str(path),
+        )
     # Hard-reject the deprecated top-level 'notes' key (§10.1)
     if "notes" in data and "convertible_notes" not in data:
         raise ArtifactIOError(

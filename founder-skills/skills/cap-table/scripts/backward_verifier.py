@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = []
+# ///
 """Backward verification for cap-table Lane-1 extraction.
 
 Forward verification (`evidence_verifier.py`) catches the
@@ -231,10 +235,15 @@ def _select_fields(instrument_type: str, fields: dict[str, Any]) -> list[str]:
     return selected
 
 
-def emit_prompts(extraction: dict[str, Any], source_doc_path: str) -> list[dict[str, Any]]:
+def emit_prompts(extraction: dict[str, Any], doc_text: str) -> list[dict[str, Any]]:
     """Build re-extraction prompts. Returns a list of {field, prompt} dicts.
 
-    The caller (cap-table SKILL.md / dispatch) is expected to:
+    `doc_text` is the document's full text, embedded directly into each prompt — the same
+    "paste the document text" shape as the Lane-1 INSTRUMENT_EXTRACTION dispatch (see
+    references/lanes/lane-1-pdf-docx.md). A prompt is dispatched to a FRESH Task sub-agent whose
+    file tools cannot resolve a main-thread/VM-shell path, so a bare path here would either be
+    denied by the host-loop path gate or (worse) silently resolve to nothing and make the
+    re-extraction a no-op with no diagnostic. The caller is expected to:
       1. Read this stdout
       2. For each prompt, spawn a fresh Task sub-agent with the prompt body
       3. Collect responses
@@ -254,7 +263,7 @@ def emit_prompts(extraction: dict[str, Any], source_doc_path: str) -> list[dict[
             f"document. DO NOT base your answer on any prior extraction — read\n"
             f"the document fresh and pull the value yourself.\n\n"
             f"## Source document\n\n"
-            f"Path: `{source_doc_path}` — use the Read tool to read it.\n\n"
+            f"{doc_text}\n\n"
             f"## Field to extract\n\n"
             f"{template}\n\n"
             f"## Output\n\n"
@@ -403,21 +412,48 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--phase", choices=("prompt", "score"), required=True)
     parser.add_argument("--extraction", type=Path, required=True)
-    parser.add_argument("--source-doc", type=str, help="Path to source doc; used in prompt body")
+    parser.add_argument(
+        "--doc-text",
+        type=Path,
+        help="--phase=prompt: plaintext file with the document's full text — the SAME text the "
+        "main thread already read for the original INSTRUMENT_EXTRACTION dispatch. Embedded "
+        "directly into each re-extraction prompt (never a bare path — a fresh Task sub-agent's "
+        "file tools cannot resolve a main-thread/VM-shell path).",
+    )
     parser.add_argument("-o", "--output", type=Path)
     parser.add_argument("--pretty", action="store_true")
+    parser.add_argument(
+        "--mode",
+        choices=("warn", "block"),
+        default="warn",
+        help="warn (default): exit 0 even on disagreement (informational, per the calibrated "
+        "noisy-disagreement contract). block: exit 1 on overall_status==fail.",
+    )
     args = parser.parse_args()
 
     extraction = json.loads(args.extraction.read_text())
 
     if args.phase == "prompt":
-        if not args.source_doc:
-            sys.stderr.write("backward_verifier.py: --phase=prompt requires --source-doc\n")
+        if not args.doc_text:
+            sys.stderr.write(
+                "backward_verifier.py: --phase=prompt requires --doc-text <file> (the document's "
+                "plain text). A fresh sub-agent dispatch cannot be given a bare path to Read — "
+                "supply the same text the main thread already read for the original extraction, "
+                "so it can be embedded directly into each re-extraction prompt.\n"
+            )
             return 2
-        prompts = emit_prompts(extraction, args.source_doc)
+        if not args.doc_text.exists():
+            sys.stderr.write(f"backward_verifier.py: --doc-text file not found: {args.doc_text}\n")
+            return 2
+        doc_text = args.doc_text.read_text(encoding="utf-8")
+        if not doc_text.strip():
+            sys.stderr.write(f"backward_verifier.py: --doc-text file is empty: {args.doc_text}\n")
+            return 2
+        prompts = emit_prompts(extraction, doc_text)
         out = {"n_prompts": len(prompts), "prompts": prompts}
         if args.output:
             args.output.write_text(json.dumps(out, indent=2 if args.pretty else None))
+            print(json.dumps({"ok": True, "output": str(args.output.resolve())}, indent=2 if args.pretty else None))
         else:
             print(json.dumps(out, indent=2 if args.pretty else None))
         return 0
@@ -435,10 +471,14 @@ def main() -> int:
     out = report_to_dict(report)
     if args.output:
         args.output.write_text(json.dumps(out, indent=2 if args.pretty else None))
+        print(json.dumps({"ok": True, "output": str(args.output.resolve())}, indent=2 if args.pretty else None))
     else:
         print(json.dumps(out, indent=2 if args.pretty else None))
 
-    # Exit code mirrors verifier semantics
+    # WARN-mode default (the calibrated contract): disagreements are noisy
+    # enough that auto-rejection over-rejects, so exit 0 unless --mode=block.
+    if args.mode == "warn":
+        return 0
     if report.overall_status == "pass":
         return 0
     if report.overall_status == "fail":

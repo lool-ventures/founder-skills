@@ -1,0 +1,211 @@
+{
+  "summary": {
+    "score_pct": 97.7,
+    "overall_status": "strong",
+    "total": 25,
+    "pass": 21,
+    "fail": 0,
+    "warn": 1,
+    "not_applicable": 3,
+    "failed_items": [],
+    "warned_items": [
+      {
+        "id": "NARR_04",
+        "category": "NARR",
+        "criterion": "Defensibility roadmap articulated",
+        "status": "warn",
+        "evidence": "Moat trajectories are stated per-dimension, but no single consolidated 'how we build the moat over 18-24 months' roadmap narrative was authored.",
+        "principle": ""
+      }
+    ]
+  },
+  "items": [
+    {
+      "id": "COVER_01",
+      "category": "COVER",
+      "label": "Minimum 5 competitors identified",
+      "status": "pass",
+      "evidence": "5 competitors identified across direct, adjacent, emerging, and do-nothing categories."
+    },
+    {
+      "id": "COVER_02",
+      "category": "COVER",
+      "label": "Category diversity (direct + adjacent/do-nothing)",
+      "status": "pass",
+      "evidence": "Direct (QuickBooks, Xero), adjacent (FreshBooks), emerging (Pilot.com), and do-nothing (manual spreadsheets) are all represented."
+    },
+    {
+      "id": "COVER_03",
+      "category": "COVER",
+      "label": "Emerging entrants considered",
+      "status": "pass",
+      "evidence": "Pilot.com included as an emerging VC-backed bookkeeping-as-a-service entrant."
+    },
+    {
+      "id": "COVER_04",
+      "category": "COVER",
+      "label": "Do-nothing / status quo included",
+      "status": "pass",
+      "evidence": "Manual spreadsheets + bookkeeper included as the do-nothing status quo alternative."
+    },
+    {
+      "id": "COVER_05",
+      "category": "COVER",
+      "label": "No obvious incumbents missing",
+      "status": "pass",
+      "evidence": "The two dominant US/international incumbents (QuickBooks, Xero) are both included; Bench Accounting was surfaced via gap-detection and declined as redundant with Pilot.com's positioning."
+    },
+    {
+      "id": "POS_01",
+      "category": "POS",
+      "label": "Primary axis pair is meaningful",
+      "status": "pass",
+      "evidence": "Primary axis pair (AI-Native Workflow Automation x Installed Base) directly tests the founder's core differentiation claim against distribution reach."
+    },
+    {
+      "id": "POS_02",
+      "category": "POS",
+      "label": "Axes are non-vanity",
+      "status": "pass",
+      "evidence": "Neither axis shows a vanity clustering flag; competitors spread meaningfully across both 0-100 ranges."
+    },
+    {
+      "id": "POS_03",
+      "category": "POS",
+      "label": "Coordinates are evidence-backed",
+      "status": "pass",
+      "evidence": "Every point carries x/y evidence with an explicit evidence_source (researched/agent_estimate/founder_override)."
+    },
+    {
+      "id": "POS_04",
+      "category": "POS",
+      "label": "Startup is differentiated on at least one axis",
+      "status": "pass",
+      "evidence": "Startup ranks 1st of 6 on the AI-Native Workflow Automation axis."
+    },
+    {
+      "id": "POS_05",
+      "category": "POS",
+      "label": "Axis rationale explains differentiation value",
+      "status": "pass",
+      "evidence": "Both axis rationales explicitly explain why the axis reveals differentiation value, not just a generic dimension."
+    },
+    {
+      "id": "MOAT_01",
+      "category": "MOAT",
+      "label": "All 6 canonical moat types evaluated",
+      "status": "pass",
+      "evidence": "All 6 canonical moat dimensions scored for all 5 competitors plus _startup."
+    },
+    {
+      "id": "MOAT_02",
+      "category": "MOAT",
+      "label": "Moat evidence meets quality floor",
+      "status": "pass",
+      "evidence": "Each moat entry carries a specific, non-generic evidence string tied to the company."
+    },
+    {
+      "id": "MOAT_03",
+      "category": "MOAT",
+      "label": "Trajectory included for each moat",
+      "status": "pass",
+      "evidence": "Trajectory (building/stable/eroding) included on every moat entry."
+    },
+    {
+      "id": "MOAT_04",
+      "category": "MOAT",
+      "label": "Custom moats justified (if present)",
+      "status": "not_applicable",
+      "evidence": "No custom moat dimensions were used; all entries use the 6 canonical moat IDs."
+    },
+    {
+      "id": "EVID_01",
+      "category": "EVID",
+      "label": "Per-competitor research depth recorded",
+      "status": "pass",
+      "evidence": "Every competitor carries an explicit research_depth (full or founder_provided)."
+    },
+    {
+      "id": "EVID_02",
+      "category": "EVID",
+      "label": "Majority of competitors have sourced evidence",
+      "status": "pass",
+      "evidence": "4 of 5 competitors have research_depth full with multiple sourced fields; only manual-spreadsheets is founder_provided (the status-quo alternative, no company to research)."
+    },
+    {
+      "id": "EVID_03",
+      "category": "EVID",
+      "label": "Evidence sources distinguished (researched vs. estimated)",
+      "status": "pass",
+      "evidence": "Each competitor's evidence_source dict distinguishes researched vs. agent_estimate per field."
+    },
+    {
+      "id": "EVID_04",
+      "category": "EVID",
+      "label": "Competitor financials/pricing sourced",
+      "status": "not_applicable",
+      "evidence": "Auto-gated: not applicable in conversation mode"
+    },
+    {
+      "id": "NARR_01",
+      "category": "NARR",
+      "label": "Differentiation claims stress-tested",
+      "status": "pass",
+      "evidence": "All 3 differentiation claims stress-tested with verifiable/evidence/challenge/verdict via POSITIONING_SCORING."
+    },
+    {
+      "id": "NARR_02",
+      "category": "NARR",
+      "label": "Investor-ready competitive framing",
+      "status": "pass",
+      "evidence": "Report frames the startup's position with explicit rank and gap language suitable for an investor narrative."
+    },
+    {
+      "id": "NARR_03",
+      "category": "NARR",
+      "label": "Competition slide alignment (deck cross-check)",
+      "status": "not_applicable",
+      "evidence": "Auto-gated: not applicable in conversation mode"
+    },
+    {
+      "id": "NARR_04",
+      "category": "NARR",
+      "label": "Defensibility roadmap articulated",
+      "status": "warn",
+      "evidence": "Moat trajectories are stated per-dimension, but no single consolidated 'how we build the moat over 18-24 months' roadmap narrative was authored.",
+      "notes": "Recommend adding an explicit defensibility roadmap section synthesizing the per-moat trajectories."
+    },
+    {
+      "id": "MISS_01",
+      "category": "MISS",
+      "label": "No \"we have no competitors\" claim",
+      "status": "pass",
+      "evidence": "5 named competitors identified; no 'we have no competitors' claim present anywhere in the artifacts."
+    },
+    {
+      "id": "MISS_02",
+      "category": "MISS",
+      "label": "No vanity axes selected",
+      "status": "pass",
+      "evidence": "Both axes fail the vanity-clustering check (x_axis_vanity_flag and y_axis_vanity_flag both false)."
+    },
+    {
+      "id": "MISS_03",
+      "category": "MISS",
+      "label": "No feature-checkbox thinking",
+      "status": "pass",
+      "evidence": "Positioning is evidence- and outcome-based (automation depth, distribution reach) rather than a feature checklist."
+    }
+  ],
+  "score_pct": 97.7,
+  "pass_count": 21,
+  "fail_count": 0,
+  "warn_count": 1,
+  "na_count": 3,
+  "total": 25,
+  "input_mode": "conversation",
+  "metadata": {
+    "run_id": "fixture-competitive-positioning-001"
+  },
+  "_produced_by": "checklist"
+}

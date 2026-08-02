@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "cap-table coverage.json",
+  "type": "object",
+  "required": ["schema_version", "primitives"],
+  "properties": {
+    "schema_version": { "const": "v0.1-coverage" },
+    "primitives": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["completeness"],
+        "properties": {
+          "completeness": { "enum": ["full", "structural_only", "not_covered"] },
+          "producer": { "type": "string" },
+          "couples": { "type": "array", "items": { "type": "string" } },
+          "incompatible_couples": { "type": "array", "items": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 2 } },
+          "value_neutral_only": { "type": "boolean" },
+          "combinable_via_sequence": { "type": "array", "items": { "type": "string" } },
+          "capability_token": { "type": "string" }
+        }
+      }
+    }
+  }
+}

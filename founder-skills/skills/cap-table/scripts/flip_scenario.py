@@ -24,14 +24,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from copy import deepcopy
 from typing import Any
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _emit import add_output_args, emit  # noqa: E402
+from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 
 
 def flip_share_for_share(
     cap_state: dict[str, Any],
     *,
+    instruments: dict[str, Any] | None = None,
     iia_grants_in_history: bool = False,
     section_102_grants_outstanding: int = 0,
 ) -> dict[str, Any]:
@@ -42,6 +48,17 @@ def flip_share_for_share(
     on share counts; counsel-review items are surfaced for IP, IIA, §102,
     and tax-deferral route choices.
     """
+    # Derive the §102 grant count from the canonical cap_state location (the same read
+    # compose_report performs), taking the max with any caller-supplied count so a founder-stated
+    # figure without per-grant data is still honored. A flip engagement that left option_grants[]
+    # empty would otherwise silently report zero §102 grants.
+    derived_102 = sum(
+        1
+        for o in cap_state.get("outstanding_options", []) or []
+        if (o.get("plan_type") or "").startswith("section_102")
+    )
+    section_102_grants_outstanding = max(section_102_grants_outstanding, derived_102)
+
     post = deepcopy(cap_state)
     # The flip itself doesn't change share counts; it changes the issuer.
     # We mark the as_of_date as "post-flip" (caller may overwrite).
@@ -130,6 +147,25 @@ def flip_share_for_share(
                 "source_ids": ["ICNL-ISRAEL-ORDINANCE", "PEARLCOHEN-102-PITFALLS"],
             }
         )
+    else:
+        # No per-grant §102 data, but the pool has issued options on a §102-flavored plan → surface the
+        # exposure as UNCONFIRMED rather than silently reporting zero §102 grants. Same rule (same
+        # rule_id); only the framing differs.
+        pool = cap_state.get("option_pool", {}) or {}
+        pool_issued = int(pool.get("issued_and_outstanding", 0) or 0)
+        pool_plan = str(pool.get("plan_type") or "")
+        if pool_issued > 0 and (pool_plan.startswith("section_102") or pool_plan == "mixed"):
+            counsel_items.append(
+                {
+                    "rule_id": "delaware_cross_border.section_102_parent_shares",
+                    "domain": "delaware_cross_border",
+                    "title": f"§102 exposure unconfirmed — {pool_issued:,} pool options issued but no per-grant tax-route data",
+                    "founder_question": "How many §102 option grants do you currently have outstanding?",
+                    "counsel_question": "What sub-plan and trustee arrangements continue §102 treatment under foreign-parent shares?",
+                    "documents_needed": ["§102 plan document", "Trustee agreement", "Per-grant deposit confirmations"],
+                    "source_ids": ["ICNL-ISRAEL-ORDINANCE", "PEARLCOHEN-102-PITFALLS"],
+                }
+            )
 
     if iia_grants_in_history:
         counsel_items.append(
@@ -148,10 +184,16 @@ def flip_share_for_share(
             }
         )
 
+    post_flip_instruments = None
+    if instruments is not None:
+        post_flip_instruments = deepcopy(instruments)
+        post_flip_instruments["_flip_entity_ref"] = "post_flip"  # entity stamp; all economic terms verbatim
+
     return {
         "completeness": "structural_only",
         "pre_flip_cap_state": cap_state,
         "post_flip_cap_state": post,
+        "post_flip_instruments": post_flip_instruments,
         "per_holder_mapping": mapping,
         "counsel_review_items": counsel_items,
         "math_provenance": [
@@ -159,7 +201,7 @@ def flip_share_for_share(
                 "output_field": "flip_exchange_ratio",
                 "source_type": "rule",
                 "rule_id": "delaware_flip.share_exchange_mechanics",
-                "rule_pack_version": "0.3.2",
+                "rule_pack_version": RULE_PACK_VERSION,
                 "source_ref": None,
             },
         ],
@@ -172,7 +214,7 @@ def _cli() -> int:
     p.add_argument("--cap-state", required=True)
     p.add_argument("--iia-grants", action="store_true")
     p.add_argument("--section-102-grants", type=int, default=0)
-    p.add_argument("--pretty", action="store_true")
+    add_output_args(p)
     args = p.parse_args()
 
     with open(args.cap_state, encoding="utf-8") as f:
@@ -182,7 +224,7 @@ def _cli() -> int:
         iia_grants_in_history=args.iia_grants,
         section_102_grants_outstanding=args.section_102_grants,
     )
-    print(json.dumps(result, indent=2 if args.pretty else None))
+    emit(result, args)
     return 0
 
 

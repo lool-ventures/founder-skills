@@ -12,12 +12,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 EV_DIR = REPO_ROOT / "founder-skills" / "skills" / "cap-table" / "scripts"
 sys.path.insert(0, str(EV_DIR))
 
+from _normalize import numeric_tokens  # type: ignore[import-not-found]  # noqa: E402
 from evidence_verifier import (  # type: ignore[import-not-found]  # noqa: E402
     compact_form,
     has_cid_artifacts,
     is_doc_image_only,
     normalize_text,
     quote_in_doc,
+    value_in_doc_check,
     value_token_check,
     verify_extraction,
     verify_field,
@@ -143,6 +145,87 @@ class TestValueTokenCheck:
         assert "no_token_match" in reason or "value_not_in_quote" in reason
 
 
+class TestFractionalDollarNumericTokens:
+    """Regression: a non-integer float >= 1000 must generate the comma-grouped
+    cents form, or value_in_doc fails against a doc printing e.g.
+    "$1,234,567.89" verbatim."""
+
+    def test_comma_grouped_cents_form_present(self) -> None:
+        tokens = numeric_tokens(1234567.89)
+        assert "1,234,567.89" in tokens
+
+    def test_integer_valued_float_path_not_regressed(self) -> None:
+        tokens = numeric_tokens(20_000_000.0)
+        assert "20,000,000" in tokens
+        assert "20M" in tokens
+
+    def test_percent_path_not_regressed(self) -> None:
+        tokens = numeric_tokens(0.80)
+        assert "80%" in tokens
+        assert "80" in tokens
+
+    def test_value_in_doc_matches_fractional_dollar_amount(self) -> None:
+        doc = "The purchase price paid by the Investor was $1,234,567.89."
+        passed, reason = value_in_doc_check(1234567.89, doc)
+        assert passed, reason
+        assert "no_token_match" not in reason
+
+    def test_no_spurious_bare_short_token(self) -> None:
+        # The variant list must stay specific to this value; it must not
+        # contain a bare short token (e.g. a truncated fragment) that would
+        # spuriously match unrelated numbers elsewhere in a document.
+        tokens = numeric_tokens(1234567.89)
+        for tok in tokens:
+            assert len(tok) >= 4, f"suspiciously short/generic token: {tok!r}"
+
+    def test_does_not_match_different_comma_grouped_number(self) -> None:
+        # Adversarial: a doc containing only a DIFFERENT comma-grouped
+        # fractional amount must NOT verify.
+        doc = "The purchase price paid by the Investor was $9,887,654.32."
+        passed, reason = value_in_doc_check(1234567.89, doc)
+        assert not passed
+        assert "no_token_match" in reason
+
+    def test_does_not_match_unrelated_document(self) -> None:
+        # Adversarial: a doc with no comma-grouped number resembling the
+        # value at all must not spuriously match.
+        doc = "The parties agree to a governing law clause under Delaware law."
+        passed, reason = value_in_doc_check(1234567.89, doc)
+        assert not passed
+        assert "no_token_match" in reason
+
+
+class TestBooleanValueSkipped:
+    """A boolean field (e.g. a term sheet's co_sale_rights=True) is synthesized from prose — the value
+    'True' has no literal token in the doc, so value-matching must SKIP it (like a dict/list), with
+    quote_in_doc as the evidence. Otherwise well-sourced booleans false-alarm as 'value not found'."""
+
+    def test_value_in_doc_check_skips_booleans(self) -> None:
+        assert value_in_doc_check(True, "The Investor shall have co-sale rights.")[0] is True
+        assert value_in_doc_check(False, "irrelevant text with padding " * 5)[0] is True
+
+    def test_boolean_field_verifies_via_quote(self) -> None:
+        doc = "The Investor shall have full co-sale rights on any founder transfer of shares. " + "padding " * 40
+        res = verify_field(
+            "co_sale_rights",
+            {
+                "value": True,
+                "evidence_quote": "The Investor shall have full co-sale rights on any founder transfer of shares.",
+            },
+            doc,
+        )
+        assert res.overall_status != "fail", res.reasons
+
+    def test_boolean_does_not_open_a_hallucination_hole(self) -> None:
+        # A fabricated quote (not in the doc) must STILL fail quote_in_doc, even for a boolean.
+        res = verify_field(
+            "co_sale_rights",
+            {"value": True, "evidence_quote": "This exact sentence is nowhere in the source document at all."},
+            "A completely unrelated term sheet body. " * 30,
+        )
+        assert res.overall_status == "fail", res.reasons
+
+
 class TestTemplateBlankRegressionFixture:
     """Regression: the template-blank hallucination class must be caught."""
 
@@ -257,3 +340,43 @@ class TestNonCanonicalEnumFixture:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestDocxTrackedChanges:
+    """B2: the verifier reads the ACCEPTED-revisions view of a tracked-changes .docx (stdlib), so a
+    correctly-extracted inserted final term verifies and a struck term does not — python-docx `.text`
+    would have dropped BOTH."""
+
+    _NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+
+    def _redline_docx(self, tmp_path: Path) -> Path:
+        body = (
+            "<w:p>"
+            '<w:r><w:t xml:space="preserve">cap is </w:t></w:r>'
+            '<w:del w:id="1"><w:r><w:delText>$1,000,000</w:delText></w:r></w:del>'
+            '<w:ins w:id="2"><w:r><w:t>$2,000,000</w:t></w:r></w:ins>'
+            "</w:p>"
+        )
+        doc = f'<?xml version="1.0"?><w:document {self._NS}><w:body>{body}</w:body></w:document>'
+        import zipfile
+
+        p = tmp_path / "redline.docx"
+        with zipfile.ZipFile(p, "w") as z:
+            z.writestr("word/document.xml", doc)
+        return p
+
+    def test_load_doc_text_accepts_revisions(self, tmp_path: Path) -> None:
+        from evidence_verifier import _load_doc_text  # type: ignore[import-not-found]
+
+        text = _load_doc_text(self._redline_docx(tmp_path))
+        assert "$2,000,000" in text  # inserted final term — survives
+        assert "$1,000,000" not in text  # struck — excluded
+
+    def test_inserted_term_verifies_struck_does_not(self, tmp_path: Path) -> None:
+        from evidence_verifier import _load_doc_text  # type: ignore[import-not-found]
+
+        text = _load_doc_text(self._redline_docx(tmp_path))
+        found_ins, _, _ = quote_in_doc("$2,000,000", text)
+        found_struck, _, _ = quote_in_doc("$1,000,000", text)
+        assert found_ins is True
+        assert found_struck is False

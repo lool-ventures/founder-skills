@@ -12,12 +12,14 @@ All tests use subprocess to exercise the script exactly as the agent does.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import types
 from typing import Any
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -158,6 +160,8 @@ _VALID_DISCUSSION: dict[str, Any] = {
     "consensus_verdict": "more_diligence",
     "key_concerns": ["GTM unclear", "Need cohort data"],
     "diligence_requirements": ["Channel CAC", "Cohort curves"],
+    "warnings": [],
+    "_produced_by": "compose_discussion",
 }
 
 _VALID_SCORE: dict[str, Any] = {
@@ -376,7 +380,11 @@ def test_self_contained() -> None:
     assert rc == 0, f"exit {rc}, stderr={stderr}"
 
     # Find all src="..." and href="..." attributes
-    allowed = {"https://github.com/lool-ventures/founder-skills", "https://lool.vc"}
+    allowed = {
+        "https://github.com/lool-ventures/founder-skills",
+        "https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback",
+        "https://lool.vc",
+    }
     src_matches = re.findall(r'(?:src|href)\s*=\s*"([^"]*)"', stdout)
     for url in src_matches:
         if url in allowed:
@@ -501,8 +509,60 @@ def test_dealbreaker_verdict() -> None:
     assert rc == 0, f"exit {rc}, stderr={stderr}"
     # Should show "Hard Pass" text
     assert "Hard Pass" in stdout
-    # hard_pass color (#ef4444) should appear
-    assert "#ef4444" in stdout
+    # hard_pass color (#92301F) should appear
+    assert "#92301F" in stdout
+
+
+def test_gauge_pass_verdict_says_decline_not_bare_pass() -> None:
+    """The conviction gauge must never render a bare 'Pass' label for a 'pass'
+    verdict — it reads as 'passes the bar' to a founder skimming the report.
+    It must render an unambiguous decline word instead."""
+    arts = _all_required_artifacts()
+    score = json.loads(json.dumps(_VALID_SCORE))
+    score["summary"]["verdict"] = "pass"
+    score["summary"]["conviction_score"] = 30.0
+    arts["score_dimensions.json"] = score
+    d = _make_artifact_dir(arts)
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, f"exit {rc}, stderr={stderr}"
+    assert "Decline" in stdout
+    # No bare "Pass" text node (Hard Pass is fine, a bare Pass is not).
+    assert re.search(r"(?<!Hard )>Pass<", stdout) is None, stdout
+
+
+def test_partner_card_pass_verdict_says_decline() -> None:
+    """A partner-level 'pass' verdict on the partner-card chart must also
+    render an unambiguous decline word, not a bare 'Pass'."""
+    arts = _all_required_artifacts()
+    disc = dict(arts["discussion.json"])
+    disc["partner_verdicts"] = [
+        {"partner": "visionary", "verdict": "invest", "rationale": "Great"},
+        {"partner": "operator", "verdict": "more_diligence", "rationale": "Ok"},
+        {"partner": "analyst", "verdict": "pass", "rationale": "Weak"},
+    ]
+    arts["discussion.json"] = disc
+    d = _make_artifact_dir(arts)
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, f"exit {rc}, stderr={stderr}"
+    assert "Decline" in stdout
+    assert re.search(r"(?<!Hard )>Pass<", stdout) is None, stdout
+
+
+def test_summary_bar_pass_verdict_says_decline() -> None:
+    """The compact summary bar's per-partner verdict label must also avoid a
+    bare 'Pass' for a 'pass' verdict."""
+    arts = _all_required_artifacts()
+    disc = dict(arts["discussion.json"])
+    disc["partner_verdicts"] = [
+        {"partner": "visionary", "verdict": "invest", "rationale": "Great"},
+        {"partner": "operator", "verdict": "more_diligence", "rationale": "Ok"},
+        {"partner": "analyst", "verdict": "pass", "rationale": "Weak"},
+    ]
+    arts["discussion.json"] = disc
+    d = _make_artifact_dir(arts)
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, f"exit {rc}, stderr={stderr}"
+    assert "Analyst: Decline" in stdout
 
 
 def test_malformed_list_elements() -> None:
@@ -561,8 +621,8 @@ def test_verdict_color_case_insensitive() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, _stderr = _run_visualize(d)
     assert rc == 0
-    # Invest -> green (#10b981), not gray fallback (#9ca3af)
-    assert "#10b981" in stdout, "Invest verdict should map to green color"
+    # Invest -> green (#2F8A56), not gray fallback (#A6AEB5)
+    assert "#2F8A56" in stdout, "Invest verdict should map to green color"
 
 
 def test_severity_color_case_insensitive() -> None:
@@ -582,8 +642,8 @@ def test_severity_color_case_insensitive() -> None:
     d = _make_artifact_dir(arts)
     rc, stdout, _stderr = _run_visualize(d)
     assert rc == 0
-    # Blocking -> red (#ef4444), not gray fallback
-    assert "#ef4444" in stdout, "Blocking severity should map to red color"
+    # Blocking -> red (#C0392B), not gray fallback
+    assert "#C0392B" in stdout, "Blocking severity should map to red color"
 
 
 def test_empty_partner_role_skipped() -> None:
@@ -616,7 +676,7 @@ def test_visualize_partner_disclaimer() -> None:
 
 
 def test_dealbreaker_color_visible() -> None:
-    """Dealbreaker bars use visible color (#b91c1c), not near-invisible #7f1d1d."""
+    """Dealbreaker bars use visible color (#92301F), not near-invisible #7f1d1d."""
     arts = _all_required_artifacts()
     # Create a score with dealbreakers to trigger bar rendering
     score = dict(_VALID_SCORE)
@@ -635,7 +695,7 @@ def test_dealbreaker_color_visible() -> None:
     rc, stdout, stderr = _run_visualize(d)
     assert rc == 0, f"exit {rc}, stderr={stderr}"
     # New visible color should appear; old invisible color should not
-    assert "#b91c1c" in stdout, "Dealbreaker should use visible #b91c1c"
+    assert "#92301F" in stdout, "Dealbreaker should use visible #92301F"
     assert "#7f1d1d" not in stdout, "Old invisible dealbreaker color should be gone"
 
 
@@ -758,7 +818,7 @@ def test_svg_scales_on_mobile() -> None:
 
 
 def test_h2_border_visible_in_chart_box() -> None:
-    """h2 inside chart-box should use visible border color (#334155), not bg color."""
+    """h2 inside chart-box should use a visible border color, not a bg-matching one."""
     d = _make_artifact_dir(_all_required_artifacts())
     rc, stdout, stderr = _run_visualize(d)
     assert rc == 0, f"exit {rc}, stderr={stderr}"
@@ -766,7 +826,7 @@ def test_h2_border_visible_in_chart_box() -> None:
     match = re.search(r"\.chart-box h2\s*\{([^}]+)\}", stdout)
     assert match, ".chart-box h2 CSS rule not found"
     rule_body = match.group(1)
-    assert "#334155" in rule_body, "h2 border should use visible #334155, not bg-matching #1e293b"
+    assert "var(--lool-line-2)" in rule_body, "h2 border should use visible var(--lool-line-2), not bg-matching #1e293b"
 
 
 def test_rationale_truncation_respects_sentences() -> None:
@@ -864,3 +924,486 @@ def test_radar_outer_labels_show_scores() -> None:
     assert rc == 0, f"exit {rc}, stderr={stderr}"
     assert "38%" in stdout, "Team's 37.5% rounded to 38% should appear as outer label"
     assert "Team" in stdout, "Category name should appear as outer label"
+
+
+def test_key_findings_distinguishes_mixed_strong_from_all_strong() -> None:
+    """A category with strong AND moderate convictions (no concerns) must read
+    'leans strong with no concerns', not the inaccurate 'scores all strong
+    conviction' (which is reserved for categories that are purely strong)."""
+    arts = _all_required_artifacts()
+    score = dict(_VALID_SCORE)
+    summary = dict(score["summary"])
+    summary["by_category"] = {
+        # mixed positive: strong present, moderate present, no concerns
+        "Team": {"strong_conviction": 2, "moderate_conviction": 2, "concern": 0, "dealbreaker": 0, "not_applicable": 0},
+        # purely strong
+        "Market": {
+            "strong_conviction": 4,
+            "moderate_conviction": 0,
+            "concern": 0,
+            "dealbreaker": 0,
+            "not_applicable": 0,
+        },
+        "Product": {
+            "strong_conviction": 4,
+            "moderate_conviction": 0,
+            "concern": 0,
+            "dealbreaker": 0,
+            "not_applicable": 0,
+        },
+        "Business Model": {
+            "strong_conviction": 4,
+            "moderate_conviction": 0,
+            "concern": 0,
+            "dealbreaker": 0,
+            "not_applicable": 0,
+        },
+        "Financials": {
+            "strong_conviction": 4,
+            "moderate_conviction": 0,
+            "concern": 0,
+            "dealbreaker": 0,
+            "not_applicable": 0,
+        },
+        "Risk": {"strong_conviction": 4, "moderate_conviction": 0, "concern": 0, "dealbreaker": 0, "not_applicable": 0},
+        "Fund Fit": {
+            "strong_conviction": 4,
+            "moderate_conviction": 0,
+            "concern": 0,
+            "dealbreaker": 0,
+            "not_applicable": 0,
+        },
+    }
+    score["summary"] = summary
+    arts["score_dimensions.json"] = score
+    d = _make_artifact_dir(arts)
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, f"exit {rc}, stderr={stderr}"
+    assert "Team leans strong with no concerns" in stdout
+    assert "Team scores all strong conviction" not in stdout
+    # a purely-strong category still uses the original phrasing
+    assert "Market scores all strong conviction" in stdout
+
+
+# ---------------------------------------------------------------------------
+# Honesty-guard parity tests: mirror compose_report.py's conviction_basis /
+# coverage_* / debated_dealbreakers handling into the HTML report.
+# ---------------------------------------------------------------------------
+
+
+def test_gauge_shows_coverage_denominator_when_basis_insufficient() -> None:
+    """conviction_basis.sufficient=False must render the 'X of Y' denominator
+    next to the gauge — the gauge's ':.1f' score is MORE precise than the
+    Markdown's rounded integer, so the caveat is at least as necessary here."""
+    arts = _all_required_artifacts()
+    score = json.loads(json.dumps(_VALID_SCORE))
+    summary = score["summary"]
+    summary["applicable"] = 2
+    summary["conviction_score"] = 50.0
+    summary["verdict"] = "more_diligence"
+    summary["conviction_basis"] = {"applicable": 2, "total": 28, "sufficient": False}
+    arts["score_dimensions.json"] = score
+    d = _make_artifact_dir(arts)
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, f"exit {rc}, stderr={stderr}"
+    assert "Scored on 2 of 28" in stdout
+
+
+def test_gauge_omits_coverage_denominator_when_basis_sufficient() -> None:
+    """A fully-scored run (sufficient=True) must NOT show the denominator
+    caveat — it's reserved for the thin-base case."""
+    d = _make_artifact_dir(_all_required_artifacts())
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, f"exit {rc}, stderr={stderr}"
+    assert "Scored on" not in stdout
+
+
+def test_verdict_label_distinguishes_coverage_floored_held_from_capped_and_merits() -> None:
+    """coverage_floored/coverage_held share one label; coverage_capped gets a
+    different one; and the plain-merits more_diligence default is different
+    from both. Three renders, three distinct labels — not three copies of a
+    bare 'More Diligence'."""
+    base_score = json.loads(json.dumps(_VALID_SCORE))
+    base_score["summary"]["verdict"] = "more_diligence"
+    base_score["summary"]["conviction_score"] = 60.0
+
+    def _label_for(coverage_flags: dict[str, bool]) -> str:
+        score = json.loads(json.dumps(base_score))
+        score["summary"].update({"coverage_capped": False, "coverage_floored": False, "coverage_held": False})
+        score["summary"].update(coverage_flags)
+        arts = _all_required_artifacts()
+        arts["score_dimensions.json"] = score
+        d = _make_artifact_dir(arts)
+        rc, stdout, stderr = _run_visualize(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        match = re.search(r'font-size="14"[^>]*>([^<]*)</text>', stdout)
+        assert match, f"No gauge verdict-label text found: {stdout}"
+        return match.group(1)
+
+    merits_label = _label_for({})
+    floored_label = _label_for({"coverage_floored": True})
+    held_label = _label_for({"coverage_held": True})
+    capped_label = _label_for({"coverage_capped": True})
+
+    assert floored_label == held_label, (
+        f"coverage_floored and coverage_held must share one label, got {floored_label!r} vs {held_label!r}"
+    )
+    assert capped_label != floored_label, "coverage_capped must have its own distinct label"
+    assert merits_label != floored_label, "the plain-merits default must differ from the coverage labels"
+    assert merits_label != capped_label, "the plain-merits default must differ from the coverage labels"
+    assert merits_label == "More Diligence", f"unexpected merits-default label: {merits_label!r}"
+
+
+def test_dealbreaker_provenance_distinguishes_debated_from_scoring_only() -> None:
+    """A dealbreaker two partners argued in the debate must render different
+    provenance text from one the scoring pass produced alone — presenting
+    them identically overstates the evidentiary weight of the latter."""
+    arts = _all_required_artifacts()
+    score = json.loads(json.dumps(_VALID_SCORE))
+    score["summary"]["dealbreaker"] = 2
+    score["summary"]["strong_conviction"] = 26
+    score["summary"]["verdict"] = "hard_pass"
+    score["summary"]["dealbreakers"] = [
+        {
+            "id": _DIMENSION_IDS[0],
+            "category": "Team",
+            "label": "Debated Flaw",
+            "evidence": "test",
+        },
+        {
+            "id": _DIMENSION_IDS[1],
+            "category": "Team",
+            "label": "Scoring-Only Flaw",
+            "evidence": "test",
+        },
+    ]
+    arts["score_dimensions.json"] = score
+
+    disc = dict(_VALID_DISCUSSION)
+    disc["debated_dealbreakers"] = [
+        {"dimension": _DIMENSION_IDS[0], "raised_by": ["visionary", "operator"]},
+    ]
+    arts["discussion.json"] = disc
+
+    d = _make_artifact_dir(arts)
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, f"exit {rc}, stderr={stderr}"
+    assert "Dealbreaker in Team: Debated Flaw (raised in debate by Visionary, Operator)" in stdout
+    assert "Dealbreaker in Team: Scoring-Only Flaw (scoring pass only — not raised in debate)" in stdout
+
+
+def test_dealbreaker_provenance_unavailable_when_no_id_level_channel() -> None:
+    """discussion.json with no 'debated_dealbreakers' list at all must render
+    as provenance-unavailable, not silently as 'scoring pass only' (which
+    would imply the debate WAS checked and found nothing)."""
+    arts = _all_required_artifacts()
+    score = json.loads(json.dumps(_VALID_SCORE))
+    score["summary"]["dealbreaker"] = 1
+    score["summary"]["strong_conviction"] = 27
+    score["summary"]["verdict"] = "hard_pass"
+    score["summary"]["dealbreakers"] = [
+        {"id": _DIMENSION_IDS[0], "category": "Team", "label": "Some Flaw", "evidence": "test"},
+    ]
+    arts["score_dimensions.json"] = score
+
+    disc = dict(_VALID_DISCUSSION)
+    disc.pop("debated_dealbreakers", None)
+    arts["discussion.json"] = disc
+
+    d = _make_artifact_dir(arts)
+    rc, stdout, stderr = _run_visualize(d)
+    assert rc == 0, f"exit {rc}, stderr={stderr}"
+    assert "Dealbreaker in Team: Some Flaw (debate provenance unavailable)" in stdout
+
+
+# ===========================================================================
+# Key-coverage tests: producer output keys ⊆ renderer known sets
+# ===========================================================================
+#
+# Invariant: when score_dimensions.py / detect_conflicts.py adds a new
+# status, verdict, or severity value, the corresponding visualize.py color
+# map must be updated. These tests pin the current complete sets so any new
+# emitted key causes a loud failure with the offending name listed.
+# ===========================================================================
+
+_IC_SIM_VISUALIZE_SCRIPT = os.path.join(IC_SIM_DIR, "visualize.py")
+_IC_SIM_SCORE_DIMENSIONS_SCRIPT = os.path.join(IC_SIM_DIR, "score_dimensions.py")
+_IC_SIM_DETECT_CONFLICTS_SCRIPT = os.path.join(IC_SIM_DIR, "detect_conflicts.py")
+
+
+def _load_ic_sim_visualize() -> types.ModuleType:
+    """Import ic-sim visualize.py with a unique sys.modules key.
+
+    _theme is imported lazily inside a render function, so no stub is needed
+    at module load time.
+    """
+    key = "_ic_sim_keycov_visualize"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    spec = importlib.util.spec_from_file_location(key, _IC_SIM_VISUALIZE_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = _IC_SIM_VISUALIZE_SCRIPT  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def _load_ic_sim_score_dimensions() -> types.ModuleType:
+    """Import ic-sim score_dimensions.py with a unique sys.modules key."""
+    key = "_ic_sim_keycov_score_dimensions"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    spec = importlib.util.spec_from_file_location(key, _IC_SIM_SCORE_DIMENSIONS_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = _IC_SIM_SCORE_DIMENSIONS_SCRIPT  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def _load_ic_sim_detect_conflicts() -> types.ModuleType:
+    """Import ic-sim detect_conflicts.py with a unique sys.modules key."""
+    key = "_ic_sim_keycov_detect_conflicts"
+    if key in sys.modules:
+        return sys.modules[key]  # type: ignore[return-value]
+    spec = importlib.util.spec_from_file_location(key, _IC_SIM_DETECT_CONFLICTS_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = _IC_SIM_DETECT_CONFLICTS_SCRIPT  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+# ---------------------------------------------------------------------------
+# Test A: dimension statuses → visualize._STATUS_COLORS coverage
+# ---------------------------------------------------------------------------
+
+
+class TestIcSimDimensionStatusColorCoverage:
+    """Every dimension status that score_dimensions.py can emit must appear
+    in visualize.py's _STATUS_COLORS so category bars receive the correct colour.
+
+    Produced set is derived live from score_dimensions.VALID_STATUSES.
+    """
+
+    def test_all_dimension_statuses_in_status_colors(self) -> None:
+        """Every dimension status the producer emits must map to a colour."""
+        produced = _load_ic_sim_score_dimensions().VALID_STATUSES
+        viz = _load_ic_sim_visualize()
+        color_keys: set[str] = set(viz._STATUS_COLORS.keys())
+
+        missing = produced - color_keys
+        assert not missing, (
+            f"visualize._STATUS_COLORS is missing a colour entry for dimension status(es) "
+            f"emitted by score_dimensions.py: {sorted(missing)}. "
+            f"Add entries to _STATUS_COLORS for each."
+        )
+
+    def test_producer_dimension_statuses_min_count(self) -> None:
+        """Guard against vacuous tests: VALID_STATUSES must have at least 5 statuses."""
+        produced = _load_ic_sim_score_dimensions().VALID_STATUSES
+        assert len(produced) >= 5, (
+            f"VALID_STATUSES expected >= 5 entries, got {len(produced)}. Check score_dimensions.VALID_STATUSES."
+        )
+
+    def test_status_colors_min_count(self) -> None:
+        """_STATUS_COLORS must cover at least the producer statuses."""
+        produced = _load_ic_sim_score_dimensions().VALID_STATUSES
+        viz = _load_ic_sim_visualize()
+        assert len(viz._STATUS_COLORS) >= len(produced), (
+            f"visualize._STATUS_COLORS has only {len(viz._STATUS_COLORS)} entries; expected >= {len(produced)}."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test B: partner verdict values → visualize._VERDICT_COLORS coverage
+# ---------------------------------------------------------------------------
+
+
+class TestIcSimPartnerVerdictColorCoverage:
+    """Every verdict value that score_dimensions.py's summary can emit must
+    appear in visualize.py's _VERDICT_COLORS so the conviction gauge shows
+    the correct colour instead of the neutral fallback.
+
+    The 4 verdicts come from _summarize() branches in score_dimensions.py —
+    there is no exported constant, so they are pinned here. A source-grep
+    guard ensures each literal is still present in the source so a rename
+    fails loudly.
+    """
+
+    # Verdict strings emitted by score_dimensions._summarize() branches.
+    PRODUCER_VERDICTS: set[str] = {
+        "invest",
+        "more_diligence",
+        "pass",
+        "hard_pass",
+    }
+
+    def test_verdict_literals_present_in_source(self) -> None:
+        """Each hardcoded verdict must appear as a string literal in score_dimensions.py.
+
+        Guards against silent renames: if a verdict string is removed from the
+        source, this test fails before any runtime path needs to exercise it.
+        """
+        with open(_IC_SIM_SCORE_DIMENSIONS_SCRIPT, encoding="utf-8") as fh:
+            src = fh.read()
+        for verdict in self.PRODUCER_VERDICTS:
+            assert f'"{verdict}"' in src or f"'{verdict}'" in src, (
+                f"Verdict string {verdict!r} not found as a literal in score_dimensions.py. "
+                f"Update PRODUCER_VERDICTS if _summarize() was changed."
+            )
+
+    def test_all_verdicts_in_verdict_colors(self) -> None:
+        """Every verdict the producer emits must map to a colour."""
+        viz = _load_ic_sim_visualize()
+        color_keys: set[str] = set(viz._VERDICT_COLORS.keys())
+
+        missing = self.PRODUCER_VERDICTS - color_keys
+        assert not missing, (
+            f"visualize._VERDICT_COLORS is missing a colour entry for verdict(s) "
+            f"emitted by score_dimensions.py: {sorted(missing)}. "
+            f"Add entries to _VERDICT_COLORS for each."
+        )
+
+    def test_producer_verdicts_min_count(self) -> None:
+        """Guard against vacuous tests: producer set must have exactly 4 verdicts."""
+        assert len(self.PRODUCER_VERDICTS) == 4, (
+            f"PRODUCER_VERDICTS expected 4 entries, got {len(self.PRODUCER_VERDICTS)}."
+        )
+
+    def test_verdict_colors_min_count(self) -> None:
+        """_VERDICT_COLORS must cover at least the 4 producer verdicts."""
+        viz = _load_ic_sim_visualize()
+        assert len(viz._VERDICT_COLORS) >= 4, (
+            f"visualize._VERDICT_COLORS has only {len(viz._VERDICT_COLORS)} entries; expected >= 4."
+        )
+
+    def test_verdict_colors_pairwise_distinct(self) -> None:
+        """Each producer verdict must have a colour distinct from every other
+        verdict's colour — in particular hard_pass must NOT share pass's colour,
+        or the gauge cannot distinguish the two most severe outcomes.
+        """
+        viz = _load_ic_sim_visualize()
+        colors = {v: viz._VERDICT_COLORS.get(v) for v in self.PRODUCER_VERDICTS}
+        seen: dict[str, str] = {}
+        for verdict, color in sorted(colors.items()):
+            assert color is not None, f"_VERDICT_COLORS missing entry for {verdict!r}."
+            assert color not in seen, (
+                f"_VERDICT_COLORS gives {verdict!r} the same colour {color!r} as {seen[color]!r}. "
+                f"Each verdict on the spectrum needs a visually distinct colour."
+            )
+            seen[color] = verdict
+
+
+# ---------------------------------------------------------------------------
+# Test C: conflict severity values → visualize._SEVERITY_COLORS coverage
+# ---------------------------------------------------------------------------
+
+
+class TestIcSimConflictSeverityColorCoverage:
+    """Every conflict severity value that detect_conflicts.py can emit must
+    appear in visualize.py's _SEVERITY_COLORS so the conflict summary chart
+    shows the correct colour instead of the neutral fallback.
+
+    VALID_SEVERITIES ({"blocking", "manageable"}) is loaded live.
+    "clear" is not in VALID_SEVERITIES (it is computed in overall_severity
+    when no conflicts exist); it is pinned here with a source-grep guard.
+    """
+
+    # "clear" is emitted in detect_conflicts.py but is not in VALID_SEVERITIES.
+    _HARDCODED_EXTRA: set[str] = {"clear"}
+
+    def _producer_severities(self) -> set[str]:
+        """VALID_SEVERITIES union hardcoded extras."""
+        return set[str](_load_ic_sim_detect_conflicts().VALID_SEVERITIES) | self._HARDCODED_EXTRA
+
+    def test_clear_literal_present_in_source(self) -> None:
+        """'clear' must appear as a string literal in detect_conflicts.py source."""
+        with open(_IC_SIM_DETECT_CONFLICTS_SCRIPT, encoding="utf-8") as fh:
+            src = fh.read()
+        assert '"clear"' in src or "'clear'" in src, (
+            "'clear' not found as a literal in detect_conflicts.py. "
+            "Update _HARDCODED_EXTRA if the severity was renamed."
+        )
+
+    def test_all_severities_in_severity_colors(self) -> None:
+        """Every conflict severity the producer emits must map to a colour."""
+        produced = self._producer_severities()
+        viz = _load_ic_sim_visualize()
+        color_keys: set[str] = set(viz._SEVERITY_COLORS.keys())
+
+        missing = produced - color_keys
+        assert not missing, (
+            f"visualize._SEVERITY_COLORS is missing a colour entry for severity value(s) "
+            f"emitted by detect_conflicts.py: {sorted(missing)}. "
+            f"Add entries to _SEVERITY_COLORS for each."
+        )
+
+    def test_producer_severities_min_count(self) -> None:
+        """Guard against vacuous tests: produced set must have at least 3 severities."""
+        produced = self._producer_severities()
+        assert len(produced) >= 3, f"VALID_SEVERITIES + extras expected >= 3 entries, got {len(produced)}."
+
+    def test_severity_colors_min_count(self) -> None:
+        """_SEVERITY_COLORS must cover at least the producer severities."""
+        produced = self._producer_severities()
+        viz = _load_ic_sim_visualize()
+        assert len(viz._SEVERITY_COLORS) >= len(produced), (
+            f"visualize._SEVERITY_COLORS has only {len(viz._SEVERITY_COLORS)} entries; expected >= {len(produced)}."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test D: score_dimensions categories → visualize._CANONICAL_CATEGORIES coverage
+# ---------------------------------------------------------------------------
+
+
+class TestIcSimCategoryCoverage:
+    """Every category name that score_dimensions.py can emit must appear in
+    visualize.py's _CANONICAL_CATEGORIES so radar and bar charts include all
+    spokes/bars in the correct order.
+
+    Produced set is derived live from score_dimensions.DIMENSION_ITEMS.
+    """
+
+    @staticmethod
+    def _producer_categories() -> set[str]:
+        """Derive emittable category names live from DIMENSION_ITEMS."""
+        sd = _load_ic_sim_score_dimensions()
+        return {item["category"] for item in sd.DIMENSION_ITEMS}
+
+    def test_all_producer_categories_in_canonical_list(self) -> None:
+        """Every category the score producer emits must appear in _CANONICAL_CATEGORIES."""
+        produced = self._producer_categories()
+        viz = _load_ic_sim_visualize()
+        canonical: set[str] = set(viz._CANONICAL_CATEGORIES)
+
+        missing = produced - canonical
+        assert not missing, (
+            f"visualize._CANONICAL_CATEGORIES is missing category(ies) "
+            f"emitted by score_dimensions.py: {sorted(missing)}. "
+            f"Add them to _CANONICAL_CATEGORIES in the correct order."
+        )
+
+    def test_producer_categories_min_count(self) -> None:
+        """Guard against vacuous tests: produced set must have at least 7 categories."""
+        produced = self._producer_categories()
+        assert len(produced) >= 7, (
+            f"DIMENSION_ITEMS expected >= 7 distinct categories, got {len(produced)}. "
+            f"Check score_dimensions.DIMENSION_ITEMS."
+        )
+
+    def test_canonical_categories_min_count(self) -> None:
+        """_CANONICAL_CATEGORIES must list at least the producer categories."""
+        produced = self._producer_categories()
+        viz = _load_ic_sim_visualize()
+        assert len(viz._CANONICAL_CATEGORIES) >= len(produced), (
+            f"visualize._CANONICAL_CATEGORIES has only {len(viz._CANONICAL_CATEGORIES)} entries; "
+            f"expected >= {len(produced)}."
+        )

@@ -59,6 +59,31 @@ def main() -> int:
         print(f"Error: deck_inventory validation failed: {e}", file=sys.stderr)
         return 1
 
+    # Non-fatal integrity notes on slide numbering. Duplicates are usually a real
+    # defect in the source deck (worth surfacing to the founder), so the inventory
+    # still records them honestly; the warning tells the main thread to double-check
+    # the extraction and disambiguate slide references downstream. Malformed number
+    # types are the schema's job, so only int values are inspected here.
+    numbers = [s["number"] for s in data.get("slides", []) if isinstance(s.get("number"), int)]
+    slide_warnings: list[str] = []
+    seen: set[int] = set()
+    dupes: list[int] = []
+    for n in numbers:
+        if n in seen and n not in dupes:
+            dupes.append(n)
+        seen.add(n)
+    if dupes:
+        dupes_str = ", ".join(str(n) for n in dupes)
+        slide_warnings.append(f"duplicate slide number(s): {dupes_str}")
+        print(f"Warning: duplicate slide number(s): {dupes_str}", file=sys.stderr)
+    unique_sorted = sorted(seen)
+    if unique_sorted and unique_sorted != list(range(unique_sorted[0], unique_sorted[-1] + 1)):
+        seq_str = ", ".join(str(n) for n in unique_sorted)
+        slide_warnings.append(f"non-sequential slide numbers: {seq_str}")
+        print(f"Warning: non-sequential slide numbers: {seq_str}", file=sys.stderr)
+    if slide_warnings:
+        receipt["warnings"] = slide_warnings
+
     sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     return 0
 

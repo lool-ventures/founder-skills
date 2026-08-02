@@ -1,0 +1,32 @@
+# Model-tier acceptance matrix for the cap-table skill (cowork-harness run --matrix).
+#
+# One representative cap-table SCENARIO run once per model tier, in one command — the
+# model-acceptance gate for "does the cap-table pipeline still land correct canonical artifacts
+# on this tier?". The `models:` axis overrides the scenario session's pinned model per cell
+# (sessions/*.yaml pin claude-sonnet-4-6); every cell must pass its scenario asserts or the
+# matrix fails (a compatibility gate, not a survey).
+#
+#   claude-sonnet-4-6 — the SUPPORT FLOOR (minimum tier real users run; a candidate must at
+#                       least match it before being recommended — see README "When to run it").
+#   claude-sonnet-5   — current mid-tier candidate.
+#   claude-opus-4-8   — current high-tier candidate.
+#
+# Run (from evals/cap-table/), pointing at a full-pipeline cap-table scenario. `--matrix`
+# composes with `--repeat`, so each tier runs as its own N-iteration repeat batch and the cell
+# verdict is judged against --min-pass-rate (docs/scenario.md "Matrix testing"):
+#
+#   cowork-harness run ../../cowork-tests/scenarios/cap-table-safe-full.yaml \
+#     --matrix matrices/model-tiers.yaml \
+#     --repeat 5 --min-pass-rate 0.8 \
+#     --max-cells 8 --concurrency 2 \
+#     --output-format json > model-tiers-acceptance.json
+#
+# The JSON envelope carries an additive matrixRepeat.cells[] (one full RepeatRollup per tier:
+# pass rate, per-assertion attribution, verdict-signal histogram, cost totals). Pair with
+# bypass_telemetry.py over the kept run dirs for the pipeline-ran-vs-bypassed rate per tier.
+#
+# NOTE: this needs the live lane (Docker + staged agent + token) — it is a manual model-acceptance
+# step, never a CI gate. The scenario's other axes (baseline/skill_dirs) are intentionally omitted:
+# an omitted axis contributes exactly one unmodified cell, so this runs len(models) cells, not a
+# bloated cross-product.
+models: ["claude-sonnet-4-6", "claude-sonnet-5", "claude-opus-4-8"]

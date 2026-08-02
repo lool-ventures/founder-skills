@@ -7,6 +7,8 @@
   "total_slides": 11,
   "claimed_stage": "seed",
   "claimed_raise": "$4M",
+  "ai_company_status": "ai_claimed_unverified",
+  "ai_evidence": "Deck describes 'AI-powered automated bookkeeping' but no ML model, inference costs, or AI-specific retention metrics are present.",
   "slides": [
     {
       "number": 1,

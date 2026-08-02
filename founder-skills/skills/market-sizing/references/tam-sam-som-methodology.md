@@ -89,6 +89,35 @@ Use both methods where possible. Top-down gives a reality check against industry
 - **Review and update:** Market sizes change. Revisit calculations as your company grows, enters new markets, or launches new products.
 - **Avoid two big presentation mistakes:** Don't present a TAM that's too small (VCs question upside) or a SAM that's too large (signals you don't understand the market).
 
+## 5. Declaring the Sizing Basis
+
+Industry reports routinely quote two different figures for the same market: a **current-year**
+size and a **forecast-year** size (a 3-5 year CAGR-projected number), and the two are often 2-3x
+apart. Nothing about the term "TAM" says which one a given source meant — a report can headline
+the forecast figure while the current one sits in a footnote, or the reverse. Two analyses built
+from the *same sources* with a different, unstated choice here produce two different headline
+TAM figures, and neither the analyst nor the report's reader can tell which convention produced
+the number that ended up on the slide.
+
+`sizing_basis` names the convention this analysis used for every headline figure. One of:
+
+- **`current_year`** — every industry-total / top-down / bottom-up input reflects the market as
+  it stands in the source's stated base year. This is the **default**: absent a specific reason to
+  use a forward-looking figure, size the market as it is today, not as a report projects it will be.
+- **`forecast_year`** — every headline figure reflects a source's stated future-year projection
+  (e.g. a 2030 forecast cited in a 2026 analysis). Use this only when the founder's materials or
+  the chosen sources are themselves forecast-anchored (e.g. the company's own SOM target is
+  explicitly a Year-5 number, and the TAM/SAM inputs are sourced on that same horizon for
+  consistency).
+- **`mixed`** — the analysis knowingly combines current-year and forecast-year figures across its
+  inputs (e.g. a current-year `industry_total` narrowed by a forecast-year `segment_pct`). State
+  which inputs use which horizon in `methodology.json`'s `rationale` — `mixed` without that
+  explanation is close to no declaration at all.
+
+**Declare it explicitly; don't let it default silently in the artifact.** An analysis that omits
+`sizing_basis` gives its reader no way to tell which convention produced the headline TAM, and a
+re-run using the other convention will read as a contradiction rather than a documented choice.
+
 ## Sources
 
 - Antler — "How to Calculate the Size Of Your Market (TAM, SAM & SOM)" — https://www.antler.co/blog/tam-sam-som

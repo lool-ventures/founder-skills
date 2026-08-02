@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This reference pack supports a future cap-table skill covering founder ownership, SAFEs, convertible notes, option pools, anti-dilution, Israeli company issues, Delaware/Israel cross-border structures, flips, and benchmark warnings.
+This reference pack supports the cap-table skill, covering founder ownership, SAFEs, convertible notes, option pools, anti-dilution, Israeli company issues, Delaware/Israel cross-border structures, flips, and benchmark warnings.
 
-The markdown is intentionally thin. Deterministic formulas, validation checks, date windows, and warning thresholds live in [`cap-table-rules.json`](./cap-table-rules.json), validated by [`cap-table-rules.schema.json`](./cap-table-rules.schema.json). Skill prose should point to rule IDs and call scripts built from the JSON spec rather than restating calculations inline.
+The markdown is intentionally thin. Deterministic formulas, validation checks, date windows, and warning thresholds live in [`cap-table-rules.json`](../data/cap-table-rules.json), validated by [`cap-table-rules.schema.json`](./cap-table-rules.schema.json). Skill prose should point to rule IDs and call scripts built from the JSON spec rather than restating calculations inline.
 
 ## Source Policy
 
@@ -72,7 +72,7 @@ Option pool advice should separate economics from labels. A “post-closing targ
 
 Anti-dilution should be modeled only after identifying the protection type and excluded issuances. Use broad-based weighted-average only when documents support it, and surface full-ratchet protection as a high-impact warning [`COOLEY-ANTI-DILUTION`].
 
-Israel tax and corporate-law items are not calculator conclusions. Section 102 (including current double-trigger treatment under ITA Position Paper 01/2025), Section 3(i), Israeli SAFE guidance, Registrar filings, and IIA-funded IP should be implemented as prompts and counsel-review gates unless counsel-approved facts are provided [`ICNL-ISRAEL-ORDINANCE`, `PEARLCOHEN-102-PITFALLS`, `SHIBOLET-102-DOUBLE-TRIGGER`, `ITA-SAFE-2025-MASLAW`, `PEARLCOHEN-SAFE-2025`, `BARNEA-REGISTRAR-ONLINE`, `IIA-ROYALTIES-IP`]. The ICNL English text is unofficial; the Hebrew official law (Nevo / Knesset Sefer HaChukkim) and current ITA circulars control.
+Israel tax and corporate-law items are not calculator conclusions. Section 102 (including current double-trigger treatment under ITA Position Paper 01/2025), Section 3(i), Israeli SAFE guidance, Registrar filings, and IIA-funded IP should be implemented as prompts and counsel-review gates unless counsel-approved facts are provided [`ICNL-ISRAEL-ORDINANCE`, `PEARLCOHEN-102-PITFALLS`, `SHIBOLET-102-DOUBLE-TRIGGER`, `ITA-SAFE-2025-HERZOG`, `PEARLCOHEN-SAFE-2025`, `BARNEA-REGISTRAR-ONLINE`, `IIA-ROYALTIES-IP`]. The ICNL English text is unofficial; the Hebrew official law (Nevo / Knesset Sefer HaChukkim) and current ITA circulars control.
 
 Delaware/Israel cross-border and flip issues should not be inferred from cap-table math alone. Scripts can track holders, instruments, and dates, but structure choice, QSBS, IP, transfer pricing, tax-deferral paths, and IIA exposure require counsel review [`KPMG-RD-CENTER-2025`, `ARNONTL-RESTRUCTURING-2025`, `TAXADVISER-QSBS-OBBBA`, `IIA-ROYALTIES-IP`].
 
@@ -129,7 +129,9 @@ The following rule IDs must be evaluated against event dates:
 
 `ISRAEL-COMPANIES-LAW` - ICNL library copy, “Companies Law, 5759-1999,” https://www.icnl.org/wp-content/uploads/Israel_CompaniesLaw.pdf
 
-`ITA-SAFE-2025-MASLAW` - Maslaw, “Israeli Tax Authority Issues New Guidelines on SAFE,” https://www.maslaw.co.il/wp-content/uploads/2025/02/Israeli-Tax-Authority-Issues-New-Guidelines-on-SAFE.pdf
+`ITA-SAFE-2025-PRIMARY` - Israel Tax Authority, Income Tax procedures 290125 (Hebrew, gov.il), https://www.gov.il/BlobFolder/policy/procedures-290125/he/IncomeTax_procedures-290125.pdf — primary ITA SAFE circular (29 Jan 2025); applies to SAFEs signed Jan 1 2025–Dec 31 2026 unless superseded. Hebrew text controls.
+
+`ITA-SAFE-2025-HERZOG` - Herzog Fox & Neeman, “The ITA Publishes an Updated Version of its Guidance and Safe Harbor for SAFEs,” https://herzoglaw.co.il/en/news-and-insights/the-ita-publishes-an-updated-version-of-its-guidance-and-safe-harbor-for-safes/ (English summary corroborating the gov.il primary; corroborated in turn by Arnon Tadmor-Levy, https://arnontl.com/news/updated-guidelines-israel-tax-authority-regarding-safe-transactions/). Replaces a former Maslaw summary whose URL now redirects to a spam domain.
 
 `KPMG-RD-CENTER-2025` - KPMG, “Israel: Final guidance for local R&D centers related to IP valuations,” https://kpmg.com/us/en/taxnewsflash/news/2025/11/israel-final-guidance-local-r-and-d-centers-ip-valuations.html
 

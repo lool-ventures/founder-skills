@@ -176,6 +176,48 @@ def test_merge_adds_fields() -> None:
         assert data["company_name"] == "Gamma Co"
 
 
+def test_merge_deep_merges_nested_dicts() -> None:
+    """merge recurses into nested sub-dicts instead of clobbering siblings.
+
+    Regression for shared-scripts-6: a single-level dict.update replaced the
+    whole nested dict, silently discarding existing sibling keys.
+    """
+    with tempfile.TemporaryDirectory(prefix="test-ctx-") as root:
+        run_context(
+            [
+                "init",
+                "--company-name",
+                "Nested Co",
+                "--stage",
+                "seed",
+                "--sector",
+                "saas",
+                "--geography",
+                "US",
+            ],
+            artifacts_root=root,
+        )
+        # Seed a nested structure with two sibling keys under fundraising.round
+        seed = json.dumps({"fundraising": {"round": {"target": 5, "lead": "Acmecorp"}}})
+        rc, _, stderr = run_context(
+            ["merge", "--slug", "nested-co", "--data", seed, "--source", "user"],
+            artifacts_root=root,
+        )
+        assert rc == 0, f"seed merge failed: {stderr}"
+
+        # Merge an update to one nested key; the sibling must survive.
+        upd = json.dumps({"fundraising": {"round": {"target": 7}}})
+        rc, data, stderr = run_context(
+            ["merge", "--slug", "nested-co", "--data", upd, "--source", "user"],
+            artifacts_root=root,
+        )
+        assert rc == 0, f"update merge failed: {stderr}"
+        assert data is not None
+        round_data = data["fundraising"]["round"]
+        assert round_data["target"] == 7, "updated key not applied"
+        assert round_data["lead"] == "Acmecorp", "sibling nested key was clobbered"
+
+
 def test_merge_updates_last_updated() -> None:
     """merge always updates timestamp."""
     with tempfile.TemporaryDirectory(prefix="test-ctx-") as root:
@@ -313,6 +355,29 @@ def test_validate_missing_required() -> None:
         )
         assert rc == 1
         assert "slug" in stderr.lower() or "stage" in stderr.lower()
+
+
+def test_validate_accepts_series_c_and_series_d_stage() -> None:
+    """validate exits 0 for a context file with stage 'series-c' or 'series-d'."""
+    for stage in ("series-c", "series-d"):
+        with tempfile.TemporaryDirectory(prefix="test-ctx-") as root:
+            path = os.path.join(root, f"founder-context-{stage}-co.json")
+            with open(path, "w") as f:
+                json.dump(
+                    {
+                        "company_name": f"{stage.title()} Co",
+                        "slug": f"{stage}-co",
+                        "stage": stage,
+                        "sector": "fintech",
+                        "geography": "US",
+                    },
+                    f,
+                )
+            rc, data, stderr = run_context(
+                ["validate", "--slug", f"{stage}-co"],
+                artifacts_root=root,
+            )
+            assert rc == 0, f"validate failed for stage={stage}: {stderr}"
 
 
 # --- auto-detect ---
@@ -790,6 +855,35 @@ def test_update_identity_changes_stage() -> None:
         assert data["sector_type"] == "saas"  # unchanged
 
 
+def test_init_accepts_series_c_and_series_d_stage() -> None:
+    """init --stage series-c / series-d is accepted by argparse choices (VALID_STAGES)."""
+    for stage in ("series-c", "series-d"):
+        with tempfile.TemporaryDirectory(prefix="test-ctx-") as root:
+            rc, data, stderr = run_context(
+                ["init", "--company-name", "LaterCo", "--stage", stage, "--sector", "B2B SaaS", "--geography", "US"],
+                artifacts_root=root,
+            )
+            assert rc == 0, f"init failed for stage={stage}: {stderr}"
+            assert data is not None
+            assert data["stage"] == stage
+
+
+def test_update_identity_accepts_series_c_stage() -> None:
+    """update-identity --stage series-c is accepted by argparse choices (VALID_STAGES)."""
+    with tempfile.TemporaryDirectory(prefix="test-ctx-") as root:
+        run_context(
+            ["init", "--company-name", "ScaleCo", "--stage", "series-b", "--sector", "B2B SaaS", "--geography", "US"],
+            artifacts_root=root,
+        )
+        rc, data, stderr = run_context(
+            ["update-identity", "--slug", "scaleco", "--stage", "series-c"],
+            artifacts_root=root,
+        )
+        assert rc == 0, f"update-identity failed: {stderr}"
+        assert data is not None
+        assert data["stage"] == "series-c"
+
+
 def test_update_identity_requires_at_least_one_field() -> None:
     """update-identity with no fields exits with error."""
     with tempfile.TemporaryDirectory(prefix="test-ctx-") as root:
@@ -1017,3 +1111,48 @@ def test_unknown_sector_type_warnings_in_json() -> None:
         # The warning message should also list valid values
         msg = next(w["message"] for w in warnings if w.get("code") == "W_SECTOR_TYPE_UNKNOWN")
         assert "saas" in msg, f"Valid values not in warning message: {msg}"
+
+
+def test_init_derives_retail_sector_type() -> None:
+    """Free-form retail/D2C sector strings derive sector_type='retail'."""
+    for sector in ("Retail", "D2C fashion brand", "E-commerce"):
+        with tempfile.TemporaryDirectory(prefix="test-ctx-") as root:
+            rc, data, stderr = run_context(
+                [
+                    "init",
+                    "--company-name",
+                    "ShopCo",
+                    "--stage",
+                    "seed",
+                    "--sector",
+                    sector,
+                    "--geography",
+                    "US",
+                ],
+                artifacts_root=root,
+            )
+            assert rc == 0
+            assert data is not None
+            assert data["sector_type"] == "retail", f"'{sector}' should derive retail, got {data['sector_type']!r}"
+
+
+def test_init_retail_marketplace_prefers_marketplace() -> None:
+    """'retail marketplace' still resolves to marketplace (precedence unchanged)."""
+    with tempfile.TemporaryDirectory(prefix="test-ctx-") as root:
+        rc, data, stderr = run_context(
+            [
+                "init",
+                "--company-name",
+                "MarketCo",
+                "--stage",
+                "seed",
+                "--sector",
+                "Retail Marketplace",
+                "--geography",
+                "US",
+            ],
+            artifacts_root=root,
+        )
+        assert rc == 0
+        assert data is not None
+        assert data["sector_type"] == "marketplace"

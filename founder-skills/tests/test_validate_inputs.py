@@ -246,6 +246,91 @@ def test_sanity_expense_coverage_no_headcount() -> None:
     assert "EXPENSE_COVERAGE_SUSPECT" not in codes
 
 
+# ---------------------------------------------------------------------------
+# EXPENSE_COVERAGE_SUSPECT on a SPARSE-BY-DESIGN source.
+#
+# The two tests above bracket the 50% threshold, but BOTH fixtures are
+# extraction-shaped: one is a parser bug (salary_annual: 0), the other a fully
+# populated model. A CONVERSATIONAL source falls in the gap between them — real
+# salaries stated, no opex breakdown, which is that intake mode working normally.
+# Firing `critical` there made the gate satisfiable only by inventing the missing
+# expenses, which is exactly what happened in a live run. Anti-hallucination
+# gates must never be clearable by fabrication.
+# ---------------------------------------------------------------------------
+
+
+def _sparse_conversational_inputs() -> dict:
+    """Founder gives total burn + headcount, no opex breakdown. ~34% coverage."""
+    inputs = _base_inputs()
+    inputs["company"]["model_format"] = "conversational"
+    inputs["cash"]["monthly_net_burn"] = 900000
+    inputs["revenue"] = {"mrr": {"value": 420000}}
+    inputs["expenses"] = {
+        "headcount": [
+            {"role": "All", "count": 14, "start_month": "2026-01", "salary_annual": 384000},
+        ],
+    }
+    return inputs
+
+
+def _suspect(result: dict) -> dict | None:
+    hits = [w for w in result["warnings"] if w["code"] == "EXPENSE_COVERAGE_SUSPECT"]
+    return hits[0] if hits else None
+
+
+def test_expense_coverage_not_critical_for_conversational_source() -> None:
+    w = _suspect(validate(_sparse_conversational_inputs()))
+    assert w is not None, "the advisory should still fire — it is informative, just not a STOP"
+    assert w["critical"] is False, "a conversational source lacking an opex breakdown is expected"
+
+
+def test_expense_coverage_not_critical_for_partial_source() -> None:
+    inputs = _sparse_conversational_inputs()
+    inputs["company"]["model_format"] = "partial"
+    w = _suspect(validate(inputs))
+    assert w is not None and w["critical"] is False
+
+
+def test_expense_coverage_stays_critical_for_spreadsheet_source() -> None:
+    """Regression guard: the gate must keep its teeth where a breakdown DOES exist."""
+    inputs = _sparse_conversational_inputs()
+    inputs["company"]["model_format"] = "spreadsheet"
+    w = _suspect(validate(inputs))
+    assert w is not None and w["critical"] is True
+
+
+def test_expense_coverage_defaults_to_critical_when_format_unstated() -> None:
+    """model_format defaults to `spreadsheet`, so an unstated format keeps the STOP."""
+    inputs = _sparse_conversational_inputs()
+    del inputs["company"]["model_format"]
+    w = _suspect(validate(inputs))
+    assert w is not None and w["critical"] is True
+
+
+def test_expense_coverage_message_tells_the_model_not_to_fabricate() -> None:
+    """The live failure was a synthesized opex line. Say so explicitly."""
+    w = _suspect(validate(_sparse_conversational_inputs()))
+    assert w is not None
+    assert "do not invent" in w["message"].lower()
+
+
+def test_expense_coverage_message_is_currency_neutral() -> None:
+    """A hardcoded `$` in this message leaked a bare dollar sign into a non-USD review."""
+    inputs = _sparse_conversational_inputs()
+    inputs["currency"] = "ILS"
+    w = _suspect(validate(inputs))
+    assert w is not None
+    assert "$" not in w["message"], f"bare $ in a non-USD message: {w['message']}"
+    assert "ILS" in w["message"]
+
+
+def test_expense_coverage_message_keeps_dollar_sign_for_usd() -> None:
+    inputs = _sparse_conversational_inputs()
+    inputs["currency"] = "USD"
+    w = _suspect(validate(inputs))
+    assert w is not None and "$" in w["message"]
+
+
 def test_sanity_expense_coverage_with_burden() -> None:
     """Burden percentage should be included in expense coverage calculation."""
     inputs = _base_inputs()
@@ -290,3 +375,37 @@ def test_fix_clean_passthrough() -> None:
     assert result["valid"]
     assert len(result["auto_fixes"]) == 0
     assert len(result["errors"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# Null-coercion regression: the validator must REPORT bad input, not crash.
+# ---------------------------------------------------------------------------
+
+
+def test_null_headcount_count_reported_not_crashed() -> None:
+    """A headcount entry with count: null must produce a TYPE_ERROR rather than
+    raising a TypeError out of the Layer-3 sanity arithmetic."""
+    inputs = _base_inputs(expenses={"headcount": [{"role": "eng", "count": None, "salary_annual": 150000}]})
+    result = validate(inputs)
+    codes = [e["code"] for e in result["errors"]]
+    assert "TYPE_ERROR" in codes
+    fields = [e["field"] for e in result["errors"] if e["code"] == "TYPE_ERROR"]
+    assert any("headcount[0].count" in f for f in fields)
+
+
+def test_null_headcount_salary_reported() -> None:
+    """A headcount entry with salary_annual: null must produce a TYPE_ERROR."""
+    inputs = _base_inputs(expenses={"headcount": [{"role": "eng", "count": 5, "salary_annual": None}]})
+    result = validate(inputs)
+    fields = [e["field"] for e in result["errors"] if e["code"] == "TYPE_ERROR"]
+    assert any("headcount[0].salary_annual" in f for f in fields)
+
+
+def test_metadata_null_does_not_crash() -> None:
+    """validate() must guard metadata == null instead of raising AttributeError
+    on inputs.get('metadata', {}).get(...)."""
+    inputs = _base_inputs(metadata=None)
+    result = validate(inputs)
+    # Should return a structured result, not raise.
+    assert "errors" in result
+    assert "warnings" in result

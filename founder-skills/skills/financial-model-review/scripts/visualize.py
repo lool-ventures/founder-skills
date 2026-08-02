@@ -110,17 +110,39 @@ def _num(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _fmt_usd(value: float | int) -> str:
-    """Format a number as compact USD currency string."""
+def _fmt_usd(value: float | int, currency_code: str = "USD") -> str:
+    """Format a number as a compact currency string, scaled with K/M/B suffixes.
+
+    `currency_code` defaults to "USD" (the back-compat behavior for absent/
+    "USD" models), using a bare "$" prefix. Any other ISO code is tagged as a
+    suffix instead (e.g. "1.5M INR") — a bare "$" would misrepresent a
+    non-USD-denominated model.
+    """
     if value < 0:
-        return "-" + _fmt_usd(-value)
+        return "-" + _fmt_usd(-value, currency_code)
+    prefix = "$" if currency_code == "USD" else ""
+    suffix = "" if currency_code == "USD" else f" {currency_code}"
     if value >= 1_000_000_000:
-        return f"${value / 1_000_000_000:,.1f}B"
+        return f"{prefix}{value / 1_000_000_000:,.1f}B{suffix}"
     if value >= 1_000_000:
-        return f"${value / 1_000_000:,.1f}M"
+        return f"{prefix}{value / 1_000_000:,.1f}M{suffix}"
     if value >= 1_000:
-        return f"${value / 1_000:,.1f}K"
-    return f"${value:,.2f}"
+        return f"{prefix}{value / 1_000:,.1f}K{suffix}"
+    return f"{prefix}{value:,.2f}{suffix}"
+
+
+def _resolve_currency(*artifacts: dict[str, Any] | None) -> str:
+    """Return the model's native currency code from the first artifact carrying one.
+
+    Checked in the order passed by the caller; falls back to "USD" (the
+    back-compat default) when none carry a currency field.
+    """
+    for artifact in artifacts:
+        if isinstance(artifact, dict):
+            currency = artifact.get("currency")
+            if isinstance(currency, str) and currency.strip():
+                return currency.strip().upper()
+    return "USD"
 
 
 def _fmt_pct(value: float | int) -> str:
@@ -130,16 +152,44 @@ def _fmt_pct(value: float | int) -> str:
     return f"{value:.0f}%"
 
 
+_RISK_LEVEL_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("low risk", "low"),
+    ("moderate risk", "moderate"),
+    ("elevated risk", "elevated"),
+    ("critical risk", "critical"),
+)
+
+
+def _risk_level(risk_assessment: str | None) -> str:
+    """Classify runway.py's `risk_assessment` prose into a coarse severity bucket.
+
+    `_assess_risk` in runway.py always opens with one of "Low risk:", "Moderate
+    risk:", "Elevated risk:", "Critical risk:", or a no-data fallback. Parsing
+    that prefix is how this rendering layer stays in sync with the producer's
+    own verdict instead of re-deriving one from `default_alive` alone — which
+    is exactly the mismatch behind finding 19: a flat-burn projection that
+    never depletes cash was being shown as unconditionally "strong" even when
+    runway.py itself rated the same scenario "Moderate risk".
+    """
+    if not risk_assessment:
+        return "unknown"
+    lowered = risk_assessment.lower()
+    for phrase, level in _RISK_LEVEL_PREFIXES:
+        if lowered.startswith(phrase):
+            return level
+    return "unknown"
+
+
 # ---------------------------------------------------------------------------
 # Color scheme
 # ---------------------------------------------------------------------------
 
-_CLR_PRIMARY = "#0d549d"
-_CLR_ACCENT = "#21a2e3"
-_CLR_PASS = "#10b981"
-_CLR_WARN = "#f59e0b"
-_CLR_FAIL = "#ef4444"
-_CLR_NA = "#9ca3af"
+_CLR_PRIMARY = "#0D549D"
+_CLR_ACCENT = "#21A2E3"
+_CLR_PASS = "#2F8A56"
+_CLR_WARN = "#C9892B"
+_CLR_FAIL = "#C0392B"
+_CLR_NA = "#A6AEB5"
 
 _STATUS_COLORS: dict[str, str] = {
     "pass": _CLR_PASS,
@@ -206,15 +256,15 @@ _STATUS_ICONS: dict[str, str] = {
 
 _RATING_COLORS: dict[str, str] = {
     "strong": _CLR_PASS,
-    "acceptable": "#3b82f6",
+    "acceptable": "#21A2E3",
     "warning": _CLR_WARN,
     "fail": _CLR_FAIL,
 }
 
 _SCENARIO_COLORS: dict[str, str] = {
-    "base": "#3b82f6",
-    "slow": "#f59e0b",
-    "crisis": "#ef4444",
+    "base": "#0D549D",
+    "slow": "#C9892B",
+    "crisis": "#C0392B",
     "threshold": "#8b5cf6",
 }
 
@@ -237,8 +287,8 @@ def _tooltip_js() -> str:
         "<script>\n"
         "document.addEventListener('DOMContentLoaded', function() {\n"
         "    var tip = document.createElement('div');\n"
-        "    tip.style.cssText = 'position:fixed;padding:8px 12px;background:#1f2937;color:#fff;'\n"
-        "        + 'border-radius:6px;font-size:12px;max-width:300px;pointer-events:none;'\n"
+        "    tip.style.cssText = 'position:fixed;padding:8px 12px;background:#374B65;color:#fff;'\n"
+        "        + 'border-radius:4px;font-size:12px;max-width:300px;pointer-events:none;'\n"
         "        + 'z-index:1000;display:none;line-height:1.4;white-space:pre-line;'\n"
         "        + 'box-shadow:0 2px 8px rgba(0,0,0,0.15)';\n"
         "    document.body.appendChild(tip);\n"
@@ -296,40 +346,43 @@ def _css() -> str:
     return f"""
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-                         Helvetica, Arial, sans-serif;
+            font-family: var(--font-body);
             line-height: 1.6;
-            color: #1f2937;
-            background: #f9fafb;
+            color: var(--lool-ink);
+            background: var(--lool-white);
             padding: 2rem;
             max-width: 960px;
             margin: 0 auto;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }}
         header {{
-            border-bottom: 3px solid {_CLR_PRIMARY};
+            border-bottom: 3px solid var(--lool-blue);
             padding-bottom: 1rem;
             margin-bottom: 2rem;
         }}
         header h1 {{
-            color: {_CLR_PRIMARY};
+            color: var(--lool-blue);
+            font-weight: 400;
             font-size: 1.75rem;
         }}
         header p {{
-            color: #6b7280;
+            color: var(--lool-mute);
             font-size: 0.875rem;
         }}
         main section {{
-            background: #ffffff;
-            border: 1px solid #e5e7eb;
-            border-radius: 0.5rem;
+            background: var(--lool-paper);
+            border: 1px solid var(--lool-line-2);
+            border-radius: 0;
             padding: 1.5rem;
             margin-bottom: 1.5rem;
         }}
         main section h2 {{
-            color: {_CLR_PRIMARY};
+            color: var(--lool-royal);
+            font-weight: 500;
             font-size: 1.25rem;
             margin-bottom: 1rem;
-            border-bottom: 1px solid #e5e7eb;
+            border-bottom: 1px solid var(--lool-line-2);
             padding-bottom: 0.5rem;
         }}
         .chart-container {{
@@ -341,11 +394,11 @@ def _css() -> str:
         }}
         .placeholder {{
             text-align: center;
-            color: #9ca3af;
+            color: var(--lool-faint);
             font-style: italic;
             padding: 2rem;
-            background: #f3f4f6;
-            border-radius: 0.25rem;
+            background: var(--lool-paper-2);
+            border-radius: 0;
         }}
         .legend {{
             display: flex;
@@ -363,7 +416,7 @@ def _css() -> str:
         .legend-swatch {{
             width: 14px;
             height: 14px;
-            border-radius: 3px;
+            border-radius: 0;
             display: inline-block;
         }}
         .summary-grid {{
@@ -373,32 +426,32 @@ def _css() -> str:
             margin-bottom: 1.5rem;
         }}
         .summary-card {{
-            background: #f9fafb;
-            border: 1px solid #e5e7eb;
-            border-radius: 0.5rem;
+            background: var(--lool-paper);
+            border: 1px solid var(--lool-line-2);
+            border-radius: 0;
             padding: 1rem;
             text-align: center;
         }}
         .summary-card .label {{
             font-size: 0.75rem;
-            color: #6b7280;
+            color: var(--lool-subtle);
             text-transform: uppercase;
-            letter-spacing: 0.05em;
+            letter-spacing: 0.06em;
         }}
         .summary-card .value {{
             font-size: 1.5rem;
             font-weight: bold;
-            color: #1f2937;
+            color: var(--lool-ink);
         }}
         footer {{
             text-align: center;
-            color: #9ca3af;
+            color: var(--lool-faint);
             font-size: 0.75rem;
             padding-top: 1rem;
-            border-top: 1px solid #e5e7eb;
+            border-top: 1px solid var(--lool-line-2);
         }}
-        footer a, header a {{ color: {_CLR_ACCENT}; text-decoration: none; }}
-        footer a:hover, header a:hover {{ text-decoration: underline; }}
+        footer a, header a {{ color: var(--lool-azure); text-decoration: none; }}
+        footer a:hover, header a:hover {{ color: var(--lool-azure-deep); text-decoration: underline; }}
         .collapsible-toggle {{
             cursor: pointer;
             user-select: none;
@@ -407,19 +460,19 @@ def _css() -> str:
             gap: 0.5rem;
             padding: 0.5rem 0;
         }}
-        .collapsible-toggle:hover {{ background: #f3f4f6; border-radius: 0.25rem; }}
+        .collapsible-toggle:hover {{ background: var(--lool-paper-2); }}
         .chevron {{
             display: inline-block;
             transition: transform 0.2s;
             font-size: 0.75rem;
-            color: #9ca3af;
+            color: var(--lool-faint);
         }}
         .collapsible-content {{ padding-left: 1.5rem; }}
         .finding-item {{
             padding: 0.75rem;
-            border-left: 3px solid #e5e7eb;
+            border-left: 3px solid var(--lool-line);
             margin-bottom: 0.5rem;
-            border-radius: 0 0.25rem 0.25rem 0;
+            border-radius: 0;
         }}
         .finding-strong {{ border-left-color: {_CLR_PASS}; }}
         .finding-attention {{ border-left-color: {_CLR_FAIL}; }}
@@ -427,7 +480,7 @@ def _css() -> str:
         .findings-subsection {{ margin-bottom: 1rem; }}
         .findings-subsection h3 {{
             font-size: 0.9rem;
-            color: #374151;
+            color: var(--lool-slate);
             margin-bottom: 0.5rem;
         }}
         @media print {{
@@ -524,14 +577,16 @@ def _chart_checklist_heatmap(checklist: dict[str, Any] | None) -> str:
             evidence = str(item.get("evidence") or item.get("notes") or "")
             parts.append(
                 f'<div style="display:flex;align-items:flex-start;gap:0.5rem;'
-                f'padding:0.35rem 0;border-bottom:1px solid #f3f4f6;">'
+                f'padding:0.35rem 0;border-bottom:1px solid var(--lool-line-2);">'
                 f'<span style="color:{_esc(color)};font-weight:bold;min-width:1.2rem;">'
                 f"{_esc(icon)}</span>"
                 f"<div>"
                 f'<span style="font-size:0.85rem;">{_esc(label)}</span>'
             )
             if evidence:
-                parts.append(f'<div style="font-size:0.75rem;color:#6b7280;margin-top:0.15rem;">{_esc(evidence)}</div>')
+                parts.append(
+                    f'<div style="font-size:0.75rem;color:var(--lool-mute);margin-top:0.15rem;">{_esc(evidence)}</div>'
+                )
             parts.append("</div></div>")
         parts.append("</div></div>")
 
@@ -580,7 +635,7 @@ _RATING_LABELS: dict[str, str] = {
 }
 
 
-def _format_metric_value(name: str, value: float) -> str:
+def _format_metric_value(name: str, value: float, currency_code: str = "USD") -> str:
     """Format a metric value appropriately based on its type."""
     pct_metrics = {"gross_margin", "nrr", "grr"}
     if name in pct_metrics and 0 < value <= 2.0:
@@ -588,7 +643,7 @@ def _format_metric_value(name: str, value: float) -> str:
     if name == "cac_payback":
         return f"{value:,.0f} mo"
     if value >= 1_000:
-        return _fmt_usd(value)
+        return _fmt_usd(value, currency_code)
     return f"{value:,.1f}"
 
 
@@ -610,6 +665,7 @@ def _chart_unit_economics(unit_economics: dict[str, Any] | None) -> str:
     if not valid_metrics:
         return '<div class="placeholder">No valid metrics</div>'
 
+    currency_code = _resolve_currency(unit_economics)
     bar_width = 220
     bar_height = 16
     parts: list[str] = []
@@ -619,10 +675,21 @@ def _chart_unit_economics(unit_economics: dict[str, Any] | None) -> str:
         value = _num(m.get("value", 0))
         rating = str(m.get("rating", ""))
         benchmark = _as_dict(m.get("benchmark"))
-        color = _RATING_COLORS.get(rating, _CLR_PRIMARY)
         display_name = _METRIC_LABELS.get(name, name.replace("_", " ").title())
-        rating_label = _RATING_LABELS.get(rating, rating.title())
-        val_str = _format_metric_value(name, value)
+
+        # A non-USD metric is rated `contextual` because the USD-calibrated benchmark
+        # set was not established against local-currency-market companies — but the
+        # dimensionless comparison DID run, and its grade is preserved here. Show it,
+        # marked as a reference, so a non-USD review is not a page of ungraded numbers.
+        # See the matching note in compose_report.py's unit-economics section.
+        reference_rating = str(m.get("benchmark_reference_rating") or "")
+        if reference_rating:
+            color = _RATING_COLORS.get(reference_rating, _CLR_PRIMARY)
+            rating_label = f"{_RATING_LABELS.get(reference_rating, reference_rating.title())} (ref)"
+        else:
+            color = _RATING_COLORS.get(rating, _CLR_PRIMARY)
+            rating_label = _RATING_LABELS.get(rating, rating.title())
+        val_str = _format_metric_value(name, value, currency_code)
 
         # Determine scale for this metric's bullet chart
         target = _num(benchmark.get("target", 0))
@@ -631,10 +698,19 @@ def _chart_unit_economics(unit_economics: dict[str, Any] | None) -> str:
         # Build tooltip text
         tip_parts: list[str] = [f"{display_name}: {val_str}"]
         if target:
-            tip_parts.append(f"Target: {_format_metric_value(name, target)}")
+            tip_parts.append(f"Target: {_format_metric_value(name, target, currency_code)}")
         source = benchmark.get("source", "")
         if source:
             tip_parts.append(f"Source: {source}")
+        if reference_rating:
+            tip_parts.append(
+                f"Reference grade only ({reference_rating}) — dimensionless benchmark, "
+                "no FX conversion; withheld from the rating because the benchmark set is "
+                "calibrated on USD-market companies"
+            )
+            ref_source = str(m.get("benchmark_reference_source") or "")
+            if ref_source:
+                tip_parts.append(f"Reference source: {ref_source}")
         tooltip = "\n".join(tip_parts)
 
         # Build inline SVG bullet chart
@@ -643,11 +719,11 @@ def _chart_unit_economics(unit_economics: dict[str, Any] | None) -> str:
             f'style="vertical-align:middle;" data-tooltip="{_esc(tooltip)}">'
         )
         # Background track
-        svg += f'<rect x="0" y="0" width="{bar_width}" height="{bar_height}" fill="#f3f4f6" rx="3" />'
+        svg += f'<rect x="0" y="0" width="{bar_width}" height="{bar_height}" fill="#F1F4F4" rx="3" />'
         # Benchmark target zone (if available)
         if target > 0:
             target_x = min(target / scale_max * bar_width, bar_width)
-            svg += f'<rect x="0" y="2" width="{target_x:.1f}" height="{bar_height - 4}" fill="#e5e7eb" rx="2" />'
+            svg += f'<rect x="0" y="2" width="{target_x:.1f}" height="{bar_height - 4}" fill="#D7DBE0" rx="2" />'
         # Value bar
         bar_w = max(min(abs(value) / scale_max * bar_width, bar_width), 2.0)
         svg += f'<rect x="0" y="3" width="{bar_w:.1f}" height="{bar_height - 6}" fill="{_esc(color)}" rx="2" />'
@@ -656,15 +732,15 @@ def _chart_unit_economics(unit_economics: dict[str, Any] | None) -> str:
             marker_x = min(target / scale_max * bar_width, bar_width - 1)
             svg += (
                 f'<line x1="{marker_x:.1f}" y1="0" x2="{marker_x:.1f}" y2="{bar_height}" '
-                f'stroke="#374151" stroke-width="2" />'
+                f'stroke="#374B65" stroke-width="2" />'
             )
         svg += "</svg>"
 
         parts.append(
             f'<div style="display:flex;align-items:center;gap:0.75rem;'
-            f'padding:0.4rem 0;border-bottom:1px solid #f3f4f6;">'
+            f'padding:0.4rem 0;border-bottom:1px solid var(--lool-line-2);">'
             f'<span style="min-width:140px;font-size:0.85rem;font-weight:600;'
-            f'color:#1f2937;">{_esc(display_name)}</span>'
+            f'color:var(--lool-ink);">{_esc(display_name)}</span>'
             f"{svg}"
             f'<span style="min-width:120px;font-size:0.8rem;color:{_esc(color)};">'
             f"{_esc(val_str)} — {_esc(rating_label)}</span>"
@@ -675,7 +751,7 @@ def _chart_unit_economics(unit_economics: dict[str, Any] | None) -> str:
     legend_items: list[str] = []
     for rating, color in [
         ("Strong", _CLR_PASS),
-        ("Acceptable", "#3b82f6"),
+        ("Acceptable", "#21A2E3"),
         ("Needs improvement", _CLR_WARN),
         ("Below target", _CLR_FAIL),
     ]:
@@ -707,6 +783,8 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
     scenarios = _as_list(runway.get("scenarios"))
     if not scenarios:
         return '<div class="placeholder">No runway scenarios</div>'
+
+    currency_code = _resolve_currency(runway)
 
     # Collect all data points per scenario
     scenario_data: list[tuple[str, list[tuple[int, float]]]] = []
@@ -789,13 +867,13 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
         parts.append(
             f'<text x="{_num(margin_left - 8):.2f}" y="{y:.2f}" '
             f'text-anchor="end" dominant-baseline="central" '
-            f'font-size="9" fill="#9ca3af">{_esc(_fmt_usd(cash_val))}</text>'
+            f'font-size="9" fill="#7D90A3">{_esc(_fmt_usd(cash_val, currency_code))}</text>'
         )
         # Grid line
         parts.append(
             f'<line x1="{_num(margin_left):.2f}" y1="{y:.2f}" '
             f'x2="{_num(margin_left + chart_width):.2f}" y2="{y:.2f}" '
-            f'stroke="#e5e7eb" stroke-width="1" />'
+            f'stroke="#D7DBE0" stroke-width="1" />'
         )
 
     # Zero line (if visible)
@@ -804,18 +882,19 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
         parts.append(
             f'<line x1="{_num(margin_left):.2f}" y1="{zero_y:.2f}" '
             f'x2="{_num(margin_left + chart_width):.2f}" y2="{zero_y:.2f}" '
-            f'stroke="#ef4444" stroke-width="1.5" stroke-dasharray="4,3" />'
+            f'stroke="{_CLR_FAIL}" stroke-width="1.5" stroke-dasharray="4,3" />'
         )
+        zero_label = "$0" if currency_code == "USD" else f"0 {currency_code}"
         parts.append(
             f'<text x="{_num(margin_left + chart_width + 5):.2f}" y="{zero_y:.2f}" '
-            f'dominant-baseline="central" font-size="9" fill="#ef4444">$0</text>'
+            f'dominant-baseline="central" font-size="9" fill="{_CLR_FAIL}">{_esc(zero_label)}</text>'
         )
 
     # X-axis label
     parts.append(
         f'<text x="{_num(margin_left + chart_width / 2):.2f}" '
         f'y="{_num(svg_h - 5):.2f}" text-anchor="middle" '
-        f'font-size="10" fill="#6b7280">Months</text>'
+        f'font-size="10" fill="#7D90A3">Months</text>'
     )
 
     # Plot each scenario as a polyline
@@ -925,7 +1004,9 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
     legend = '<div class="legend">' + "".join(legend_items) + "</div>"
 
     # Annotation box summarizing key runway numbers
-    annotations: list[str] = []
+    risk_assessment = str(runway.get("risk_assessment") or "")
+    risk_level = _risk_level(risk_assessment)
+    annotations: list[tuple[str, str]] = []  # (text, border color)
     for s in scenarios:
         if not isinstance(s, dict):
             continue
@@ -933,14 +1014,26 @@ def _chart_runway(runway: dict[str, Any] | None) -> str:
         slabel = _SCENARIO_LABELS.get(sname, sname.title())
         months = s.get("runway_months")
         if months is not None:
-            annotations.append(f"{slabel}: {int(_num(months))} months runway")
+            annotations.append((f"{slabel}: {int(_num(months))} months runway", _CLR_ACCENT))
         elif s.get("default_alive"):
-            annotations.append(f"{slabel}: on track to profitability")
+            if sname == "base" and risk_level in ("moderate", "elevated", "critical"):
+                # The base scenario's own risk_assessment disagrees with a bare "cash never
+                # runs out" read (finding 19) — surface the static (today's-burn) floor and
+                # the rated risk level instead of an unqualified default-alive annotation.
+                static_months = s.get("static_runway_months")
+                static_str = f", {static_months:g} mo at today's burn" if static_months is not None else ""
+                annotations.append(
+                    (f"{slabel}: default alive by projection, but rated {risk_level} risk{static_str}", _CLR_WARN)
+                )
+            elif s.get("became_profitable"):
+                annotations.append((f"{slabel}: on track to profitability", _CLR_ACCENT))
+            else:
+                annotations.append((f"{slabel}: cash never runs out (default alive)", _CLR_ACCENT))
     annotation_html = ""
     if annotations:
         items_html = "".join(
-            f'<div class="finding-item" style="border-left-color:{_CLR_ACCENT};">{_esc(a)}</div>'
-            for a in annotations[:4]
+            f'<div class="finding-item" style="border-left-color:{_esc(color)};">{_esc(a)}</div>'
+            for a, color in annotations[:4]
         )
         annotation_html = f'<div style="margin-top:1rem;">{items_html}</div>'
 
@@ -966,6 +1059,7 @@ def _chart_revenue_waterfall(inputs: dict[str, Any] | None) -> str:
     arr_data = _as_dict(revenue.get("arr"))
     arr_value = _num(arr_data.get("value", 0))
     arr_as_of = str(arr_data.get("as_of", ""))
+    currency_code = _resolve_currency(inputs)
 
     if arr_value <= 0:
         return '<div class="placeholder">No ARR data available</div>'
@@ -992,8 +1086,8 @@ def _chart_revenue_waterfall(inputs: dict[str, Any] | None) -> str:
     # Value label above bar
     parts.append(
         f'<text x="{_num(bar_x + bar_width / 2):.2f}" y="{_num(bar_y - 8):.2f}" '
-        f'text-anchor="middle" font-size="14" fill="#1f2937" font-weight="bold">'
-        f"{_esc(_fmt_usd(arr_value))}</text>"
+        f'text-anchor="middle" font-size="14" fill="#374B65" font-weight="bold">'
+        f"{_esc(_fmt_usd(arr_value, currency_code))}</text>"
     )
 
     # Label below bar
@@ -1002,7 +1096,7 @@ def _chart_revenue_waterfall(inputs: dict[str, Any] | None) -> str:
         label = f"ARR (as of {arr_as_of})"
     parts.append(
         f'<text x="{_num(bar_x + bar_width / 2):.2f}" y="{_num(margin_top + chart_height + 18):.2f}" '
-        f'text-anchor="middle" font-size="11" fill="#6b7280">{_esc(label)}</text>'
+        f'text-anchor="middle" font-size="11" fill="#7D90A3">{_esc(label)}</text>'
     )
 
     parts.append("</svg>")
@@ -1080,18 +1174,39 @@ def _executive_summary(
     # Runway (base case)
     if _usable(runway):
         scenarios = _as_list(runway.get("scenarios"))
+        risk_assessment = str(runway.get("risk_assessment") or "")
+        risk_level = _risk_level(risk_assessment)
         for s in scenarios:
             if isinstance(s, dict) and s.get("name") == "base":
                 raw_months = s.get("runway_months")
                 alive = s.get("default_alive", False)
-                alive_color = _CLR_PASS if alive else _CLR_FAIL
+                profitable = s.get("became_profitable", False)
+                static_months = s.get("static_runway_months")
                 runway_display = "∞" if raw_months is None else f"{int(_num(raw_months))} mo"
+                tooltip_attr = ""
+                if alive and risk_level in ("moderate", "elevated", "critical"):
+                    # runway.py's own risk_assessment disagrees with a bare "cash never runs
+                    # out" read (finding 19): the flat-burn projection never depletes, but the
+                    # producer itself rates this scenario moderate-or-worse risk — never render
+                    # it as the unqualified "strong" green a plain default_alive check would.
+                    alive_color = _CLR_WARN
+                    alive_label = f"Default alive, but rated {risk_level} risk"
+                    if static_months is not None:
+                        alive_label += f" — {static_months:g} mo at today's burn"
+                    if risk_assessment:
+                        tooltip_attr = f' data-tooltip="{_esc(risk_assessment)}"'
+                elif alive:
+                    alive_color = _CLR_PASS
+                    alive_label = "On track to profitability" if profitable else "Default alive (cash never runs out)"
+                else:
+                    alive_color = _CLR_FAIL
+                    alive_label = "Cash runs out before profitability"
                 cards.append(
-                    f'<div class="summary-card">'
+                    f'<div class="summary-card"{tooltip_attr}>'
                     f'<div class="label">Base Runway</div>'
                     f'<div class="value" style="color:{_esc(alive_color)}">{runway_display}</div>'
                     f'<div class="label">'
-                    f"{'On track to profitability' if alive else 'Cash runs out before profitability'}"
+                    f"{alive_label}"
                     f"</div>"
                     f"</div>"
                 )
@@ -1103,10 +1218,11 @@ def _executive_summary(
         arr_data = _as_dict(revenue.get("arr"))
         arr_val = _num(arr_data.get("value", 0))
         if arr_val > 0:
+            currency_code = _resolve_currency(inputs)
             cards.append(
                 f'<div class="summary-card">'
                 f'<div class="label">ARR</div>'
-                f'<div class="value" style="color:{_CLR_PRIMARY}">{_esc(_fmt_usd(arr_val))}</div>'
+                f'<div class="value" style="color:{_CLR_PRIMARY}">{_esc(_fmt_usd(arr_val, currency_code))}</div>'
                 f'<div class="label">current</div>'
                 f"</div>"
             )
@@ -1175,12 +1291,30 @@ def _key_findings(
     # --- Runway findings ---
     if _usable(runway):
         scenarios = _as_list(runway.get("scenarios"))
+        risk_assessment = str(runway.get("risk_assessment") or "")
+        risk_level = _risk_level(risk_assessment)
         for s in scenarios:
             if not isinstance(s, dict):
                 continue
             if s.get("name") == "base":
                 if s.get("default_alive"):
-                    strong.append("On track to profitability (base case)")
+                    if risk_level == "low":
+                        if s.get("became_profitable"):
+                            strong.append("On track to profitability (base case)")
+                        else:
+                            strong.append("Default alive — cash never runs out (base case)")
+                    else:
+                        # runway.py's own risk_assessment rates this scenario
+                        # moderate-or-worse (finding 19): a flat-burn projection that never
+                        # depletes cash is not the same as a safe cash position, so it must
+                        # not be filed under "What's strong".
+                        static_months = s.get("static_runway_months")
+                        attention.append(risk_assessment or f"Default alive but rated {risk_level} risk (base case)")
+                        if static_months is not None:
+                            actions.append(
+                                f"Treat the {static_months:g}-month static runway (today's burn, no growth) as "
+                                "the planning number, not the flat-burn projection"
+                            )
                 else:
                     months = s.get("runway_months")
                     if months is not None:
@@ -1225,6 +1359,11 @@ def _key_findings(
 
 def compose_html(dir_path: str) -> str:
     """Load artifacts and compose full HTML report."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _theme
+
     all_names = REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS
     artifacts: dict[str, dict[str, Any] | None] = {}
     for name in all_names:
@@ -1272,13 +1411,15 @@ def compose_html(dir_path: str) -> str:
             {revenue_html}
         </section>"""
 
+    brand_css = _theme.brand_css()
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Financial Model Review: {_esc(company_name)}</title>
-    <style>{_css()}</style>
+    <style>{brand_css}{_css()}</style>
 </head>
 <body>
     <header>
@@ -1310,6 +1451,7 @@ def compose_html(dir_path: str) -> str:
     </footer>
     {_tooltip_js()}
     {_collapsible_js()}
+    {_theme.FOOTER_CREDIT_HTML}
 </body>
 </html>
 """

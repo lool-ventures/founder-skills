@@ -29,7 +29,7 @@ Structured extraction of the spreadsheet contents for downstream analysis.
 | `row_count` | integer | yes | Number of data rows |
 | `col_count` | integer | yes | Number of columns |
 | `pre_header_rows` | any[][] | yes | Rows before the detected header row (xlsx: rows above header containing company name, logos, etc.; csv: always empty `[]`). `validate_extraction.py` treats a missing key as `[]` for backward compatibility with older model_data files. |
-| `cell_refs` | object[] | yes | List of row-level cell coordinate mappings. Each entry: `{"row_index": N, "label": "Revenue", "cols": {"Jan 2025": "B3"}}`. `row_index` is the position in `rows[]` (stable key — labels can duplicate). Only rows with numeric cells are included. xlsx: populated from openpyxl cell coordinates; csv: always `[]`. Used by `validate_extraction.py` for best-match provenance (value-based lookup, not authoritative for duplicate values). Missing key treated as `[]` for backward compatibility. |
+| `cell_refs` | object[] | yes | List of row-level cell coordinate mappings. Each entry: `{"row_index": N, "label": "Revenue", "cols": {"Jan 2025": "B3"}}`. `row_index` is the position in `rows[]` (stable key — labels can duplicate). `cols` is keyed by column header; a header duplicated in the same row gets a `#N` occurrence suffix on its 2nd+ column (e.g. `"Q1"`, `"Q1#2"`) so duplicate-header columns never collide. Only rows with numeric cells are included. xlsx: populated from openpyxl cell coordinates; csv: always `[]`. Used by `validate_extraction.py` for best-match provenance (value-based lookup, not authoritative for duplicate values). Missing key treated as `[]` for backward compatibility. |
 
 **Example:**
 ```json
@@ -42,7 +42,9 @@ Structured extraction of the spreadsheet contents for downstream analysis.
       "detected_type": "assumptions",
       "periodicity": "monthly",
       "row_count": 45,
-      "col_count": 4
+      "col_count": 4,
+      "pre_header_rows": [["Acmecorp Financial Model"]],
+      "cell_refs": [{"row_index": 0, "label": "Monthly churn", "cols": {"Value": "B3"}}]
     }
   ],
   "source_format": "xlsx",
@@ -65,8 +67,10 @@ Structured extraction of the spreadsheet contents for downstream analysis.
     "stage": "seed",
     "geography": "israel",
     "sector": "saas",
+    "revenue_model_type": "saas-plg",
     "traits": ["multi-currency", "multi-entity"]
   },
+  "metadata": {"run_id": "<RUN_ID>"},
   "items": [
     {
       "id": "STRUCT_01",
@@ -78,7 +82,7 @@ Structured extraction of the spreadsheet contents for downstream analysis.
 }
 ```
 
-The `company` block is used for gate evaluation. Items whose gate doesn't match the company profile are auto-scored as `not_applicable` regardless of the agent's assessment.
+The `company` block is used for gate evaluation. Items whose gate doesn't match the company profile are auto-scored as `not_applicable` regardless of the agent's assessment. `revenue_model_type` drives sector-type gating (omitting it emits a "sector gates may not match" warning). `metadata.run_id` is propagated into `checklist.json` for the run_id-parity / stale-artifact check; a missing run_id blocks Context B.
 
 ### Output format
 
@@ -181,6 +185,10 @@ Cash runway projections across scenarios with decision-point analysis.
 
 ### scenarios[] entry
 
+Scenarios are identified by `name` (no `id` or `label` field). The canonical names are `"base"`, `"slow"`, `"crisis"`, and `"threshold"`. Downstream consumers (`compose_report.py`, `coaching_payload`) look up the base scenario by `name == "base"` or `name == "baseline"`.
+
+**Default-alive shape:** when a company is projected to never run out of cash, `runway_months` is `null`, `cash_out_date` is `null`, `decision_point` is `null`, `default_alive` is `true`, and the `note` field (if present) explains the assumption. `null` runway is intentional and correct for default-alive companies — it does not indicate missing data.
+
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | yes | Scenario name |
@@ -226,6 +234,24 @@ Assembled report from all artifacts with cross-artifact validation.
 |-------|------|----------|-------------|
 | `report_markdown` | string | yes | Complete review report in markdown format |
 | `validation` | object | yes | Cross-artifact validation results |
+| `coaching_payload` | object | yes | Structured payload the Context B coaching dispatch consumes (Step 8c reads `data["coaching_payload"]`). See below. |
+
+### coaching_payload
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `schema_version` | string | yes | Coaching-payload schema version |
+| `summary` | object | yes | `score_pct`, `overall_status`, `total`, `pass`, `fail`, `warn`, `not_applicable` |
+| `failed_items` | object[] | yes | Failed checklist items (top 30 by severity when `truncated`) |
+| `warned_items` | object[] | yes | Warned checklist items (subject to the same truncation) |
+| `high_severity_warnings` | string[] | yes | High-severity validation warning codes |
+| `company_name` | string | yes | Company name |
+| `runway_months` | number \| null | yes | Base-case runway months (`null` when not computed) |
+| `review_dir` | string | yes | Absolute review directory path |
+| `report_path` | string | yes | Absolute `report.md` path |
+| `insertion_marker` | string | yes | The exact per-run uuid marker compose emitted into `report.md` |
+| `truncated` | boolean | yes | `true` when `failed_items`/`warned_items` were truncated to the top 30 |
+| `truncated_count` | number | yes | Count of dropped entries when `truncated` is `true` |
 
 ### validation
 

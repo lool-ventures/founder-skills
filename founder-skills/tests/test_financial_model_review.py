@@ -12,8 +12,10 @@ All tests use subprocess to exercise the scripts exactly as the agent does.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -86,6 +88,72 @@ def test_extract_model_xlsx() -> None:
     assert data is not None
     assert "sheets" in data
     assert len(data["sheets"]) >= 2  # sample has multiple sheets
+
+
+def test_extract_model_revenue_sheet_first_data_row_not_pre_header() -> None:
+    """Revenue sheet first data row (2025-01, 100, 500, 50000) must land in rows[],
+    not pre_header_rows.
+
+    Regression: _find_header_row scored the data row higher than the text header
+    (Month, Customers, ARPU, MRR) because '2025-01' matched the monthly pattern.
+    Fix: rows predominantly numeric/date are disqualified from header candidacy.
+    """
+    import pytest
+
+    fixture = os.path.join(FIXTURES_DIR, "sample_model.xlsx")
+    if not os.path.exists(fixture):
+        pytest.skip("sample_model.xlsx fixture not yet created")
+    rc, data, stderr = run_script("extract_model.py", ["--file", fixture, "--pretty"])
+    assert rc == 0
+    assert data is not None
+    rev = next((s for s in data["sheets"] if s["name"] == "Revenue"), None)
+    assert rev is not None, "Revenue sheet not found in fixture"
+    # Correct headers are the text labels
+    assert rev["headers"][0] == "Month", (
+        f"Expected first header 'Month', got {rev['headers'][0]!r} — data row classified as header"
+    )
+    # 2025-01 must appear in rows[], not in pre_header_rows
+    row_labels = [str(r[0]) for r in rev["rows"] if r]
+    assert "2025-01" in row_labels, "First data row (2025-01) must appear in rows[], not pre_header_rows"
+    pre_header_labels = [str(r[0]) for r in rev["pre_header_rows"] if r]
+    assert "2025-01" not in pre_header_labels, (
+        "2025-01 must not appear in pre_header_rows — it is a data row, not banner text"
+    )
+
+
+def test_extract_model_banner_rows_still_captured_as_pre_header() -> None:
+    """Text-dominant banner rows before a period header must still go to pre_header_rows.
+
+    Guards against over-correction: a Carta/Pulley export with a company name
+    banner (e.g. 'Acme Corp Financial Summary') before the period columns must
+    still classify the banner as pre-header and the period row as header.
+    """
+    from openpyxl import Workbook  # type: ignore[import-untyped]
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+        xlsx_path = f.name
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = "P&L"
+    # Row 1: banner text (text-dominant, not data)
+    ws.append(["Acme Corp Financial Summary", None, None, None])
+    # Row 2: period header (text cells that match monthly patterns)
+    ws.append(["Line Item", "Jan 2025", "Feb 2025", "Mar 2025"])
+    # Row 3+: data rows
+    ws.append(["Revenue", 50000, 55000, 60000])
+    wb.save(xlsx_path)
+    wb.close()
+
+    rc, data, stderr = run_script("extract_model.py", ["--file", xlsx_path, "--pretty"])
+    os.unlink(xlsx_path)
+    assert rc == 0
+    sheet = data["sheets"][0]
+    # Banner row must be in pre_header_rows
+    assert sheet["pre_header_rows"], "Banner row should appear in pre_header_rows"
+    assert sheet["pre_header_rows"][0][0] == "Acme Corp Financial Summary"
+    # Period row must be selected as the header
+    assert "Jan 2025" in sheet["headers"], f"Period row should be the header, got headers={sheet['headers']}"
 
 
 def test_extract_model_stdin_passthrough() -> None:
@@ -246,7 +314,7 @@ def test_extract_periodicity_stdin_no_periodicity() -> None:
 
 def test_extract_periodicity_mixed_xlsx() -> None:
     """XLSX with quarterly and monthly sheets returns mixed summary."""
-    from openpyxl import Workbook
+    from openpyxl import Workbook  # type: ignore[import-untyped]
 
     wb = Workbook()
     # Sheet 1: quarterly headers
@@ -291,7 +359,7 @@ def test_extract_model_cell_refs_csv() -> None:
 
 def test_extract_model_cell_refs_xlsx() -> None:
     """XLSX extraction produces correct cell_refs with coordinates."""
-    from openpyxl import Workbook
+    from openpyxl import Workbook  # type: ignore[import-untyped]
 
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
         xlsx_path = f.name
@@ -329,9 +397,106 @@ def test_extract_model_cell_refs_xlsx() -> None:
     assert exp_ref["cols"]["Jan 2025"] == "B3"
 
 
+def _load_fmr_compose_module() -> Any:
+    import importlib.util
+
+    path = os.path.join(FMR_SCRIPTS_DIR, "compose_report.py")
+    spec = importlib.util.spec_from_file_location("fmr_compose_report_module", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["fmr_compose_report_module"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_coaching_payload_never_carries_pass_items() -> None:
+    """Lock: pass-item evidence must never reach coaching_payload (it is built
+    from failed/warned items + summary counts only), so capping pass-evidence
+    length can never become a coaching regression. A pass item bearing a
+    distinctive long evidence string must not surface in the payload."""
+    mod = _load_fmr_compose_module()
+    marker = "UNIQUE_PASS_EVIDENCE_TOKEN_zzz checked many things in great detail"
+    checklist = {
+        "summary": {
+            "score_pct": 95,
+            "overall_status": "pass",
+            "total": 46,
+            "pass": 46,
+            "fail": 0,
+            "warn": 0,
+            "failed_items": [],
+            "warned_items": [],
+        },
+        "items": [{"id": "STRUCT_01", "status": "pass", "evidence": marker, "notes": None}],
+    }
+    inputs = {"company": {"company_name": "TestCo"}}
+    with tempfile.TemporaryDirectory(prefix="test-coaching-") as d:
+        payload = mod._emit_coaching_payload(
+            inputs, checklist, [], d, os.path.join(d, "report.md"), "<!--marker-->", None
+        )
+    assert marker not in json.dumps(payload), (
+        "pass-item evidence leaked into coaching_payload — pass brevity would be a coaching regression"
+    )
+
+
+def _load_validate_extraction_module() -> Any:
+    import importlib.util
+
+    path = os.path.join(FMR_SCRIPTS_DIR, "validate_extraction.py")
+    spec = importlib.util.spec_from_file_location("fmr_validate_extraction_module", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["fmr_validate_extraction_module"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_cell_refs_duplicate_headers_resolve_to_own_coordinate() -> None:
+    """Duplicate column headers must not collide in cell_refs.cols: a value
+    present only in the FIRST duplicate column must resolve to that column's
+    coordinate, not the last duplicate's. The last-duplicate-wins collision
+    corrupts the best-match provenance that feeds the Step-3.6 founder review."""
+    import pytest
+
+    pytest.importorskip("openpyxl")
+    from openpyxl import Workbook  # type: ignore[import-untyped]
+
+    with tempfile.TemporaryDirectory(prefix="test-extract-") as d:
+        path = os.path.join(d, "dup_headers.xlsx")
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.title = "P&L"
+        ws.append(["Line Item", "Q1", "Q2", "Q1", "Q2"])  # Q1/Q2 headers duplicated
+        ws.append(["Revenue", 11, 22, 33, 44])  # non-empty label -> cell_refs populates
+        wb.save(path)
+        wb.close()
+
+        rc, data, stderr = run_script("extract_model.py", ["--file", path, "--pretty"])
+        assert rc == 0, stderr
+        sheet = data["sheets"][0]
+        ref = next(r for r in sheet["cell_refs"] if r["label"] == "Revenue")
+        cols = ref["cols"]
+        # Both Q1 columns (B2 and D2) must survive under distinct keys.
+        coords = set(cols.values())
+        assert "B2" in coords and "D2" in coords, (
+            f"both Q1 columns' coordinates must survive (no last-wins collision): {cols}"
+        )
+        assert len([k for k in cols if k.startswith("Q1")]) == 2, (
+            f"the two Q1 columns must occupy two distinct keys, not collide: {cols}"
+        )
+
+        # Consumer: a value present ONLY in the first Q1 column resolves to B2.
+        ve = _load_validate_extraction_module()
+        got = ve._find_cell_ref(11.0, data)
+        assert got is not None and got["ref"] == "P&L!B2", (
+            f"value 11 (first Q1, B2) must resolve to B2, not the last Q1 column: {got}"
+        )
+
+
 def test_extract_model_cell_refs_duplicate_labels() -> None:
     """XLSX with duplicate row labels produces separate cell_refs entries."""
-    from openpyxl import Workbook
+    from openpyxl import Workbook  # type: ignore[import-untyped]
 
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
         xlsx_path = f.name
@@ -587,6 +752,49 @@ def test_checklist_gating_normalizes_geography() -> None:
     payload = json.dumps({"items": items, "company": company})
     rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
     assert rc == 0
+    assert data is not None
+    cash30 = next(i for i in data["items"] if i["id"] == "CASH_30")
+    assert cash30["status"] == "not_applicable"
+
+
+def test_checklist_gating_known_hub_geography_no_warning() -> None:
+    """Major startup-hub geographies (e.g. India) normalize cleanly without the
+    'not in normalization map' stderr warning, and gate the same as any
+    non-Israel geography (Israel-specific items auto-gated as not_applicable)."""
+    for raw_geo in ("India", "Germany", "France", "Canada", "Singapore", "Australia"):
+        company: dict[str, Any] = {
+            "stage": "seed",
+            "geography": raw_geo,
+            "sector": "B2B SaaS",
+            "sector_type": "saas",
+            "traits": [],
+        }
+        items = _make_checklist_items()
+        payload = json.dumps({"items": items, "company": company})
+        rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+        assert rc == 0
+        assert "not in normalization map" not in stderr, f"unexpected warning for geography={raw_geo!r}: {stderr}"
+        assert data is not None
+        cash30 = next(i for i in data["items"] if i["id"] == "CASH_30")
+        assert cash30["status"] == "not_applicable", f"{raw_geo} should auto-gate Israel-only CASH_30"
+
+
+def test_checklist_gating_unrecognized_geography_still_warns_and_proceeds() -> None:
+    """A genuinely unrecognized geography still falls through gracefully (warning
+    on stderr, raw lowercased value used, no crash) rather than being silently
+    swallowed."""
+    company = {
+        "stage": "seed",
+        "geography": "Ruritania",
+        "sector": "B2B SaaS",
+        "sector_type": "saas",
+        "traits": [],
+    }
+    items = _make_checklist_items()
+    payload = json.dumps({"items": items, "company": company})
+    rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert "not in normalization map" in stderr
     assert data is not None
     cash30 = next(i for i in data["items"] if i["id"] == "CASH_30")
     assert cash30["status"] == "not_applicable"
@@ -866,6 +1074,74 @@ def test_checklist_no_model_format_backward_compat() -> None:
     assert "model_maturity_pct" in summary
 
 
+def test_checklist_partial_format_evaluates_all_46_items() -> None:
+    """model_format='partial' must not auto-gate any item due to format gating.
+
+    'partial' = incomplete spreadsheet — structure is still assessable.
+    Documented contract: partial evaluates all 46 items (same as spreadsheet).
+    Only deck/conversational gate STRUCT+CASH items.
+    """
+    company = {
+        "stage": "seed",
+        "geography": "us",
+        "sector": "saas",
+        "sector_type": "saas",
+        "traits": [],
+        "model_format": "partial",
+    }
+    items = _make_checklist_items()
+    payload = json.dumps({"items": items, "company": company})
+    rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    # No item should be not_applicable due to model_format_gate='spreadsheet' gating.
+    # (Profile-based geography/sector gating unrelated to format may still fire.)
+    format_gated = [
+        it
+        for it in data["items"]
+        if it["status"] == "not_applicable" and "model_format_gate" in str(it.get("evidence", "")).lower()
+    ]
+    assert format_gated == [], (
+        f"partial format must not gate any items via model_format_gate, but got: {[it['id'] for it in format_gated]}"
+    )
+    # STRUCT items must be evaluable (pass, not not_applicable via format gating)
+    for i in range(1, 10):
+        item = next(it for it in data["items"] if it["id"] == f"STRUCT_0{i}")
+        assert item["status"] != "not_applicable" or "model_format_gate" not in str(item.get("evidence", "")), (
+            f"STRUCT_0{i} must not be format-gated for partial format"
+        )
+
+
+def test_checklist_deck_format_gates_exactly_22_spreadsheet_items() -> None:
+    """deck format must gate all 22 items with model_format_gate='spreadsheet' (9 STRUCT + 13 CASH).
+
+    Pin: 9 STRUCT_01..09 + CASH_20..32 (13 items) = 22 items total.
+    Geography-gated CASH items (28, 29, 30, 31, 32) have both geo and format gates;
+    with us/saas profile the geo gate fires first, but format gate also applies.
+    """
+    company = {
+        "stage": "seed",
+        "geography": "us",
+        "sector": "saas",
+        "sector_type": "saas",
+        "traits": [],
+        "model_format": "deck",
+    }
+    items = _make_checklist_items()
+    payload = json.dumps({"items": items, "company": company})
+    rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    # All 9 STRUCT items must be not_applicable for deck
+    for i in range(1, 10):
+        item = next(it for it in data["items"] if it["id"] == f"STRUCT_0{i}")
+        assert item["status"] == "not_applicable", f"STRUCT_0{i} should be gated for deck"
+    # All 13 CASH items (20-32) must be not_applicable for deck (format or geo gate)
+    for i in range(20, 33):
+        item = next(it for it in data["items"] if it["id"] == f"CASH_{i}")
+        assert item["status"] == "not_applicable", f"CASH_{i} should be gated for deck"
+
+
 def test_checklist_dispatch_shape_propagates_run_id_and_gates() -> None:
     """The exact shape the SKILL.md CHECKLIST dispatch returns must yield a
     checklist.json with metadata.run_id (Context B parity) and engaged
@@ -952,6 +1228,205 @@ _VALID_INPUTS: dict[str, Any] = {
 }
 
 
+def _ue_metrics(currency: str | None) -> list[dict]:
+    payload = copy.deepcopy(_VALID_INPUTS)
+    if currency:
+        payload["currency"] = currency
+    rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(payload))
+    assert rc == 0 and data is not None
+    metrics: list[dict] = data["metrics"]
+    return metrics
+
+
+def _by_id(metrics: list[dict], mid: str) -> dict | None:
+    return next((m for m in metrics if m["id"] == mid), None)
+
+
+def test_non_usd_preserves_the_withheld_grade_as_a_reference() -> None:
+    """With the USD ARR floors correctly suppressed, burn multiple and Rule of 40 both drop to
+    `contextual` at once — leaving a non-USD founder numbers with no assessment. The grade the
+    comparison already produced is preserved as an explicit REFERENCE so graded signal survives."""
+    usd, ils = _ue_metrics(None), _ue_metrics("ILS")
+    for mid in ("burn_multiple", "rule_of_40"):
+        u, i = _by_id(usd, mid), _by_id(ils, mid)
+        if u is None or i is None or u["rating"] not in ("strong", "acceptable", "warning", "fail"):
+            continue  # not graded on this fixture — nothing to preserve
+        assert i["rating"] == "contextual", f"{mid}: primary rating must stay the reliance boundary"
+        assert i.get("benchmark_reference_rating") == u["rating"], (
+            f"{mid}: reference grade should match what USD graded ({u['rating']}), "
+            f"got {i.get('benchmark_reference_rating')!r}"
+        )
+
+
+def test_non_usd_reference_grade_carries_its_provenance() -> None:
+    """A founder shown a reference grade is entitled to see what it was measured against."""
+    ils = _ue_metrics("ILS")
+    refs = [m for m in ils if m.get("benchmark_reference_rating")]
+    assert refs, "expected at least one reference-graded metric for a non-USD model"
+    for m in refs:
+        assert m.get("benchmark_reference_source"), f"{m['id']}: reference grade without a source"
+        assert m.get("benchmark_reference_as_of"), f"{m['id']}: reference grade without an as-of"
+        note = m.get("benchmark_reference_note", "")
+        assert "reference" in note.lower() and "not a verdict" in note.lower(), (
+            f"{m['id']}: the reference must be labelled as such, got: {note!r}"
+        )
+
+
+def test_non_usd_reference_needs_no_fx_rate_and_invents_none() -> None:
+    """The stage thresholds are DIMENSIONLESS (2.0x, 0.70, a sum of percentages), so the comparison
+    is exact rather than converted. Nothing may claim a conversion or a rate."""
+    ils = _ue_metrics("ILS")
+    for m in [m for m in ils if m.get("benchmark_reference_rating")]:
+        blob = json.dumps(m).lower()
+        assert "fx rate" not in blob and "converted at" not in blob, (
+            f"{m['id']}: reference grade must not imply a currency conversion: {blob[:200]}"
+        )
+
+
+def test_usd_models_gain_no_reference_fields() -> None:
+    """Pure addition: a USD review must be byte-for-byte unaffected by this."""
+    for m in _ue_metrics(None):
+        assert "benchmark_reference_rating" not in m, f"{m['id']} leaked a reference field into a USD review"
+
+
+def test_ltv_cac_is_not_suppressed_for_non_usd() -> None:
+    """Scope guard: the caveat is applied to burn_multiple and rule_of_40 only. LTV/CAC is a
+    dimensionless ratio with no ARR floor attached and keeps its grade in any currency."""
+    ils = _ue_metrics("ILS")
+    ltv_cac = _by_id(ils, "ltv_cac_ratio") or _by_id(ils, "ltv_cac")
+    if ltv_cac is not None:
+        assert "benchmark_reference_rating" not in ltv_cac, (
+            "LTV/CAC should never have been routed through the non-USD caveat"
+        )
+
+
+def _runway_payload(cash: float, burn: float, mrr: float, growth: float) -> str:
+    """Runway input with an explicit opex line so net burn is derivable."""
+    return json.dumps(
+        {
+            "company": {"name": "TestCo", "stage": "seed"},
+            "revenue": {"mrr": {"value": mrr}, "growth_rate_monthly": growth},
+            "cash": {"current_balance": cash, "monthly_net_burn": burn, "balance_date": "2026-06"},
+            "expenses": {"opex_monthly": [{"category": "All", "amount": mrr + burn, "start_month": "2026-01"}]},
+        }
+    )
+
+
+def _base_scenario(data: dict) -> dict:
+    return next((s for s in data["scenarios"] if s["name"].lower().startswith("base")), data["scenarios"][0])
+
+
+def test_runway_reports_static_runway_alongside_the_projection() -> None:
+    """The projection holds burn FLAT while revenue compounds, so it can turn a short cash
+    position into 'default alive'. The static number is the floor under that and must be present."""
+    rc, data, _ = run_script("runway.py", ["--pretty"], stdin_data=_runway_payload(6_200_000, 900_000, 420_000, 0.12))
+    assert rc == 0
+    base = _base_scenario(data)
+    assert base["static_runway_months"] == 6.9, base["static_runway_months"]
+
+
+def test_runway_verdict_names_the_flat_burn_assumption_when_static_runway_is_short() -> None:
+    """A ~7-month cash position surfacing as 'low risk' is the founder-trust bug: the verdict
+    has to carry the assumption that produced it."""
+    rc, data, _ = run_script("runway.py", ["--pretty"], stdin_data=_runway_payload(6_200_000, 900_000, 420_000, 0.12))
+    assert rc == 0
+    verdict = data["risk_assessment"]
+    assert "6.9 months" in verdict
+    assert "burn staying flat" in verdict or "holds burn flat" in verdict
+
+
+def test_runway_default_alive_without_profitability_is_not_called_low_risk() -> None:
+    """default_alive is also set when cash merely never depletes in the window (incl. grant-driven),
+    which is not the same as profitable — so it must not read as 'Low risk' unqualified."""
+    rc, data, _ = run_script("runway.py", ["--pretty"], stdin_data=_runway_payload(6_200_000, 900_000, 420_000, 0.12))
+    assert rc == 0
+    base = _base_scenario(data)
+    if base["default_alive"] and not base.get("became_profitable"):
+        assert not data["risk_assessment"].startswith("Low risk")
+
+
+def test_runway_static_months_absent_when_not_burning() -> None:
+    """Revenue already covering opex means there is no static runway to report (no division)."""
+    rc, data, _ = run_script(
+        "runway.py",
+        ["--pretty"],
+        stdin_data=json.dumps(
+            {
+                "company": {"name": "TestCo", "stage": "seed"},
+                "revenue": {"mrr": {"value": 500000}, "growth_rate_monthly": 0.05},
+                "cash": {"current_balance": 3_000_000, "monthly_net_burn": -50_000, "balance_date": "2026-06"},
+                "expenses": {"opex_monthly": [{"category": "All", "amount": 450000, "start_month": "2026-01"}]},
+            }
+        ),
+    )
+    assert rc == 0
+    assert _base_scenario(data)["static_runway_months"] is None
+
+
+def _implausible_bm_payload(currency: str | None) -> str:
+    """burn 900K/mo against net-new ARR of 50K*0.01*12 = 6K -> 150x, past the >50 cutoff.
+
+    ARR is set material (600K) so the USD $500K floor does NOT gate it — this isolates the
+    implausibly-high branch itself, which is the one the non-USD caveat cannot reach.
+    """
+    payload = copy.deepcopy(_VALID_INPUTS)
+    if currency:
+        payload["currency"] = currency
+    payload["revenue"] = {
+        "mrr": {"value": 50000},
+        "growth_rate_monthly": 0.01,
+        "arr": {"value": 600000},
+    }
+    payload["cash"]["monthly_net_burn"] = 900000
+    return json.dumps(payload)
+
+
+def _burn_multiple(data: dict) -> dict | None:
+    hits = [m for m in data["metrics"] if m["id"] == "burn_multiple"]
+    return hits[0] if hits else None
+
+
+def test_implausible_burn_multiple_usd_blames_inputs() -> None:
+    """USD keeps today's wording: with the floor active, an implausible ratio really is suspect data."""
+    rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=_implausible_bm_payload(None))
+    assert rc == 0
+    bm = _burn_multiple(data)
+    assert bm is not None and bm["rating"] == "not_rated"
+    assert "check input consistency" in bm["evidence"]
+
+
+def test_implausible_burn_multiple_non_usd_blames_the_ungated_arr_base() -> None:
+    """Non-USD skips the USD-denominated ARR materiality floor by design, so an implausible
+    ratio there is most likely an immaterial base that was never gated — NOT a data error.
+    Sending the founder to hunt a nonexistent input bug is the defect. The uniform non-USD
+    caveat cannot fix this one: it early-returns on `not_rated`."""
+    rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=_implausible_bm_payload("ILS"))
+    assert rc == 0
+    bm = _burn_multiple(data)
+    assert bm is not None and bm["rating"] == "not_rated"
+    assert "check input consistency" not in bm["evidence"]
+    assert "materiality floor" in bm["evidence"]
+    assert "ILS" in bm["evidence"]
+
+
+def test_non_usd_arr_floor_asymmetry_is_deliberate_and_explained() -> None:
+    """An immaterial ARR is withheld in USD but computed in non-USD (the floor is USD-denominated).
+    That asymmetry is intended — but the non-USD side must SAY why rather than assert a benchmark."""
+    payload = copy.deepcopy(_VALID_INPUTS)
+    # Keep the fixture's revenue block (it carries the growth data the ratio needs) and only make the
+    # ARR base immaterial — that is the single variable this asymmetry turns on.
+    payload["revenue"]["arr"] = {"value": 100000}
+    payload["cash"]["monthly_net_burn"] = 900000
+    rc_usd, usd, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(payload))
+    payload["currency"] = "ILS"
+    rc_ils, ils, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(payload))
+    assert rc_usd == 0 and rc_ils == 0
+    bm_usd, bm_ils = _burn_multiple(usd), _burn_multiple(ils)
+    assert bm_usd is not None and bm_usd["rating"] == "not_applicable"
+    assert bm_ils is not None and bm_ils["rating"] != "not_applicable"
+    assert "materiality floor" in bm_ils["evidence"] or "USD-denominated" in bm_ils["evidence"]
+
+
 # --- unit_economics.py tests ---
 
 
@@ -966,6 +1441,36 @@ def test_unit_economics_basic() -> None:
     assert "ltv" in metrics_by_name
     assert "gross_margin" in metrics_by_name
     assert "ltv_cac_ratio" in metrics_by_name
+
+
+def test_unit_economics_flags_insufficient_data_below_two_metrics() -> None:
+    """When <2 metrics are computable, unit_economics self-declares insufficient_data
+    (mirroring runway.py) so the downstream gate can accept-with-warning."""
+    minimal = {
+        "company": {
+            "company_name": "MinCo",
+            "slug": "minco",
+            "stage": "pre-seed",
+            "sector": "B2B SaaS",
+            "geography": "US",
+            "revenue_model_type": "saas-plg",
+        },
+        "cash": {"current_balance": 500000},
+    }
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(minimal))
+    assert rc == 0, stderr
+    assert data is not None
+    assert data["summary"]["computed"] < 2
+    assert data.get("insufficient_data") is True
+
+
+def test_unit_economics_no_insufficient_flag_when_metrics_computed() -> None:
+    """A rich model computing >=2 metrics carries no insufficient_data flag."""
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(_VALID_INPUTS))
+    assert rc == 0, stderr
+    assert data is not None
+    assert data["summary"]["computed"] >= 2
+    assert "insufficient_data" not in data
 
 
 def test_unit_economics_burn_multiple() -> None:
@@ -1012,18 +1517,25 @@ def test_unit_economics_ratings() -> None:
 
 
 def test_unit_economics_burn_multiple_computed_wins() -> None:
-    """When compute inputs are present and values are close, computed burn_multiple is used."""
+    """When compute inputs and provided are close (<2x ratio), computed burn_multiple is used.
+
+    Derivation (period-matched formula):
+      mrr=50000, g=0.08, burn=80000
+      net_new_arr = 50000*0.08*12 = 48000
+      computed = 80000/48000 = 1.67x
+      provided = 1.7; ratio = 1.7/1.67 = 1.02 < 2.0 → computed (1.67) wins
+    """
     inputs = json.loads(json.dumps(_VALID_INPUTS))
-    # Computed: 80000 / (50000 * 0.08) = 20.0x; provided 18.0 is within 2x ratio → computed wins
-    inputs["unit_economics"]["burn_multiple"] = 18.0
+    inputs["unit_economics"]["burn_multiple"] = 1.7
     payload = json.dumps(inputs)
     rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
     assert rc == 0
     assert data is not None
     metrics_by_name = {m["name"]: m for m in data["metrics"]}
     assert "burn_multiple" in metrics_by_name
-    # Computed value (20.0) should be used, not the reported 18.0
-    assert metrics_by_name["burn_multiple"]["value"] != 18.0
+    # Computed value (1.67) should be used, not the reported 1.7
+    assert metrics_by_name["burn_multiple"]["value"] == 1.67
+    assert metrics_by_name["burn_multiple"]["value"] != 1.7
     # burn_multiple_lifetime should NOT exist
     assert "burn_multiple_lifetime" not in metrics_by_name
 
@@ -1433,6 +1945,93 @@ def test_runway_fx_adjustment() -> None:
     assert base["fx_adjustment"] == 0.0
     # Limitations should mention FX
     assert any("FX" in lim for lim in data["limitations"])
+
+
+def test_runway_non_usd_currency_not_formatted_with_bare_dollar_sign() -> None:
+    """When currency is a non-USD code, cash-balance messaging must be
+    currency-tagged (e.g., "1,200,000 INR") rather than a bare "$" sign that
+    implies USD."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["currency"] = "INR"
+    inputs["cash"].pop("monthly_net_burn", None)
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert "$" not in data["risk_assessment"]
+    assert "INR" in data["risk_assessment"]
+
+
+def test_runway_absent_currency_still_uses_dollar_sign() -> None:
+    """Back-compat: currency absent must keep today's bare-$ formatting."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["cash"].pop("monthly_net_burn", None)
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert "$" in data["risk_assessment"]
+
+
+def test_runway_output_echoes_currency() -> None:
+    """The output JSON must carry the resolved currency code so downstream
+    consumers (compose_report.py, visualize.py) can format currency-aware
+    without re-reading inputs.json themselves."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["currency"] = "INR"
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0, stderr
+    assert data is not None
+    assert data.get("currency") == "INR"
+
+
+def test_runway_output_defaults_currency_to_usd_when_absent() -> None:
+    """Back-compat: absent currency echoes as 'USD' in the output."""
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=json.dumps(_VALID_INPUTS))
+    assert rc == 0, stderr
+    assert data is not None
+    assert data.get("currency") == "USD"
+
+
+def test_runway_output_echoes_currency_on_insufficient_data_paths() -> None:
+    """Currency must be echoed even on the early-return insufficient-data
+    branches (both cash and burn missing; burn known but cash missing; cash
+    known but burn missing) — not only the full-computation return path."""
+    both_missing = json.loads(json.dumps(_VALID_INPUTS))
+    both_missing["currency"] = "INR"
+    both_missing["cash"] = {}
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=json.dumps(both_missing))
+    assert rc == 0, stderr
+    assert data is not None and data.get("currency") == "INR"
+
+    burn_known_cash_missing = json.loads(json.dumps(_VALID_INPUTS))
+    burn_known_cash_missing["currency"] = "INR"
+    burn_known_cash_missing["cash"] = {"monthly_net_burn": 80000}
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=json.dumps(burn_known_cash_missing))
+    assert rc == 0, stderr
+    assert data is not None and data.get("currency") == "INR"
+
+    cash_known_burn_missing = json.loads(json.dumps(_VALID_INPUTS))
+    cash_known_burn_missing["currency"] = "INR"
+    cash_known_burn_missing["cash"] = {"current_balance": 2000000}
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=json.dumps(cash_known_burn_missing))
+    assert rc == 0, stderr
+    assert data is not None and data.get("currency") == "INR"
+
+
+def test_runway_burn_sensitivity_grid_skipped_for_non_usd() -> None:
+    """The 500K-5M cash-level sensitivity grid is a USD-hypothetical grid
+    (fixed round-number USD cash levels) — it must not be presented as if
+    those numbers were native non-USD currency amounts. Skip it for non-USD
+    rather than mislabeling raw USD figures as native currency."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["currency"] = "INR"
+    inputs["cash"] = {"monthly_net_burn": 80000}
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0, stderr
+    assert data is not None
+    assert not data.get("burn_sensitivity")
+    assert any("INR" in w for w in data.get("warnings", []))
 
 
 def test_runway_post_raise() -> None:
@@ -1975,6 +2574,88 @@ def test_compose_infinite_runway_rendering() -> None:
     assert "None months" not in md, "Report should not render 'None months'"
     # Should contain the formatted infinite runway text
     assert "Infinite" in md or "profitability" in md.lower(), "Report should indicate infinite runway / profitability"
+
+
+def test_compose_default_alive_coaching_payload_note() -> None:
+    """coaching_payload carries base_runway_note when base scenario is default-alive with null runway."""
+    runway_da = json.loads(json.dumps(_VALID_RUNWAY))
+    # Base scenario: default_alive=True, runway_months=None
+    runway_da["scenarios"][0]["runway_months"] = None
+    runway_da["scenarios"][0]["cash_out_date"] = None
+    runway_da["scenarios"][0]["decision_point"] = None
+    runway_da["scenarios"][0]["default_alive"] = True
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": runway_da,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    payload = data.get("coaching_payload", {})
+    # runway_months is null for default-alive
+    assert payload.get("runway_months") is None
+    # base_runway_note must be present and explain the null
+    assert "base_runway_note" in payload, "coaching_payload must carry base_runway_note for default-alive base scenario"
+    note = payload["base_runway_note"]
+    assert "default-alive" in note.lower() or "default_alive" in note.lower(), (
+        f"base_runway_note should explain default-alive semantics; got: {note!r}"
+    )
+    assert "null" in note.lower() or "by design" in note.lower(), (
+        f"base_runway_note should state runway_months is null by design; got: {note!r}"
+    )
+
+
+def test_compose_coaching_payload_carries_static_runway() -> None:
+    """The Main-Thread Return treats runway_months as a HEADLINE field, but it is legitimately null
+    for a default-alive company. static_runway_months travels with it so the headline always has a
+    concrete number — otherwise the step has a field it cannot render."""
+    runway_da = json.loads(json.dumps(_VALID_RUNWAY))
+    runway_da["scenarios"][0]["runway_months"] = None
+    runway_da["scenarios"][0]["default_alive"] = True
+    runway_da["scenarios"][0]["static_runway_months"] = 6.9
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": runway_da,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0 and data is not None
+    payload = data.get("coaching_payload", {})
+    assert payload.get("runway_months") is None
+    assert payload.get("static_runway_months") == 6.9, (
+        "coaching_payload must carry static_runway_months so a null runway_months still has a "
+        f"reportable headline number; got: {payload.get('static_runway_months')!r}"
+    )
+
+
+def test_compose_default_alive_note_absent_when_not_default_alive() -> None:
+    """coaching_payload does NOT carry base_runway_note when base scenario is not default-alive."""
+    # _VALID_RUNWAY base scenario has default_alive=True but runway_months=25 (non-null)
+    runway_normal = json.loads(json.dumps(_VALID_RUNWAY))
+    runway_normal["scenarios"][0]["default_alive"] = False
+    runway_normal["scenarios"][0]["runway_months"] = 20
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": runway_normal,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    payload = data.get("coaching_payload", {})
+    assert "base_runway_note" not in payload, (
+        "base_runway_note should only appear for default-alive null-runway base scenarios"
+    )
 
 
 def test_compose_post_raise_in_report() -> None:
@@ -2796,6 +3477,191 @@ def test_unit_economics_burn_multiple_fallback_below_500k_arr() -> None:
     assert "$500K" in bm["evidence"] or "not meaningful" in bm["evidence"].lower()
 
 
+# --- Currency determinism: burn_multiple / rule_of_40 are currency-agnostic
+# --- RATIOS; only the USD-denominated materiality floor and stage benchmark
+# --- table are USD-bound. A non-USD model must still get the ratio computed,
+# --- downgraded to `contextual` (benchmark/floor not verifiable) — not
+# --- silently withheld (not_rated, value None) and not silently passed through
+# --- the ordinary benchmark rating either. This must hold whether or not
+# --- revenue.arr.value happens to be present. ---
+
+
+def test_unit_economics_burn_multiple_non_usd_currency_computes_ratio_as_contextual() -> None:
+    """A non-USD-currency model's burn multiple ratio is currency-agnostic and must
+    still be computed — only the USD stage benchmark and $500K materiality floor
+    are not verifiable, so the rating downgrades to `contextual` with the ratio
+    shown, rather than withholding the value entirely."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["currency"] = "INR"
+    inputs["revenue"]["arr"]["value"] = 123_000_000  # native INR, not USD
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["rating"] == "contextual"
+    assert bm["value"] is not None  # the ratio itself is currency-agnostic
+    assert "INR" in bm["evidence"]
+    assert "$" not in bm["evidence"]
+
+
+def test_unit_economics_burn_multiple_non_usd_currency_same_regardless_of_arr_presence() -> None:
+    """The non-USD treatment must not depend on whether revenue.arr.value is
+    present — deleting it must not silently let the metric through the ordinary
+    benchmark-rated path (more data must not mean less scrutiny, and vice versa)."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["currency"] = "INR"
+    inputs["revenue"].pop("arr", None)
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["rating"] == "contextual"
+    assert bm["value"] is not None
+
+
+def test_unit_economics_burn_multiple_non_usd_low_raw_arr_not_gated_not_applicable() -> None:
+    """The $500K floor is USD-denominated; a small raw non-USD ARR number must not
+    trigger the not_applicable low-ARR gate — we cannot tell whether it clears
+    materiality without a currency conversion, so the gate must not fire."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["currency"] = "INR"
+    inputs["revenue"]["arr"]["value"] = 100_000  # raw number is below the USD floor,
+    # but this is INR, not a USD reading — the floor must not gate on it.
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["rating"] != "not_applicable"
+    assert bm["value"] is not None
+
+
+def test_unit_economics_rule_of_40_non_usd_currency_computes_ratio_as_contextual() -> None:
+    """Same currency-agnostic-ratio treatment for Rule of 40's $1M ARR gate."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["currency"] = "INR"
+    inputs["revenue"]["arr"]["value"] = 82_000_000  # native INR, not USD
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert r40["rating"] == "contextual"
+    assert r40["value"] is not None
+    assert "INR" in r40["evidence"]
+    assert "$" not in r40["evidence"]
+
+
+def test_unit_economics_rule_of_40_non_usd_currency_same_regardless_of_arr_presence() -> None:
+    """ARR-absent path must receive the identical contextual treatment as ARR-present."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["currency"] = "INR"
+    inputs["revenue"].pop("arr", None)
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert r40["rating"] == "contextual"
+    assert r40["value"] is not None
+
+
+def test_unit_economics_rule_of_40_non_usd_low_raw_arr_not_gated_by_usd_5m_floor() -> None:
+    """The '$5M ARR' not-benchmark-compared floor on the operating-margin path is
+    USD-denominated; a small raw non-USD ARR must not hit it (it would leak a bare
+    $5M into evidence and compare native units against a USD threshold). Non-USD
+    falls through to the benchmark branch and gets the uniform contextual caveat."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["currency"] = "INR"
+    inputs["revenue"]["arr"]["value"] = 4_000_000  # native INR, below the USD $5M floor
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    r40 = metrics_by_name["rule_of_40"]
+    assert r40["rating"] == "contextual"
+    assert r40["value"] is not None
+    assert "5M ARR" not in r40["evidence"], f"USD $5M floor leaked for non-USD: {r40['evidence']}"
+    assert "$" not in r40["evidence"]
+
+
+def test_unit_economics_currency_usd_explicit_matches_absent() -> None:
+    """currency: 'USD' must behave identically to currency being absent."""
+    rc1, data1, stderr1 = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(_VALID_INPUTS))
+    inputs_usd = json.loads(json.dumps(_VALID_INPUTS))
+    inputs_usd["currency"] = "USD"
+    rc2, data2, stderr2 = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inputs_usd))
+    assert rc1 == 0, stderr1
+    assert rc2 == 0, stderr2
+    assert data1 is not None and data2 is not None
+    assert data1["metrics"] == data2["metrics"]
+
+
+def test_unit_economics_output_echoes_currency() -> None:
+    """The output JSON must carry the resolved currency code so downstream
+    consumers (compose_report.py, visualize.py) can format currency-aware
+    without re-reading inputs.json themselves."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["currency"] = "INR"
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0, stderr
+    assert data is not None
+    assert data.get("currency") == "INR"
+
+
+def test_unit_economics_output_defaults_currency_to_usd_when_absent() -> None:
+    """Back-compat: absent currency echoes as 'USD' in the output."""
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(_VALID_INPUTS))
+    assert rc == 0, stderr
+    assert data is not None
+    assert data.get("currency") == "USD"
+
+
+def test_unit_economics_cac_ltv_arr_per_fte_evidence_currency_tagged() -> None:
+    """CAC, LTV, and ARR/FTE evidence strings must be currency-tagged for a
+    non-USD model, not left as a bare '$' figure — these metrics aren't gated
+    by the USD ARR floor at all, so they were the one bare-$ site the earlier
+    currency fix missed entirely."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["currency"] = "INR"
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0, stderr
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+
+    cac = metrics_by_name["cac"]
+    assert "$" not in cac["evidence"]
+    assert "INR" in cac["evidence"]
+
+    ltv = metrics_by_name["ltv"]
+    assert "$" not in ltv["evidence"]
+    assert "INR" in ltv["evidence"]
+
+    arr_fte = metrics_by_name["arr_per_fte"]
+    assert "$" not in arr_fte["evidence"]
+    assert "INR" in arr_fte["evidence"]
+
+
+def test_unit_economics_cac_ltv_arr_per_fte_evidence_usd_unchanged() -> None:
+    """Back-compat: absent/USD currency keeps the ordinary bare-$ evidence text."""
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(_VALID_INPUTS))
+    assert rc == 0, stderr
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    assert "$" in metrics_by_name["cac"]["evidence"]
+    assert "$" in metrics_by_name["ltv"]["evidence"]
+    assert "$" in metrics_by_name["arr_per_fte"]["evidence"]
+
+
 # --- New tests: FMR postmortem fixes ---
 
 
@@ -2876,16 +3742,14 @@ def test_unit_economics_burn_multiple_hyper_growth_contextual() -> None:
 
 def test_unit_economics_burn_multiple_seed_vs_series_a_thresholds() -> None:
     """Seed burn_multiple thresholds (2.0/2.5/3.0) differ from series-a (1.5/2.0/2.5)."""
-    # A burn_mult of 1.8 should be strong for seed but acceptable for series-a
+    # Target BM = 2.0 using period-matched formula: monthly_burn / (mrr * g * 12)
+    # mrr=50000, g=0.08 → net_new_arr = 50000*0.08*12 = 48000
+    # burn = 2.0 * 48000 = 96000 → BM = 96000/48000 = 2.0
+    # Seed (strong<=2.0): 2.0 ≤ 2.0 → "strong"; Series-A (strong<=1.5): 2.0 > 1.5 → "acceptable"
     for stage, expected_rating in [("seed", "strong"), ("series-a", "acceptable")]:
         inputs = json.loads(json.dumps(_VALID_INPUTS))
         inputs["company"]["stage"] = stage
-        # Engineer BM to ~1.8x: burn=80K, net_new_arr = MRR*growth*12 = 50K*0.08*12 = 48K
-        # burn / (net_new_arr/12) = 80K / 4K = 20.0 — too high
-        # Set growth higher: 0.20 → net_new_arr/12 = 50K*0.20 = 10K, burn_mult = 80K/10K = 8
-        # Set burn = 15000, growth = 0.08 → net_new_arr/12 = 4K, burn_mult = 3.75 — hmm
-        # Use: burn=8000, growth=0.08 → 8000/4000 = 2.0
-        inputs["cash"]["monthly_net_burn"] = 8000
+        inputs["cash"]["monthly_net_burn"] = 96000
         inputs["revenue"]["growth_rate_monthly"] = 0.08
         payload = json.dumps(inputs)
         rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
@@ -3033,9 +3897,10 @@ def test_unit_economics_burn_multiple_quarterly_5_entries_full_yoy() -> None:
 def test_unit_economics_burn_multiple_divergence_warning() -> None:
     """When TTM and growth-rate burn multiples diverge >2x, emit BURN_MULTIPLE_DIVERGENCE warning."""
     inputs = json.loads(json.dumps(_VALID_INPUTS))
-    # Monthly time-series with flat ARR (net new ARR = 0 from growth, but big jump in ARR)
     # TTM: arr grows from 200K to 800K → net_new_arr = 600K, burn_mult = (80K*12)/600K = 1.6x
-    # Growth-rate: MRR=50K, growth=0.02 → net_new_arr = 50K*0.02*12 = 12K, burn_mult = 80K/1K = 80x
+    # Growth-rate (period-matched): MRR=50K, growth=0.02 → net_new_arr_monthly = 50K*0.02*12 = 12K
+    #   _gr_burn_mult = 80K / 12K = 6.67x
+    # Ratio = max(1.6, 6.67) / min(1.6, 6.67) = 4.17 > 2.0 → divergence warning fires
     inputs["revenue"]["growth_rate_monthly"] = 0.02  # low stated growth
     inputs["revenue"]["monthly"] = [
         {"month": f"2025-{m:02d}", "arr": 200000 + i * (600000 / 11)} for i, m in enumerate(range(1, 13))
@@ -3057,11 +3922,13 @@ def test_unit_economics_burn_multiple_divergence_warning() -> None:
 def test_unit_economics_burn_multiple_no_divergence_warning() -> None:
     """When TTM and growth-rate burn multiples are close, no BURN_MULTIPLE_DIVERGENCE."""
     inputs = json.loads(json.dumps(_VALID_INPUTS))
-    # Linear ARR growth of ~4K/mo over 12 months → net_new_arr ≈ 44K
-    # growth_rate=0.08, MRR=50K → growth-rate net_new_arr = 50K*0.08*12 = 48K
-    # TTM BM ≈ 21.8x, GR BM ≈ 20.0x → ratio ~1.09 (< 2x threshold)
+    # ARR grows at exactly ΔARR_per_month = mrr*g*12 = 50K*0.08*12 = 48K per month
+    # 12 entries (i=0..11) → ts_net_new_arr = arr[11]-arr[0] = 11 * 48K = 528K
+    # TTM BM = (80K*12) / 528K = 1.82x
+    # GR BM (period-matched) = 80K / (50K*0.08*12) = 80K/48K = 1.67x
+    # Ratio = max(1.82, 1.67) / min(1.82, 1.67) = 1.09 → below 2.0 threshold, no warning
     inputs["revenue"]["monthly"] = [
-        {"month": f"2025-{m:02d}", "total": 50000 + i * 333, "arr": 600000 + i * 4000}
+        {"month": f"2025-{m:02d}", "total": 50000 + i * 4000, "arr": 600000 + i * 48000}
         for i, m in enumerate(range(1, 13))
     ]
     payload = json.dumps(inputs)
@@ -3071,6 +3938,32 @@ def test_unit_economics_burn_multiple_no_divergence_warning() -> None:
     warnings = data.get("warnings", [])
     codes = [w["code"] for w in warnings]
     assert "BURN_MULTIPLE_DIVERGENCE" not in codes
+
+
+def test_unit_economics_burn_multiple_reference_regression() -> None:
+    """Reference regression: mrr=58500, g=0.08, burn=42000 → burn_multiple=0.75, rating='strong'.
+
+    Derivation (period-matched Sacks convention):
+      ΔMRR = 58500 * 0.08 = 4680
+      net_new_arr_per_month = ΔMRR * 12 = 4680 * 12 = 56160
+      burn_multiple = monthly_burn / net_new_arr_per_month = 42000 / 56160 = 0.7479... → round(2) = 0.75
+      Seed benchmark: strong ≤ 2.0 → 0.75 ≤ 2.0 → 'strong'
+    """
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["revenue"]["mrr"] = {"value": 58500, "as_of": "2025-12"}
+    inputs["revenue"]["growth_rate_monthly"] = 0.08
+    inputs["cash"]["monthly_net_burn"] = 42000
+    # Ensure growth-rate fallback is used (no monthly/quarterly time-series)
+    inputs["revenue"].pop("monthly", None)
+    inputs["revenue"].pop("quarterly", None)
+    payload = json.dumps(inputs)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    metrics_by_name = {m["name"]: m for m in data["metrics"]}
+    bm = metrics_by_name["burn_multiple"]
+    assert bm["value"] == 0.75, f"Expected 0.75, got {bm['value']}"
+    assert bm["rating"] == "strong", f"Expected 'strong' (≤ seed threshold 2.0), got {bm['rating']!r}"
 
 
 def test_unit_economics_ai_gross_margin_seed_vs_series_a() -> None:
@@ -3207,6 +4100,402 @@ def test_validate_burn_revenue_seed_higher_threshold() -> None:
     assert "BURN_REVENUE_SUSPECT" not in codes
 
 
+class TestValidateInputsLateStageCoverage:
+    """A late-stage founder must clear the enum and be gated at their real stage.
+
+    The shared founder context accepts seven stages; this validator's enum and
+    its seed+/series-a+ membership sets were written with five. The gap is not
+    symmetrical: the enum rejects loudly, while the membership sets fail open to
+    the pre-seed branch, so a late-stage company is silently held to no threshold
+    at all.
+    """
+
+    LATE_STAGES = ("series-c", "series-d")
+
+    def test_late_stage_clears_the_enum(self) -> None:
+        for stage in self.LATE_STAGES:
+            inputs = _make_inputs(stage=stage)
+            rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+            assert rc == 0
+            assert data is not None
+            enum_errors = [
+                e for e in data.get("errors", []) if e.get("code") == "ENUM_ERROR" and "stage" in json.dumps(e)
+            ]
+            assert not enum_errors, f"{stage} rejected by the stage enum: {enum_errors}"
+
+    def test_late_stage_uses_the_series_a_burn_threshold(self) -> None:
+        """Not the pre-seed 'skip' branch — the defect the enum error masks."""
+        for stage in self.LATE_STAGES:
+            # 6x MRR: above the series-a+ threshold of 5x, below the seed+ 10x.
+            inputs = _make_inputs(stage=stage, mrr=100_000, burn=600_000)
+            rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+            assert rc == 0
+            assert data is not None
+            codes = [w["code"] for w in data["warnings"]]
+            assert "BURN_REVENUE_SUSPECT" in codes, (
+                f"{stage} burn at 6x MRR did not trip the series-a+ threshold — it "
+                f"fell through to the pre-seed skip branch. warnings={codes}"
+            )
+
+    def test_pre_seed_still_skips_the_burn_threshold(self) -> None:
+        """Guard the by-design case: pre-seed is excluded on purpose, not by omission."""
+        inputs = _make_inputs(stage="pre-seed", mrr=100_000, burn=600_000)
+        rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+        assert rc == 0
+        assert data is not None
+        assert "BURN_REVENUE_SUSPECT" not in [w["code"] for w in data["warnings"]]
+
+    def test_later_stage_still_uses_the_series_a_threshold(self) -> None:
+        """Regression guard for a stage that already worked."""
+        inputs = _make_inputs(stage="later", mrr=100_000, burn=600_000)
+        rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+        assert rc == 0
+        assert data is not None
+        assert "BURN_REVENUE_SUSPECT" in [w["code"] for w in data["warnings"]]
+
+
+def _load_fmr_unit_economics_module() -> Any:
+    import importlib.util
+
+    path = os.path.join(FMR_SCRIPTS_DIR, "unit_economics.py")
+    spec = importlib.util.spec_from_file_location("fmr_unit_economics_module", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["fmr_unit_economics_module"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class TestImplausibleValuesAreNotStrengths:
+    """A higher-is-better scale must be able to say "that is not a real number".
+
+    Rating an absurd value `strong` means the check stops checking exactly where
+    a mis-scaled input is most likely — the same reasoning behind the existing
+    burn-multiple and operating-margin guards.
+    """
+
+    @staticmethod
+    def _ue() -> Any:
+        return _load_fmr_unit_economics_module()
+
+    def test_structurally_impossible_values_are_flagged(self) -> None:
+        m = self._ue()
+        for metric, value in (("gross_margin", 7.8), ("grr", 1.4)):
+            assert m._implausibility_note(metric, value, pct=True), (
+                f"{metric}={value} is impossible and must not read as a strength"
+            )
+
+    def test_units_error_magnitudes_are_flagged(self) -> None:
+        m = self._ue()
+        assert m._implausibility_note("nrr", 5.0, pct=True)
+        assert m._implausibility_note("ltv_cac_ratio", 120.0, pct=False)
+
+    def test_real_values_are_left_alone(self) -> None:
+        """Anti-vacuity: an elite-but-real figure must still rate normally."""
+        m = self._ue()
+        for metric, value, pct in (
+            ("gross_margin", 0.92, True),
+            ("grr", 0.97, True),
+            ("nrr", 1.6, True),
+            ("ltv_cac_ratio", 8.0, False),
+        ):
+            assert m._implausibility_note(metric, value, pct=pct) is None, (
+                f"{metric}={value} is high but achievable — flagging it would be a false positive"
+            )
+
+    def test_a_metric_without_a_ceiling_is_never_flagged(self) -> None:
+        m = self._ue()
+        assert m._implausibility_note("rule_of_40", 250.0, pct=False) is None
+
+
+class TestAgentSuppliedDisclosureReachesTheReport:
+    """A defaulted value must be distinguishable from a founder-stated one in the
+    artifact people keep, not only in the chat turn where it was confirmed."""
+
+    @staticmethod
+    def _compose() -> Any:
+        return _load_fmr_compose_module()
+
+    def test_declared_defaults_render(self) -> None:
+        mod = self._compose()
+        out = mod._section_agent_supplied({"agent_supplied": ["cash.monthly_net_burn", "growth.growth_rate_monthly"]})
+        assert "Agent-Supplied Values" in out
+        assert "cash.monthly_net_burn" in out
+        assert "growth.growth_rate_monthly" in out
+
+    def test_nothing_renders_when_nothing_was_defaulted(self) -> None:
+        """Anti-vacuity: an empty or absent declaration must produce no section."""
+        mod = self._compose()
+        assert mod._section_agent_supplied({"agent_supplied": []}) == ""
+        assert mod._section_agent_supplied({}) == ""
+        assert mod._section_agent_supplied(None) == ""
+
+
+class TestStructuralErrorEvidenceExists:
+    """The structural-error criterion is scored entirely on broken cells, so the
+    tally has to be produced and routed to whoever scores it."""
+
+    def test_error_cells_are_tallied(self) -> None:
+        import importlib.util
+
+        path = os.path.join(FMR_SCRIPTS_DIR, "extract_model.py")
+        spec = importlib.util.spec_from_file_location("fmr_extract_model_mod", path)
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["fmr_extract_model_mod"] = mod
+        spec.loader.exec_module(mod)
+
+        sheets = [{"rows": [["Revenue", 100, "#REF!"], ["Costs", "#DIV/0!", "#REF!"]]}]
+        assert mod._count_structural_errors(sheets) == {"#REF!": 2, "#DIV/0!": 1}
+        assert mod._count_structural_errors([{"rows": [["ok", 1]]}]) == {}
+
+    def test_the_assessor_is_told_where_the_evidence_is(self) -> None:
+        base = os.path.dirname(FMR_SCRIPTS_DIR)
+        with open(os.path.join(base, "SKILL.md"), encoding="utf-8") as f:
+            skill = f.read()
+        agent_path = os.path.join(os.path.dirname(SCRIPT_DIR), "agents", "financial-model-review.md")
+        with open(agent_path, encoding="utf-8") as f:
+            agent = f.read()
+        for doc, name in ((skill, "SKILL.md"), (agent, "agent body")):
+            assert "structural_errors" in doc, f"{name} never names the tally"
+            assert "not_applicable" in doc, f"{name} does not say what to do when it is absent"
+
+
+class TestCurrencyRuleIsNotContradicted:
+    """The agent body is resident in context on every dispatch, so a boilerplate
+    default there outranks a skill rule in practice."""
+
+    def test_no_usd_default_contradicts_the_native_currency_rule(self) -> None:
+        agent_path = os.path.join(os.path.dirname(SCRIPT_DIR), "agents", "financial-model-review.md")
+        with open(agent_path, encoding="utf-8") as f:
+            agent = f.read()
+        assert "Currency is USD unless" not in agent
+        assert "native currency" in agent.lower()
+
+
+class TestValidateExtractionStageRangeSubstitution:
+    """A stage with no plausibility ranges must borrow DOWNWARD, and say so.
+
+    The bounds are floors — only the low end is compared — so standing in a
+    lower stage's minimum makes the check more permissive, not less. Defaulting
+    a Series C to seed's $50K floor means almost any cash figure reads as
+    plausible and the check quietly stops checking.
+    """
+
+    @staticmethod
+    def _ve() -> Any:
+        import importlib.util
+
+        path = os.path.join(FMR_SCRIPTS_DIR, "validate_extraction.py")
+        spec = importlib.util.spec_from_file_location("fmr_validate_extraction_stage_mod", path)
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["fmr_validate_extraction_stage_mod"] = mod
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_stages_above_the_table_borrow_from_the_nearest_lower_stage(self) -> None:
+        mod = self._ve()
+        for stage in ("series-c", "series-d", "later"):
+            ranges, basis = mod._resolve_stage_ranges(stage)
+            assert basis is not None, f"{stage} substituted silently"
+            assert basis["resolved_to"] == "series-b", (
+                f"{stage} borrowed from {basis['resolved_to']}, not the nearest lower stage"
+            )
+            assert ranges["cash_balance"][0] == mod._STAGE_RANGES["series-b"]["cash_balance"][0]
+
+    def test_substitution_is_stricter_than_the_old_seed_default(self) -> None:
+        """The floor must rise, not fall — this is what makes it not a false negative."""
+        mod = self._ve()
+        seed_floor = mod._STAGE_RANGES["seed"]["cash_balance"][0]
+        ranges, _ = mod._resolve_stage_ranges("series-c")
+        assert ranges["cash_balance"][0] > seed_floor
+
+    def test_a_stage_with_its_own_ranges_substitutes_nothing(self) -> None:
+        """Anti-vacuity: no disclosure when nothing was borrowed."""
+        mod = self._ve()
+        for stage in ("pre-seed", "seed", "series-a", "series-b"):
+            ranges, basis = mod._resolve_stage_ranges(stage)
+            assert basis is None, f"{stage} has its own ranges; reporting a substitution is wrong"
+            assert ranges is mod._STAGE_RANGES[stage]
+
+    def test_an_unrecognized_token_keeps_the_seed_default(self) -> None:
+        """Off-ladder tokens carry no ordering, so there is nothing to descend from."""
+        mod = self._ve()
+        ranges, basis = mod._resolve_stage_ranges("not-a-stage")
+        assert ranges is mod._STAGE_RANGES["seed"]
+        assert basis is not None and basis["resolved_to"] == "seed"
+
+    def test_the_check_result_carries_the_substitution(self) -> None:
+        mod = self._ve()
+        inputs = {
+            "company": {"company_name": "TestCo", "stage": "series-c"},
+            "cash": {"current_balance": 40_000_000, "monthly_net_burn": 900_000},
+            "expenses": {"headcount": []},
+        }
+        result = mod._check_scale_plausibility(inputs, {"sheets": []})
+        assert result.get("stage_basis") is not None, "substitution not surfaced on the check"
+        assert result["stage_basis"]["requested"] == "series-c"
+        assert "series-b" in result["message"]
+
+    def test_a_non_usd_model_reports_no_substitution(self) -> None:
+        """The ranges are never consulted for a non-USD model, so nothing was borrowed."""
+        mod = self._ve()
+        inputs = {
+            "company": {"company_name": "TestCo", "stage": "series-c"},
+            "currency": "EUR",
+            "cash": {"current_balance": 40_000_000, "monthly_net_burn": 900_000},
+            "expenses": {"headcount": []},
+        }
+        result = mod._check_scale_plausibility(inputs, {"sheets": []})
+        assert "stage_basis" not in result
+
+    def test_an_unrecognized_off_ladder_token_lands_on_seed_not_the_ladder(self) -> None:
+        """Confirms the two substitution paths land differently: an on-ladder
+        stage with no published ranges (series-c/-d/later) descends to the
+        nearest lower published stage (series-b); a token that isn't on the
+        ladder at all (typo, unknown value) has no ordering to descend from
+        and lands on seed instead. A prior audit got this backwards in both
+        directions, so this is pinned directly against the code."""
+        mod = self._ve()
+        for on_ladder_unpublished in ("series-c", "series-d", "later"):
+            _ranges, basis = mod._resolve_stage_ranges(on_ladder_unpublished)
+            assert basis is not None
+            assert basis["resolved_to"] == "series-b", (
+                f"{on_ladder_unpublished} should descend the ladder to series-b, got {basis['resolved_to']}"
+            )
+        for off_ladder in ("growth", "not-a-real-stage", "bridge"):
+            _ranges, basis = mod._resolve_stage_ranges(off_ladder)
+            assert basis is not None
+            assert basis["resolved_to"] == "seed", (
+                f"{off_ladder} is not on the ladder; it should land on seed, not descend it, got {basis['resolved_to']}"
+            )
+            assert basis["reason"] == "stage not recognized"
+
+    def test_a_missing_stage_is_disclosed_via_the_resolver_sentinel(self) -> None:
+        """`_STAGE_UNSPECIFIED` is the sentinel callers must pass instead of
+        defaulting to "seed" themselves before the resolver ever sees it."""
+        mod = self._ve()
+        ranges, basis = mod._resolve_stage_ranges(mod._STAGE_UNSPECIFIED)
+        assert ranges is mod._STAGE_RANGES["seed"]
+        assert basis is not None
+        assert basis["resolved_to"] == "seed"
+        assert basis["reason"] != "stage not recognized", (
+            "a missing stage must carry its own reason, distinct from an "
+            "unrecognized token, even though both resolve to seed"
+        )
+
+    def test_a_missing_stage_field_is_disclosed_not_silently_seeded(self) -> None:
+        """ITEM 26b: `company.stage` absent entirely used to hit
+        `.get("stage", "seed")`, which resolves straight through
+        `stage in _STAGE_RANGES` with no substitution recorded — no
+        disclosure at all, unlike the unrecognized-token path. The check
+        result must now carry `stage_basis` in this case too."""
+        mod = self._ve()
+        inputs = {
+            "company": {"company_name": "TestCo"},  # no "stage" key at all
+            "cash": {"current_balance": 40_000_000, "monthly_net_burn": 900_000},
+            "expenses": {"headcount": []},
+        }
+        result = mod._check_scale_plausibility(inputs, {"sheets": []})
+        assert result.get("stage_basis") is not None, "missing stage substituted silently"
+        assert result["stage_basis"]["resolved_to"] == "seed"
+        assert result["stage_basis"]["reason"] != "stage not recognized"
+
+    def test_a_missing_company_block_is_also_disclosed(self) -> None:
+        """The same gap one level up: no "company" key at all."""
+        mod = self._ve()
+        inputs = {
+            "cash": {"current_balance": 40_000_000, "monthly_net_burn": 900_000},
+            "expenses": {"headcount": []},
+        }
+        result = mod._check_scale_plausibility(inputs, {"sheets": []})
+        assert result.get("stage_basis") is not None, "missing company block substituted silently"
+        assert result["stage_basis"]["resolved_to"] == "seed"
+
+    def test_missing_stage_uses_the_same_seed_floor_as_before(self) -> None:
+        """The fix must not change WHICH ranges are used for a missing stage —
+        only whether the substitution is disclosed. Same seed floor, now
+        surfaced instead of silent."""
+        mod = self._ve()
+        ranges, _basis = mod._resolve_stage_ranges(mod._STAGE_UNSPECIFIED)
+        assert ranges["cash_balance"][0] == mod._STAGE_RANGES["seed"]["cash_balance"][0]
+        assert ranges["monthly_burn"][0] == mod._STAGE_RANGES["seed"]["monthly_burn"][0]
+
+    def test_plausibility_vote_also_discloses_a_missing_stage_via_resolver(self) -> None:
+        """`_plausibility_vote` (the --fix gate) does the same `.get(..., "seed")`
+        pattern as `_check_scale_plausibility` — confirm it now routes through
+        the resolver too, rather than defaulting before the resolver runs."""
+        mod = self._ve()
+        inputs: dict[str, Any] = {
+            "company": {"company_name": "TestCo"},
+            "cash": {"current_balance": 40_000_000, "monthly_net_burn": 900_000},
+            "expenses": {"headcount": []},
+        }
+        # Same ranges as an explicit "seed" — the vote's plausibility outcome
+        # is unaffected by this fix, only the disclosure path upstream is.
+        plausible_explicit, checked_explicit = mod._plausibility_vote(
+            {**inputs, "company": {"company_name": "TestCo", "stage": "seed"}}
+        )
+        plausible_missing, checked_missing = mod._plausibility_vote(inputs)
+        assert plausible_missing == plausible_explicit
+        assert checked_missing == checked_explicit
+
+
+class TestUnitEconomicsBenchmarkDisclosure:
+    """A substituted stage benchmark must be visible in the artifact.
+
+    Published medians do not exist for every stage. Substituting a neighbouring
+    stage's is the honest option, but it changes every rating derived from it,
+    so the substitution has to travel with the numbers rather than sit on stderr.
+    """
+
+    @staticmethod
+    def _ue_inputs(stage: str) -> dict[str, Any]:
+        return {
+            "company": {
+                "company_name": "TestCo",
+                "slug": "testco",
+                "stage": stage,
+                "sector": "SaaS",
+                "geography": "US",
+            },
+            "revenue": {"mrr": {"value": 500_000, "as_of": "2025-01"}, "growth_rate_monthly": 0.05},
+            "unit_economics": {"gross_margin": 0.78, "cac": 12_000},
+            "cash": {
+                "current_balance": 20_000_000,
+                "balance_date": "2025-01",
+                "monthly_net_burn": 800_000,
+            },
+        }
+
+    def test_substituted_stage_is_disclosed(self) -> None:
+        for stage in ("series-c", "series-d"):
+            rc, data, stderr = run_script(
+                "unit_economics.py",
+                ["--pretty"],
+                stdin_data=json.dumps(self._ue_inputs(stage)),
+            )
+            assert rc == 0
+            assert data is not None
+            basis = data.get("benchmark_basis")
+            assert basis is not None, f"{stage} rated against substituted benchmarks silently"
+            assert basis["requested"] == stage
+            assert basis["resolved_to"] in _load_fmr_unit_economics_module().STAGE_BENCHMARKS
+
+    def test_stage_with_its_own_benchmarks_discloses_nothing(self) -> None:
+        """Anti-vacuity: the key must be absent when no substitution happened."""
+        for stage in ("seed", "series-a"):
+            rc, data, stderr = run_script(
+                "unit_economics.py",
+                ["--pretty"],
+                stdin_data=json.dumps(self._ue_inputs(stage)),
+            )
+            assert rc == 0
+            assert data is not None
+            assert "benchmark_basis" not in data, f"{stage} has its own benchmarks; disclosing a substitution is wrong"
+
+
 def test_validate_burn_revenue_seed_above_threshold() -> None:
     """Seed stage burn > 10x MRR triggers warning."""
     inputs = _make_inputs(stage="seed", mrr=50_000, burn=600_000)  # 12x
@@ -3239,9 +4528,9 @@ def test_validate_burn_revenue_zero_mrr_no_trigger() -> None:
 
 def test_validate_burn_multiple_suspect() -> None:
     """Extreme burn multiple (> 10x) triggers BURN_MULTIPLE_SUSPECT."""
-    # burn=1.44M, MRR=170K, growth=10% → net_new_ARR = 170K * 0.10 * 12 = 204K
-    # burn_multiple = (1.44M * 12) / 204K ≈ 84x
-    inputs = _make_inputs(stage="series-a", mrr=170_000, burn=1_440_000, growth=0.10)
+    # burn=1.44M/mo, MRR=170K, growth=1% → monthly net-new ARR = 170K * 0.01 * 12
+    # = 20.4K; annual ≈ 244.8K; burn_multiple = (1.44M * 12) / 244.8K ≈ 71x
+    inputs = _make_inputs(stage="series-a", mrr=170_000, burn=1_440_000, growth=0.01)
     rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
     assert rc == 0
     assert data is not None
@@ -3252,8 +4541,8 @@ def test_validate_burn_multiple_suspect() -> None:
 
 def test_validate_burn_multiple_suspect_ttm_overrides_growth_rate() -> None:
     """Time-series burn multiple should prevent false positive from growth-rate shortcut."""
-    # Growth-rate shortcut: burn=150K, MRR=50K, growth=2% → net_new_arr = 50K*0.02*12 = 12K
-    # burn_multiple = (150K*12)/12K = 150x → would trigger BURN_MULTIPLE_SUSPECT
+    # Growth-rate shortcut: burn=150K, MRR=50K, growth=2% → monthly net-new ARR
+    # = 50K*0.02*12 = 12K → burn_multiple = 150K/12K = 12.5x → would trigger
     # But TTM time-series: ARR grew from 400K to 1.4M → net_new_arr = 1M
     # burn_multiple = (150K*12)/1M = 1.8x → should NOT trigger
     inputs = _make_inputs(stage="series-a", mrr=50_000, burn=150_000, growth=0.02)
@@ -3536,6 +4825,41 @@ def test_validate_enum_errors() -> None:
     error_fields = {e["field"] for e in data.get("errors", [])}
     assert "company.stage" in error_fields
     assert "structure.formatting_quality" in error_fields
+
+
+# --- Currency determinism: top-level `currency` field ---
+
+
+def test_validate_accepts_currency_field() -> None:
+    """A top-level currency ISO code is a recognized, valid field."""
+    payload = json.dumps({"company": _CO, "currency": "INR"})
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data["valid"] is True
+    assert data["errors"] == []
+
+
+def test_validate_rejects_non_string_currency() -> None:
+    """A non-string currency value is a structural TYPE_ERROR, not silently ignored."""
+    payload = json.dumps({"company": _CO, "currency": 123})
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data["valid"] is False
+    error_fields = {e["field"] for e in data.get("errors", [])}
+    assert "currency" in error_fields
+
+
+def test_validate_absent_currency_backward_compatible() -> None:
+    """Omitting currency entirely must validate identically to today (no new
+    errors/warnings introduced by the field's mere absence)."""
+    payload = json.dumps({"company": _CO})
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert data["valid"] is True
+    assert data["errors"] == []
 
 
 def test_validate_time_series_date_format() -> None:
@@ -3896,8 +5220,15 @@ class TestBurnMultipleProvidedPreference:
         return inp
 
     def test_divergent_prefers_provided(self) -> None:
-        """31x growth-rate vs 3.05x provided → use 3.05x, warn about divergence."""
-        inp = self._make_inputs(0.118, provided_bm=3.05)
+        """15x growth-rate vs 3.05x provided → use 3.05x, warn about divergence.
+
+        Derivation (period-matched formula):
+          mrr=153603, g=0.02, burn=561000
+          net_new_arr = 153603*0.02*12 = 36864.72
+          computed = 561000/36864.72 = 15.22x
+          ratio = max(15.22, 3.05) / min(15.22, 3.05) = 4.99 > 2.0 → prefer provided
+        """
+        inp = self._make_inputs(0.02, provided_bm=3.05)
         rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
         assert rc == 0
         bm = next(m for m in data["metrics"] if m["name"] == "burn_multiple")
@@ -3908,27 +5239,39 @@ class TestBurnMultipleProvidedPreference:
         assert "BURN_MULTIPLE_REPORTED_DIVERGENCE" in codes
 
     def test_close_values_uses_computed(self) -> None:
-        """When growth-rate and provided are close, use computed."""
+        """When growth-rate and provided are close, use computed.
+
+        Derivation (period-matched formula):
+          mrr=100000, g=0.05, burn=50000
+          net_new_arr = 100000*0.05*12 = 60000
+          computed = 50000/60000 = 0.83x
+          provided = 0.85; ratio = 0.85/0.83 = 1.02 < 2.0 → use computed (0.83)
+        """
         inp = {
             "company": {"stage": "series-a", "sector": "B2B SaaS", "revenue_model_type": "saas-sales-led"},
             "revenue": {"mrr": {"value": 100000}, "arr": {"value": 1200000}, "growth_rate_monthly": 0.05},
             "cash": {"current_balance": 5000000, "monthly_net_burn": 50000},
-            "unit_economics": {"gross_margin": 0.75, "burn_multiple": 9.5},
+            "unit_economics": {"gross_margin": 0.75, "burn_multiple": 0.85},
         }
         rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
         assert rc == 0
         bm = next(m for m in data["metrics"] if m["name"] == "burn_multiple")
-        # Computed: 50000 / (100000*0.05) = 10x; provided 9.5; ratio 1.05 < 2 → use computed
-        assert bm["value"] == 10.0
+        assert bm["value"] == 0.83
 
     def test_no_provided_uses_computed(self) -> None:
-        """Without provided burn_multiple, always use computed (existing behavior)."""
+        """Without provided burn_multiple, always use computed (existing behavior).
+
+        Derivation (period-matched formula):
+          mrr=153603, g=0.118, burn=561000
+          net_new_arr = 153603*0.118*12 = 217,571.9
+          computed = 561000/217571.9 = 2.58x
+        """
         inp = self._make_inputs(0.118, provided_bm=None)
         rc, data, _ = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(inp))
         assert rc == 0
         bm = next(m for m in data["metrics"] if m["name"] == "burn_multiple")
-        # 561000 / (153603 * 0.118) = 30.95
-        assert bm["value"] == 30.95
+        # period-matched: 561000 / (153603*0.118*12) = 2.58
+        assert bm["value"] == 2.58
 
     def test_time_series_path_unaffected_by_divergence_check(self) -> None:
         """Time-series burn multiple path should not be affected by the growth-rate divergence check."""
@@ -4471,3 +5814,2695 @@ def test_runway_breakeven_warning_when_burn_zero_no_cash() -> None:
     assert "breakeven" in warnings_text.lower(), (
         f"Expected a 'breakeven' warning when burn=0 and no cash balance, got: {warnings_list}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Null-coercion regression: present-but-null numeric fields must not crash the
+# math producers. The corrections layer writes None for blank/cleared cells.
+# ---------------------------------------------------------------------------
+
+
+def test_runway_null_debt_does_not_crash() -> None:
+    """cash.debt: null must not raise TypeError (the .get default only applies
+    to missing keys, not explicit JSON null)."""
+    inputs = {
+        "company": {"company_name": "TestCo", "stage": "seed"},
+        "cash": {"current_balance": 1_000_000, "monthly_net_burn": 50_000, "debt": None},
+    }
+    rc, data, stderr = run_script("runway.py", stdin_data=json.dumps(inputs))
+    assert rc == 0, f"runway.py crashed on null debt: {stderr}"
+    assert data.get("baseline", {}).get("net_cash") == 1_000_000
+
+
+def test_runway_null_grant_and_target_fields_do_not_crash() -> None:
+    """IIA grant fields, ils_expense_fraction, and runway_target_months set to
+    null must not raise TypeError."""
+    inputs = {
+        "company": {"company_name": "TestCo", "stage": "seed"},
+        "cash": {
+            "current_balance": 1_000_000,
+            "monthly_net_burn": 50_000,
+            "grants": {
+                "iia_approved": 500_000,
+                "iia_disbursement_months": None,
+                "iia_start_month": None,
+            },
+            "fundraising": {"target_raise": 2_000_000},
+        },
+        "bridge": {"runway_target_months": None},
+        "israel_specific": {"fx_rate_ils_usd": 3.5, "ils_expense_fraction": None},
+    }
+    rc, data, stderr = run_script("runway.py", stdin_data=json.dumps(inputs))
+    assert rc == 0, f"runway.py crashed on null grant/target fields: {stderr}"
+    assert data.get("post_raise") is not None
+
+
+def test_unit_economics_null_headcount_count_does_not_crash() -> None:
+    """A headcount entry with count/salary/burden null must not raise TypeError
+    in either the ARR/FTE path or the magic-number S&M loop."""
+    inputs = {
+        "company": {"company_name": "TestCo", "stage": "seed"},
+        "revenue_model_type": "saas-plg",
+        "revenue": {
+            "arr": {"value": 2_000_000},
+            "mrr": {"value": 166_666},
+            "growth_rate_monthly": 0.1,
+        },
+        "expenses": {
+            "headcount": [
+                {"role": "sales", "count": None, "salary_annual": None, "burden_pct": None},
+                {"role": "eng", "count": 5, "salary_annual": 150_000, "burden_pct": 0.3},
+            ]
+        },
+    }
+    rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(inputs))
+    assert rc == 0, f"unit_economics.py crashed on null headcount count: {stderr}"
+    assert data is not None
+
+
+def test_compose_marker_collision_reflected_in_status_and_report() -> None:
+    """When body content contains the marker prefix, MARKER_COLLISION must be
+    in validation.warnings, status must be 'warnings' (not 'clean'), and the
+    warning must render in the report's Validation Warnings section — i.e. the
+    pre-scan happens before status + the Warnings section are finalized."""
+    inputs_collide = json.loads(json.dumps(_VALID_INPUTS))
+    inputs_collide["company"]["company_name"] = "TestCo <!-- COACHING_INSERTION_POINT_deadbeef -->"
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": inputs_collide,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "MARKER_COLLISION" in codes, "MARKER_COLLISION must be recorded in validation.warnings"
+    assert data["validation"]["status"] == "warnings", "status must reflect MARKER_COLLISION"
+    # The warning must actually render in the report body (not just JSON). The
+    # Validation Warnings section humanizes the code to its label.
+    md = data["report_markdown"]
+    assert "## Validation Warnings" in md
+    assert "Marker Collision" in md, "MARKER_COLLISION must render in the Warnings section"
+
+
+def test_compose_fmt_usd_negative_net_cash() -> None:
+    """Negative net_cash (debt > balance) must render as '-$..' not '$-..'."""
+    inputs_debt = json.loads(json.dumps(_VALID_INPUTS))
+    inputs_debt["cash"]["current_balance"] = 500_000
+    inputs_debt["cash"]["debt"] = 2_000_000
+    runway_neg = json.loads(json.dumps(_VALID_RUNWAY))
+    runway_neg["baseline"]["net_cash"] = -1_500_000
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": inputs_debt,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": runway_neg,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    assert "$-1,500,000.00" not in md, "Negative must not fall through to $-.. form"
+    assert "-$1.5M" in md, "Negative net cash should render as -$1.5M"
+
+
+# === Currency-aware report formatting (non-USD models) ===
+
+
+def test_compose_non_usd_report_has_no_bare_dollar_signs() -> None:
+    """End-to-end: a non-USD-denominated model's report.md must not print a bare
+    '$' on any monetary value — CAC/LTV in the Unit Economics table, Net
+    Cash/Monthly Burn/Monthly Revenue and the raise amounts in the Runway
+    section must all be tagged with the model's native ISO code instead.
+    unit_economics.json / runway.json now echo `currency` in their own output,
+    so compose_report.py reads it from those artifacts rather than inputs.json."""
+    inputs_inr = json.loads(json.dumps(_VALID_INPUTS))
+    inputs_inr["currency"] = "INR"
+    ue_inr = json.loads(json.dumps(_VALID_UNIT_ECONOMICS))
+    ue_inr["currency"] = "INR"
+    runway_inr = json.loads(json.dumps(_VALID_RUNWAY))
+    runway_inr["currency"] = "INR"
+    runway_inr["post_raise"] = {
+        "raise_amount": 5_000_000,
+        "new_cash": 7_000_000,
+        "new_runway_months": 30,
+        "meets_target": True,
+    }
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": inputs_inr,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": ue_inr,
+            "runway.json": runway_inr,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0, stderr
+    assert data is not None
+    report = data["report_markdown"]
+    assert not re.search(r"\$\d", report), f"Found a bare-$ monetary value in a non-USD report:\n{report}"
+    assert "INR" in report
+
+
+def test_compose_usd_report_unaffected_by_currency_threading() -> None:
+    """Back-compat: an explicit currency: 'USD' (or absent) must still render
+    with the ordinary bare-$ formatting — the currency-aware formatting only
+    changes behavior for a genuinely non-USD model."""
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0, stderr
+    assert data is not None
+    report = data["report_markdown"]
+    assert "$" in report
+    assert "USD" not in report  # back-compat: no currency tag noise for USD
+
+
+# === run_id CLI stamping (alignment with the cross-skill contract) ===
+
+
+def test_checklist_cli_run_id_overrides_stdin() -> None:
+    """checklist.py: --run-id stamps metadata.run_id, overriding stdin (CLI > stdin)."""
+    payload = json.dumps({"items": _make_checklist_items(), "metadata": {"run_id": "STDIN"}})
+    rc, data, stderr = run_script("checklist.py", ["--pretty", "--run-id", "CLI-WINS"], stdin_data=payload)
+    assert rc == 0, stderr
+    assert data is not None and data.get("metadata", {}).get("run_id") == "CLI-WINS"
+
+
+def test_unit_economics_cli_run_id_overrides_stdin() -> None:
+    """unit_economics.py: --run-id overrides stdin-passthrough run_id."""
+    inp = dict(_VALID_INPUTS)
+    inp["metadata"] = {"run_id": "STDIN"}
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty", "--run-id", "CLI-WINS"], stdin_data=json.dumps(inp))
+    assert rc == 0, stderr
+    assert data is not None and data.get("metadata", {}).get("run_id") == "CLI-WINS"
+
+
+def test_runway_cli_run_id_overrides_stdin() -> None:
+    """runway.py: --run-id overrides stdin-passthrough run_id."""
+    inp = dict(_VALID_INPUTS)
+    inp["metadata"] = {"run_id": "STDIN"}
+    rc, data, stderr = run_script("runway.py", ["--pretty", "--run-id", "CLI-WINS"], stdin_data=json.dumps(inp))
+    assert rc == 0, stderr
+    assert data is not None and data.get("metadata", {}).get("run_id") == "CLI-WINS"
+
+
+# === Fix C: default-alive note includes projected breakeven month ===
+
+
+def test_runway_default_alive_note_includes_breakeven_month() -> None:
+    """When a scenario is default-alive, its note must include the projected breakeven month.
+
+    The note already explains default_alive semantics; this extends it with
+    '; projected to reach cash-flow breakeven around month N of the projection'.
+    """
+    inputs = {
+        "company": {
+            "company_name": "GrowthCo",
+            "slug": "growthco",
+            "stage": "seed",
+            "sector": "SaaS",
+            "geography": "US",
+        },
+        "revenue": {
+            "mrr": {"value": 50_000, "as_of": "2025-01"},
+            "growth_rate_monthly": 0.20,  # 20% MoM → reaches breakeven within ~3 months
+        },
+        "cash": {
+            "current_balance": 2_000_000,
+            "balance_date": "2025-01",
+            "monthly_net_burn": 100_000,
+        },
+    }
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0, stderr
+    assert data is not None
+    base = next(s for s in data["scenarios"] if s["name"] == "base")
+    assert base["default_alive"] is True
+    note = base.get("note", "")
+    assert "breakeven" in note.lower(), f"default-alive note must include breakeven month; got: {note!r}"
+    # Note must name a specific month number
+    import re as _re
+
+    assert _re.search(r"month \d+", note), f"note must say 'month N' for a specific breakeven month; got: {note!r}"
+
+
+def test_runway_default_alive_note_no_breakeven_when_not_profitable() -> None:
+    """When default-alive via grant (not profitability), no breakeven month in note."""
+    inputs = {
+        "company": {"company_name": "GrantCo", "slug": "grantco", "stage": "seed", "sector": "SaaS", "geography": "IL"},
+        "revenue": {
+            "mrr": {"value": 10_000, "as_of": "2025-01"},
+            "growth_rate_monthly": 0.0,  # zero growth — never reaches breakeven
+        },
+        "cash": {
+            "current_balance": 500_000,
+            "balance_date": "2025-01",
+            "monthly_net_burn": 20_000,
+            "grants": {
+                "iia_approved": 3_000_000,
+                "iia_disbursement_months": 60,
+                "iia_start_month": 1,
+            },
+        },
+    }
+    rc, data, stderr = run_script("runway.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert rc == 0, stderr
+    assert data is not None
+    base = next(s for s in data["scenarios"] if s["name"] == "base")
+    assert base["default_alive"] is True
+    note = base.get("note", "")
+    # Without profitability, the note should not claim a breakeven month
+    assert "breakeven" not in note.lower() or "month" not in note.lower(), (
+        f"Note should not claim a breakeven month when company never becomes profitable; got: {note!r}"
+    )
+
+
+def test_compose_default_alive_breakeven_month_in_runway_table() -> None:
+    """Infinite runway row in report should include '~month N' when breakeven is derivable."""
+    import copy
+
+    runway_da = copy.deepcopy(_VALID_RUNWAY)
+    # Make base scenario default-alive with null runway_months
+    runway_da["scenarios"][0]["runway_months"] = None
+    runway_da["scenarios"][0]["cash_out_date"] = None
+    runway_da["scenarios"][0]["decision_point"] = None
+    runway_da["scenarios"][0]["default_alive"] = True
+    # Add synthetic projections where month 5 reaches breakeven
+    runway_da["scenarios"][0]["monthly_projections"] = [
+        {
+            "month": i,
+            "cash_balance": 2_000_000,
+            "revenue": 50_000 + i * 20_000,
+            "expenses": 150_000,
+            "net_burn": 150_000 - (50_000 + i * 20_000),
+        }
+        for i in range(1, 10)
+    ]
+    # Month 5: revenue = 50K + 5*20K = 150K, net_burn = 150K - 150K = 0
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": runway_da,
+        }
+    )
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0, stderr
+    assert data is not None
+    md = data["report_markdown"]
+    assert "breakeven" in md.lower() or "~month" in md.lower(), (
+        f"Compose report should include breakeven month for default-alive scenario; got runway section:\n{md}"
+    )
+
+
+# === Fix D: apply_corrections.py neutral informational stderr for corrected payload ===
+
+
+def test_apply_corrections_corrected_payload_no_warning_on_stderr() -> None:
+    """apply_corrections.py must NOT print 'Warning:' or 'legacy' to stderr for the
+    corrected-object payload shape — that is the documented dispatch contract.
+    Instead it emits a neutral informational line.
+    """
+    original: dict[str, Any] = {
+        "company": {"company_name": "TestCo", "stage": "seed"},
+        "cash": {"current_balance": 1_000_000, "monthly_net_burn": 50_000},
+    }
+    # corrected-object shape (the documented dispatch contract)
+    payload = {
+        "corrected": {
+            "company": {"company_name": "TestCo", "stage": "seed"},
+            "cash": {"current_balance": 1_200_000, "monthly_net_burn": 50_000},
+        },
+        "corrections": [{"path": "cash.current_balance", "was": 1_000_000, "now": 1_200_000}],
+    }
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as orig_f:
+        json.dump(original, orig_f)
+        orig_path = orig_f.name
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as corr_f:
+        json.dump(payload, corr_f)
+        corr_path = corr_f.name
+    with tempfile.TemporaryDirectory() as out_dir:
+        rc, data, stderr = run_script(
+            "apply_corrections.py",
+            [corr_path, "--original", orig_path, "--output-dir", out_dir, "--pretty"],
+        )
+    os.unlink(orig_path)
+    os.unlink(corr_path)
+    assert rc == 0, f"apply_corrections failed: {stderr}"
+    # Must NOT contain "Warning:" or "legacy" — that is alarming for a normal run
+    assert "Warning:" not in stderr, f"stderr must not contain 'Warning:' for corrected-payload shape; got: {stderr!r}"
+    assert "legacy" not in stderr.lower(), f"stderr must not say 'legacy' for corrected-payload shape; got: {stderr!r}"
+    # Must contain a neutral informational line
+    assert "Info:" in stderr or "info:" in stderr.lower() or "corrected-object" in stderr.lower(), (
+        f"stderr should contain a neutral informational message; got: {stderr!r}"
+    )
+
+
+# ===========================================================================
+# Key-coverage tests: compose_report.py summary key reads vs. producer output
+# ===========================================================================
+#
+# Invariant: every key the producer writes to a summary block must either be
+# read by compose_report's section renderer OR appear in an explicit
+# exclusion list (with a documented reason for skipping).
+#
+# Direction tested: produced ⊆ read ∪ explicitly-excluded.
+# A new key added to checklist.py or unit_economics.py summary that the
+# renderer silently ignores will fail with the offending key listed.
+# ===========================================================================
+
+
+def _load_compose_report_module() -> Any:
+    """Import compose_report.py as a module with a unique sys.modules key."""
+    import importlib.util
+    import types
+
+    key = "_fmr_keycov_compose_report"
+    if key in sys.modules:
+        return sys.modules[key]
+    script_path = os.path.join(FMR_SCRIPTS_DIR, "compose_report.py")
+    spec = importlib.util.spec_from_file_location(key, script_path)
+    assert spec is not None and spec.loader is not None
+    mod = types.ModuleType(key)
+    mod.__spec__ = spec  # type: ignore[assignment]
+    mod.__file__ = script_path  # type: ignore[assignment]
+    sys.modules[key] = mod
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+class TestChecklistSummaryKeysCoverage:
+    """compose_report._section_checklist must read every key that checklist.py
+    writes to the summary block, OR the key must be in the explicit exclusion set.
+
+    Producer (checklist.py) summary block keys:
+        total, pass, fail, warn, not_applicable, score_pct,
+        business_quality_pct, model_maturity_pct, overall_status,
+        by_category, failed_items, warned_items
+
+    Renderer (_section_checklist) reads via summary.get(...):
+        score_pct, total, pass, fail, warn, not_applicable,
+        overall_status, failed_items, warned_items, by_category
+
+    Additionally _section_executive_summary reads:
+        overall_status, score_pct, model_maturity_pct, business_quality_pct
+
+    Explicit exclusions (not rendered by _section_checklist but used
+    elsewhere or intentionally omitted from the Markdown section):
+        business_quality_pct — rendered in _section_executive_summary only
+                               (deck-only score; not a checklist-section concern)
+        model_maturity_pct  — rendered in _section_executive_summary only
+                               (structure sub-score; not a checklist-section concern)
+    """
+
+    # Keys checklist.py writes to summary{}.
+    PRODUCED_SUMMARY_KEYS: set[str] = {
+        "total",
+        "pass",
+        "fail",
+        "warn",
+        "not_applicable",
+        "score_pct",
+        "business_quality_pct",
+        "model_maturity_pct",
+        "overall_status",
+        "by_category",
+        "failed_items",
+        "warned_items",
+    }
+
+    # Keys intentionally NOT rendered in _section_checklist but consumed
+    # by _section_executive_summary (documented design split).
+    EXCLUDED_FROM_CHECKLIST_SECTION: set[str] = {
+        "business_quality_pct",
+        "model_maturity_pct",
+    }
+
+    def test_produced_keys_rendered_or_excluded(self) -> None:
+        """Every checklist summary key must be read by _section_checklist or
+        appear in EXCLUDED_FROM_CHECKLIST_SECTION."""
+        import re
+
+        compose_script = os.path.join(FMR_SCRIPTS_DIR, "compose_report.py")
+        with open(compose_script, encoding="utf-8") as fh:
+            src = fh.read()
+
+        # Locate _section_checklist function body
+        fn_match = re.search(r"def _section_checklist\(.*?\n(?=def |\Z)", src, re.DOTALL)
+        assert fn_match, "Could not locate _section_checklist in compose_report.py"
+        fn_body = fn_match.group(0)
+
+        # Extract every summary.get("...") key read in the function
+        read_keys = set(re.findall(r'summary\.get\("([^"]+)"', fn_body))
+        assert len(read_keys) >= 5, (
+            f"Expected at least 5 summary.get() calls in _section_checklist, got {len(read_keys)}: {sorted(read_keys)}"
+        )
+
+        unread_and_not_excluded = self.PRODUCED_SUMMARY_KEYS - read_keys - self.EXCLUDED_FROM_CHECKLIST_SECTION
+        assert not unread_and_not_excluded, (
+            f"compose_report._section_checklist silently ignores checklist summary key(s): "
+            f"{sorted(unread_and_not_excluded)}. Either read and render each key or add it to "
+            f"EXCLUDED_FROM_CHECKLIST_SECTION with a documented reason."
+        )
+
+    def test_excluded_keys_read_by_executive_summary(self) -> None:
+        """Keys excluded from _section_checklist must be read by
+        _section_executive_summary (confirming they are rendered somewhere
+        and the exclusion is not a silent drop)."""
+        import re
+
+        compose_script = os.path.join(FMR_SCRIPTS_DIR, "compose_report.py")
+        with open(compose_script, encoding="utf-8") as fh:
+            src = fh.read()
+
+        fn_match = re.search(r"def _section_executive_summary\(.*?\n(?=def |\Z)", src, re.DOTALL)
+        assert fn_match, "Could not locate _section_executive_summary in compose_report.py"
+        fn_body = fn_match.group(0)
+
+        exec_read_keys = set(re.findall(r'summary\.get\("([^"]+)"', fn_body))
+
+        not_rendered_anywhere = self.EXCLUDED_FROM_CHECKLIST_SECTION - exec_read_keys
+        assert not not_rendered_anywhere, (
+            f"Checklist summary key(s) excluded from _section_checklist are ALSO not rendered "
+            f"by _section_executive_summary: {sorted(not_rendered_anywhere)}. "
+            f"Either render them somewhere or remove from PRODUCED_SUMMARY_KEYS."
+        )
+
+    def test_produced_summary_keys_min_count(self) -> None:
+        """Guard against vacuous tests: producer summary must have >= 12 keys."""
+        assert len(self.PRODUCED_SUMMARY_KEYS) >= 12, (
+            f"PRODUCED_SUMMARY_KEYS expected >= 12 entries, got {len(self.PRODUCED_SUMMARY_KEYS)}. "
+            f"Update when checklist.py changes its summary schema."
+        )
+
+    def test_live_producer_summary_keys_all_rendered_or_excluded(self) -> None:
+        """Live checklist.py output summary keys must all appear in the read set
+        or exclusion list.  Runs checklist.py on the existing _VALID_CHECKLIST fixture."""
+        import re
+
+        checklist_input = {
+            "items": _VALID_CHECKLIST["items"],
+            "company": {
+                "company_name": "TestCo",
+                "stage": "seed",
+                "geography": "US",
+                "revenue_model_type": "saas-sales-led",
+            },
+        }
+        rc, data, stderr = run_script("checklist.py", stdin_data=json.dumps(checklist_input))
+        assert rc == 0, f"checklist.py failed: {stderr}"
+        assert isinstance(data, dict) and "summary" in data, "checklist.py output missing 'summary'"
+
+        live_summary_keys = set(k for k, v in data["summary"].items() if v is not None)
+        assert len(live_summary_keys) >= 8, (
+            f"Expected >= 8 non-None summary keys from live checklist producer, got {live_summary_keys}"
+        )
+
+        compose_script = os.path.join(FMR_SCRIPTS_DIR, "compose_report.py")
+        with open(compose_script, encoding="utf-8") as fh:
+            src = fh.read()
+        fn_match = re.search(r"def _section_checklist\(.*?\n(?=def |\Z)", src, re.DOTALL)
+        assert fn_match
+        read_keys = set(re.findall(r'summary\.get\("([^"]+)"', fn_match.group(0)))
+
+        fn_exec_match = re.search(r"def _section_executive_summary\(.*?\n(?=def |\Z)", src, re.DOTALL)
+        assert fn_exec_match
+        exec_read_keys = set(re.findall(r'summary\.get\("([^"]+)"', fn_exec_match.group(0)))
+
+        all_rendered = read_keys | exec_read_keys
+        unrendered = live_summary_keys - all_rendered - self.EXCLUDED_FROM_CHECKLIST_SECTION
+        assert not unrendered, (
+            f"Live checklist.py summary key(s) not rendered by any compose_report section "
+            f"and not in exclusion list: {sorted(unrendered)}."
+        )
+
+
+class TestUnitEconSummaryKeysCoverage:
+    """compose_report._section_unit_economics must read every key that
+    unit_economics.py writes to the summary block, OR the key must be in
+    the explicit exclusion set.
+
+    Producer (unit_economics.py) summary block keys:
+        computed, strong, acceptable, warning, fail,
+        not_rated, contextual, not_applicable
+
+    Renderer (_section_unit_economics) reads:
+        strong, acceptable, warning, fail
+
+    Explicit exclusions (informational / display only):
+        computed      — number of metrics that returned a non-None value;
+                        used in visualize.py executive summary, not in the
+                        Markdown section text.
+        not_rated     — count of metrics with no benchmark; informational.
+        contextual    — count of metrics rated contextual; informational.
+        not_applicable — count of metrics that don't apply (SaaS-only, etc.);
+                         informational.
+    """
+
+    PRODUCED_SUMMARY_KEYS: set[str] = {
+        "computed",
+        "strong",
+        "acceptable",
+        "warning",
+        "fail",
+        "not_rated",
+        "contextual",
+        "not_applicable",
+    }
+
+    # Keys the Markdown section doesn't render because they are informational
+    # counts that don't affect the coaching narrative.
+    EXCLUDED_INFORMATIONAL: set[str] = {
+        "computed",
+        "not_rated",
+        "contextual",
+        "not_applicable",
+    }
+
+    def test_produced_keys_rendered_or_excluded(self) -> None:
+        """Every unit-economics summary key must be read by _section_unit_economics
+        or appear in EXCLUDED_INFORMATIONAL."""
+        import re
+
+        compose_script = os.path.join(FMR_SCRIPTS_DIR, "compose_report.py")
+        with open(compose_script, encoding="utf-8") as fh:
+            src = fh.read()
+
+        fn_match = re.search(r"def _section_unit_economics\(.*?\n(?=def |\Z)", src, re.DOTALL)
+        assert fn_match, "Could not locate _section_unit_economics in compose_report.py"
+        fn_body = fn_match.group(0)
+
+        read_keys = set(re.findall(r'ue_summary\.get\("([^"]+)"', fn_body))
+        assert len(read_keys) >= 4, (
+            f"Expected >= 4 ue_summary.get() calls in _section_unit_economics, "
+            f"got {len(read_keys)}: {sorted(read_keys)}"
+        )
+
+        unread_and_not_excluded = self.PRODUCED_SUMMARY_KEYS - read_keys - self.EXCLUDED_INFORMATIONAL
+        assert not unread_and_not_excluded, (
+            f"compose_report._section_unit_economics silently ignores unit-economics "
+            f"summary key(s): {sorted(unread_and_not_excluded)}. Either render each key "
+            f"or add it to EXCLUDED_INFORMATIONAL with a documented reason."
+        )
+
+    def test_excluded_keys_are_genuinely_informational(self) -> None:
+        """Excluded keys must actually exist in the producer's output (not phantom).
+
+        Verifies each excluded key appears in a live unit_economics.py run so
+        the exclusion list doesn't silently mask producer renames.
+        """
+        full_saas_inputs = {
+            "company": {
+                "company_name": "TestCo",
+                "stage": "seed",
+                "revenue_model_type": "saas-sales-led",
+            },
+            "revenue": {
+                "arr": {"value": 600_000, "as_of": "2025-12"},
+                "mrr": {"value": 50_000, "as_of": "2025-12"},
+                "growth_rate_monthly": 0.08,
+            },
+            "cash": {"current_balance": 2_000_000, "monthly_net_burn": 80_000},
+            "unit_economics": {
+                "cac": {"total": 1_500, "fully_loaded": True},
+                "gross_margin": 0.75,
+            },
+        }
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(full_saas_inputs))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+        assert isinstance(data, dict) and "summary" in data
+
+        live_summary_keys = set(data["summary"].keys())
+        phantom_exclusions = self.EXCLUDED_INFORMATIONAL - live_summary_keys
+        assert not phantom_exclusions, (
+            f"EXCLUDED_INFORMATIONAL contains key(s) that unit_economics.py does NOT actually "
+            f"emit: {sorted(phantom_exclusions)}. Remove phantom entries from the exclusion list."
+        )
+
+    def test_produced_summary_keys_min_count(self) -> None:
+        """Guard against vacuous tests: producer summary must have >= 8 keys."""
+        assert len(self.PRODUCED_SUMMARY_KEYS) >= 8, (
+            f"PRODUCED_SUMMARY_KEYS expected >= 8 entries, got {len(self.PRODUCED_SUMMARY_KEYS)}."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Magic number: period-matched formula
+# ---------------------------------------------------------------------------
+#
+# Source: Scale Venture Partners, "Magic Number Math"
+#   "Take the change in subscription revenue between two quarters, annualize it
+#    (multiply by four), and divide the result by the sales and marketing spend
+#    for the earlier of the two quarters."
+# Period-matched monthly equivalent: net-new ARR (ΔMRR × 12) ÷ monthly S&M.
+#
+# Worked example: MRR $100K, 5% MoM (ΔMRR $5K), S&M $600K/yr ($50K/mo)
+#   correct = (5K × 12) / 50K = 60K / 50K = 1.2
+#   old bug = 60K / 600K = 0.1  (divided by annual instead of monthly)
+# ---------------------------------------------------------------------------
+
+
+class TestMagicNumberFormula:
+    """unit_economics.py magic number must divide net-new ARR by monthly S&M."""
+
+    _SAAS_INPUTS_TEMPLATE: dict[str, Any] = {
+        "company": {
+            "company_name": "TestCo",
+            "stage": "seed",
+            "sector": "B2B SaaS",
+            "geography": "US",
+            "revenue_model_type": "saas-sales-led",
+        },
+        "revenue": {
+            "arr": {"value": 1_200_000, "as_of": "2025-12"},
+            "mrr": {"value": 100_000, "as_of": "2025-12"},
+            "growth_rate_monthly": 0.05,
+        },
+        "cash": {"current_balance": 2_000_000, "monthly_net_burn": 80_000},
+        "expenses": {
+            "headcount": [
+                {
+                    "role": "sales",
+                    "count": 1,
+                    "salary_annual": 600_000,
+                    "burden_pct": 0.0,
+                }
+            ]
+        },
+    }
+
+    def test_magic_number_period_matched(self) -> None:
+        """Magic number ≈ 1.2 for MRR=100K, growth=5%, S&M=600K/yr (50K/mo).
+
+        Derivation:
+          net_new_ARR = ΔMRR × 12 = (100K × 0.05) × 12 = 60K
+          monthly_sm  = 600K / 12 = 50K
+          magic       = 60K / 50K = 1.2
+
+        Period-mismatch (old bug) gives 60K / 600K = 0.1 — 12x understated.
+        """
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(self._SAAS_INPUTS_TEMPLATE))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        magic = metrics.get("magic_number")
+        assert magic is not None, "magic_number metric missing from output"
+        assert magic["value"] is not None, "magic_number value is null"
+
+        # Period-matched result ≈ 1.2; old bug gives 0.1
+        assert abs(magic["value"] - 1.2) < 0.05, (
+            f"magic_number expected ≈ 1.2 (period-matched), got {magic['value']:.4f}. "
+            f"Verify net-new ARR (ΔMRR×12) is divided by monthly S&M."
+        )
+
+    def test_magic_number_not_12x_understated(self) -> None:
+        """Magic number must NOT be 12x smaller than the correct value."""
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(self._SAAS_INPUTS_TEMPLATE))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        magic = metrics.get("magic_number")
+        assert magic is not None
+        if magic["value"] is not None:
+            assert magic["value"] > 0.5, (
+                f"magic_number = {magic['value']:.4f} is suspiciously low. "
+                f"Expected ≈ 1.2 for the test fixture. Old bug gives 0.1."
+            )
+
+
+# ---------------------------------------------------------------------------
+# GRR sanity: GRR > 1.0 is impossible by definition
+# ---------------------------------------------------------------------------
+#
+# Source: Bessemer, "Gross Dollar Retention"
+#   "GDR nets out the revenue from customers who turned off or downgraded…
+#    but does not account for any expansion."
+# Therefore GDR (GRR) ≤ 100% by definition — a value > 1.0 is a data error.
+# ---------------------------------------------------------------------------
+
+
+class TestGRRSanity:
+    """validate_inputs.py Layer 3 must flag GRR > 1.0 as impossible."""
+
+    def _make_grr_inputs(self, grr: float) -> dict[str, Any]:
+        return {
+            "company": {
+                "company_name": "TestCo",
+                "stage": "seed",
+                "sector": "B2B SaaS",
+                "geography": "US",
+                "revenue_model_type": "saas-sales-led",
+            },
+            "revenue": {
+                "mrr": {"value": 50_000, "as_of": "2025-12"},
+                "grr": grr,
+            },
+            "cash": {"current_balance": 1_000_000, "monthly_net_burn": 80_000},
+        }
+
+    def test_grr_above_one_flagged(self) -> None:
+        """GRR = 1.05 (105%) must trigger GRR_ABOVE_ONE in Layer 3."""
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(self._make_grr_inputs(1.05)))
+        assert rc == 0
+        codes = [w["code"] for w in data.get("warnings", [])]
+        assert "GRR_ABOVE_ONE" in codes, f"Expected GRR_ABOVE_ONE warning for grr=1.05. Got: {codes}"
+
+    def test_grr_exactly_one_not_flagged(self) -> None:
+        """GRR = 1.0 (100%) is at the boundary; no impossible-value flag."""
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(self._make_grr_inputs(1.0)))
+        assert rc == 0
+        codes = [w["code"] for w in data.get("warnings", [])]
+        assert "GRR_ABOVE_ONE" not in codes, f"GRR = 1.0 (100%) should not trigger GRR_ABOVE_ONE. Got: {codes}"
+
+    def test_grr_normal_not_flagged(self) -> None:
+        """GRR = 0.90 (90%) is valid; no impossible-value flag."""
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(self._make_grr_inputs(0.90)))
+        assert rc == 0
+        codes = [w["code"] for w in data.get("warnings", [])]
+        assert "GRR_ABOVE_ONE" not in codes
+
+    def test_grr_above_one_is_critical(self) -> None:
+        """GRR_ABOVE_ONE must be marked critical (impossible value, not just unusual)."""
+        rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(self._make_grr_inputs(1.1)))
+        assert rc == 0
+        suspects = [w for w in data.get("warnings", []) if w["code"] == "GRR_ABOVE_ONE"]
+        assert suspects, "GRR_ABOVE_ONE warning not raised"
+        assert suspects[0].get("critical") is True, (
+            f"GRR_ABOVE_ONE must be marked critical (impossible value). Got: {suspects[0]}"
+        )
+
+
+class TestBurnMultipleSuspectPeriodMatch:
+    """The BURN_MULTIPLE_SUSPECT growth-rate fallback divides ANNUAL burn, so
+    its net-new-ARR estimate must also be annual (monthly net-new ARR x 12).
+    A period mismatch overstates the multiple 12x and false-flags healthy
+    companies as data errors."""
+
+    def _make_inputs(self, mrr: float, growth: float, burn: float) -> dict[str, Any]:
+        return {
+            "company": {
+                "company_name": "TestCo",
+                "stage": "seed",
+                "sector": "B2B SaaS",
+                "geography": "US",
+                "revenue_model_type": "saas-sales-led",
+            },
+            "revenue": {
+                "mrr": {"value": mrr, "as_of": "2025-12"},
+                "growth_rate_monthly": growth,
+            },
+            "cash": {"current_balance": 1_000_000, "monthly_net_burn": burn},
+        }
+
+    def test_healthy_burn_multiple_not_flagged(self) -> None:
+        """Burn 80K / MRR 50K / 8% MoM is a 1.67x burn multiple — no flag."""
+        rc, data, _ = run_script(
+            "validate_inputs.py", ["--pretty"], stdin_data=json.dumps(self._make_inputs(50_000, 0.08, 80_000))
+        )
+        assert rc == 0
+        codes = [w["code"] for w in data.get("warnings", [])]
+        assert "BURN_MULTIPLE_SUSPECT" not in codes, f"1.67x burn multiple must not be flagged as suspect. Got: {codes}"
+
+    def test_extreme_burn_multiple_flagged(self) -> None:
+        """Burn 200K / MRR 100K / 0.1% MoM is a ~167x burn multiple — flagged."""
+        rc, data, _ = run_script(
+            "validate_inputs.py", ["--pretty"], stdin_data=json.dumps(self._make_inputs(100_000, 0.001, 200_000))
+        )
+        assert rc == 0
+        codes = [w["code"] for w in data.get("warnings", [])]
+        assert "BURN_MULTIPLE_SUSPECT" in codes, f"~167x burn multiple must be flagged as suspect. Got: {codes}"
+
+
+# ---------------------------------------------------------------------------
+# Rule of 40 growth-basis disclosure
+# ---------------------------------------------------------------------------
+#
+# unit_economics.py annualizes the current MoM growth rate using
+# (1+g)^12 - 1 — a forward annualization, not realized YoY.
+# The evidence string must disclose this to avoid misleading readers.
+# ---------------------------------------------------------------------------
+
+
+class TestRuleOf40GrowthDisclosure:
+    """Rule of 40 evidence string must disclose that growth is annualized from MoM."""
+
+    _SAAS_INPUTS: dict[str, Any] = {
+        "company": {
+            "company_name": "TestCo",
+            "stage": "series-a",
+            "sector": "B2B SaaS",
+            "geography": "US",
+            "revenue_model_type": "saas-sales-led",
+        },
+        "revenue": {
+            "arr": {"value": 6_000_000, "as_of": "2025-12"},
+            "mrr": {"value": 500_000, "as_of": "2025-12"},
+            "growth_rate_monthly": 0.08,
+        },
+        "cash": {"current_balance": 5_000_000, "monthly_net_burn": 300_000},
+        "unit_economics": {"gross_margin": 0.75},
+    }
+
+    def test_r40_evidence_discloses_annualized_growth(self) -> None:
+        """Rule of 40 evidence must include 'annualized' to signal forward projection."""
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(self._SAAS_INPUTS))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        r40 = metrics.get("rule_of_40")
+        assert r40 is not None, "rule_of_40 metric missing"
+        assert r40.get("rating") not in (
+            "not_applicable",
+            None,
+        ), f"rule_of_40 not computed: {r40}"
+
+        evidence = r40.get("evidence", "") or ""
+        assert "annualized" in evidence.lower(), (
+            f"rule_of_40 evidence must disclose that growth is annualized from MoM rate. Got: {evidence!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Item 5: Runway scenarios table — Assumptions column
+# ---------------------------------------------------------------------------
+
+
+class TestRunwayAssumptionsColumn:
+    """compose_report._section_runway() must render an Assumptions column
+    with growth_rate, burn_change, fx_adjustment from scenario fields."""
+
+    _BASE_ARTIFACTS = {
+        "inputs.json": _VALID_INPUTS,
+        "checklist.json": _VALID_CHECKLIST,
+        "unit_economics.json": _VALID_UNIT_ECONOMICS,
+    }
+
+    def _run_with_runway(self, runway: dict) -> str:
+        d = _make_fmr_artifact_dir({**self._BASE_ARTIFACTS, "runway.json": runway})
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        assert data is not None
+        return data["report_markdown"]  # type: ignore[no-any-return]
+
+    def test_assumptions_column_header_present(self) -> None:
+        """Scenarios table header must include 'Assumptions'."""
+        md = self._run_with_runway(_VALID_RUNWAY)
+        assert "Assumptions" in md
+
+    def test_growth_rate_rendered_in_assumptions(self) -> None:
+        """growth_rate field appears as 'growth X%/mo' in Assumptions column."""
+        runway = json.loads(json.dumps(_VALID_RUNWAY))
+        runway["scenarios"][1]["growth_rate"] = 0.05  # slow scenario
+        md = self._run_with_runway(runway)
+        assert "growth 5%/mo" in md
+
+    def test_burn_change_rendered_in_assumptions(self) -> None:
+        """burn_change field appears as 'burn X%' in Assumptions column."""
+        runway = json.loads(json.dumps(_VALID_RUNWAY))
+        runway["scenarios"][2]["burn_change"] = 0.20  # crisis scenario
+        md = self._run_with_runway(runway)
+        assert "burn +20%" in md
+
+    def test_burn_change_negative_rendered_with_sign(self) -> None:
+        """Negative burn_change shows negative sign (cost cut)."""
+        runway = json.loads(json.dumps(_VALID_RUNWAY))
+        runway["scenarios"][1]["burn_change"] = -0.15
+        md = self._run_with_runway(runway)
+        assert "burn -15%" in md
+
+    def test_fx_adjustment_skipped_when_zero(self) -> None:
+        """fx_adjustment == 0 must not appear in the table (no noise)."""
+        runway = json.loads(json.dumps(_VALID_RUNWAY))
+        runway["scenarios"][0]["fx_adjustment"] = 0.0
+        md = self._run_with_runway(runway)
+        # "fx" should not appear when value is zero
+        assert "fx" not in md
+
+    def test_no_assumptions_fields_renders_dash_or_empty(self) -> None:
+        """When no scenario has growth_rate/burn_change/fx, Assumptions column
+        cells are empty or '—' — not a Python None literal."""
+        md = self._run_with_runway(_VALID_RUNWAY)
+        assert "None" not in md
+
+
+# ---------------------------------------------------------------------------
+# Item 6: Executive summary — breakeven month derivation for default-alive
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultAliveBreakevenInExecSummary:
+    """When the base scenario is default-alive (runway_months=None), the
+    executive summary Base Runway line must show the breakeven month derived
+    from monthly_projections, matching the scenarios table cell."""
+
+    _BASE_ARTIFACTS = {
+        "inputs.json": _VALID_INPUTS,
+        "checklist.json": _VALID_CHECKLIST,
+        "unit_economics.json": _VALID_UNIT_ECONOMICS,
+    }
+
+    def _run_with_runway(self, runway: dict) -> str:
+        d = _make_fmr_artifact_dir({**self._BASE_ARTIFACTS, "runway.json": runway})
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        assert data is not None
+        return data["report_markdown"]  # type: ignore[no-any-return]
+
+    def test_exec_summary_shows_infinite_not_null_for_default_alive(self) -> None:
+        """Base Runway line must not say 'None months' when default-alive."""
+        runway = json.loads(json.dumps(_VALID_RUNWAY))
+        runway["scenarios"][0]["runway_months"] = None
+        runway["scenarios"][0]["cash_out_date"] = None
+        runway["scenarios"][0]["decision_point"] = None
+        runway["scenarios"][0]["default_alive"] = True
+        md = self._run_with_runway(runway)
+        assert "None months" not in md
+
+    def test_exec_summary_shows_breakeven_month_from_projections(self) -> None:
+        """When projections contain a month where net_burn <= 0, exec summary
+        must reference that month (profitability / month N)."""
+        runway = json.loads(json.dumps(_VALID_RUNWAY))
+        runway["scenarios"][0]["runway_months"] = None
+        runway["scenarios"][0]["cash_out_date"] = None
+        runway["scenarios"][0]["decision_point"] = None
+        runway["scenarios"][0]["default_alive"] = True
+        runway["scenarios"][0]["monthly_projections"] = [
+            {"month": 1, "net_burn": 20000},
+            {"month": 2, "net_burn": 5000},
+            {"month": 3, "net_burn": -1000},  # breakeven at month 3
+            {"month": 4, "net_burn": -5000},
+        ]
+        md = self._run_with_runway(runway)
+        # Should reference month 3 (breakeven)
+        assert "3" in md
+
+    def test_exec_summary_consistent_with_scenarios_table(self) -> None:
+        """Both exec summary and scenarios table must indicate default-alive /
+        infinite — no conflicting finite number in one and None in the other."""
+        runway = json.loads(json.dumps(_VALID_RUNWAY))
+        runway["scenarios"][0]["runway_months"] = None
+        runway["scenarios"][0]["cash_out_date"] = None
+        runway["scenarios"][0]["decision_point"] = None
+        runway["scenarios"][0]["default_alive"] = True
+        md = self._run_with_runway(runway)
+        # "None months" must not appear in either location
+        assert "None months" not in md
+        # Report must use a consistent signal — Infinite or profitability
+        assert "Infinite" in md or "profitability" in md.lower() or "default-alive" in md.lower()
+
+
+# ---------------------------------------------------------------------------
+# Fix A/B: static runway paired with the default-alive "Infinite" headline
+# ---------------------------------------------------------------------------
+
+
+class TestStaticRunwayPairedWithInfiniteHeadline:
+    """finding 18/22: a default-alive scenario's 'Infinite' runway headline must
+    never travel without the static (today's-burn, no-growth) floor — the
+    projection holds burn flat while revenue compounds, an assumption a growing
+    company's hiring plan rarely survives."""
+
+    _BASE_ARTIFACTS = {
+        "inputs.json": _VALID_INPUTS,
+        "checklist.json": _VALID_CHECKLIST,
+        "unit_economics.json": _VALID_UNIT_ECONOMICS,
+    }
+
+    def _run_with_runway(self, runway: dict) -> str:
+        d = _make_fmr_artifact_dir({**self._BASE_ARTIFACTS, "runway.json": runway})
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        assert data is not None
+        return data["report_markdown"]  # type: ignore[no-any-return]
+
+    def _default_alive_runway(self, static_months: float | None) -> dict:
+        runway = json.loads(json.dumps(_VALID_RUNWAY))
+        runway["scenarios"][0]["runway_months"] = None
+        runway["scenarios"][0]["cash_out_date"] = None
+        runway["scenarios"][0]["decision_point"] = None
+        runway["scenarios"][0]["default_alive"] = True
+        if static_months is not None:
+            runway["scenarios"][0]["static_runway_months"] = static_months
+        return runway  # type: ignore[no-any-return]
+
+    def test_exec_summary_shows_static_runway_and_flat_burn_caveat(self) -> None:
+        """The exec summary's 'Infinite' headline must be paired with the
+        concrete static number and a flat-burn caveat, not left bare."""
+        md = self._run_with_runway(self._default_alive_runway(6.9))
+        assert "Infinite" in md
+        assert "6.9 months" in md
+        assert "flat" in md.lower()
+
+    def test_exec_summary_omits_static_line_when_static_absent(self) -> None:
+        """No static number available (e.g. zero initial burn) — must not
+        fabricate one, and must not crash."""
+        md = self._run_with_runway(self._default_alive_runway(None))
+        assert "At Today's Burn" not in md
+
+    def test_scenarios_table_has_runway_at_todays_burn_column(self) -> None:
+        """The Scenarios markdown table gains a 'Runway at Today's Burn'
+        column, populated from static_runway_months for every scenario row —
+        not just base."""
+        runway = self._default_alive_runway(6.9)
+        runway["scenarios"][1]["static_runway_months"] = 12.3
+        runway["scenarios"][2]["static_runway_months"] = 4.1
+        md = self._run_with_runway(runway)
+        assert "Runway at Today's Burn" in md
+        assert "6.9 months" in md
+        assert "12.3 months" in md
+        assert "4.1 months" in md
+
+    def test_scenarios_table_dash_when_static_missing_for_a_row(self) -> None:
+        """A scenario row with no static_runway_months renders the em-dash
+        placeholder in the new column, not a Python None literal."""
+        md = self._run_with_runway(self._default_alive_runway(6.9))
+        assert "Runway at Today's Burn" in md
+        # "slow" and "crisis" in _VALID_RUNWAY carry no static_runway_months —
+        # their row's new column must be the placeholder dash, not "None".
+        slow_row = next(line for line in md.splitlines() if line.startswith("| slow "))
+        assert "None" not in slow_row
+        assert "—" in slow_row
+
+
+# ---------------------------------------------------------------------------
+# Item 7: Corrections Applied section from extraction_corrections.json
+# ---------------------------------------------------------------------------
+
+
+class TestCorrectionsAppliedSection:
+    """compose_report must render a 'Corrections Applied' section when
+    extraction_corrections.json is present; must be absent without it."""
+
+    _BASE_ARTIFACTS = {
+        "inputs.json": _VALID_INPUTS,
+        "checklist.json": _VALID_CHECKLIST,
+        "unit_economics.json": _VALID_UNIT_ECONOMICS,
+        "runway.json": _VALID_RUNWAY,
+    }
+
+    _CORRECTIONS = {
+        "timestamp": "2026-06-12T10:00:00Z",
+        "corrections": [
+            {"path": "revenue.arr.value", "was": "1000000", "now": "12000000", "source": "founder"},
+            {"path": "cash.current_balance", "was": "500000", "now": "5000000", "source": "founder"},
+        ],
+    }
+
+    def test_corrections_section_present_when_file_exists(self) -> None:
+        """'Corrections Applied' heading appears when extraction_corrections.json provided."""
+        d = _make_fmr_artifact_dir({**self._BASE_ARTIFACTS, "extraction_corrections.json": self._CORRECTIONS})
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        assert data is not None
+        assert "Corrections Applied" in data["report_markdown"]
+
+    def test_corrections_field_names_in_table(self) -> None:
+        """Corrected field paths appear as rows in the corrections table."""
+        d = _make_fmr_artifact_dir({**self._BASE_ARTIFACTS, "extraction_corrections.json": self._CORRECTIONS})
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        assert data is not None
+        md = data["report_markdown"]
+        assert "revenue.arr.value" in md
+        assert "cash.current_balance" in md
+
+    def test_corrections_was_now_values_in_table(self) -> None:
+        """Original and corrected values appear in the table."""
+        d = _make_fmr_artifact_dir({**self._BASE_ARTIFACTS, "extraction_corrections.json": self._CORRECTIONS})
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        assert data is not None
+        md = data["report_markdown"]
+        assert "1000000" in md or "12000000" in md  # was/now values visible
+
+    _DISPATCH_CORRECTIONS = {
+        "corrections": [
+            {"path": "revenue.arr.value", "old": 1000000, "new": 12000000, "reason": "source tab B12"},
+        ],
+    }
+
+    def test_corrections_old_new_values_in_table(self) -> None:
+        """The dispatch-shape old/new keys render actual values, not '?' placeholders."""
+        d = _make_fmr_artifact_dir({**self._BASE_ARTIFACTS, "extraction_corrections.json": self._DISPATCH_CORRECTIONS})
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        assert data is not None
+        md = data["report_markdown"]
+        assert "1000000" in md or "12000000" in md
+        assert "| ? | ?" not in md
+
+    def test_corrections_reason_rendered(self) -> None:
+        """The correction reason is surfaced in the table."""
+        d = _make_fmr_artifact_dir({**self._BASE_ARTIFACTS, "extraction_corrections.json": self._DISPATCH_CORRECTIONS})
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        assert data is not None
+        assert "source tab B12" in data["report_markdown"]
+
+    def test_corrections_null_null_row_renders_not_found(self) -> None:
+        """A field genuinely absent from source (old=null, new=null) renders a
+        'not in source' cell, not an ambiguous '?'."""
+        corr = {
+            "corrections": [
+                {"path": "cash.debt", "old": None, "new": None, "reason": "not visible in source"},
+            ],
+        }
+        d = _make_fmr_artifact_dir({**self._BASE_ARTIFACTS, "extraction_corrections.json": corr})
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        assert data is not None
+        md = data["report_markdown"]
+        assert "not in source" in md
+        assert "cash.debt |" in md and "| ? |" not in md.split("cash.debt")[1].split("\n")[0]
+
+    def test_corrections_caption_provenance_neutral(self) -> None:
+        """The caption must not claim corrections were founder-authored (they may be
+        agent-authored during INPUTS_REVIEW)."""
+        d = _make_fmr_artifact_dir({**self._BASE_ARTIFACTS, "extraction_corrections.json": self._DISPATCH_CORRECTIONS})
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        assert data is not None
+        assert "corrected by the founder" not in data["report_markdown"]
+
+    def test_corrections_replace_array_lengths_rendered(self) -> None:
+        """replace_array entries render was_length/now_length, not '?'."""
+        corr = {
+            "corrections": [
+                {"path": "revenue.monthly", "type": "replace_array", "was_length": 3, "now_length": 12},
+            ],
+        }
+        d = _make_fmr_artifact_dir({**self._BASE_ARTIFACTS, "extraction_corrections.json": corr})
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        assert data is not None
+        md = data["report_markdown"]
+        row = md.split("revenue.monthly")[1].split("\n")[0]
+        assert "3" in row and "12" in row and "?" not in row
+
+    def test_corrections_section_absent_without_file(self) -> None:
+        """'Corrections Applied' does not appear when file is absent."""
+        d = _make_fmr_artifact_dir(self._BASE_ARTIFACTS)
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        assert data is not None
+        assert "Corrections Applied" not in data["report_markdown"]
+
+    def test_compose_succeeds_without_corrections_file(self) -> None:
+        """Missing extraction_corrections.json must not fail or warn."""
+        d = _make_fmr_artifact_dir(self._BASE_ARTIFACTS)
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0
+        assert data is not None
+        # No MISSING_ARTIFACT warning for corrections file
+        warnings = data["validation"].get("warnings", [])
+        missing = [w for w in warnings if w["code"] == "MISSING_ARTIFACT" and "corrections" in w.get("detail", "")]
+        assert not missing
+
+
+# ---------------------------------------------------------------------------
+# Item 8: Explorer footer line in report_markdown
+# ---------------------------------------------------------------------------
+
+
+class TestExplorerFooterLine:
+    """compose_report must append a footer line pointing founders to explore.html
+    for what-if scenarios."""
+
+    _BASE_ARTIFACTS = {
+        "inputs.json": _VALID_INPUTS,
+        "checklist.json": _VALID_CHECKLIST,
+        "unit_economics.json": _VALID_UNIT_ECONOMICS,
+        "runway.json": _VALID_RUNWAY,
+    }
+
+    def test_explorer_footer_present_in_report_markdown(self) -> None:
+        """report_markdown footer must reference the interactive explorer."""
+        d = _make_fmr_artifact_dir(self._BASE_ARTIFACTS)
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        assert data is not None
+        md = data["report_markdown"]
+        # Footer must mention explore.html or explore.py
+        assert "explore" in md.lower()
+
+    def test_explorer_footer_mentions_what_if(self) -> None:
+        """Footer should indicate what-if / interactive use."""
+        d = _make_fmr_artifact_dir(self._BASE_ARTIFACTS)
+        rc, data, stderr = _run_compose(d)
+        assert rc == 0, f"compose failed: {stderr}"
+        assert data is not None
+        md = data["report_markdown"]
+        assert "what-if" in md.lower() or "scenarios" in md.lower()
+
+
+# ---------------------------------------------------------------------------
+# Change 1: Magic number includes non-headcount marketing opex
+# ---------------------------------------------------------------------------
+#
+# Source: Scale Venture Partners, "Magic Number Math"
+#   The denominator is "sales and marketing spend for the earlier of the two
+#   quarters" — i.e. ALL S&M, not just headcount.
+#
+# Non-headcount marketing lives in expenses.opex_monthly[] entries whose
+# category (case-insensitive) matches the SM_OPEX_CATEGORIES frozenset.
+# opex_monthly.amount is MONTHLY, so the annual base adds amount * 12.
+#
+# Worked examples:
+#   A) Only marketing opex, no sales HC:
+#      MRR=100K, growth=5%, marketing_opex=$50K/mo → $600K/yr
+#      net_new_ARR = 100K * 0.05 * 12 = 60K
+#      monthly_sm  = 600K / 12 = 50K
+#      magic       = 60K / 50K = 1.2
+#      (old code: no HC → not_rated; new code: should compute)
+#
+#   B) Sales HC + marketing opex:
+#      MRR=100K, growth=5%
+#      sales_HC_annual = 600K, marketing_opex = $20K/mo = $240K/yr
+#      combined_annual = 600K + 240K = 840K
+#      monthly_sm  = 840K / 12 = 70K
+#      net_new_ARR = 60K
+#      magic       = 60K / 70K ≈ 0.857  (old: 60K/50K = 1.2 — too optimistic)
+# ---------------------------------------------------------------------------
+
+
+class TestMagicNumberWithMarketingOpex:
+    """Magic number denominator must include non-headcount marketing opex."""
+
+    _BASE_COMPANY: dict[str, Any] = {
+        "company_name": "TestCo",
+        "stage": "seed",
+        "sector": "B2B SaaS",
+        "geography": "US",
+        "revenue_model_type": "saas-sales-led",
+    }
+    _BASE_REVENUE: dict[str, Any] = {
+        "arr": {"value": 1_200_000, "as_of": "2025-12"},
+        "mrr": {"value": 100_000, "as_of": "2025-12"},
+        "growth_rate_monthly": 0.05,
+    }
+    _BASE_CASH: dict[str, Any] = {
+        "current_balance": 2_000_000,
+        "monthly_net_burn": 80_000,
+    }
+
+    def test_magic_number_opex_only_marketing_computes(self) -> None:
+        """Marketing opex alone (no sales HC) should now produce a magic number.
+
+        Derivation (example A):
+          net_new_ARR  = 100K * 0.05 * 12 = 60K
+          opex_monthly = $50K/mo → annual = $600K → monthly = $50K
+          magic        = 60K / 50K = 1.2
+        Old behaviour: no headcount → sm_spend_annual = 0 → not_rated
+        New behaviour: marketing opex included → magic = 1.2
+        """
+        inputs: dict[str, Any] = {
+            "company": self._BASE_COMPANY,
+            "revenue": self._BASE_REVENUE,
+            "cash": self._BASE_CASH,
+            "expenses": {
+                "opex_monthly": [
+                    {"category": "marketing", "amount": 50_000, "start_month": "2025-01"},
+                ]
+            },
+        }
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(inputs))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        magic = metrics.get("magic_number")
+        assert magic is not None, "magic_number metric missing"
+        assert magic["value"] is not None, (
+            "magic_number value is null — marketing opex alone must be sufficient to compute"
+        )
+        assert magic["rating"] != "not_rated", (
+            f"magic_number should not be not_rated when marketing opex is present. Got: {magic}"
+        )
+        # net_new_ARR=60K, monthly_sm=50K → magic=1.2
+        assert abs(magic["value"] - 1.2) < 0.05, (
+            f"Expected magic_number ≈ 1.2 (marketing opex $50K/mo), got {magic['value']:.4f}"
+        )
+
+    def test_magic_number_combined_base_lower_than_headcount_only(self) -> None:
+        """Adding marketing opex to existing sales HC lowers the magic number.
+
+        Derivation (example B):
+          net_new_ARR       = 100K * 0.05 * 12 = 60K
+          sales_HC_annual   = $600K  → monthly = $50K
+          marketing_opex    = $20K/mo → annual = $240K
+          combined_annual   = $840K  → combined_monthly = $70K
+          magic_combined    = 60K / 70K ≈ 0.857
+          magic_HC_only     = 60K / 50K = 1.2
+        Adding opex must lower the magic number (more conservative, matches definition).
+        """
+        inputs_hc_only: dict[str, Any] = {
+            "company": self._BASE_COMPANY,
+            "revenue": self._BASE_REVENUE,
+            "cash": self._BASE_CASH,
+            "expenses": {
+                "headcount": [
+                    {
+                        "role": "sales",
+                        "count": 1,
+                        "salary_annual": 600_000,
+                        "burden_pct": 0.0,
+                    }
+                ]
+            },
+        }
+        inputs_combined: dict[str, Any] = {
+            "company": self._BASE_COMPANY,
+            "revenue": self._BASE_REVENUE,
+            "cash": self._BASE_CASH,
+            "expenses": {
+                "headcount": [
+                    {
+                        "role": "sales",
+                        "count": 1,
+                        "salary_annual": 600_000,
+                        "burden_pct": 0.0,
+                    }
+                ],
+                "opex_monthly": [
+                    {"category": "marketing", "amount": 20_000, "start_month": "2025-01"},
+                ],
+            },
+        }
+        rc1, data1, _ = run_script("unit_economics.py", stdin_data=json.dumps(inputs_hc_only))
+        rc2, data2, _ = run_script("unit_economics.py", stdin_data=json.dumps(inputs_combined))
+        assert rc1 == 0 and rc2 == 0
+
+        magic_hc = {m["name"]: m for m in data1.get("metrics", [])}["magic_number"]
+        magic_combined = {m["name"]: m for m in data2.get("metrics", [])}["magic_number"]
+
+        assert magic_hc["value"] is not None and magic_combined["value"] is not None
+        assert magic_combined["value"] < magic_hc["value"], (
+            f"Combined base must lower magic number: "
+            f"hc-only={magic_hc['value']:.4f}, combined={magic_combined['value']:.4f}"
+        )
+        # Spot-check combined value ≈ 0.857 (60K / 70K)
+        assert abs(magic_combined["value"] - round(60_000 / 70_000, 2)) < 0.05, (
+            f"Expected magic_number ≈ {round(60_000 / 70_000, 2):.4f} for combined base, "
+            f"got {magic_combined['value']:.4f}"
+        )
+
+    def test_magic_number_evidence_names_headcount_and_opex(self) -> None:
+        """Evidence string must honestly name the combined base when both are present."""
+        inputs: dict[str, Any] = {
+            "company": self._BASE_COMPANY,
+            "revenue": self._BASE_REVENUE,
+            "cash": self._BASE_CASH,
+            "expenses": {
+                "headcount": [{"role": "marketing", "count": 1, "salary_annual": 120_000, "burden_pct": 0.0}],
+                "opex_monthly": [
+                    {"category": "ads", "amount": 10_000, "start_month": "2025-01"},
+                ],
+            },
+        }
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(inputs))
+        assert rc == 0, f"failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        magic = metrics.get("magic_number")
+        assert magic is not None and magic["value"] is not None
+        evidence = magic.get("evidence", "")
+        # Evidence must mention the opex component in the base description
+        assert "opex" in evidence.lower() or "marketing" in evidence.lower(), (
+            f"Evidence should name the opex base component. Got: {evidence!r}"
+        )
+
+    def test_magic_number_category_case_insensitive(self) -> None:
+        """Category matching must be case-insensitive ('Advertising', 'DEMAND GEN', etc.)."""
+        for cat in ("Advertising", "DEMAND GEN", "Demand Generation", "S&M", "Sales & Marketing"):
+            inputs: dict[str, Any] = {
+                "company": self._BASE_COMPANY,
+                "revenue": self._BASE_REVENUE,
+                "cash": self._BASE_CASH,
+                "expenses": {
+                    "opex_monthly": [
+                        {"category": cat, "amount": 50_000, "start_month": "2025-01"},
+                    ]
+                },
+            }
+            rc, data, _ = run_script("unit_economics.py", stdin_data=json.dumps(inputs))
+            assert rc == 0
+            metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+            magic = metrics["magic_number"]
+            assert magic["value"] is not None, f"Category '{cat}' not matched — magic_number should compute"
+
+    def test_magic_number_non_sm_opex_excluded(self) -> None:
+        """Cloud/engineering opex must NOT be counted in the S&M base."""
+        inputs_no_sm: dict[str, Any] = {
+            "company": self._BASE_COMPANY,
+            "revenue": self._BASE_REVENUE,
+            "cash": self._BASE_CASH,
+            "expenses": {
+                "opex_monthly": [
+                    {"category": "cloud", "amount": 50_000, "start_month": "2025-01"},
+                    {"category": "engineering tools", "amount": 20_000, "start_month": "2025-01"},
+                ]
+            },
+        }
+        rc, data, _ = run_script("unit_economics.py", stdin_data=json.dumps(inputs_no_sm))
+        assert rc == 0
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        magic = metrics["magic_number"]
+        # No S&M in opex → should still be not_rated (cloud/tools are not S&M)
+        assert magic["value"] is None, f"Non-S&M opex categories must not trigger magic_number. Got: {magic}"
+
+
+# ---------------------------------------------------------------------------
+# Change 2: Rule of 40 uses realized YoY growth when revenue history exists
+# ---------------------------------------------------------------------------
+#
+# Source: Brad Feld (canonical R40): growth = "year-over-year growth rate"
+# of revenue.  When ≥12 monthly entries (or ≥5 quarterly) exist, use the
+# realized YoY rate; otherwise fall back to annualized-MoM with disclosure.
+#
+# Realized YoY derivation using monthly time-series:
+#   latest_arr    = ARR at final month entry
+#   year_ago_arr  = ARR 12 months earlier (index -13 if 13 entries, else index 0)
+#   yoy_growth_%  = (latest_arr - year_ago_arr) / year_ago_arr * 100
+#
+# Worked example — 13 monthly entries, ARR grows from 400K to 1M:
+#   yoy_growth = (1000K - 400K) / 400K * 100 = 150.0%
+#   op_margin  = -monthly_burn / mrr = -30K / 83.3K ≈ -36% → let's use gross for simplicity
+#   gross_margin = 0.75 → R40 = 150 + 75 = 225
+#   (annualized-MoM from growth_rate_monthly=0.08: (1.08^12-1)*100 ≈ 151.8% — very close
+#    but would differ for non-constant-growth companies)
+#
+# Worked example (fallback, no monthly history):
+#   growth_rate_monthly=0.08 → annualized = (1.08^12-1)*100 ≈ 151.8%
+#   evidence must include "annualized from current MoM rate"
+# ---------------------------------------------------------------------------
+
+
+class TestRuleOf40RealizedYoY:
+    """Rule of 40 uses realized YoY when ≥12 months of history exist."""
+
+    _BASE_COMPANY: dict[str, Any] = {
+        "company_name": "TestCo",
+        "stage": "series-a",
+        "sector": "B2B SaaS",
+        "geography": "US",
+        "revenue_model_type": "saas-sales-led",
+    }
+
+    def _make_inputs_with_monthly(
+        self,
+        n_months: int,
+        arr_start: float,
+        arr_end: float,
+        mrr_current: float,
+        burn: float,
+    ) -> dict[str, Any]:
+        """Build inputs with n_months of monthly ARR history, linear progression."""
+        step = (arr_end - arr_start) / max(n_months - 1, 1)
+        monthly = [
+            {
+                "month": f"2025-{i + 1:02d}" if i < 12 else f"2026-{i - 11:02d}",
+                "arr": round(arr_start + step * i),
+            }
+            for i in range(n_months)
+        ]
+        return {
+            "company": self._BASE_COMPANY,
+            "revenue": {
+                "arr": {"value": arr_end, "as_of": "2025-12"},
+                "mrr": {"value": mrr_current, "as_of": "2025-12"},
+                "growth_rate_monthly": 0.08,  # also present — should NOT be used for growth
+                "monthly": monthly,
+            },
+            "cash": {"current_balance": 5_000_000, "monthly_net_burn": burn},
+            "unit_economics": {"gross_margin": 0.75},
+        }
+
+    def test_r40_realized_yoy_with_12_monthly_entries(self) -> None:
+        """With 12 monthly entries, R40 uses realized YoY growth (not annualized MoM).
+
+        Derivation (12 entries, arr 400K→1M, index-lookback is index 0 = 400K):
+          year_ago_arr = 400K (entry[0])
+          latest_arr   = 1M  (entry[-1])
+          yoy_growth   = (1M - 400K) / 400K * 100 = 150.0%
+          gross_margin = 0.75 → margin_pct = 75
+          r40          = 150.0 + 75 = 225.0
+          (annualized-MoM at 8% would give ≈151.8 — deliberately close but not identical
+           for clean testing; see fallback test for the MoM path)
+        The evidence must say "realized YoY" (not "annualized from current MoM rate").
+        """
+        inputs = self._make_inputs_with_monthly(
+            n_months=12, arr_start=400_000, arr_end=1_000_000, mrr_current=83_333, burn=100_000
+        )
+        # Force gross-margin path: remove monthly_net_burn  → op_margin unavailable
+        del inputs["cash"]["monthly_net_burn"]
+
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(inputs))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        r40 = metrics.get("rule_of_40")
+        assert r40 is not None, "rule_of_40 missing"
+        assert r40["value"] is not None, f"rule_of_40 not computed: {r40}"
+
+        evidence = r40.get("evidence", "")
+        assert "realized yoy" in evidence.lower(), (
+            f"Evidence must say 'realized YoY' when monthly history is present. Got: {evidence!r}"
+        )
+        assert "annualized from current mom" not in evidence.lower(), (
+            f"Evidence must NOT say annualized-from-MoM when history is present. Got: {evidence!r}"
+        )
+
+    def test_r40_no_history_falls_back_to_annualized_mom(self) -> None:
+        """Without monthly history, R40 falls back to annualized-MoM with disclosure.
+
+        This test ensures the fallback path still carries the 'annualized from current MoM rate'
+        disclosure required by TestRuleOf40GrowthDisclosure.
+        """
+        inputs: dict[str, Any] = {
+            "company": self._BASE_COMPANY,
+            "revenue": {
+                "arr": {"value": 6_000_000, "as_of": "2025-12"},
+                "mrr": {"value": 500_000, "as_of": "2025-12"},
+                "growth_rate_monthly": 0.08,
+                # No "monthly" or "quarterly" entries
+            },
+            "cash": {"current_balance": 5_000_000, "monthly_net_burn": 300_000},
+            "unit_economics": {"gross_margin": 0.75},
+        }
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(inputs))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        r40 = metrics.get("rule_of_40")
+        assert r40 is not None and r40["value"] is not None, f"r40 not computed: {r40}"
+
+        evidence = r40.get("evidence", "")
+        assert "annualized" in evidence.lower(), (
+            f"Fallback evidence must say 'annualized' (from MoM rate). Got: {evidence!r}"
+        )
+
+    def test_r40_realized_yoy_with_5_quarterly_entries(self) -> None:
+        """With 5 quarterly entries (full YoY window), R40 uses realized YoY.
+
+        Derivation:
+          entry 0: arr=400K (year_ago)
+          entry 4: arr=1M  (latest)
+          yoy_growth = (1M - 400K) / 400K * 100 = 150.0%
+          gross_margin = 0.75 → r40 = 225.0
+        Evidence must say 'realized YoY'.
+        """
+        inputs: dict[str, Any] = {
+            "company": self._BASE_COMPANY,
+            "revenue": {
+                "arr": {"value": 1_000_000, "as_of": "2025-Q4"},
+                "mrr": {"value": 83_333, "as_of": "2025-Q4"},
+                "growth_rate_monthly": 0.08,
+                "quarterly": [
+                    {"quarter": "2024-Q4", "arr": 400_000},
+                    {"quarter": "2025-Q1", "arr": 600_000},
+                    {"quarter": "2025-Q2", "arr": 700_000},
+                    {"quarter": "2025-Q3", "arr": 850_000},
+                    {"quarter": "2025-Q4", "arr": 1_000_000},
+                ],
+            },
+            "cash": {"current_balance": 5_000_000},  # no monthly_net_burn → gross path
+            "unit_economics": {"gross_margin": 0.75},
+        }
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(inputs))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        r40 = metrics.get("rule_of_40")
+        assert r40 is not None and r40["value"] is not None, f"r40 not computed: {r40}"
+
+        evidence = r40.get("evidence", "")
+        assert "realized yoy" in evidence.lower(), (
+            f"Evidence must say 'realized YoY' for 5-quarter window. Got: {evidence!r}"
+        )
+
+    def test_r40_fewer_than_12_monthly_falls_back_to_mom(self) -> None:
+        """With only 11 monthly entries (< 12), fall back to annualized-MoM."""
+        inputs = self._make_inputs_with_monthly(
+            n_months=11, arr_start=400_000, arr_end=1_000_000, mrr_current=83_333, burn=100_000
+        )
+        del inputs["cash"]["monthly_net_burn"]
+
+        rc, data, stderr = run_script("unit_economics.py", stdin_data=json.dumps(inputs))
+        assert rc == 0, f"unit_economics.py failed: {stderr}"
+
+        metrics = {m["name"]: m for m in data.get("metrics", []) if isinstance(m, dict)}
+        r40 = metrics.get("rule_of_40")
+        assert r40 is not None and r40["value"] is not None
+
+        evidence = r40.get("evidence", "")
+        assert "annualized" in evidence.lower(), (
+            f"With < 12 monthly entries, evidence must say 'annualized'. Got: {evidence!r}"
+        )
+
+
+# --- Sector-aware gross margin benchmarks ---
+
+
+def _gm_payload(
+    model_type: str,
+    gm: float,
+    stage: str = "seed",
+    traits: list[str] | None = None,
+    basis: str | None = None,
+    ai_cogs: bool = False,
+) -> str:
+    """Build a unit_economics payload with a specific revenue model type and gross margin."""
+    inputs = json.loads(json.dumps(_VALID_INPUTS))
+    inputs["company"]["stage"] = stage
+    inputs["company"]["revenue_model_type"] = model_type
+    if traits is not None:
+        inputs["company"]["traits"] = traits
+    inputs["unit_economics"]["gross_margin"] = gm
+    if basis is not None:
+        inputs["unit_economics"]["gross_margin_basis"] = basis
+    if ai_cogs:
+        inputs["expenses"]["cogs"]["inference_costs"] = 4000
+    return json.dumps(inputs)
+
+
+def _gm_metric(payload: str) -> dict[str, Any]:
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0, f"unit_economics.py failed: {stderr}"
+    assert data is not None
+    metric: dict[str, Any] = {m["name"]: m for m in data["metrics"]}["gross_margin"]
+    return metric
+
+
+def test_unit_economics_gm_retail_sector_benchmark() -> None:
+    """A retail company's mid-50s gross margin rates strong against the retail table, not SaaS."""
+    gm = _gm_metric(_gm_payload("retail", 0.55))
+    assert gm["rating"] == "strong", f"0.55 GM should be strong for retail, got {gm['rating']!r}"
+    assert "Damodaran" in gm["benchmark_source"], f"retail bar must cite its source: {gm['benchmark_source']!r}"
+    assert gm["benchmark_as_of"] == "2026-01"
+    assert "sector benchmark" in gm["evidence"], f"evidence should name the sector bar: {gm['evidence']!r}"
+    # No basis provided: the product-GM assumption must be disclosed, not silent.
+    assert "product" in gm["evidence"].lower(), f"evidence must disclose the basis assumption: {gm['evidence']!r}"
+
+
+def test_unit_economics_gm_hardware_sector_benchmark() -> None:
+    """A hardware company's 45% gross margin rates acceptable against the hardware table."""
+    gm = _gm_metric(_gm_payload("hardware", 0.45))
+    assert gm["rating"] == "acceptable", f"0.45 GM should be acceptable for hardware, got {gm['rating']!r}"
+    assert "Damodaran" in gm["benchmark_source"]
+
+
+def test_unit_economics_gm_hardware_subscription_contextual() -> None:
+    """hardware-subscription is contextual: the device-only 50% rule excludes service blends,
+    and a single GM number cannot be decomposed into hardware vs service margin."""
+    gm = _gm_metric(_gm_payload("hardware-subscription", 0.45))
+    assert gm["rating"] == "contextual", f"got {gm['rating']!r}"
+    assert "split" in gm["evidence"].lower(), f"evidence should ask for the margin split: {gm['evidence']!r}"
+    assert gm["benchmark_source"] != ""
+
+
+def test_unit_economics_gm_consumer_subscription_benchmark() -> None:
+    """A consumer-subscription 50% gross margin rates acceptable against its own table."""
+    gm = _gm_metric(_gm_payload("consumer-subscription", 0.50))
+    assert gm["rating"] == "acceptable", f"0.50 GM should be acceptable for consumer sub, got {gm['rating']!r}"
+    assert "Damodaran" in gm["benchmark_source"]
+
+
+def test_unit_economics_gm_marketplace_contextual() -> None:
+    """Marketplace gross margin is contextual: basis-dependent, never pass/fail."""
+    gm = _gm_metric(_gm_payload("marketplace", 0.60))
+    assert gm["rating"] == "contextual", f"got {gm['rating']!r}"
+    assert "basis" in gm["evidence"].lower(), f"evidence must explain the revenue-basis caveat: {gm['evidence']!r}"
+    assert gm["benchmark_source"] != ""
+
+
+def test_unit_economics_gm_transactional_fintech_contextual() -> None:
+    """Transactional fintech gross margin is contextual (take-rate/net-revenue basis)."""
+    gm = _gm_metric(_gm_payload("transactional-fintech", 0.60))
+    assert gm["rating"] == "contextual", f"got {gm['rating']!r}"
+    assert "basis" in gm["evidence"].lower()
+
+
+def test_unit_economics_gm_ai_discount_composes_with_sector_table() -> None:
+    """With material AI COGS present, the AI adjustment applies to the selected sector table."""
+    gm = _gm_metric(_gm_payload("retail", 0.46, traits=["ai-powered"], ai_cogs=True))
+    # retail strong bar 0.50 - 0.05 seed AI adjustment = 0.45
+    assert gm["rating"] == "strong", f"0.46 GM should clear the AI-adjusted retail bar, got {gm['rating']!r}"
+    assert "AI-adjusted" in gm["evidence"]
+
+
+def test_unit_economics_gm_ai_trait_alone_no_discount() -> None:
+    """The ai-powered trait alone earns no margin concession without AI costs in COGS."""
+    gm = _gm_metric(_gm_payload("retail", 0.46, traits=["ai-powered"]))
+    assert gm["rating"] == "acceptable", f"trait without AI COGS must not discount the bar: {gm['rating']!r}"
+    assert "AI-adjusted" not in gm["evidence"]
+
+
+def test_unit_economics_gm_sector_tables_stage_invariant() -> None:
+    """Non-SaaS gross margin tables do not vary by stage (sources are not stage-segmented)."""
+    for stage in ("pre-seed", "seed", "series-a"):
+        gm = _gm_metric(_gm_payload("hardware", 0.45, stage=stage))
+        assert gm["rating"] == "acceptable", f"stage {stage}: got {gm['rating']!r}"
+
+
+def test_unit_economics_gm_saas_table_unchanged() -> None:
+    """SaaS models keep the existing stage-keyed KeyBanc benchmark."""
+    gm = _gm_metric(_gm_payload("saas-sales-led", 0.72))
+    assert gm["rating"] == "acceptable", f"0.72 GM at seed should stay acceptable for SaaS, got {gm['rating']!r}"
+    assert "KeyBanc" in gm["benchmark_source"]
+
+
+def test_unit_economics_gm_unknown_model_type_falls_back_to_saas() -> None:
+    """An empty/unknown revenue model type keeps the SaaS benchmark, with the assumption disclosed."""
+    gm = _gm_metric(_gm_payload("", 0.72))
+    assert gm["rating"] == "acceptable"
+    assert "KeyBanc" in gm["benchmark_source"]
+    assert "assumed" in gm["evidence"].lower(), f"fallback must disclose the SaaS assumption: {gm['evidence']!r}"
+
+
+def test_unit_economics_gm_non_product_basis_contextual() -> None:
+    """A non-product gross_margin_basis makes the metric contextual — the threshold tables all
+    assume product/service gross margin, and store contribution is a different metric."""
+    gm = _gm_metric(_gm_payload("retail", 0.20, basis="store_contribution"))
+    assert gm["rating"] == "contextual", f"store-contribution margin must not rate fail: {gm['rating']!r}"
+    assert "store" in gm["evidence"].lower() or "basis" in gm["evidence"].lower()
+
+
+def test_unit_economics_gm_product_basis_rated() -> None:
+    """An explicit product basis rates normally against the sector table."""
+    gm = _gm_metric(_gm_payload("retail", 0.55, basis="product"))
+    assert gm["rating"] == "strong", f"got {gm['rating']!r}"
+
+
+def test_unit_economics_gm_threshold_boundaries() -> None:
+    """Exact-threshold values rate at the tier (>= semantics) for every sector table."""
+    cases = [
+        ("retail", 0.50, "strong"),
+        ("retail", 0.35, "acceptable"),
+        ("retail", 0.25, "warning"),
+        ("retail", 0.249, "fail"),
+        ("hardware", 0.50, "strong"),
+        ("hardware", 0.40, "acceptable"),
+        ("hardware", 0.25, "warning"),
+        ("consumer-subscription", 0.65, "strong"),
+        ("consumer-subscription", 0.45, "acceptable"),
+        ("consumer-subscription", 0.30, "warning"),
+    ]
+    for model_type, gm_value, expected in cases:
+        gm = _gm_metric(_gm_payload(model_type, gm_value))
+        assert gm["rating"] == expected, f"{model_type} @ {gm_value}: expected {expected}, got {gm['rating']!r}"
+
+
+def test_validate_inputs_gross_margin_basis_enum() -> None:
+    """validate_inputs accepts the documented gross_margin_basis values and rejects others."""
+    ok = json.dumps(
+        {"company": _CO, "unit_economics": {"gross_margin": 0.5, "gross_margin_basis": "store_contribution"}}
+    )
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=ok)
+    assert rc == 0
+    assert "unit_economics.gross_margin_basis" not in {e["field"] for e in data.get("errors", [])}
+
+    bad = json.dumps({"company": _CO, "unit_economics": {"gross_margin": 0.5, "gross_margin_basis": "ebitda"}})
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=bad)
+    assert rc == 0
+    assert "unit_economics.gross_margin_basis" in {e["field"] for e in data.get("errors", [])}
+
+
+def test_unit_economics_gm_usage_based_contextual() -> None:
+    """usage-based is contextual: healthy consumption models span passthrough-heavy CPaaS
+    (~51%) to software-margin platforms — a single bar mis-rates one end."""
+    gm = _gm_metric(_gm_payload("usage-based", 0.51))
+    assert gm["rating"] == "contextual", f"a ~51% CPaaS-style GM must not be pass/fail: {gm['rating']!r}"
+    assert "passthrough" in gm["evidence"].lower(), f"evidence should explain the spread: {gm['evidence']!r}"
+    assert gm["benchmark_source"] != ""
+
+
+def test_unit_economics_cac_contextual_for_retail() -> None:
+    """Retail CAC is contextual (store-driven vs paid acquisition varies too widely)."""
+    payload = _gm_payload("retail", 0.55)
+    rc, data, stderr = run_script("unit_economics.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    cac = {m["name"]: m for m in data["metrics"]}["cac"]
+    assert cac["rating"] == "contextual", f"got {cac['rating']!r}"
+
+
+def test_validate_inputs_accepts_retail_revenue_model() -> None:
+    """The revenue_model_type enum accepts 'retail'."""
+    payload = json.dumps({"company": {**_CO, "revenue_model_type": "retail"}})
+    rc, data, stderr = run_script("validate_inputs.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    error_fields = {e["field"] for e in data.get("errors", [])}
+    assert "company.revenue_model_type" not in error_fields, f"retail must be a valid enum value: {data.get('errors')}"
+
+
+def test_checklist_retail_derives_sector_type() -> None:
+    """retail revenue_model_type derives sector_type without warning; no sector item fires."""
+    company = {
+        "stage": "seed",
+        "geography": "us",
+        "sector": "Retail",
+        "revenue_model_type": "retail",
+        "traits": [],
+        # no sector_type — should derive "retail"
+    }
+    items = _make_checklist_items()
+    payload = json.dumps({"items": items, "company": company})
+    rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert "could not derive" not in stderr, f"retail should derive a sector_type: {stderr!r}"
+    for item_id in ("SECTOR_39", "SECTOR_40", "SECTOR_41", "SECTOR_42", "SECTOR_43", "SECTOR_44"):
+        item = next(i for i in data["items"] if i["id"] == item_id)
+        assert item["status"] == "not_applicable", f"{item_id} should be gated for retail sector_type"
+
+
+# --- extract_model.py used-range hardening ---
+
+
+def _write_degenerate_xlsx(path: str) -> None:
+    """Small real table + one styled-but-empty cell far away, ballooning the
+    declared used-range (~3M cells) the way stray formatting does."""
+    import openpyxl
+    from openpyxl.styles import PatternFill
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = "Revenue"
+    ws.append(["Metric", "2025-01", "2025-02"])
+    ws.append(["MRR", 50000, 55000])
+    ws.append(["Customers", 100, 110])
+    ws.cell(row=100000, column=30).fill = PatternFill(start_color="FFFF0000", fill_type="solid")
+    wb.save(path)
+
+
+def _write_unknown_extension_xlsx(path: str) -> None:
+    """Normal small table whose sheet XML carries an unknown extLst extension,
+    which makes openpyxl emit a UserWarning at load time."""
+    import zipfile
+
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.append(["Metric", "2025-01"])
+    ws.append(["MRR", 50000])
+    wb.save(path)
+
+    with zipfile.ZipFile(path) as zin:
+        data = {n: zin.read(n) for n in zin.namelist()}
+    xml = data["xl/worksheets/sheet1.xml"].decode()
+    inj = '<extLst><ext uri="{DEADBEEF-0000-0000-0000-000000000000}"/></extLst></worksheet>'
+    data["xl/worksheets/sheet1.xml"] = xml.replace("</worksheet>", inj).encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+        for n, b in data.items():
+            zout.writestr(n, b)
+
+
+def test_extract_model_degenerate_used_range_bounded() -> None:
+    """A formatting-bloated used-range collapses to the populated region with a
+    warning — not a multi-megabyte blob of null cells."""
+    import pytest
+
+    pytest.importorskip("openpyxl")
+    with tempfile.TemporaryDirectory(prefix="test-extract-") as d:
+        path = os.path.join(d, "patho.xlsx")
+        _write_degenerate_xlsx(path)
+        rc, raw, stderr = run_script_raw("extract_model.py", ["--file", path])
+        assert rc == 0, f"extraction failed: {stderr}"
+        assert len(raw) < 1_000_000, f"degenerate range must not balloon the output: {len(raw)} bytes"
+        data = json.loads(raw)
+        sheet = data["sheets"][0]
+        assert sheet["row_count"] <= 10, f"rows must trim to the populated region: {sheet['row_count']}"
+        assert sheet["col_count"] <= 5, f"cols must trim to the populated region: {sheet['col_count']}"
+        labels = [str(r[0]) for r in sheet["rows"] if r]
+        assert "MRR" in labels, "real data must survive the trim"
+        warnings_list = data.get("extraction_warnings", [])
+        assert warnings_list, "a truncated extraction must carry a warning"
+        assert any("Revenue" in w for w in warnings_list), f"warning must name the sheet: {warnings_list}"
+
+
+def test_extract_model_degenerate_receipt_carries_warning() -> None:
+    """With -o, the truncation warning is surfaced in the write receipt."""
+    import pytest
+
+    pytest.importorskip("openpyxl")
+    with tempfile.TemporaryDirectory(prefix="test-extract-") as d:
+        path = os.path.join(d, "patho.xlsx")
+        out_path = os.path.join(d, "model_data.json")
+        _write_degenerate_xlsx(path)
+        rc, receipt, stderr = run_script("extract_model.py", ["--file", path, "-o", out_path])
+        assert rc == 0
+        assert receipt.get("ok") is True
+        assert receipt.get("extraction_warnings"), f"receipt must surface the warning: {receipt}"
+
+
+def test_extract_model_openpyxl_warning_captured_not_leaked() -> None:
+    """openpyxl load warnings are captured into extraction_warnings, not stderr."""
+    import pytest
+
+    pytest.importorskip("openpyxl")
+    with tempfile.TemporaryDirectory(prefix="test-extract-") as d:
+        path = os.path.join(d, "warned.xlsx")
+        _write_unknown_extension_xlsx(path)
+        rc, data, stderr = run_script("extract_model.py", ["--file", path, "--pretty"])
+        assert rc == 0
+        assert "Unknown extension" not in stderr, "openpyxl warning must not leak to stderr"
+        warnings_list = data.get("extraction_warnings", [])
+        assert any("Unknown extension" in w for w in warnings_list), (
+            f"openpyxl warning must be captured in the output: {warnings_list}"
+        )
+        labels = [str(r[0]) for r in data["sheets"][0]["rows"] if r]
+        assert "MRR" in labels, "data must still extract despite the warning"
+
+
+def test_extract_model_normal_xlsx_no_extraction_warnings() -> None:
+    """A normal model extracts exactly as before: no extraction_warnings key."""
+    import pytest
+
+    pytest.importorskip("openpyxl")
+    import openpyxl
+
+    with tempfile.TemporaryDirectory(prefix="test-extract-") as d:
+        path = os.path.join(d, "normal.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.title = "Revenue"
+        ws.append(["Metric", "2025-01", "2025-02"])
+        ws.append(["MRR", 50000, 55000])
+        wb.save(path)
+        rc, data, stderr = run_script("extract_model.py", ["--file", path, "--pretty"])
+        assert rc == 0
+        assert "extraction_warnings" not in data, "normal models must not grow new keys"
+        assert data["sheets"][0]["row_count"] == 2
+        assert data["sheets"][0]["col_count"] == 3
+
+
+def test_model_data_output_is_line_navigable() -> None:
+    """Regression lock: run the extractor exactly as SKILL.md Step 2 does
+    (--pretty, -o) and confirm model_data.json has many more lines than the
+    sheet has rows — so downstream Grep/paged-Read can target regions. Guards
+    against an edit that drops --pretty and re-ships a single multi-MB line."""
+    import pytest
+
+    pytest.importorskip("openpyxl")
+    from openpyxl import Workbook  # type: ignore[import-untyped]
+
+    with tempfile.TemporaryDirectory(prefix="test-extract-") as d:
+        path = os.path.join(d, "m.xlsx")
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.append(["Metric", "M1", "M2"])
+        for i in range(20):
+            ws.append([f"Row {i}", i, i + 1])
+        wb.save(path)
+        wb.close()
+        out = os.path.join(d, "model_data.json")
+        rc, receipt, stderr = run_script("extract_model.py", ["--file", path, "--pretty", "-o", out])
+        assert rc == 0, stderr
+        with open(out, encoding="utf-8") as fh:
+            text = fh.read()
+        line_count = text.count("\n")
+        sheet = json.loads(text)["sheets"][0]
+        assert line_count > sheet["row_count"], (
+            f"pretty output must stay line-navigable (lines {line_count} > rows {sheet['row_count']})"
+        )
+
+
+def _write_midsize_sparse_xlsx(path: str) -> None:
+    """A tight table plus one styled-but-empty cell ~5,200 rows down, inflating
+    the declared used-range to ~26k cells — below the old 100k sparse-guard
+    floor AND the 2M degenerate threshold, the sub-degenerate window the old
+    guard skipped entirely. Plus a dense control sheet with no trailing nulls."""
+    import openpyxl
+    from openpyxl.styles import PatternFill
+
+    wb = openpyxl.Workbook()
+    sparse = wb.active
+    assert sparse is not None
+    sparse.title = "Sparse"
+    sparse.append(["Metric", "M1", "M2", "M3", "M4"])
+    for i in range(29):
+        sparse.append([f"Item {i}", i, i + 1, i + 2, i + 3])
+    sparse.cell(row=5200, column=5).fill = PatternFill(start_color="FFFF0000", fill_type="solid")
+
+    dense = wb.create_sheet("Dense")
+    dense.append(["Metric", "M1", "M2", "M3", "M4"])
+    for i in range(29):
+        dense.append([f"Row {i}", i, i + 1, i + 2, i + 3])
+    wb.save(path)
+
+
+def test_extract_trims_trailing_null_region_on_midsize_sparse_sheet() -> None:
+    """The trailing-null bounding-box trim is unconditional on the sub-degenerate
+    path: a ~26k-cell stray-formatting balloon (below the old 100k sparse floor)
+    must collapse to its populated region, losslessly, while a dense control
+    sheet with no trailing nulls stays unchanged (byte-identical no-op)."""
+    import pytest
+
+    pytest.importorskip("openpyxl")
+    with tempfile.TemporaryDirectory(prefix="test-extract-") as d:
+        path = os.path.join(d, "midsize.xlsx")
+        _write_midsize_sparse_xlsx(path)
+        rc, raw, stderr = run_script_raw("extract_model.py", ["--file", path])
+        assert rc == 0, f"extraction failed: {stderr}"
+        data = json.loads(raw)
+        sheets = {s["name"]: s for s in data["sheets"]}
+
+        sparse = sheets["Sparse"]
+        assert sparse["row_count"] <= 35, (
+            f"sub-degenerate stray-formatting balloon must trim trailing nulls: {sparse['row_count']}"
+        )
+        assert sparse["col_count"] == 5, f"cols must trim to the populated region: {sparse['col_count']}"
+        assert "Item 0" in [str(r[0]) for r in sparse["rows"] if r], "real data must survive the trim"
+        warnings_list = data.get("extraction_warnings", [])
+        assert any("Sparse" in w for w in warnings_list), (
+            f">25%-trimmed sheet must carry a warning naming it: {warnings_list}"
+        )
+
+        dense = sheets["Dense"]
+        assert dense["row_count"] == 29 and dense["col_count"] == 5, (
+            f"dense control must be unchanged: {dense['row_count']}x{dense['col_count']}"
+        )
+        assert not any("Dense" in w for w in warnings_list), "a no-op trim on a dense sheet must not warn"
+        assert dense["rows"][0][0] == "Row 0", "dense data must be intact (lossless no-op)"
+
+
+# --- extract_model.py used-range hardening: ratio trigger, caps, filters ---
+
+
+def _load_extract_model_module() -> Any:
+    import importlib.util
+
+    path = os.path.join(FMR_SCRIPTS_DIR, "extract_model.py")
+    spec = importlib.util.spec_from_file_location("fmr_extract_model_module", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["fmr_extract_model_module"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class _FakeCell:
+    def __init__(self, value: Any, coordinate: str) -> None:
+        self.value = value
+        self.coordinate = coordinate
+
+
+class _FakeWS:
+    """Duck-typed worksheet: declares a huge range, yields dense rows."""
+
+    def __init__(self, title: str, declared_rows: int, declared_cols: int, real_rows: int, real_cols: int) -> None:
+        self.title = title
+        self.max_row = declared_rows
+        self.max_column = declared_cols
+        self._real_rows = real_rows
+        self._real_cols = real_cols
+
+    def iter_rows(self, min_col: int = 1, max_col: int | None = None, values_only: bool = False) -> Any:
+        width = min(max_col or self.max_column, self.max_column)
+        for i in range(min(self._real_rows, self.max_row)):
+            yield tuple(_FakeCell("x" if j < self._real_cols else None, f"R{i + 1}C{j + 1}") for j in range(width))
+
+
+def test_extract_model_sub_threshold_sparse_bloat_trimmed() -> None:
+    """A sparse formatting-bloated sheet BELOW the absolute degenerate threshold
+    still collapses to its populated region (populated-ratio trigger)."""
+    import pytest
+
+    pytest.importorskip("openpyxl")
+    import openpyxl
+    from openpyxl.styles import PatternFill
+
+    with tempfile.TemporaryDirectory(prefix="test-extract-") as d:
+        path = os.path.join(d, "subthreshold.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.title = "Revenue"
+        ws.append(["Metric", "2025-01", "2025-02"])
+        ws.append(["MRR", 50000, 55000])
+        # ~1.04M declared cells: under the absolute threshold, sparse in the extreme
+        ws.cell(row=40000, column=26).fill = PatternFill(start_color="FF00FF00", fill_type="solid")
+        wb.save(path)
+        rc, raw, stderr = run_script_raw("extract_model.py", ["--file", path])
+        assert rc == 0, f"extraction failed: {stderr}"
+        assert len(raw) < 1_000_000, f"sparse bloat below the threshold still ballooned: {len(raw)} bytes"
+        data = json.loads(raw)
+        sheet = data["sheets"][0]
+        assert sheet["row_count"] <= 10, f"rows must trim to the populated region: {sheet['row_count']}"
+        labels = [str(r[0]) for r in sheet["rows"] if r]
+        assert "MRR" in labels
+        assert any("Revenue" in w for w in data.get("extraction_warnings", []))
+
+
+def test_extract_model_degenerate_column_cap_disclosed() -> None:
+    """When the declared range is wider than the column cap, the warning says
+    the far columns were never scanned — no silent column drop."""
+    import pytest
+
+    pytest.importorskip("openpyxl")
+    import openpyxl
+    from openpyxl.styles import PatternFill
+
+    with tempfile.TemporaryDirectory(prefix="test-extract-") as d:
+        path = os.path.join(d, "widepatho.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.title = "Revenue"
+        ws.append(["Metric", "2025-01"])
+        ws.append(["MRR", 50000])
+        ws.cell(row=100000, column=2000).fill = PatternFill(start_color="FFFF0000", fill_type="solid")
+        wb.save(path)
+        rc, data, stderr = run_script("extract_model.py", ["--file", path, "--pretty"])
+        assert rc == 0
+        warnings_list = data.get("extraction_warnings", [])
+        assert any("1,024" in w and "not scanned" in w for w in warnings_list), (
+            f"column cap must be disclosed: {warnings_list}"
+        )
+
+
+def test_extract_model_read_sheet_rows_respects_cell_budget() -> None:
+    """A dense degenerate sheet is truncated to the cell budget with a warning,
+    and a smaller remaining workbook budget truncates further."""
+    import pytest
+
+    pytest.importorskip("openpyxl")
+    mod = _load_extract_model_module()
+
+    ws = _FakeWS("Dense", declared_rows=1_000_000, declared_cols=2_000, real_rows=2_000, real_cols=600)
+    rows, coords, notes, kept = mod._read_sheet_rows(ws, cell_budget=1_000_000)
+    assert kept == len(rows) * len(rows[0])
+    assert kept <= 1_000_000, f"kept cells must respect the budget: {kept}"
+    assert notes and any("dropped" in n for n in notes)
+
+    ws2 = _FakeWS("Dense2", declared_rows=1_000_000, declared_cols=2_000, real_rows=2_000, real_cols=600)
+    rows2, _coords2, notes2, kept2 = mod._read_sheet_rows(ws2, cell_budget=1_200)
+    assert kept2 <= 1_200, f"a depleted workbook budget must bind: {kept2}"
+    assert notes2
+
+
+def test_extract_model_foreign_warnings_not_captured() -> None:
+    """Only openpyxl-origin warnings land in extraction_warnings; anything else
+    is re-emitted to stderr untouched."""
+    import warnings as warnings_mod
+
+    import pytest
+
+    pytest.importorskip("openpyxl")
+    import openpyxl
+
+    mod = _load_extract_model_module()
+    with tempfile.TemporaryDirectory(prefix="test-extract-") as d:
+        path = os.path.join(d, "normal.xlsx")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.append(["Metric", "2025-01"])
+        ws.append(["MRR", 50000])
+        wb.save(path)
+
+        original = mod._read_sheet_rows
+
+        def _warning_reader(ws: Any, cell_budget: int) -> Any:
+            warnings_mod.warn("synthetic non-openpyxl deprecation", DeprecationWarning, stacklevel=2)
+            return original(ws, cell_budget)
+
+        mod._read_sheet_rows = _warning_reader
+        try:
+            data = mod.extract_xlsx(path)
+        finally:
+            mod._read_sheet_rows = original
+        captured = data.get("extraction_warnings", [])
+        assert not any("synthetic non-openpyxl" in w for w in captured), (
+            f"foreign warnings must not enter extraction output: {captured}"
+        )
+
+
+def test_extract_model_receipt_warning_list_capped() -> None:
+    """A many-sheet pathological workbook does not flood the -o receipt: at most
+    10 warnings plus a summary line (the JSON payload keeps the full list)."""
+    import pytest
+
+    pytest.importorskip("openpyxl")
+    import openpyxl
+    from openpyxl.styles import PatternFill
+
+    with tempfile.TemporaryDirectory(prefix="test-extract-") as d:
+        path = os.path.join(d, "manysheets.xlsx")
+        out_path = os.path.join(d, "model_data.json")
+        wb = openpyxl.Workbook()
+        first = wb.active
+        assert first is not None
+        wb.remove(first)
+        for i in range(12):
+            ws = wb.create_sheet(f"Tab{i}")
+            ws.append(["Metric", "2025-01"])
+            ws.append(["MRR", 50000])
+            ws.cell(row=100000, column=30).fill = PatternFill(start_color="FFFF0000", fill_type="solid")
+        wb.save(path)
+        rc, receipt, stderr = run_script("extract_model.py", ["--file", path, "-o", out_path])
+        assert rc == 0
+        rw = receipt.get("extraction_warnings", [])
+        assert len(rw) == 11, f"receipt must cap at 10 warnings + summary line: {len(rw)}"
+        assert "more" in rw[-1], f"summary line must count the rest: {rw[-1]!r}"
+        with open(out_path, encoding="utf-8") as f:
+            payload = json.load(f)
+        assert len(payload["extraction_warnings"]) == 12, "the JSON payload keeps the full list"
+
+
+def test_extract_model_output_size_warning() -> None:
+    """An unusually large serialized output adds a receipt warning (dense real
+    data is kept, never silently truncated — but the size is called out)."""
+    import pytest
+
+    pytest.importorskip("openpyxl")
+    import openpyxl
+
+    mod = _load_extract_model_module()
+    with tempfile.TemporaryDirectory(prefix="test-extract-") as d:
+        path = os.path.join(d, "normal.xlsx")
+        out_path = os.path.join(d, "model_data.json")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.append(["Metric", "2025-01"])
+        ws.append(["MRR", 50000])
+        wb.save(path)
+
+        mod._OUTPUT_BYTES_WARN = 100  # force the threshold for the test
+        old_argv = sys.argv
+        sys.argv = ["extract_model.py", "--file", path, "-o", out_path]
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        try:
+            with redirect_stdout(buf):
+                mod.main()
+        finally:
+            sys.argv = old_argv
+        receipt = json.loads(buf.getvalue())
+        rw = receipt.get("extraction_warnings", [])
+        assert any("bytes" in w for w in rw), f"oversized output must be called out in the receipt: {rw}"
+
+
+# ---------------------------------------------------------------------------
+# METRIC_SELF_CONTRADICTION — one figure, one source
+#
+# The observed failure: unit_economics.py computed a burn multiple of 4.5x while
+# the checklist sub-agent independently derived ~7x in its evidence prose. The
+# founder is handed two numbers and cannot tell which to take to an investor.
+#
+# The upstream ambiguity that caused it is fixed at the source; these tests lock
+# the compose-time BACKSTOP, which must catch the class without crying wolf on
+# the many legitimate reasons a second number appears near a metric name.
+# ---------------------------------------------------------------------------
+
+
+def _ue_with_ratios(burn_multiple: float = 4.5, ltv_cac: float = 3.2) -> dict[str, Any]:
+    return {
+        "metrics": [
+            {
+                "id": "burn_multiple",
+                "name": "burn_multiple",
+                "value": burn_multiple,
+                "rating": "warning",
+                "evidence": "Net burn over net-new ARR",
+                "benchmark": {"target": 2.0, "source": "test", "as_of": "2025-Q1"},
+                "benchmark_source": "test",
+                "benchmark_as_of": "2025-Q1",
+            },
+            {
+                "id": "ltv_cac_ratio",
+                "name": "ltv_cac_ratio",
+                "value": ltv_cac,
+                "rating": "acceptable",
+                "evidence": "LTV over CAC",
+                "benchmark": {"target": 3.0, "source": "test", "as_of": "2025-Q1"},
+                "benchmark_source": "test",
+                "benchmark_as_of": "2025-Q1",
+            },
+        ],
+    }
+
+
+def _checklist_with_evidence(evidence: str) -> dict[str, Any]:
+    checklist = json.loads(json.dumps(_VALID_CHECKLIST))
+    checklist["items"][0]["evidence"] = evidence
+    checklist["items"][0]["id"] = "METRIC_34"
+    return checklist
+
+
+def _compose_codes(unit_economics: dict[str, Any], checklist: dict[str, Any]) -> list[str]:
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": checklist,
+            "unit_economics.json": unit_economics,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    return [w["code"] for w in data["validation"]["warnings"]]
+
+
+def test_metric_self_contradiction_catches_the_observed_burn_multiple_conflict() -> None:
+    """The live failure: computed 4.5x, checklist evidence says ~7x."""
+    codes = _compose_codes(
+        _ue_with_ratios(burn_multiple=4.5),
+        _checklist_with_evidence("Burn multiple of approximately 7x is far above the 2.0x seed benchmark."),
+    )
+    assert "METRIC_SELF_CONTRADICTION" in codes
+
+
+def test_metric_self_contradiction_names_both_figures() -> None:
+    """The founder must be able to adjudicate, which needs both numbers."""
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _checklist_with_evidence("Burn multiple of 7x observed."),
+            "unit_economics.json": _ue_with_ratios(burn_multiple=4.5),
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    msg = next(w["message"] for w in data["validation"]["warnings"] if w["code"] == "METRIC_SELF_CONTRADICTION")
+    assert "4.5" in msg and "7" in msg
+    assert "unit_economics.json" in msg, "must name which artifact is authoritative"
+
+
+def test_metric_self_contradiction_founder_message_reaches_report_md_not_json_message() -> None:
+    """report.json keeps the artifact-naming `message`; report.md renders the
+    plain-language `founder_message` instead -- no artifact filename, no
+    third-person reference to the founder.
+    """
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _checklist_with_evidence("Burn multiple of 7x observed."),
+            "unit_economics.json": _ue_with_ratios(burn_multiple=4.5),
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+
+    warning = next(w for w in data["validation"]["warnings"] if w["code"] == "METRIC_SELF_CONTRADICTION")
+    assert "founder_message" in warning
+    founder_msg = warning["founder_message"]
+    assert "unit_economics.json" not in founder_msg
+    assert "the founder" not in founder_msg
+    assert "4.5" in founder_msg and "7" in founder_msg
+
+    # report.json's `message` is untouched -- still names the authoritative artifact.
+    assert "unit_economics.json" in warning["message"]
+
+    # report.md renders the founder-facing text, not the raw artifact-naming message.
+    report_md = data["report_markdown"]
+    assert founder_msg in report_md
+    contradiction_lines = [line for line in report_md.splitlines() if "different numbers for the" in line]
+    assert contradiction_lines, "expected a rendered Warnings line for METRIC_SELF_CONTRADICTION"
+    for line in contradiction_lines:
+        assert "unit_economics.json" not in line
+        assert "the founder" not in line
+
+
+def test_metric_self_contradiction_allows_quoting_the_benchmark() -> None:
+    """ "4.5x vs the 2.0x benchmark" is the NORMAL phrasing — never flag it.
+
+    Without this the check fires on almost every well-written evidence line and
+    the reader learns to ignore it, which is worse than not having the check.
+    """
+    codes = _compose_codes(
+        _ue_with_ratios(burn_multiple=4.5),
+        _checklist_with_evidence("Burn multiple of 4.5x exceeds the 2.0x strong benchmark for seed stage."),
+    )
+    assert "METRIC_SELF_CONTRADICTION" not in codes
+
+
+def test_metric_self_contradiction_tolerates_prose_rounding() -> None:
+    """A computed 4.53 written as "4.5x" is rounding, not a contradiction."""
+    codes = _compose_codes(
+        _ue_with_ratios(burn_multiple=4.53),
+        _checklist_with_evidence("Burn multiple of 4.5x is the headline efficiency figure."),
+    )
+    assert "METRIC_SELF_CONTRADICTION" not in codes
+
+
+def test_metric_self_contradiction_ignores_numbers_not_about_the_metric() -> None:
+    """A stray figure elsewhere in the sentence must not attach to the metric."""
+    codes = _compose_codes(
+        _ue_with_ratios(burn_multiple=4.5),
+        _checklist_with_evidence("Net burn grew and headcount is up 7x since the last round."),
+    )
+    assert "METRIC_SELF_CONTRADICTION" not in codes
+
+
+def test_metric_self_contradiction_skips_percent_and_currency_metrics() -> None:
+    """Scope is ratio metrics only — 0.75 / "75%" / "$75K" are the same value.
+
+    Locking the exclusion so a later change does not widen the check into the
+    false-positive territory it was deliberately kept out of.
+    """
+    ue = {
+        "metrics": [
+            {
+                "id": "gross_margin",
+                "name": "gross_margin",
+                "value": 0.75,
+                "rating": "strong",
+                "evidence": "75% GM",
+                "benchmark_source": "test",
+                "benchmark_as_of": "2024",
+            },
+        ],
+    }
+    codes = _compose_codes(ue, _checklist_with_evidence("Gross margin of 75% is strong."))
+    assert "METRIC_SELF_CONTRADICTION" not in codes
+
+
+def test_metric_self_contradiction_absent_when_evidence_agrees() -> None:
+    """No false positive on the happy path."""
+    codes = _compose_codes(
+        _ue_with_ratios(burn_multiple=4.5, ltv_cac=3.2),
+        _checklist_with_evidence("Burn multiple of 4.5x and an LTV/CAC of 3.2 are both in range."),
+    )
+    assert "METRIC_SELF_CONTRADICTION" not in codes
+
+
+# ---------------------------------------------------------------------------
+# Non-USD reference grades must reach the founder
+#
+# With the USD-denominated absolute floors correctly suppressed, LTV/CAC, burn
+# multiple and Rule of 40 all land `contextual` at once — a page of numbers with
+# no assessment, for exactly the audience most likely to file in a local
+# currency. The dimensionless comparison DID run (a 1.5x ratio is 1.5x in any
+# currency, no FX involved); these lock that its grade is surfaced as a clearly
+# marked reference rather than discarded.
+# ---------------------------------------------------------------------------
+
+
+def _ue_with_reference_grade() -> dict[str, Any]:
+    return {
+        "currency": "ILS",
+        "metrics": [
+            {
+                "id": "burn_multiple",
+                "name": "burn_multiple",
+                "value": 2.1,
+                "rating": "contextual",
+                "evidence": "Net burn over net-new ARR; ratio shown but not benchmark-compared",
+                "benchmark_reference_rating": "acceptable",
+                "benchmark_reference_source": "CFO Advisors 2025",
+                "benchmark_reference_as_of": "2025-Q1",
+                "benchmark_source": "",
+                "benchmark_as_of": "",
+            },
+            {
+                "id": "cac",
+                "name": "cac",
+                "value": 1500,
+                "rating": "acceptable",
+                "evidence": "Fully loaded CAC",
+                "benchmark_source": "test",
+                "benchmark_as_of": "2024",
+            },
+        ],
+        "summary": {},
+    }
+
+
+def test_non_usd_reference_grade_is_shown_not_swallowed() -> None:
+    """The report must show the graded reference, not a bare "Contextual"."""
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _ue_with_reference_grade(),
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    assert "Acceptable (reference)" in md, "the preserved grade must reach the founder"
+    # And it must be explained, since an unexplained "(reference)" is its own puzzle.
+    assert "reference grade" in md.lower()
+    assert "no FX conversion" in md, "must state that no rate was invented"
+    # A metric with a real rating is untouched.
+    assert "| Acceptable |" in md
+
+
+def test_reference_grade_note_precedes_the_metrics_table() -> None:
+    """The note must not land between the header row and the separator row.
+
+    Appending it after the two header lines silently breaks the markdown table —
+    caught only by reading the rendered output, so pin the ordering.
+    """
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _ue_with_reference_grade(),
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    note_at = md.lower().find("reference grade")
+    header_at = md.find("| Metric | Value | Rating | Evidence |")
+    separator_at = md.find("|--------|-------|--------|----------|")
+    assert -1 < note_at < header_at < separator_at, "note must sit above the intact table header"
+    assert md[header_at:separator_at].strip() == "| Metric | Value | Rating | Evidence |"
+
+
+def test_usd_review_shows_no_reference_grade_machinery() -> None:
+    """Back-compat: a USD model must not gain the note or the "(reference)" suffix."""
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    assert "(reference)" not in md
+    assert "reference grade" not in md.lower()
+
+
+# ---------------------------------------------------------------------------
+# UNDECLARED_AGENT_VALUE — provenance for values the founder never stated
+#
+# Live: a conversational run wrote `bridge.runway_target_months: 24` for a founder
+# who never mentioned a runway target. The value was harmless (runway.py defaults
+# to 24 anyway) but inputs.json recorded it indistinguishably from a stated input,
+# so nothing downstream could tell the difference. Same defect market-sizing fixed
+# with `founder_stated_inputs`, approached from the other side: there we assert the
+# founder's numbers survive, here we assert the agent's are labelled as its own.
+#
+# The fix is provenance, not prohibition — defaulting is allowed, hiding it is not.
+# ---------------------------------------------------------------------------
+
+
+def _conversational_inputs(**over: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "company": {
+            "name": "TestCo",
+            "stage": "seed",
+            "model_format": "conversational",
+            "currency": "ILS",
+        },
+        "revenue": {"mrr": 90000},
+        "burn": {"net_monthly": -380000},
+        "cash": {"current_balance": 4200000},
+        "bridge": {"raise_amount": 12000000, "runway_target_months": 24},
+        "metadata": {"run_id": "T"},
+    }
+    base.update(over)
+    return base
+
+
+def _validate_codes(inputs: dict[str, Any]) -> list[str]:
+    rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(inputs))
+    assert data is not None, "validate_inputs.py produced no JSON"
+    return [w["code"] for w in data.get("warnings", [])]
+
+
+def test_undeclared_agent_value_flags_the_live_case() -> None:
+    """Conversational run carrying a computation-feeding field with no declaration."""
+    assert "UNDECLARED_AGENT_VALUE" in _validate_codes(_conversational_inputs())
+
+
+def test_undeclared_agent_value_names_the_offending_paths() -> None:
+    """The founder must be told WHICH fields are unattributed, not just that some are."""
+    rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(_conversational_inputs()))
+    assert data is not None
+    msg = next(w["message"] for w in data["warnings"] if w["code"] == "UNDECLARED_AGENT_VALUE")
+    assert "bridge.runway_target_months" in msg
+    assert "agent_supplied" in msg, "must name the field that resolves it"
+
+
+def test_declaring_the_field_clears_the_warning() -> None:
+    """Defaulting is permitted — declaring it is the requirement."""
+    inputs = _conversational_inputs(agent_supplied=["bridge.runway_target_months"])
+    assert "UNDECLARED_AGENT_VALUE" not in _validate_codes(inputs)
+
+
+def test_empty_declaration_is_a_declaration() -> None:
+    """`[]` means "the founder stated all of these" — absent means unanswered.
+
+    The distinction is the whole mechanism: an optional field that can be silently
+    omitted cannot force the question, which is why absence is what we flag.
+    """
+    assert "UNDECLARED_AGENT_VALUE" not in _validate_codes(_conversational_inputs(agent_supplied=[]))
+
+
+def test_spreadsheet_runs_are_exempt() -> None:
+    """Extraction has its own provenance chain (validate_extraction.py)."""
+    inputs = _conversational_inputs()
+    inputs["company"]["model_format"] = "spreadsheet"
+    assert "UNDECLARED_AGENT_VALUE" not in _validate_codes(inputs)
+
+
+def test_no_computation_feeding_field_means_nothing_to_declare() -> None:
+    """No false positive when the agent supplied nothing that feeds a computation."""
+    inputs = _conversational_inputs()
+    del inputs["bridge"]
+    assert "UNDECLARED_AGENT_VALUE" not in _validate_codes(inputs)
+
+
+def test_undeclared_agent_value_is_not_critical() -> None:
+    """It is a disclosure gap, not a data error — it must not block the review."""
+    rc, data, _ = run_script("validate_inputs.py", ["--pretty"], stdin_data=json.dumps(_conversational_inputs()))
+    assert data is not None
+    w = next(x for x in data["warnings"] if x["code"] == "UNDECLARED_AGENT_VALUE")
+    assert w["critical"] is False

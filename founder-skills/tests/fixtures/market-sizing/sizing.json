@@ -1,0 +1,51 @@
+{
+  "approach": "bottom-up",
+  "currency": "USD",
+  "sizing_basis": "current_year",
+  "bottom_up": {
+    "tam": {
+      "value": 8100000000.0,
+      "raw_value": 8100000000.0,
+      "formula": "customer_count * arpu",
+      "inputs": {
+        "customer_count": 4500000,
+        "arpu": 1800.0
+      }
+    },
+    "sam": {
+      "value": 2835000000.0,
+      "raw_value": 2835000000.0,
+      "formula": "serviceable_customers * arpu",
+      "inputs": {
+        "serviceable_customers": 1575000.0,
+        "serviceable_pct": 35.0,
+        "arpu": 1800.0
+      }
+    },
+    "som": {
+      "value": 141750000.0,
+      "raw_value": 141750000.0,
+      "formula": "target_customers * arpu",
+      "inputs": {
+        "target_customers": 78750.0,
+        "target_pct": 5.0,
+        "arpu": 1800.0
+      }
+    },
+    "projected": {
+      "years": 3,
+      "growth_rate_pct": 20.0,
+      "tam": 13996800000.0,
+      "sam": 4898880000.0,
+      "som": 244944000.0
+    }
+  },
+  "validation": {
+    "status": "valid",
+    "errors": [],
+    "warnings": []
+  },
+  "metadata": {
+    "run_id": "fixture-market-sizing-001"
+  }
+}

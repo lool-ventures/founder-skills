@@ -5,9 +5,799 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.6.0] - 2026-08-02 — Fits more companies, reports more honestly
+
+
+### Highlights
+
+Three themes.
+
+**The skills now fit companies they previously mis-handled.** In **financial model review** and
+**market sizing**, figures denominated in a currency other than USD are labelled and reported in that
+currency end to end, and are no longer judged against USD-denominated bars. (No FX conversion is
+performed anywhere — the currency is a label on the numbers you supply, and the reports say so. The
+other four skills have no currency dimension.) Gross margin is benchmarked against your sector — hardware, consumer
+subscription and retail get their own bands, and marketplace, transactional-fintech,
+hardware-subscription and usage-based models are rated *contextual* rather than failed against a SaaS
+bar. Retail/D2C is a first-class revenue model, Series C and Series D are accepted stages, and more
+geographies are recognised by name. In cap-table, a lone SAFE, note, term sheet or option plan with no
+surrounding cap table now produces an instrument-terms report instead of a dead end, and messy
+real-world spreadsheets — holder × share-class matrices, angel and ex-employee common holders, printed
+Total rows, right-to-left Hebrew PDF exports — are read rather than refused or silently misread.
+
+**Reports say what they mean, and say what they don't know.** An IC simulation's "pass" now reads as
+**Decline** everywhere a founder sees it — a bare "Pass" reads as approval and means the opposite. A
+dimension your materials simply don't disclose is scored *to confirm* and excluded from the conviction
+denominator, so honest non-disclosure no longer drags a verdict down. Past six undisclosed dimensions
+the verdict is held at More Diligence in **both** directions, with the reason stated: a thin deck can no
+longer produce a confident "Invest", and — new in this release — it can no longer produce a Decline
+either. You cannot be declined on the grounds that you weren't asked. (A weakness the materials *do*
+disclose is a concern, not a non-disclosure, and that still counts against you.) Instruments with blank fields are kept as partials with a plain-language note
+about what was skipped, never filled in with invented numbers. Figures computed outside the validated
+engine carry a disclosure banner, and computed round terms that diverge from your source document lead
+the report with a warning.
+
+**Runs are more reliable and quieter.** Deliverables land in the run's own folder rather than
+occasionally inside a project folder you happened to connect. Sub-agent results move over files instead
+of the message channel, and the coaching section can no longer be half-written, duplicated, or corrupted
+by its own punctuation. The skills stop asking for company name, stage, sector and geography they can
+already read off your deck, and internal plumbing — script names, flags, exit codes, warning codes,
+step labels — no longer leaks into what you read.
+
+*Version 0.5.1 was documented but never distributed — it was neither tagged nor published, so no user
+received it. Upgrading from 0.5.0 delivers both 0.5.1's changes and this release's.*
+
+### Fixed — a coaching step that could land its file where the review could not find it
+
+- A sub-agent's hand-off path is no longer inferred from the wrong process. The resolver was deriving
+  where a *sub-agent* writes from where the *main thread's shell* happened to be sitting; on Cowork those
+  are different processes in different namespaces, so a coaching file could land under a duplicated path
+  segment. The review still finished, but the coaching step had to be recovered by hand, and the recovery
+  narration leaked internals into what you read. The path is now derived from the one fact that is
+  actually true of the sub-agent, and every skill resolves it through the script rather than assembling it
+  from strings.
+- When a hand-off file genuinely is missing, the review now distinguishes "the sub-agent never wrote it"
+  from "it wrote it somewhere unexpected" and reports the second as its own condition, so a compliant
+  step is no longer described as a failed one.
+- A required read that fails now stops and says so, instead of continuing without the input. This is the
+  more important half: a step that improvises produces a complete-looking assessment of data it never
+  read, which nothing downstream can detect.
+
+### Fixed — financial-model-review: a validator that could only be satisfied by inventing data
+
+- The expense-coverage check treated a conversational model — total burn plus headcount, no line-item
+  opex — as a blocking extraction failure. Because the only way to clear a block is to supply the missing
+  expenses, and a conversational model has none to supply, the check could be satisfied by inventing a
+  reconciling opex figure. It is now advisory for conversational and partial models, states plainly that
+  the remainder is unitemized, and says not to invent one. Spreadsheet and deck models — which do carry a
+  breakdown — still block, because there the gap really does mean something was missed.
+- Non-USD figures in that warning no longer carry a dollar sign.
+
+### Fixed — financial-model-review: runway that reads as safer than it is
+
+- Every runway scenario now reports **runway at today's burn** alongside the projection. The projection
+  holds spending flat while revenue grows, so a company with about seven months of cash could be
+  described as "low risk" — true only if you never hire through that growth. The verdict now states the
+  assumption it depends on, and a company that merely doesn't run out of cash is no longer described the
+  same way as one that reaches profitability.
+- A projected-default-alive company reports "no cash-out date" as a result rather than as a missing
+  number.
+
+### Fixed — financial-model-review: non-USD reviews that graded almost nothing
+
+- Suppressing USD-denominated bars for a non-USD model was individually correct but collectively left
+  burn multiple and Rule of 40 with no assessment at all. Both now carry the grade they would have
+  received against the stage benchmark, labelled as a reference with its source and date rather than as a
+  verdict. No exchange rate is used or assumed: these benchmarks are ratios, so the comparison is exact.
+- An implausibly high burn multiple in a non-USD model no longer says "check input consistency" when the
+  real cause is a small revenue base that the USD-denominated materiality floor could not be applied to.
+
+### Also in 0.6.0 — landed after the release commit, before the tag
+
+**Numbers the founder gave must survive the pipeline.**
+
+- Market sizing no longer silently substitutes a better-sourced researched figure for one you stated. A
+  researched figure that disagrees is reported as a cross-check with both numbers named, so you can
+  decide — it never quietly replaces your input. (In testing, a founder-stated 18,000 pharmacies was
+  swapped for a researched 16,601 and the report's headline TAM came from a number they never gave.)
+- Market sizing figures carry the analysis currency rather than assuming dollars, and the report
+  discloses that no FX conversion happens anywhere — industry totals are usually quoted in USD, so a
+  mixed-currency input needs converting before you rely on the total.
+- A financial model review no longer contradicts itself on a headline ratio. Where the burn multiple in
+  the metrics table and the burn multiple in the checklist evidence disagreed, the report now flags it
+  instead of leaving you two numbers to choose between.
+- `growth_rate_monthly` is defined as net of churn where it is consumed, so two parts of the review can
+  no longer derive different burn multiples from the same inputs.
+
+**Reports say more where they used to say nothing.**
+
+- A non-USD financial model now shows what each ratio *would* score against the stage benchmark, marked
+  as a reference rather than a verdict. Previously a non-USD review could return a page of numbers with
+  no assessment at all, because every ratio landed "contextual" at once.
+- Competitive positioning's coaching section is written from the actual moat scores. It was being asked
+  for a defensibility roadmap without being given the moat data — so its advice could disagree with the
+  scored table on the same page.
+- Moat count and defensibility grade are explained as independent: two weak moats correctly give a count
+  of 2 with a low grade, which previously read as a scoring bug.
+
+**Runs are harder to get wrong.**
+
+- A cap-table quick answer lands in its own folder instead of overwriting where a full review belongs.
+- Sub-agent hand-offs report a path-namespace mismatch distinctly from a missing file — the two look
+  identical from the outside and need opposite responses.
+- The conversational path (numbers typed in chat, or read off a deck) is now documented end to end: it
+  no longer tries to review an extraction file that was never created, and confirming your numbers before
+  the math runs is a stop point there too, exactly as it is for an uploaded model.
+
+**Answers now come from the calculator, not from arithmetic in the chat.**
+
+- Ask a cap-table question in passing — *"if I raise 2M on an 8M pre with a 10% pool, how much do I still
+  own?"* — and the answer now comes from the solver. It used to be worked out in the reply, and **it was
+  wrong**: 70% where the real figure is 72%, because a pre-money 10% pool dilutes to 8% of post. Two points
+  of a company, on a question you ask before signing.
+- Every skill now states plainly that a figure reaching you must come out of the tools, never from mental
+  arithmetic, a remembered benchmark, or a "rough estimate" offered with the real analysis as a follow-up.
+  That last pattern was the most common: you cannot tell that what you just read was not the analysis, so
+  you never ask for it.
+- A follow-up "what if it were X instead?" re-runs the numbers rather than adjusting them in prose. So does
+  splitting a total — per-founder ownership comes from the model, never from arithmetic in the chat.
+- **Cap-table now answers "what does this round do to *me*?"** A priced round reports each founder's
+  post-round stake by name — *Alex Stone 33.8%, Sam Lee 29.6%* — alongside the founders' combined
+  figure. Before, only the combined number existed, and the honest response to the most common
+  question a co-founded company asks was to decline it. The per-founder figures are computed by the
+  same solver as everything else, not divided out afterwards, and the report says plainly that shares
+  held through an employee pool are counted in the totals but not broken out per person.
+
+**Nothing is filled in on your behalf without saying so.**
+
+- A financial model review records which values it supplied versus which you stated. It had been writing a
+  24-month runway target for founders who never mentioned one — harmless as a number, misleading as a
+  record, because your own inputs file could not tell you which figures were yours.
+- Cap-table will not invent a date it was not given. It had been filling in a plausible SAFE issuance date
+  that then appeared in your date-sensitive watchlist, indistinguishable from one you supplied — and a
+  wrong QSBS clock is worse than a missing one.
+
+**The IC simulation stops overstating what it knows.**
+
+- A verdict reached on almost no disclosed information now says so, in every direction. Previously a
+  scorecard with 23 of 28 dimensions undisclosed could return *"More Diligence — promising but needs more
+  evidence"* with no caveat at all. It now reads *"too little disclosed to reach a verdict (this is NOT a
+  negative signal)"* and shows the denominator: *"Scored on 3 of 28 dimensions."*
+- A conviction percentage computed from a handful of dimensions is labelled as such rather than presented
+  with the precision of a full assessment.
+
+**Reports say less that is irrelevant to you.**
+
+- A US-only company no longer sees Israeli tax and registrar obligations in its watchlist. The rules were
+  correctly filtered; the filter was being dropped between the calculation and the report.
+- Progress updates describe what is happening to your work rather than to our machinery — "checking your
+  numbers against the 46-point review" instead of internal step names.
+
+**Fewer questions you have already answered.**
+
+- Deck review stops re-asking your company's stage when you gave it a minute earlier, and says it is
+  reusing your answer rather than skipping the step silently.
+- Runs fail less often on their own bookkeeping: a checklist no longer rejects a whole batch over evidence
+  for items it was about to mark not-applicable.
+
+**The IC simulation now holds a real debate.**
+
+- The three partner archetypes used to be consulted in parallel, with no sight of each other — so no
+  debate happened. The write-up of "the discussion" was then composed rather than recorded, and it was
+  binding: a concern narrated as a dealbreaker forced the score to follow. Two runs on the same inputs
+  could reach different headline verdicts depending on how dramatically that exchange got written.
+  Partners now actually respond to each other, and the record is produced from what they said.
+- The report distinguishes a dealbreaker the partners **argued** from one the scoring pass raised
+  alone. Both are worth reading; only the first has been tested by disagreement.
+
+**Competitive positioning asks who is missing, not just who is wrong.**
+
+- The adversarial check that challenges competitors who do not genuinely compete only ever tested the
+  list you already had. A separate pass now asks what is *absent* — the blind spot you came to this
+  skill unable to see — before you validate the set rather than after.
+- Recent competitor developments are dated and sourced, so a rival who moved last quarter is not
+  described as though nothing changed.
+
+**Your work is handed to you, not left at an address.**
+
+- Every skill now sends its finished documents to you as files. They used to be written to a folder
+  and described by path — and on Cowork's cloud lane, which is the default for a new task, that
+  workspace is reclaimed when the task ends. A path could name something already gone.
+- Cap-table hands over **all four** documents it produces. A live run delivered three and silently
+  dropped the visual report; the closing summary had only ever named three of them.
+- The quick routes deliver too. Fast-assess, concise and instrument-only reviews each produce one
+  document, and each now has a named place to hand it over — the instrument-only route previously had
+  no delivery step at all.
+
+**Numbers that were quietly not being checked.**
+
+- A Series C or D financial model was rejected outright by one validator and, at seven other gates,
+  matched no stage at all and was held to no burn threshold. Both now derive from one ordered ladder,
+  so a stage nobody thought about cannot silently fall through.
+- Plausibility bounds above Series B had been borrowing Seed's floor. Because only the low end is
+  compared, that made the check *more* permissive the later the company: $600K of cash at Series C
+  read as plausible against a $50K floor. It is now checked against Series B's $1M.
+- An implausible figure no longer rates as a strength. A 780% gross margin or a 500% NRR — far more
+  likely a mis-scaled input than an elite company — used to sail through as a positive, precisely
+  where a second look was most warranted.
+- A deck you pasted as text is no longer scored `fail` on five criteria for visual design it was never
+  possible to assess from text.
+
+**Questions render properly, and answer the right thing.**
+
+- Every founder question now specifies its own options. Sixteen gates had none, which left the wording
+  improvised — one gate measured four different option sets across four runs.
+- Two gates offered five choices to a control that renders four, so an option simply could not be
+  picked. One offered a choice that would have failed validation if taken.
+- Cap-table will not carry an example date into your file. It had been copying the incorporation date
+  out of its own template — the same class of invention already fixed for SAFE issuance dates — and
+  that date drives QSBS holding-period timing.
+
+**Warnings are written to you.**
+
+- Report warnings used to be phrased for the machine: internal file names, raw status codes, and in one
+  case an instruction addressed to the assistant *about* you ("rather than leaving the founder two
+  numbers to choose between"). They now state what it means for your report. The diagnostic detail is
+  still recorded for the assistant, just not shown to you as though it were advice.
+- A cap-table run that models a SAFE snapshot without a priced round no longer reports that as
+  "pending input", which reads as an unfinished analysis rather than the answer you asked for.
+
+### Known limitation — a skill may not run unless you name it
+
+- Asked to review a financial model, the assistant may agree your request matched and still answer from
+  its own knowledge instead — substituting recalled benchmarks for the source-cited ones, and only
+  mentioning the choice if you ask. Each skill's description now states plainly what is lost by answering
+  from memory, but **that does not reliably change the decision**: in testing the assistant declined,
+  then acknowledged the miss when challenged.
+- **If you want a specific skill, name it.** Either a slash command (`/financial-model-review`,
+  `/cap-table`, `/deck-review`, `/ic-sim`, `/market-sizing`, `/competitive-positioning`) or plain prose:
+  *"Use the financial-model-review skill on our model."* Both route reliably — every example prompt in
+  the README now does this.
+- Being honest about the shape of it: on a handful of pasted figures, answering directly is not
+  unreasonable — the deeper scoring needs more of your model (CAC, churn, headcount, expense breakdown).
+  The real problem is being given an unbenchmarked answer with no signal that a rigorous path existed.
+  Naming the skill removes the ambiguity entirely.
+- **What changed this release — and how to reach it.** The quick-check path below lives *inside* each
+  skill, so **it only helps once the skill is running.** In testing, a short conversational question with
+  no skill named triggered the skill in only one of three tries; the other two were answered directly,
+  without it. **So name the skill even for a quick question** — *"use market-sizing: roughly how big is
+  this market?"* — or you will get an answer with no analysis behind it and no way to tell.
+- Market sizing, financial model review and competitive positioning now
+  have a real **quick-check** path: a short directional answer that still runs the actual calculator on
+  the inputs you gave, writes an artifact, and tells you which checks were skipped and what they would
+  have added. The numbers match the full run's — only the production weight is dropped. IC simulation and
+  deck review have no quick path, because no honest subset of a verdict or a 35-criterion score exists;
+  they now tell you what the full run costs before starting it instead. All five also carry a checkpoint
+  that forbids answering from arithmetic done in conversation. **The checkpoint is guidance, not a
+  mechanism** — it makes the honest path available and obvious, and we have not yet demonstrated it
+  changes the decision every time. Naming the skill is still the reliable route.
+
+### Added — financial-model-review: models in any currency
+
+- Set your model's currency (ISO 4217) and the review stays in it end to end. Every figure in the
+  report, the HTML artifact, the explorer, and the unit-economics and runway evidence is tagged with
+  the native code rather than shown with a bare `$`.
+- Extraction now preserves the model's native currency and never applies an FX rate it finds in the
+  sheet. Previously the same non-USD model could come out two orders of magnitude apart between runs
+  depending on whether that run converted.
+- Non-USD models are no longer judged against USD bars or given bogus scale warnings. Burn multiple
+  and Rule of 40 are still computed (they are ratios) but reported as *contextual* with a note that
+  the stage benchmark could not be verified; the ARR materiality floors and the fixed USD
+  cash-sensitivity grid are skipped with an explanation; and the extraction plausibility check drops
+  its USD-absolute floors, so a healthy non-USD model can't trip a false "values may still be in
+  thousands" flag or a wrong auto-correction.
+
+### Added — financial-model-review: gross margin benchmarked against your sector
+
+- Hardware, consumer-subscription and retail models are scored against their own thresholds instead of
+  the SaaS survey table, where a healthy hardware margin previously rated a warning or a fail.
+- Marketplace, transactional-fintech, hardware-subscription and usage-based models are rated
+  **contextual** with the reason (net take-rate vs gross volume basis; a blend needing its
+  hardware/service split; passthrough-heavy vs software-margin spans) rather than graded against a bar
+  that doesn't apply.
+- New `gross_margin_basis` input: declaring `store_contribution`, `net_revenue`, `gross_revenue` or
+  `blended` rates the margin contextual and redirects the review to store contribution, buildout
+  payback and same-store trends. A restaurant's store-level margin and its product margin are
+  different metrics and neither should be judged on the other's bar.
+- When the SaaS bar *is* applied by default, the report now says so — an unrecognised model type is
+  labelled "SaaS benchmark assumed", and a sector-table model with no declared basis is labelled as
+  assuming product/merchandise margin.
+- The AI gross-margin allowance is no longer granted on a trait alone: an `ai-powered` model qualifies
+  only if AI costs actually appear in COGS. `ai-native` models and AI sectors still qualify outright.
+
+### Added — cap-table: review a standalone SAFE, note, term sheet, or option plan
+
+- A document with no surrounding cap table used to fail. You are now asked how to proceed — supply the
+  cap base for a full review, or take instrument terms only — and the terms-only path produces a new
+  `report_extraction_only.md`: an instrument-terms table (cap, discount, MFN, pro-rata, maturity,
+  governing law, issuance date) with an explicit "what this does NOT cover" section.
+- Term sheets and option plans render a terms table with a per-term confidence column, and an
+  amendment that restates one clause of an existing instrument is classified as an amendment rather
+  than forced through the convertible-note path as an all-null note.
+- Fields the document genuinely doesn't state read as "not stated in document; confirm" — never a
+  fabricated value, and never "uncapped" for a cap-implying form whose cap is simply absent.
+
+### Added — cap-table: acquisition modeling
+
+- Model an acquisition alongside a priced round: negotiated consideration percentage, consideration
+  form, timing, and which entity is acquired, with the pre-money and pool bases selectable. Option-pool
+  top-ups size correctly against the combined post-closing fully-diluted base, and the report states
+  the sizing basis so a negotiated headline target isn't confused with the realised percentage.
+- A flip can now be chained into a priced round, so the round is modeled against the post-flip cap
+  state rather than the pre-flip one.
+- Deals past the feasibility fold return a typed, remedy-bearing refusal rather than a wrong number,
+  and an over- or double-specified deal is named as such. Every acquisition rule is flagged for counsel
+  review.
+
+### Added — cap-table: coverage check and disclosure before the math
+
+- Each deal is checked against a registry of what the validated engine actually covers. An uncovered
+  structure is disclosed rather than quietly approximated: the report carries a "computed outside the
+  validated cap-table engine" banner and a `coverage_disclosure.json` artifact. (For a deal carrying
+  SAFEs, notes, an acquisition or a flip the scenario plan is auto-populated; a plain priced round or
+  pool-only change still has its scenarios authored by hand.)
+- When computed price-per-share or fully-diluted diverges from a figure stated in your source document
+  by more than 0.1%, the report now *leads* with a warning naming the divergence, and records it in
+  `report.json`. (The reconciliation table itself shipped in an earlier release; this is the banner.)
+- A preferred series whose original issue price you can't confirm can be declared unknown instead of
+  given a placeholder. The report then states that anti-dilution and liquidation preference are not
+  modeled for that series and the conversion ratio is assumed 1:1, and the skill refuses to run
+  anti-dilution math against the placeholder.
+
+### Added — cap-table: messy real-world spreadsheets
+
+- Holder × share-class matrices (one column per class) are decomposed per class, reading class identity
+  from the column header.
+- Non-founder ordinary shareholders — angels, ex-employees, nominee trusts — get their own category
+  instead of being mis-filed as founders, and real shareholder names now appear in the ownership and
+  voting tables instead of "Batch b1".
+- A labelled Total / Subtotal / Grand total / Sum row is detected and skipped with a warning naming the
+  excluded row (whole-cell matching, so a fund actually named "Total Ventures Fund I" is never
+  dropped), and the summed shares are cross-footed against the sheet's own printed total — blocking
+  with a named reason rather than emitting a silently doubled figure.
+- Hebrew and other right-to-left PDF exports often store their text layer in visual (reversed) order,
+  which a naive read silently garbles. This is now detected and flagged before the numbers are trusted.
+- A cap table made only of preferred series and/or angel common holders is accepted; the no-equity-base
+  stop previously fired unless founders or an option pool were present.
+
+### Added — cap-table: blank and partial instruments are kept, not invented
+
+- A SAFE with no purchase amount, a note whose principal lives in a schedule, a warrant or option grant
+  with no stated strike, a missing maturity date or an unnamed investor: each is kept as a partial with
+  a per-field "not stated; confirm" note and a plain-language callout of what was skipped.
+- The callouts distinguish what actually matters to your ownership numbers: a terms-only SAFE or note
+  contributes no shares and is excluded; a strike-less warrant's shares still count in fully-diluted
+  (only the exercise math is deferred); a strike-less option grant changes no totals at all.
+- Re-submitting a corrected extraction of the same instrument used to append a second copy and inflate
+  the table; a likely duplicate is now flagged with instructions to reuse the id.
+- A note with neither a cap nor a discount now gets a specific answer — no conversion price exists for
+  the round, confirm one from the note or counsel — instead of a generic "no conversion path".
+- On a jurisdiction flip, per-grant option tax-route detail is requested up front, and a pool with
+  issued options but no per-grant data raises an explicit "§102 exposure unconfirmed" counsel item
+  instead of reporting zero §102 grants.
+
+### Added — ic-sim: "to confirm" for what your materials don't disclose
+
+- A dimension your deck simply doesn't address is scored `to_confirm` — undisclosed, needs
+  confirmation — and excluded from the conviction denominator, instead of being forced into "concern"
+  (a negative judgment) or "N/A". It appears as its own column in the scorecard and the HTML category
+  bars. Absence that *is* the finding — no traction behind a large ask, no unit economics at Series A —
+  still scores as a concern.
+- Past six undisclosed dimensions the verdict is capped at **More Diligence**, with the conviction
+  score left untouched and the report explaining that the cap comes from missing data rather than from
+  the merits.
+
+### Added — competitive-positioning: adversarial competitor-set verification
+
+- Before the landscape locks in, every candidate competitor is independently re-researched from scratch
+  — deliberately ignoring your draft's own description — and given a genuine / adjacent /
+  not-a-competitor verdict. A "not a real competitor" flag must carry its own reasoning plus an
+  independent characterisation of that company's buyer and job, so it can't be a rubber stamp.
+- Flagged names are shown to you in the chat *and* named in the confirmation question, and are **never
+  auto-removed** — you decide. Competitors you decline stay recorded, so later coaching can refer to the
+  decision.
+- Newly discovered competitors are an explicit include/skip decision rather than a silent addition.
+- Researched claims must cite the URL or the exact search query behind them; a researched claim with no
+  source raises a "Researched Without Source" warning so an unverifiable funding, M&A or pricing claim
+  is visible rather than invisible.
+- Materials more than roughly a year old are flagged up front, since competitor pricing and positioning
+  from an old deck may already be wrong.
+- Decks beyond ~10 pages are read in page-range chunks, so competitive claims on later slides actually
+  reach the analysis.
+- A moat rating you supplied yourself is accepted instead of erroring out the scoring step.
+- The positioning map now plots the researched coordinates; previously the map and report could render
+  draft coordinates while the evidence-grounded ones sat unused.
+
+### Added — market-sizing: catches the errors that silently shrink a market
+
+- A percentage written as a fraction (`0.35` where `35` was meant) produced a market ~100× too small.
+  It is now caught and surfaced as a high-severity warning in the report's Warnings section, not left
+  on a stream no founder sees. The prompts also spell out that these values are percentage *points*,
+  and which one narrows TAM→SAM versus SAM→SOM so the two can't be swapped.
+- SAM and SOM convergence are now checked, not just TAM. A converging TAM previously hid an
+  order-of-magnitude SAM or SOM gap presented as equally defensible.
+- The "competitive landscape acknowledged" criterion is scored from what your deck actually says, via a
+  new notes field — previously it was scored without ever seeing the deck.
+- Validation verdicts are constrained to four honest states (validated / partially supported /
+  unsupported / refuted), so an invented in-between label can't misrepresent how well a figure is
+  sourced.
+- A dollar amount like `$8M` written into a shell heredoc could be expanded away before it reached the
+  artifact; quoting is now required throughout.
+- The report's self-check now reads as a score with pass/fail/not-applicable counts.
+
+### Added — later stages, more sectors, more geographies (all skills)
+
+- Series C and Series D are accepted stages; the list previously ended at Series B, so a later-stage
+  company had to mislabel itself. Three financial-model-review criteria that were auto-marked N/A at
+  those stages (LTV/CAC shown, burn multiple tracked, dilution/ownership shown) are now scored.
+- **Retail / physical-store and D2C** is a recognised revenue model with its own per-stage checks —
+  store-level contribution, buildout capex per location, store payback, same-store versus new-store
+  split, inventory as a runway risk, cohort maturation, shrinkage and returns.
+- Gross-margin guidance covers hardware, consumer subscription and retail, and explicitly marks
+  marketplace, transactional-fintech, hardware-subscription and usage-based models as contextual.
+- India, Germany, France, Canada, Singapore and Australia are recognised by name and gate the same way
+  as any other non-Israel geography.
+
+### Changed — verdicts and wording you actually read
+
+- **IC simulation reports a decline as "Decline".** The internal `pass` / `hard_pass` values rendered
+  as a bare "Pass" in the headline verdict, the conviction gauge, the per-partner chips, the summary
+  bar, the coaching commentary and the chat narration — which a founder can read as approval when it
+  means the opposite. All of them now read "Decline" / "Decline — Hard Pass", and the report carries a
+  legend for all four outcomes.
+- **Internal plumbing no longer leaks into cap-table narration** — script and file names, `--flags`,
+  exit codes, `W_`/`E_` warning codes, JSON, and step labels like "Lane 3" or "Context A". The
+  first-run company-context lookup previously surfaced a "not found" exit status as though something
+  had gone wrong.
+- **The skills stop asking for what your materials already state.** Company name, stage, sector and
+  geography are derived field by field from the deck or description, remaining fields are inferred from
+  clear signals (currency, phone country code, address, a named round or round size, product category),
+  and only genuinely unknown fields are asked about — with the derived values shown so you confirm
+  rather than re-supply. Applies to deck-review, competitive-positioning, market-sizing and unattended
+  ic-sim runs.
+- **A generic ("illustrative") IC simulation stops inventing a fund.** It no longer fabricates
+  portfolio holdings, skips portfolio-conflict analysis rather than checking you against made-up
+  companies, and a fund-fit dealbreaker derived from the synthetic persona no longer forces a hard
+  pass. The report states plainly that the thesis, partners, portfolio and any conflicts are fictional
+  constructs. Startup-side dealbreakers still force a decline in every mode.
+- **Where a debate and a score disagree, the divergence is reported** rather than reconciled away: the
+  mechanical verdict is the headline, the mismatch stays as a caveat, and nothing is re-run to force
+  agreement.
+
+### Changed — where your deliverables land, and how results are handed off
+
+- Deliverables now land in this run's own folder under `outputs/`, derived from the session identity.
+  The old logic probed the filesystem, so a connected folder containing its own `outputs/` could
+  receive the run's files, and a shell sitting above several sessions picked the alphabetically first
+  one — meaning files could land in a different task's folder.
+- Sub-agent results are handed off through per-run files instead of the message channel, with a
+  permanent audit trail per run. If the hand-off file isn't visible to the orchestrator after one
+  corrective attempt, the run degrades to the message channel rather than dying mid-pipeline.
+- The coaching section can no longer be half-written, duplicated, or corrupted by its own punctuation.
+  Insertion is done by a script rather than by the model editing your report: the commentary is carried
+  as plain markdown so quotes and line breaks can't break transport, the result is self-checked in
+  memory before anything is written, a re-run finds the section present and no-ops instead of adding a
+  second one, and a run whose artifacts disagree on identity is blocked *before* the report is touched
+  — with a named reason instead of a silently missing section.
+- Cowork parity: bundled reference files, prior-step artifacts and uploads are located and passed
+  correctly under Cowork's host-loop runtime, and writes that Cowork's `outputs/` mount refuses to
+  delete are copied rather than moved.
+
+### Changed — install and docs
+
+- **The install instructions were wrong at almost every step, and are rewritten from a verified
+  walkthrough.** Most consequentially: *syncing the marketplace does not install the plugin* — you still
+  have to click the `+` on the plugin card. Every previous version of the instructions stopped before
+  that, so anyone following them would sync and then find nothing installed. The Cowork path now leads
+  (it is where these skills are actually used), the duplicate "Claude Desktop" section is merged into it,
+  and "Sync automatically" is called out because it is what prevents the stale-plugin problem.
+- **The `npx skills add` path is documented as not working — for every host, not just Claude Code.** The
+  old text promised it "works with Claude Code, Cursor, Copilot, Windsurf" while the caveat below
+  contradicted it, and that caveat addressed only Claude Code users. Skills resolve their scripts through
+  the plugin root, which that layout does not create, so they fail on the first step anywhere.
+- **Python prerequisites are stated where they apply.** Claude Code runs the scripts on your own machine
+  and needs Python 3.10+ (plus `openpyxl` for Excel, `pdfplumber` for PDFs). Cowork's sandbox already has
+  everything, so Cowork users install nothing.
+- **New: what to expect on a first run** — that an analysis takes minutes rather than seconds, and where
+  the reports appear (the task's Working folder under `outputs/artifacts/…` in Cowork; `artifacts/` in
+  Claude Code). Neither was documented anywhere.
+- **Troubleshooting is split by app.** Both remedies were previously Claude Code CLI commands under a
+  heading about Claude Desktop, including a cache path Cowork does not use — so a Cowork user following
+  them changed nothing.
+- **New: a plain "not legal, tax or investment advice" line** on the cap-table skill, which advertises
+  SAFE conversion math and a counsel-handoff packet.
+- The cap-table deliverables list is no longer unconditional: the quick-answer path writes no artifacts,
+  a lone instrument with no cap table returns an instrument-terms report, and the pre-money slider is
+  priced-rounds-only.
+- Skills are called "skills" throughout, matching what you see in Claude, rather than alternating between
+  "skill" and "agent"; the "What it does" lists drop internal vocabulary for what the skill actually does
+  for you. Old deep links to the per-skill sections still work.
+- README gained a table of contents (now including the install paths); the per-skill "full workflow
+  details" links are relabelled as the technical spec for the agent runtime rather than user reading; and
+  the cap-table description drops internal vocabulary in favour of "every calculation traceable to a
+  cited source", spelling out broad-based weighted-average (BBWA).
+- CONTRIBUTING documents the pre-commit hook and the DCO sign-off gate, points at the security policy for
+  vulnerability reporting, adds a Releasing section, states that participating means agreeing to the Code
+  of Conduct, and adds a section on running the Cowork-runtime test gates locally.
+- The bundled Sora typeface now ships its SIL Open Font License and copyright notice, as the license
+  requires of any redistribution, with a third-party notices pointer under README's License section.
+
+### Changed — privacy disclosure is now complete
+
+- The README claimed the plugin "runs entirely inside your local Claude session". That was not true of
+  three skills, and the gap is now stated plainly: **market sizing, IC simulation and competitive
+  positioning search the web** as part of their work, so search queries derived from your materials pass
+  through Claude to a search provider. Cap-table, deck review and financial model review never touch the
+  network.
+- A second egress was undisclosed entirely: **the competitive-positioning explorer's optional 3D view
+  loads a charting library from a public CDN** the first time you open that tab. Every other generated
+  file is self-contained and works offline.
+- What was already true is unchanged and stays: no data is collected, transmitted or shared with lool
+  ventures, and feedback remains opt-in and user-initiated.
+
+### Changed — a coherent, theme-aware banner set
+
+- Every skill now has a banner, including cap-table, which never had one — and each comes in a light and
+  a dark version, so **GitHub dark mode no longer shows a glaring white slab**. The old banners baked an
+  opaque near-white gradient across their right ~57%: designed for light mode only, and more than half of
+  each image carried no information.
+- The set now reads as one system: uniform line weight throughout (the IC simulation banner was filled
+  artwork while every other was outline), strokes heavy enough to survive being scaled into GitHub's
+  column, and the same survey motifs threading through all six.
+- Banner alt text was repeating the heading immediately below it, so screen readers announced every skill
+  twice. The banners are decorative and are now marked as such.
+- Despite seven more images, `assets/` shrank from 6.09 MB to 2.67 MB — the header alone was 4.7 MB of
+  resolution and an unused transparency channel that nothing could see.
+
+### Fixed — financial-model-review
+
+- The static review page no longer attempts a dead server round-trip. In Cowork the page is served from
+  an ordinary origin, so its guard didn't hold and **Submit Corrections** fired a request to a server
+  that isn't there — and if the origin answered `200`, the founder was told their corrections had been
+  saved when nothing had been. It now skips the round-trip entirely and goes straight to the download,
+  and the overlay says the file was *downloaded* (pending upload) rather than *saved*.
+- A data-sparse model now reaches a finished report instead of stalling on a gate: when too few metrics
+  are computable the producer declares the shortfall, the completeness gate passes with a partial-data
+  warning, and the documented rule is to record the warning and proceed — never to fabricate a value to
+  clear the gate.
+- The missing-critical-data path now applies to spreadsheets, not just decks and conversational input,
+  so a spreadsheet that verifiably lacks the fields no longer falls through it.
+- Very large or oddly formatted Excel files no longer blow up extraction: a sheet whose declared range
+  is ballooned by stray formatting is trimmed to its populated region, a pathological sheet gets a
+  bounded read with the caps disclosed, and extraction warnings now surface in the output and the
+  on-screen receipt.
+- Cell references cited as provenance are correct when a sheet repeats a column header; two columns
+  sharing a header previously collided, attributing a value to the wrong cell.
+- The report's "Corrections Applied" table no longer shows `?` for every value, adds a reason column
+  when reasons exist, shows a field the source didn't contain as "not in source", and summarises a
+  replaced series as a row count.
+- A review no longer crashes when an optional input block is present but explicitly empty.
+- The final completeness check warns about unexpected files in the review folder, catching an artifact
+  written outside the sanctioned pipeline.
+- Passing checklist rows are one-line notes rather than full evidence paragraphs, so the criteria table
+  is tighter and passing items never pad the coaching section.
+
+### Fixed — deck-review
+
+- Slide-count scoring had dead bands: a 7-slide deck and a 16–18-slide deck fell between the pass and
+  fail rules and produced neither. Fail is now 6 or fewer / 19 or more, warn is 7–9 / 13–18.
+- The "inconsistent company name" flag stops crying wolf. Your brand inside an email address, URL or
+  domain, in ordinary lowercase prose, or as a plural or shared-root form no longer counts as name
+  drift — only genuinely cased variants do.
+- A deck that never states its stage no longer triggers a bogus stage warning. An absent stage is
+  recorded honestly as "not stated" instead of being filled with a placeholder that then produced a
+  "stage mismatch" or "out of scope" warning.
+- Duplicate or non-sequential slide numbers in the source deck are surfaced as a warning instead of
+  being silently absorbed, and downstream slide references are disambiguated.
+- The review can no longer make a bad score disappear: pipeline problems are fixed and re-run, but
+  content findings — critical checklist failures, extreme slide count, stage mismatch — are the honest
+  verdict and are reported as-is, never re-scored or suppressed.
+- A claim that your deck has no charts, photos, diagrams or logos must now be checked against the
+  recorded per-slide visuals, citing the slides checked, before it can be made.
+
+### Fixed — ic-sim
+
+- Portfolio-conflict scoring uses the actual conflict findings, instead of defaulting to "not
+  applicable" whenever that data wasn't in front of the scoring step.
+- Two spurious "Schema Drift" notes no longer appear in every report: the per-run stamp carried by every
+  artifact, and the portfolio field that is legitimately optional in generic mode.
+
+### Fixed — cap-table
+
+- A dollar figure printed with cents verified correctly instead of false-failing on the fractional
+  part; conversely, a yes/no term the extraction asserts without a supporting quote in the document is
+  now flagged as unverified rather than passing silently.
+- Pointing the extractor at a source path that doesn't exist now fails loudly instead of degrading to a
+  clean-looking "unverified" pass.
+- Answering a freeform blocker with a mistyped field name now warns and names the valid fields, instead
+  of accepting the answer and ignoring it.
+- An option-pool target outside 0–100% is rejected with a named error rather than producing nonsense.
+
+### Fixed — competitive-positioning
+
+- Long labels on the defensibility-timeline chart are no longer clipped.
+
+### Development
+
+Contributor-facing only; nothing here changes what a founder installs or runs.
+
+Regression coverage for Cowork-runtime behaviour now runs on every PR, via
+[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) — a Cowork-runtime emulator used as a
+dev-time CLI, not a runtime dependency and not part of the distributed plugin. Two token-free jobs:
+static analysis over every skill body, agent, reference and command, and deterministic replay of
+recorded Cowork runs. Recording itself remains local and paid, so replay verifies against recordings
+that can lag the current skills — the gate is "no new regressions against the recorded baseline", not
+"verified against live Cowork". Several of the founder-facing fixes in this release came out of that
+lane rather than from unit tests, because they only reproduce inside Cowork's runtime: an HTML artifact
+whose Submit button silently failed under Cowork's own serving origin, script paths that resolve in the
+CLI but not in the VM, and an `outputs/` mount that refuses deletes.
+
+The privacy guard gained a path-name layer — a denylisted name in a filename now trips it even when the
+contents are clean — plus a denylist refresher. `CONTRIBUTING.md` documents how to run both Cowork
+gates locally; `CLAUDE.md` and `cowork-tests/README.md` carry the details.
+
+## [0.5.1] - 2026-06-18 — Fleet-wide hardening: audit remediation, brand theme, self-sufficient reports
+
+### Highlights
+
+A broad correctness, observability, and presentation pass across all six skills following 0.5.0's
+cap-table introduction. The headline work: a full-repo audit remediation hardening every skill and
+the shared scripts; the lool brand theme applied to every generated HTML artifact; self-sufficient
+reports that read standalone without the chat context; a founder feedback channel; deterministic
+`run_id` stamping, artifacts-root resolution, and fleet-wide outputs-tree safety; and a large
+cap-table extraction- and math-correctness pass. New drift-contract and renderer-key-coverage test
+suites lock each skill's prose to its producers, and a fleet-wide cowork-harness replay gate
+exercises every skill under Cowork's runtime token-free on each PR — so these fixes can't silently
+regress.
+
+### Added — feedback channel
+
+- `/founder-skills:feedback` command — drafts a bug report, idea, help request, or "founder win"
+  and hands the user a prefilled GitHub Issue / Discussion link (or a private `mailto:` to
+  founder-skills@lool.vc) to submit themselves. The plugin transmits nothing automatically; a
+  privacy hard-stop keeps company names, numbers, file paths, and transcript data out of the draft.
+- Every generated report (Markdown + HTML) now carries a "Share feedback" link in its footer,
+  routing to the Ideas & Feedback discussion category.
+- Skills surface `/founder-skills:feedback` on a blocked/failed run and on unsolicited sentiment
+  (once per session, never routine).
+- cap-table report footer harmonized with the other five skills (now links back to the repo and
+  lool ventures; drops the internal rule-pack version line).
+
+### Added — self-sufficient reports
+
+- Every skill's report (Markdown + HTML) now stands alone — it carries the context, definitions, and
+  provenance needed to be read and shared without the originating chat session. Rolled out across
+  all six skills (deck-review, market-sizing, ic-sim, competitive-positioning,
+  financial-model-review, cap-table).
+
+### Added — lool brand theme
+
+- The lool visual identity is applied to every generated HTML artifact across all six skills:
+  design-token CSS plus the Sora variable font (OFL) embedded base64-inline so artifacts stay
+  self-contained, with a footer credit. A theme-sync contract test keeps each skill's `_theme.py`
+  copy identical.
+
+### Added — cowork-harness replay gate
+
+- A token-free **replay** PR gate (`.github/workflows/cowork-replay.yml`) exercises the skills under
+  Claude Cowork's runtime via `cowork-harness` (≥ 0.7.1). Recording is live (staged agent + Docker);
+  replay/verify run token- and agent-free in stock CI. **11 committed cassettes:** six cap-table
+  scenarios (Lane 1/2/4 extraction, anti-hallucination, priced-round + BBWA anti-dilution,
+  fast-assess routing) plus a per-skill fleet-parity smoke for market-sizing, ic-sim,
+  competitive-positioning, deck-review, and financial-model-review — each proving the artifacts-root
+  resolver lands deliverables at `outputs/artifacts/<skill>-<slug>/` with no host-path leak and no
+  `outputs/` delete.
+- The suite lives at the repo root (`cowork-tests/`), **outside** the hashed plugin mount, so editing
+  a scenario or fixture no longer churns the cassette staleness fingerprint. Staleness is further
+  **scoped per skill** — each scenario declares the skill it exercises, and
+  `founder-skills/.cowork-hashignore` drops `tests/` (pytest is not skill runtime) — so editing one
+  skill re-stales only its own cassette.
+- The CI gate is split: **privacy is hard-fail** (class-scoped `--allow-domain` / `--allow-email`
+  allowlists; only synthetic email domains permitted) and **staleness is warn-only** (the whole-plugin
+  mount otherwise re-stales every cassette on any skill edit). An **email canary** must trip under the
+  same allowlist, so the job fails if the email tripwire is ever silently disabled. All fixtures are
+  synthetic.
+
+### Added — other
+
+- **cap-table:** Articles-of-Association extraction dispatch template (Lane 1); `--mode=grid` dumps
+  the Lane-3 cell grid deterministically; vision fallback for image-only documents in the evidence
+  verifier.
+- **cap-table — deterministic Lane-3 (freeform spreadsheet) mapping.** Replaces the agent-authored
+  heredoc that wrote Lane-3 artifacts with a pure, unit-tested mapper (`freeform_mapper.py`, behind
+  `extract_cap_table.py --mode=freeform-emit`). A closed agent↔producer contract
+  (`references/schemas/freeform-role-map.json`) pins block types + column-role values to schema
+  fields, so the structure-detection sub-agent and the producer can't drift. Off-contract roles and
+  fields freeform can't supply (a note's `interest_rate_type`, a preferred series' issue price, an
+  enum `plan_type`) become founder-confirmation **blockers** (a human-in-the-loop gate; answers
+  return via `--answer BLOCK.FIELD=VALUE`) rather than fabrications. Per-target-array stable instrument
+  ids, merged-cell/sheet-qualified-range handling, and a `cap_state.py` `E_NO_EQUITY_BASE` guard that
+  turns the old silent all-zero-snapshot (founders + option_pool both absent while instruments are
+  present) into a loud error.
+- **deck-review:** resume now preserves same-run pipeline artifacts across the stage-gate
+  round-trip.
+
+### Changed — determinism & observability
+
+- **Unified `run_id` stamping.** All producers now inject `metadata.run_id` via a required
+  `--run-id` CLI flag, so every artifact in a run shares one identifier and compose can enforce
+  parity. Applied across ic-sim, market-sizing, competitive-positioning, deck-review,
+  financial-model-review, and cap-table; a static orchestration guard asserts CLI-stamping producer
+  pipes carry `--run-id`.
+- **Deterministic artifacts-root resolution.** The inline `ARTIFACTS_ROOT` path computation in each
+  SKILL.md Step 0 block was guidance the agent paraphrased, not code it ran verbatim — it kept the
+  intent ("under `outputs/`") but dropped the detection, landing `outputs/` in one run and
+  `outputs/artifacts/` in another, desyncing cross-skill `find_artifact.py` resolution and
+  path-based assertions. All six skills now invoke a shared `scripts/resolve_artifacts_root.py`
+  (fixed resolution order, deterministic, creates the dir) as one opaque command.
+- **Outputs-tree safety (fleet-wide).** In Cowork the per-run work dir is the promoted, user-visible
+  `outputs/` tree, where staging scratch or deleting artifacts is unsafe — Cowork can deny the delete
+  and the parity gate flags it. All six skills now stage sub-agent JSON in a `/tmp` mktemp dir and
+  overwrite each artifact in place every run instead of a fresh-start `rm`; a fresh per-run `run_id`
+  plus compose's `STALE_ARTIFACT` parity check backstop any skipped-step leftover. deck-review keeps
+  its `setup_run.py` resume lifecycle, with its `--clean` delete now tolerant of a Cowork-denied
+  delete. A `test_skill_orchestration` guard flags any `outputs/`-tree `.staging` path or `rm`.
+- **CI version-bump filter** now requires in-plugin Markdown bumps, matching the documented
+  versioning policy.
+
+### Fixed — fleet-wide audit remediation
+
+A full-repo audit hardened all six skills and the shared scripts. By area:
+
+- **cap-table:** math correctness (conversion-cap-price fallback, anti-dilution baseline, donut
+  palette, summary counts); extraction correctness (AoA merge, Carta fabrication guard, share-suffix
+  parsing); pre-money SAFE now honors the document's two conversion branches and a pool-inclusive
+  denominator; warrants join the broad-based anti-dilution base and the rule text matches the NVCA
+  charter it cites; the solver flags economically impossible rounds instead of returning garbage;
+  note conversion surfaces as a dilution driver; anti-dilution meta keys excluded from the explorer
+  donut/legend; `pdfplumber` declared so a missing parser blocks the hallucination gate rather than
+  silently degrading; rule-pack version single-sourced and bound into every producer; the dead
+  ITA-SAFE citation replaced with live gov.il primary sources and honest Carta provenance.
+- **financial-model-review:** burn multiple was divided by net-new ARR instead of monthly ΔMRR (a
+  12× overstatement) — fixed, plus three more 12× period-mismatch bugs and a GRR sanity guard;
+  partial models now evaluate all 46 checklist items and data rows survive header detection; the
+  extracted-values review is a hard stop gate rather than a drive-by; stops overstating a
+  default-alive company as "on track to profitability"; magic number uses the full S&M base and
+  Rule of 40 uses realized YoY with honest benchmark labels (dead Mosaic citations retired); the
+  checklist sub-agent no longer self-gates (gating belongs to the producer); MARKER_COLLISION
+  pre-scan before status render; present-but-null numeric fields guarded in math and validators.
+- **market-sizing:** unit-aware sensitivity parameter values — the Value column holds the input
+  parameter (currency / count / percent), so the old USD-for-low/high, raw-number-for-base rendering
+  printed percentages and counts as dollars; a new `_fmt_param_value` formats each cell by parameter
+  name. Also: tolerates non-numeric deck claims and null notes; compose reordered so
+  MARKER_COLLISION reflects in both status and the Warnings section.
+- **deck-review:** 3-value `ai_company_status` with producer-applied AI-criteria gating and verbatim
+  pass-through; canonical scoring IDs enumerated in dispatch templates; `checklist.py` omits null
+  evidence/notes, requires `--run-id`, and fails closed on `-o` validation errors; `gate_state`
+  answer handling survives corrupt files; resume detection moved into `setup_run.py`; visualize
+  legend color and gauge fixes.
+- **ic-sim:** derives `consensus_strength`, fixes warnings ordering, guards renderers against
+  malformed artifacts; resolves cross-owned straggler findings shared with market-sizing.
+- **competitive-positioning:** `EVID_02` mode-gating prose corrected; scripts hardened against
+  malformed artifacts; `checklist.py` gains `--input-mode`/`--run-id` flags; all three
+  artifact-integrity warning codes named in SKILL.md.
+- **shared scripts:** `find_artifact.py` conformed to the `--pretty` / `-o` / JSON-stdout script
+  convention; `founder_context.py` now performs a real recursive deep merge; `marketplace.json`
+  drops the top-level `description` to match the documented format.
+
+### Tests
+
+- **Drift-contract suites** pin each skill's SKILL.md prose to its script source across all six
+  skills, and surfaced/fixed several dead `coaching_payload` shell-variable captures and an
+  input-mode attribution bug.
+- **Renderer key-coverage** tests across all six skills assert every produced key is either rendered
+  or explicitly excluded.
+- Regression suites added for the cap-table extraction and math fixes.
+
+### Docs
+
+- README adds the cap-table skill section and documents six agents and Python 3.10+; CONTRIBUTING and
+  SECURITY include cap-table; VERSIONING clarifies that tags gate releases and reconciles the
+  no-bump cases; CLAUDE.md sync-test-repo framing and e2e figures corrected.
 
 ## [0.5.0] - 2026-06-10 — New skill: cap-table; financial-model-review hardening
+
+### Highlights
 
 This release ships the cap-table skill for the first time and completes a pre-distribution hardening
 pass on financial-model-review. Users upgrading from 0.4.7 get both skills in their first-ever
@@ -176,7 +966,7 @@ Gate 2 no longer blocks publication for profitable or default-alive companies. P
 #### HTML self-containment and escaping
 
 - **Chart.js vendored into `explore.py`.** The explorer previously loaded Chart.js from a CDN. The Cowork iframe sandbox blocks external fetches; offline `file://` viewing also broke. Copied the vendored `chart.min.js` (already used by `competitive-positioning/scripts/explore.py`) into `financial-model-review/scripts/vendor/` and switched to inline embedding.
-- **`</script>` injection hardening.** Founder-document-derived data (company names, LLM-extracted strings) embedded as JSON in `<script>` blocks now has `<` escaped to `<` at every embed site in both `explore.py` and `review_inputs.py`.
+- **`</script>` injection hardening.** Founder-document-derived data (company names, LLM-extracted strings) embedded as JSON in `<script>` blocks now has `<` escaped to `\u003c` at every embed site in both `explore.py` and `review_inputs.py`.
 - **HTML escaping for warning/commentary fields.** Extraction-warning `candidates` and `untraceable[*].role` strings in `review_inputs.py` are now wrapped with `html.escape()`. Commentary fields (`callout`, `highlight`, `watch_out`) in `explore.py` are assigned via `textContent`/`createTextNode` instead of HTML string concatenation.
 - **Scenario labels and banner title escaped** via the shared `_esc()` helper throughout the explorer.
 
@@ -229,6 +1019,10 @@ Surfaces-based counsel-packet rendering and tag backfill across the existing ~70
 
 ## [0.4.7] - 2026-05-19
 
+### Highlights
+
+Gives `competitive-positioning`'s research sub-agent the `WebSearch` tool it was always dispatched to use, so competitor research and moat-trajectory evidence are honest rather than guessed from training data.
+
 ### Fixed
 
 - **`competitive-positioning`: sub-agent had no network tools but was dispatched to research competitors.** SKILL.md Steps 4 (LANDSCAPE_RESEARCH), 5a (MOAT_SCORING), and 5b (POSITIONING_SCORING) dispatch the sub-agent with prompts asking for `evidence_source: researched | agent_estimate` (and Step 5a's `trajectory: building/stable/eroding`, which is inherently research-dependent). The agent's `tools:` allowlist was `["Read", "Edit", "Glob", "Grep"]` — no network access — and Step 4 explicitly forbade the main thread from doing the research either. Net effect since the skill shipped: every `evidence_source: "researched"` stamp was a training-cutoff guess wearing a research label. CHECKLIST (Step 6) is unaffected (artifact grading only, no research).
@@ -250,6 +1044,10 @@ Surfaces-based counsel-packet rendering and tag backfill across the existing ~70
 
 ## [0.4.6] - 2026-05-13
 
+### Highlights
+
+Fixes a `market-sizing` gap where deck TAM/SAM/SOM figures stated under non-canonical keys silently bypassed deck-vs-computed reconciliation, and adds a narrative escape hatch for deck claims that don't fit the canonical shape.
+
 ### Fixed
 
 - **`market-sizing`: non-canonical `existing_claims` keys silently bypassed deck-vs-computed reconciliation.** When a deck stated TAM/SAM/SOM figures under non-canonical keys (e.g., `SAM_Israel_only`, `TAM_global`), both the `DECK_CLAIM_MISMATCH` warning and the report's provenance section's `deck_claim` / `delta_vs_deck_pct` columns silently returned `None` — `compose_report.py` and `visualize.py` look up `tam`/`sam`/`som` by exact lowercase name via `dict.get()`. The skill produced a complete report with no signal that comparison had been short-circuited, allowing downstream framing to treat a missing deck figure as a wrong deck figure.
@@ -268,6 +1066,10 @@ Surfaces-based counsel-packet rendering and tag backfill across the existing ~70
 - `WARNING_SEVERITY` totality test updated 19 → 20 codes.
 
 ## [0.4.5] - 2026-05-10
+
+### Highlights
+
+Adds a skill-quality CI pipeline — contract tests, compose invariants, and a deck-review end-to-end smoke — that runs on every PR and gates releases on tag-push.
 
 ### Added
 
@@ -297,6 +1099,10 @@ Surfaces-based counsel-packet rendering and tag backfill across the existing ~70
   The workflow env-injects both `ANTHROPIC_API_KEY_CI` and `CLAUDE_CODE_OAUTH_TOKEN_CI` if set; whichever is present is used. Configure exactly one in repo secrets.
 
 ## [0.4.4] - 2026-05-09
+
+### Highlights
+
+Retires the single-purpose `verify-cowork-clone.sh` in favor of `claude-plugin-doctor`, which diagnoses drift across all cache layers rather than just the marketplace clone HEAD.
 
 ### Removed
 
@@ -329,6 +1135,10 @@ Skill, plugin, and dev-workflow alignment with the documented Claude Code v2.1.1
 
 ## [0.4.2] - 2026-05-04
 
+### Highlights
+
+Coaching commentary now reasons from a structured `coaching_payload` block in `report.json` instead of re-reading the full report, saving tokens and aligning producer schemas across skills.
+
 ### Changed
 
 - **Coaching commentary now reads structured data instead of the full report.** Each skill's `compose_report.py` emits a structured `coaching_payload` block in `report.json` (per-skill schema, with summary stats and failed/warned items). The post-compose coaching sub-agent reasons from this payload directly and inserts `## Coaching Commentary` at a per-run marker (`<!-- COACHING_INSERTION_POINT_<8-hex> -->`) via `Edit`, instead of re-reading `report.md`. Empirical: ~9K tokens saved per coaching run on `deck-review`; larger savings expected on `financial-model-review` (its `report.md` is typically ~3× larger).
@@ -343,6 +1153,10 @@ Skill, plugin, and dev-workflow alignment with the documented Claude Code v2.1.1
 - Tests covering coaching payload shapes, marker placement and collision handling, severity-sorted truncation, idempotency, and cross-skill dispatch contracts.
 
 ## [0.4.1] - 2026-05-03
+
+### Highlights
+
+Skills now run inline in the main thread so they work end-to-end on Cowork, with heavy analytical steps dispatched to sub-agents and coaching commentary appended via a post-compose dispatch.
 
 ### Changed
 
@@ -362,6 +1176,10 @@ Skill, plugin, and dev-workflow alignment with the documented Claude Code v2.1.1
 - Per-skill regression tests for compose-script output verification and tolerant JSON extraction.
 
 ## [0.4.0] - 2026-05-03
+
+### Highlights
+
+Replaces `deck-review`'s heredoc-written JSON with validating Python producer scripts that schema-check every artifact, and moves the stage gate to a checkpoint-and-resume flow.
 
 ### Changed
 
@@ -386,6 +1204,10 @@ Hardens `deck-review` against several issues surfaced in real Cowork runs:
 - The "Different stage" path no longer asks the agent to mutate the artifact directly — `stage_profile.py --rebuild-stage` does it.
 
 ## [0.3.1] - 2026-04-29
+
+### Highlights
+
+Gives every founder-skills sub-agent a persistence path (`Write`/`Edit`) that survives Cowork's `Bash` filtering, so sub-agents write their JSON/HTML artifacts instead of degrading to prose narration.
 
 ### Fixed
 

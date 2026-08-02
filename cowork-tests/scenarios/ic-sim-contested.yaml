@@ -1,0 +1,123 @@
+name: ic-sim-contested
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: first   # gates here are immaterial to the asserts; option-1 is paraphrase-proof (anchor-discipline rule)
+skills: [ic-sim]
+
+# Contested-deal lane — ic-sim. The sibling `ic-sim-smoke` proves the debate ROUND happens and that
+# discussion.json is derived rather than authored; it cannot prove the paths that only open when a
+# partner MOVES, because on a clean deal all three hold their round-1 position (measured: 3/3
+# verdict_changed=false, 0 dealbreakers). Three producer paths therefore stayed dark there:
+#   * verdict_changed=true carrying a non-empty changed_because (the rejection path's happy side)
+#   * an evidenced dealbreaker (compose_discussion rejects an unevidenced one)
+#   * the dealbreaker -> hard_pass binding rule in scoring
+#
+# This deal is built to open them, and the design constraint is that it must do so WITHOUT
+# predetermining the answer. The vision is genuinely fundable (4x ARR growth, real clinical
+# deployment, a market every fund wants exposure to) so the visionary has honest grounds to open at
+# invest. The disqualifying facts are real, independent, and decisive only once stated together —
+# which is exactly the information a round-1 partner working alone does not have. A partner who
+# reads the other two and does NOT move is behaving reasonably; a partner who moves must say why.
+# Both outcomes are valid, so the asserts below check the MECHANISM (derivation, provenance,
+# validation), never a particular verdict. See the measurement note at the foot of this file.
+prompt: |
+  Simulate a VC investment-committee discussion for a Series A deal in Ridgeline, a US Delaware
+  C-corp selling AI-assisted clinical documentation to outpatient specialty clinics. Deal:
+  $12,000,000 round at a $60,000,000 pre-money.
+
+  Traction: $2,400,000 ARR, up roughly 4x over the last 12 months. 34 clinic sites live.
+
+  Concentration and retention: one hospital network accounts for 78% of ARR. That contract is a
+  12-month pilot that expires in 5 months and the network has not yet committed to renewal.
+  Net revenue retention across all OTHER customers is 71%. Gross margin is 54% — model inference is
+  billed per encounter and is not currently passed through to the customer.
+
+  Efficiency: blended CAC is roughly $41,000 against a $14,000 average annual contract value, so
+  CAC payback runs about 31 months. Sales cycle averages 7 months.
+
+  Team: the CEO is ex-McKinsey healthcare. The co-founder/CTO departed 6 weeks ago and has not been
+  replaced; the remaining engineering lead is a first-time manager. Headcount is 19.
+
+  Compliance: the product processes PHI. A HIPAA business associate agreement is in place with the
+  primary model vendor, but two secondary model vendors are used in production without a BAA.
+
+  Use the ic-sim skill to run the full IC simulation across all three partner archetypes and produce
+  the report.
+
+assert:
+  - result: success
+  - all_tasks_completed: true
+  - file_exists: outputs/artifacts/ic-sim-ridgeline/report.json
+
+  # --- the point of this scenario: the round-2 artifacts exist and are partner-authored ---
+  # All three rebuttals must land. A missing one is the regression this lane exists to catch
+  # (compose_discussion refuses to emit on a missing archetype, so result:success alone would
+  # already red — but assert them by name so the FAILING archetype is named in the verdict).
+  - file_exists: outputs/artifacts/ic-sim-ridgeline/partner_rebuttal_visionary.json
+  - file_exists: outputs/artifacts/ic-sim-ridgeline/partner_rebuttal_operator.json
+  - file_exists: outputs/artifacts/ic-sim-ridgeline/partner_rebuttal_analyst.json
+
+  # discussion.json came from the producer, not from the orchestrator's own prose. This is the
+  # invariant the architecture turns on: content that binds a score must be derived, never authored.
+  - artifact_json:
+      artifact: outputs/artifacts/ic-sim-ridgeline/discussion.json
+      path: _produced_by
+      equals: compose_discussion
+  # Consensus is derived (majority of the three revised verdicts; a genuine three-way split falls to
+  # more_diligence). Assert it resolves to a LEGAL value — never to a specific one. Which verdict a
+  # contested deal earns is the model's judgment and pinning it would make this lane a thermometer
+  # for prompt drift rather than a test of the pipeline.
+  - artifact_json:
+      artifact: outputs/artifacts/ic-sim-ridgeline/discussion.json
+      path: consensus_verdict
+      in: ["invest", "more_diligence", "pass", "hard_pass"]
+  # The exchange the founder reads is assembled from the partners' own responses. Empty sections
+  # would mean the round ran but said nothing.
+  - artifact_json:
+      artifact: outputs/artifacts/ic-sim-ridgeline/discussion.json
+      path: debate_sections.0.exchanges.0.partner
+      exists: true
+
+  # --- fleet contract asserts (mirrors ic-sim-smoke) ---
+  - subagent_dispatched: 'archetype|Partner analysis|rebuttal|IC simulation|IC dimensions|coaching commentary'
+  - subagent_file_write:
+      path_suffix: coaching.md
+  - subagent_dispatch_healthy:
+      type: 'ic-sim'
+  - skill_triggered: '(founder-skills:)?ic-sim$'
+  - computer_links_resolve: true
+  - no_delete_in_outputs: true
+  - subagent_tool_absent: 'Bash'
+  - questions_count_max: 8
+  # Budgets: ic-sim-smoke measured 8 dispatches / 60 turns / 52 tools on the same pipeline shape.
+  # Headroom over that, not a tightened floor — a contested deal reasons longer, and this lane is
+  # here to exercise a code path, not to police verbosity.
+  - dispatch_count_max: 11
+  - max_turns: 150
+  - tool_calls_max: 140
+  - no_unexpected_files:
+      - 'outputs/artifacts/ic-sim-ridgeline/**'
+      - 'outputs/artifacts/founder-context-ridgeline.json'
+      - 'outputs/Ridgeline_IC_Simulation.*'
+
+# MEASUREMENT NOTE — read before adding a verdict_changed / dealbreakers assert here.
+# Whether a partner actually moves is model judgment, so an assert on it is an assert on the model,
+# not on the pipeline. Do not add one from intuition. Measure it first:
+#   cowork-harness run scenarios/ic-sim-contested.yaml --repeat 5 --min-pass-rate 1.0
+# then read verdict_changed / dealbreakers[] out of the three partner_rebuttal_*.json per run. Add
+# the assert only if the path opens on every run, and prefer an aggregate over naming an archetype
+# (which of the three moves is the least stable thing here). If it opens on some runs and not
+# others, this lane has still done its job — it proved the path reachable live — and the producer's
+# own rejection branches stay covered by the unit suite, which can drive them deterministically.
+  # GATE FLOOR. `questions_count_max` above is a CEILING — it caps interruption but has never once
+  # asserted that the skill asked anything at all. A run that silently skips its confirmation gates and
+  # assumes the answers produces a well-formed report, a green suite, and a founder who was never
+  # consulted. Measured: a committed cassette for this fleet once froze exactly that (0 gates) and went
+  # green for weeks. `gate_answers_delivered` alone does NOT close it — it passes VACUOUSLY when zero
+  # gates fire, which is why the two are always paired.
+  # Floor is deliberately 1, well BELOW the count observed at record time: gate firing is
+  # model-dependent (the same batch saw one cap-table lane fire the founder-context pack and another
+  # skip it), so a floor set AT the observed count converts ordinary variance into a red suite. This
+  # asserts the property — "it asked" — not the model's exact behaviour.
+  - gate_answers_delivered: true
+  - gate_answer_count_min: 1

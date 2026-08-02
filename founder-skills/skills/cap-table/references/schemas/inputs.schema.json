@@ -55,6 +55,7 @@
         "type": "object",
         "properties": {
           "holder_id": {"type": "string"},
+          "holder_name": {"type": ["string", "null"], "description": "Optional human-readable shareholder name; shown in the ownership tables when present, else the batch falls back to holder_id."},
           "shares": {"type": "integer"},
           "issuance_date": {"type": "string"},
           "consideration": {"type": ["number", "null"]},
@@ -85,8 +86,15 @@
           "ad_trigger_basis": {"enum": ["original_issue_price", "current_conversion_price"]},
           "ad_a_denominator_basis": {"enum": ["nvca_broad", "nvca_narrow"]},
           "ad_cp2_floor": {"type": ["number", "null"]},
-          "ad_carve_outs": {"enum": ["nvca_default"]},
+          "ad_carve_outs": {
+            "enum": ["nvca_default", [], ["nvca_default"]],
+            "description": "Scalar policy marker despite the plural name — only one carve-out bundle (NVCA-default) is modeled today. Accepts the canonical scalar 'nvca_default' plus the two list shapes the plural name invites a model to write ([] and ['nvca_default']); cap_state.py normalizes all three to the scalar 'nvca_default'. Any other value is rejected."
+          },
           "pro_rata_rights": {"type": "boolean"},
+          "pricing_unknown": {
+            "type": "boolean",
+            "description": "True when the founder/mapper could not confirm this series' actual issue/conversion pricing. When true, original_issue_price/original_conversion_price/current_conversion_price are written as a numeric 1.0 sentinel (NOT real pricing) and anti_dilution_protection must resolve to 'none' — cap_state.py enforces both post-canonicalization. Declared here for documentation only; the hand-rolled runtime validator does not support if/then, so this flag drives no schema-level branching."
+          },
           "extraction_provenance": {
             "type": "object",
             "properties": {
@@ -149,7 +157,57 @@
       "required": ["run_id", "schema_version"],
       "properties": {
         "run_id": {"type": "string"},
-        "schema_version": {"const": "v0.5.0-inputs"}
+        "schema_version": {"const": "v0.5.0-inputs"},
+        "stage": {
+          "enum": ["pre-seed", "seed", "series-a", "series-b", "series-c", "series-d", "later"],
+          "description": "Founder-declared funding stage, same vocabulary as founder_context.py --stage. Optional, and deliberately has no default: stage-scoped benchmarks must be able to tell 'not recorded' from a stage, and must not fire on the former. Absent means a stage-scoped rule does not apply rather than applying at some assumed stage."
+        },
+        "cap_base_source": {
+          "enum": ["confirmed", "assumed"],
+          "description": "Whether the founder cap base (founders + share counts + pool) was founder-confirmed ('confirmed') or assumed/placeholder ('assumed'). Drives the S2 W_CAP_BASE_ASSUMED backstop; absent is treated as not-confirmed but only warns on a positive signal (placeholder names)."
+        },
+        "cap_base_provenance": {
+          "type": "string",
+          "description": "How the cap base was produced (lineage), distinct from whether it was confirmed. The freeform mapper stamps 'deterministic_mapped' when it produces the equity from the spreadsheet; a Lane-1/2/4 hand-build sets 'model_reconstructed' (or leaves it absent). cap_state emits W_CAP_BASE_RECONSTRUCTED when a 'confirmed' base is NOT 'deterministic_mapped' — so a model-built base can't masquerade as verified. Free string (no enum) so a model-set value never fails validation; the trigger keys on the absence of the exact 'deterministic_mapped' marker."
+        },
+        "extraction_mode": {
+          "type": "string",
+          "description": "How the source was read. Set to 'vision_image_pdf' when the pdf-probe detects an image-only PDF (no text layer) read by raw model vision (no OCR) — cap_state then emits W_VISION_EXTRACTION_LOW_CONFIDENCE so the structured artifacts carry the under-extraction caveat. Free string; the trigger keys on the exact 'vision_image_pdf' value."
+        },
+        "source_markup": {
+          "type": "string",
+          "description": "Revision state of the source document. Set to 'tracked_changes_accepted' when the founder chose to proceed on the accepted-revisions (final-proposed) view of a redline/tracked-changes .docx — cap_state then emits W_REDLINE_DRAFT so the report persists the unsigned-draft caveat. Free string (no enum, so a model-set value never fails validation); the trigger keys on the exact 'tracked_changes_accepted' value."
+        }
+      }
+    },
+    "stated_totals": {
+      "type": "object",
+      "description": "Independent totals the SOURCE document itself prints (e.g. Carta's 'Totals' row fully-diluted figure), captured to cross-foot against the computed cap state. cap_state compares fully_diluted to as_converted_totals.fully_diluted_shares and emits a suppressible W_FD_RECONCILE_DELTA when they diverge beyond 0.1%. Optional; populate ONLY from a total the source prints independently of the entered holder/class rows (so the check is non-circular).",
+      "properties": {
+        "fully_diluted": {
+          "type": "integer",
+          "description": "Fully-diluted share total the SOURCE document prints (e.g. Carta's 'Totals' row). Cross-footed against the computed as_converted_totals.fully_diluted_shares. Source-printed only (non-circular)."
+        },
+        "price_per_share": {
+          "type": "number",
+          "description": "Per-share price the SOURCE document prints for the round (e.g. a pro-forma's stated PPS). Captured to reconcile against the skill's computed equity_financing_price. Source-printed only (non-circular)."
+        },
+        "pre_money": {
+          "type": "number",
+          "description": "Pre-money valuation the SOURCE document prints for the round. Reconciled against the pre_money used in the scenario. Source-printed only (non-circular)."
+        },
+        "source": {"type": "string"}
+      }
+    },
+    "acquisition": {
+      "type": "object",
+      "description": "Negotiated-% acquisition whose holders receive consideration shares in/around the priced round.",
+      "required": ["acquired_entity", "consideration_pct", "consideration_form"],
+      "properties": {
+        "acquired_entity": { "type": "string" },
+        "consideration_pct": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+        "consideration_form": { "const": "shares" },
+        "acquisition_timing": { "enum": ["concurrent_with_round", "pre_round_closed"], "default": "concurrent_with_round" }
       }
     }
   }

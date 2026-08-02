@@ -38,6 +38,7 @@ WARNING_SEVERITY: dict[str, str] = {
     "CORRUPT_ARTIFACT": "high",
     "MISSING_ARTIFACT": "high",
     "STALE_ARTIFACT": "high",
+    "UNVALIDATED_ARTIFACT": "high",
     "BLOCKING_CONFLICT": "high",
     "ORPHANED_CONFLICT": "high",
     "VERDICT_SCORE_MISMATCH": "high",
@@ -45,12 +46,21 @@ WARNING_SEVERITY: dict[str, str] = {
     # Medium — quality concerns worth surfacing
     "PARTNER_UNANIMITY": "medium",
     "ZERO_APPLICABLE": "medium",
+    "LOW_CONVICTION_BASIS": "medium",
+    "LOW_COVERAGE_VERDICT_CAP": "medium",
+    "LOW_COVERAGE_VERDICT_FLOOR": "medium",
+    "LOW_COVERAGE_VERDICT_HELD": "medium",
     "STALE_IMPORT": "medium",
     "LOW_EVIDENCE": "medium",
     "FUND_VALIDATION_ERROR": "medium",
     "CONFLICT_CHECK_VALIDATION_ERROR": "medium",
     "SCORE_DIMENSIONS_VALIDATION_ERROR": "medium",
     "DEGRADED_ASSESSMENT": "medium",
+    # No id-level debate channel at all, so NO dealbreaker can be attributed.
+    # Medium, not low: it means the discussion.json is hand-written or was
+    # produced by a compose_discussion.py predating debated_dealbreakers, and
+    # every provenance label in the report degrades to "unavailable".
+    "DEALBREAKER_PROVENANCE_UNVERIFIABLE": "medium",
     "CONSENSUS_SCORE_MISMATCH": "medium",
     "UNANIMOUS_VERDICT_MISMATCH": "medium",
     "SHALLOW_ASSESSMENT": "medium",
@@ -61,6 +71,16 @@ WARNING_SEVERITY: dict[str, str] = {
     "STAGE_OUT_OF_SCOPE": "low",
     # v0.4.2 Mitigation 2 — informational only (uuid is per-run, won't collide)
     "MARKER_COLLISION": "low",
+    # Uncalibrated by design (see compose_discussion.py) — never gates, just a
+    # prompt to read the debate more closely.
+    "PARTNER_CAPITULATION": "low",
+    # A scored dealbreaker the debate never argued. LOW and deliberately
+    # non-gating: scoring covers 28 dimensions and the debate covers whatever
+    # three partners chose to argue, so an undebated dealbreaker is an expected,
+    # often-correct outcome. This exists to make the difference visible, never to
+    # suppress the finding — suppressing it would flip hard_pass and hide a fatal
+    # flaw from the founder.
+    "UNDEBATED_DEALBREAKER": "low",
     # Info — transparency, no action needed
     "PARTNER_CONVERGENCE": "info",
     "SEQUENTIAL_FALLBACK": "info",
@@ -79,6 +99,10 @@ WARNING_LABELS: dict[str, str] = {
     "VERDICT_SCORE_MISMATCH": "Verdict/Score Mismatch",
     "PARTNER_UNANIMITY": "Partner Unanimity",
     "ZERO_APPLICABLE": "Zero Applicable Dimensions",
+    "LOW_CONVICTION_BASIS": "Thin Scoring Base",
+    "LOW_COVERAGE_VERDICT_CAP": "Verdict Capped — Low Coverage",
+    "LOW_COVERAGE_VERDICT_FLOOR": "Verdict Floored — Low Coverage",
+    "LOW_COVERAGE_VERDICT_HELD": "Verdict Held — Low Coverage",
     "STALE_IMPORT": "Stale Import",
     "LOW_EVIDENCE": "Low Evidence",
     "FUND_VALIDATION_ERROR": "Fund Validation Error",
@@ -92,6 +116,10 @@ WARNING_LABELS: dict[str, str] = {
     "PARTNER_CONVERGENCE": "Partner Convergence",
     "SEQUENTIAL_FALLBACK": "Sequential Fallback",
     "MARKER_COLLISION": "Marker Collision",
+    "UNVALIDATED_ARTIFACT": "Unvalidated Artifact",
+    "PARTNER_CAPITULATION": "Partner Capitulation (Unconfirmed)",
+    "UNDEBATED_DEALBREAKER": "Undebated Dealbreaker",
+    "DEALBREAKER_PROVENANCE_UNVERIFIABLE": "Dealbreaker Provenance Unverifiable",
 }
 
 
@@ -142,6 +170,12 @@ EXPECTED_KEYS: dict[str, set[str]] = {
         "competitors",
         "product_description",
         "team_highlights",
+        "competitive_notes",
+        "gtm_notes",
+        # `to_confirm`: under the Step-1 Auto-pilot carve-out the agent marks a
+        # basic it could only infer (not founder-state) as to_confirm and proceeds
+        # rather than stalling — a sanctioned note, not schema drift.
+        "to_confirm",
     },
     "fund_profile.json": {
         "fund_name",
@@ -166,9 +200,13 @@ EXPECTED_KEYS: dict[str, set[str]] = {
         "partner_verdicts",
         "debate_sections",
         "consensus_verdict",
+        "debated_dealbreakers",
         "key_concerns",
         "diligence_requirements",
         "assessment_mode_intentional",
+        # compose_discussion.py's uncalibrated capitulation signal (see 4d.
+        # PARTNER_CAPITULATION below and that script's module docstring).
+        "warnings",
     },
     "score_dimensions.json": {
         "items",
@@ -195,7 +233,10 @@ REQUIRED_KEYS: dict[str, set[str]] = {
         "check_size_range",
         "stage_focus",
         "archetypes",
-        "portfolio",
+        # NOTE: "portfolio" is intentionally NOT in this set. fund_profile.py
+        # only requires it for fund_specific mode (a real fund's actual
+        # holdings) — it's optional in generic mode, so it can't be an
+        # unconditional top-level-shape requirement here.
     },
     "conflict_check.json": {
         "portfolio_size",
@@ -271,13 +312,22 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _warn(code: str, message: str) -> dict[str, str]:
-    """Create a warning dict with code, message, and severity."""
-    return {
+def _warn(code: str, message: str, founder_message: str | None = None) -> dict[str, str]:
+    """Create a warning dict with code, message, and severity.
+
+    `message` is agent-facing and unchanged in report.json. `founder_message`
+    is an OPTIONAL additive key stating the founder-visible consequence in
+    plain words (no artifact filename, no raw enum token) -- report.md
+    renders it instead of `message` when present.
+    """
+    w = {
         "code": code,
         "message": message,
         "severity": WARNING_SEVERITY.get(code, "medium"),
     }
+    if founder_message is not None:
+        w["founder_message"] = founder_message
+    return w
 
 
 def _fmt_number(val: Any, fallback: str = "?") -> str:
@@ -322,6 +372,23 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     score_dims = artifacts.get("score_dimensions.json")
     prior = artifacts.get("prior_artifacts.json")
 
+    # 0. UNVALIDATED_ARTIFACT — script provenance check. discussion.json is
+    # the artifact a hand-written verdict used to slip into (see
+    # compose_discussion.py's module docstring) — every real discussion.json
+    # carries the producer's own stamp, so a missing/wrong stamp means
+    # something other than compose_discussion.py wrote this file.
+    EXPECTED_PRODUCERS = {"discussion.json": "compose_discussion"}
+    for name, expected_producer in EXPECTED_PRODUCERS.items():
+        data = artifacts.get(name)
+        if _usable(data) and data.get("_produced_by") != expected_producer:
+            warnings.append(
+                _warn(
+                    "UNVALIDATED_ARTIFACT",
+                    f"Artifact '{name}' exists but was not produced by {expected_producer}.py — "
+                    f"run the script instead of writing the file directly",
+                )
+            )
+
     # 1. CORRUPT_ARTIFACT / MISSING_ARTIFACT — required artifacts
     for name in REQUIRED_ARTIFACTS:
         data = artifacts.get(name)
@@ -360,14 +427,18 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # 3. ORPHANED_CONFLICT — conflict company not found in fund_profile portfolio
     if _usable(conflict_check) and _usable(fund_profile):
         portfolio_names = {
-            _normalize_company(entry.get("name", ""))
+            _normalize_company(name)
             for entry in _as_list(fund_profile.get("portfolio"))
             if isinstance(entry, dict)
+            for name in [entry.get("name", "")]
+            if isinstance(name, str)
         }
         for conflict in _as_list(conflict_check.get("conflicts")):
             if not isinstance(conflict, dict):
                 continue
             company = conflict.get("company", "")
+            if not isinstance(company, str):
+                continue
             if _normalize_company(company) not in portfolio_names:
                 warnings.append(
                     _warn(
@@ -398,10 +469,16 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
         conviction_score = score_summary.get("conviction_score", 0.0)
         verdict = score_summary.get("verdict", "")
 
-        # Suppress if ZERO_APPLICABLE_DIMENSIONS present
+        # Suppress if ZERO_APPLICABLE_DIMENSIONS present, OR if the verdict was intentionally
+        # coverage-capped or coverage-floored (IC-11: too many to_confirm -> forced to
+        # more_diligence while the conviction sits in the invest band, or in the pass band —
+        # both divergences are by design, not errors).
         has_zero_applicable = "ZERO_APPLICABLE_DIMENSIONS" in score_warnings
+        coverage_capped = score_summary.get("coverage_capped") is True
+        coverage_floored = score_summary.get("coverage_floored") is True
+        coverage_held = score_summary.get("coverage_held") is True
 
-        if not has_zero_applicable and verdict in VERDICT_SCORE_RANGES:
+        if not has_zero_applicable and not coverage_capped and not coverage_floored and verdict in VERDICT_SCORE_RANGES:
             low, high = VERDICT_SCORE_RANGES[verdict]
             if not (low <= conviction_score <= high) and verdict != "hard_pass":
                 warnings.append(
@@ -411,6 +488,61 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                         f"(expected range: {low}%-{high}%)",
                     )
                 )
+
+        # Surface the coverage cap so the founder knows the verdict was held back by
+        # undisclosed data, not by the merits.
+        if coverage_capped:
+            to_confirm_n = score_summary.get("to_confirm", 0)
+            warnings.append(
+                _warn(
+                    "LOW_COVERAGE_VERDICT_CAP",
+                    f"{to_confirm_n} dimensions are undisclosed (to_confirm) — verdict capped at "
+                    f"'more_diligence' (conviction {conviction_score}% reflects only the confirmed "
+                    "dimensions). Supply the missing data to lift the cap.",
+                    founder_message=(
+                        f"{to_confirm_n} of the scoring dimensions are still undisclosed, so the "
+                        f"verdict is being held at 'More Diligence' — the {conviction_score}% score "
+                        "reflects only what could be confirmed so far. Share the missing "
+                        "information to get a fuller verdict."
+                    ),
+                )
+            )
+
+        if coverage_held:
+            to_confirm_n = score_summary.get("to_confirm", 0)
+            basis = _as_dict(score_summary.get("conviction_basis"))
+            warnings.append(
+                _warn(
+                    "LOW_COVERAGE_VERDICT_HELD",
+                    f"{to_confirm_n} dimensions are undisclosed and only "
+                    f"{basis.get('applicable', '?')} of {basis.get('total', 28)} were scoreable — the "
+                    "'More Diligence' verdict reflects how little was disclosed, not a considered "
+                    "assessment of the company. It is neither a positive nor a negative signal. Supply "
+                    "the missing data for a real verdict.",
+                )
+            )
+
+        # And the floor. The founder MUST be told the difference between "we looked
+        # and this is a pass" and "we could not look" — presenting the latter as a
+        # decline is the more damaging error of the two.
+        if coverage_floored:
+            to_confirm_n = score_summary.get("to_confirm", 0)
+            warnings.append(
+                _warn(
+                    "LOW_COVERAGE_VERDICT_FLOOR",
+                    f"{to_confirm_n} dimensions are undisclosed (to_confirm) — the low conviction "
+                    f"({conviction_score}%) reflects missing information, not assessed weakness, so the "
+                    "verdict is held at 'more_diligence' rather than a decline. This is NOT a negative "
+                    "signal about the company; supply the missing data for a real verdict.",
+                    founder_message=(
+                        f"The {conviction_score}% score is low because {to_confirm_n} scoring "
+                        "dimensions are still undisclosed — not because of anything weak in what "
+                        "was reviewed. The verdict is being held at 'More Diligence' rather than "
+                        "scored as a decline. This is not a negative signal; share the missing "
+                        "information for a real verdict."
+                    ),
+                )
+            )
 
     # 4b. CONSENSUS_SCORE_MISMATCH
     if _usable(discussion) and _usable(score_dims):
@@ -429,6 +561,17 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # 4c. UNANIMOUS_VERDICT_MISMATCH
     # Only fires when ALL partners share one polarity but consensus has
     # the opposite. Individual dissent (1-2 out of 3) is normal and ignored.
+    #
+    # DORMANT IN NORMAL OPERATION since compose_discussion.py started deriving
+    # consensus_verdict as a majority vote over partner_verdicts itself
+    # (see that script) — a mismatch between the two is now structurally
+    # near-impossible for a real, producer-written discussion.json (majority
+    # of 3 either equals a unanimous vote, or there's dissent, which this
+    # check ignores by design). It is NOT dead code: a hand-written or
+    # otherwise non-derived discussion.json (which UNVALIDATED_ARTIFACT above
+    # flags separately) can still violate this, so it stays as a second,
+    # independent check on that failure mode. Do not read a quiet run of this
+    # warning as evidence the check no longer does anything.
     _POSITIVE_VERDICTS = {"invest", "more_diligence"}
     _NEGATIVE_VERDICTS = {"pass", "hard_pass"}
     if _usable(discussion):
@@ -470,6 +613,73 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                     )
                 )
 
+    # 4d. PARTNER_CAPITULATION — surfaces compose_discussion.py's uncalibrated
+    # POSSIBLE_CAPITULATION signal (>=2 of 3 verdicts changed and converged on
+    # the same value) in the report's own Warnings section. Low severity and
+    # never gating — see that script's module docstring for why it cannot
+    # distinguish genuine persuasion from manufactured agreement.
+    if _usable(discussion) and "POSSIBLE_CAPITULATION" in _as_list(discussion.get("warnings")):
+        warnings.append(
+            _warn(
+                "PARTNER_CAPITULATION",
+                "2 or more partners changed their verdict in the rebuttal round and converged on the "
+                "same value — consistent with genuine persuasion by new evidence, but also with three "
+                "partners folding to whoever argued hardest. This signal cannot tell the two apart; "
+                "read the debate before treating the convergence as settled.",
+            )
+        )
+
+    # 4e. Dealbreaker provenance — which scored dealbreakers the debate actually
+    # argued. Scoring runs after the debate, over all 28 dimensions, and the only
+    # thing tying the two together is a sentence in the SCORE_DIMENSIONS dispatch
+    # asking the sub-agent to reflect debated dealbreakers. That is a soft
+    # instruction, and on a measured run it produced 4 scored dealbreakers against
+    # 3 debated ones, with the report narrating "four independent fatal flaws".
+    #
+    # This does NOT suppress the undebated one — an undebated dealbreaker can be
+    # entirely real (28 dimensions, 3 partners' arguments), and dropping it would
+    # flip hard_pass and hide a fatal flaw. It discloses, so a reader can tell a
+    # partner-argued dealbreaker from a scoring-pass one.
+    if _usable(score_dims):
+        scored_ids = [
+            db.get("id") for db in _as_list(_as_dict(score_dims.get("summary")).get("dealbreakers")) if db.get("id")
+        ]
+        if scored_ids:
+            debated_raw = discussion.get("debated_dealbreakers") if _usable(discussion) else None
+            if isinstance(debated_raw, list):
+                debated_ids = {d.get("dimension") for d in debated_raw if isinstance(d, dict)}
+                undebated = [i for i in scored_ids if i not in debated_ids]
+                if undebated:
+                    warnings.append(
+                        _warn(
+                            "UNDEBATED_DEALBREAKER",
+                            f"{len(undebated)} of {len(scored_ids)} scored dealbreaker(s) "
+                            f"({', '.join(sorted(undebated))}) were never raised as dealbreakers in the "
+                            "partner debate — they come from the scoring pass alone. That does not make "
+                            "them wrong, but they carry less evidentiary weight than a dealbreaker two "
+                            "partners argued, and the report labels which is which.",
+                        )
+                    )
+            else:
+                # No id-level channel in this discussion.json (hand-written, or
+                # produced before compose_discussion.py emitted the field). The
+                # comparison is impossible — say so rather than let "no warning"
+                # read as "every dealbreaker was debated".
+                warnings.append(
+                    _warn(
+                        "DEALBREAKER_PROVENANCE_UNVERIFIABLE",
+                        f"discussion.json carries no 'debated_dealbreakers' list, so none of the "
+                        f"{len(scored_ids)} scored dealbreaker(s) can be traced to the debate. Treat every "
+                        "dealbreaker in this report as unattributed.",
+                        founder_message=(
+                            f"We can't confirm which of the {len(scored_ids)} dealbreaker(s) below "
+                            "were raised and argued in the partner debate versus flagged during "
+                            "scoring alone — that link isn't available for this run. That doesn't "
+                            "mean they're wrong, just that we can't show their provenance."
+                        ),
+                    )
+                )
+
     # 5. PARTNER_UNANIMITY / PARTNER_CONVERGENCE
     if _usable(discussion):
         partner_verdicts = _as_list(discussion.get("partner_verdicts"))
@@ -478,7 +688,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
         if len(partner_verdicts) != 3:
             warnings.append(_warn("INVALID_PARTNER_COUNT", f"Expected 3 partner verdicts, got {len(partner_verdicts)}"))
 
-        if len(partner_verdicts) == 3:
+        if len(partner_verdicts) == 3 and all(isinstance(pv, dict) for pv in partner_verdicts):
             verdicts_list = [pv.get("verdict") for pv in partner_verdicts]
             rationales = [pv.get("rationale", "") for pv in partner_verdicts]
 
@@ -517,7 +727,32 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     if _usable(score_dims):
         score_warnings = _as_list(_as_dict(score_dims.get("summary")).get("warnings"))
         if "ZERO_APPLICABLE_DIMENSIONS" in score_warnings:
-            warnings.append(_warn("ZERO_APPLICABLE", "All dimensions marked not_applicable — score is 0.0"))
+            warnings.append(
+                _warn(
+                    "ZERO_APPLICABLE",
+                    "All dimensions marked not_applicable — score is 0.0",
+                    founder_message=(
+                        "None of the scoring dimensions could be applied to this company, so the "
+                        "0% conviction score doesn't reflect an assessment — it means nothing was "
+                        "scored, not that everything failed."
+                    ),
+                )
+            )
+        if "LOW_CONVICTION_BASIS" in score_warnings:
+            # Read the summary locally rather than leaning on the binding from the
+            # earlier block — both happen to guard on _usable(score_dims), so it
+            # would resolve, but that is an implicit coupling a later edit can break.
+            basis = _as_dict(_as_dict(score_dims.get("summary")).get("conviction_basis"))
+            warnings.append(
+                _warn(
+                    "LOW_CONVICTION_BASIS",
+                    f"The conviction score rests on only {basis.get('applicable')} of "
+                    f"{basis.get('total')} dimensions — the remainder are undisclosed or not "
+                    "applicable. The percentage is arithmetically correct but its precision "
+                    "overstates the evidence; present it with its denominator and do not treat "
+                    "it as comparable to a fully-scored company.",
+                )
+            )
 
     # 7. STALE_IMPORT
     if _usable(prior):
@@ -636,14 +871,24 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 _warn(
                     "HIGH_NA_COUNT",
                     f"{na_count} of 28 dimensions marked not_applicable — conviction score may be inflated",
+                    founder_message=(
+                        f"{na_count} of the 28 scoring dimensions didn't apply to this company, so "
+                        "the conviction score is based on a smaller set than usual and may read "
+                        "higher than it would with fuller coverage."
+                    ),
                 )
             )
 
     # 11. SCHEMA_DRIFT
+    # `metadata` (carrying `metadata.run_id`) is stamped on EVERY producer
+    # artifact per references/artifact-schemas.md — it is not an unexpected
+    # key on any of them, so it's exempted here rather than duplicated into
+    # every EXPECTED_KEYS set below. `_produced_by` is the same story for the
+    # producer-provenance stamp the UNVALIDATED_ARTIFACT check (above) reads.
     for name, expected in EXPECTED_KEYS.items():
         artifact = artifacts.get(name)
         if _usable(artifact):
-            actual_keys = set(artifact.keys())
+            actual_keys = set(artifact.keys()) - {"metadata", "_produced_by"}
             extra = actual_keys - expected
             if extra:
                 warnings.append(
@@ -732,21 +977,88 @@ def _section_executive_summary(
         concern = summary.get("concern", 0)
         db = summary.get("dealbreaker", 0)
 
+        # VC "pass"/"hard_pass" mean DECLINE — but a bare "Pass" reads to a
+        # founder as "passes the bar." Never render the internal enum value
+        # alone; always lead with an unambiguous decision word.
         verdict_label = {
             "invest": "Invest — strong enough for a term sheet discussion",
             "more_diligence": "More Diligence — promising but needs more evidence",
-            "pass": "Pass — too many concerns to proceed at this time",
-            "hard_pass": "Hard Pass — fatal flaw identified",
+            "pass": "Decline — too many concerns to proceed at this time",
+            "hard_pass": "Decline — Hard Pass: fatal flaw identified",
         }.get(verdict, verdict)
 
-        lines.append(f"**Conviction Score:** {score}% — {verdict_label}")
-        lines.append(f"**Breakdown:** {strong} strong, {moderate} moderate, {concern} concern, {db} dealbreaker")
+        # When the verdict was HELD by coverage rather than earned on the merits, the
+        # default wording is wrong in opposite directions: "promising but needs more
+        # evidence" flatters a floored verdict (nothing was assessed, so nothing is
+        # promising) and undersells a capped one (the conviction was in the invest
+        # band). Make the coverage framing the DEFAULT rendering rather than a caveat
+        # the narrator has to remember further down the report.
+        if verdict == "more_diligence":
+            # coverage_held is the case that used to fall through to the merits
+            # wording: nothing moved the verdict, but coverage was too thin for
+            # "promising" to describe anything that was actually assessed.
+            if summary.get("coverage_floored") is True or summary.get("coverage_held") is True:
+                verdict_label = (
+                    "More Diligence — too little disclosed to reach a verdict (this is NOT a negative signal)"
+                )
+            elif summary.get("coverage_capped") is True:
+                verdict_label = (
+                    "More Diligence — the confirmed dimensions score well, but too much is undisclosed to underwrite"
+                )
+
+        # The score never appears without its denominator when the base is thin. "50.0%"
+        # off two applicable dimensions reads as a considered midpoint across the whole
+        # framework; the decimal place implies evidence that does not exist.
+        basis = _as_dict(summary.get("conviction_basis"))
+        if basis.get("sufficient") is False and basis.get("applicable"):
+            lines.append(
+                f"**Conviction Score:** {score}% — {verdict_label}  \n"
+                f"*Scored on {basis.get('applicable')} of {basis.get('total')} dimensions — "
+                f"too thin a base for the percentage to be meaningful. Read the breakdown below, "
+                f"not the headline number.*"
+            )
+        else:
+            lines.append(f"**Conviction Score:** {score}% — {verdict_label}")
+        to_confirm_ct = summary.get("to_confirm", 0)
+        lines.append(
+            f"**Breakdown:** {strong} strong, {moderate} moderate, {concern} concern, {db} dealbreaker"
+            + (f", {to_confirm_ct} to-confirm" if to_confirm_ct else "")
+        )
+        lines.append(
+            "\n*Conviction score = (strong × 1.0 + moderate × 0.5) ÷ applicable dimensions × 100. "
+            "Concerns and N/A earn no credit. A real dealbreaker forces hard_pass regardless of score "
+            "(in generic-fund mode a Fund-Fit dealbreaker is non-blocking — see note below if shown).*"
+        )
+        lines.append(
+            "\n*Verdict legend: **Invest** = proceed to term sheet discussion. "
+            "**More Diligence** = promising, needs more evidence. **Decline** (internal `pass`) "
+            "= would not proceed today. **Decline — Hard Pass** (internal `hard_pass`) = a fatal "
+            "flaw makes this a decline regardless of score.*"
+        )
+
+        # GENERIC_MODE_DEALBREAKER_NON_BLOCKING: a Fund-Fit dealbreaker (derived from the
+        # synthesized fund persona) was recorded but did NOT override the verdict — only the
+        # Fund-Fit ones are simulated; startup-side dealbreakers still force hard_pass. Name
+        # exactly which dimensions were treated as simulated so the note can't be read as
+        # excusing a real fatal flaw.
+        simulated_ids = summary.get("simulated_dealbreaker_ids") or []
+        if simulated_ids:
+            labels = ", ".join(f"`{sid}`" for sid in simulated_ids)
+            lines.append(
+                f"\n> **Note:** {len(simulated_ids)} Fund-Fit dealbreaker(s) ({labels}) were flagged "
+                "during this illustrative/generic-fund simulation and treated as **simulated and "
+                "non-blocking** — their evidence derives from the synthesized fund persona (invented "
+                "portfolio / check-size / thesis), not a real fund, so they cannot override the "
+                "merits-based score. Any startup-side dealbreaker still forces a hard decline."
+            )
 
     if discussion is not None and not _is_stub(discussion):
         partner_verdicts = _as_list(discussion.get("partner_verdicts"))
         if partner_verdicts:
             verdict_strs = [
-                f"{(pv.get('partner') or '?').title()}: {pv.get('verdict') or '?'}" for pv in partner_verdicts
+                f"{(pv.get('partner') or '?').title()}: {pv.get('verdict') or '?'}"
+                for pv in partner_verdicts
+                if isinstance(pv, dict)
             ]
             lines.append(f"**Partner Split:** {' | '.join(verdict_strs)}")
 
@@ -775,12 +1087,20 @@ def _section_fund_profile(fund: dict[str, Any] | None) -> str:
     lines.append(f"**Fund:** {fund.get('fund_name', '?')}")
     lines.append(f"**Mode:** {fund.get('mode', '?')}")
 
+    if fund.get("mode") == "generic":
+        lines.append(
+            "\n> **Illustrative fund profile.** This is a synthesized generic-fund persona "
+            "built for this simulation — not a real fund's actual thesis, partners, or "
+            "portfolio holdings. Any portfolio companies and conflicts referenced anywhere "
+            "in this report are fictional constructs, not real investments."
+        )
+
     thesis = _as_list(fund.get("thesis_areas"))
     if thesis:
         lines.append(f"**Thesis Areas:** {', '.join(str(t) for t in thesis)}")
 
     check_size = fund.get("check_size_range", {})
-    if check_size:
+    if isinstance(check_size, dict) and check_size:
         currency = check_size.get("currency", "USD")
         min_str = _fmt_number(check_size.get("min"))
         max_str = _fmt_number(check_size.get("max"))
@@ -790,6 +1110,8 @@ def _section_fund_profile(fund: dict[str, Any] | None) -> str:
     if archetypes:
         lines.append("\n**Partners:**")
         for arch in archetypes:
+            if not isinstance(arch, dict):
+                continue
             role = arch.get("role", "?").title()
             name = arch.get("name", "?")
             lines.append(f"- **{name}** ({role}): {arch.get('background', '?')}")
@@ -840,6 +1162,17 @@ def _section_discussion(discussion: dict[str, Any] | None) -> str:
         if rationale:
             lines.append(f"\n{rationale}")
 
+    # Key concerns from discussion (item 14 — collected but previously dropped)
+    key_concerns = _as_list(discussion.get("key_concerns"))
+    if key_concerns:
+        lines.append("\n### Key Concerns\n")
+        for concern in key_concerns:
+            if isinstance(concern, str) and concern.strip():
+                lines.append(f"- {concern}")
+            elif isinstance(concern, dict) and concern.get("concern"):
+                lines.append(f"- {concern['concern']}")
+        lines.append("")
+
     # Debate sections
     debate = _as_list(discussion.get("debate_sections"))
     if debate:
@@ -874,15 +1207,19 @@ def _section_scorecard(score_dims: dict[str, Any] | None) -> str:
     )
 
     # Category summary
-    lines.append("| Category | Strong | Moderate | Concern | Dealbreaker | N/A |")
-    lines.append("|----------|--------|----------|---------|-------------|-----|")
+    lines.append("| Category | Strong | Moderate | Concern | Dealbreaker | To Confirm | N/A |")
+    lines.append("|----------|--------|----------|---------|-------------|------------|-----|")
     for cat, counts in by_cat.items():
+        if not isinstance(counts, dict):
+            continue
         lines.append(
             f"| {cat} | {counts.get('strong_conviction', 0)} | {counts.get('moderate_conviction', 0)} "
             f"| {counts.get('concern', 0)} | {counts.get('dealbreaker', 0)} "
-            f"| {counts.get('not_applicable', 0)} |"
+            f"| {counts.get('to_confirm', 0)} | {counts.get('not_applicable', 0)} |"
         )
     lines.append("")
+
+    lines.append("\n*Dimensions are scored once by the committee as a whole, not per partner.*\n")
 
     # Full item table
     status_icons = {
@@ -890,22 +1227,54 @@ def _section_scorecard(score_dims: dict[str, Any] | None) -> str:
         "moderate_conviction": "MODERATE",
         "concern": "CONCERN",
         "dealbreaker": "DEALBREAKER",
+        "to_confirm": "TO CONFIRM",
         "not_applicable": "N/A",
     }
 
-    lines.append("| # | Category | Dimension | Status |")
-    lines.append("|---|----------|-----------|--------|")
+    lines.append("| # | Category | Dimension | Status | Evidence |")
+    lines.append("|---|----------|-----------|--------|----------|")
     for i, item in enumerate(items, 1):
+        if not isinstance(item, dict):
+            continue
         cat = item.get("category", "?")
         label = item.get("label", item.get("id", "?"))
         status = status_icons.get(item.get("status", "?"), "?")
-        lines.append(f"| {i} | {cat} | {label} | {status} |")
+        raw_evidence = item.get("evidence") or ""
+        evidence = str(raw_evidence)
+        if len(evidence) > 120:
+            evidence = evidence[:117] + "..."
+        evidence = evidence.replace("|", "\\|").replace("\n", " ")
+        lines.append(f"| {i} | {cat} | {label} | {status} | {evidence} |")
 
     return "\n".join(lines) + "\n"
 
 
-def _section_concerns(score_dims: dict[str, Any] | None) -> str:
-    """Concerns and dealbreakers."""
+def _dealbreaker_provenance(discussion: dict[str, Any] | None) -> dict[str, list[str]] | None:
+    """Map dimension id -> the archetypes that raised it as a dealbreaker in the
+    debate. Returns None when discussion.json carries no id-level channel, which
+    is NOT the same as "nothing was debated" and must not be rendered as such."""
+    if not _usable(discussion):
+        return None
+    debated = discussion.get("debated_dealbreakers")
+    if not isinstance(debated, list):
+        return None
+    out: dict[str, list[str]] = {}
+    for entry in debated:
+        if not isinstance(entry, dict):
+            continue
+        dimension = entry.get("dimension")
+        if isinstance(dimension, str) and dimension:
+            out[dimension] = [a for a in _as_list(entry.get("raised_by")) if isinstance(a, str)]
+    return out
+
+
+def _section_concerns(score_dims: dict[str, Any] | None, discussion: dict[str, Any] | None = None) -> str:
+    """Concerns and dealbreakers.
+
+    Each dealbreaker is labelled with its provenance — argued by named partners
+    in the debate, or produced by the scoring pass alone. The two are not equally
+    evidenced and the report should not present them as if they were.
+    """
     if score_dims is None or _is_stub(score_dims):
         return ""
 
@@ -919,11 +1288,25 @@ def _section_concerns(score_dims: dict[str, Any] | None) -> str:
     lines = ["## Concerns and Dealbreakers\n"]
 
     if dealbreakers:
+        provenance = _dealbreaker_provenance(discussion)
         lines.append("### Dealbreakers\n")
         for db in dealbreakers:
             lines.append(f"- **{db.get('label', db.get('id', '?'))}** ({db.get('category', '?')})")
+            if provenance is None:
+                lines.append("  - *Debate provenance: unavailable — could not be traced to the partner debate.*")
+            elif db.get("id") in provenance:
+                raised_by = provenance[db["id"]] or []
+                who = ", ".join(a.title() for a in raised_by) if raised_by else "the debate"
+                lines.append(f"  - *Raised as a dealbreaker in the debate by: {who}.*")
+            else:
+                lines.append(
+                    "  - *From the scoring pass — no partner raised this as a dealbreaker in the debate. "
+                    "It may still be real; it is simply less corroborated than a partner-argued one.*"
+                )
             if db.get("notes"):
                 lines.append(f"  - {db['notes']}")
+            if db.get("evidence"):
+                lines.append(f"  - *Basis: {db['evidence']}*")
         lines.append("")
 
     if concerns:
@@ -932,7 +1315,49 @@ def _section_concerns(score_dims: dict[str, Any] | None) -> str:
             lines.append(f"- **{c.get('label', c.get('id', '?'))}** ({c.get('category', '?')})")
             if c.get("notes"):
                 lines.append(f"  - {c['notes']}")
+            if c.get("evidence"):
+                lines.append(f"  - *Basis: {c['evidence']}*")
         lines.append("")
+
+    return "\n".join(lines) + "\n"
+
+
+def _section_partner_questions(partner_assessments: list[dict[str, Any] | None]) -> str:
+    """Questions the Partners Would Ask You — rendered from partner_assessment_*.json artifacts."""
+    usable = [pa for pa in partner_assessments if _usable(pa)]
+    if not usable:
+        return ""
+
+    lines = ["## Questions the Partners Would Ask You\n"]
+    lines.append(
+        "*These questions come from each partner's individual assessment. "
+        "They are generated based on archetype personas — use them to stress-test your narrative.*\n"
+    )
+
+    for pa in usable:
+        partner = (pa.get("partner") or "unknown").title()
+        lines.append(f"### {partner}\n")
+
+        conviction_points = _as_list(pa.get("conviction_points"))
+        if conviction_points:
+            lines.append("**What I like:**")
+            for cp in conviction_points:
+                lines.append(f"- {cp}")
+            lines.append("")
+
+        key_concerns = _as_list(pa.get("key_concerns"))
+        if key_concerns:
+            lines.append("**What gives me pause:**")
+            for kc in key_concerns:
+                lines.append(f"- {kc}")
+            lines.append("")
+
+        questions = _as_list(pa.get("questions_for_founders"))
+        if questions:
+            lines.append("**Questions I would ask:**")
+            for q in questions:
+                lines.append(f"- {q}")
+            lines.append("")
 
     return "\n".join(lines) + "\n"
 
@@ -962,7 +1387,7 @@ def _section_warnings(warnings: list[dict[str, str]]) -> str:
     for w in warnings:
         sev = w.get("severity", "?")
         code = w.get("code", "?")
-        msg = w.get("message", "?")
+        msg = w.get("founder_message") or w.get("message", "?")
         label = _humanize_warning(code)
         icon = sev_icons.get(sev, "")
         prefix = f"[{icon}] " if icon else ""
@@ -970,9 +1395,34 @@ def _section_warnings(warnings: list[dict[str, str]]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _derive_consensus_strength(discussion: dict[str, Any]) -> str:
+    """Derive consensus_strength from discussion.json partner_verdicts.
+
+    "strong" = all 3 partner verdicts match, "mixed" = a 2-1 split,
+    "weak" = otherwise (no clear majority, missing/malformed verdicts).
+    """
+    verdicts = [
+        _normalize_verdict(pv.get("verdict"))
+        for pv in _as_list(discussion.get("partner_verdicts"))
+        if isinstance(pv, dict) and pv.get("verdict")
+    ]
+    if len(verdicts) != 3:
+        return "weak"
+    counts: dict[str, int] = {}
+    for v in verdicts:
+        counts[v] = counts.get(v, 0) + 1
+    top = max(counts.values())
+    if top == 3:
+        return "strong"
+    if top == 2:
+        return "mixed"
+    return "weak"
+
+
 def _emit_coaching_payload(
     startup_profile: dict[str, Any],
     score_dims: dict[str, Any],
+    discussion: dict[str, Any],
     validation_warnings: list[dict[str, str]],
     review_dir: str,
     report_path: str,
@@ -981,7 +1431,7 @@ def _emit_coaching_payload(
     """Build the v0.4.2 coaching_payload for ic-sim (schema_version v0.4.2-ic-sim).
 
     Uses dimension-based schema (no checklist concept).
-    Source: score_dimensions.json summary fields.
+    Source: score_dimensions.json summary fields + discussion.json partner verdicts.
     """
     summary = _as_dict(score_dims.get("summary"))
 
@@ -1022,6 +1472,7 @@ def _emit_coaching_payload(
 
     return {
         "schema_version": "v0.4.2-ic-sim",
+        "consensus_strength": _derive_consensus_strength(discussion),
         "summary": {
             "verdict": summary.get("verdict"),
             "conviction_score": summary.get("conviction_score"),
@@ -1084,8 +1535,6 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
                     w["message"] += f" [Accepted: {acc['reason']}]"
                     break
 
-    status = "clean" if not warnings else "warnings"
-
     # Assemble report sections — treat corrupt artifacts as None for rendering
     def _render_safe(data: dict[str, Any] | None) -> dict[str, Any] | None:
         return None if data is _CORRUPT else data
@@ -1096,28 +1545,36 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     discussion = _render_safe(artifacts.get("discussion.json"))
     score_dims = _render_safe(artifacts.get("score_dimensions.json"))
 
-    sections = [
+    # Partner assessment artifacts (optional — degrade gracefully when absent)
+    partner_assessments: list[dict[str, Any] | None] = [
+        _render_safe(artifacts.get(pa_file)) for pa_file in PARTNER_ASSESSMENT_FILES
+    ]
+
+    # Render every section EXCEPT Warnings first; the Warnings section, status,
+    # validation.warnings, and coaching_payload must all observe the SAME final
+    # warnings list — including any MARKER_COLLISION discovered by scanning the body.
+    pre_warning_sections = [
         _section_title(profile),
         _section_executive_summary(profile, score_dims, discussion),
         _section_fund_profile(fund),
         _section_conflict_check(conflict),
         _section_discussion(discussion),
         _section_scorecard(score_dims),
-        _section_concerns(score_dims),
+        _section_concerns(score_dims, discussion),
+        _section_partner_questions(partner_assessments),
         _section_diligence(discussion),
-        _section_warnings(warnings),
     ]
-
-    report_markdown = "\n".join(s for s in sections if s)
+    body_markdown = "\n".join(s for s in pre_warning_sections if s)
 
     # v0.4.2 Mitigation 2: per-run uuid marker for Context B's Edit
     marker = f"<!-- COACHING_INSERTION_POINT_{uuid.uuid4().hex[:8]} -->"
 
-    # Pre-scan: check assembled body BEFORE appending the marker (otherwise we
-    # always find our own emission). Agent post-Edit verification uses the
-    # EXACT uuid (per-run), so substring collisions with body content are
-    # informational only — but worth flagging so authors can sanitize.
-    if "<!-- COACHING_INSERTION_POINT_" in report_markdown:
+    # Pre-scan the body (before appending our own marker, otherwise we always
+    # find our own emission). Agent post-Edit verification uses the EXACT uuid
+    # (per-run), so substring collisions with body content are informational
+    # only — but worth flagging so authors can sanitize. Append BEFORE status is
+    # computed and BEFORE the Warnings section is rendered so all consumers agree.
+    if "<!-- COACHING_INSERTION_POINT_" in body_markdown:
         warnings.append(
             _warn(
                 "MARKER_COLLISION",
@@ -1129,11 +1586,19 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
             )
         )
 
+    status = "clean" if not warnings else "warnings"
+
+    # Render the Warnings section against the final warnings list and splice it in.
+    warnings_section = _section_warnings(warnings)
+    sections = [body_markdown, warnings_section] if warnings_section else [body_markdown]
+    report_markdown = "\n".join(s for s in sections if s)
+
     report_markdown += (
         f"\n\n{marker}\n\n---\n"
         "*Generated by [founder skills](https://github.com/lool-ventures/founder-skills)"
         " by [lool ventures](https://lool.vc)"
-        " — IC Simulation Agent*\n"
+        " — IC Simulation Agent"
+        " · [Share feedback](https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback)*\n"
     )
 
     # Stderr summary
@@ -1158,6 +1623,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     coaching_payload = _emit_coaching_payload(
         startup_profile=_as_dict(profile),
         score_dims=_as_dict(score_dims),
+        discussion=_as_dict(discussion),
         validation_warnings=warnings,
         review_dir=os.path.abspath(dir_path),
         report_path=resolved_report_path,

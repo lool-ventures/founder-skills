@@ -135,28 +135,69 @@ _CANONICAL_CATEGORIES = [
 _CANONICAL_PARTNERS = ["visionary", "operator", "analyst"]
 
 _VERDICT_COLORS: dict[str, str] = {
-    "invest": "#10b981",
-    "more_diligence": "#f59e0b",
-    "pass": "#ef4444",
-    "hard_pass": "#ef4444",
+    "invest": "#2F8A56",
+    "more_diligence": "#C9892B",
+    "pass": "#C0392B",
+    "hard_pass": "#92301F",
 }
 
+# VC "pass"/"hard_pass" mean DECLINE, but a bare "Pass" label reads to a
+# founder as "passes the bar." Never render the internal enum value alone.
+_VERDICT_LABELS: dict[str, str] = {
+    "invest": "Invest",
+    "more_diligence": "More Diligence",
+    "pass": "Decline",
+    "hard_pass": "Decline — Hard Pass",
+}
+
+
+def _verdict_label(verdict: str) -> str:
+    """Founder-facing verdict label — never a bare 'Pass' for the internal
+    'pass'/'hard_pass' enum values."""
+    return _VERDICT_LABELS.get(verdict, verdict.replace("_", " ").title())
+
+
+def _overall_verdict_label(verdict: str, summary: dict[str, Any]) -> str:
+    """Founder-facing label for the OVERALL score verdict, coverage-aware.
+
+    A 'more_diligence' verdict can mean three different things, per
+    score_dimensions.py: genuinely promising-but-unproven (the merits
+    default), held/floored to more_diligence because too little was
+    disclosed to score at all (`coverage_floored` / `coverage_held` — these
+    two SHARE one label, see that script's module comments), or capped down
+    from an invest-band score because too much is undisclosed to underwrite
+    (`coverage_capped` — its own, separate label). Collapsing all three into
+    a bare "More Diligence" drops the exact distinction compose_report.py's
+    markdown draws for the same summary dict.
+    """
+    label = _verdict_label(verdict)
+    if verdict == "more_diligence":
+        if summary.get("coverage_floored") is True or summary.get("coverage_held") is True:
+            return f"{label} — Low Coverage"
+        if summary.get("coverage_capped") is True:
+            return f"{label} — Capped"
+    return label
+
+
 _STATUS_COLORS: dict[str, str] = {
-    "strong_conviction": "#10b981",
-    "moderate_conviction": "#f59e0b",
-    "concern": "#ef4444",
-    "dealbreaker": "#b91c1c",
-    "not_applicable": "#9ca3af",
+    "strong_conviction": "#2F8A56",
+    "moderate_conviction": "#C9892B",
+    "concern": "#C0392B",
+    "dealbreaker": "#92301F",
+    "not_applicable": "#A6AEB5",
+    "to_confirm": "#6C7A89",
 }
 
 _SEVERITY_COLORS: dict[str, str] = {
-    "clear": "#10b981",
-    "manageable": "#f59e0b",
-    "blocking": "#ef4444",
+    "clear": "#2F8A56",
+    "manageable": "#C9892B",
+    "blocking": "#C0392B",
 }
 
-_CLR_PRIMARY = "#0d549d"
-_CLR_ACCENT = "#21a2e3"
+_CLR_NEUTRAL = "#A6AEB5"
+
+_CLR_PRIMARY = "#0D549D"
+_CLR_ACCENT = "#21A2E3"
 
 
 # ---------------------------------------------------------------------------
@@ -164,52 +205,60 @@ _CLR_ACCENT = "#21a2e3"
 # ---------------------------------------------------------------------------
 
 
-def _css() -> str:
+def _css(brand_css: str) -> str:
     """Return the full CSS block for the report."""
-    return """
-    <style>
+    return (
+        "\n    <style>\n"
+        + brand_css
+        + """
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-                         "Helvetica Neue", Arial, sans-serif;
-            background: #f9fafb; color: #1f2937; line-height: 1.6;
+            font-family: var(--font-body);
+            background: var(--lool-white); color: var(--lool-ink); line-height: 1.6;
             padding: 2rem; max-width: 1100px; margin: 0 auto;
+            -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
         }
-        h1 { color: #0d549d; font-size: 1.8rem; margin-bottom: 0.25rem; }
+        h1 { color: var(--lool-blue); font-weight: 400; font-size: 1.8rem; margin-bottom: 0.25rem; }
         h2 {
-            color: #0d549d; font-size: 1.2rem; margin: 2rem 0 1rem;
-            border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem;
+            color: var(--lool-royal); font-weight: 500; font-size: 1.2rem; margin: 2rem 0 1rem;
+            border-bottom: 1px solid var(--lool-line-2); padding-bottom: 0.5rem;
         }
-        .subtitle { color: #6b7280; font-size: 0.9rem; margin-bottom: 2rem; }
+        .subtitle { color: var(--lool-mute); font-size: 0.9rem; margin-bottom: 2rem; }
         .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
         .chart-box {
-            background: #ffffff; border-radius: 12px; padding: 1.5rem;
-            border: 1px solid #e5e7eb;
+            background: var(--lool-paper); padding: 1.5rem;
+            border: 1px solid var(--lool-line-2);
         }
         .chart-box.full { grid-column: 1 / -1; }
         .partner-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
         .partner-card {
-            border-radius: 10px; padding: 1rem; border-left: 4px solid;
-            background: #ffffff;
+            padding: 1rem; border: 1px solid var(--lool-line-2);
+            border-left: 4px solid var(--lool-line);
+            background: var(--lool-paper);
         }
-        .partner-card h3 { font-size: 1rem; margin-bottom: 0.25rem; }
+        .partner-card h3 { font-size: 1rem; font-weight: 500; margin-bottom: 0.25rem; }
         .partner-card .verdict { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem; }
-        .partner-card .rationale { font-size: 0.8rem; color: #6b7280; }
+        .partner-card .rationale { font-size: 0.8rem; color: var(--lool-mute); }
         .badge {
-            display: inline-block; padding: 0.25rem 0.75rem; border-radius: 9999px;
+            display: inline-block; padding: 0.25rem 0.75rem; border-radius: var(--r-pill);
             font-size: 0.8rem; font-weight: 600; color: #fff;
         }
         .conflict-table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.85rem; }
-        .conflict-table th { text-align: left; color: #6b7280; padding: 0.5rem; border-bottom: 1px solid #e5e7eb; }
-        .conflict-table td { padding: 0.5rem; border-bottom: 1px solid #f3f4f6; }
-        .placeholder { color: #6b7280; font-style: italic; padding: 2rem; text-align: center; }
+        .conflict-table th {
+            text-align: left; color: var(--lool-subtle); padding: 0.5rem;
+            border-bottom: 1px solid var(--lool-line-2);
+        }
+        .conflict-table td { padding: 0.5rem; border-bottom: 1px solid var(--lool-line-2); }
+        .placeholder { color: var(--lool-mute); font-style: italic; padding: 2rem; text-align: center; }
         .footer {
             margin-top: 3rem; padding-top: 1rem;
-            border-top: 1px solid #e5e7eb; color: #9ca3af;
+            border-top: 1px solid var(--lool-line-2); color: var(--lool-faint);
             font-size: 0.75rem; text-align: center;
         }
-        .footer a { color: #21a2e3; text-decoration: none; }
-        .chart-box h2 { border-bottom-color: #334155; margin-top: 0; }
+        .footer a { color: var(--lool-azure); text-decoration: none; }
+        .footer a:hover { color: var(--lool-azure-deep); }
+        .footer-credit { text-align: center; }
+        .chart-box h2 { border-bottom-color: var(--lool-line-2); margin-top: 0; }
         svg { max-width: 100%; height: auto; }
         .collapsible-toggle {
             cursor: pointer; user-select: none; display: flex;
@@ -219,14 +268,14 @@ def _css() -> str:
         .collapsible-toggle.open::before { transform: rotate(90deg); }
         .collapsible-body { display: none; }
         .collapsible-body.open { display: block; }
-        .finding-strong { color: #10b981; }
-        .finding-attention { color: #ef4444; }
+        .finding-strong { color: var(--lool-success); }
+        .finding-attention { color: var(--lool-danger); }
         [data-tooltip] { position: relative; cursor: help; }
         #tooltip-box {
-            display: none; position: fixed; background: #1f2937; color: #f9fafb;
-            padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 0.8rem;
+            display: none; position: fixed; background: var(--lool-slate); color: var(--lool-white);
+            padding: 0.5rem 0.75rem; border-radius: var(--r-input); font-size: 0.8rem;
             max-width: 300px; z-index: 9999; pointer-events: none;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            box-shadow: var(--shadow-soft);
         }
         @media (max-width: 768px) {
             body { padding: 1rem; }
@@ -235,13 +284,14 @@ def _css() -> str:
         }
         @media print {
             body { background: #fff; padding: 0; }
-            .chart-box { break-inside: avoid; border: 1px solid #d1d5db; }
+            .chart-box { break-inside: avoid; border: 1px solid var(--lool-line); }
             .collapsible-body { display: block !important; }
             .collapsible-toggle::before { content: ""; }
             #tooltip-box { display: none !important; }
         }
     </style>
 """
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +366,46 @@ def _collapsible_js() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Dealbreaker provenance
+# ---------------------------------------------------------------------------
+
+
+def _dealbreaker_provenance(discussion: dict[str, Any] | None) -> dict[str, list[str]] | None:
+    """Map dimension id -> the archetypes that raised it as a dealbreaker in
+    the debate. Returns None when discussion.json carries no id-level
+    channel at all — that is NOT the same as "nothing was debated" and must
+    not be rendered as such. Mirrors compose_report.py's
+    _dealbreaker_provenance so the HTML and Markdown reports agree."""
+    if not _usable(discussion):
+        return None
+    debated = discussion.get("debated_dealbreakers")
+    if not isinstance(debated, list):
+        return None
+    out: dict[str, list[str]] = {}
+    for entry in debated:
+        if not isinstance(entry, dict):
+            continue
+        dimension = entry.get("dimension")
+        if isinstance(dimension, str) and dimension:
+            out[dimension] = [a for a in _as_list(entry.get("raised_by")) if isinstance(a, str)]
+    return out
+
+
+def _dealbreaker_provenance_suffix(db_id: str, provenance: dict[str, list[str]] | None) -> str:
+    """Short founder-facing suffix distinguishing a dealbreaker two partners
+    argued in the debate from one the scoring pass produced alone, or from
+    the case where provenance can't be traced at all — the three cases
+    compose_report.py's Markdown draws, condensed for a Key Findings bullet."""
+    if provenance is None:
+        return " (debate provenance unavailable)"
+    if db_id in provenance:
+        raised_by = provenance[db_id] or []
+        who = ", ".join(a.title() for a in raised_by) if raised_by else "the debate"
+        return f" (raised in debate by {who})"
+    return " (scoring pass only — not raised in debate)"
+
+
+# ---------------------------------------------------------------------------
 # Key Findings
 # ---------------------------------------------------------------------------
 
@@ -334,21 +424,31 @@ def _key_findings(
         summary = _as_dict(score_dims.get("summary"))
         by_cat = _as_dict(summary.get("by_category"))
 
-        # Strong categories (all strong conviction, no concerns/dealbreakers)
+        # Strong categories: positive (>=1 strong) with no concerns/dealbreakers.
+        # Only claim "all strong conviction" when no moderate convictions exist
+        # either — otherwise the category is strong-leaning but mixed.
         for cat in _CANONICAL_CATEGORIES:
             counts = _as_dict(by_cat.get(cat))
             s = int(_num(counts.get("strong_conviction"), 0))
+            m = int(_num(counts.get("moderate_conviction"), 0))
             c = int(_num(counts.get("concern"), 0))
             d = int(_num(counts.get("dealbreaker"), 0))
             if s > 0 and c == 0 and d == 0:
-                strong.append(f"{cat} scores all strong conviction")
+                if m == 0:
+                    strong.append(f"{cat} scores all strong conviction")
+                else:
+                    strong.append(f"{cat} leans strong with no concerns")
 
-        # Dealbreakers
+        # Dealbreakers — labelled with debate provenance so a partner-argued
+        # dealbreaker isn't presented identically to a scoring-pass-only one.
+        provenance = _dealbreaker_provenance(discussion)
         for db in _as_list(summary.get("dealbreakers")):
             if isinstance(db, dict):
                 label = str(db.get("label", db.get("id", "?")))
                 cat = str(db.get("category", ""))
-                attention.append(f"Dealbreaker in {cat}: {label}")
+                db_id = str(db.get("id", ""))
+                suffix = _dealbreaker_provenance_suffix(db_id, provenance)
+                attention.append(f"Dealbreaker in {cat}: {label}{suffix}")
 
         # Top concerns
         for tc in _as_list(summary.get("top_concerns")):
@@ -384,7 +484,7 @@ def _key_findings(
         parts.append(
             '<div style="margin-bottom:1rem;">'
             '<strong class="finding-strong">What\'s strong</strong>'
-            '<ul style="margin:0.25rem 0 0 1.25rem;color:#6b7280;'
+            '<ul style="margin:0.25rem 0 0 1.25rem;color:var(--lool-mute);'
             'font-size:0.9rem;">'
         )
         for item in strong:
@@ -395,7 +495,7 @@ def _key_findings(
         parts.append(
             '<div style="margin-bottom:1rem;">'
             '<strong class="finding-attention">What needs attention</strong>'
-            '<ul style="margin:0.25rem 0 0 1.25rem;color:#6b7280;'
+            '<ul style="margin:0.25rem 0 0 1.25rem;color:var(--lool-mute);'
             'font-size:0.9rem;">'
         )
         for item in attention:
@@ -406,7 +506,7 @@ def _key_findings(
         parts.append(
             '<div style="margin-bottom:1rem;">'
             "<strong>Top actions</strong>"
-            '<ul style="margin:0.25rem 0 0 1.25rem;color:#6b7280;'
+            '<ul style="margin:0.25rem 0 0 1.25rem;color:var(--lool-mute);'
             'font-size:0.9rem;">'
         )
         for item in actions:
@@ -455,34 +555,46 @@ def _chart_conviction_gauge(score_dims: dict[str, Any] | None) -> str:
     arc_end_x = cx + r
     arc_end_y = cy
 
-    verdict_color = _VERDICT_COLORS.get(verdict, "#9ca3af")
-    verdict_label = _esc(verdict.replace("_", " ").title())
+    verdict_color = _VERDICT_COLORS.get(verdict, _CLR_NEUTRAL)
+    verdict_label = _esc(_overall_verdict_label(verdict, summary))
+
+    # Coverage denominator — mirrors compose_report.py's executive-summary
+    # guard: "50.0%" off two applicable dimensions reads as a considered
+    # midpoint across the whole framework, and the gauge's ".1f" is MORE
+    # precision than the Markdown's rounded integer, so the caveat is at
+    # least as necessary here.
+    basis = _as_dict(summary.get("conviction_basis"))
+    coverage_note: str | None = None
+    if basis.get("sufficient") is False and basis.get("applicable") is not None:
+        coverage_note = f"Scored on {basis.get('applicable')} of {basis.get('total', '?')} dims"
 
     # Needle tip on the arc
     needle_len = r - 10.0
     needle_x = cx + needle_len * math.cos(score_angle)
     needle_y = cy - needle_len * math.sin(score_angle)
 
+    view_h = 170 if coverage_note is None else 192
+
     svg_parts = [
-        '<svg viewBox="0 0 300 170" xmlns="http://www.w3.org/2000/svg">',
+        f'<svg viewBox="0 0 300 {view_h}" xmlns="http://www.w3.org/2000/svg">',
         # Background arc zones (no overlay arc — just zones + needle)
         # Red zone: full semi-circle
         f'<path d="M {start_x:.2f} {start_y:.2f}'
         f" A {r:.2f} {r:.2f} 0 1 1"
         f' {arc_end_x:.2f} {arc_end_y:.2f}"'
-        ' fill="none" stroke="#ef4444" stroke-width="18"'
+        ' fill="none" stroke="#C0392B" stroke-width="18"'
         ' stroke-opacity="0.25"/>',
         # Yellow zone: 50%–75%
         f'<path d="M {z50_x:.2f} {z50_y:.2f}'
         f" A {r:.2f} {r:.2f} 0 0 1"
         f' {z75_x:.2f} {z75_y:.2f}"'
-        ' fill="none" stroke="#f59e0b" stroke-width="18"'
+        ' fill="none" stroke="#C9892B" stroke-width="18"'
         ' stroke-opacity="0.25"/>',
         # Green zone: 75%–100%
         f'<path d="M {z75_x:.2f} {z75_y:.2f}'
         f" A {r:.2f} {r:.2f} 0 0 1"
         f' {arc_end_x:.2f} {arc_end_y:.2f}"'
-        ' fill="none" stroke="#10b981" stroke-width="18"'
+        ' fill="none" stroke="#2F8A56" stroke-width="18"'
         ' stroke-opacity="0.25"/>',
         # Needle line
         f'<line x1="{cx:.2f}" y1="{cy:.2f}"'
@@ -501,13 +613,20 @@ def _chart_conviction_gauge(score_dims: dict[str, Any] | None) -> str:
     )
     # Verdict label
     svg_parts.append(
-        f'<text x="{cx:.2f}" y="{cy + 8:.2f}" text-anchor="middle" font-size="14" fill="#6b7280">{verdict_label}</text>'
+        f'<text x="{cx:.2f}" y="{cy + 8:.2f}" text-anchor="middle" font-size="14" fill="#7D90A3">{verdict_label}</text>'
     )
+    # Coverage caveat — the score never appears without its denominator when
+    # the base is too thin for the percentage to be meaningful.
+    if coverage_note is not None:
+        svg_parts.append(
+            f'<text x="{cx:.2f}" y="{cy + 26:.2f}" text-anchor="middle"'
+            f' font-size="10" fill="#7D90A3">{_esc(coverage_note)}</text>'
+        )
     svg_parts.append("</svg>")
 
     svg = "\n".join(svg_parts)
     ai_note = (
-        '<div style="color:#6b7280;font-size:0.75rem;text-align:center;'
+        '<div style="color:var(--lool-mute);font-size:0.75rem;text-align:center;'
         'margin-top:0.5rem;font-style:italic;">AI-generated assessment</div>'
     )
     return f'<div class="chart-box"><h2>Conviction Gauge</h2>{svg}{ai_note}</div>'
@@ -575,7 +694,7 @@ def _chart_category_radar(score_dims: dict[str, Any] | None) -> str:
             px = cx + ring_r * math.cos(a)
             py = cy + ring_r * math.sin(a)
             points.append(f"{px:.2f},{py:.2f}")
-        svg_lines.append(f'<polygon points="{" ".join(points)}" fill="none" stroke="#d1d5db" stroke-width="0.5"/>')
+        svg_lines.append(f'<polygon points="{" ".join(points)}" fill="none" stroke="#D7DBE0" stroke-width="0.5"/>')
 
     # Draw axis lines
     for i in range(n):
@@ -583,7 +702,7 @@ def _chart_category_radar(score_dims: dict[str, Any] | None) -> str:
         ex = cx + max_r * math.cos(a)
         ey = cy + max_r * math.sin(a)
         svg_lines.append(
-            f'<line x1="{cx:.2f}" y1="{cy:.2f}" x2="{ex:.2f}" y2="{ey:.2f}" stroke="#d1d5db" stroke-width="0.5"/>'
+            f'<line x1="{cx:.2f}" y1="{cy:.2f}" x2="{ex:.2f}" y2="{ey:.2f}" stroke="#D7DBE0" stroke-width="0.5"/>'
         )
 
     # Data polygon
@@ -600,13 +719,13 @@ def _chart_category_radar(score_dims: dict[str, Any] | None) -> str:
 
     svg_lines.append(
         f'<polygon points="{" ".join(data_points)}"'
-        f' fill="#21a2e3" fill-opacity="0.2" stroke="#21a2e3" stroke-width="2"/>'
+        f' fill="#21A2E3" fill-opacity="0.2" stroke="#21A2E3" stroke-width="2"/>'
     )
 
     # Data points (dots)
     for i in range(n):
         px, py, _score_val = point_coords[i]
-        svg_lines.append(f'<circle cx="{px:.2f}" cy="{py:.2f}" r="3" fill="#21a2e3"/>')
+        svg_lines.append(f'<circle cx="{px:.2f}" cy="{py:.2f}" r="3" fill="#21A2E3"/>')
 
     # Labels
     for i in range(n):
@@ -622,18 +741,18 @@ def _chart_category_radar(score_dims: dict[str, Any] | None) -> str:
         score_str = f"{scores[i]:.0f}%"
         svg_lines.append(
             f'<text x="{lx:.2f}" y="{ly:.2f}" text-anchor="{anchor}"'
-            f' font-size="10" fill="#6b7280">'
+            f' font-size="10" fill="#7D90A3">'
             f"{_esc(categories[i])}</text>"
         )
         svg_lines.append(
             f'<text x="{lx:.2f}" y="{ly + 12:.2f}" text-anchor="{anchor}"'
-            f' font-size="9" fill="#9ca3af">{_esc(score_str)}</text>'
+            f' font-size="9" fill="#A6AEB5">{_esc(score_str)}</text>'
         )
 
     svg_lines.append("</svg>")
     svg = "\n".join(svg_lines)
     note = (
-        '<div style="color:#6b7280;font-size:0.7rem;margin-top:0.25rem;">'
+        '<div style="color:var(--lool-mute);font-size:0.7rem;margin-top:0.25rem;">'
         "Values below 5% rendered at 5% for readability.</div>"
     )
     return f'<div class="chart-box"><h2>Category Radar</h2>{svg}{note}</div>'
@@ -672,6 +791,7 @@ def _chart_category_bars(score_dims: dict[str, Any] | None) -> str:
         "moderate_conviction",
         "concern",
         "dealbreaker",
+        "to_confirm",
         "not_applicable",
     ]
     status_labels = {
@@ -679,6 +799,7 @@ def _chart_category_bars(score_dims: dict[str, Any] | None) -> str:
         "moderate_conviction": "Moderate",
         "concern": "Concern",
         "dealbreaker": "Dealbreaker",
+        "to_confirm": "To Confirm",
         "not_applicable": "N/A",
     }
 
@@ -690,7 +811,7 @@ def _chart_category_bars(score_dims: dict[str, Any] | None) -> str:
         # Category label
         svg_lines.append(
             f'<text x="{label_width - 8:.2f}" y="{y + bar_height / 2 + 4:.2f}"'
-            f' text-anchor="end" font-size="11" fill="#1f2937">'
+            f' text-anchor="end" font-size="11" fill="#374B65">'
             f"{_esc(cat)}</text>"
         )
 
@@ -700,7 +821,7 @@ def _chart_category_bars(score_dims: dict[str, Any] | None) -> str:
             count = _num(counts.get(status), 0.0)
             if total > 0 and count > 0:
                 seg_w = (count / total) * bar_width
-                color = _STATUS_COLORS.get(status, "#9ca3af")
+                color = _STATUS_COLORS.get(status, _CLR_NEUTRAL)
                 svg_lines.append(
                     f'<rect x="{x_offset:.2f}" y="{y:.2f}"'
                     f' width="{seg_w:.2f}" height="{bar_height:.2f}"'
@@ -722,11 +843,11 @@ def _chart_category_bars(score_dims: dict[str, Any] | None) -> str:
     legend_y = y_start + len(categories) * (bar_height + bar_gap) + 10
     lx = label_width
     for status in status_order:
-        color = _STATUS_COLORS.get(status, "#9ca3af")
+        color = _STATUS_COLORS.get(status, _CLR_NEUTRAL)
         label = status_labels.get(status, status)
         svg_lines.append(f'<rect x="{lx:.2f}" y="{legend_y:.2f}" width="10" height="10" fill="{_esc(color)}" rx="2"/>')
         svg_lines.append(
-            f'<text x="{lx + 14:.2f}" y="{legend_y + 9:.2f}" font-size="9" fill="#6b7280">{_esc(label)}</text>'
+            f'<text x="{lx + 14:.2f}" y="{legend_y + 9:.2f}" font-size="9" fill="#7D90A3">{_esc(label)}</text>'
         )
         lx += len(label) * 6.5 + 24
 
@@ -766,22 +887,22 @@ def _chart_partner_verdicts(discussion: dict[str, Any] | None) -> str:
         pv = by_partner.get(partner)
         if pv is None:
             cards.append(
-                '<div class="partner-card" style="border-color: #e5e7eb;">'
+                '<div class="partner-card" style="border-left-color: var(--lool-line);">'
                 f"<h3>{_esc(partner.title())}</h3>"
-                '<div class="verdict" style="color: #6b7280;">No verdict</div>'
+                '<div class="verdict" style="color: var(--lool-mute);">No verdict</div>'
                 "</div>"
             )
             continue
 
         verdict = str(pv.get("verdict", "unknown")).strip().lower()
         rationale = str(pv.get("rationale", ""))
-        color = _VERDICT_COLORS.get(verdict, "#9ca3af")
-        verdict_label = _esc(verdict.replace("_", " ").title())
+        color = _VERDICT_COLORS.get(verdict, _CLR_NEUTRAL)
+        verdict_label = _esc(_verdict_label(verdict))
 
         rationale = _smart_truncate(rationale)
 
         cards.append(
-            f'<div class="partner-card" style="border-color: {_esc(color)};">'
+            f'<div class="partner-card" style="border-left-color: {_esc(color)};">'
             f"<h3>{_esc(partner.title())}</h3>"
             f'<div class="verdict" style="color: {_esc(color)};">'
             f"{verdict_label}</div>"
@@ -790,7 +911,7 @@ def _chart_partner_verdicts(discussion: dict[str, Any] | None) -> str:
         )
 
     subtitle = (
-        '<div style="color:#6b7280;font-size:0.8rem;margin-bottom:0.75rem;'
+        '<div style="color:var(--lool-mute);font-size:0.8rem;margin-bottom:0.75rem;'
         'font-style:italic;">AI-simulated partner perspectives '
         "— not actual investor views</div>"
     )
@@ -811,7 +932,7 @@ def _chart_conflict_summary(conflict: dict[str, Any] | None) -> str:
 
     summary = _as_dict(conflict.get("summary"))  # type: ignore[union-attr]
     severity = str(summary.get("overall_severity", "unknown")).strip().lower()
-    badge_color = _SEVERITY_COLORS.get(severity, "#9ca3af")
+    badge_color = _SEVERITY_COLORS.get(severity, _CLR_NEUTRAL)
 
     parts: list[str] = [f'<span class="badge" style="background: {_esc(badge_color)};">{_esc(severity.title())}</span>']
 
@@ -824,7 +945,7 @@ def _chart_conflict_summary(conflict: dict[str, Any] | None) -> str:
             company = _esc(str(c.get("company", "?")))
             ctype = _esc(str(c.get("type", "?")))
             csev = str(c.get("severity", "?")).strip().lower()
-            csev_color = _SEVERITY_COLORS.get(csev, "#9ca3af")
+            csev_color = _SEVERITY_COLORS.get(csev, _CLR_NEUTRAL)
             rows.append(
                 f"<tr><td>{company}</td><td>{ctype}</td>"
                 f'<td style="color: {_esc(csev_color)};">'
@@ -860,9 +981,9 @@ def _section_summary_bar(
         one_liner = str(startup.get("one_liner", ""))
         sector = str(startup.get("sector", ""))
         if one_liner:
-            parts.append(f'<div style="color:#1f2937;font-size:0.95rem;">{_esc(one_liner)}</div>')
+            parts.append(f'<div style="color:var(--lool-ink);font-size:0.95rem;">{_esc(one_liner)}</div>')
         if sector:
-            parts.append(f'<div style="color:#6b7280;font-size:0.85rem;">Sector: {_esc(sector)}</div>')
+            parts.append(f'<div style="color:var(--lool-mute);font-size:0.85rem;">Sector: {_esc(sector)}</div>')
 
     if _usable(discussion):
         verdict_spans: list[str] = []
@@ -873,8 +994,8 @@ def _section_summary_bar(
             verdict = str(pv.get("verdict", "")).lower().replace(" ", "_")
             if not name:
                 continue
-            color = _VERDICT_COLORS.get(verdict, "#9ca3af")
-            label = verdict.replace("_", " ").title()
+            color = _VERDICT_COLORS.get(verdict, _CLR_NEUTRAL)
+            label = _verdict_label(verdict)
             verdict_spans.append(f'<span style="color:{color};">{_esc(name)}: {_esc(label)}</span>')
         if verdict_spans:
             parts.append(f'<div style="font-size:0.85rem;margin-top:0.25rem;">{" · ".join(verdict_spans)}</div>')
@@ -886,10 +1007,10 @@ def _section_summary_bar(
         concern = int(_num(summary.get("concern"), 0))
         db = int(_num(summary.get("dealbreaker"), 0))
         breakdown = (
-            f'<span style="color:#10b981;">{strong} strong</span>'
-            f' · <span style="color:#f59e0b;">{moderate} moderate</span>'
-            f' · <span style="color:#ef4444;">{concern} concern</span>'
-            f' · <span style="color:#b91c1c;">{db} dealbreaker</span>'
+            f'<span style="color:#2F8A56;">{strong} strong</span>'
+            f' · <span style="color:#C9892B;">{moderate} moderate</span>'
+            f' · <span style="color:#C0392B;">{concern} concern</span>'
+            f' · <span style="color:#92301F;">{db} dealbreaker</span>'
         )
         parts.append(f'<div style="font-size:0.85rem;margin-top:0.25rem;">{breakdown}</div>')
 
@@ -898,8 +1019,8 @@ def _section_summary_bar(
 
     inner = "\n".join(parts)
     return (
-        '<div style="background:#ffffff;border-radius:10px;padding:1rem 1.5rem;'
-        'margin-bottom:1.5rem;border:1px solid #e5e7eb;">'
+        '<div style="background:var(--lool-paper);padding:1rem 1.5rem;'
+        'margin-bottom:1.5rem;border:1px solid var(--lool-line-2);">'
         f"{inner}</div>"
     )
 
@@ -911,6 +1032,11 @@ def _section_summary_bar(
 
 def compose_html(dir_path: str) -> str:
     """Load artifacts and compose the full HTML document."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _theme
+
     all_names = REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS
     artifacts: dict[str, dict[str, Any] | None] = {}
     for name in all_names:
@@ -982,10 +1108,11 @@ def compose_html(dir_path: str) -> str:
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>{page_title}</title>
-{_css()}
+{_css(_theme.brand_css())}
 </head>
 <body>
 {body}
+{_theme.FOOTER_CREDIT_HTML}
 </body>
 </html>
 """

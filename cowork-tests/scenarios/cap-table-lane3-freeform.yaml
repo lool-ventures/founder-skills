@@ -1,0 +1,97 @@
+name: cap-table-lane3-freeform
+session: ../sessions/lane3-freeform.yaml
+fidelity: cowork
+on_unanswered: fail
+skills: [cap-table]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
+
+# Lane-3 freeform spreadsheet — the runtime-distinct surface no other cassette covers: the
+# SPREADSHEET_STRUCTURE_DETECTION sub-agent reads the compacted cell grid and classifies blocks
+# (founders / SAFEs) AND must classify the non-mappable "Returns" exit-modeling tab as an ignore
+# type rather than inventing a block_type. All data is SYNTHETIC (Cadence / invented founders).
+prompt: |
+  I'm a founder at Cadence, a US Delaware C-corp (seed-stage B2B SaaS). I've uploaded our cap
+  table as a freeform Excel workbook: a "Cap Table" tab with our two founders (Maya Gold and Ofer
+  Tal) and their common share counts, a "SAFEs" tab with our one outstanding SAFE (Foobar Capital
+  LLC), and a "Returns" tab with exit-scenario modeling. We have NO employee option pool.
+
+  The "Discount" value of 0.2 in the SAFEs tab is a 20% discount RATE (the investor converts at 80%
+  of the priced-round price), not a price multiplier.
+
+  Please reconstruct the cap table from the spreadsheet (Lane 3 freeform). For the review, model
+  ONLY the SAFE's cap-implied ownership snapshot — no priced-round or Series A scenarios — and give
+  me the full cap-table review with the interactive explorer built on that snapshot.
+
+# The prompt pre-answers the fields the cap-table skill gates on for this fixture (option-pool existence
+# + which scenario to model), so the run is intended to be GATE-CLEAN — like the Lane-4 safe-full scenario.
+# The `answers` below are a backstop only, anchored on a stable FRAGMENT of the canonical label (SKILL.md
+# "Canonical gate phrasing") — never the full label, never blanket `first`.
+# NOTE: there is intentionally NO discount anchor — the freeform discount rate-vs-multiplier gate was
+# removed (the convention is deterministic; SKILL.md no longer raises it, surfacing the conversion as a
+# non-blocking note instead), so that gate never fires.
+answers:
+  - when_question: "scenarios?.*model"   # optional s — see A-05: count-dependent anchors die mid-batch
+    # multiSelect gate; prefix "Cap-implied" (NOT "implied" — matching is boundary-anchored startsWith,
+    # not substring) uniquely selects "Cap-implied SAFE snapshot". Backstop only: the prompt pre-answers
+    # this gate, so it is normally gate-clean.
+    choose: ["Cap-implied"]
+  - when_question: "option pool"
+    choose: "No option pool"        # canonical label (SKILL.md); the prompt also pre-suppresses this gate
+
+assert:
+  # Lane-3 ran end-to-end and produced its equity artifacts from the freeform sheet.
+  - result: success
+  # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
+  # the deliverable but stranded steps, which result:success alone misses.
+  - all_tasks_completed: true
+  - file_exists: outputs/artifacts/cap-table-cadence/inputs.json
+  - file_exists: outputs/artifacts/cap-table-cadence/instruments.json
+  # Deliverables promoted to the outputs root (manifest-backed → survives replay; parity).
+  - user_visible_artifact: outputs/Cadence_Cap_Table_Explorer.html
+  # Hard-fact extraction from the freeform grid (unique to this layer — not deterministic-pytest).
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-cadence/inputs.json
+      path: founders.0.common_shares
+      equals: 4000000
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-cadence/instruments.json
+      path: safes.0.post_money_valuation_cap
+      equals: 10000000
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-cadence/instruments.json
+      path: safes.0.discount_multiplier
+      equals: 0.8
+  # The SPREADSHEET_STRUCTURE_DETECTION (+ Context-B) sub-agents were dispatched.
+  - subagent_dispatched: 'cap-table'
+  # Uploaded input is read-only — the mapper must READ the uploaded freeform workbook, never mutate it.
+  # Guard the upload's content hash (0.29.0 captures uploads as a read-only input root, so input_unmodified
+  # now reaches the upload lanes). Evaluable only after a re-record captures the upload root.
+  - input_unmodified: 'uploads/**'
+  # host-path posture: hostloop exposes real host paths by design; the leak class is covered
+  # by the container-tier host-path-canary scenario + the privacy scan's path class on cassettes.
+  # --- fleet contract asserts (adopted at the 0.24.0 pin; budgets tightened from discovery actuals) ---
+  # The pipeline entered through the Skill tool (prefix-tolerant; id shape confirmed at discovery).
+  - skill_triggered: '(founder-skills:)?cap-table$'
+  # Every computer:// deliverable link shared with the founder must resolve (zero links pass).
+  - computer_links_resolve: true
+  # No delete under outputs/ (live-lane key; replay skips it loudly).
+  - no_delete_in_outputs: true
+  # Dispatch contract: sub-agents declare no Bash (agents/*.md) — regression tripwire.
+  - subagent_tool_absent: 'Bash'
+  # Scripted answers reached the model non-error whenever a gate fired (0.25.0: vacuous-passes
+  # when zero gates fire, so it's safe despite model-dependent gating — see README pin note).
+  - gate_answers_delivered: true
+  # Usability budget: gates asked before value (observed + headroom, from discovery).
+  - questions_count_max: 8
+  # Author-chosen dispatch budget (production has NO Task-fan-out cap; this is an
+  # efficiency tripwire, not a platform mirror). tightened from discovery actuals (observed x1.5).
+  - dispatch_count_max: 6
+  # Efficiency budgets — generous ceilings; tightened to observed x1.5 post-record.
+  - max_turns: 115
+  - tool_calls_max: 110
+  # Stray-file guard (new-files-only; overwrite-in-place is covered by producer stamps).
+  # Allowlist = artifact namespace (incl. handoff/**) + founder-context sidecar + promoted
+  # deliverables. Pre-0.24 cassettes exclude loudly (no preRunPaths). tightened from discovery actuals (observed x1.5).
+  - no_unexpected_files:
+      - 'outputs/artifacts/cap-table-cadence/**'
+      - 'outputs/artifacts/founder-context-cadence.json'
+      - 'outputs/Cadence_*'

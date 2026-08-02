@@ -1,0 +1,98 @@
+name: market-sizing-smoke
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: first   # gates here are immaterial to the asserts; option-1 is paraphrase-proof (anchor-discipline rule)
+skills: [market-sizing]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
+
+# Phase 1 fleet-parity smoke — market-sizing (conversational lane, Cadence).
+# Goal: prove the resolver fix lands artifacts at outputs/artifacts/market-sizing-<slug>/ and the
+# pipeline produces report.json. Rich prompt supplies name/stage/sector/geo so the founder-context gate
+# is self-satisfied; on_unanswered: first backstops any single-select confirmation.
+# NOTE (research-skill / §6): market-sizing does WebSearch and may cite public source domains — the
+# privacy gate allowlist must cover any domain this run cites (extend cowork-replay.yml, documented).
+# Slug + gate shape confirmed at the 0.24.0 discovery re-record.
+prompt: |
+  I'm the founder of Cadence, a US-based seed-stage B2B SaaS company selling field-service scheduling
+  and dispatch software to small and mid-sized service businesses (HVAC, plumbing, electrical). Please
+  use the market-sizing skill to build a full TAM/SAM/SOM analysis for Cadence — top-down and
+  bottom-up — with a sensitivity test, and produce the written report. Keep all figures illustrative;
+  where you would cite an external market source, label it clearly.
+
+assert:
+  - result: success
+  # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
+  # the deliverable but stranded steps, which result:success alone misses.
+  - all_tasks_completed: true
+  - file_exists: outputs/artifacts/market-sizing-cadence/report.json
+  - artifact_json:
+      artifact: outputs/artifacts/market-sizing-cadence/report.json
+      path: coaching_payload.schema_version
+      exists: true
+  # Analytical sub-agents (top-down / bottom-up / sensitivity / checklist) were dispatched — guards
+  # against a regression that collapses the per-step dispatch into the main thread.
+  - subagent_dispatched: 'market-sizing'
+  # Context-B coaching hand-off: the coaching sub-agent WRITES its commentary to the
+  # handoff file (file transport, not the message channel) with a paired non-error
+  # result — guards the first leg of the "## Coaching Commentary" insertion chain.
+  # Tier-agnostic + replay-checkable. NOTE: the hand-off filename is `coaching.md`
+  # (raw markdown, wrapped by md_to_commentary.py). It was
+  # `coaching_commentary_output.json` when the current cassettes were recorded, so this
+  # assert FAILS under `--reassert` until the next re-record and passes after it — the
+  # same expected-until-re-record class as the `input_unmodified` upload guards.
+  - subagent_file_write:
+      path_suffix: coaching.md
+  # Per-dispatch correlation: ties THIS dispatch's resolved type to ITS OWN delivered
+  # write via parentToolUseId, which subagent_file_write (matching ANY sub-agent write)
+  # cannot do.
+  - subagent_dispatch_healthy:
+      type: 'market-sizing'
+  # host-path posture: hostloop exposes real host paths by design; the leak class is covered
+  # by the container-tier host-path-canary scenario + the privacy scan's path class on cassettes.
+  # --- fleet contract asserts (adopted at the 0.24.0 pin; budgets tightened from discovery actuals) ---
+  # The pipeline entered through the Skill tool (prefix-tolerant; id shape confirmed at discovery).
+  - skill_triggered: '(founder-skills:)?market-sizing$'
+  # Every computer:// deliverable link shared with the founder must resolve (zero links pass).
+  - computer_links_resolve: true
+  # No delete under outputs/ (live-lane key; replay skips it loudly).
+  - no_delete_in_outputs: true
+  # The skill HANDED the work over, rather than only writing it and naming a path. Served at container
+  # AND hostloop, so it costs this cowork lane nothing — which is why the dedicated container scenario
+  # was dropped rather than recorded (its one container-only key, `no_scratchpad_leak`, went vacuous
+  # once the archive began landing in the deliverables directory: nothing is presented from the
+  # scratchpad any more, so there is no promotion to verify).
+  # KNOW WHAT THIS DOES NOT CATCH. It is satisfied by the FIRST successful delivery call, and the
+  # handler's rejection is PER-CALL. The archive is offered on request, so it ships in its own later
+  # call — a regression that presents it from an unpresentable path fails only that call, after this
+  # key is already green. Nothing at any tier catches it here. The net for that class is
+  # `delivery_check.py` in the post-batch sweep, which reconciles tool_use against tool_result by id
+  # and reports an errored call separately. Do not treat this key as covering it.
+  - present_files_called: true
+  # Dispatch contract: sub-agents declare no Bash (agents/*.md) — regression tripwire.
+  - subagent_tool_absent: 'Bash'
+  # Usability budget: gates asked before value (observed + headroom, from discovery).
+  - questions_count_max: 8
+  # Author-chosen dispatch budget (production has NO Task-fan-out cap; this is an
+  # efficiency tripwire, not a platform mirror). tightened from discovery actuals (observed x1.5).
+  - dispatch_count_max: 8
+  # Efficiency budgets — generous ceilings; tightened to observed x1.5 post-record.
+  - max_turns: 125
+  - tool_calls_max: 115
+  # Stray-file guard (new-files-only; overwrite-in-place is covered by producer stamps).
+  # Allowlist = artifact namespace (incl. handoff/**) + founder-context sidecar + promoted
+  # deliverables. Pre-0.24 cassettes exclude loudly (no preRunPaths). tightened from discovery actuals (observed x1.5).
+  - no_unexpected_files:
+      - 'outputs/artifacts/market-sizing-cadence/**'
+      - 'outputs/artifacts/founder-context-cadence.json'
+      - 'outputs/Cadence_Market_Sizing.*'
+  # GATE FLOOR. `questions_count_max` above is a CEILING — it caps interruption but has never once
+  # asserted that the skill asked anything at all. A run that silently skips its confirmation gates and
+  # assumes the answers produces a well-formed report, a green suite, and a founder who was never
+  # consulted. Measured: a committed cassette for this fleet once froze exactly that (0 gates) and went
+  # green for weeks. `gate_answers_delivered` alone does NOT close it — it passes VACUOUSLY when zero
+  # gates fire, which is why the two are always paired.
+  # Floor is deliberately 1, well BELOW the count observed at record time: gate firing is
+  # model-dependent (the same batch saw one cap-table lane fire the founder-context pack and another
+  # skip it), so a floor set AT the observed count converts ordinary variance into a red suite. This
+  # asserts the property — "it asked" — not the model's exact behaviour.
+  - gate_answers_delivered: true
+  - gate_answer_count_min: 1

@@ -1,0 +1,374 @@
+{
+  "skill": "cap-table",
+  "_note": "On-demand reliability bench for the cap-table skill. Two parts: (1) trigger_cases \u2014 whether the skill should auto-fire on a trap-topic question (verified in the Cowork runtime); (2) correctness_cases + computation_cases \u2014 model-alone vs skill-engaged answers scored for numeric correctness AND reliance-boundary violations. The gate encoded here: trap topics with numbers/dates/eligibility at stake SHOULD trigger; pure glossary should NOT. Run with run_reliability_bench.py.",
+  "trap_topics": {
+    "qsbs_date": {
+      "rule_id": "delaware_cross_border.qsbs_date_sensitive",
+      "constant": "2025-07-05",
+      "trap": "OBBBA window starts 2025-07-05 inclusive (day AFTER July 4 enactment); 'after July 4' is the off-by-one. Eligibility is counsel-only (counsel_review_flag)."
+    },
+    "section_102": {
+      "rule_id": "israel_equity_tax.section_102_capital_gains",
+      "constant": "trustee deposit date",
+      "trap": "24-month capital-gains clock runs from trustee-deposit date, not grant date."
+    },
+    "post_money_denominator": {
+      "rule_id": "safe.company_capitalization_yc_post_money",
+      "constant": "excludes new money + new pool",
+      "trap": "YC post-money SAFE 'Company Capitalization' denominator excludes new financing money and most new pool; Claude tends to include them."
+    },
+    "warrant_fd": {
+      "rule_id": "warrant.included_in_fd_per_policy",
+      "constant": "vested outstanding warrants are in the fully-diluted count",
+      "trap": "net-share/cashless haircut and double-counting; whether warrants are already in the FD base."
+    },
+    "mfn_chain": {
+      "rule_id": "safe.mfn_package_only",
+      "constant": "MFN inherits the full package; circular chains have no solution",
+      "trap": "circular MFN references must fail loudly, not be guessed."
+    }
+  },
+  "trigger_cases": [
+    {
+      "id": "trg_qsbs_1",
+      "topic": "qsbs_date",
+      "risk": "high",
+      "should_trigger": true,
+      "query": "I issued my Delaware C-corp founder stock on 2025-07-10 \u2014 does it qualify for QSBS?",
+      "_note": "single counsel-flag topic, no modeling verb \u2014 should still trigger"
+    },
+    {
+      "id": "trg_qsbs_2",
+      "topic": "qsbs_date",
+      "risk": "high",
+      "should_trigger": true,
+      "query": "got my founder shares July 8 2025, any section 1202 QSBS benefit?"
+    },
+    {
+      "id": "trg_qsbs_3",
+      "topic": "qsbs_date",
+      "risk": "high",
+      "should_trigger": true,
+      "query": "is stock I issued right after the OBBBA eligible for the QSBS exclusion?"
+    },
+    {
+      "id": "trg_qsbs_4",
+      "topic": "qsbs_date",
+      "risk": "high",
+      "should_trigger": true,
+      "query": "founder stock issued 2025-07-03 \u2014 do I get the QSBS gain exclusion?",
+      "_note": "edge: before the 2025-07-05 boundary; correct answer is NO/pre-OBBBA"
+    },
+    {
+      "id": "trg_qsbs_5",
+      "topic": "qsbs_date",
+      "risk": "high",
+      "should_trigger": true,
+      "query": "will my July 2025 C-corp shares get the 1202 gain exclusion?"
+    },
+    {
+      "id": "trg_102_1",
+      "topic": "section_102",
+      "risk": "high",
+      "should_trigger": true,
+      "query": "Israeli 102 options granted Jan 2024, trustee deposit Feb 2024 \u2014 do they meet the 24-month capital-gains holding period for a mid-2026 exit?",
+      "_note": "section 102 holding-period question with dates at stake \u2014 should trigger"
+    },
+    {
+      "id": "trg_102_2",
+      "topic": "section_102",
+      "risk": "high",
+      "should_trigger": true,
+      "query": "when does my team get capital-gains treatment on our section 102 grants?"
+    },
+    {
+      "id": "trg_102_3",
+      "topic": "section_102",
+      "risk": "high",
+      "should_trigger": true,
+      "query": "our 102 options were granted 2024-01-15 \u2014 is the holding period satisfied if we sell in 2026?"
+    },
+    {
+      "id": "trg_102_4",
+      "topic": "section_102",
+      "risk": "high",
+      "should_trigger": true,
+      "query": "does our section 102 cap-gains clock start at grant or at trustee deposit?"
+    },
+    {
+      "id": "trg_warr_1",
+      "topic": "warrant_fd",
+      "risk": "medium",
+      "should_trigger": true,
+      "query": "do my investor's 200k warrants dilute me now on a fully-diluted basis?",
+      "_note": "warrant dilution question on a fully-diluted basis \u2014 should trigger"
+    },
+    {
+      "id": "trg_warr_2",
+      "topic": "warrant_fd",
+      "risk": "medium",
+      "should_trigger": true,
+      "query": "are outstanding warrants already counted in my fully-diluted ownership?"
+    },
+    {
+      "id": "trg_warr_3",
+      "topic": "warrant_fd",
+      "risk": "medium",
+      "should_trigger": true,
+      "query": "how do 150k warrants affect my cap-table ownership percentage?"
+    },
+    {
+      "id": "trg_gut_1",
+      "topic": "post_money_denominator",
+      "risk": "high",
+      "should_trigger": true,
+      "query": "quick gut-check: $18M pre, $4M raise, one $1M SAFE at a $10M cap \u2014 is my dilution reasonable?",
+      "_note": "post-money SAFE gut-check with numbers at stake \u2014 should trigger"
+    },
+    {
+      "id": "trg_gut_2",
+      "topic": "post_money_denominator",
+      "risk": "high",
+      "should_trigger": true,
+      "query": "back-of-envelope, how much do I give up at $20M pre / $5M raise with two SAFEs converting?"
+    },
+    {
+      "id": "trg_gut_3",
+      "topic": "post_money_denominator",
+      "risk": "high",
+      "should_trigger": true,
+      "query": "ballpark, what's my ownership after a $5M round at $20M pre with $2M of SAFEs?"
+    },
+    {
+      "id": "trg_mfn_1",
+      "topic": "mfn_chain",
+      "risk": "high",
+      "should_trigger": true,
+      "query": "my uncapped MFN SAFE points at another investor's SAFE \u2014 what terms does it inherit?"
+    },
+    {
+      "id": "ctl_glossary_qsbs",
+      "topic": "qsbs_date",
+      "risk": "none",
+      "should_trigger": false,
+      "query": "what is QSBS, in general?",
+      "_note": "CONTROL: pure glossary, no facts/dates \u2014 must NOT over-fire (mirrors 'what is a SAFE?')"
+    },
+    {
+      "id": "ctl_glossary_102",
+      "topic": "section_102",
+      "risk": "none",
+      "should_trigger": false,
+      "query": "what's the section 102 capital-gains track, conceptually?",
+      "_note": "CONTROL: glossary"
+    },
+    {
+      "id": "ctl_glossary_fd",
+      "topic": "warrant_fd",
+      "risk": "none",
+      "should_trigger": false,
+      "query": "what does 'fully diluted' mean on a cap table?",
+      "_note": "CONTROL: glossary"
+    },
+    {
+      "id": "ctl_409a",
+      "topic": "out_of_scope",
+      "risk": "none",
+      "should_trigger": false,
+      "query": "what 409A discount do founders apply to common stock for ISO pricing?",
+      "_note": "CONTROL: explicitly out of scope (description NOT-for list); must stay false"
+    }
+  ],
+  "correctness_cases": [
+    {
+      "id": "cor_qsbs_inwindow",
+      "topic": "qsbs_date",
+      "rule_id": "delaware_cross_border.qsbs_date_sensitive",
+      "prompt": "I issued founder stock in my Delaware C-corp on 2025-07-10. Does it qualify for the QSBS gain exclusion under the OBBBA changes? Give me a direct answer.",
+      "canonical_fact": "The OBBBA-enhanced QSBS window starts 2025-07-05 (inclusive). 2025-07-10 is inside the window on the DATE test. Overall eligibility (active business, <=$50M gross assets, 5-year hold) is a counsel determination the tool must not conclude.",
+      "must_cite": [
+        "2025-07-05"
+      ],
+      "must_not_conclude_eligibility": [
+        "you qualify",
+        "you're eligible",
+        "you are eligible",
+        "likely yes",
+        "qualifies for the exclusion",
+        "strong eligibility",
+        "you do qualify"
+      ],
+      "counsel_deferral_markers": [
+        "counsel",
+        "tax advisor",
+        "attorney",
+        "confirm with",
+        "not legal advice",
+        "professional advice"
+      ]
+    },
+    {
+      "id": "cor_qsbs_edge_before",
+      "topic": "qsbs_date",
+      "rule_id": "delaware_cross_border.qsbs_date_sensitive",
+      "prompt": "I issued founder stock in my Delaware C-corp on 2025-07-03. Does it fall under the new OBBBA QSBS rules? Direct answer.",
+      "canonical_fact": "2025-07-03 is BEFORE the 2025-07-05 inclusive start, so it does NOT fall under the OBBBA-enhanced window; pre-OBBBA section 1202 rules apply. The off-by-one trap: 'after July 4' wrongly sweeps in July 3-4.",
+      "must_cite": [
+        "2025-07-05"
+      ],
+      "must_state_before_window": true,
+      "wrong_if_contains": [
+        "after july 4",
+        "qualifies under the new",
+        "falls under the obbba"
+      ],
+      "counsel_deferral_markers": [
+        "counsel",
+        "tax advisor",
+        "attorney",
+        "confirm with"
+      ]
+    },
+    {
+      "id": "cor_102_holding",
+      "topic": "section_102",
+      "rule_id": "israel_equity_tax.section_102_capital_gains",
+      "prompt": "We granted Israeli Section 102 capital-gains-track options on 2024-01-15; the trustee deposit was 2024-02-01. If we exit mid-2026, is the 24-month holding period satisfied? Direct answer.",
+      "canonical_fact": "The 24-month clock runs from the TRUSTEE DEPOSIT date (2024-02-01), not the grant date, so it expires 2026-02-01; a mid-2026 exit clears it. The reasoning MUST anchor on trustee deposit.",
+      "must_cite": [
+        "trustee"
+      ],
+      "wrong_if_clock_from_grant": true
+    },
+    {
+      "id": "cor_102_whichdate",
+      "topic": "section_102",
+      "rule_id": "israel_equity_tax.section_102_capital_gains",
+      "prompt": "For Israeli Section 102 capital-gains options, does the 24-month holding clock start at the grant date or at some other date? Direct answer.",
+      "canonical_fact": "It starts at the trustee-deposit date, not the grant date.",
+      "must_cite": [
+        "trustee"
+      ],
+      "wrong_if_contains": [
+        "starts at the grant date",
+        "from the grant date",
+        "grant date is when the clock"
+      ]
+    },
+    {
+      "id": "cor_warrant_fd",
+      "topic": "warrant_fd",
+      "rule_id": "warrant.included_in_fd_per_policy",
+      "prompt": "An investor holds warrants for 200,000 shares. Two founders hold 10,000,000 shares; option pool is 1,000,000. Are the warrants in my fully-diluted count now, and what is my fully-diluted ownership? Direct answer.",
+      "canonical_fact": "Vested outstanding warrants ARE in the fully-diluted count. FD total = 11,200,000; founders = 89.29%.",
+      "must_cite": [
+        "89.2"
+      ],
+      "must_state_warrants_in_fd": true
+    },
+    {
+      "id": "cor_postmoney_denominator",
+      "topic": "post_money_denominator",
+      "rule_id": "safe.company_capitalization_yc_post_money",
+      "prompt": "Quick gut-check: $18M pre-money, $4M new money, I have one $1M post-money SAFE at a $10M cap. Two founders hold 10,000,000 shares, no option pool. Roughly what is my post-round founder ownership? Direct answer.",
+      "canonical_fact": "Post-money SAFE owns 10% of the pre-financing company capitalization (denominator EXCLUDES the $4M new money). SAFE ~1,111,111 shares; new money ~18.2%; founders ~73.6%.",
+      "must_cite_any": [
+        "73.",
+        "74%",
+        "~73",
+        "73-74"
+      ],
+      "trap_note": "Wrong if it computes the SAFE share against a post-money/round-inclusive denominator or lands founders far from ~73-74%."
+    }
+  ],
+  "_computation_note": "Coupled-math cases \u2014 a model answering alone must compute these by hand, so they are the main candidates for a correctness gap. Canonical numbers are the cap-table skill's deterministic-solver outputs. Graded by LLM judge against `canonical` + `judge_rubric`, not string match.",
+  "computation_cases": [
+    {
+      "id": "comp_stacked_safes",
+      "topic": "stacked_post_money_safes",
+      "rule_id": "safe.stacked_post_money_caps",
+      "prompt": "I signed three post-money SAFEs: $500K at a $5M post-money cap, $750K at an $8M cap, and $250K at a $6M cap. Two founders hold 10,000,000 shares total, no option pool. Before any priced round, what total percentage of my company have I already given away across the three SAFEs, and what percentage do the two founders retain together? Give me the numbers.",
+      "canonical": "Each post-money SAFE's cap-implied ownership = purchase / post-money cap: $500K/$5M = 10%, $750K/$8M = 9.375%, $250K/$6M = 4.167%. They stack: total given away = 23.54%; founders retain = 76.46% (cap-implied, pre-priced-round).",
+      "judge_rubric": "CORRECT if total-given is ~23-24% AND founders-retained is ~76-77%, computed as the sum of purchase/cap per SAFE. WRONG if it averages the caps, applies a single blended cap, double-dilutes the SAFEs against each other, or lands founders outside ~75-78%.",
+      "canonical_values": {
+        "per_safe_cap_implied_ownership": {
+          "safe_5": 0.1,
+          "safe_8": 0.09375,
+          "safe_6": 0.041667
+        },
+        "total_given_away": 0.2354,
+        "founders_retained": 0.7646
+      }
+    },
+    {
+      "id": "comp_bbwa_downround",
+      "topic": "anti_dilution_bbwa",
+      "rule_id": "anti_dilution.broad_based_weighted_average",
+      "prompt": "We raised our Series A at $2.00/share with broad-based weighted-average anti-dilution. We're now doing a down round at $1.00/share for $3M of new money. Founders hold 8,000,000 common; Series A investors hold 2,000,000 preferred; the option pool is 1,000,000. Roughly what does the anti-dilution adjustment move the Series A conversion price to, about how many extra shares do the Series A investors receive, and what is the founders' combined ownership before and after? Give me the numbers.",
+      "canonical": "BBWA: CP2 = CP1 x (A+B)/(A+C) using CP1 = $2.00 (the CURRENT conversion price), not OIP. CP2 = ~$1.78. Series A receives ~+250,000 extra shares (~250,951). Founders ~72.7% before -> ~55.9% after (most of the drop is the new money; ~1.3pp is the anti-dilution transfer).",
+      "judge_rubric": "CORRECT if CP2 ~ $1.75-1.80, extra Series A shares ~200k-300k, founders-after ~54-58%, AND the method uses the current conversion price (CP1 = $2.00) in the weighted-average. WRONG (the key trap) if it divides by the Original Issue Price inconsistently with CP1, ratchets the price all the way to $1.00, or lands founders-after far from ~56%.",
+      "boundary": null,
+      "canonical_values": {
+        "cp2": 1.786
+      }
+    },
+    {
+      "id": "comp_full_ratchet",
+      "topic": "anti_dilution_full_ratchet",
+      "rule_id": "anti_dilution.full_ratchet",
+      "prompt": "Same facts but with FULL-RATCHET anti-dilution: Series A originally at $2.00/share, now a down round at $1.00/share for $3M of new money; founders 8,000,000 common, Series A 2,000,000 preferred, option pool 1,000,000. How much worse is the founder dilution under full ratchet than under broad-based weighted average, and what conversion price does the Series A effectively end up at? Give me the numbers.",
+      "_canonical_correction": "Canonical follows the skill's deterministic producer (anti_dilution.full_ratchet), which defines CP2 = new_issue_price. This case is closed-form, not a fixed point, so it does not exercise the iterative solver.",
+      "canonical": "Full ratchet resets the Series A conversion price to the new (down-round) issue price = $1.00 (per anti_dilution.full_ratchet: CP2 = new_issue_price). Series A converts ~2:1 -> ~4,000,000 common, vs BBWA's CP2 ~$1.79 -> ~2,240,000. Full ratchet is materially more dilutive to founders than BBWA.",
+      "judge_rubric": "CORRECT if it gives full-ratchet CP2 = $1.00 (the new issue price), Series A ~4,000,000 shares (~2:1), AND recognizes full ratchet is materially more dilutive than BBWA. WRONG if CP2 is far from $1.00 or it treats full ratchet as similar to BBWA.",
+      "boundary": null,
+      "canonical_values": {
+        "cp2": 1.0
+      }
+    },
+    {
+      "id": "comp_pool_shuffle",
+      "topic": "option_pool_premoney",
+      "rule_id": "option_pool.pre_money_topup",
+      "prompt": "Series A term sheet: $20M pre-money, $5M new money, and a 10% post-closing option pool that must be created pre-money (before the investment goes in). Two founders hold 10,000,000 shares, no existing pool. What's the resulting price per share, how many shares is the pool, and who bears the cost of that pool - founders or the new investors? Give me the numbers.",
+      "canonical": "The pre-money 10%-post pool expands the denominator before pricing: price per share = ~$1.75 (vs $2.00 with no pre-money pool); pool = ~1,428,571 shares; the pool dilution falls on the founders / pre-round holders, NOT the new investors.",
+      "judge_rubric": "CORRECT if price ~$1.70-1.80 (and notes it would be $2.00 without the pre-money pool), pool ~1.3-1.5M shares, AND it identifies founders bear the pool cost. WRONG if it prices at $2.00 (ignoring the pre-money pool effect), splits the pool cost with investors, or gets the pool share count badly off.",
+      "boundary": null,
+      "canonical_values": {
+        "price_per_share": 1.75,
+        "pool_shares": 1428571
+      }
+    },
+    {
+      "id": "comp_mfn_circular",
+      "topic": "mfn_circular",
+      "rule_id": "safe.mfn_package_only",
+      "prompt": "I have two uncapped SAFEs, and each one has an MFN provision pointing at the other - each says it inherits the other's terms. There is no priced round yet. What price do they convert at? Give me a direct answer.",
+      "canonical": "This is a circular reference: each SAFE's terms depend on the other's, with no anchor price, so the system has NO real-valued solution. The correct response is to recognize the circularity and refuse to fabricate a price - it cannot be resolved until a conversion event sets an anchor.",
+      "judge_rubric": "CORRECT if it recognizes the circular/unresolvable nature (no anchor, no solution, needs a conversion event) and does NOT invent a specific conversion price. WRONG if it fabricates a concrete conversion price or otherwise 'resolves' the circular reference as if it had a unique answer.",
+      "boundary": null,
+      "canonical_values": {
+        "raises_circular": true,
+        "blocker_code": "E_SAFE_CIRCULAR_MFN",
+        "has_conversion_price": false
+      }
+    },
+    {
+      "id": "comp_discount_only_iterative",
+      "topic": "discount_only_safe_fixed_point",
+      "rule_id": "safe.post_money_cap_conversion",
+      "_canonical_source": "Canonical numbers are the deterministic fixed-point solver's output (run_scenario.py): the iteration starts at the naive $1.00 and converges to $0.875.",
+      "prompt": "I have one uncapped SAFE: $1,000,000 with a 20% discount and no valuation cap. I'm raising a priced round at $10M pre-money with $4M of new money. Two founders hold 10,000,000 shares, no option pool. When the SAFE converts into this round, what is the price per share for the new investors, what price does the SAFE convert at, and what is each party's ownership after the round? Give me the numbers.",
+      "canonical": "This is a non-linear fixed point: the new-investor price and the SAFE's discounted price are mutually dependent (new investors price against the post-SAFE-conversion capitalization), so it must be solved iteratively. CORRECT answer: round price per share = $0.875; SAFE converts at $0.70 (= 80% of $0.875) into 1,428,571 shares; post-round fully-diluted = 16,000,000; ownership: founders 62.5%, SAFE 8.93%, new money 28.57%. The NAIVE non-iterative mistake is price = $10M/10M = $1.00, SAFE at $0.80, founders ~65.6% \u2014 this fails to account for the SAFE/round-price interdependence.",
+      "judge_rubric": "CORRECT if round PPS is ~$0.86-0.89 (NOT $1.00), SAFE conversion price is ~$0.69-0.71 (NOT $0.80), and founders are ~62-63% (NOT ~65-66%). WRONG (the iterative-solver trap) if it gives PPS $1.00 / SAFE $0.80 / founders ~65-66%, i.e. it computed the round price without accounting for the SAFE's simultaneous conversion. PARTIAL acceptable only if it explicitly flags the circular interdependence and that an exact answer needs iteration, even without the exact figures.",
+      "boundary": null,
+      "canonical_values": {
+        "equity_financing_price": 0.875,
+        "safe_conversion_price": 0.7,
+        "safe_conversion_shares": 1428571,
+        "founders_pct": 0.625,
+        "safe_pct": 0.0893,
+        "new_money_pct": 0.2857
+      }
+    }
+  ]
+}

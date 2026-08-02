@@ -37,21 +37,27 @@ WARNING_SEVERITY: dict[str, str] = {
     "CHECKLIST_FAILURES": "high",
     "OVERCLAIMED_VALIDATION": "high",
     "UNVALIDATED_CLAIMS": "high",
+    "IMPLAUSIBLE_PCT_SCALE": "high",
     # Medium severity — include in Warnings section of report
-    "MISSING_OPTIONAL_ARTIFACT": "low",
     "UNSOURCED_ASSUMPTIONS": "medium",
     "APPROACH_MISMATCH": "medium",
     "TAM_DISCREPANCY": "medium",
+    "SAM_DISCREPANCY": "medium",
+    "SOM_DISCREPANCY": "medium",
     "CHECKLIST_INCOMPLETE": "medium",
     "FEW_SENSITIVITY_PARAMS": "medium",
     "NARROW_AGENT_ESTIMATE_RANGE": "medium",
     "LOW_CHECKLIST_COVERAGE": "medium",
     "REFUTED_CLAIMS": "medium",
     "REFUTED_MISSING_REASON": "medium",
+    "EXISTING_CLAIMS_SHAPE": "medium",
+    "CURRENCY_MISMATCH": "medium",
+    "FOUNDER_VALUE_OVERRIDDEN": "medium",
+    # Low severity — informational; do not block under --strict
+    "MISSING_OPTIONAL_ARTIFACT": "low",
     "DECK_CLAIM_MISMATCH": "low",
     "PROVENANCE_UNRESOLVED": "low",
-    "EXISTING_CLAIMS_SHAPE": "medium",
-    # v0.4.2 Mitigation 2 — informational only (uuid is per-run, won't collide)
+    # Marker collision is informational only (uuid is per-run, won't collide)
     "MARKER_COLLISION": "low",
 }
 
@@ -96,6 +102,7 @@ PARAM_LABELS: dict[str, str] = {
 WARNING_LABELS: dict[str, str] = {
     "CORRUPT_ARTIFACT": "Corrupt Artifact",
     "MISSING_ARTIFACT": "Missing Artifact",
+    "IMPLAUSIBLE_PCT_SCALE": "Implausible Percentage Scale",
     "CHECKLIST_FAILURES": "Checklist Failures",
     "OVERCLAIMED_VALIDATION": "Overclaimed Validation",
     "UNVALIDATED_CLAIMS": "Unvalidated Claims",
@@ -103,6 +110,8 @@ WARNING_LABELS: dict[str, str] = {
     "UNSOURCED_ASSUMPTIONS": "Unsourced Assumptions",
     "APPROACH_MISMATCH": "Approach Mismatch",
     "TAM_DISCREPANCY": "TAM Discrepancy",
+    "SAM_DISCREPANCY": "SAM Discrepancy",
+    "SOM_DISCREPANCY": "SOM Discrepancy",
     "CHECKLIST_INCOMPLETE": "Checklist Incomplete",
     "FEW_SENSITIVITY_PARAMS": "Few Sensitivity Parameters",
     "NARROW_AGENT_ESTIMATE_RANGE": "Narrow Agent-Estimate Range",
@@ -188,15 +197,144 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _fmt_usd(value: float | int) -> str:
-    """Format a number as USD currency string."""
+def _has_document_materials(inputs: dict[str, Any] | None) -> bool:
+    """True when the founder actually supplied a document (deck, model, etc.).
+
+    `materials_provided` is required (artifact-schemas.md). A conversational-only
+    run — the founder describing their market in chat, with no upload — sets it
+    to `["text"]` per SKILL.md's "Founder provided text, not a file" edge case, or
+    leaves it empty. Anything else ("pitch deck", "financial model", "cap table", ...)
+    means a real document existed, so deck-attributed language ("the deck stated...")
+    is accurate. Used to keep claims-reconciliation copy from crediting a deck that
+    was never provided.
+    """
+    if not isinstance(inputs, dict):
+        return False
+    materials = _as_list(inputs.get("materials_provided"))
+    return any(isinstance(m, str) and m.strip().lower() != "text" for m in materials)
+
+
+# Process-wide currency label for money formatting, set once per run from the
+# artifacts by _set_currency(). A bare "$" on a non-USD analysis is a wrong UNIT
+# on the headline number, and a wrong unit in a TAM travels into a deck. Callers
+# may still pass currency_code explicitly; the global is only the default, so
+# threading a code through every one of the ~30 _fmt_usd call sites (each inside
+# a section renderer that has no business knowing about currency) isn't needed.
+# Safe as process state because these scripts are single-shot CLIs.
+_CURRENCY: str = "USD"
+
+
+def _resolve_currency(*artifacts: dict[str, Any] | None) -> str:
+    """Return the analysis currency code from the first artifact carrying one.
+
+    Checked in the order passed by the caller; falls back to "USD" (the
+    back-compat default) when none carry a currency field.
+    """
+    for artifact in artifacts:
+        if isinstance(artifact, dict):
+            currency = artifact.get("currency")
+            if isinstance(currency, str) and currency.strip():
+                return currency.strip().upper()
+    return "USD"
+
+
+def _set_currency(code: str) -> None:
+    """Set the process-wide default currency label for _fmt_usd."""
+    global _CURRENCY
+    _CURRENCY = code.strip().upper() if isinstance(code, str) and code.strip() else "USD"
+
+
+# Human-readable labels for the declared sizing_basis convention — see
+# references/tam-sam-som-methodology.md §5.
+_SIZING_BASIS_LABELS: dict[str, str] = {
+    "current_year": "Current-year market size",
+    "forecast_year": "Forecast-year market size",
+    "mixed": "Mixed (current- and forecast-year figures)",
+}
+
+
+def _sizing_basis_label(value: Any) -> str:
+    """Human-readable label for sizing_basis.
+
+    Anything outside the three known tokens — including absence — renders as
+    "Not declared" rather than defaulting to "current_year". An artifact
+    produced before this field existed (or a run that never set it) has a
+    genuinely undeclared basis; silently stamping "current_year" on it would
+    assert a convention that was not actually in force when the figures were
+    sourced.
+    """
+    if isinstance(value, str) and value in _SIZING_BASIS_LABELS:
+        return _SIZING_BASIS_LABELS[value]
+    return "Not declared"
+
+
+def _resolve_sizing_basis(
+    sizing: dict[str, Any] | None,
+    inputs: dict[str, Any] | None,
+) -> str | None:
+    """Resolve the raw sizing_basis token.
+
+    sizing.json is the artifact the figures actually came out of and is
+    authoritative for which convention was used; inputs.json only carries the
+    field at intake (Steps 2-3), so it is the fallback rather than the
+    primary source.
+    """
+    if _usable(sizing):
+        val = sizing.get("sizing_basis")
+        if isinstance(val, str) and val:
+            return val
+    if _usable(inputs):
+        val = inputs.get("sizing_basis")
+        if isinstance(val, str) and val:
+            return val
+    return None
+
+
+def _fmt_usd(value: float | int, currency_code: str | None = None) -> str:
+    """Format a number as a compact currency string, scaled with K/M/B suffixes.
+
+    Defaults to the process-wide currency (``_set_currency``), itself defaulting
+    to "USD" and rendering a bare "$" prefix. Any other ISO code is tagged as a
+    suffix instead (e.g. "1.5M ILS") — a bare "$" would misrepresent a
+    non-USD-denominated analysis.
+    """
+    code = _CURRENCY if currency_code is None else (currency_code or "USD")
+    if value < 0:
+        return "-" + _fmt_usd(-value, code)
+    prefix = "$" if code == "USD" else ""
+    suffix = "" if code == "USD" else f" {code}"
     if value >= 1_000_000_000:
-        return f"${value / 1_000_000_000:,.1f}B"
+        return f"{prefix}{value / 1_000_000_000:,.1f}B{suffix}"
     if value >= 1_000_000:
-        return f"${value / 1_000_000:,.1f}M"
+        return f"{prefix}{value / 1_000_000:,.1f}M{suffix}"
     if value >= 1_000:
-        return f"${value / 1_000:,.1f}K"
-    return f"${value:,.2f}"
+        return f"{prefix}{value / 1_000:,.1f}K{suffix}"
+    return f"{prefix}{value:,.2f}{suffix}"
+
+
+def _fmt_param_value(name: str, value: Any) -> str:
+    """Unit-aware formatting for a sensitivity parameter's input value.
+
+    The Value column holds the parameter itself, not a market-size figure, so its unit varies:
+    percentages (``*_pct``), counts (``*_count``), and currency (everything else, e.g. ``arpu``,
+    ``industry_total``). Formatting all three the same way (the old behavior — USD for low/high,
+    raw number for base) renders percents and counts as dollars and leaves base inconsistent.
+    """
+    if not isinstance(value, (int, float)):
+        return "—"
+    lname = name.lower()
+    if lname.endswith("_pct") or "pct" in lname or "percent" in lname or "share" in lname or "rate" in lname:
+        return f"{float(value):.2f}".rstrip("0").rstrip(".") + "%"
+    if (
+        "count" in lname
+        or "customers" in lname
+        or "users" in lname
+        or "establishments" in lname
+        or lname.startswith("num_")
+        or lname.endswith("_num")
+    ):
+        return _fmt_number(int(value) if float(value).is_integer() else value)
+    return _fmt_usd(float(value))
 
 
 def _md_safe(text: str) -> str:
@@ -306,15 +444,124 @@ def _warn(code: str, message: str) -> dict[str, str]:
     }
 
 
+def _collect_sizing_inputs(sizing: dict[str, Any] | None) -> dict[str, float]:
+    """Flatten every quantitative parameter the sizing math actually consumed.
+
+    Walks both approaches x tam/sam/som and keeps only QUANTITATIVE_PARAMS keys,
+    so derived intermediates (``serviceable_customers``, ``target_customers``) are
+    ignored. A parameter appearing under several figures carries the same value,
+    so last-write-wins is harmless.
+    """
+    used: dict[str, float] = {}
+    if not isinstance(sizing, dict):
+        return used
+    for approach_key in ("top_down", "bottom_up"):
+        approach = _as_dict(sizing.get(approach_key))
+        for figure_key in ("tam", "sam", "som"):
+            figure_inputs = _as_dict(_as_dict(approach.get(figure_key)).get("inputs"))
+            for name, value in figure_inputs.items():
+                if name in QUANTITATIVE_PARAMS and isinstance(value, (int, float)) and not isinstance(value, bool):
+                    used[name] = float(value)
+    return used
+
+
+def _check_founder_value_fidelity(
+    inputs: dict[str, Any] | None,
+    sizing: dict[str, Any] | None,
+) -> list[dict[str, str]]:
+    """Warn when a founder-stated input is NOT what the math was computed from.
+
+    A researched figure may be offered as a cross-check; it must never be silently
+    substituted for a value the founder supplied. The founder recognises their own
+    numbers, and a headline figure derived from a number they never gave reads as
+    an arithmetic error — discrediting the parts of the analysis that are right.
+
+    Detection is opt-in on ``inputs.founder_stated_inputs`` being populated: when the
+    founder stated nothing quantitative there is nothing to preserve. Tolerance is
+    0.5% relative, so a unit normalization ("18k" -> 18000) does not trip it while a
+    genuine substitution (18,000 -> 16,601) does.
+    """
+    warnings: list[dict[str, str]] = []
+    stated = _as_dict(_as_dict(inputs).get("founder_stated_inputs"))
+    if not stated:
+        return warnings
+    used = _collect_sizing_inputs(sizing)
+    for name, stated_value in sorted(stated.items()):
+        if name not in QUANTITATIVE_PARAMS:
+            continue
+        if not isinstance(stated_value, (int, float)) or isinstance(stated_value, bool):
+            continue
+        if name not in used:
+            continue
+        stated_f = float(stated_value)
+        used_f = used[name]
+        denom = abs(stated_f) if stated_f else 1.0
+        if abs(used_f - stated_f) / denom <= 0.005:
+            continue
+        warnings.append(
+            _warn(
+                "FOUNDER_VALUE_OVERRIDDEN",
+                (
+                    f"The founder stated {name} = {stated_f:,.10g}, but the sizing was computed from "
+                    f"{used_f:,.10g}. A researched figure may be presented as a cross-check; it must not "
+                    f"replace a founder-stated input. Either recompute from {stated_f:,.10g}, or — if the "
+                    f"founder agreed to the revised figure — update inputs.founder_stated_inputs and record "
+                    "the reason via accepted_warnings so the swap is disclosed rather than silent."
+                ),
+            )
+        )
+    return warnings
+
+
 def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict[str, str]]:
-    """Run all 16 validation checks across artifacts. Returns list of warnings."""
+    """Run all 17 validation checks across artifacts. Returns list of warnings."""
     warnings: list[dict[str, str]] = []
 
+    inputs = artifacts.get("inputs.json")
     methodology = artifacts.get("methodology.json")
     validation = artifacts.get("validation.json")
     sizing = artifacts.get("sizing.json")
     sensitivity = artifacts.get("sensitivity.json")
     checklist = artifacts.get("checklist.json")
+
+    # CURRENCY_MISMATCH — inputs.json records the founder's currency at intake;
+    # sizing.json records what the producer was actually told. If they disagree,
+    # one of the two figures on the page is mislabelled and we cannot know which,
+    # so say so instead of silently picking a winner.
+    if _usable(inputs) and _usable(sizing):
+        in_cur = inputs.get("currency")
+        sz_cur = sizing.get("currency")
+        if (
+            isinstance(in_cur, str)
+            and in_cur.strip()
+            and isinstance(sz_cur, str)
+            and sz_cur.strip()
+            and in_cur.strip().upper() != sz_cur.strip().upper()
+        ):
+            warnings.append(
+                _warn(
+                    "CURRENCY_MISMATCH",
+                    (
+                        f"inputs.json states currency {in_cur.strip().upper()} but sizing.json was computed "
+                        f"as {sz_cur.strip().upper()}. Money figures in this report are labelled "
+                        f"{in_cur.strip().upper()}; if the sizing inputs were actually in "
+                        f"{sz_cur.strip().upper()}, every TAM/SAM/SOM figure carries the wrong unit. "
+                        "No FX conversion is performed — re-run the sizing step with the correct "
+                        "--currency rather than converting the output by hand."
+                    ),
+                )
+            )
+
+    warnings.extend(_check_founder_value_fidelity(inputs, sizing))
+
+    # 0. IMPLAUSIBLE_PCT_SCALE — surface sizing.json's input-plausibility warnings (WB-1:
+    # the fractional-% guard, e.g. 0.4 entered where 40 was meant → silent ~100x error).
+    # These are recorded in sizing.json's validation.warnings; re-emit so the founder sees
+    # them in the report's Warnings section rather than only on the script's stderr.
+    if _usable(sizing):
+        for w in _as_list((sizing.get("validation") or {}).get("warnings")):
+            if isinstance(w, dict) and w.get("code") == "IMPLAUSIBLE_PCT_SCALE":
+                warnings.append(_warn("IMPLAUSIBLE_PCT_SCALE", str(w.get("message") or "Implausible percentage input")))
 
     # 1. CORRUPT_ARTIFACT / MISSING_ARTIFACT — required artifacts
     for name in REQUIRED_ARTIFACTS:
@@ -356,7 +603,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     if _usable(validation):
         agent_estimate_names: set[str] = set()
         for assumption in _as_list(validation.get("assumptions")):
-            if assumption.get("category") == "agent_estimate":
+            if isinstance(assumption, dict) and assumption.get("category") == "agent_estimate":
                 name = assumption.get("name", "")
                 if name in QUANTITATIVE_PARAMS:
                     agent_estimate_names.add(name)
@@ -364,7 +611,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
         sensitivity_params: set[str] = set()
         if _usable(sensitivity):
             for scenario in _as_list(sensitivity.get("scenarios")):
-                if scenario.get("confidence") == "agent_estimate":
+                if isinstance(scenario, dict) and scenario.get("confidence") == "agent_estimate":
                     sensitivity_params.add(scenario.get("parameter", ""))
 
         unsourced = agent_estimate_names - sensitivity_params
@@ -380,7 +627,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # 4. UNVALIDATED_CLAIMS
     if _usable(validation):
         for fig in _as_list(validation.get("figure_validations")):
-            if fig.get("status") == "unsupported":
+            if isinstance(fig, dict) and fig.get("status") == "unsupported":
                 fig_display = fig.get("label", fig.get("figure", "unknown"))
                 warnings.append(
                     _warn(
@@ -392,7 +639,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # 5. REFUTED_CLAIMS — surfaces refuted figures in warnings section
     if _usable(validation):
         for fig in _as_list(validation.get("figure_validations")):
-            if fig.get("status") == "refuted":
+            if isinstance(fig, dict) and fig.get("status") == "refuted":
                 fig_display = fig.get("label", fig.get("figure", "unknown"))
                 refutation = fig.get("refutation")
                 if not refutation:
@@ -429,7 +676,9 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 )
             )
 
-    # 8. TAM_DISCREPANCY
+    # 8. TAM_DISCREPANCY / SAM_DISCREPANCY / SOM_DISCREPANCY — same >30% gate extended
+    # to SAM/SOM (previously only TAM was checked; an order-of-magnitude SAM/SOM gap
+    # between top-down and bottom-up could be presented as equally defensible).
     if _usable(sizing):
         comparison = _as_dict(sizing.get("comparison"))
         if comparison.get("tam_delta_pct", 0) > 30:
@@ -437,6 +686,20 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 _warn(
                     "TAM_DISCREPANCY",
                     f"Top-down and bottom-up TAM differ by {comparison['tam_delta_pct']}% (>30%)",
+                )
+            )
+        if comparison.get("sam_delta_pct", 0) > 30:
+            warnings.append(
+                _warn(
+                    "SAM_DISCREPANCY",
+                    f"Top-down and bottom-up SAM differ by {comparison['sam_delta_pct']}% (>30%)",
+                )
+            )
+        if comparison.get("som_delta_pct", 0) > 30:
+            warnings.append(
+                _warn(
+                    "SOM_DISCREPANCY",
+                    f"Top-down and bottom-up SOM differ by {comparison['som_delta_pct']}% (>30%)",
                 )
             )
 
@@ -490,7 +753,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # 13. NARROW_AGENT_ESTIMATE_RANGE
     if _usable(sensitivity):
         for scenario in _as_list(sensitivity.get("scenarios")):
-            if scenario.get("confidence") == "agent_estimate":
+            if isinstance(scenario, dict) and scenario.get("confidence") == "agent_estimate":
                 eff = _as_dict(scenario.get("effective_range"))
                 low = abs(eff.get("low_pct", 0))
                 high = abs(eff.get("high_pct", 0))
@@ -506,7 +769,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # 14. OVERCLAIMED_VALIDATION
     if _usable(validation):
         for fig in _as_list(validation.get("figure_validations")):
-            if fig.get("status") == "validated" and fig.get("source_count", 0) < 2:
+            if isinstance(fig, dict) and fig.get("status") == "validated" and fig.get("source_count", 0) < 2:
                 fig_display = fig.get("label", fig.get("figure", "unknown"))
                 warnings.append(
                     _warn(
@@ -529,11 +792,19 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 claim = existing_claims.get(metric)
                 delta = _compute_delta(float(val), claim)
                 if delta is not None and abs(delta) > 50 and claim is not None:
+                    # Code stays DECK_CLAIM_MISMATCH (stable API, asserted elsewhere);
+                    # only the human-readable wording follows where the claim came from.
+                    _src = (
+                        "deck claim"
+                        if _has_document_materials(artifacts.get("inputs.json"))
+                        else "the figure you stated"
+                    )
+                    _lbl = "deck" if _has_document_materials(artifacts.get("inputs.json")) else "you said"
                     warnings.append(
                         _warn(
                             "DECK_CLAIM_MISMATCH",
-                            f"{metric.upper()} differs from deck claim by {delta:+.1f}% "
-                            f"(deck: {_fmt_usd(float(claim))}, calculated: {_fmt_usd(val)})",
+                            f"{metric.upper()} differs from {_src} by {delta:+.1f}% "
+                            f"({_lbl}: {_fmt_usd(float(claim))}, calculated: {_fmt_usd(val)})",
                         )
                     )
 
@@ -598,9 +869,15 @@ def _section_deck_claims_narrative(inputs: dict[str, Any] | None) -> str:
     detail = inputs.get("existing_claims_detail")
     if not detail:  # None, empty dict, empty list, empty string, etc.
         return ""
-    lines = ["## Deck Claims (Narrative)\n"]
+    # Attribute the claim to where it actually came from. This skill supports
+    # conversational runs (no upload at all), and crediting a founder's spoken
+    # figures to "the deck" is a wrong provenance statement about their own input.
+    from_doc = _has_document_materials(inputs)
+    heading = "Deck Claims" if from_doc else "Your Stated Figures"
+    source = "The deck stated" if from_doc else "You stated"
+    lines = [f"## {heading} (Narrative)\n"]
     lines.append(
-        "*The deck stated additional figures that don't fit the canonical "
+        f"*{source} additional figures that don't fit the canonical "
         "TAM/SAM/SOM shape. These are captured for context but are not "
         "reconciled against the computed sizing.*\n"
     )
@@ -614,7 +891,10 @@ def _section_deck_claims_narrative(inputs: dict[str, Any] | None) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _section_title_provenance(inputs: dict[str, Any] | None) -> str:
+def _section_title_provenance(
+    inputs: dict[str, Any] | None,
+    sizing: dict[str, Any] | None = None,
+) -> str:
     """Section 1: Title and provenance."""
     if inputs is None:
         return "# Market Sizing Report\n\n*No inputs artifact found.*\n"
@@ -622,10 +902,12 @@ def _section_title_provenance(inputs: dict[str, Any] | None) -> str:
     date = inputs.get("analysis_date", "unknown date")
     materials = _as_list(inputs.get("materials_provided"))
     mat_str = ", ".join(str(m) for m in materials) if materials else "none"
+    basis_label = _sizing_basis_label(_resolve_sizing_basis(sizing, inputs))
     lines = [
         f"# Market Sizing: {company}\n",
         f"**Date:** {date}  ",
         f"**Materials:** {mat_str}  ",
+        f"**Sizing basis:** {basis_label}  ",
         "**Generated by:** [founder skills](https://github.com/lool-ventures/founder-skills)"
         " by [lool ventures](https://lool.vc)"
         " — Market Sizing Agent\n",
@@ -726,7 +1008,7 @@ def _section_methodology(methodology: dict[str, Any] | None) -> str:
 
 
 def _section_analysis_checklist(checklist: dict[str, Any] | None, artifacts_found: list[str]) -> str:
-    """Analysis checklist."""
+    """Analysis checklist with compact 22-row appendix."""
     lines = ["## Analysis Checklist\n"]
     lines.append(f"- Artifacts produced: {', '.join(artifacts_found)}")
     if checklist is not None and not _is_stub(checklist):
@@ -734,7 +1016,42 @@ def _section_analysis_checklist(checklist: dict[str, Any] | None, artifacts_foun
         pass_ct = summary.get("pass", 0)
         fail_ct = summary.get("fail", 0)
         na_ct = summary.get("not_applicable", 0)
-        lines.append(f"- Self-check: {pass_ct} pass, {fail_ct} fail, {na_ct} N/A")
+        total_ct = summary.get("total", pass_ct + fail_ct + na_ct)
+        applicable_ct = total_ct - na_ct
+        score_pct = summary.get("score_pct")
+        if isinstance(score_pct, (int, float)):
+            # Render as "<score>% (<pass>/<applicable> pass, ...)" — NOT a bare "pass/total"
+            # fraction (e.g. "100/22"), which reads as a malformed ratio rather than 100% across
+            # 22 items.
+            score_str = f"{int(score_pct)}" if float(score_pct) == int(score_pct) else f"{score_pct:.1f}"
+            lines.append(f"- Self-check: {score_str}% ({pass_ct}/{applicable_ct} pass, {fail_ct} fail, {na_ct} N/A)")
+        else:
+            lines.append(f"- Self-check: {pass_ct} pass, {fail_ct} fail, {na_ct} N/A")
+
+        # Failed items detail
+        failed_items = _as_list(summary.get("failed_items"))
+        if failed_items:
+            lines.append("\n**Items that failed:**")
+            for raw_f in failed_items:
+                f = _as_dict(raw_f)
+                label = f.get("label", f.get("id", "?"))
+                notes = f.get("notes", "")
+                lines.append(f"- **{label}**: {notes}" if notes else f"- **{label}**")
+
+        # Compact 22-row appendix table
+        items = _as_list(checklist.get("items"))
+        if items:
+            lines.append("\n### Appendix: Full Self-Check\n")
+            lines.append("| # | Criterion | Status | Notes |")
+            lines.append("|---|-----------|--------|-------|")
+            status_icons = {"pass": "PASS", "fail": "FAIL", "not_applicable": "N/A"}
+            for i, raw_item in enumerate(items, 1):
+                item = _as_dict(raw_item)
+                label = _md_safe(item.get("label", item.get("id", "?")))
+                status = status_icons.get(item.get("status", "?"), "?")
+                notes = _md_safe(item.get("notes", "") or "")
+                lines.append(f"| {i} | {label} | {status} | {notes} |")
+
     return "\n".join(lines) + "\n"
 
 
@@ -762,6 +1079,18 @@ def _section_sizing_table(
         return f"## Market Sizing\n\n*Sizing not performed — {sizing.get('reason', 'unknown reason')}*\n"
 
     lines = ["## Market Sizing\n"]
+
+    # Non-USD disclosure. Labelling the figures correctly is necessary but not
+    # sufficient: an externally-sourced industry total is very often quoted in
+    # USD, and nothing here converts it. Say so rather than let a mixed-unit
+    # TAM pass as a single-unit one.
+    if _CURRENCY != "USD":
+        lines.append(
+            f"> **Currency: {_CURRENCY}.** All figures are stated in {_CURRENCY} as supplied — "
+            f"**no FX conversion is applied anywhere in this analysis.** If any input came from an "
+            f"external source quoted in another currency (industry totals usually are quoted in USD), "
+            f"convert it to {_CURRENCY} yourself before relying on the combined figure.\n"
+        )
 
     # One-line narrative per approach
     td_data = sizing.get("top_down")
@@ -873,6 +1202,8 @@ def _section_assumptions(validation: dict[str, Any] | None) -> str:
     # Params whose values are monetary
     monetary_params = {"industry_total", "arpu"}
     for a in assumptions:
+        if not isinstance(a, dict):
+            continue
         cat = a.get("category", "unknown")
         cat_display = cat_labels.get(cat, cat)
         name = a.get("name", "unnamed")
@@ -901,6 +1232,8 @@ def _section_validation(validation: dict[str, Any] | None) -> str:
 
     lines = ["## Validation\n"]
     for fig in figs:
+        if not isinstance(fig, dict):
+            continue
         figure = fig.get("label") or fig.get("figure", "unknown")
         status = fig.get("status", "unknown")
         source_count = fig.get("source_count", 0)
@@ -922,37 +1255,121 @@ def _section_sensitivity(sensitivity: dict[str, Any] | None) -> str:
 
     lines = [
         "## Sensitivity Analysis\n",
-        "The table below shows how SOM changes when each assumption moves between"
+        "The table below shows how each market tier changes when each assumption moves between"
         " its low and high estimate. Parameters tagged *Estimate* have wider ranges"
         " because they lack external sourcing — they tend to dominate the sensitivity,"
         " which highlights exactly where better data would most strengthen the analysis.\n",
     ]
-    has_approach_used = any(s.get("approach_used") for s in scenarios)
+    has_approach_used = any(isinstance(s, dict) and s.get("approach_used") for s in scenarios)
+
+    # Check whether TAM/SAM fields are present in any scenario (real sensitivity.py output)
+    has_tam_sam = any(
+        isinstance(s, dict) and ("tam" in s.get("low", {}) or "tam" in s.get("base", {})) for s in scenarios
+    )
+
     if has_approach_used:
-        lines.append("| Parameter | Approach | Confidence | Low SOM | Base SOM | High SOM | Range |")
-        lines.append("|-----------|----------|------------|---------|----------|----------|-------|")
+        if has_tam_sam:
+            lines.append(
+                "| Parameter | Approach | Confidence | Low Value | Base Value | High Value"
+                " | Low TAM | Base TAM | High TAM"
+                " | Low SAM | Base SAM | High SAM"
+                " | Low SOM | Base SOM | High SOM | Range |"
+            )
+            lines.append(
+                "|-----------|----------|------------|-----------|------------|----------"
+                "|---------|----------|----------"
+                "|---------|----------|----------"
+                "|---------|----------|----------|-------|"
+            )
+        else:
+            lines.append("| Parameter | Approach | Confidence | Low SOM | Base SOM | High SOM | Range |")
+            lines.append("|-----------|----------|------------|---------|----------|----------|-------|")
     else:
-        lines.append("| Parameter | Confidence | Low SOM | Base SOM | High SOM | Range |")
-        lines.append("|-----------|------------|---------|----------|----------|-------|")
+        if has_tam_sam:
+            lines.append(
+                "| Parameter | Confidence | Low Value | Base Value | High Value"
+                " | Low TAM | Base TAM | High TAM"
+                " | Low SAM | Base SAM | High SAM"
+                " | Low SOM | Base SOM | High SOM | Range |"
+            )
+            lines.append(
+                "|-----------|------------|-----------|------------|----------"
+                "|---------|----------|----------"
+                "|---------|----------|----------"
+                "|---------|----------|----------|-------|"
+            )
+        else:
+            lines.append("| Parameter | Confidence | Low SOM | Base SOM | High SOM | Range |")
+            lines.append("|-----------|------------|---------|----------|----------|-------|")
 
     conf_labels = {"sourced": "Sourced", "derived": "Derived", "agent_estimate": "Estimate"}
     for s in scenarios:
+        if not isinstance(s, dict):
+            continue
         param = _humanize_param(s.get("parameter", "?"))
         conf = conf_labels.get(s.get("confidence", "sourced"), s.get("confidence", "sourced"))
-        low_som = _fmt_usd(s.get("low", {}).get("som", 0))
-        base_som = _fmt_usd(s.get("base", {}).get("som", 0))
-        high_som = _fmt_usd(s.get("high", {}).get("som", 0))
+        low_d = _as_dict(s.get("low"))
+        base_d = _as_dict(s.get("base"))
+        high_d = _as_dict(s.get("high"))
+        low_som = _fmt_usd(low_d.get("som", 0))
+        base_som = _fmt_usd(base_d.get("som", 0))
+        high_som = _fmt_usd(high_d.get("som", 0))
         eff = _as_dict(s.get("effective_range"))
         range_str = f"[{eff.get('low_pct', 0)}%, +{eff.get('high_pct', 0)}%]"
         widened = " (widened)" if s.get("range_widened") else ""
+
+        # Parameter value columns (low/base/high parameter value, not market size).
+        # Format unit-aware (currency / count / percent) so all three cells are consistent.
+        raw_param = s.get("parameter", "")
+        base_val = s.get("base_value")
+        low_val_raw = low_d.get("value")
+        high_val_raw = high_d.get("value")
+        if base_val is not None and isinstance(base_val, (int, float)):
+            low_val_str = _fmt_param_value(raw_param, low_val_raw) if isinstance(low_val_raw, (int, float)) else "—"
+            base_val_str = _fmt_param_value(raw_param, base_val)
+            high_val_str = _fmt_param_value(raw_param, high_val_raw) if isinstance(high_val_raw, (int, float)) else "—"
+        else:
+            low_val_str = base_val_str = high_val_str = "—"
+
         if has_approach_used:
             approach_labels = {"top_down": "Top-down", "bottom_up": "Bottom-up"}
             approach_used = approach_labels.get(s.get("approach_used", "?"), s.get("approach_used", "?"))
-            lines.append(
-                f"| {param} | {approach_used} | {conf} | {low_som} | {base_som} | {high_som} | {range_str}{widened} |"
-            )
+            if has_tam_sam:
+                low_tam = _fmt_usd(low_d.get("tam", 0))
+                base_tam = _fmt_usd(base_d.get("tam", 0))
+                high_tam = _fmt_usd(high_d.get("tam", 0))
+                low_sam = _fmt_usd(low_d.get("sam", 0))
+                base_sam = _fmt_usd(base_d.get("sam", 0))
+                high_sam = _fmt_usd(high_d.get("sam", 0))
+                lines.append(
+                    f"| {param} | {approach_used} | {conf}"
+                    f" | {low_val_str} | {base_val_str} | {high_val_str}"
+                    f" | {low_tam} | {base_tam} | {high_tam}"
+                    f" | {low_sam} | {base_sam} | {high_sam}"
+                    f" | {low_som} | {base_som} | {high_som} | {range_str}{widened} |"
+                )
+            else:
+                lines.append(
+                    f"| {param} | {approach_used} | {conf}"
+                    f" | {low_som} | {base_som} | {high_som} | {range_str}{widened} |"
+                )
         else:
-            lines.append(f"| {param} | {conf} | {low_som} | {base_som} | {high_som} | {range_str}{widened} |")
+            if has_tam_sam:
+                low_tam = _fmt_usd(low_d.get("tam", 0))
+                base_tam = _fmt_usd(base_d.get("tam", 0))
+                high_tam = _fmt_usd(high_d.get("tam", 0))
+                low_sam = _fmt_usd(low_d.get("sam", 0))
+                base_sam = _fmt_usd(base_d.get("sam", 0))
+                high_sam = _fmt_usd(high_d.get("sam", 0))
+                lines.append(
+                    f"| {param} | {conf}"
+                    f" | {low_val_str} | {base_val_str} | {high_val_str}"
+                    f" | {low_tam} | {base_tam} | {high_tam}"
+                    f" | {low_sam} | {base_sam} | {high_sam}"
+                    f" | {low_som} | {base_som} | {high_som} | {range_str}{widened} |"
+                )
+            else:
+                lines.append(f"| {param} | {conf} | {low_som} | {base_som} | {high_som} | {range_str}{widened} |")
 
     ranking = _as_list(sensitivity.get("sensitivity_ranking"))
     if ranking:
@@ -1024,6 +1441,54 @@ def _section_sources(validation: dict[str, Any] | None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _resolve_headline_market_size(
+    sizing: dict[str, Any] | None,
+) -> tuple[dict[str, float | None], str | None]:
+    """Resolve a single headline TAM/SAM/SOM triple from sizing.json for the coaching payload.
+
+    sizing.json never carries a top-level "tam"/"sam"/"som" scalar — each figure is
+    nested under an approach key (``top_down`` / ``bottom_up``) as a dict whose
+    numeric value lives at ``.value`` (see market_sizing.py's ``top_down()`` /
+    ``bottom_up()`` output). The coaching sub-agent is told to reason ONLY from
+    coaching_payload and never refetch from disk, so this resolves the nested path
+    once here rather than leaving it undone.
+
+    Selection rule for ``approach: "both"`` mode — documented here because nothing
+    upstream names a winner between the two independently-computed TAMs: prefer
+    ``bottom_up`` when both approaches are present, falling back to ``top_down``
+    when bottom_up is absent (top_down-only mode). This matches the skill's own
+    stated methodology preference (references/tam-sam-som-methodology.md:84 —
+    "Prefer bottom-up for accuracy: Anchor TAM/SAM/SOM with bottom-up grounded in
+    how your business works. Cross-check against top-down.") rather than inventing
+    a new rule such as averaging or taking the larger/smaller figure.
+
+    Returns (figures, source_approach):
+      - figures: {"tam": .., "sam": .., "som": ..}, each a float or None when the
+        nested value is missing/non-numeric.
+      - source_approach: "bottom_up" | "top_down" | None (neither approach present,
+        or sizing.json is absent/corrupt/a stub — callers already coerce those to
+        a plain dict or None before reaching here).
+    """
+    figures: dict[str, float | None] = {"tam": None, "sam": None, "som": None}
+    if not isinstance(sizing, dict):
+        return figures, None
+
+    bottom_up = _as_dict(sizing.get("bottom_up"))
+    top_down = _as_dict(sizing.get("top_down"))
+    if bottom_up:
+        source, source_approach = bottom_up, "bottom_up"
+    elif top_down:
+        source, source_approach = top_down, "top_down"
+    else:
+        return figures, None
+
+    for metric in ("tam", "sam", "som"):
+        val = _as_dict(source.get(metric)).get("value")
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            figures[metric] = float(val)
+    return figures, source_approach
+
+
 def _emit_coaching_payload(
     inputs: dict[str, Any],
     methodology: dict[str, Any],
@@ -1032,14 +1497,36 @@ def _emit_coaching_payload(
     review_dir: str,
     report_path: str,
     insertion_marker: str,
+    sizing: dict[str, Any] | None = None,
+    currency: str = "USD",
 ) -> dict[str, Any]:
     """Build the v0.4.2 coaching_payload for market-sizing (schema_version v0.4.2-market-sizing).
 
     Read from existing artifacts; do not fabricate fields.
     market-sizing's checklist has only pass/fail/not_applicable (no warn status),
     so warned_items is always an explicit empty list for cross-skill schema consistency.
+
+    tam/sam/som/currency/market_size_approach are resolved via
+    _resolve_headline_market_size — see that function for the nested-path
+    resolution and the "both"-mode selection rule. currency is never converted
+    (no FX conversion happens anywhere in this pipeline); it is only a label on
+    the numbers already computed by market_sizing.py.
     """
+    market_size, market_size_approach = _resolve_headline_market_size(sizing)
     summary = _as_dict(checklist.get("summary"))
+
+    # Derive a confidence tier from the checklist score_pct so the Context B
+    # agent reads it directly from coaching_payload (no fabrication from
+    # nonexistent sizing.json/checklist.json fields).
+    confidence: str | None = None
+    score_pct = summary.get("score_pct")
+    if isinstance(score_pct, (int, float)):
+        if score_pct >= 85:
+            confidence = "high"
+        elif score_pct >= 60:
+            confidence = "medium"
+        else:
+            confidence = "low"
 
     # Compute deck_coverage from inputs.existing_claims (canonical keys only).
     # Non-canonical keys do NOT count here — EXISTING_CLAIMS_SHAPE warning is
@@ -1072,7 +1559,13 @@ def _emit_coaching_payload(
         "high_severity_warnings": [w["code"] for w in validation_warnings if w.get("severity") == "high"],
         "company_name": inputs.get("company_name"),
         "methodology": methodology.get("approach_chosen"),
+        "confidence": confidence,  # derived from checklist score_pct; null if unavailable
         "deck_coverage": deck_coverage,  # nullable; additive in v0.4.2-market-sizing
+        "tam": market_size["tam"],
+        "sam": market_size["sam"],
+        "som": market_size["som"],
+        "currency": currency,
+        "market_size_approach": market_size_approach,  # "bottom_up" | "top_down" | null
         "review_dir": review_dir,
         "report_path": report_path,
         "insertion_marker": insertion_marker,
@@ -1098,6 +1591,9 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     if _usable(methodology_art):
         acceptances: list[dict[str, str]] = []
         for aw in _as_list(methodology_art.get("accepted_warnings")):
+            if not isinstance(aw, dict):
+                print("Warning: accepted_warnings entry is not an object — skipped", file=sys.stderr)
+                continue
             code = aw.get("code", "")
             match_str = aw.get("match", "")
             if not code or not match_str:
@@ -1124,9 +1620,6 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
                     w["message"] += f" [Accepted: {acc['reason']}]"
                     break
 
-    # Determine status
-    status = "clean" if not warnings else "warnings"
-
     # Assemble report — treat corrupt artifacts as None for rendering
     def _render_safe(data: dict[str, Any] | None) -> dict[str, Any] | None:
         return None if data is _CORRUPT else data
@@ -1138,13 +1631,25 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     sensitivity = _render_safe(artifacts.get("sensitivity.json"))
     checklist = _render_safe(artifacts.get("checklist.json"))
 
+    # Resolve the analysis currency BEFORE any section renders — every money
+    # figure in the report goes through _fmt_usd, which reads this.
+    # inputs.json is checked FIRST: it is where the founder's stated currency is
+    # recorded at intake, so it outranks whatever the producer defaulted to. A
+    # disagreement between the two is separately reported as CURRENCY_MISMATCH.
+    _set_currency(_resolve_currency(inputs, sizing, methodology))
+
     # Compute provenance
     provenance_data: dict[str, dict[str, Any]] | None = None
     if _usable(sizing) and not _is_stub(sizing):
         provenance_data, _ = _compute_provenance(sizing, validation_data, inputs)
 
+    # Render every section EXCEPT Warnings first. The marker pre-scan and the
+    # MARKER_COLLISION append must run before the Warnings section is rendered
+    # and before status is computed, so that a marker collision is reflected in
+    # both validation.status and the report's Warnings section.
+    _WARNINGS_PLACEHOLDER = "\x00__WARNINGS_SECTION__\x00"
     sections = [
-        _section_title_provenance(inputs),
+        _section_title_provenance(inputs, sizing),
         _section_executive_summary(sizing, sensitivity, provenance_data),
         _section_analysis_checklist(checklist, artifacts_found),
         _section_methodology(methodology),
@@ -1154,11 +1659,11 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         _section_assumptions(validation_data),
         _section_validation(validation_data),
         _section_sensitivity(sensitivity),
-        _section_warnings(warnings),
+        _WARNINGS_PLACEHOLDER,
         _section_sources(validation_data),
     ]
 
-    report_markdown = "\n".join(sections)
+    body_without_warnings = "\n".join(s for s in sections if s != _WARNINGS_PLACEHOLDER)
 
     # v0.4.2 Mitigation 2: per-run uuid marker for Context B's Edit
     marker = f"<!-- COACHING_INSERTION_POINT_{uuid.uuid4().hex[:8]} -->"
@@ -1167,7 +1672,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # always find our own emission). Agent post-Edit verification uses the
     # EXACT uuid (per-run), so substring collisions with body content are
     # informational only — but worth flagging so authors can sanitize.
-    if "<!-- COACHING_INSERTION_POINT_" in report_markdown:
+    if "<!-- COACHING_INSERTION_POINT_" in body_without_warnings:
         warnings.append(
             _warn(
                 "MARKER_COLLISION",
@@ -1179,11 +1684,18 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
             )
         )
 
+    # Determine status AFTER all warnings (including MARKER_COLLISION) are known.
+    status = "clean" if not warnings else "warnings"
+
+    # Splice the Warnings section in now that the warnings list is final.
+    report_markdown = "\n".join(_section_warnings(warnings) if s == _WARNINGS_PLACEHOLDER else s for s in sections)
+
     report_markdown += (
         f"\n\n{marker}\n\n---\n"
         "*Generated by [founder skills](https://github.com/lool-ventures/founder-skills)"
         " by [lool ventures](https://lool.vc)"
-        " — Market Sizing Agent*\n"
+        " — Market Sizing Agent"
+        " · [Share feedback](https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback)*\n"
     )
 
     # Stderr summary
@@ -1208,6 +1720,8 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         review_dir=os.path.abspath(dir_path),
         report_path=resolved_report_path,
         insertion_marker=marker,
+        sizing=sizing,
+        currency=_CURRENCY,
     )
 
     result = {
@@ -1232,7 +1746,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("-d", "--dir", required=True, help="Directory containing JSON artifacts")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
-    p.add_argument("--strict", action="store_true", help="Exit 1 if any warnings (CI mode)")
+    p.add_argument("--strict", action="store_true", help="Exit 1 on high/medium-severity warnings (CI mode)")
     p.add_argument(
         "--write-md",
         help="Also write the report markdown to this path (in addition to JSON output via -o)",

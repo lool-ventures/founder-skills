@@ -30,6 +30,7 @@ _VALID_INPUT = {
     "review_date": "2026-05-03",
     "input_format": "pdf",
     "total_slides": 1,
+    "ai_company_status": "not_ai",
     "slides": [{"number": 1, "headline": "h", "content_summary": "s"}],
 }
 

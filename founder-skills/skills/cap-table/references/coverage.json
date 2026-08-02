@@ -1,0 +1,22 @@
+{
+  "schema_version": "v0.1-coverage",
+  "primitives": {
+    "safe_conversion": { "completeness": "full", "producer": "safe_conversion.py" },
+    "note_conversion": { "completeness": "full", "producer": "note_conversion.py" },
+    "priced_round": {
+      "completeness": "full",
+      "producer": "priced_round.py",
+      "couples": ["safe_conversion", "note_conversion", "option_pool", "anti_dilution", "new_money", "acquisition_consideration"],
+      "incompatible_couples": [["note_conversion", "acquisition_consideration"]]
+    },
+    "option_pool": { "completeness": "full", "producer": "option_pool.py" },
+    "anti_dilution": { "completeness": "full", "producer": "anti_dilution.py" },
+    "flip": {
+      "completeness": "structural_only",
+      "producer": "flip_scenario.py",
+      "value_neutral_only": true,
+      "combinable_via_sequence": ["priced_round"]
+    },
+    "acquisition_consideration": { "completeness": "full", "producer": "priced_round.py", "capability_token": "acquisition_consideration_v1" }
+  }
+}

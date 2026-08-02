@@ -20,7 +20,18 @@ import tempfile
 from typing import Any
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+FOUNDER_SKILLS_DIR = os.path.dirname(SCRIPT_DIR)
 CP_SCRIPTS_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "competitive-positioning", "scripts")
+CP_SKILL_MD = os.path.join(FOUNDER_SKILLS_DIR, "skills", "competitive-positioning", "SKILL.md")
+CP_AGENT_MD = os.path.join(FOUNDER_SKILLS_DIR, "agents", "competitive-positioning.md")
+CP_ARTIFACT_SCHEMAS_MD = os.path.join(
+    FOUNDER_SKILLS_DIR, "skills", "competitive-positioning", "references", "artifact-schemas.md"
+)
+
+
+def _read(path: str) -> str:
+    with open(path, encoding="utf-8") as f:
+        return f.read()
 
 
 def run_script(
@@ -66,9 +77,10 @@ def _make_competitor(
     research_depth: str = "full",
     sourced_fields_count: int = 5,
     evidence_source: dict[str, str] | None = None,
+    recent_developments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a single enriched competitor entry."""
-    return {
+    comp: dict[str, Any] = {
         "name": name,
         "slug": slug,
         "category": category,
@@ -82,6 +94,29 @@ def _make_competitor(
         "research_depth": research_depth,
         "sourced_fields_count": sourced_fields_count,
     }
+    if recent_developments is not None:
+        comp["recent_developments"] = recent_developments
+    return comp
+
+
+def _make_recent_development(
+    *,
+    date: str = "2026-03",
+    dev_type: str = "funding",
+    summary: str = "Raised a $20M Series B.",
+    source: str = "https://example.com/news/series-b",
+    relevance: str | None = "Signals aggressive expansion into our segment.",
+) -> dict[str, Any]:
+    """Build a single recent_developments[] entry."""
+    entry: dict[str, Any] = {
+        "date": date,
+        "type": dev_type,
+        "summary": summary,
+        "source": source,
+    }
+    if relevance is not None:
+        entry["relevance"] = relevance
+    return entry
 
 
 def _make_valid_landscape(
@@ -259,6 +294,85 @@ class TestValidateLandscape:
         assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
         assert "non-empty" in stderr.lower()
 
+    # 10e. Known near-miss field alias 'key_differentiators_per_deck' is auto-normalized to
+    # 'key_differentiators' (same auto-fix pattern as the underscore-slug conversion above) —
+    # an observed sub-agent near-miss, rather than a hard failure forcing a repair round-trip.
+    def test_key_differentiators_per_deck_alias_auto_normalized(self) -> None:
+        payload = _make_valid_landscape()
+        comp = payload["competitors"][0]
+        comp["key_differentiators_per_deck"] = comp.pop("key_differentiators")
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0 (auto-normalize), got {rc}. stderr: {stderr}"
+        assert data is not None
+        fixed = data["competitors"][0]
+        assert "key_differentiators" in fixed
+        assert "key_differentiators_per_deck" not in fixed
+        assert "auto-converted" in stderr.lower() or "normalized" in stderr.lower()
+
+    # 10f. When BOTH the canonical field and the alias are present, canonical wins and no
+    # silent data loss occurs — the alias is simply dropped (not merged/overwritten).
+    def test_key_differentiators_per_deck_alias_ignored_when_canonical_present(self) -> None:
+        payload = _make_valid_landscape()
+        comp = payload["competitors"][0]
+        comp["key_differentiators_per_deck"] = ["Alias value"]
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None
+        fixed = data["competitors"][0]
+        assert fixed["key_differentiators"] == comp["key_differentiators"]
+
+    # 10f-2. When both keys are present the alias is dropped, but NOT silently — a stderr
+    # note must record the drop (gap-detection knowledge shouldn't vanish without a trace).
+    def test_key_differentiators_per_deck_both_present_notes_drop(self) -> None:
+        payload = _make_valid_landscape()
+        comp = payload["competitors"][0]
+        comp["key_differentiators_per_deck"] = ["Alias value"]
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert "key_differentiators_per_deck" in stderr, (
+            f"dropping the alias when canonical is present must emit a stderr note: {stderr!r}"
+        )
+
+    # 10g. A "researched" per-field evidence_source with no matching "sources" citation
+    # warns (verifiability gap) — mirrors score_moats.py's RESEARCHED_WITHOUT_SOURCE.
+    def test_researched_field_without_source_warns(self) -> None:
+        payload = _make_valid_landscape()
+        # _make_competitor's default evidence_source has "description" and "pricing_model"
+        # both "researched", with no "sources" dict at all.
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0 (warn, not fail), got {rc}. stderr: {stderr}"
+        assert data is not None
+        codes = [w["code"] for w in data["warnings"]]
+        assert "RESEARCHED_WITHOUT_SOURCE" in codes
+        warn = next(w for w in data["warnings"] if w["code"] == "RESEARCHED_WITHOUT_SOURCE")
+        assert warn["severity"] == "medium"
+        assert "alpha-corp" in warn["message"]
+
+    # 10h. A "researched" field WITH a matching "sources" entry does not warn for that field,
+    # and "sources" is passed through into the output competitor.
+    def test_researched_field_with_source_no_warning_and_passthrough(self) -> None:
+        payload = _make_valid_landscape()
+        for comp in payload["competitors"]:
+            comp["sources"] = {k: "https://example.com/q" for k in comp["evidence_source"]}
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None
+        codes = [w["code"] for w in data["warnings"]]
+        assert "RESEARCHED_WITHOUT_SOURCE" not in codes
+        alpha = next(c for c in data["competitors"] if c["slug"] == "alpha-corp")
+        assert alpha["sources"]["description"] == "https://example.com/q"
+
+    # 10i. agent_estimate fields are exempt — no source expected.
+    def test_agent_estimate_field_without_source_does_not_warn(self) -> None:
+        payload = _make_valid_landscape()
+        for comp in payload["competitors"]:
+            comp["evidence_source"] = {k: "agent_estimate" for k in comp["evidence_source"]}
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None
+        codes = [w["code"] for w in data["warnings"]]
+        assert "RESEARCHED_WITHOUT_SOURCE" not in codes
+
     # 11. data_confidence passthrough
     def test_data_confidence_passthrough(self) -> None:
         payload = _make_valid_landscape(data_confidence=0.85)
@@ -306,6 +420,473 @@ class TestValidateLandscape:
             assert len(file_data["competitors"]) == 5
         finally:
             os.unlink(tmp_path)
+
+
+class TestValidateLandscapeKeyDifferentiators:
+    """key_differentiators emptiness is only valid for a competitor with
+    research_depth 'partial' (the promoted-but-not-yet-enriched case). Any other
+    research_depth claims complete research, so an empty list there is an error."""
+
+    def test_empty_key_differentiators_valid_when_research_depth_partial(self) -> None:
+        payload = _make_valid_landscape()
+        comp = payload["competitors"][0]
+        comp["key_differentiators"] = []
+        comp["research_depth"] = "partial"
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0 for empty key_differentiators + partial, got {rc}. stderr: {stderr}"
+        assert data is not None
+        fixed = next(c for c in data["competitors"] if c["slug"] == comp["slug"])
+        assert fixed["key_differentiators"] == []
+
+    def test_empty_key_differentiators_invalid_when_research_depth_full(self) -> None:
+        payload = _make_valid_landscape()
+        comp = payload["competitors"][0]
+        comp["key_differentiators"] = []
+        comp["research_depth"] = "full"
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1 for empty key_differentiators + full, got {rc}. stderr: {stderr}"
+        assert "partial" in stderr.lower()
+
+    def test_key_differentiators_absent_still_fails(self) -> None:
+        payload = _make_valid_landscape()
+        del payload["competitors"][0]["key_differentiators"]
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1 when key_differentiators is absent entirely, got {rc}. stderr: {stderr}"
+
+    def test_non_empty_key_differentiators_valid_at_any_research_depth(self) -> None:
+        for depth in ("full", "partial", "founder_provided"):
+            payload = _make_valid_landscape()
+            comp = payload["competitors"][0]
+            comp["key_differentiators"] = ["A real, sourced differentiator"]
+            comp["research_depth"] = depth
+            rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+            assert rc == 0, (
+                f"depth={depth}: expected exit 0 for non-empty key_differentiators, got {rc}. stderr: {stderr}"
+            )
+
+
+class TestValidateLandscapeSuggestedAdditions:
+    """A declined suggested_addition (merged: false) must survive into
+    landscape.json — otherwise the coaching commentary can never cite a
+    declined suggestion, because it was never persisted."""
+
+    def test_declined_suggested_addition_survives_with_merged_false(self) -> None:
+        payload = _make_valid_landscape()
+        payload["suggested_additions"] = [
+            {
+                "name": "Omega Analytics",
+                "slug": "omega-analytics",
+                "category": "adjacent",
+                "rationale": "Found via research; founder declined to add it to the formal set.",
+                "merged": False,
+            }
+        ]
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert "suggested_additions" in data, "declined suggested_additions must survive into landscape.json"
+        assert data["suggested_additions"] == payload["suggested_additions"]
+        assert data["suggested_additions"][0]["merged"] is False
+
+    def test_suggested_additions_absent_when_not_in_input(self) -> None:
+        payload = _make_valid_landscape()
+        assert "suggested_additions" not in payload
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert "suggested_additions" not in data, (
+            "suggested_additions must not be fabricated in the output when the input never had it"
+        )
+
+
+# ---------------------------------------------------------------------------
+# recent_developments[] + --as-of / landscape_as_of tests
+#
+# All tests pin the clock via --as-of / the `as_of` factory kwarg so the
+# recency window doesn't drift with wall-clock time and age fixtures out.
+# Fixed reference date: 2026-06-15. Recency window is 18 months, so
+# window_start = 2024-12-15 (month-granularity floor: 2024-12).
+# ---------------------------------------------------------------------------
+
+AS_OF = "2026-06-15"
+
+
+def _make_landscape_with_dev(
+    recent_developments: list[dict[str, Any]] | None,
+    *,
+    other_competitors_dev: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build a valid landscape_enriched.json where competitor[0] carries the
+    given recent_developments (None means the key is entirely absent) and the
+    rest carry `other_competitors_dev` (default: none)."""
+    comps = [
+        _make_competitor("Alpha Corp", "alpha-corp", "direct", recent_developments=recent_developments),
+        _make_competitor("Beta Inc", "beta-inc", "direct", recent_developments=other_competitors_dev),
+        _make_competitor("Gamma Ltd", "gamma-ltd", "adjacent", recent_developments=other_competitors_dev),
+        _make_competitor("Delta Co", "delta-co", "emerging", recent_developments=other_competitors_dev),
+        _make_competitor("Manual Process", "manual-process", "do_nothing", recent_developments=other_competitors_dev),
+    ]
+    return _make_valid_landscape(competitors=comps)
+
+
+class TestValidateLandscapeRecentDevelopments:
+    """recent_developments[] is optional per-competitor structured data for
+    dated, sourced signals (funding, launches, leadership moves, etc.). The
+    validation rules exist to stop fabrication of a temporal claim."""
+
+    # --- date format acceptance ---------------------------------------
+
+    def test_date_format_yyyy_mm_accepted(self) -> None:
+        payload = _make_landscape_with_dev([_make_recent_development(date="2026-03")])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        alpha = next(c for c in data["competitors"] if c["slug"] == "alpha-corp")
+        assert alpha["recent_developments"][0]["date"] == "2026-03"
+
+    def test_date_format_yyyy_mm_dd_accepted(self) -> None:
+        payload = _make_landscape_with_dev([_make_recent_development(date="2026-03-15")])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+
+    # --- date format rejection ------------------------------------------
+
+    def test_date_format_quarter_rejected(self) -> None:
+        payload = _make_landscape_with_dev([_make_recent_development(date="Q1 2026")])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+        assert "date" in stderr.lower()
+
+    def test_date_format_free_text_rejected(self) -> None:
+        payload = _make_landscape_with_dev([_make_recent_development(date="last spring")])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+
+    def test_date_format_year_only_rejected(self) -> None:
+        payload = _make_landscape_with_dev([_make_recent_development(date="2026")])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+
+    # --- future / out-of-window ------------------------------------------
+
+    def test_future_date_rejected(self) -> None:
+        payload = _make_landscape_with_dev([_make_recent_development(date="2026-07")])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+        assert "future" in stderr.lower()
+
+    def test_future_full_date_rejected(self) -> None:
+        payload = _make_landscape_with_dev([_make_recent_development(date="2026-06-16")])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+        assert "future" in stderr.lower()
+
+    def test_out_of_window_date_rejected(self) -> None:
+        # window_start (month granularity) = 2024-12; 2024-11 is one month too old.
+        payload = _make_landscape_with_dev([_make_recent_development(date="2024-11")])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+        assert "recency window" in stderr.lower()
+
+    def test_within_window_boundary_accepted(self) -> None:
+        # Exactly at the 18-month floor should be accepted (not strictly less-than).
+        payload = _make_landscape_with_dev([_make_recent_development(date="2024-12")])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+
+    # --- source URL requirement -------------------------------------------
+
+    def test_non_url_source_rejected(self) -> None:
+        payload = _make_landscape_with_dev([_make_recent_development(source="saw it on their blog, no link")])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+        assert "source" in stderr.lower()
+        assert "url" in stderr.lower()
+
+    def test_empty_source_rejected(self) -> None:
+        payload = _make_landscape_with_dev([_make_recent_development(source="")])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+
+    def test_search_query_source_rejected_unlike_moat_source(self) -> None:
+        """Unlike moat 'source' (which may be a search query), a dated factual
+        claim about a named company must be spot-checkable — URL required."""
+        payload = _make_landscape_with_dev([_make_recent_development(source="competitor pricing changes 2026")])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+
+    # --- type enum ----------------------------------------------------------
+
+    def test_bad_type_rejected(self) -> None:
+        payload = _make_landscape_with_dev([_make_recent_development(dev_type="rumor")])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+        assert "type" in stderr.lower()
+
+    def test_all_seven_types_accepted(self) -> None:
+        for t in (
+            "funding",
+            "pricing_change",
+            "product_launch",
+            "market_move",
+            "acquisition",
+            "leadership",
+            "layoff",
+        ):
+            payload = _make_landscape_with_dev([_make_recent_development(dev_type=t)])
+            rc, data, stderr = run_script(
+                "validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload)
+            )
+            assert rc == 0, f"type={t}: expected exit 0, got {rc}. stderr: {stderr}"
+
+    # --- summary required ----------------------------------------------------
+
+    def test_empty_summary_rejected(self) -> None:
+        payload = _make_landscape_with_dev([_make_recent_development(summary="")])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+
+    # --- agent_estimate rejection ---------------------------------------------
+
+    def test_agent_estimate_evidence_source_rejected(self) -> None:
+        payload = _make_landscape_with_dev([_make_recent_development()])
+        payload["competitors"][0]["evidence_source"]["recent_developments"] = "agent_estimate"
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+        assert "agent_estimate" in stderr.lower()
+
+    def test_researched_evidence_source_does_not_reject(self) -> None:
+        payload = _make_landscape_with_dev([_make_recent_development()])
+        payload["competitors"][0]["evidence_source"]["recent_developments"] = "researched"
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+
+    # --- absent / empty are both valid, silently -----------------------------
+
+    def test_field_absent_is_valid_no_per_competitor_warning(self) -> None:
+        payload = _make_landscape_with_dev(None, other_competitors_dev=[_make_recent_development()])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        alpha = next(c for c in data["competitors"] if c["slug"] == "alpha-corp")
+        assert "recent_developments" not in alpha
+        # Other competitors have entries, so the whole-set NO_RECENT_DEVELOPMENTS
+        # warning must not fire, and there must be no per-competitor warning
+        # about alpha-corp's recent_developments specifically (a mention of
+        # "recent_developments" naming alpha-corp) for having none.
+        codes = [w["code"] for w in data["warnings"]]
+        assert "NO_RECENT_DEVELOPMENTS" not in codes
+        assert not any(
+            "alpha-corp" in w.get("message", "") and "recent_developments" in w.get("message", "")
+            for w in data["warnings"]
+        )
+
+    def test_field_empty_list_is_valid(self) -> None:
+        payload = _make_landscape_with_dev([], other_competitors_dev=[_make_recent_development()])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        alpha = next(c for c in data["competitors"] if c["slug"] == "alpha-corp")
+        assert alpha["recent_developments"] == []
+
+    def test_not_a_list_rejected(self) -> None:
+        payload = _make_valid_landscape()
+        payload["competitors"][0]["recent_developments"] = "funding round in March"
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+        assert "array" in stderr.lower()
+
+    # --- NO_RECENT_DEVELOPMENTS whole-set warning ------------------------------
+
+    def test_no_recent_developments_warns_when_all_empty(self) -> None:
+        payload = _make_valid_landscape()  # none of _make_valid_landscape's competitors set it
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        codes = [w["code"] for w in data["warnings"]]
+        assert "NO_RECENT_DEVELOPMENTS" in codes
+        warn = next(w for w in data["warnings"] if w["code"] == "NO_RECENT_DEVELOPMENTS")
+        assert warn["severity"] == "medium"
+
+    def test_no_recent_developments_does_not_warn_when_one_has_entries(self) -> None:
+        """One quiet competitor among several researched ones is a correct
+        answer and must NOT trigger the whole-set warning."""
+        payload = _make_landscape_with_dev([_make_recent_development()], other_competitors_dev=None)
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        codes = [w["code"] for w in data["warnings"]]
+        assert "NO_RECENT_DEVELOPMENTS" not in codes
+
+    # --- landscape_as_of stamp + --as-of --------------------------------------
+
+    def test_landscape_as_of_present_and_honors_as_of_flag(self) -> None:
+        payload = _make_valid_landscape()
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data["landscape_as_of"] == AS_OF
+
+    def test_landscape_as_of_defaults_to_today_when_omitted(self) -> None:
+        import datetime as _dt
+
+        payload = _make_valid_landscape()
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data["landscape_as_of"] == _dt.datetime.now(_dt.timezone.utc).date().isoformat()
+
+    def test_bad_as_of_flag_rejected(self) -> None:
+        payload = _make_valid_landscape()
+        rc, data, stderr = run_script(
+            "validate_landscape.py", args=["--as-of", "not-a-date"], stdin_data=json.dumps(payload)
+        )
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+
+
+# ---------------------------------------------------------------------------
+# Factory: verdicts input for verify_competitors.py
+# ---------------------------------------------------------------------------
+
+
+def _make_verdict_entry(
+    slug: str,
+    verdict: str,
+    recommended_action: str,
+    *,
+    buyer: str = "Head of Platform Engineering",
+    job_to_be_done: str = "Secure production APIs against abuse",
+    evidence_source: str = "researched",
+) -> dict[str, Any]:
+    """Build one verify_competitors.py verdict entry, including the
+    show-your-work fields a non-genuine verdict requires."""
+    return {
+        "slug": slug,
+        "verdict": verdict,
+        "recommended_action": recommended_action,
+        "reasoning": (
+            "Independent re-characterization found a materially different overlap "
+            "profile than the draft category assumed."
+        ),
+        "independent_characterization": {
+            "buyer": buyer,
+            "job_to_be_done": job_to_be_done,
+            "evidence_source": evidence_source,
+        },
+    }
+
+
+def _run_verify_competitors(
+    verdicts: list[dict[str, Any]],
+    landscape_categories: dict[str, str],
+    *,
+    run_id: str = "20260319T143045Z",
+) -> tuple[int, dict[str, Any] | None, str]:
+    """Run verify_competitors.py with a --landscape file built from
+    {slug: category} so category_disagreements has a draft category to
+    compare each verdict against."""
+    payload = {
+        "verdicts": verdicts,
+        "startup_characterization": {
+            "buyer": "Head of Platform Engineering",
+            "job_to_be_done": "Secure production APIs against abuse",
+        },
+        "metadata": {"run_id": run_id},
+    }
+    landscape_competitors = [{"slug": slug, "category": category} for slug, category in landscape_categories.items()]
+    with tempfile.TemporaryDirectory() as d:
+        land_path = os.path.join(d, "landscape_draft.json")
+        with open(land_path, "w") as f:
+            json.dump({"competitors": landscape_competitors}, f)
+        return run_script(
+            "verify_competitors.py",
+            args=["--landscape", land_path],
+            stdin_data=json.dumps(payload),
+        )
+
+
+# ===========================================================================
+# verify_competitors.py tests — category_disagreements (upgrade/downgrade)
+# ===========================================================================
+
+
+class TestVerifyCompetitorsCategoryDisagreements:
+    """summary.category_disagreements must surface BOTH directions: a verdict
+    stronger than the draft category (upgrade — cuts against the startup) and
+    a verdict weaker than the draft category (downgrade). do_nothing/emerging
+    encode market role, not degree of overlap, so they must never produce a
+    disagreement; custom is caller-defined and must be excluded too."""
+
+    def test_genuine_verdict_on_adjacent_draft_flags_upgrade(self) -> None:
+        verdicts = [_make_verdict_entry("acme", "genuine", "reclassify_direct")]
+        rc, data, stderr = _run_verify_competitors(verdicts, {"acme": "adjacent"})
+        assert rc == 0, stderr
+        assert data is not None
+        assert data["summary"]["category_disagreements"] == [
+            {"slug": "acme", "draft_category": "adjacent", "verdict": "genuine", "direction": "upgrade"}
+        ]
+
+    def test_adjacent_verdict_on_direct_draft_flags_downgrade(self) -> None:
+        verdicts = [_make_verdict_entry("acme", "adjacent", "reclassify_adjacent")]
+        rc, data, stderr = _run_verify_competitors(verdicts, {"acme": "direct"})
+        assert rc == 0, stderr
+        assert data is not None
+        assert data["summary"]["category_disagreements"] == [
+            {"slug": "acme", "draft_category": "direct", "verdict": "adjacent", "direction": "downgrade"}
+        ]
+
+    def test_genuine_verdict_on_do_nothing_draft_produces_no_disagreement(self) -> None:
+        """do_nothing encodes market role, not overlap degree — a correct genuine
+        verdict on a draft-do_nothing entry must not be flagged as a mischaracterization."""
+        verdicts = [_make_verdict_entry("acme", "genuine", "keep")]
+        rc, data, stderr = _run_verify_competitors(verdicts, {"acme": "do_nothing"})
+        assert rc == 0, stderr
+        assert data is not None
+        assert data["summary"]["category_disagreements"] == []
+
+    def test_adjacent_verdict_on_emerging_draft_produces_no_disagreement(self) -> None:
+        """emerging encodes convergence risk, not overlap degree — a correct adjacent
+        verdict on a draft-emerging entry must not be flagged."""
+        verdicts = [_make_verdict_entry("acme", "adjacent", "reclassify_adjacent")]
+        rc, data, stderr = _run_verify_competitors(verdicts, {"acme": "emerging"})
+        assert rc == 0, stderr
+        assert data is not None
+        assert data["summary"]["category_disagreements"] == []
+
+    def test_custom_draft_category_never_produces_a_disagreement(self) -> None:
+        """custom's semantics are caller-defined — no fixed verdict is 'expected'."""
+        verdicts = [_make_verdict_entry("acme", "genuine", "reclassify_direct")]
+        rc, data, stderr = _run_verify_competitors(verdicts, {"acme": "custom"})
+        assert rc == 0, stderr
+        assert data is not None
+        assert data["summary"]["category_disagreements"] == []
+
+    def test_flagged_slugs_semantics_unchanged_by_category_disagreements(self) -> None:
+        """flagged / flagged_slugs stay keyed on verdict != genuine only — an
+        upgrade (verdict genuine) must never appear there even though it's a
+        disagreement, and a downgrade (verdict != genuine) must still appear."""
+        verdicts = [
+            _make_verdict_entry("acme", "genuine", "reclassify_direct"),  # upgrade, verdict==genuine
+            _make_verdict_entry("beta", "adjacent", "reclassify_adjacent"),  # downgrade, verdict!=genuine
+        ]
+        rc, data, stderr = _run_verify_competitors(verdicts, {"acme": "adjacent", "beta": "direct"})
+        assert rc == 0, stderr
+        assert data is not None
+        summary = data["summary"]
+        assert "acme" not in summary["flagged_slugs"], "an upgrade (verdict genuine) must not be flagged"
+        assert "beta" in summary["flagged_slugs"], "a downgrade (verdict != genuine) must still be flagged"
+        assert summary["flagged"] == 1
+        assert len(summary["category_disagreements"]) == 2
+
+    def test_reclassify_direct_is_an_accepted_recommended_action(self) -> None:
+        """reclassify_direct is the natural action for an upgrade — the producer
+        must accept it, not just the pre-existing reclassify_adjacent."""
+        verdicts = [_make_verdict_entry("acme", "genuine", "reclassify_direct")]
+        rc, data, stderr = _run_verify_competitors(verdicts, {"acme": "adjacent"})
+        assert rc == 0, f"reclassify_direct must be an accepted recommended_action: {stderr}"
+        assert data is not None
+        assert data["validation"]["status"] == "ok"
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +996,21 @@ class TestScoreMoats:
         startup_ids = [m["id"] for m in data["companies"]["_startup"]["moats"]]
         assert "custom_ip_patents" in startup_ids
 
+    # 2b. founder_provided evidence_source accepted (CP-1)
+    def test_score_moats_accepts_founder_provided_evidence(self) -> None:
+        """CP-1: 'founder_provided' — the provenance vocabulary the methodology reference and
+        startup_characterization use — must be accepted by the moat producer, not rejected as
+        invalid. It is distinct from 'founder_override' (a coordinate/rating override counted
+        separately in compose). The observed Gen-2 failure was a wasted repair dispatch when the
+        sub-agent stamped a founder-stated moat 'founder_provided' and the producer rejected it."""
+        entry = _make_moat_entry("custom_founder_stated", status="moderate", evidence_source="founder_provided")
+        payload = _make_valid_moat_input(extra_startup_moats=[entry])
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"founder_provided must be accepted. stderr: {stderr}"
+        assert data is not None
+        ids = [m["id"] for m in data["companies"]["_startup"]["moats"]]
+        assert "custom_founder_stated" in ids
+
     # 3. Missing canonical moat produces warning
     def test_score_moats_missing_canonical_warns(self) -> None:
         payload = _make_valid_moat_input()
@@ -447,6 +1043,76 @@ class TestScoreMoats:
         warn = next(w for w in data["warnings"] if w["code"] == "MOAT_WITHOUT_EVIDENCE")
         assert warn["severity"] == "medium"
         assert "_startup" in warn.get("company", "")
+
+    # 4b. "researched" evidence_source with no source citation warns (unverifiable claim gap) —
+    # a dated real-world claim (funding round, M&A, exec change) stamped "researched" needs a
+    # URL or search query beside it so the main thread can spot-check it later.
+    def test_score_moats_researched_without_source_warns(self) -> None:
+        payload = _make_valid_moat_input()
+        for m in payload["moat_assessments"]["_startup"]["moats"]:
+            if m["id"] == "network_effects":
+                m["evidence_source"] = "researched"
+                m.pop("source", None)
+                break
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0 (warn, not fail), got {rc}. stderr: {stderr}"
+        assert data is not None
+        codes = [w["code"] for w in data["warnings"]]
+        assert "RESEARCHED_WITHOUT_SOURCE" in codes
+        warn = next(w for w in data["warnings"] if w["code"] == "RESEARCHED_WITHOUT_SOURCE")
+        assert warn["severity"] == "medium"
+        assert warn.get("company") == "_startup"
+        assert warn.get("moat_id") == "network_effects"
+
+    # 4c. Empty-string source is treated the same as missing (still warns).
+    def test_score_moats_researched_with_blank_source_warns(self) -> None:
+        payload = _make_valid_moat_input()
+        for m in payload["moat_assessments"]["_startup"]["moats"]:
+            if m["id"] == "network_effects":
+                m["evidence_source"] = "researched"
+                m["source"] = "   "
+                break
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None
+        codes = [w["code"] for w in data["warnings"]]
+        assert "RESEARCHED_WITHOUT_SOURCE" in codes
+
+    # 4d. A "researched" moat WITH a source citation does not warn, and the source is
+    # passed through into the output artifact.
+    def test_score_moats_researched_with_source_no_warning_and_passthrough(self) -> None:
+        payload = _make_valid_moat_input()
+        # Every moat across both companies defaults to evidence_source="researched" (see
+        # _make_moat_entry) — give them all a source, then check the one under test passes
+        # through, and confirm no RESEARCHED_WITHOUT_SOURCE leaks from the rest of the fixture.
+        for company in payload["moat_assessments"].values():
+            for m in company["moats"]:
+                m["source"] = "https://example.com/generic-source"
+        for m in payload["moat_assessments"]["_startup"]["moats"]:
+            if m["id"] == "network_effects":
+                m["evidence_source"] = "researched"
+                m["source"] = "https://example.com/press-release"
+                break
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None
+        codes = [w["code"] for w in data["warnings"]]
+        assert "RESEARCHED_WITHOUT_SOURCE" not in codes
+        out_moat = next(m for m in data["companies"]["_startup"]["moats"] if m["id"] == "network_effects")
+        assert out_moat["source"] == "https://example.com/press-release"
+
+    # 4e. agent_estimate / founder_override moats are exempt — no source expected.
+    def test_score_moats_non_researched_no_source_does_not_warn(self) -> None:
+        payload = _make_valid_moat_input()
+        for company in payload["moat_assessments"].values():
+            for m in company["moats"]:
+                m["evidence_source"] = "agent_estimate"
+                m.pop("source", None)
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None
+        codes = [w["code"] for w in data["warnings"]]
+        assert "RESEARCHED_WITHOUT_SOURCE" not in codes
 
     # 5. Per-company aggregates
     def test_score_moats_per_company_aggregates(self) -> None:
@@ -516,6 +1182,40 @@ class TestScoreMoats:
         payload["moat_assessments"]["_startup"]["moats"][0]["trajectory"] = "declining"
         rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
         assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+
+    # 9b. Invalid trajectory error message lists the allowed values — a real observed near-miss
+    # was a sub-agent stamping trajectory:"absent" (a moat *status* value, not a trajectory).
+    # The repair-dispatch loop feeds this stderr back to the sub-agent verbatim, so the allowed
+    # set needs to be IN the message, not just in a resolver step the model has to search for.
+    def test_score_moats_invalid_trajectory_error_lists_allowed_values(self) -> None:
+        payload = _make_valid_moat_input()
+        payload["moat_assessments"]["_startup"]["moats"][0]["trajectory"] = "absent"
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+        for allowed in ("building", "stable", "eroding"):
+            assert allowed in stderr, f"allowed trajectory value '{allowed}' not in error message: {stderr}"
+
+    # 9b-2. The trajectory error must not MISLABEL the trajectory enum as a "moat status" set
+    # (it lists building/stable/eroding — those are trajectories, not statuses). The message
+    # should identify it as the trajectory enum and point 'absent'-type values to the status field.
+    def test_score_moats_invalid_trajectory_error_not_mislabeled(self) -> None:
+        payload = _make_valid_moat_input()
+        payload["moat_assessments"]["_startup"]["moats"][0]["trajectory"] = "absent"
+        rc, _data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 1, stderr
+        low = stderr.lower()
+        assert "trajectory enum" in low or "not the moat status" in low or "not a moat status" in low, (
+            f"trajectory error must not mislabel the enum as a moat status set: {stderr!r}"
+        )
+
+    # 9c. Invalid status error message likewise lists the allowed values.
+    def test_score_moats_invalid_status_error_lists_allowed_values(self) -> None:
+        payload = _make_valid_moat_input()
+        payload["moat_assessments"]["_startup"]["moats"][0]["status"] = "nonexistent"
+        rc, data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+        for allowed in ("strong", "moderate", "weak", "absent", "not_applicable"):
+            assert allowed in stderr, f"allowed status value '{allowed}' not in error message: {stderr}"
 
     # 10. Array-of-objects moat_assessments is normalized to dict-keyed format
     def test_score_moats_array_format_normalized(self) -> None:
@@ -1086,6 +1786,28 @@ class TestScorePositioning:
         assert rc == 1
         assert "recommended" in stderr.lower() or '"name"' in stderr
 
+    # 18. scored_view carries points[] through — the main thread must not have to
+    # separately keep the sub-agent's raw x/y coordinates alive elsewhere to
+    # rebuild the map; positioning_scores.json is a self-contained record of them.
+    def test_score_positioning_scored_view_includes_points(self) -> None:
+        payload = _make_valid_positioning_input()
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        view = data["views"][0]
+        assert "points" in view, "scored_view must pass through the input view's points[]"
+        input_points = payload["views"][0]["points"]
+        assert len(view["points"]) == len(input_points)
+        by_competitor = {p["competitor"]: p for p in view["points"]}
+        for ip in input_points:
+            out_p = by_competitor[ip["competitor"]]
+            assert out_p["x"] == ip["x"]
+            assert out_p["y"] == ip["y"]
+            assert out_p["x_evidence"] == ip["x_evidence"]
+            assert out_p["y_evidence"] == ip["y_evidence"]
+            assert out_p["x_evidence_source"] == ip["x_evidence_source"]
+            assert out_p["y_evidence_source"] == ip["y_evidence_source"]
+
 
 # ---------------------------------------------------------------------------
 # Factory: valid checklist input for checklist.py
@@ -1170,6 +1892,86 @@ def _make_valid_checklist_input(
         "data_confidence": data_confidence,
         "metadata": {"run_id": run_id},
     }
+
+
+# ===========================================================================
+# score_positioning.py tests — scoring_basis
+# ===========================================================================
+
+
+class TestScorePositioningScoringBasis:
+    """scoring_basis must round-trip from stdin to output verbatim, reject an
+    unlisted value, and stay ABSENT from the output when the input never
+    supplied it — never silently defaulted to 'shipped'. An artifact produced
+    before this field existed has a genuinely undefined basis; stamping a
+    default on it would assert a convention that was never in force."""
+
+    def test_scoring_basis_round_trips_from_stdin(self) -> None:
+        for basis in ("shipped", "roadmap_12mo", "mixed"):
+            payload = _make_valid_positioning_input()
+            payload["scoring_basis"] = basis
+            rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+            assert rc == 0, f"basis={basis}: expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            assert data.get("scoring_basis") == basis
+
+    def test_invalid_scoring_basis_exits_1(self) -> None:
+        payload = _make_valid_positioning_input()
+        payload["scoring_basis"] = "bogus_basis"
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1 for an unlisted scoring_basis, got {rc}. stderr: {stderr}"
+        assert "scoring_basis" in stderr
+
+    def test_scoring_basis_absent_from_input_stays_absent_from_output(self) -> None:
+        payload = _make_valid_positioning_input()
+        assert "scoring_basis" not in payload
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert "scoring_basis" not in data, (
+            f"scoring_basis must be ABSENT (not defaulted) when the input never supplied it. "
+            f"Got: {data.get('scoring_basis')!r}"
+        )
+
+    def test_founder_override_repipe_round_trip_preserves_scoring_basis(self) -> None:
+        """The founder coordinate-override flow re-pipes `positioning.json` itself
+        (not the original sub-agent hand-off) through score_positioning.py to
+        refresh positioning_scores.json. This must carry scoring_basis end to end:
+        a positioning.json on disk that carries scoring_basis, piped through the
+        script and written back out with -o, must still carry scoring_basis in
+        the resulting positioning_scores.json file. If the SKILL.md merge step
+        stops copying scoring_basis into positioning.json, this is the test that
+        catches the regression before every renderer falls back to "Not declared".
+        """
+        for basis in ("shipped", "roadmap_12mo", "mixed"):
+            # Simulate positioning.json on disk after a founder override: real
+            # points, a scoring_basis carried over from the original merge, and
+            # one coordinate stamped founder_override.
+            positioning_on_disk = _make_valid_positioning_input()
+            positioning_on_disk["scoring_basis"] = basis
+            positioning_on_disk["views"][0]["points"][1]["x_evidence_source"] = "founder_override"
+
+            with tempfile.TemporaryDirectory() as tmp:
+                positioning_path = os.path.join(tmp, "positioning.json")
+                scores_path = os.path.join(tmp, "positioning_scores.json")
+                with open(positioning_path, "w", encoding="utf-8") as f:
+                    json.dump(positioning_on_disk, f)
+
+                with open(positioning_path, encoding="utf-8") as f:
+                    stdin_data = f.read()
+                rc, _receipt, stderr = run_script(
+                    "score_positioning.py",
+                    args=["-o", scores_path],
+                    stdin_data=stdin_data,
+                )
+                assert rc == 0, f"basis={basis}: expected exit 0, got {rc}. stderr: {stderr}"
+
+                with open(scores_path, encoding="utf-8") as f:
+                    refreshed = json.load(f)
+                assert refreshed.get("scoring_basis") == basis, (
+                    f"basis={basis}: refreshed positioning_scores.json lost scoring_basis on the "
+                    f"founder-override re-pipe. Got: {refreshed.get('scoring_basis')!r}"
+                )
 
 
 # ===========================================================================
@@ -1849,6 +2651,41 @@ class TestCompose:
             warn = next(w for w in data["warnings"] if w["code"] == "SHALLOW_COMPETITOR_PROFILE")
             assert warn["severity"] == "medium"
             assert "shallow-co" in warn["message"].lower() or "Shallow Co" in warn["message"]
+            assert "research_depth" in warn["message"], "message must keep the raw field for the agent"
+
+    # 7b. SHALLOW_COMPETITOR_PROFILE founder_message: plain-language, no raw enum token
+    def test_compose_shallow_profile_founder_message(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            shallow = _make_competitor(
+                "Shallow Co",
+                "shallow-co",
+                "direct",
+                research_depth="partial",
+                sourced_fields_count=1,
+            )
+            comps = [
+                shallow,
+                _make_competitor("Alpha Corp", "alpha-corp", "direct"),
+                _make_competitor("Beta Inc", "beta-inc", "adjacent"),
+                _make_competitor("Gamma Ltd", "gamma-ltd", "emerging"),
+                _make_competitor("Manual Process", "manual-process", "do_nothing"),
+            ]
+            _make_artifact_dir(tmp, landscape_overrides={"competitors": comps})
+            pos = _make_positioning_artifact()
+            pos["views"][0]["points"].append(_make_positioning_point("shallow-co", 40, 40))
+            pos["moat_assessments"]["shallow-co"] = {"moats": [_make_moat_entry("network_effects")]}
+            with open(os.path.join(tmp, "positioning.json"), "w") as f:
+                json.dump(pos, f)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            warn = next(w for w in data["warnings"] if w["code"] == "SHALLOW_COMPETITOR_PROFILE")
+            assert "founder_message" in warn
+            founder_msg = warn["founder_message"]
+            assert "research_depth" not in founder_msg
+            assert "partial" not in founder_msg
+            assert "shallow-co" in founder_msg
+            assert founder_msg in data["report_markdown"]
 
     # 8. Vanity-flagged view -> VANITY_AXIS_WARNING
     def test_compose_vanity_axis_warns(self) -> None:
@@ -1902,6 +2739,51 @@ class TestCompose:
             codes = [w["code"] for w in data["warnings"]]
             assert "MOAT_WITHOUT_EVIDENCE" in codes
 
+    # 9b. RESEARCHED_WITHOUT_SOURCE forwarded from moat_scores warnings, medium severity,
+    # and acceptable via accepted_warnings (the same pattern as MOAT_WITHOUT_EVIDENCE).
+    def test_compose_researched_without_source_warns_medium_and_acceptable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            moat_warns = [
+                {
+                    "code": "RESEARCHED_WITHOUT_SOURCE",
+                    "severity": "medium",
+                    "message": "alpha-corp: network_effects evidence_source is 'researched' but no source was provided",
+                    "company": "alpha-corp",
+                    "moat_id": "network_effects",
+                }
+            ]
+            _make_artifact_dir(
+                tmp,
+                moat_scores_overrides={"warnings": moat_warns},
+            )
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            codes = [w["code"] for w in data["warnings"]]
+            assert "RESEARCHED_WITHOUT_SOURCE" in codes
+            warn = next(w for w in data["warnings"] if w["code"] == "RESEARCHED_WITHOUT_SOURCE")
+            assert warn["severity"] == "medium"
+
+            # Medium severity doesn't block --strict on its own (only high-severity does) —
+            # confirm --strict still passes, then confirm acceptance via positioning.json's
+            # accepted_warnings marks the warning acknowledged in the composed report.
+            rc2, _data2, stderr2 = run_script("compose_report.py", args=["--dir", tmp, "--strict", "--pretty"])
+            assert rc2 == 0, stderr2
+
+            positioning_path = os.path.join(tmp, "positioning.json")
+            with open(positioning_path, encoding="utf-8") as f:
+                positioning = json.load(f)
+            positioning["accepted_warnings"] = [
+                {"code": "RESEARCHED_WITHOUT_SOURCE", "match": "alpha-corp", "reason": "test acceptance"}
+            ]
+            with open(positioning_path, "w", encoding="utf-8") as f:
+                json.dump(positioning, f)
+            rc3, data3, stderr3 = run_script("compose_report.py", args=["--dir", tmp, "--strict", "--pretty"])
+            assert rc3 == 0, f"Expected exit 0 after acceptance, got {rc3}. stderr: {stderr3}"
+            assert data3 is not None
+            warn3 = next(w for w in data3["warnings"] if w["code"] == "RESEARCHED_WITHOUT_SOURCE")
+            assert warn3.get("acknowledged") is True
+
     # 10. MISSING_DO_NOTHING forwarded from landscape warnings
     def test_compose_missing_do_nothing_warns(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1921,6 +2803,35 @@ class TestCompose:
             assert data is not None
             codes = [w["code"] for w in data["warnings"]]
             assert "MISSING_DO_NOTHING" in codes
+
+    # 10b. NO_RECENT_DEVELOPMENTS forwarded from landscape warnings — this is the
+    # inertness guard: the warning is only useful to a founder if it survives the
+    # compose_report.py forwarding loop (`if code in WARNING_SEVERITY`). Without
+    # NO_RECENT_DEVELOPMENTS registered in WARNING_SEVERITY, this silently drops.
+    def test_compose_no_recent_developments_forwarded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            land_warns = [
+                {
+                    "code": "NO_RECENT_DEVELOPMENTS",
+                    "severity": "medium",
+                    "message": "No competitor has any recent_developments entries.",
+                }
+            ]
+            _make_artifact_dir(
+                tmp,
+                landscape_overrides={"warnings": land_warns},
+            )
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            codes = [w["code"] for w in data["warnings"]]
+            assert "NO_RECENT_DEVELOPMENTS" in codes, (
+                "NO_RECENT_DEVELOPMENTS must be registered in WARNING_SEVERITY, or forwarding "
+                "silently drops it (compose_report.py's landscape-warning forwarding loop "
+                "only appends codes present in WARNING_SEVERITY)"
+            )
+            warn = next(w for w in data["warnings"] if w["code"] == "NO_RECENT_DEVELOPMENTS")
+            assert warn["severity"] == "medium"
 
     # 11. RESEARCH_DEPTH_LOW: founder_provided + few sourced competitors
     def test_compose_research_depth_low_warns(self) -> None:
@@ -2284,6 +3195,231 @@ class TestCompose:
             foo_warns = [w for w in incomplete if "foo" in w["message"]]
             # foo is missing from both moat_scores and positioning views
             assert len(foo_warns) >= 1, f"Expected INCOMPLETE_SCORING for 'foo', got: {incomplete}"
+
+    # 19b. INCOMPLETE_SCORING founder_message: plain-language, reaches report.md
+    def test_compose_incomplete_scoring_founder_message(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            comps = [
+                _make_competitor("Foo Corp", "foo", "direct"),
+                _make_competitor("Alpha Corp", "alpha-corp", "direct"),
+                _make_competitor("Beta Inc", "beta-inc", "adjacent"),
+                _make_competitor("Gamma Ltd", "gamma-ltd", "emerging"),
+                _make_competitor("Manual Process", "manual-process", "do_nothing"),
+            ]
+            _make_artifact_dir(tmp, landscape_overrides={"competitors": comps})
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            foo_warns = [w for w in data["warnings"] if w["code"] == "INCOMPLETE_SCORING" and "foo" in w["message"]]
+            assert len(foo_warns) >= 1
+            for w in foo_warns:
+                assert "founder_message" in w
+                founder_msg = w["founder_message"]
+                assert "moat_scores" not in founder_msg
+                assert founder_msg in data["report_markdown"]
+
+
+class TestComposeRecentDevelopmentsSection:
+    """The 'What's Changed Recently' report section renders dated + sourced
+    recent_developments grouped by competitor, most recent first, and is
+    omitted entirely (no heading at all) when no competitor has any."""
+
+    def test_section_renders_when_data_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            comps = [
+                _make_competitor(
+                    "Alpha Corp",
+                    "alpha-corp",
+                    "direct",
+                    recent_developments=[
+                        _make_recent_development(
+                            date="2026-03",
+                            dev_type="funding",
+                            summary="Raised a $20M Series B.",
+                            source="https://example.com/news/series-b",
+                        ),
+                        _make_recent_development(
+                            date="2025-11",
+                            dev_type="leadership",
+                            summary="New VP of Sales hired.",
+                            source="https://example.com/news/vp-sales",
+                        ),
+                    ],
+                ),
+                _make_competitor("Beta Inc", "beta-inc", "direct"),
+                _make_competitor("Gamma Ltd", "gamma-ltd", "adjacent"),
+                _make_competitor("Delta Co", "delta-co", "emerging"),
+                _make_competitor("Manual Process", "manual-process", "do_nothing"),
+            ]
+            _make_artifact_dir(
+                tmp,
+                landscape_overrides={"competitors": comps, "landscape_as_of": "2026-06-15"},
+            )
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            report = data["report_markdown"]
+            assert "## What's Changed Recently" in report
+            assert "Raised a $20M Series B." in report
+            assert "New VP of Sales hired." in report
+            assert "https://example.com/news/series-b" in report
+            # Most recent first: 2026-03 entry must appear before the 2025-11 one.
+            assert report.index("Raised a $20M Series B.") < report.index("New VP of Sales hired.")
+
+    def test_section_absent_when_no_developments(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)  # default competitors have no recent_developments
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            assert "What's Changed Recently" not in data["report_markdown"]
+
+    def test_section_absent_when_all_developments_empty_lists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            comps = [
+                _make_competitor("Alpha Corp", "alpha-corp", "direct", recent_developments=[]),
+                _make_competitor("Beta Inc", "beta-inc", "direct", recent_developments=[]),
+                _make_competitor("Gamma Ltd", "gamma-ltd", "adjacent"),
+                _make_competitor("Delta Co", "delta-co", "emerging"),
+                _make_competitor("Manual Process", "manual-process", "do_nothing"),
+            ]
+            _make_artifact_dir(tmp, landscape_overrides={"competitors": comps})
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            assert "What's Changed Recently" not in data["report_markdown"]
+
+
+class TestComposeScoringBasis:
+    """compose_report.py must render the declared scoring basis with its human
+    label, and 'Not declared' — never a silent default of 'shipped' — when the
+    scored artifact never carries the field, in both report_markdown and
+    report.json's scoring_summary."""
+
+    def test_scoring_basis_not_declared_when_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)  # default positioning_scores has no scoring_basis key
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            assert data is not None
+            assert data["scoring_summary"]["scoring_basis"] == "Not declared"
+            assert "**Scoring Basis:** Not declared" in data["report_markdown"]
+
+    def test_scoring_basis_shipped_label_rendered(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp, positioning_scores_overrides={"scoring_basis": "shipped"})
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            assert data is not None
+            assert data["scoring_summary"]["scoring_basis"] == "Shipped / verifiable surface"
+            assert "**Scoring Basis:** Shipped / verifiable surface" in data["report_markdown"]
+
+    def test_scoring_basis_roadmap_12mo_label_rendered(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp, positioning_scores_overrides={"scoring_basis": "roadmap_12mo"})
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            assert data is not None
+            assert data["scoring_summary"]["scoring_basis"] == "12-month roadmap"
+            assert "**Scoring Basis:** 12-month roadmap" in data["report_markdown"]
+
+    def test_scoring_basis_mixed_label_rendered(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp, positioning_scores_overrides={"scoring_basis": "mixed"})
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            assert data is not None
+            assert data["scoring_summary"]["scoring_basis"] == "Mixed"
+            assert "**Scoring Basis:** Mixed" in data["report_markdown"]
+
+
+class TestComposeFounderOverrideUnion:
+    """metadata.founder_override_count (and the FOUNDER_OVERRIDE_COUNT warning)
+    must be the UNION of moat_scores.json and positioning.json's draft
+    moat_assessments block, deduplicated by (slug, moat_id) — a founder moat
+    override recorded in only one of the two sources must still be counted,
+    and the same override present in both must be counted once, not twice."""
+
+    def test_override_recorded_only_in_moat_scores_is_counted_even_when_draft_omits_the_block(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            ms_path = os.path.join(tmp, "moat_scores.json")
+            with open(ms_path) as f:
+                moat_scores = json.load(f)
+            moat_scores["companies"]["alpha-corp"]["moats"][0]["evidence_source"] = "founder_override"
+            with open(ms_path, "w") as f:
+                json.dump(moat_scores, f)
+
+            # SKILL.md now instructs writing {} or omitting moat_assessments in the
+            # positioning.json draft entirely (it's superseded by moat_scores.json).
+            pos_path = os.path.join(tmp, "positioning.json")
+            with open(pos_path) as f:
+                positioning = json.load(f)
+            del positioning["moat_assessments"]
+            with open(pos_path, "w") as f:
+                json.dump(positioning, f)
+
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"compose must succeed with moat_assessments omitted: {stderr}"
+            assert data is not None
+            assert data["metadata"]["founder_override_count"] >= 1, (
+                "a founder_override recorded only in moat_scores.json must be counted "
+                "even when positioning.json omits moat_assessments entirely"
+            )
+            codes = [w["code"] for w in data["warnings"]]
+            assert "FOUNDER_OVERRIDE_COUNT" in codes
+
+    def test_override_recorded_only_in_positioning_draft_is_counted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)  # default moat_scores.json has no founder_override
+            pos_path = os.path.join(tmp, "positioning.json")
+            with open(pos_path) as f:
+                positioning = json.load(f)
+            positioning["moat_assessments"]["alpha-corp"]["moats"][0]["evidence_source"] = "founder_override"
+            with open(pos_path, "w") as f:
+                json.dump(positioning, f)
+
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            assert data is not None
+            assert data["metadata"]["founder_override_count"] >= 1
+
+    def test_same_override_present_in_both_sources_is_counted_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            ms_path = os.path.join(tmp, "moat_scores.json")
+            with open(ms_path) as f:
+                moat_scores = json.load(f)
+            moat_scores["companies"]["alpha-corp"]["moats"][0]["evidence_source"] = "founder_override"
+            same_moat_id = moat_scores["companies"]["alpha-corp"]["moats"][0]["id"]
+            with open(ms_path, "w") as f:
+                json.dump(moat_scores, f)
+
+            pos_path = os.path.join(tmp, "positioning.json")
+            with open(pos_path) as f:
+                positioning = json.load(f)
+            for moat in positioning["moat_assessments"]["alpha-corp"]["moats"]:
+                if moat["id"] == same_moat_id:
+                    moat["evidence_source"] = "founder_override"
+            with open(pos_path, "w") as f:
+                json.dump(positioning, f)
+
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            assert data is not None
+            assert data["metadata"]["founder_override_count"] == 1, (
+                f"the same (slug, moat_id) override present in both moat_scores.json and "
+                f"positioning.json's draft must be counted ONCE, got "
+                f"{data['metadata']['founder_override_count']}"
+            )
+
+    def test_compose_succeeds_when_moat_assessments_is_empty_dict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp, positioning_overrides={"moat_assessments": {}})
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"compose must succeed when moat_assessments == {{}}: {stderr}"
+            assert data is not None
+            assert "Traceback" not in stderr
 
 
 class TestScorePositioningValidation:
@@ -2756,6 +3892,11 @@ def test_compose_emits_coaching_payload() -> None:
         "review_dir",
         "report_path",
         "insertion_marker",
+        # The coaching agent is asked for a defensibility roadmap while being
+        # forbidden to read report.md. Without this it can only invent moat
+        # claims, appended beside the real scored table in the same
+        # investor-facing deliverable.
+        "defensibility",
     ):
         assert key in payload, f"coaching_payload missing key: {key}"
 
@@ -2849,3 +3990,1001 @@ def test_payload_arrays_match_summary_counts() -> None:
     payload = data["coaching_payload"]
     assert len(payload["failed_items"]) == payload["summary"]["fail"] == 2
     assert len(payload["warned_items"]) == payload["summary"]["warn"] == 1
+
+
+# ===========================================================================
+# Audit regression tests (a4: competitive-positioning)
+# ===========================================================================
+
+
+class TestChecklistInputModeAndRunIdFlags:
+    """checklist.py --input-mode / --run-id flags (audit cp-1, MAJOR).
+
+    The CHECKLIST sub-agent returns items only. The main thread stamps the real
+    input_mode and run_id via CLI flags so deck/document runs gate correctly and
+    checklist.json carries a run_id for the Context B verifier.
+    """
+
+    def _items_only(self) -> str:
+        payload = _make_valid_checklist_input(input_mode="deck")
+        # Strip the fields the sub-agent must NOT supply.
+        payload.pop("input_mode", None)
+        payload.pop("metadata", None)
+        return json.dumps(payload)
+
+    def test_input_mode_flag_overrides_gating_for_deck(self) -> None:
+        # Items-only input + --input-mode deck: NARR_03 stays active, EVID_04 gated.
+        rc, data, stderr = run_script(
+            "checklist.py",
+            args=["--input-mode", "deck"],
+            stdin_data=self._items_only(),
+        )
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data["input_mode"] == "deck"
+        by_id = {item["id"]: item for item in data["items"]}
+        # Deck gates EVID_04 only — NARR_03 must remain active (deck cross-check applies).
+        assert by_id["EVID_04"]["status"] == "not_applicable"
+        assert by_id["NARR_03"]["status"] != "not_applicable"
+
+    def test_missing_input_mode_flag_defaults_to_conversation(self) -> None:
+        # Without --input-mode and without input_mode in JSON, default is conversation.
+        rc, data, stderr = run_script("checklist.py", stdin_data=self._items_only())
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data["input_mode"] == "conversation"
+
+    def test_input_mode_flag_precedence_over_stdin(self) -> None:
+        # CLI flag must win over the input_mode in the stdin JSON.
+        payload = _make_valid_checklist_input(input_mode="conversation")
+        payload.pop("metadata", None)
+        rc, data, stderr = run_script(
+            "checklist.py",
+            args=["--input-mode", "document"],
+            stdin_data=json.dumps(payload),
+        )
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data["input_mode"] == "document"
+        by_id = {item["id"]: item for item in data["items"]}
+        # document gates NARR_03 only, not EVID_04.
+        assert by_id["NARR_03"]["status"] == "not_applicable"
+        assert by_id["EVID_04"]["status"] != "not_applicable"
+
+    def test_run_id_flag_stamps_metadata(self) -> None:
+        # --run-id must populate result.metadata.run_id even with items-only input.
+        rc, data, stderr = run_script(
+            "checklist.py",
+            args=["--input-mode", "deck", "--run-id", "20260611T120000Z"],
+            stdin_data=self._items_only(),
+        )
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data["metadata"].get("run_id") == "20260611T120000Z"
+
+    def test_run_id_flag_overrides_stdin_metadata(self) -> None:
+        # --run-id (CLI) wins over any metadata embedded in the stdin JSON.
+        payload = _make_valid_checklist_input(run_id="STALE_FROM_STDIN")
+        payload.pop("input_mode", None)
+        rc, data, stderr = run_script(
+            "checklist.py",
+            args=["--run-id", "AUTHORITATIVE"],
+            stdin_data=json.dumps(payload),
+        )
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert data["metadata"].get("run_id") == "AUTHORITATIVE"
+
+    def test_invalid_input_mode_flag_rejected(self) -> None:
+        # argparse choices reject an unknown mode (exit 2).
+        rc, _data, _stderr = run_script(
+            "checklist.py",
+            args=["--input-mode", "bogus"],
+            stdin_data=self._items_only(),
+        )
+        assert rc == 2
+
+
+class TestScoreMoatsNonStringEvidence:
+    """score_moats.py must reject non-string evidence with a structured error,
+    not a raw TypeError traceback (audit cp-scripts-5)."""
+
+    def test_null_evidence_strong_status(self) -> None:
+        payload = {
+            "moat_assessments": {
+                "_startup": {
+                    "moats": [
+                        {
+                            "id": "network_effects",
+                            "status": "strong",
+                            "evidence": None,
+                            "evidence_source": "researched",
+                            "trajectory": "building",
+                        }
+                    ]
+                }
+            },
+            "metadata": {"run_id": "20260611T120000Z"},
+        }
+        rc, _data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}"
+        assert "must be a string" in stderr
+        assert "Traceback" not in stderr
+
+    def test_numeric_evidence_estimated_confidence(self) -> None:
+        payload = {
+            "moat_assessments": {
+                "_startup": {
+                    "moats": [
+                        {
+                            "id": "network_effects",
+                            "status": "moderate",
+                            "evidence": 42,
+                            "evidence_source": "agent_estimate",
+                            "trajectory": "stable",
+                        }
+                    ]
+                }
+            },
+            "data_confidence": "estimated",
+            "metadata": {"run_id": "20260611T120000Z"},
+        }
+        rc, _data, stderr = run_script("score_moats.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}"
+        assert "must be a string" in stderr
+        assert "Traceback" not in stderr
+
+
+class TestComposeNonDictArtifact:
+    """compose_report.py must flag a top-level-array artifact as CORRUPT_ARTIFACT,
+    not crash with AttributeError (audit cp-scripts-2)."""
+
+    def test_array_landscape_degrades_to_corrupt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            # Overwrite landscape.json with a top-level JSON array.
+            with open(os.path.join(tmp, "landscape.json"), "w") as f:
+                f.write('["not", "a", "dict"]')
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert "Traceback" not in stderr
+            assert data is not None
+            codes = {w["code"] for w in data["warnings"]}
+            assert "CORRUPT_ARTIFACT" in codes
+
+    def test_array_artifact_blocks_under_strict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            with open(os.path.join(tmp, "positioning.json"), "w") as f:
+                f.write("[1, 2, 3]")
+            rc, _data, stderr = run_script(
+                "compose_report.py",
+                args=["--dir", tmp, "--strict", "-o", os.path.join(tmp, "report.json")],
+            )
+            assert "Traceback" not in stderr
+            assert rc == 1
+
+
+class TestComposeExecutiveSummaryStrongThreshold:
+    """The executive-summary 'strong' label and 'strong differentiation' paragraph
+    must use the same >=75 threshold (audit cp-scripts-3). A score in [70, 75)
+    labelled Moderate must not be described as strong in the paragraph below."""
+
+    def test_score_72_not_described_as_strong(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(
+                tmp,
+                positioning_scores_overrides={"overall_differentiation": 72.0},
+                moat_scores_overrides=None,
+            )
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            assert data is not None
+            md = data["report_markdown"]
+            # The score label for 72 is "Moderate"; the paragraph must not call it strong.
+            assert "Moderate — differentiated but the lead is narrow" in md
+            assert "strong competitive differentiation" not in md
+
+    def test_score_80_still_described_as_strong(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(
+                tmp,
+                positioning_scores_overrides={"overall_differentiation": 80.0},
+            )
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            assert data is not None
+            assert "strong competitive differentiation" in data["report_markdown"]
+
+
+class TestComposeNonStringViewId:
+    """compose_report.py _section_positioning must coerce a non-string view_id
+    rather than crash on .title() (audit cp-scripts-7)."""
+
+    def test_numeric_view_id_does_not_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            ps_path = os.path.join(tmp, "positioning_scores.json")
+            with open(ps_path) as f:
+                ps = json.load(f)
+            if ps.get("views"):
+                ps["views"][0]["view_id"] = 42
+            with open(ps_path, "w") as f:
+                json.dump(ps, f)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert "Traceback" not in stderr
+            assert data is not None
+
+
+class TestComposeMergeIntegrity:
+    """compose_report.py must cross-check positioning.json points against the
+    points passed through positioning_scores.json (finding 35): score_positioning.py
+    passes each view's input points straight through unmodified, so
+    positioning_scores.json is the authoritative post-scoring coordinate record.
+    positioning.json is supposed to be hand-merged to match it; a skipped or
+    partial merge must be caught (CORRUPT_ARTIFACT, high, blocking under --strict)
+    rather than silently composing a report over stale/placeholder coordinates.
+    """
+
+    _PRIMARY_POINTS = [
+        _make_positioning_point("_startup", 90, 85),
+        _make_positioning_point("alpha-corp", 60, 40),
+        _make_positioning_point("beta-inc", 30, 70),
+        _make_positioning_point("gamma-ltd", 50, 50),
+        _make_positioning_point("delta-co", 20, 60),
+        _make_positioning_point("manual-process", 95, 15),
+    ]
+
+    @staticmethod
+    def _scores_view(points: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "view_id": "primary",
+            "x_axis_name": "Deployment Speed",
+            "y_axis_name": "Detection Accuracy",
+            "x_axis_rationale": "Key differentiator for SMBs",
+            "y_axis_rationale": "Table-stakes dimension",
+            "x_axis_vanity_flag": False,
+            "y_axis_vanity_flag": False,
+            "differentiation_score": 75.0,
+            "startup_x_rank": 1,
+            "startup_y_rank": 3,
+            "competitor_count": 5,
+            "points": points,
+        }
+
+    def _mismatch_codes_and_messages(self, tmp: str) -> tuple[list[str], str]:
+        rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert "Traceback" not in stderr
+        codes = [w["code"] for w in data["warnings"]]
+        messages = " ".join(w["message"] for w in data["warnings"])
+        return codes, messages
+
+    # 1. Fully stale merge — every competitor still at draft coordinates
+    def test_full_mismatch_produces_blocking_corrupt_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scores_points = [_make_positioning_point(p["competitor"], 1, 1) for p in self._PRIMARY_POINTS]
+            _make_artifact_dir(
+                tmp,
+                positioning_scores_overrides={"views": [self._scores_view(scores_points)]},
+            )
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            merge_warnings = [w for w in data["warnings"] if "differ from positioning_scores.json" in w["message"]]
+            assert merge_warnings, f"Expected a merge-integrity warning, got: {data['warnings']}"
+            warn = merge_warnings[0]
+            assert warn["code"] == "CORRUPT_ARTIFACT"
+            assert warn["severity"] == "high"
+            for slug in ("alpha-corp", "beta-inc", "gamma-ltd", "delta-co", "manual-process"):
+                assert slug in warn["message"]
+
+            # High severity blocks under --strict
+            rc_strict, _out, stderr_strict = run_script(
+                "compose_report.py", args=["--dir", tmp, "--pretty", "--strict"]
+            )
+            assert rc_strict == 1, f"Expected --strict to block on a merge mismatch. stderr: {stderr_strict}"
+
+    # 2. Correctly merged — points match exactly -> no false positive
+    def test_matching_points_compose_cleanly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(
+                tmp,
+                positioning_scores_overrides={"views": [self._scores_view(list(self._PRIMARY_POINTS))]},
+            )
+            codes, messages = self._mismatch_codes_and_messages(tmp)
+            assert "differ from positioning_scores.json" not in messages
+            assert not [c for c in codes if c == "CORRUPT_ARTIFACT"]
+
+    # 3. Partial merge — one competitor updated, one left stale
+    def test_partial_merge_catches_only_stale_competitor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scores_points = [dict(p) for p in self._PRIMARY_POINTS]
+            for p in scores_points:
+                if p["competitor"] == "gamma-ltd":
+                    p["x"], p["y"] = 99, 99  # this one was never merged back
+            _make_artifact_dir(
+                tmp,
+                positioning_scores_overrides={"views": [self._scores_view(scores_points)]},
+            )
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+            merge_warnings = [w for w in data["warnings"] if "differ from positioning_scores.json" in w["message"]]
+            assert len(merge_warnings) == 1, f"Expected exactly one merge warning, got: {merge_warnings}"
+            msg = merge_warnings[0]["message"]
+            assert "gamma-ltd" in msg
+            for slug in ("alpha-corp", "beta-inc", "delta-co", "manual-process"):
+                assert slug not in msg
+
+    # 4. positioning_scores.json view with no points at all -> degrade explicitly
+    def test_missing_points_in_scores_view_degrades_without_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scores_view = self._scores_view([])
+            del scores_view["points"]
+            _make_artifact_dir(
+                tmp,
+                positioning_scores_overrides={"views": [scores_view]},
+            )
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert "Traceback" not in stderr
+            assert data is not None
+            messages = " ".join(w["message"] for w in data["warnings"])
+            assert "differ from positioning_scores.json" not in messages
+
+
+class TestValidateLandscapeNoStdinFlag:
+    """validate_landscape.py must no longer expose the dead --stdin flag
+    (audit cp-scripts-9)."""
+
+    def test_stdin_flag_removed(self) -> None:
+        rc, _stdout, stderr = run_script_raw(
+            "validate_landscape.py",
+            args=["--stdin"],
+            stdin_data=json.dumps(_make_valid_landscape()),
+        )
+        # Unknown flag → argparse exit 2 + "unrecognized arguments".
+        assert rc == 2
+        assert "unrecognized arguments" in stderr or "--stdin" in stderr
+
+
+# === run_id CLI stamping (alignment with the cross-skill contract) ===
+
+
+class TestRunIdStamping:
+    """All three passthrough producers accept --run-id; CLI value is stamped
+    into metadata.run_id and overrides any run_id from stdin metadata
+    (CLI > stdin), so the Context B run_id-parity check holds even when the
+    sub-agent omits or misreports metadata."""
+
+    def test_validate_landscape_cli_run_id_overrides_stdin(self) -> None:
+        payload = _make_valid_landscape()
+        payload["metadata"] = {"run_id": "STDIN"}
+        rc, data, stderr = run_script("validate_landscape.py", ["--run-id", "CLI-WINS"], stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None and data["metadata"]["run_id"] == "CLI-WINS"
+
+    def test_score_moats_cli_run_id_stamped_when_stdin_absent(self) -> None:
+        payload = _make_valid_moat_input()
+        payload.pop("metadata", None)
+        rc, data, stderr = run_script("score_moats.py", ["--run-id", "CLI-ONLY"], stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None and data["metadata"]["run_id"] == "CLI-ONLY"
+
+    def test_score_positioning_cli_run_id_overrides_stdin(self) -> None:
+        payload = _make_valid_positioning_input()
+        payload["metadata"] = {"run_id": "STDIN"}
+        rc, data, stderr = run_script("score_positioning.py", ["--run-id", "CLI-WINS"], stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None and data["metadata"]["run_id"] == "CLI-WINS"
+
+
+# ===========================================================================
+# Artifact self-sufficiency — items 1, 2, 3
+# ===========================================================================
+
+
+class TestComposePositioningPointsTable:
+    """compose_report.py _section_positioning renders per-view points evidence table (item 1)."""
+
+    def test_points_table_rendered_in_positioning_section(self) -> None:
+        """Evidence coordinates from positioning.json views[].points appear in the report.
+
+        Column headers come from positioning_scores.json (x_axis_name / y_axis_name);
+        the points evidence text comes from positioning.json views[].points.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            # positioning.json: provide evidence-rich points under the "primary" view
+            views_with_evidence = [
+                {
+                    "id": "primary",
+                    "x_axis": {
+                        "name": "Deployment Speed",
+                        "description": "How fast",
+                        "rationale": "Key differentiator",
+                    },
+                    "y_axis": {
+                        "name": "Detection Accuracy",
+                        "description": "Accuracy",
+                        "rationale": "Table-stakes",
+                    },
+                    "points": [
+                        {
+                            "competitor": "_startup",
+                            "x": 90,
+                            "y": 85,
+                            "x_evidence": "Deploys in under 5 minutes per benchmark",
+                            "y_evidence": "All data stored on-prem per architecture docs",
+                            "x_evidence_source": "researched",
+                            "y_evidence_source": "researched",
+                        },
+                        {
+                            "competitor": "alpha-corp",
+                            "x": 60,
+                            "y": 40,
+                            "x_evidence": "Alpha Corp requires 2-day setup",
+                            "y_evidence": "Alpha Corp uses cloud storage",
+                            "x_evidence_source": "researched",
+                            "y_evidence_source": "researched",
+                        },
+                    ],
+                }
+            ]
+            _make_artifact_dir(tmp, positioning_overrides={"views": views_with_evidence})
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"compose failed: {stderr}"
+            assert data is not None
+            md = data["report_markdown"]
+            # Column headers come from positioning_scores.json axis names (fixture defaults)
+            assert "Deployment Speed" in md, "x-axis name should appear in points table header"
+            assert "Detection Accuracy" in md, "y-axis name should appear in points table header"
+            # Evidence text for at least one point
+            assert "Deploys in under 5 minutes" in md or "alpha-corp" in md, (
+                "Evidence text or competitor slug should appear in points table"
+            )
+            # x/y coordinates
+            assert "90" in md and "85" in md, "Coordinate values should appear in points table"
+
+    def test_points_table_not_rendered_without_positioning(self) -> None:
+        """No crash when positioning.json is absent."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp, include_positioning=False)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert "Traceback" not in stderr
+            assert data is not None
+
+    def test_evidence_truncated_at_120_chars(self) -> None:
+        """Evidence strings longer than 120 chars are truncated in the table."""
+        with tempfile.TemporaryDirectory() as tmp:
+            long_evidence = "A" * 200 + " end"
+            views_with_long = [
+                {
+                    "id": "primary",
+                    "x_axis": {"name": "Speed", "description": "d", "rationale": "r"},
+                    "y_axis": {"name": "Privacy", "description": "d", "rationale": "r"},
+                    "points": [
+                        {
+                            "competitor": "_startup",
+                            "x": 90,
+                            "y": 85,
+                            "x_evidence": long_evidence,
+                            "y_evidence": "short",
+                            "x_evidence_source": "researched",
+                            "y_evidence_source": "researched",
+                        },
+                    ],
+                }
+            ]
+            _make_artifact_dir(tmp, positioning_overrides={"views": views_with_long})
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            md = data["report_markdown"]  # type: ignore[index]
+            # The " end" suffix beyond 120 chars should NOT appear
+            assert " end" not in md, "Evidence beyond 120 chars should be truncated"
+            # But some of the evidence should appear
+            assert "AAAA" in md, "Truncated evidence prefix should appear"
+
+
+class TestComposeMoatEvidenceAndLeader:
+    """compose_report.py _section_moat_assessment renders evidence text and leader context (items 2-3)."""
+
+    def test_moat_evidence_text_appears_in_report(self) -> None:
+        """Moat evidence text appears as bullets under the moat table."""
+        with tempfile.TemporaryDirectory() as tmp:
+            # Build moat_scores with evidence on the _startup moats
+            ms = _make_moat_scores_artifact()
+            ms["companies"]["_startup"]["moats"] = [
+                {
+                    "id": "network_effects",
+                    "status": "strong",
+                    "evidence": "Has 50K active users sharing data; network value grows with square of users",
+                    "evidence_source": "researched",
+                    "trajectory": "building",
+                },
+                {
+                    "id": "switching_costs",
+                    "status": "moderate",
+                    "evidence": "Integration depth locks in enterprise workflows",
+                    "evidence_source": "researched",
+                    "trajectory": "stable",
+                },
+            ]
+            # Add other moats missing from CANONICAL to avoid MISSING_CANONICAL warnings failing the test
+            for m_id in ["data_advantages", "regulatory_barriers", "cost_structure", "brand_reputation"]:
+                ms["companies"]["_startup"]["moats"].append(
+                    {
+                        "id": m_id,
+                        "status": "weak",
+                        "evidence": "Limited.",
+                        "evidence_source": "agent_estimate",
+                        "trajectory": "stable",
+                    }
+                )
+            _make_artifact_dir(tmp, moat_scores_overrides=ms)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"compose failed: {stderr}"
+            md = data["report_markdown"]  # type: ignore[index]
+            assert "50K active users" in md, "Moat evidence text should appear in report"
+            assert "Integration depth" in md, "Second moat evidence text should appear in report"
+
+    def test_moat_ranking_shows_leader_context(self) -> None:
+        """Leader name and status appear in the startup ranking section."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ms = _make_moat_scores_artifact()
+            # alpha-corp is stronger in network_effects → _startup is rank 2
+            _make_artifact_dir(tmp, moat_scores_overrides=ms)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            md = data["report_markdown"]  # type: ignore[index]
+            # Rank line must mention the leader when _startup is not rank 1
+            assert "leader:" in md or "alpha-corp" in md, "Leader context should appear in moat ranking section"
+
+    def test_moat_dimension_matrix_rendered(self) -> None:
+        """Per-dimension comparison matrix with company rows appears in report."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _make_artifact_dir(tmp)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            md = data["report_markdown"]  # type: ignore[index]
+            # Matrix section header
+            assert "Moat Dimension Comparison Matrix" in md, "Matrix section should appear"
+            # Legend
+            assert "S=Strong" in md, "Legend line should appear"
+            # _startup row marker
+            assert "_startup_" in md, "_startup row should appear in matrix"
+
+    def test_moat_matrix_uses_status_initials(self) -> None:
+        """Status initials (S/M/W/—) appear in the matrix rows."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ms = _make_moat_scores_artifact()
+            # Give _startup a 'strong' data_advantages so S appears
+            for moat in ms["companies"]["_startup"]["moats"]:
+                if moat["id"] == "data_advantages":
+                    moat["status"] = "strong"
+            _make_artifact_dir(tmp, moat_scores_overrides=ms)
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            md = data["report_markdown"]  # type: ignore[index]
+            assert " S " in md or "| S " in md or " S|" in md, (
+                "Status initial 'S' should appear in the matrix for strong moat"
+            )
+
+
+# ===========================================================================
+# SKILL.md / agent.md / artifact-schemas.md contract tests
+#
+# These lock in guidance/template fixes that behavior tests can't reach —
+# the *content* of what the main thread and sub-agent are told to do.
+# ===========================================================================
+
+
+def test_skill_md_step0_uses_resolver_for_agent_paths() -> None:
+    """Step 0 must derive HANDOFF_AGENT/ANALYSIS_DIR_AGENT via resolve_artifacts_root.py's
+    --handoff-dir-agent / --analysis-dir-agent flags, not by hand-splicing the printed
+    AGENT_ARTIFACTS_ROOT with a free-form skill-name/slug/run-id string — the same class of
+    non-determinism the script was built to remove for the bare artifacts root."""
+    skill_md = _read(CP_SKILL_MD)
+    # Anchor without the trailing punctuation — the sentence continues differently
+    # now that the block routes between modes, and the assertion is about what the
+    # block contains, not how its lead-in is punctuated.
+    start = skill_md.index("After Step 1 (when the slug is known)")
+    end = skill_md.index("### Step 1: Read or Create Founder Context")
+    block = skill_md[start:end]
+    assert "--handoff-dir-agent" in block, "Step 0 should compute HANDOFF_AGENT via the resolver, not hand-splice it"
+    assert "--analysis-dir-agent" in block, (
+        "Step 0 should compute ANALYSIS_DIR_AGENT via the resolver, not hand-splice it"
+    )
+
+
+def test_skill_md_step1_lists_full_stage_enum() -> None:
+    """Step 1's founder_context.py init example must inline the full --stage enum so the
+    agent doesn't guess a token (e.g. 'seriesa') and hit an argparse error/retry — same fix
+    already applied to market-sizing's Step 1."""
+    skill_md = _read(CP_SKILL_MD)
+    start = skill_md.index("### Step 1: Read or Create Founder Context")
+    end = skill_md.index("### Step 2: Build Product Profile")
+    block = skill_md[start:end]
+    for stage in ("pre-seed", "seed", "series-a", "series-b", "series-c", "series-d", "later"):
+        assert stage in block, f"--stage enum value '{stage}' not inlined in Step 1"
+
+
+def test_skill_md_step1_carveout_is_non_binary() -> None:
+    """Step 1's deck/materials carve-out must derive the four basics field-by-field,
+    NOT all-or-nothing: deriving three and missing one must not send the agent back to
+    asking for all four. A missing-but-implied field should be inferred from a clear
+    signal (geography from a phone country code, stage from a fundraise signal, etc.)
+    rather than gated, and AskUserQuestion must be reserved for only the genuinely
+    underivable field(s). Regression guard: the prior binary wording ('fall back to
+    AskUserQuestion when one or more cannot be derived') made a single un-derivable
+    field (an unstated geography behind a +972 phone) re-gate all four."""
+    skill_md = _read(CP_SKILL_MD)
+    start = skill_md.index("### Step 1: Read or Create Founder Context")
+    end = skill_md.index("### Step 2: Build Product Profile")
+    block = skill_md[start:end].lower()
+    # Non-binary: the four basics are treated independently.
+    assert any(phrase in block for phrase in ("field-by-field", "independently", "never all-or-nothing")), (
+        "Step 1 carve-out must state the four basics are derived independently (non-binary)"
+    )
+    # Ask only for the missing field(s), not all four.
+    assert "only those" in block or "only the missing" in block or "only for" in block, (
+        "Step 1 carve-out must instruct asking AskUserQuestion for only the underivable field(s)"
+    )
+    # Ambiguous-signal inference heuristic (derive-then-proceed instead of gating).
+    assert "infer" in block, "Step 1 carve-out must describe inferring a missing field from a signal"
+    assert "+972" in block or "phone country code" in block or "fundraise signal" in block, (
+        "Step 1 carve-out must give a concrete inference signal (e.g. phone country code, fundraise signal)"
+    )
+
+
+def test_skill_md_step1_lists_sector_type_enum() -> None:
+    """Step 1 must also mention --sector-type and its enum so the agent knows the override
+    exists before hitting the runtime 'set explicitly with --sector-type' warning."""
+    skill_md = _read(CP_SKILL_MD)
+    start = skill_md.index("### Step 1: Read or Create Founder Context")
+    end = skill_md.index("### Step 2: Build Product Profile")
+    block = skill_md[start:end]
+    assert "--sector-type" in block
+    for sector_type in ("saas", "ai-native", "marketplace", "hardware", "hardware-subscription"):
+        assert sector_type in block, f"--sector-type enum value '{sector_type}' not inlined in Step 1"
+
+
+def test_skill_md_find_artifact_has_example_invocation() -> None:
+    """Step 7b's cross-skill lookup must show a concrete find_artifact.py invocation
+    (with --skill and --artifact) so the agent doesn't guess the wrong flags."""
+    skill_md = _read(CP_SKILL_MD)
+    start = skill_md.index("**7b — Cross-skill lookups:**")
+    end = skill_md.index("**7c", start)
+    block = skill_md[start:end]
+    assert "--skill" in block and "--artifact" in block, (
+        "Step 7b must include an example find_artifact.py invocation with --skill/--artifact"
+    )
+
+
+def test_skill_md_declined_additions_recorded() -> None:
+    """Step 4 must state that declined suggested_additions are retained (not discarded),
+    so the gap-detection knowledge persists into landscape.json instead of being lost."""
+    skill_md = _read(CP_SKILL_MD)
+    start = skill_md.index("### Step 4: Research & Enrich Competitors")
+    end = skill_md.index("### Step 5", start)
+    block = skill_md[start:end].lower()
+    assert "declined" in block or "not approved" in block, (
+        "Step 4 must address recording/retaining declined suggested_additions"
+    )
+
+
+def test_skill_md_moat_scoring_dispatch_requires_source_citation() -> None:
+    """The MOAT_SCORING dispatch prompt must tell the sub-agent to attach a source (URL or
+    search query) beside every evidence_source:'researched' moat, matching score_moats.py's
+    (warn-only) RESEARCHED_WITHOUT_SOURCE check."""
+    skill_md = _read(CP_SKILL_MD)
+    start = skill_md.index("**MOAT_SCORING dispatch prompt:**")
+    end = skill_md.index("**POSITIONING_SCORING dispatch prompt:**")
+    block = skill_md[start:end]
+    assert "source" in block.lower()
+    assert '"source"' in block, "MOAT_SCORING template should show the 'source' field in its JSON example"
+
+
+def test_skill_md_landscape_research_dispatch_requires_source_citation() -> None:
+    """The LANDSCAPE_RESEARCH dispatch prompt must tell the sub-agent to attach a 'sources'
+    citation dict beside per-field evidence_source:'researched' values, matching
+    validate_landscape.py's (warn-only) RESEARCHED_WITHOUT_SOURCE check."""
+    skill_md = _read(CP_SKILL_MD)
+    start = skill_md.index("### Step 4: Research & Enrich Competitors")
+    end = skill_md.index("### Gate 2: Founder Validation of Axis Selection")
+    block = skill_md[start:end]
+    assert '"sources"' in block, "LANDSCAPE_RESEARCH template should show the 'sources' field in its JSON example"
+
+
+def test_agent_md_moat_scoring_subtype_requires_source_citation() -> None:
+    agent_md = _read(CP_AGENT_MD)
+    start = agent_md.index("#### MOAT_SCORING subtype")
+    end = agent_md.index("#### POSITIONING_SCORING subtype")
+    block = agent_md[start:end]
+    assert "source" in block.lower()
+    assert '"source"' in block
+
+
+def test_agent_md_landscape_research_subtype_requires_source_citation() -> None:
+    agent_md = _read(CP_AGENT_MD)
+    start = agent_md.index("#### LANDSCAPE_RESEARCH subtype")
+    end = agent_md.index("#### COMPETITOR_VERIFICATION subtype")
+    block = agent_md[start:end]
+    assert '"sources"' in block
+
+
+def test_skill_md_step5_documents_positioning_json_points_merge() -> None:
+    """After piping the POSITIONING_SCORING hand-off through score_positioning.py, SKILL.md
+    must explicitly instruct the main thread to carry the sub-agent's assigned coordinates
+    back into positioning.json's views[].points[] (the draft written before dispatch was a
+    placeholder) — otherwise nothing ever updates the file compose_report.py/visualize.py/
+    explore.py actually read points from."""
+    skill_md = _read(CP_SKILL_MD)
+    start = skill_md.index("### Step 5: Positioning & Moat Assessment")
+    end = skill_md.index("### Step 6: Score Checklist")
+    block = skill_md[start:end]
+    assert "merge" in block.lower(), "Step 5 must document the points merge-back into positioning.json"
+    assert "positioning.json" in block
+
+
+def test_skill_md_states_mechanical_fix_vs_content_authoring_carve_out() -> None:
+    """The 'main thread must not author analytical content' rule needs an explicit carve-out
+    for MECHANICAL fixes (schema near-miss renames, merging a sub-agent's own coordinates back
+    into positioning.json) — otherwise the blanket rule reads as forbidding the Step 5 points
+    merge and the producers' own auto-normalization too."""
+    skill_md = _read(CP_SKILL_MD)
+    start = skill_md.index("### Context A hand-off protocol")
+    end = skill_md.index("### Step 4: Research & Enrich Competitors")
+    block = skill_md[start:end]
+    assert "mechanical" in block.lower(), "Expected an explicit mechanical-fix-vs-content-authoring carve-out"
+
+
+def test_skill_md_step4_additions_gate_uses_two_step_protocol() -> None:
+    """The Step 4 suggested_additions mini-gate must follow the same two-step (chat message
+    THEN AskUserQuestion) pattern Gates 1 and 2 use, or explicitly say it's an inline prompt —
+    plain prose left the format to guesswork."""
+    skill_md = _read(CP_SKILL_MD)
+    start = skill_md.index("### Step 4: Research & Enrich Competitors")
+    end = skill_md.index("### Gate 2: Founder Validation of Axis Selection")
+    block = skill_md[start:end]
+    assert "MANDATORY STOP" in block or "inline prompt" in block.lower(), (
+        "Step 4's suggested_additions mini-gate must either use the two-step gate protocol "
+        "or explicitly state it's an inline (non-hard-gate) prompt"
+    )
+
+
+def test_skill_md_step2_flags_stale_source_vintage() -> None:
+    """Step 2 should tell the agent to flag a deck/source whose copyright or vintage predates
+    the analysis by a wide margin — competitor data from a stale deck may already be outdated."""
+    skill_md = _read(CP_SKILL_MD)
+    start = skill_md.index("### Step 2: Build Product Profile")
+    end = skill_md.index("### Step 3: Identify Competitors")
+    block = skill_md[start:end]
+    assert any(kw in block.lower() for kw in ("vintage", "stale", "copyright date", "outdated")), (
+        "Step 2 should mention flagging stale source-material vintage to the founder"
+    )
+
+
+def test_agent_md_context_b_writes_raw_markdown_not_json() -> None:
+    """R2 coaching-transport fix (supersedes the old escaped-JSON guardrail
+    this test used to assert): the Context B commentary hand-off is now RAW
+    markdown, written directly with the Write tool — the JSON transport
+    envelope is built deterministically by md_to_commentary.py on the main
+    thread, not hand-escaped by the sub-agent. See
+    test_agent_coaching_writes_raw_markdown_no_json_escaping for the full
+    assertion set."""
+    agent_md = _read(CP_AGENT_MD)
+    start = agent_md.index("### Context B — Post-compose coaching dispatch")
+    end = agent_md.index("## Core Principles")
+    block = agent_md[start:end]
+    assert "plain markdown" in block.lower()
+    assert "single pass" not in block.lower()
+
+
+def test_artifact_schemas_documents_moat_source_field() -> None:
+    schemas = _read(CP_ARTIFACT_SCHEMAS_MD)
+    start = schemas.index("### moats[] entry")
+    end = schemas.index("### differentiation_claims[] entry")
+    block = schemas[start:end]
+    assert "`source`" in block or "| `source` " in block
+
+
+def test_artifact_schemas_documents_competitor_sources_field() -> None:
+    schemas = _read(CP_ARTIFACT_SCHEMAS_MD)
+    assert "`sources`" in schemas or "| `sources` " in schemas
+
+
+def test_artifact_schemas_documents_researched_without_source_code() -> None:
+    schemas = _read(CP_ARTIFACT_SCHEMAS_MD)
+    start = schemas.index("## Warning Severity Reference")
+    block = schemas[start:]
+    assert "RESEARCHED_WITHOUT_SOURCE" in block
+
+
+def test_skill_md_step2_deck_mode_notes_large_pdf_page_ranges() -> None:
+    """The Read tool refuses a >10-page PDF without an explicit page range (max 20 pages per
+    call) — Step 2's 'read ALL pages systematically' instruction should say to chunk large
+    decks into page-range reads instead of leaving the agent to discover the limit at runtime."""
+    skill_md = _read(CP_SKILL_MD)
+    start = skill_md.index("### Step 2: Build Product Profile")
+    end = skill_md.index("### Step 3: Identify Competitors")
+    block = skill_md[start:end]
+    assert "page" in block.lower() and ("range" in block.lower() or "chunk" in block.lower()), (
+        "Step 2 should mention reading large decks in page-range chunks"
+    )
+
+
+# ============================================================
+# R2 coaching-transport fix: raw-markdown Context-B pipe
+# ============================================================
+
+
+def test_skill_md_coaching_pipe_uses_format_markdown_adapter() -> None:
+    """R2 coaching-transport fix: Step 7c's Context-B pipe must gate the raw
+    .md hand-off with check_handoff.py --format=markdown and transform it
+    through the shared md_to_commentary.py adapter before insert_coaching.py
+    — never hand the sub-agent a JSON-escaping burden."""
+    skill_md = _read(CP_SKILL_MD)
+    start = skill_md.index("### Step 7: Compose, Validate, and Post-Compose Coaching")
+    end = skill_md.index("### Step 8: Deliver Artifacts")
+    step7 = skill_md[start:end]
+    assert "--format=markdown" in step7
+    assert "md_to_commentary.py" in step7
+    assert "OUTPUT_PATH: <HANDOFF_AGENT>/coaching.md" in step7
+    assert "coaching_commentary_output.json" not in step7
+
+
+def test_skill_md_coaching_exit7_repair_dispatch() -> None:
+    """The content-shape gate's new exit 7 (shape-invalid: receipt-shaped or
+    marker-bearing hand-off) must branch to a repair-dispatch, mirroring the
+    other typed exits."""
+    skill_md = _read(CP_SKILL_MD)
+    start = skill_md.index("### Step 7: Compose, Validate, and Post-Compose Coaching")
+    end = skill_md.index("### Step 8: Deliver Artifacts")
+    step7 = skill_md[start:end]
+    assert "Exit 7" in step7
+    assert "repair-dispatch" in step7.lower()
+    idx = step7.index("Exit 7")
+    window = step7[idx : idx + 300].lower()
+    assert "coaching commentary" in window or "coaching markdown" in window
+
+
+def test_agent_coaching_writes_raw_markdown_no_json_escaping() -> None:
+    """R2 coaching-transport fix: agents/competitive-positioning.md's Context B
+    section must instruct the sub-agent to write RAW markdown (no JSON
+    envelope, no hand-escaping) — the escaping moves into
+    md_to_commentary.py's json.dumps, which cannot emit malformed JSON. The
+    old 'escape every newline as \\n / every quote as \\"' guardrail (the
+    thing that broke ~17-22% of the time) must be gone."""
+    agent_body = _read(CP_AGENT_MD)
+    idx = agent_body.index("### Context B")
+    section = agent_body[idx : idx + 4000]
+    assert "plain markdown" in section.lower()
+    assert "do not escape anything" in section.lower() or "do not escape" in section.lower()
+    assert "escaped as `\\n`" not in agent_body
+    assert 'escaped as `\\"`' not in agent_body
+    assert "no pretty-print" not in agent_body.lower()
+
+
+# ---------------------------------------------------------------------------
+# Defensibility payload + the moat_count doc-vs-code contract
+# ---------------------------------------------------------------------------
+
+
+def test_coaching_payload_carries_scored_moat_data() -> None:
+    """The defensibility block must hold real scores, not placeholders.
+
+    The coaching agent is asked "which moats to invest in, in what order" and is
+    forbidden to read report.md. Every field it needs to answer that has to be in
+    the payload, or the only way to comply is to make the numbers up — and the
+    commentary lands in the same report as the scored table.
+    """
+    d = _make_v042_artifact_dir()
+    rc, data, err = run_script("compose_report.py", args=["--dir", d, "--pretty"])
+    assert rc == 0, err
+    assert data is not None
+
+    defensibility = data["coaching_payload"]["defensibility"]
+    for key in ("moat_count", "strongest_moat", "overall_defensibility", "moats"):
+        assert key in defensibility, f"defensibility missing {key}"
+
+    assert isinstance(defensibility["moats"], list)
+    assert defensibility["moats"], "per-dimension statuses are required to order a roadmap"
+    for moat in defensibility["moats"]:
+        assert set(moat) == {"id", "status"}, f"unexpected moat shape: {moat}"
+        assert moat["status"] in ("strong", "moderate", "weak", "absent", "not_applicable")
+
+    # Values must be read from moat_scores.json, not invented by compose.
+    with open(os.path.join(d, "moat_scores.json")) as f:
+        startup = json.load(f)["companies"]["_startup"]
+    assert defensibility["moat_count"] == startup["moat_count"]
+    assert defensibility["overall_defensibility"] == startup["overall_defensibility"]
+    assert defensibility["strongest_moat"] == startup["strongest_moat"]
+
+
+def test_skill_md_moat_count_definition_matches_score_moats() -> None:
+    """SKILL.md's stated moat_count rule must match what score_moats.py computes.
+
+    This drifted: SKILL.md said "dimensions rated `strong` or `moderate`" while the
+    script counts everything not `absent`/`not_applicable` (so `weak` counts too),
+    exactly as artifact-schemas.md documents. A narrator reading the SKILL.md line
+    correctly concluded the rubric had been violated on a two-weak-moat company —
+    it hadn't; the prose was wrong. Guarding the direction of the fix so nobody
+    "reconciles" the correct script to the incorrect doc.
+    """
+    skill_dir = os.path.dirname(CP_SCRIPTS_DIR)
+    with open(os.path.join(skill_dir, "SKILL.md"), encoding="utf-8") as f:
+        skill_md = f.read()
+    with open(os.path.join(CP_SCRIPTS_DIR, "score_moats.py"), encoding="utf-8") as f:
+        script = f.read()
+
+    # The code is the source of truth: it filters on absent/not_applicable.
+    assert 'm["status"] not in ("absent", "not_applicable")' in script, (
+        "score_moats.py no longer computes moat_count by excluding absent/not_applicable — "
+        "if this changed deliberately, update SKILL.md and this test together"
+    )
+
+    # The prose must describe that rule, and must NOT describe the old wrong one.
+    flat = " ".join(skill_md.split())
+    assert "Moat count = dimensions with **any** status other than `absent` / `not_applicable`" in flat, (
+        "SKILL.md's moat_count definition no longer matches score_moats.py"
+    )
+    assert "Moat count = dimensions rated `strong` or `moderate`" not in flat, (
+        "SKILL.md has reverted to the incorrect moat_count definition"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Mode-gated items must not require evidence they will never use
+#
+# checklist.py auto-gates EVID_04 (deck/conversation) and NARR_03
+# (conversation/document) to not_applicable and OVERWRITES their evidence with
+# GATE_MESSAGE. Requiring a non-empty string for them anyway rejects the whole
+# batch over a value that is discarded — a live run hit exactly that: the
+# sub-agent reasonably left them empty in conversation mode, the batch
+# hard-failed, and the run paid a repair dispatch to write text nothing reads.
+# ---------------------------------------------------------------------------
+
+
+def _checklist_items(blank: set[str]) -> list[dict]:
+    return [{"id": i, "status": "pass", "evidence": ("" if i in blank else "ok")} for i in CHECKLIST_IDS]
+
+
+def test_mode_gated_items_accept_empty_evidence() -> None:
+    """EVID_04/NARR_03 blank in conversation mode is valid, not a hard failure."""
+    rc, data, err = run_script(
+        "checklist.py",
+        args=["--pretty", "--input-mode", "conversation"],
+        stdin_data=json.dumps({"items": _checklist_items({"EVID_04", "NARR_03"})}),
+    )
+    assert rc == 0, f"gated blanks must not fail the batch: {err}"
+    assert data is not None
+    gated = {i["id"]: i for i in data["items"] if i["id"] in {"EVID_04", "NARR_03"}}
+    for item in gated.values():
+        assert item["status"] == "not_applicable"
+        assert "Auto-gated" in item["evidence"], "the gate message must still be written"
+
+
+def test_non_gated_items_still_require_evidence() -> None:
+    """The exemption is scoped: an ungated item with blank evidence still fails."""
+    rc, _, err = run_script(
+        "checklist.py",
+        args=["--input-mode", "conversation"],
+        stdin_data=json.dumps({"items": _checklist_items({"POS_03"})}),
+    )
+    assert rc == 1
+    assert "POS_03" in err
+
+
+def test_the_exemption_is_mode_sensitive() -> None:
+    """NARR_03 is gated in conversation but NOT in deck mode — so it still fails there.
+
+    Pins that the exemption reads MODE_GATING rather than hard-coding ids.
+    """
+    rc, _, err = run_script(
+        "checklist.py",
+        args=["--input-mode", "deck"],
+        stdin_data=json.dumps({"items": _checklist_items({"NARR_03"})}),
+    )
+    assert rc == 1, "NARR_03 is not gated in deck mode, so blank evidence must still fail"
+    assert "NARR_03" in err

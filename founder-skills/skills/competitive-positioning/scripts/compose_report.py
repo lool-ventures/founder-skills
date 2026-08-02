@@ -50,6 +50,8 @@ WARNING_SEVERITY: dict[str, str] = {
     "RESEARCH_DEPTH_LOW": "medium",
     "MISSING_CANONICAL_MOAT": "medium",
     "INCOMPLETE_SCORING": "medium",
+    "RESEARCHED_WITHOUT_SOURCE": "medium",
+    "NO_RECENT_DEVELOPMENTS": "medium",
     # Low
     "FOUNDER_OVERRIDE_COUNT": "low",
     # v0.4.2 Mitigation 2 — informational only (uuid is per-run, won't collide)
@@ -79,6 +81,8 @@ WARNING_LABELS: dict[str, str] = {
     "RESEARCH_DEPTH_LOW": "Research Depth Low",
     "MISSING_CANONICAL_MOAT": "Missing Canonical Moat",
     "INCOMPLETE_SCORING": "Incomplete Scoring",
+    "RESEARCHED_WITHOUT_SOURCE": "Researched Without Source",
+    "NO_RECENT_DEVELOPMENTS": "No Recent Developments",
     "FOUNDER_OVERRIDE_COUNT": "Founder Override Count",
     "MARKER_COLLISION": "Marker Collision",
     "SEQUENTIAL_FALLBACK": "Sequential Fallback",
@@ -174,25 +178,98 @@ def _humanize(value: str) -> str:
     return _LABELS.get(value, value.replace("_", " ").title() if value else "?")
 
 
-def _warn(code: str, message: str) -> dict[str, Any]:
-    """Create a warning dict with code, message, and severity."""
-    return {
+_SCORING_BASIS_LABELS: dict[str, str] = {
+    "shipped": "Shipped / verifiable surface",
+    "roadmap_12mo": "12-month roadmap",
+    "mixed": "Mixed",
+}
+
+
+def _scoring_basis_label(value: Any) -> str:
+    """Human-readable label for scoring_basis.
+
+    Anything outside the three known tokens — including absence — renders as
+    "Not declared" rather than defaulting to "shipped". An artifact produced
+    before this field existed has a genuinely undefined basis; silently
+    stamping "shipped" on it would assert a convention that was not in force
+    when the coordinates were scored.
+    """
+    if isinstance(value, str) and value in _SCORING_BASIS_LABELS:
+        return _SCORING_BASIS_LABELS[value]
+    return "Not declared"
+
+
+def _resolve_scoring_basis(
+    positioning_scores: dict[str, Any] | None,
+    positioning: dict[str, Any] | None,
+) -> str | None:
+    """Resolve the raw scoring_basis token.
+
+    positioning_scores.json is the scored artifact and is authoritative for
+    what convention actually produced the coordinates; positioning.json only
+    carries the field on the founder-override re-pipe path, so it is the
+    fallback rather than the primary source.
+    """
+    if _usable(positioning_scores):
+        val = positioning_scores.get("scoring_basis")
+        if isinstance(val, str) and val:
+            return val
+    if _usable(positioning):
+        val = positioning.get("scoring_basis")
+        if isinstance(val, str) and val:
+            return val
+    return None
+
+
+def _md_escape(text: str) -> str:
+    """Escape text for safe markdown table cell interpolation."""
+    return text.replace("|", "\\|").replace("\n", " ")
+
+
+def _truncate_evidence(text: str, max_len: int = 120) -> str:
+    """Truncate long evidence strings for table cells."""
+    if not text or len(text) <= max_len:
+        return text
+    return text[:max_len].rstrip() + "…"
+
+
+def _warn(code: str, message: str, founder_message: str | None = None) -> dict[str, Any]:
+    """Create a warning dict with code, message, and severity.
+
+    `message` is agent-facing and unchanged in report.json. `founder_message`
+    is an OPTIONAL additive key stating the founder-visible consequence in
+    plain words (no artifact filename, no raw enum token) -- report.md
+    renders it instead of `message` when present.
+    """
+    w: dict[str, Any] = {
         "code": code,
         "message": message,
         "severity": WARNING_SEVERITY.get(code, "medium"),
     }
+    if founder_message is not None:
+        w["founder_message"] = founder_message
+    return w
 
 
 def _load_artifact(dir_path: str, name: str) -> dict[str, Any] | None:
-    """Load a JSON artifact. Returns None if missing, _CORRUPT if unparseable."""
+    """Load a JSON artifact.
+
+    Returns None if missing, _CORRUPT if unparseable OR if the parsed top-level
+    payload is not a JSON object (e.g. a list/string/number). Wrong-shape valid
+    JSON degrades to the CORRUPT_ARTIFACT path rather than crashing downstream
+    `.get()` access.
+    """
     path = os.path.join(dir_path, name)
     if not os.path.exists(path):
         return None
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)  # type: ignore[no-any-return]
+            loaded = json.load(f)
     except (json.JSONDecodeError, OSError):
         return _CORRUPT
+    if not isinstance(loaded, dict):
+        return _CORRUPT
+    return loaded
 
 
 def _is_stub(data: dict[str, Any] | None) -> bool:
@@ -291,9 +368,8 @@ def _normalize_positioning(positioning: dict[str, Any]) -> None:
 
 
 def _count_founder_overrides(positioning: dict[str, Any]) -> int:
-    """Count evidence_source == 'founder_override' across positioning points and moat assessments."""
+    """Count evidence_source == 'founder_override' across positioning coordinates."""
     count = 0
-    # Count in views -> points
     for view in _as_list(positioning.get("views")):
         for point in _as_list(_as_dict(view).get("points")):
             p = _as_dict(point)
@@ -301,12 +377,73 @@ def _count_founder_overrides(positioning: dict[str, Any]) -> int:
                 count += 1
             if p.get("y_evidence_source") == "founder_override":
                 count += 1
-    # Count in moat_assessments
-    for _slug, company_data in _as_dict(positioning.get("moat_assessments")).items():
-        for moat in _as_list(_as_dict(company_data).get("moats")):
-            if _as_dict(moat).get("evidence_source") == "founder_override":
-                count += 1
     return count
+
+
+def _count_moat_founder_overrides(
+    moat_scores: dict[str, Any] | None,
+    positioning: dict[str, Any] | None,
+) -> int:
+    """Count evidence_source == 'founder_override' among moat ratings.
+
+    Counts the UNION of two sources, deduplicated by (slug, moat id).
+
+    moat_scores.json is the authoritative moat artifact: a founder moat
+    override is re-piped through score_moats.py and lands there.
+    positioning.json's moat_assessments block is a superseded draft that is
+    never merged back, but an override may still have been recorded only
+    there. Preferring one source would silently drop the override recorded
+    in the other; counting both without a key would double-count the single
+    founder decision that appears in both. The (slug, id) key does neither.
+    """
+    seen: set[tuple[str, str]] = set()
+
+    def _collect(companies: dict[str, Any]) -> None:
+        for slug, company_data in companies.items():
+            for idx, moat in enumerate(_as_list(_as_dict(company_data).get("moats"))):
+                m = _as_dict(moat)
+                if m.get("evidence_source") != "founder_override":
+                    continue
+                moat_id = m.get("id")
+                key = moat_id if isinstance(moat_id, str) and moat_id.strip() else f"#{idx}"
+                seen.add((slug, key))
+
+    if _usable(moat_scores):
+        _collect(_as_dict(moat_scores.get("companies")))
+    if _usable(positioning):
+        _collect(_as_dict(_as_dict(positioning).get("moat_assessments")))
+    return len(seen)
+
+
+# score_positioning.py's _score_view() passes each view's input `points` straight
+# through into positioning_scores.json (see that file's comment at the `points` key
+# in its scored_view dict) — it never recomputes coordinates. That makes
+# positioning_scores.json the authoritative post-scoring record of coordinates,
+# NOT "aggregates only". positioning.json is supposed to be hand-merged back to
+# match it (per SKILL.md's merge step); when that merge is skipped or partial, the
+# two artifacts disagree and every downstream renderer (compose_report, visualize,
+# explore) silently presents stale/placeholder coordinates while the aggregate
+# scores still look valid. This tolerance absorbs float round-trip noise (JSON
+# (de)serialization, an LLM re-emitting "60" as "60.0"), not real coordinate drift —
+# on the validated 0-100 axis scale, a merge that actually updated the value moves
+# it far more than this.
+_POINT_MERGE_TOLERANCE = 0.01
+
+
+def _points_by_slug(points: list[Any]) -> dict[str, tuple[float, float]]:
+    """Map competitor slug -> (x, y) from a view's points list.
+
+    Skips malformed entries (non-dict, missing/non-string competitor, non-numeric
+    x/y) rather than raising — callers treat absence as "nothing to compare".
+    """
+    out: dict[str, tuple[float, float]] = {}
+    for p in points:
+        p = _as_dict(p)
+        slug = p.get("competitor")
+        x, y = p.get("x"), p.get("y")
+        if isinstance(slug, str) and slug and isinstance(x, (int, float)) and isinstance(y, (int, float)):
+            out[slug] = (float(x), float(y))
+    return out
 
 
 def validate_artifacts(
@@ -418,6 +555,11 @@ def validate_artifacts(
                         _warn(
                             "INCOMPLETE_SCORING",
                             f"Competitor '{ls}' in landscape but missing from moat_scores — may distort rankings",
+                            founder_message=(
+                                f"'{ls}' is listed as a competitor but wasn't scored on moat "
+                                "strength, so the moat comparison across competitors is "
+                                "incomplete and may be skewed."
+                            ),
                         )
                     )
 
@@ -435,6 +577,11 @@ def validate_artifacts(
                         _warn(
                             "INCOMPLETE_SCORING",
                             f"Competitor '{ls}' in landscape but missing from positioning views — map is incomplete",
+                            founder_message=(
+                                f"'{ls}' is listed as a competitor but doesn't appear on the "
+                                "positioning map, so the map doesn't show where they sit "
+                                "relative to everyone else."
+                            ),
                         )
                     )
 
@@ -450,6 +597,53 @@ def validate_artifacts(
                     f"Positioning views {missing_in_scores} not found in positioning_scores — axis mismatch",
                 )
             )
+
+    # 3c. Merge integrity — per-competitor coordinates in positioning.json must
+    # match the points carried through positioning_scores.json (see
+    # _POINT_MERGE_TOLERANCE above for why positioning_scores.json is authoritative
+    # here). Checked per view id, per competitor slug, so a PARTIAL merge — some
+    # competitors updated, one left stale — is caught, not just an all-or-nothing
+    # miss. A view missing from positioning_scores entirely is already reported by
+    # the 3b axis-consistency check above; a positioning_scores view carrying no
+    # `points` at all (an older artifact predating the passthrough convention)
+    # degrades explicitly here — skipped, not crashed, not false-flagged.
+    if _usable(positioning) and _usable(positioning_scores):
+        scores_views_by_id: dict[Any, dict[str, Any]] = {
+            _as_dict(v).get("view_id"): _as_dict(v) for v in _as_list(positioning_scores.get("views"))
+        }
+        for view in _as_list(positioning.get("views")):
+            view = _as_dict(view)
+            vid = view.get("id")
+            score_view = scores_views_by_id.get(vid)
+            if score_view is None:
+                continue
+
+            score_points_raw = score_view.get("points")
+            if not isinstance(score_points_raw, list):
+                continue  # older artifact with no points passthrough — nothing to cross-check
+
+            pos_points = _points_by_slug(_as_list(view.get("points")))
+            score_points = _points_by_slug(score_points_raw)
+
+            mismatched = sorted(
+                slug
+                for slug, (px, py) in pos_points.items()
+                if slug in score_points
+                and (
+                    abs(px - score_points[slug][0]) > _POINT_MERGE_TOLERANCE
+                    or abs(py - score_points[slug][1]) > _POINT_MERGE_TOLERANCE
+                )
+            )
+            if mismatched:
+                warnings.append(
+                    _warn(
+                        "CORRUPT_ARTIFACT",
+                        f"View '{vid}': positioning.json coordinates for {mismatched} differ from "
+                        "positioning_scores.json — the scored merge back into positioning.json was "
+                        "skipped or partial; the report would show stale/placeholder coordinates "
+                        "instead of the scored values",
+                    )
+                )
 
     # 4. Forward warnings from sub-artifacts
     # Forward from moat_scores
@@ -491,6 +685,12 @@ def validate_artifacts(
                             "SHALLOW_COMPETITOR_PROFILE",
                             f"Competitor '{slug}' has research_depth='{rd}' with only "
                             f"{sfc} sourced fields (minimum 3 expected)",
+                            founder_message=(
+                                f"The profile for '{slug}' is based on limited research — only "
+                                f"{sfc} verified data points (fewer than the usual minimum of 3). "
+                                "Treat any comparison involving them as preliminary until more "
+                                "information is gathered."
+                            ),
                         )
                     )
 
@@ -564,15 +764,16 @@ def validate_artifacts(
             warnings.append(_warn("CHECKLIST_ALL_PASS", "All checklist items passed — review for self-grading bias"))
 
     # 10. FOUNDER_OVERRIDE_COUNT
-    if _usable(positioning):
-        override_count = _count_founder_overrides(positioning)
-        if override_count > 0:
-            warnings.append(
-                _warn(
-                    "FOUNDER_OVERRIDE_COUNT",
-                    f"{override_count} positioning coordinates or moat ratings have evidence_source='founder_override'",
-                )
+    coordinate_overrides = _count_founder_overrides(positioning) if _usable(positioning) else 0
+    moat_overrides = _count_moat_founder_overrides(moat_scores, positioning)
+    override_count = coordinate_overrides + moat_overrides
+    if override_count > 0:
+        warnings.append(
+            _warn(
+                "FOUNDER_OVERRIDE_COUNT",
+                f"{override_count} positioning coordinates or moat ratings have evidence_source='founder_override'",
             )
+        )
 
     return warnings
 
@@ -643,7 +844,10 @@ def _section_executive_summary(
     # Summary paragraph
     lines.append("")
     if diff_score is not None and defensibility is not None:
-        if diff_score >= 70 and defensibility in ("high", "moderate"):
+        # Use the same 'strong' threshold (>=75) as the score label above so the
+        # label and the prose paragraph never disagree (a score of 70-74.9 is
+        # labelled Moderate, so it must not be described as 'strong' here).
+        if diff_score >= 75 and defensibility in ("high", "moderate"):
             lines.append(
                 "The startup shows strong competitive differentiation with "
                 f"{defensibility} defensibility. The positioning analysis "
@@ -687,21 +891,77 @@ def _section_competitor_landscape(landscape: dict[str, Any] | None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _section_recent_developments(landscape: dict[str, Any] | None) -> str:
+    """Recent competitor developments (funding, launches, leadership moves, etc.),
+    grouped by competitor and sorted most-recent-first. Every entry here is
+    dated and sourced (validate_landscape.py enforces both) — omit the section
+    entirely when no competitor has any, rather than printing an empty heading.
+    """
+    if landscape is None or _is_stub(landscape):
+        return ""
+
+    entries: list[tuple[str, dict[str, Any]]] = []
+    for c in _as_list(landscape.get("competitors")):
+        c = _as_dict(c)
+        name = str(c.get("name") or c.get("slug") or "?")
+        for dev in _as_list(c.get("recent_developments")):
+            dev = _as_dict(dev)
+            if dev:
+                entries.append((name, dev))
+
+    if not entries:
+        return ""
+
+    entries.sort(key=lambda pair: str(pair[1].get("date", "")), reverse=True)
+
+    lines = ["## What's Changed Recently\n"]
+    as_of = landscape.get("landscape_as_of")
+    if as_of:
+        lines.append(f"**As Of:** {as_of}\n")
+    for name, dev in entries:
+        date_str = dev.get("date", "?")
+        type_label = _humanize(str(dev.get("type", "?")))
+        summary = _md_escape(str(dev.get("summary", "?")))
+        lines.append(f"- **{date_str}** — {_md_escape(name)} ({type_label}): {summary}")
+        relevance = dev.get("relevance")
+        if isinstance(relevance, str) and relevance.strip():
+            lines.append(f"  - Why it matters: {_md_escape(relevance)}")
+        source = dev.get("source")
+        if isinstance(source, str) and source.strip():
+            lines.append(f"  - Source: {source}")
+    lines.append("")
+
+    return "\n".join(lines) + "\n"
+
+
 def _section_positioning(
     positioning_scores: dict[str, Any] | None,
+    positioning: dict[str, Any] | None = None,
 ) -> str:
-    """Positioning analysis with per-view details."""
+    """Positioning analysis with per-view details and evidence points table."""
     if positioning_scores is None or _is_stub(positioning_scores):
         return "## Positioning Analysis\n\n*No positioning scores available.*\n"
 
     lines = ["## Positioning Analysis\n"]
+    basis_label = _scoring_basis_label(_resolve_scoring_basis(positioning_scores, positioning))
+    lines.append(f"**Scoring Basis:** {basis_label}\n")
     overall = positioning_scores.get("overall_differentiation")
     if overall is not None:
         lines.append(f"**Overall Differentiation:** {overall}%\n")
 
+    # Build a lookup: view_id → points list from positioning.json
+    pos_views_by_id: dict[str, list[dict[str, Any]]] = {}
+    if _usable(positioning):
+        for pv in _as_list(positioning.get("views")):
+            pv = _as_dict(pv)
+            vid_key = str(pv.get("id", ""))
+            if vid_key:
+                pos_views_by_id[vid_key] = _as_list(pv.get("points"))
+
     for view in _as_list(positioning_scores.get("views")):
         view = _as_dict(view)
-        vid = view.get("view_id", "?").title()
+        vid = str(view.get("view_id", "?")).title()
+        vid_key = str(view.get("view_id", ""))
         lines.append(f"### {vid} View\n")
         lines.append(f"- **X-Axis:** {view.get('x_axis_name', '?')}")
         lines.append(f"  - Rationale: {view.get('x_axis_rationale', '?')}")
@@ -719,11 +979,31 @@ def _section_positioning(
         )
         lines.append("")
 
+        # Points evidence table (from positioning.json views[].points[])
+        points = pos_views_by_id.get(vid_key, [])
+        if points:
+            x_name = view.get("x_axis_name", "X")
+            y_name = view.get("y_axis_name", "Y")
+            lines.append(
+                f"| Company | {_md_escape(x_name)} | {_md_escape(y_name)} "
+                f"| {_md_escape(x_name)} evidence | {_md_escape(y_name)} evidence |"
+            )
+            lines.append("|---------|------|------|------------|------------|")
+            for pt in points:
+                pt = _as_dict(pt)
+                slug = pt.get("competitor", "?")
+                x_val = pt.get("x", "?")
+                y_val = pt.get("y", "?")
+                x_ev = _md_escape(_truncate_evidence(str(pt.get("x_evidence", ""))))
+                y_ev = _md_escape(_truncate_evidence(str(pt.get("y_evidence", ""))))
+                lines.append(f"| {_md_escape(slug)} | {x_val} | {y_val} | {x_ev} | {y_ev} |")
+            lines.append("")
+
     return "\n".join(lines) + "\n"
 
 
 def _section_moat_assessment(moat_scores: dict[str, Any] | None) -> str:
-    """Moat assessment section."""
+    """Moat assessment section with evidence, leader context, and per-dimension matrix."""
     if moat_scores is None or _is_stub(moat_scores):
         return "## Moat Assessment\n\n*No moat scores available.*\n"
 
@@ -731,6 +1011,8 @@ def _section_moat_assessment(moat_scores: dict[str, Any] | None) -> str:
 
     companies = _as_dict(moat_scores.get("companies"))
     startup = _as_dict(companies.get("_startup"))
+    # Competitor slugs (exclude _startup for leader lookup)
+    competitor_slugs = [k for k in companies if k != "_startup"]
 
     if startup:
         defensibility = _humanize(str(startup.get("overall_defensibility", "?")))
@@ -739,9 +1021,10 @@ def _section_moat_assessment(moat_scores: dict[str, Any] | None) -> str:
         lines.append(f"**Strongest Moat:** {strongest}")
         lines.append("")
 
-        # Moat table for _startup
+        # Moat table for _startup — with evidence text as a bullet under each row
         lines.append("| Moat | Status | Trajectory | Evidence Source |")
         lines.append("|------|--------|------------|----------------|")
+        moat_evidence_pairs: list[tuple[str, str]] = []
         for moat in _as_list(startup.get("moats")):
             moat = _as_dict(moat)
             mid = _humanize(str(moat.get("id", "?")))
@@ -749,16 +1032,77 @@ def _section_moat_assessment(moat_scores: dict[str, Any] | None) -> str:
             traj = _humanize(str(moat.get("trajectory", "?")))
             src = _humanize(str(moat.get("evidence_source", "?")))
             lines.append(f"| {mid} | {status} | {traj} | {src} |")
+            evidence_text = str(moat.get("evidence", "")).strip()
+            if evidence_text:
+                moat_evidence_pairs.append((mid, evidence_text))
         lines.append("")
 
-    # Comparison highlights
+        # Evidence bullets under the table
+        if moat_evidence_pairs:
+            lines.append("**Evidence:**")
+            for mid, ev in moat_evidence_pairs:
+                lines.append(f"- **{mid}:** {_truncate_evidence(ev, 200)}")
+            lines.append("")
+
+    # Comparison highlights — with leader context appended
     comparison = _as_dict(moat_scores.get("comparison"))
     startup_rank = _as_dict(comparison.get("startup_rank"))
+    by_dimension = _as_dict(comparison.get("by_dimension"))
     if startup_rank:
         lines.append("### Startup Ranking by Moat Dimension\n")
         for dim, rank_info in startup_rank.items():
             ri = _as_dict(rank_info)
-            lines.append(f"- **{_humanize(dim)}:** Rank {ri.get('rank', '?')} of {ri.get('total', '?')}")
+            rank_val = ri.get("rank", "?")
+            total_val = ri.get("total", "?")
+            # Identify the leader: competitor with the strongest status in this dimension
+            leader_name: str | None = None
+            leader_status: str | None = None
+            _status_order = {"strong": 0, "moderate": 1, "weak": 2, "absent": 3, "not_applicable": 4}
+            dim_scores = _as_dict(by_dimension.get(dim))
+            for slug in competitor_slugs:
+                s = dim_scores.get(slug, "absent")
+                if leader_name is None or _status_order.get(s, 99) < _status_order.get(leader_status or "absent", 99):
+                    leader_name = slug
+                    leader_status = s
+            leader_note = ""
+            if leader_name and leader_status and rank_val != 1:
+                leader_note = f" — leader: {leader_name} ({_humanize(leader_status)})"
+            lines.append(f"- **{_humanize(dim)}:** Rank {rank_val} of {total_val}{leader_note}")
+        lines.append("")
+
+    # Per-dimension comparison matrix (rows=companies, cols=6 canonical moat dimensions)
+    canonical_dims = [
+        "network_effects",
+        "data_advantages",
+        "switching_costs",
+        "regulatory_barriers",
+        "cost_structure",
+        "brand_reputation",
+    ]
+    _status_short = {
+        "strong": "S",
+        "moderate": "M",
+        "weak": "W",
+        "absent": "—",
+        "not_applicable": "N/A",
+    }
+    # Collect all company slugs including _startup
+    all_slugs = ["_startup"] + competitor_slugs
+    if all_slugs and by_dimension:
+        lines.append("### Moat Dimension Comparison Matrix\n")
+        header_dims = " | ".join(_humanize(d)[:12] for d in canonical_dims)
+        lines.append(f"| Company | {header_dims} |")
+        lines.append("|---------|" + "|".join(["-------"] * len(canonical_dims)) + "|")
+        for slug in all_slugs:
+            row_data = []
+            for dim in canonical_dims:
+                dim_map = _as_dict(by_dimension.get(dim))
+                val = dim_map.get(slug, "—")
+                row_data.append(_status_short.get(val, val[:3] if isinstance(val, str) else "—"))
+            display = "_startup_" if slug == "_startup" else slug
+            lines.append(f"| {display} | " + " | ".join(row_data) + " |")
+        lines.append("")
+        lines.append("_Legend: S=Strong, M=Moderate, W=Weak, —=Absent, N/A=Not Applicable_")
         lines.append("")
 
     return "\n".join(lines) + "\n"
@@ -895,7 +1239,7 @@ def _section_warnings(warnings: list[dict[str, Any]]) -> str:
     for w in reportable:
         sev = w.get("severity", "?")
         code = w.get("code", "?")
-        msg = w.get("message", "?")
+        msg = w.get("founder_message") or w.get("message", "?")
         label = _humanize_warning(code)
         icon = sev_icons.get(sev, "")
         prefix = f"[{icon}] " if icon else ""
@@ -915,14 +1259,39 @@ def _emit_coaching_payload(
     review_dir: str,
     report_path: str,
     insertion_marker: str,
+    moat_scores: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the v0.4.2 coaching_payload for competitive-positioning.
 
     Read from existing artifacts; do not fabricate fields.
     No stage or is_ai_company fields (no analog in this skill).
+
+    `defensibility` carries the scored moat picture because the coaching agent is
+    asked for "the single highest-leverage fix to improve defensibility" and a
+    "defensibility roadmap: which moats to invest in, in what order" — while being
+    forbidden to read report.md. Without these numbers it can only invent moat
+    claims, and its commentary is appended to the same investor-facing report that
+    carries the scored table, so an invented claim lands next to the real one.
     """
     summary = _as_dict(checklist.get("summary"))
+    startup = _as_dict(_as_dict(_as_dict(moat_scores).get("companies")).get("_startup"))
+    defensibility = {
+        "moat_count": startup.get("moat_count"),
+        "strongest_moat": startup.get("strongest_moat"),
+        "overall_defensibility": startup.get("overall_defensibility"),
+        # Per-dimension statuses, so "which moats to invest in, in what order"
+        # can be answered from the scores rather than guessed.
+        "moats": [
+            {
+                "id": moat.get("id"),
+                "status": moat.get("status"),
+            }
+            for moat in _as_list(startup.get("moats"))
+            if isinstance(moat, dict)
+        ],
+    }
     return {
+        "defensibility": defensibility,
         "schema_version": "v0.4.2-competitive-positioning",
         "summary": {
             "score_pct": summary.get("score_pct"),
@@ -1008,16 +1377,19 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     positioning_scores = _render_safe(artifacts.get("positioning_scores.json"))
     checklist = _render_safe(artifacts.get("checklist.json"))
 
-    # Assemble report sections
+    # Assemble report sections — render everything EXCEPT the Warnings section
+    # first. The Warnings section must be spliced in only after the marker
+    # prescan has had a chance to append MARKER_COLLISION, otherwise that
+    # warning would never reach the rendered ## Warnings list.
     sections = [
         _section_title(product_profile, landscape),
         _section_executive_summary(product_profile, positioning_scores, moat_scores, checklist),
         _section_competitor_landscape(landscape),
-        _section_positioning(positioning_scores),
+        _section_recent_developments(landscape),
+        _section_positioning(positioning_scores, positioning_safe),
         _section_moat_assessment(moat_scores),
         _section_stress_test(positioning_scores),
         _section_key_findings(positioning_scores, moat_scores, checklist),
-        _section_warnings(warnings),
     ]
 
     report_markdown = "\n".join(s for s in sections if s)
@@ -1025,10 +1397,12 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # v0.4.2 Mitigation 2: per-run uuid marker for Context B's Edit
     marker = f"<!-- COACHING_INSERTION_POINT_{uuid.uuid4().hex[:8]} -->"
 
-    # Pre-scan: check assembled body BEFORE appending the marker (otherwise we
-    # always find our own emission). Agent post-Edit verification uses the
-    # EXACT uuid (per-run), so substring collisions with body content are
-    # informational only — but worth flagging so authors can sanitize.
+    # Pre-scan: check the assembled body BEFORE appending the marker (otherwise
+    # we always find our own emission) and BEFORE rendering the Warnings section
+    # (so the prescan only inspects report body content, not our own warning
+    # text). Agent post-Edit verification uses the EXACT uuid (per-run), so
+    # substring collisions with body content are informational only — but worth
+    # flagging so authors can sanitize.
     if "<!-- COACHING_INSERTION_POINT_" in report_markdown:
         warnings.append(
             _warn(
@@ -1041,11 +1415,21 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
             )
         )
 
+    # Splice the Warnings section now that MARKER_COLLISION (if any) is in the
+    # warnings list. _section_warnings filters to high/medium/acknowledged only,
+    # so the low-severity MARKER_COLLISION still won't surface in the report,
+    # but the data flow is now correct for any future reportable warning the
+    # prescan might add.
+    warnings_section = _section_warnings(warnings)
+    if warnings_section:
+        report_markdown += "\n" + warnings_section
+
     report_markdown += (
         f"\n\n{marker}\n\n---\n"
         "*Generated by [founder skills](https://github.com/lool-ventures/founder-skills)"
         " by [lool ventures](https://lool.vc)"
-        " — Competitive Positioning Coach*\n"
+        " — Competitive Positioning Coach"
+        " · [Share feedback](https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback)*\n"
     )
 
     # Build metadata
@@ -1076,6 +1460,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     founder_override_count = 0
     if positioning_safe is not None and not _is_stub(positioning_safe):
         founder_override_count = _count_founder_overrides(positioning_safe)
+    founder_override_count += _count_moat_founder_overrides(moat_scores, positioning_safe)
 
     # Extract run_id from first usable artifact
     run_id = ""
@@ -1102,6 +1487,8 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     if moat_scores is not None and not _is_stub(moat_scores):
         startup_data = _as_dict(_as_dict(moat_scores.get("companies")).get("_startup"))
         startup_defensibility = startup_data.get("overall_defensibility", "unknown")
+
+    scoring_basis_label = _scoring_basis_label(_resolve_scoring_basis(positioning_scores, positioning_safe))
 
     # Stderr summary
     print(
@@ -1137,6 +1524,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         review_dir=os.path.abspath(dir_path),
         report_path=resolved_report_path,
         insertion_marker=marker,
+        moat_scores=_as_dict(moat_scores) if _usable(moat_scores) else None,
     )
 
     return {
@@ -1157,6 +1545,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
             "checklist_score_pct": checklist_score_pct,
             "overall_differentiation": overall_differentiation,
             "startup_defensibility": startup_defensibility,
+            "scoring_basis": scoring_basis_label,
         },
         "coaching_payload": coaching_payload,
     }

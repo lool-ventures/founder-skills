@@ -21,10 +21,13 @@ Exit codes: 0 = success (may include warnings), 1 = validation error.
 from __future__ import annotations
 
 import argparse
+import calendar
 import json
 import os
 import re
 import sys
+from datetime import date as _date
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -63,19 +66,182 @@ MIN_COMPETITORS = 3
 MAX_COMPETITORS = 10
 RESERVED_SLUGS = {"_startup"}
 
+VALID_RECENT_DEVELOPMENT_TYPES = {
+    "funding",
+    "pricing_change",
+    "product_launch",
+    "market_move",
+    "acquisition",
+    "leadership",
+    "layoff",
+}
+DEV_DATE_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+DEV_DATE_FULL_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+URL_PREFIXES = ("http://", "https://")
+# PROVISIONAL: how far back a recent_developments entry may date and still be
+# considered "recent" relative to the as-of date. This is a judgement call, not
+# a validated bound — revisit if founder feedback or investor practice suggests
+# a different horizon.
+RECENCY_WINDOW_MONTHS = 18
+
 
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
 
 
-def validate_landscape(enriched: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
+def _parse_as_of(as_of_str: str) -> _date:
+    """Parse a --as-of CLI value (YYYY-MM-DD). Raises ValueError on bad format."""
+    if not DEV_DATE_FULL_RE.match(as_of_str):
+        raise ValueError(f"--as-of must be YYYY-MM-DD, got '{as_of_str}'")
+    y, m, d = (int(x) for x in as_of_str.split("-"))
+    return _date(y, m, d)
+
+
+def _shift_months(d: _date, months: int) -> _date:
+    """Return d shifted back by `months` months, clamping day to the target
+    month's length (e.g. Aug 31 - 6 months -> Feb 28/29, not an OverflowError)."""
+    total = d.year * 12 + (d.month - 1) - months
+    y2, m2 = divmod(total, 12)
+    m2 += 1
+    last_day = calendar.monthrange(y2, m2)[1]
+    return _date(y2, m2, min(d.day, last_day))
+
+
+def _parse_dev_date(date_str: str) -> tuple[_date, bool]:
+    """Parse a recent_developments 'date' field. Returns (date, is_month_only).
+
+    Raises ValueError if the format is not YYYY-MM or YYYY-MM-DD. A month-only
+    date is normalized to day=1 for storage, but callers must compare it at
+    month granularity (see is_month_only) — a day-1 date is a comparison
+    artifact, not a claim that the event happened on the 1st.
+    """
+    if DEV_DATE_FULL_RE.match(date_str):
+        y, m, d = (int(x) for x in date_str.split("-"))
+        return _date(y, m, d), False
+    if DEV_DATE_MONTH_RE.match(date_str):
+        y, m = (int(x) for x in date_str.split("-"))
+        return _date(y, m, 1), True
+    raise ValueError("bad format")
+
+
+def _check_recent_developments(comp: dict[str, Any], as_of: _date, window_start: _date) -> list[str]:
+    """Validate the optional recent_developments[] field for one competitor.
+
+    Returns a list of error message fragments (caller prefixes with the
+    'Competitor N (name):' context, matching the rest of this file's error
+    style). Absent or an empty list is valid and produces no errors.
+    """
+    if "recent_developments" not in comp:
+        return []
+    rd = comp["recent_developments"]
+    if not isinstance(rd, list):
+        return ["recent_developments must be an array"]
+
+    errors: list[str] = []
+    for idx, raw_entry in enumerate(rd):
+        if not isinstance(raw_entry, dict):
+            errors.append(f"recent_developments[{idx}] must be an object")
+            continue
+        entry: dict[str, Any] = raw_entry
+
+        date_str = entry.get("date")
+        if not isinstance(date_str, str) or not date_str:
+            errors.append(f"recent_developments[{idx}]: 'date' is required and must be a string")
+        else:
+            try:
+                dev_date, month_only = _parse_dev_date(date_str)
+            except ValueError:
+                errors.append(f"recent_developments[{idx}]: 'date' must be YYYY-MM or YYYY-MM-DD, got '{date_str}'")
+            else:
+                if month_only:
+                    is_future = (dev_date.year, dev_date.month) > (as_of.year, as_of.month)
+                    is_too_old = (dev_date.year, dev_date.month) < (window_start.year, window_start.month)
+                else:
+                    is_future = dev_date > as_of
+                    is_too_old = dev_date < window_start
+                if is_future:
+                    errors.append(
+                        f"recent_developments[{idx}]: 'date' {date_str} is in the future "
+                        f"relative to as-of {as_of.isoformat()}"
+                    )
+                elif is_too_old:
+                    errors.append(
+                        f"recent_developments[{idx}]: 'date' {date_str} is outside the "
+                        f"{RECENCY_WINDOW_MONTHS}-month recency window (as-of {as_of.isoformat()})"
+                    )
+
+        type_val = entry.get("type")
+        if type_val not in VALID_RECENT_DEVELOPMENT_TYPES:
+            errors.append(
+                f"recent_developments[{idx}]: 'type' must be one of "
+                f"{sorted(VALID_RECENT_DEVELOPMENT_TYPES)}, got {type_val!r}"
+            )
+
+        summary = entry.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            errors.append(f"recent_developments[{idx}]: 'summary' is required and must be non-empty")
+
+        source = entry.get("source")
+        if not isinstance(source, str) or not source.strip() or not source.startswith(URL_PREFIXES):
+            errors.append(
+                f"recent_developments[{idx}]: 'source' must be a non-empty URL "
+                "(http:// or https://) — a dated factual claim must be spot-checkable"
+            )
+
+    return errors
+
+
+def _check_key_differentiators(comp: dict[str, Any]) -> str | None:
+    """Validate key_differentiators content, once the required-field presence
+    check (REQUIRED_COMPETITOR_FIELDS) has already run.
+
+    Returns an error message, or None if the field is absent (presence is
+    the required-field loop's job, not this one) or valid.
+
+    An empty list is valid only when research_depth is 'partial' — the
+    promoted-but-not-yet-enriched case: a suggestion that was never
+    researched has no differentiators, and inventing one would be content
+    authoring. Any other research_depth (notably 'full') claims complete
+    research, so an empty list there is an error, not a stub.
+    """
+    if "key_differentiators" not in comp:
+        return None
+    kd = comp.get("key_differentiators")
+    if not isinstance(kd, list):
+        return "key_differentiators must be an array"
+    if len(kd) == 0 and comp.get("research_depth") != "partial":
+        return (
+            "key_differentiators is empty, which is only valid for a competitor with "
+            "research_depth 'partial' (a promoted-but-not-yet-enriched suggestion). A "
+            "fully-researched competitor must have at least one differentiator — if it "
+            "was not enriched, set research_depth: 'partial' rather than leaving this "
+            "empty under 'full'."
+        )
+    return None
+
+
+def validate_landscape(enriched: dict[str, Any], as_of: str | None = None) -> tuple[dict[str, Any] | None, list[str]]:
     """Validate landscape_enriched.json and return (output, errors).
+
+    `as_of` is the reference date (YYYY-MM-DD) for the recent_developments
+    recency window; defaults to today (UTC) when omitted. Callers that need a
+    deterministic clock (tests, reproducible runs) should always pass it
+    explicitly rather than relying on the wall-clock default.
 
     Returns (output_dict, []) on success, (None, error_list) on failure.
     """
     errors: list[str] = []
     warnings: list[dict[str, Any]] = []
+
+    if as_of is None:
+        as_of_date = datetime.now(timezone.utc).date()
+    else:
+        try:
+            as_of_date = _parse_as_of(as_of)
+        except ValueError as e:
+            return None, [str(e)]
+    window_start = _shift_months(as_of_date, RECENCY_WINDOW_MONTHS)
 
     # Top-level structure
     competitors_raw = enriched.get("competitors")
@@ -94,11 +260,35 @@ def validate_landscape(enriched: dict[str, Any]) -> tuple[dict[str, Any] | None,
     validated_competitors: list[dict[str, Any]] = []
     has_do_nothing = False
     has_adjacent = False
+    has_recent_developments = False
 
     for i, comp in enumerate(competitors_raw):
         if not isinstance(comp, dict):
             errors.append(f"Competitor {i}: must be an object")
             continue
+
+        # Auto-fix: an observed sub-agent near-miss stamps 'key_differentiators_per_deck'
+        # instead of the canonical 'key_differentiators' (same auto-fix pattern as the
+        # underscore-slug conversion below). If the canonical field is absent, promote the
+        # alias to it; if BOTH are present, canonical wins and the alias is dropped — but
+        # note the drop on stderr rather than discarding it silently (its content may differ
+        # from the canonical field, and a silent drop hides that from the operator).
+        if "key_differentiators_per_deck" in comp:
+            if "key_differentiators" not in comp:
+                comp["key_differentiators"] = comp.pop("key_differentiators_per_deck")
+                print(
+                    f"Note: auto-converted field 'key_differentiators_per_deck' -> "
+                    f"'key_differentiators' for competitor {i} ({comp.get('name', '?')})",
+                    file=sys.stderr,
+                )
+            else:
+                comp.pop("key_differentiators_per_deck", None)
+                print(
+                    f"Note: dropped alias 'key_differentiators_per_deck' for competitor {i} "
+                    f"({comp.get('name', '?')}) — canonical 'key_differentiators' already present, "
+                    f"canonical wins",
+                    file=sys.stderr,
+                )
 
         # Required fields
         for field in REQUIRED_COMPETITOR_FIELDS:
@@ -139,10 +329,27 @@ def validate_landscape(enriched: dict[str, Any]) -> tuple[dict[str, Any] | None,
         if category == "adjacent":
             has_adjacent = True
 
-        # key_differentiators must be a non-empty list (null is not valid)
-        kd = comp.get("key_differentiators")
-        if not isinstance(kd, list) or len(kd) == 0:
-            errors.append(f"Competitor {i} ({comp.get('name', '?')}): key_differentiators must be a non-empty array")
+        kd_error = _check_key_differentiators(comp)
+        if kd_error:
+            errors.append(f"Competitor {i} ({comp.get('name', '?')}): {kd_error}")
+
+        # recent_developments[] — optional; absent or [] is valid (a genuinely
+        # quiet competitor is a correct answer). When present, each entry is
+        # validated against the recency window and enum/URL/non-empty rules
+        # above — these exist to stop fabrication of a dated, sourced claim.
+        for rd_error in _check_recent_developments(comp, as_of_date, window_start):
+            errors.append(f"Competitor {i} ({comp.get('name', '?')}): {rd_error}")
+
+        # A remembered event is not a researched one: reject recent_developments
+        # stamped agent_estimate outright rather than merely warning, since this
+        # field is the most exposed to confidently recalling something that
+        # never happened.
+        comp_ev_src = comp.get("evidence_source")
+        if isinstance(comp_ev_src, dict) and comp_ev_src.get("recent_developments") == "agent_estimate":
+            errors.append(
+                f"Competitor {i} ({comp.get('name', '?')}): recent_developments evidence_source "
+                "is 'agent_estimate' — a remembered event is not a researched one"
+            )
 
         # Build validated competitor entry — preserve ALL fields from input.
         # Required fields were already validated above; enrichment fields
@@ -160,6 +367,37 @@ def validate_landscape(enriched: dict[str, Any]) -> tuple[dict[str, Any] | None,
 
         validated_competitors.append(validated_comp)
 
+        rd_list = validated_comp.get("recent_developments")
+        if isinstance(rd_list, list) and len(rd_list) > 0:
+            has_recent_developments = True
+
+        # Verifiability check: a per-field "researched" evidence_source with no matching
+        # "sources" (URL or search query) citation is indistinguishable from a plausible-
+        # sounding fabrication to the main thread, which never sees the sub-agent's WebSearch
+        # results — only its artifact. Not a schema requirement (a source may legitimately be
+        # a query string, not a URL) — warn, don't fail.
+        ev_src = validated_comp.get("evidence_source")
+        if isinstance(ev_src, dict):
+            sources = validated_comp.get("sources")
+            sources = sources if isinstance(sources, dict) else {}
+            for field, src_type in ev_src.items():
+                if src_type != "researched":
+                    continue
+                cited = sources.get(field)
+                if isinstance(cited, str) and cited.strip():
+                    continue
+                warnings.append(
+                    {
+                        "code": "RESEARCHED_WITHOUT_SOURCE",
+                        "severity": "medium",
+                        "message": (
+                            f"{validated_comp.get('slug', '?')}: '{field}' evidence_source is"
+                            " 'researched' but no source (URL or search query) was provided"
+                            " in 'sources' — this claim can't be spot-checked"
+                        ),
+                    }
+                )
+
     # Bail on errors
     if errors:
         return None, errors
@@ -175,6 +413,21 @@ def validate_landscape(enriched: dict[str, Any]) -> tuple[dict[str, Any] | None,
             }
         )
 
+    # NO_RECENT_DEVELOPMENTS fires only when EVERY competitor has an empty/absent
+    # recent_developments — that pattern indicates shallow research. One quiet
+    # competitor among several researched ones is a correct answer and must not
+    # warn (hence no per-competitor warning above).
+    if not has_recent_developments:
+        warnings.append(
+            {
+                "code": "NO_RECENT_DEVELOPMENTS",
+                "severity": "medium",
+                "message": "No competitor has any recent_developments entries. This may indicate "
+                "shallow research rather than a genuinely quiet market — consider researching "
+                "recent funding, launches, pricing changes, or leadership moves.",
+            }
+        )
+
     # Metadata passthrough
     metadata = enriched.get("metadata", {})
     input_mode = enriched.get("input_mode", "conversation")
@@ -185,6 +438,7 @@ def validate_landscape(enriched: dict[str, Any]) -> tuple[dict[str, Any] | None,
         "warnings": warnings,
         "_produced_by": "validate_landscape",
         "metadata": metadata,
+        "landscape_as_of": as_of_date.isoformat(),
     }
 
     # Optional passthroughs
@@ -194,6 +448,8 @@ def validate_landscape(enriched: dict[str, Any]) -> tuple[dict[str, Any] | None,
         output["assessment_mode"] = enriched["assessment_mode"]
     if "data_confidence" in enriched:
         output["data_confidence"] = enriched["data_confidence"]
+    if "suggested_additions" in enriched:
+        output["suggested_additions"] = enriched["suggested_additions"]
 
     return output, []
 
@@ -207,8 +463,29 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Validate competitor landscape (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
-    p.add_argument("--stdin", action="store_true", default=True, help="Read from stdin (default)")
+    p.add_argument(
+        "--run-id",
+        default=None,
+        help="Stamp metadata.run_id (overrides any run_id from stdin metadata)",
+    )
+    p.add_argument(
+        "--as-of",
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="Reference date for the recent_developments recency window (default: today, UTC)",
+    )
     return p.parse_args()
+
+
+def _apply_run_id(result: dict, run_id: str | None) -> None:
+    """CLI run_id overrides stdin-passthrough metadata.run_id (CLI > stdin)."""
+    if not run_id:
+        return
+    md = result.get("metadata")
+    if not isinstance(md, dict):
+        md = {}
+    md["run_id"] = run_id
+    result["metadata"] = md
 
 
 def main() -> None:
@@ -232,7 +509,7 @@ def main() -> None:
         print("Error: JSON must be an object", file=sys.stderr)
         sys.exit(1)
 
-    result, errors = validate_landscape(data)
+    result, errors = validate_landscape(data, as_of=args.as_of)
 
     if errors:
         for err in errors:
@@ -240,6 +517,7 @@ def main() -> None:
         sys.exit(1)
 
     assert result is not None
+    _apply_run_id(result, args.run_id)
 
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"

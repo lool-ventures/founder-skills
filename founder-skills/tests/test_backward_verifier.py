@@ -229,6 +229,15 @@ class TestCliRoundTrip:
         return p
 
     def test_prompt_phase_emits_structured_output(self, extraction_file: Path) -> None:
+        # The re-extraction prompt carries the document TEXT inline. Handing a
+        # sub-agent a path instead lets the check silently no-op when the path
+        # does not resolve in its namespace — the guardrail fails closed with no
+        # diagnostic, which is the failure this transport shape removes.
+        doc = extraction_file.parent / "source_doc.txt"
+        doc.write_text(
+            "SAFE purchase amount is $500,000 at a $10,000,000 post-money valuation cap with a 20% discount.",
+            encoding="utf-8",
+        )
         result = subprocess.run(
             [
                 sys.executable,
@@ -236,8 +245,8 @@ class TestCliRoundTrip:
                 "--phase=prompt",
                 "--extraction",
                 str(extraction_file),
-                "--source-doc",
-                "/tmp/fake.pdf",
+                "--doc-text",
+                str(doc),
             ],
             capture_output=True,
             text=True,
@@ -248,6 +257,10 @@ class TestCliRoundTrip:
         fields = [p["field"] for p in out["prompts"]]
         assert "purchase_amount" in fields
         assert "discount_multiplier" in fields
+        # The document text must reach the prompt itself, not a path reference.
+        joined = json.dumps(out)
+        assert "$500,000" in joined
+        assert "use the Read tool" not in joined
         assert "form" not in fields
 
     def test_score_phase_consumes_responses(self, extraction_file: Path) -> None:
@@ -276,7 +289,35 @@ class TestCliRoundTrip:
         assert report["overall_status"] == "pass"
         assert report["n_matched"] == 3
 
-    def test_score_phase_exits_1_on_mismatch(self, extraction_file: Path) -> None:
+    def test_score_phase_exits_1_on_mismatch_block_mode(self, extraction_file: Path) -> None:
+        responses = {
+            "responses": [
+                {"field": "purchase_amount", "value": 99_999, "evidence_quote": "..."},  # wrong
+                {"field": "post_money_valuation_cap", "value": 20000000, "evidence_quote": "..."},
+                {"field": "discount_multiplier", "value": 0.80, "evidence_quote": "..."},
+            ]
+        }
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS_DIR / "backward_verifier.py"),
+                "--phase=score",
+                "--mode=block",
+                "--extraction",
+                str(extraction_file),
+            ],
+            input=json.dumps(responses),
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+        report = json.loads(result.stdout)
+        assert report["overall_status"] == "fail"
+        assert report["n_mismatched"] == 1
+
+    def test_score_phase_warn_mode_default_exits_0_on_mismatch(self, extraction_file: Path) -> None:
+        """extraction-9: default --mode is warn — a mismatch is informational
+        (exit 0), per the calibrated noisy-disagreement contract."""
         responses = {
             "responses": [
                 {"field": "purchase_amount", "value": 99_999, "evidence_quote": "..."},  # wrong
@@ -296,8 +337,9 @@ class TestCliRoundTrip:
             capture_output=True,
             text=True,
         )
-        assert result.returncode == 1
+        assert result.returncode == 0, result.stderr
         report = json.loads(result.stdout)
+        # Status still reflects the disagreement; only the exit code is warn-mode.
         assert report["overall_status"] == "fail"
         assert report["n_mismatched"] == 1
 

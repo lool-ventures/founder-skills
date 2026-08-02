@@ -39,6 +39,17 @@ class WarrantPumpError(ValueError):
     """Raised when a warrant cannot be exercised (e.g., missing FMV for net-share)."""
 
 
+def warrant_has_usable_exercise_price(warrant: dict[str, Any]) -> bool:
+    """True when the warrant carries a usable strike for exercise math.
+
+    A warrant whose strike is genuinely not stated in the source is kept as a partial
+    (exercise_price null): its shares still count in fully-diluted, but exercise/pump math
+    cannot run. >= 0 (not > 0): a zero/nominal strike is a legitimate warrant.
+    """
+    ep = warrant.get("exercise_price")
+    return isinstance(ep, (int, float)) and not isinstance(ep, bool) and ep >= 0
+
+
 def _resolve_fmv(
     *,
     settlement_type: str,
@@ -102,6 +113,12 @@ def exercise_warrant(
         exercise_path = settlement
 
     shares_underlying = int(warrant["shares_underlying"])
+    if not warrant_has_usable_exercise_price(warrant):
+        raise WarrantPumpError(
+            f"E_WARRANT_EXERCISE_PRICE_MISSING: warrants[{warrant.get('warrant_id', '?')}] has no usable "
+            "exercise_price (strike not stated in the source). Supply the strike to model exercise; the "
+            "warrant's shares still count in the fully-diluted total."
+        )
     strike = float(warrant["exercise_price"])
 
     if effective == "cash_exercise":

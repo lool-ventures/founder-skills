@@ -1,0 +1,131 @@
+name: cap-table-acquisition
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: first   # backstop for variance gates; known deterministic gates label-pinned below
+skills: [cap-table]                # scope the staleness hash to this skill + shared roots
+
+# P3-a — bespoke acquisition deal (COVERED combination): Israeli company doing a Delaware flip,
+# one YC post-money SAFE, 20% equity acquisition consideration for TargetCo, and a Series A
+# priced round — all closing concurrently.
+#
+# Coverage: ["flip", "priced_round", "safe_conversion", "acquisition_consideration"] is covered
+# per TestIsCovered.test_flip_plus_round_is_covered_via_sequence and
+# TestIsCovered.test_priced_round_with_safe_and_acquisition_is_covered.
+#
+# Lane 4 (conversational) — all data supplied inline; no file upload required.
+# Corresponding fixtures:
+#   cowork-tests/fixtures/acmecorp_acquisition_inputs.json
+#   cowork-tests/fixtures/acmecorp_acquisition_instruments.json
+#
+# Recorded at native hostloop (re-record with `./rerecord.sh cap-table-acquisition`).
+# All data is SYNTHETIC (Acmecorp / TargetCo / Foobar Capital — never real founder/company data).
+
+# Known gates (canonical SKILL.md Gate Catalog phrasing), anchored on a stable fragment:
+answers:
+  # PIN THE JURISDICTION GATE. This lane is the one cap-table scenario whose prompt states a
+  # MID-FLIP deal ("an Israeli private company ... that we are mid-flip to a US Delaware C-corp"),
+  # and slot 1 of that gate is `Israeli company` — so `on_unanswered: first` answered it WRONG.
+  # Not theoretical: the committed cassette's inputs.json carries
+  # `"jurisdiction": {"structure": "israeli"}, "mode": "standard"`, contradicting the prompt.
+  # It passed anyway because no assert reads either field, and the flip scenario still got modeled
+  # — the exact silent-wrong-data shape `on_unanswered: first` is supposed to be audited for.
+  # `Mid-flip` is slot 3 of 4 (`Israeli company | Delaware (already flipped) | Mid-flip |
+  # Delaware with Israeli subsidiary`, Gate Catalog row *Jurisdiction structure*), so the pin is
+  # load-bearing: without it a re-record silently reproduces the same wrong base.
+  - when_question: "jurisdiction structure"
+    choose: "Mid-flip"
+  - when_question: "cap-table base"
+    choose: "Confirmed"
+  # No scenarios-model rule: this deal's gate asks IIA / denominator / pool sizing (not a scenarios-model
+  # multiSelect), so on_unanswered: first answers them (all "Recommended"/first options match intent) — a
+  # scenarios-model anchor would be a dead rule that hard-fails only if the gate shape ever shifts to include it.
+  # Founder-only FACT gate — the class b752162 made canonical: "stated-value option first, explicit
+  # defer last". That ordering turns `on_unanswered: first` into a STALL GENERATOR in an unattended
+  # record: slot 1 here is "I'll provide it in chat", so the backstop promises a chat message that
+  # never comes, and the agent ends its turn waiting. Verified from the run that failed: the gate asked
+  # "What is the issuance date of the Foobar Capital SAFE?" with exactly
+  # ["I'll provide it in chat", "Don't have it handy"].
+  # Choosing the DEFER is the documented escape — the skill proceeds with a watchlist item instead of
+  # blocking. "Don't have" is a unique leading substring against the only other option, and short
+  # enough to survive the label drift this gate shape invites.
+  - when_question: "issuance date"
+    choose: "Don't have"
+
+prompt: |
+  I'm raising a Series A for Acmecorp, an Israeli private company (limited by shares) that we are
+  mid-flip to a US Delaware C-corp.
+
+  Cap table today (pre-flip, Israeli ordinary shares):
+  - Founder Alex Stone: 4,000,000 ordinary shares
+  - Founder Sam Lee: 3,500,000 ordinary shares
+  - Option pool: 1,500,000 authorized, 500,000 issued, 1,000,000 unallocated
+
+  Outstanding instrument: one YC post-money SAFE from Foobar Capital LLC — $500,000 on a
+  $10,000,000 post-money valuation cap, no discount.
+
+  Concurrent acquisition: as part of this closing we are acquiring TargetCo Ltd. The TargetCo
+  shareholders will receive 20% of our fully-diluted post-closing cap table as acquisition
+  consideration (shares, closing concurrent with the round).
+
+  Incoming round: $4,000,000 Series A priced round at a $16,000,000 pre-money valuation.
+
+  Give me the full cap-table review — including the Israeli → Delaware flip, how the SAFE converts
+  at the priced round, how the 20% acquisition consideration is allocated, and the resulting
+  dilution for each holder — and build the interactive explorer.
+
+assert:
+  # End-to-end: the full pipeline ran and produced its deliverables (manifest-backed → survives replay).
+  - result: success
+  # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
+  # the deliverable but stranded steps, which result:success alone misses.
+  - all_tasks_completed: true
+  - file_exists: outputs/artifacts/cap-table-acmecorp/scenarios.json
+  - file_exists: outputs/artifacts/cap-table-acmecorp/report.json
+  - user_visible_artifact: outputs/Acmecorp_Cap_Table_Explorer.html
+  # The cap-state snapshot was built (structural; stable across re-records).
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-acmecorp/cap_state.json
+      path: as_converted_totals.fully_diluted_shares
+      gt: 0
+  # The acquisition block was faithfully reconstructed from the conversation (Lane 4 key invariant).
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-acmecorp/inputs.json
+      path: acquisition.consideration_pct
+      equals: 0.2
+  # Context-B coaching sub-agent dispatched (match by agentType/description).
+  - subagent_dispatched: 'cap-table'
+  - transcript_matches: 'acquisition|flip|consideration|dilution'
+  # host-path posture: hostloop exposes real host paths by design; the leak class is covered
+  # by the container-tier host-path-canary scenario + the privacy scan's path class on cassettes.
+  # --- fleet contract asserts (adopted at the 0.24.0 pin; budgets tightened from discovery actuals) ---
+  # The pipeline entered through the Skill tool (prefix-tolerant; id shape confirmed at discovery).
+  - skill_triggered: '(founder-skills:)?cap-table$'
+  # Every computer:// deliverable link shared with the founder must resolve (zero links pass).
+  - computer_links_resolve: true
+  # No delete under outputs/ (live-lane key; replay skips it loudly).
+  - no_delete_in_outputs: true
+  # Dispatch contract: sub-agents declare no Bash (agents/*.md) — regression tripwire.
+  - subagent_tool_absent: 'Bash'
+  # Scripted answers reached the model non-error whenever a gate fired (0.25.0: vacuous-passes
+  # when zero gates fire, so it's safe despite model-dependent gating — see README pin note).
+  - gate_answers_delivered: true
+  # Usability budget: gates asked before value (observed + headroom, from discovery).
+  - questions_count_max: 10
+  # Author-chosen dispatch budget (production has NO Task-fan-out cap; this is an
+  # efficiency tripwire, not a platform mirror). tightened from discovery actuals (observed x1.5).
+  - dispatch_count_max: 6
+  # Efficiency budgets — generous ceilings; tightened to observed x1.5 post-record.
+  - max_turns: 115
+  - tool_calls_max: 110
+  # Stray-file guard (new-files-only; overwrite-in-place is covered by producer stamps).
+  # Allowlist = artifact namespace (incl. handoff/**) + founder-context sidecar + promoted
+  # deliverables. Pre-0.24 cassettes exclude loudly (no preRunPaths). tightened from discovery actuals (observed x1.5).
+  - no_unexpected_files:
+      - 'outputs/artifacts/cap-table-acmecorp/**'
+      - 'outputs/artifacts/founder-context-acmecorp.json'
+      - 'outputs/Acmecorp_*'
+  # GATE FLOOR — the presence companion this lane was missing. `gate_answers_delivered` above passes
+  # VACUOUSLY when zero gates fire, so on its own it is satisfied by a run that asked nothing. Floor is
+  # deliberately 1, below the count observed at record time: gate firing is model-dependent, and a floor
+  # set AT the observed count turns ordinary variance into a red suite.
+  - gate_answer_count_min: 1

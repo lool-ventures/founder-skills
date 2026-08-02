@@ -1,0 +1,86 @@
+{
+  "assessment_mode": "sub-agent",
+  "partner_verdicts": [
+    {
+      "partner": "visionary",
+      "verdict": "invest",
+      "rationale": "SMB bookkeeping automation is a large, underserved category and the timing is right \u2014 QuickBooks/Xero haven't moved fast on AI-native workflows. Early traction (300 customers, 18% MoM) suggests real category-creation pull."
+    },
+    {
+      "partner": "operator",
+      "verdict": "more_diligence",
+      "rationale": "Strong product-market fit signals with 300 paying customers and 18% MoM MRR growth. However, the GTM motion (inbound + accountant partnerships) isn't quantified by channel, so it's unclear how repeatable this is beyond the founders."
+    },
+    {
+      "partner": "analyst",
+      "verdict": "more_diligence",
+      "rationale": "Unit economics are emerging but not yet proven at scale. $400K ARR at 300 customers implies ~$1,333 ACV, consistent with the stated $150/mo pricing, but no LTV/CAC or gross margin figures were shared."
+    }
+  ],
+  "debate_sections": [
+    {
+      "topic": "Responses to Visionary",
+      "exchanges": [
+        {
+          "partner": "operator",
+          "position": "The category-timing story is compelling but it's not GTM proof without channel-level economics \u2014 I'd want the same evidence before calling this repeatable."
+        },
+        {
+          "partner": "analyst",
+          "position": "I don't discount the category-timing thesis, but a timing bet doesn't substitute for a gross-margin figure \u2014 those are answering different questions."
+        }
+      ]
+    },
+    {
+      "topic": "Responses to Operator",
+      "exchanges": [
+        {
+          "partner": "visionary",
+          "position": "Agreed the channel mix isn't proven yet, but 18% MoM with zero paid spend is still a strong category-pull signal even before we see per-channel CAC."
+        },
+        {
+          "partner": "analyst",
+          "position": "Agreed on needing channel-level CAC before committing \u2014 that would also sharpen the LTV/CAC picture I'm missing. (concedes this point)"
+        }
+      ]
+    },
+    {
+      "topic": "Responses to Analyst",
+      "exchanges": [
+        {
+          "partner": "visionary",
+          "position": "Fair point on unit economics being unproven \u2014 I'd still weight the category timing bet heavily, but I don't dispute we need the numbers. (concedes this point)"
+        },
+        {
+          "partner": "operator",
+          "position": "Agreed we need cohort and margin data before committing \u2014 that reinforces rather than changes my position."
+        }
+      ]
+    }
+  ],
+  "consensus_verdict": "more_diligence",
+  "debated_dealbreakers": [],
+  "key_concerns": [
+    "Category timing bets are inherently hard to verify this early",
+    "No named incumbent has publicly failed at this yet, so the 'why now' is inferred rather than evidenced",
+    "GTM motion is described but not proven \u2014 no channel-level economics",
+    "Unclear if the accountant-partnership channel is repeatable beyond the founders' existing relationships",
+    "No churn analysis shared \u2014 need cohort data",
+    "No LTV/CAC or gross margin figures disclosed",
+    "18-month runway claim not yet cross-checked against burn rate"
+  ],
+  "diligence_requirements": [
+    "Competitive teardown of QuickBooks/Xero AI roadmap",
+    "3 customer reference calls on why they switched",
+    "Channel-level unit economics",
+    "Cohort retention curves (monthly, by acquisition channel)",
+    "Reference calls with 3 customers",
+    "Full unit economics workup (LTV/CAC, gross margin, payback period)",
+    "12-month burn and runway model"
+  ],
+  "warnings": [],
+  "_produced_by": "compose_discussion",
+  "metadata": {
+    "run_id": "fixture-ic-sim-001"
+  }
+}

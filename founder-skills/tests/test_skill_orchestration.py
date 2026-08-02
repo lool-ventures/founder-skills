@@ -39,6 +39,34 @@ def _parse_frontmatter(path: Path) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize("skill_md", SKILL_MD_FILES, ids=lambda p: p.parent.name)
+def test_outputs_mount_append_only_guardrail(skill_md: Path) -> None:
+    """Every skill must carry an append-only guardrail for the WHOLE outputs mount
+    in Step 0 (before any file work): never delete anything under the mount —
+    including files the agent created itself — and never stage scratch under it.
+
+    A sub-agent once created a VM->host scratch copy at the outputs-mount ROOT and
+    rm'd it as delivery hygiene, tripping the platform's mount-wide delete-deny,
+    because each skill's 'never delete' rule was scoped one directory too narrow
+    (the per-skill artifacts dir, not the mount).
+    """
+    text = skill_md.read_text(encoding="utf-8")
+    assert "### Step 1" in text, (
+        f"{skill_md.parent.name} SKILL.md has no '### Step 1' anchor — the guardrail "
+        "scope check would silently degrade to whole-file"
+    )
+    step0 = text.split("### Step 1")[0]
+    assert "Outputs mount is append-only" in step0, (
+        f"{skill_md.parent.name} Step 0 must carry the 'Outputs mount is append-only' guardrail"
+    )
+    assert "including files you created" in step0, (
+        f"{skill_md.parent.name} append-only rule must forbid deleting files the agent created itself"
+    )
+    assert "scratch anywhere under the outputs mount" in step0, (
+        f"{skill_md.parent.name} append-only rule must forbid staging scratch under the outputs mount"
+    )
+
+
+@pytest.mark.parametrize("skill_md", SKILL_MD_FILES, ids=lambda p: p.parent.name)
 def test_skill_md_has_user_invocable_frontmatter(skill_md: Path) -> None:
     """v0.4.3 invariant: every SKILL.md declares user-invocable: true."""
     fm = _parse_frontmatter(skill_md)
@@ -235,3 +263,523 @@ def test_skill_md_subagent_blocks_have_no_bash(skill_md: Path) -> None:
         "`<!-- skill-quality-ci: bash-after-subagent-ok -->` anywhere "
         "between the cue line and the bash block."
     )
+
+
+# Producer pipes that write a pipeline artifact (-o <path>.json).
+_PIPE_WRITES_JSON = re.compile(r'\.py\b[^\n|]*\s-o\s+"?[^"\n]*\.json')
+# Scripts that write JSON but do not mint a run_id, exempt from the stamping
+# check: orchestrators / renderers / receipts, plus artifacts that are NOT in
+# the Context B run_id-parity set (FMR's model_data / extraction_validation are
+# pre-pipeline extraction outputs, not parity artifacts).
+_RUN_ID_EXEMPT_SCRIPTS = (
+    "compose_report.py",  # consumes run_ids, does not mint them
+    "visualize.py",
+    "explore.py",
+    "find_artifact.py",
+    "founder_context.py",
+    "extract_model.py",  # model_data.json — not a run_id-parity artifact
+    "validate_extraction.py",  # extraction_validation.json — not parity-checked
+    "validate_inputs.py",  # --fix -o corrects in place; preserves the input's metadata.run_id (not minted)
+)
+# All six skills now stamp metadata.run_id from --run-id on the producer CLI.
+# Two mechanisms exist (both satisfy the Context B run_id-parity check) and the
+# pipe must carry --run-id either way:
+#   - CLI-stamping: producer sets metadata.run_id from --run-id.
+#   - stdin passthrough + CLI override: producer propagates stdin metadata.run_id
+#     but --run-id (when passed, as the SKILL.md pipes now do) takes precedence.
+# Its ABSENCE deterministically BLOCKED Context B in the ic-sim / market-sizing
+# regression, so every artifact-writing producer pipe must pass it.
+
+
+# Cowork-parity regression (fleet-wide): the promoted outputs/ tree is
+# user-visible AND read-only-after-write in Cowork — staging scratch there or
+# deleting anything there is a parity violation (Cowork can deny the delete,
+# and the harness verdict flags it; crucially the harness text-scan can't
+# resolve a shell `$VAR` to an outputs/ path — limitation H-A — so THIS pytest
+# is the real guard, not the verdict). Every skill resolves its work dir into a
+# `$<X>_DIR` variable under outputs/artifacts/ (ANALYSIS_DIR / SIM_DIR /
+# REVIEW_DIR). The two hazards:
+#   1. `.staging` UNDER that dir (`"$REVIEW_DIR/.staging"`). Fix: stage scratch
+#      in a `$STAGING_DIR` mktemp'd under /tmp. Matched by `/<>.staging` with a
+#      LITERAL slash before `.staging` — so the `$STAGING_DIR` mktemp template
+#      itself (`/tmp/<skill>-${SLUG}.staging.XXXXXX`, `.staging` preceded by
+#      `}`) is NOT matched.
+#   2. a bash `rm` whose target is one of those dir vars (the old fresh-start
+#      bulk-delete). Fix: overwrite-in-place — producers rewrite via `-o`, and
+#      compose's STALE_ARTIFACT (run_ids must match) catches a skipped-step
+#      stale leftover. deck-review's fresh-start is a Python `os.remove` in
+#      setup_run.py (invisible to a bash scan, resume-guarded) — NOT a bash rm,
+#      so it's correctly not matched here.
+_OUTPUTS_DIR_VARS = r"(?:ANALYSIS_DIR|SIM_DIR|REVIEW_DIR)"
+_STAGING_UNDER_OUTPUTS = re.compile(r"\$\{?" + _OUTPUTS_DIR_VARS + r"\}?/\.staging")
+_BASH_RM_OF_OUTPUTS = re.compile(r"\brm\b[^\n`]*\$\{?" + _OUTPUTS_DIR_VARS + r"\b")
+# A `mv` whose SOURCE (first path arg) is an outputs var DELETES that outputs file — Cowork denies
+# deletes under outputs/, and the live fmr sweep failed `no_delete_in_outputs` on exactly this
+# (`mv "$REVIEW_DIR/corrected_inputs.json" "$REVIEW_DIR/inputs.json"`). `mv <tmp> <outputs>` (creating
+# IN outputs) is fine and not matched; the safe move into outputs is `cp` (overwrite-in-place). The
+# the outputs var must be the FIRST path arg (the source), so `mv <tmp> <outputs>` (a create IN outputs)
+# is NOT flagged, and a backtick-wrapped prose "use `mv`" is excluded (backtick breaks the `\s+`).
+_BASH_MV_FROM_OUTPUTS = re.compile(r"\bmv\b\s+(?:-\w+\s+)?\"?\$\{?" + _OUTPUTS_DIR_VARS + r"\b")
+
+
+@pytest.mark.parametrize("skill_md", SKILL_MD_FILES, ids=lambda p: p.parent.name)
+def test_skill_md_stages_scratch_outside_outputs(skill_md: Path) -> None:
+    """No SKILL.md may stage scratch under, `rm`, or `mv`-from, the promoted
+    outputs/ work dir (`$ANALYSIS_DIR` / `$SIM_DIR` / `$REVIEW_DIR`).
+
+    All are Cowork-parity violations (outputs/ is user-visible; a delete there is
+    denied and trips `no_delete_in_outputs`). Stage scratch under a `/tmp`
+    `$STAGING_DIR`; overwrite-in-place with `cp` (never `mv`-from-outputs, which
+    deletes the source) instead of bulk-deleting. NOTE: the harness delete scan
+    also flags an `rm` token co-occurring with a literal `outputs` path in ONE
+    command (`isOutputsDelete`), so never put an `rm` on a line that also
+    references an outputs path — even when the `rm` targets /tmp.
+    """
+    text = skill_md.read_text(encoding="utf-8")
+    hits: list[tuple[int, str]] = []
+    for label, pat in (
+        ("staging-under-outputs", _STAGING_UNDER_OUTPUTS),
+        ("bash-rm-of-outputs", _BASH_RM_OF_OUTPUTS),
+        ("bash-mv-from-outputs", _BASH_MV_FROM_OUTPUTS),
+    ):
+        for m in pat.finditer(text):
+            ln = text.count("\n", 0, m.start()) + 1
+            hits.append((ln, f"[{label}] {text.splitlines()[ln - 1].strip()[:90]}"))
+    assert not hits, (
+        f"{skill_md.relative_to(REPO_ROOT)}: Cowork-parity violation under the promoted outputs/ "
+        f"work dir. Stage scratch in a /tmp $STAGING_DIR; overwrite-in-place instead of bulk-rm "
+        f"(see compose's STALE_ARTIFACT backstop):\n" + "\n".join(f"  line {ln}: {txt}" for ln, txt in hits)
+    )
+
+
+# Dispatch-prompt templates all start with a `CONTEXT: <NAME>` header line (the
+# sub-agent's dispatch envelope). A type-less Task dispatch silently falls back to
+# the built-in `general-purpose` agent (tools:["*"] — workspace bash included, and
+# the scoped agent's persona/rubric discarded), which fired routinely in real
+# traffic. Each dispatch instruction must therefore pin the literal
+# `subagent_type: "founder-skills:<skill>"`. Keyed on the CONTEXT: templates (not
+# fuzzy prose cues) so it can't false-positive on descriptive mentions.
+_DISPATCH_TEMPLATE_HEADER = re.compile(r"(?m)^CONTEXT:\s*\S")
+
+
+@pytest.mark.parametrize("skill_md", SKILL_MD_FILES, ids=lambda p: p.parent.name)
+def test_skill_md_dispatches_pin_subagent_type(skill_md: Path) -> None:
+    """A skill with CONTEXT:-headed dispatch templates must pin the literal
+    `subagent_type: "founder-skills:<skill>"` (C3 — closes the type-less
+    `general-purpose` fallback trap: a type-less Task dispatch resolves to the
+    built-in general-purpose agent with tools:["*"], discarding the scoped
+    agent's allowlist AND persona/rubric).
+
+    This is the coarse regression guard (a skill that dispatches but never pins
+    the type at all). Per-dispatch coverage — including parallel dispatches that
+    legitimately pin once for several templates — is verified in review, not by a
+    raw pin>=template count. Dispatch-prompt reference lane files (e.g.
+    cap-table/references/lanes/*.md) are folded in so a lane-file dispatch counts."""
+    skill_name = skill_md.parent.name
+    pin = f'subagent_type: "founder-skills:{skill_name}"'
+    texts = [skill_md.read_text(encoding="utf-8")]
+    ref_dir = skill_md.parent / "references"
+    if ref_dir.is_dir():
+        texts.extend(p.read_text(encoding="utf-8") for p in sorted(ref_dir.rglob("*.md")))
+    joined = "\n".join(texts)
+    if not _DISPATCH_TEMPLATE_HEADER.search(joined):
+        return  # no sub-agent dispatch templates → nothing to pin
+    assert pin in joined, (
+        f"{skill_md.relative_to(REPO_ROOT)}: has CONTEXT: dispatch template(s) but never pins "
+        f"`{pin}`. A type-less Task dispatch falls back to the wildcard general-purpose agent "
+        f"(bash-capable; scoped persona/rubric discarded)."
+    )
+
+
+@pytest.mark.parametrize("skill_md", SKILL_MD_FILES, ids=lambda p: p.parent.name)
+def test_producer_pipes_carry_run_id(skill_md: Path) -> None:
+    """Every `... script.py ... -o <artifact>.json` invocation in a SKILL.md
+    bash block must pass --run-id so the producer stamps metadata.run_id
+    (regression guard for the ic-sim / market-sizing Context B blocker)."""
+    text = skill_md.read_text(encoding="utf-8")
+    offenders: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not _PIPE_WRITES_JSON.search(line):
+            continue
+        if any(exempt in line for exempt in _RUN_ID_EXEMPT_SCRIPTS):
+            continue
+        if "--run-id" not in line:
+            offenders.append(line[:100])
+    assert not offenders, (
+        f"{skill_md.relative_to(REPO_ROOT)}: artifact-writing producer pipe(s) "
+        f"missing --run-id (Context B run_id-parity will BLOCK):\n" + "\n".join(f"  {o}" for o in offenders)
+    )
+
+
+def test_cap_table_skill_md_runs_coverage_detection_in_numbered_step_4() -> None:
+    """P3 regression guard: `detect_structure.py` must be invoked inside the
+    numbered Step 4 (cap_state) section, not only documented in the side-section
+    '## Coverage & Disclosure'. Before this fix the numbered Step 2->5 spine
+    never called detect_structure.py at all — a reader following the numbered
+    steps top-to-bottom could silently skip coverage detection and the
+    hand-rolled-figure ban entirely. This asserts the closing action added to
+    the end of Step 4 (before the Step 4.5 pre-math audit) survives; it fails
+    if that action is later removed and detect_structure.py is left living
+    only in the side-section prose."""
+    skill_md = SKILLS_DIR / "cap-table" / "SKILL.md"
+    text = skill_md.read_text(encoding="utf-8")
+    step4_heading = re.search(r"^### Step 4:.*$", text, re.MULTILINE)
+    step4_5_heading = re.search(r"^### Step 4\.5:.*$", text, re.MULTILINE)
+    assert step4_heading and step4_5_heading, (
+        f"{skill_md.relative_to(REPO_ROOT)}: expected '### Step 4:' and "
+        "'### Step 4.5:' headings to anchor the numbered-step region on — "
+        "one or both are missing."
+    )
+    step4_region = text[step4_heading.end() : step4_5_heading.start()]
+    assert "detect_structure.py" in step4_region, (
+        f"{skill_md.relative_to(REPO_ROOT)}: 'detect_structure.py' no longer appears "
+        "between the Step 4 and Step 4.5 headings — coverage detection must be "
+        "invoked from the numbered spine (Step 4's closing action), not only from "
+        "the '## Coverage & Disclosure' side-section, or it silently gets skipped."
+    )
+
+
+def test_fmr_step3_branches_on_model_format_before_dispatching() -> None:
+    """Step 3's INPUTS_REVIEW dispatch must branch on `model_format` FIRST.
+
+    The dispatch template hardcodes "Read model_data.json … (the full extraction
+    output)", and on a conversational/deck run that file does not exist and never
+    will — nothing was extracted. Step 3 previously carried no `model_format`
+    conditional at all, so the rule was not buried, it was absent. Sent anyway,
+    the sub-agent is asked for a missing file and the failure is not a clean error
+    but an improvisation: reconstructed values, or the main thread abandoning the
+    pipeline to hand-compute.
+    """
+    skill_md = (SKILLS_DIR / "financial-model-review" / "SKILL.md").read_text(encoding="utf-8")
+    step3 = skill_md.index("### Step 3: INPUTS_REVIEW Dispatch")
+    step35 = skill_md.index("### Step 3.5:")
+    block = " ".join(skill_md[step3:step35].split())
+
+    # The branch must come before the dispatch template it guards.
+    branch_at = block.index("branch on `model_format`")
+    template_at = block.index("Dispatch prompt template")
+    assert branch_at < template_at, "the model_format branch must precede the dispatch template"
+
+    assert "skip the INPUTS_REVIEW dispatch entirely" in block, (
+        "the conversational branch must say to skip the dispatch, not just describe the difference"
+    )
+    assert "there is no `model_data.json` and there never will be" in block, (
+        "must state the file's permanent absence — otherwise the model waits for or invents it"
+    )
+    assert "Author `inputs.json` directly" in block, "must say what to do instead of dispatching"
+
+
+def test_fmr_conversational_path_has_the_same_stop_as_the_file_path() -> None:
+    """Path B's numbers-confirmation gate must be a STOP, exactly like Path A's.
+
+    Path A read "This is a STOP point — do not proceed to Step 4 until the founder
+    responds", with a rationale. Path B was a single unemphasised sentence with
+    neither, so the founder's confirmation of the numbers before math ran on them
+    was optional-by-phrasing — on the path where the numbers are LEAST verifiable.
+    """
+    skill_md = (SKILLS_DIR / "financial-model-review" / "SKILL.md").read_text(encoding="utf-8")
+    path_b = skill_md.index("**Path B — Conversational**")
+    step4 = skill_md.index("### Step 4:")
+    block = " ".join(skill_md[path_b:step4].split())
+
+    assert "This is a STOP point — do not proceed to Step 4 until the founder responds." in block, (
+        "Path B must carry Path A's STOP language verbatim"
+    )
+    assert "last check on the numbers before math runs" in block, (
+        "the STOP needs Path A's rationale too — an unexplained gate gets optimised away"
+    )
+    assert "It matters *more* here, not less" in block, (
+        "must say why the conversational path needs the gate more, not less, than the file path"
+    )
+
+
+ALL_SKILLS = [
+    "market-sizing",
+    "financial-model-review",
+    "ic-sim",
+    "deck-review",
+    "competitive-positioning",
+    "cap-table",
+]
+
+
+@pytest.mark.parametrize("skill", ALL_SKILLS)
+def test_no_dispatch_template_ends_a_line_promising_content_that_never_follows(skill: str) -> None:
+    """A dispatch template must not dangle "… is:" with nothing after it.
+
+    All six skills shipped the Context B template saying "The structured
+    coaching_payload from report.json is:" followed by a blank line — the payload is
+    STAGED as a file, never inlined, so the sentence promised content that does not
+    exist. A live run filled the gap with its own judgment and added a narrative
+    paragraph beside the scored figures.
+
+    Colon-terminated lines are fine when content follows; the defect is the dangle.
+    """
+    text = (SKILLS_DIR / skill / "SKILL.md").read_text(encoding="utf-8")
+    lines = text.splitlines()
+    offenders: list[str] = []
+    for i, line in enumerate(lines):
+        stripped = line.rstrip()
+        if not re.search(r"\b(is|are|follows)\s*:$", stripped):
+            continue
+        # Look at the next non-empty line. A dangle is: blank line, then something
+        # that is plainly not the promised content (a new instruction/heading).
+        nxt = ""
+        for cand in lines[i + 1 : i + 4]:
+            if cand.strip():
+                nxt = cand.strip()
+                break
+        if lines[i + 1 : i + 2] == [""] and (nxt.startswith(("Read ", "#", "**", "Follow ")) or not nxt):
+            offenders.append(f"{i + 1}: {stripped!r} -> {nxt[:60]!r}")
+    assert not offenders, f"{skill}/SKILL.md has a line promising content that never follows:\n  " + "\n  ".join(
+        offenders
+    )
+
+
+@pytest.mark.parametrize("skill", ALL_SKILLS)
+def test_no_dispatch_template_hides_a_shape_behind_an_ellipsis(skill: str) -> None:
+    """A dispatch template must SHOW the shape it asks a sub-agent to produce.
+
+    Second instance of this class. The first was a colon dangling with nothing
+    after it; this one was `"suggested_additions": [...newly discovered...]` — the
+    sub-agent could not know the field names, invented `why_suggested` where the
+    schema says `rationale`, and the producer rejected it, costing a repair
+    round-trip.
+
+    An ellipsis is fine in prose and fine for values ("description": "..."), but a
+    LIST whose element shape is elided is a shape the sub-agent has to guess.
+    """
+    text = (SKILLS_DIR / skill / "SKILL.md").read_text(encoding="utf-8")
+    offenders = [
+        f"{i + 1}: {line.strip()}"
+        for i, line in enumerate(text.splitlines())
+        if re.match(r'^\s*"[a-z_]+":\s*\[\.\.\..*\.\.\.\]', line)
+    ]
+    assert not offenders, (
+        f"{skill}/SKILL.md elides a list element shape a sub-agent must produce:\n  "
+        + "\n  ".join(offenders)
+        + "\nShow one concrete element instead — the field names are not guessable."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Per-dispatch subagent_type coverage (defect #2 in
+# 2026-08-01-founder-skills-defects-found.md): the coarse pin check above only
+# asserts the pin string appears SOMEWHERE in the joined text. market-sizing's
+# prose at one line correctly instructs "pin subagent_type on both calls", and
+# its own fenced pseudocode four lines below silently omits it on both Task(
+# calls — the coarse check cannot see that, because the pin string is present
+# in the PROSE sentence and the assert never looks inside the fenced block the
+# model will actually copy from. The docstring above names this as
+# review-only-covered ("Per-dispatch coverage ... is verified in review, not by
+# a raw pin>=template count"); the coarse check's own author flagged the gap.
+#
+# This closes it mechanically: every `Task(` call inside a fenced code block
+# must carry `subagent_type=` INSIDE THAT SAME CALL's argument list, not merely
+# somewhere in the surrounding prose. A naive `Task\(...\)` regex breaks the
+# moment a prompt string contains its own parenthesis (market-sizing's own
+# templates interpolate free text like "<research data from validation.json>"),
+# so the call's extent is found by a balanced-paren scan that treats quoted
+# string contents as opaque — the same reason a hand-rolled JSON parser is
+# wrong when `json.loads` exists, just for parens instead of braces.
+_FENCE = re.compile(r"(?m)^```[^\n]*\n(.*?)^```", re.DOTALL)
+_TASK_CALL_START = re.compile(r"\bTask\(")
+_PIN_KWARG = re.compile(r"subagent_type\s*=")
+
+
+def _fenced_blocks(text: str) -> list[str]:
+    """Every fenced code block's inner content, in order.
+
+    Anchored to line-start (`(?m)^```) — an earlier unanchored version matched
+    the first ``` ANYWHERE, including inline prose that describes fence syntax
+    literally (`` ` ```json ... ``` ` `` — cap-table's own JSON-extraction
+    protocol paragraph does this to explain what a fence looks like). That
+    desynchronized every open/close pairing for the rest of the file from the
+    first such mention onward, producing a bogus "fenced block" spanning real
+    prose and a false positive on content nowhere near a real ``` fence.
+    """
+    return [m.group(1) for m in _FENCE.finditer(text)]
+
+
+def _extract_call_args(text: str, open_paren_index: int) -> str | None:
+    """The argument-list text of a call whose `(` is at `open_paren_index`.
+
+    Walks forward tracking paren depth, treating the contents of a single- or
+    double-quoted string as opaque (an escaped quote does not close it, and a
+    paren inside a string does not count toward depth) — pseudocode Task(...)
+    calls embed quoted prompt strings that may themselves contain parens or
+    unbalanced-looking text. Returns None if the call is never closed (should
+    not happen in well-formed fenced pseudocode; treated as "nothing to check"
+    rather than crashing the test on a markdown-fence edge case).
+    """
+    depth = 1
+    i = open_paren_index + 1
+    quote: str | None = None
+    start = i
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if quote is not None:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch == "#":
+            # Skip to end of line. A `#` comment INSIDE the argument list is not
+            # hypothetical: cap-table's real dispatch templates carry
+            # `# REQUIRED — omitting it silently downgrades…` between kwargs, and
+            # the defects doc recommends propagating that style to the skill this
+            # test exists to fix. Without this branch a `)` in a comment closes
+            # the call early (false positive on a CONFORMING call), and an
+            # apostrophe in a comment opens a phantom string that swallows the
+            # rest of the block (silent skip — a false NEGATIVE on exactly the
+            # defect class this test catches).
+            nl = text.find("\n", i)
+            if nl == -1:
+                return None
+            i = nl + 1
+            continue
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return text[start:i]
+        i += 1
+    return None
+
+
+# --- unit coverage for the two helpers above, on synthetic strings ---
+
+
+def test_fenced_blocks_ignores_inline_fence_syntax_in_prose() -> None:
+    """Regression: an EARLIER unanchored version of `_FENCE` matched the first
+    ``` occurring ANYWHERE, including inline prose that describes fence syntax
+    literally — cap-table's own JSON-extraction paragraph does exactly this
+    (`` ` ```json ... ``` ` ``) — which desynchronized every open/close pairing
+    downstream and produced a false positive on ordinary prose nowhere near a
+    real fence. Caught by running this test's assertion against real SKILL.md
+    content before the anchor fix landed.
+    """
+    text = (
+        "Some prose that says a reply may be wrapped in ` ```json ... ``` ` fences,\n"
+        "or plain ` ``` ... ``` `.\n\n"
+        "```\n"
+        'Task(subagent_type="founder-skills:x")\n'
+        "```\n"
+    )
+    blocks = _fenced_blocks(text)
+    assert len(blocks) == 1
+    assert "subagent_type" in blocks[0]
+
+
+def test_extract_call_args_handles_parens_inside_quoted_strings() -> None:
+    r"""The scanner must treat a paren INSIDE a quoted prompt string as opaque —
+    market-sizing's own templates interpolate free text like
+    "<research data (see validation.json)>", and a naive `Task\([^)]*\)` regex
+    would close the call at that embedded `)` instead of the real one.
+    """
+    block = 'Task(description="x", prompt="<research data (see validation.json)>", subagent_type="founder-skills:x")'
+    start = block.index("Task(")
+    args = _extract_call_args(block, start + len("Task") + 1 - 1)
+    assert args is not None
+    assert "subagent_type" in args
+    assert args.endswith('subagent_type="founder-skills:x"')
+
+
+def test_extract_call_args_returns_none_on_unclosed_call() -> None:
+    """An unclosed call must not be reported as a violation (nor crash) — that
+    is a markdown-authoring defect this test is not responsible for diagnosing.
+    """
+    block = 'Task(description="x", prompt="unterminated'
+    start = block.index("Task(")
+    assert _extract_call_args(block, start + len("Task") + 1 - 1) is None
+
+
+def test_fenced_task_scan_flags_missing_pin_and_clears_present_pin() -> None:
+    """Direct check of the scan-and-flag logic the parametrized test drives,
+    on a synthetic two-call block mirroring market-sizing's real shape: one
+    call correctly pinned, one not — must flag exactly the unpinned one.
+    """
+    block = (
+        "[\n"
+        '  Task(description="a", prompt="CONTEXT: A", subagent_type="founder-skills:x"),\n'
+        '  Task(description="b", prompt="CONTEXT: B"),\n'
+        "]\n"
+    )
+    calls = list(_TASK_CALL_START.finditer(block))
+    assert len(calls) == 2
+    pinned = [_PIN_KWARG.search(_extract_call_args(block, m.end() - 1) or "") is not None for m in calls]
+    assert pinned == [True, False]
+
+
+@pytest.mark.parametrize("skill_md", SKILL_MD_FILES, ids=lambda p: p.parent.name)
+def test_fenced_task_calls_pin_subagent_type_individually(skill_md: Path) -> None:
+    """Every `Task(` inside a fenced pseudocode block pins `subagent_type=`
+    WITHIN ITS OWN argument list — closes defect #2: the coarse check above
+    only proves the pin string exists somewhere in the file, which a correctly
+    worded PROSE sentence satisfies even when the fenced example right below it
+    contradicts it. The model copies the fenced form, not the prose.
+
+    Reference lane files (cap-table's references/lanes/*.md) are folded in —
+    same set the coarse check above scans — since a lane file's fenced Task(
+    call is exactly as copyable as one in SKILL.md itself.
+    """
+    skill_name = skill_md.parent.name
+    sources: list[tuple[str, str]] = [(str(skill_md.relative_to(REPO_ROOT)), skill_md.read_text(encoding="utf-8"))]
+    ref_dir = skill_md.parent / "references"
+    if ref_dir.is_dir():
+        for p in sorted(ref_dir.rglob("*.md")):
+            sources.append((str(p.relative_to(REPO_ROOT)), p.read_text(encoding="utf-8")))
+
+    offenders: list[str] = []
+    for rel_path, text in sources:
+        for block in _fenced_blocks(text):
+            for m in _TASK_CALL_START.finditer(block):
+                args = _extract_call_args(block, m.end() - 1)
+                if args is None:
+                    continue  # malformed/unclosed call — not this test's job to diagnose
+                if not _PIN_KWARG.search(args):
+                    snippet = block[m.start() : m.start() + 90].replace("\n", " ")
+                    offenders.append(f"{rel_path}: {snippet}...")
+
+    assert not offenders, (
+        f"{skill_name}: fenced Task( call(s) with no `subagent_type=` in their OWN argument list "
+        f"(a type-less dispatch falls back to the wildcard general-purpose agent — bash-capable, "
+        f"scoped persona/rubric discarded). Prose stating the pin elsewhere in the file does not "
+        f"satisfy this; the model copies the fenced example, not the sentence above it:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_extract_call_args_skips_hash_comments_inside_the_arg_list() -> None:
+    """A `#` comment between kwargs must not truncate or derail the scan.
+
+    Both failure modes found by adversarial review, and both reachable via the
+    in-tree comment convention (`# REQUIRED — omitting it silently downgrades…`)
+    that the defects doc recommends spreading to more dispatch templates:
+      * a `)` inside the comment closed the call early -> the pin looked absent
+        -> FALSE POSITIVE against a conforming call;
+      * an apostrophe opened a phantom string -> scan ran off the end and
+        returned None -> the call was SILENTLY SKIPPED, a false negative on the
+        very defect class this guard exists to catch.
+    """
+    paren = 'Task(  # note ) here\n  subagent_type="founder-skills:x", description="d")'
+    args = _extract_call_args(paren, paren.index("Task(") + 4)
+    assert args is not None and _PIN_KWARG.search(args), "a ) inside a comment must not close the call"
+
+    apostrophe = 'Task(  # don\'t omit this\n  subagent_type="founder-skills:x", description="d")'
+    args2 = _extract_call_args(apostrophe, apostrophe.index("Task(") + 4)
+    assert args2 is not None, "an apostrophe in a comment must not open a phantom string"
+    assert _PIN_KWARG.search(args2)
+
+
+def test_extract_call_args_still_flags_an_unpinned_call_carrying_a_comment() -> None:
+    """The comment skip must not become a way to hide a missing pin."""
+    block = 'Task(  # some note\n  description="d", prompt="CONTEXT: X")'
+    args = _extract_call_args(block, block.index("Task(") + 4)
+    assert args is not None
+    assert _PIN_KWARG.search(args) is None

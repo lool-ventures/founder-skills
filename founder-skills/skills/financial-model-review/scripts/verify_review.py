@@ -18,6 +18,7 @@ Output:
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
 import sys
@@ -94,7 +95,7 @@ _ALWAYS_REQUIRED = [
 _OPTIONAL = ["model_data.json", "report.html", "explore.html"]
 
 
-def _check_existence(dir_path: str, gate: int, model_format: str | None) -> dict[str, dict[str, Any]]:
+def _check_existence(dir_path: str, gate: int) -> dict[str, dict[str, Any]]:
     """Check artifact existence. Returns per-artifact status dicts."""
     results: dict[str, dict[str, Any]] = {}
 
@@ -183,11 +184,32 @@ def _check_inputs_quality(data: dict[str, Any]) -> list[dict[str, str]]:
         if _deep_get(data, *keys) is None:
             issues.append(_issue("error", f"{label} is null"))
 
-    # At least one revenue metric required
+    # At least one revenue metric required — unless the absence is honest:
+    # an agent-estimated review (data_confidence estimated/mixed), or a real
+    # revenue time series with no labeled scalar. Fabricated-empty (no series,
+    # no estimated/mixed confidence) still hard-fails.
     mrr_value = _deep_get(data, "revenue", "mrr", "value")
     monthly_total = _deep_get(data, "revenue", "monthly_total")
     if mrr_value is None and monthly_total is None:
-        issues.append(_issue("error", "revenue.mrr.value or revenue.monthly_total is required"))
+
+        def _has_series(key: str) -> bool:
+            series = _deep_get(data, "revenue", key)
+            return isinstance(series, list) and any(
+                isinstance(e, dict)
+                and isinstance(e.get("total"), (int, float))
+                and not isinstance(e.get("total"), bool)
+                for e in series
+            )
+
+        honest = (
+            _deep_get(data, "company", "data_confidence") in ("estimated", "mixed")
+            or _has_series("monthly")
+            or _has_series("quarterly")
+        )
+        message = "revenue.mrr.value or revenue.monthly_total is required"
+        if honest:
+            message += " — accepted: revenue evidence present as a series or estimated-confidence review"
+        issues.append(_issue("warning" if honest else "error", message))
 
     # Warnings for null fields
     warning_fields = [
@@ -232,6 +254,13 @@ def _check_checklist_quality(data: dict[str, Any]) -> list[dict[str, str]]:
 def _check_ue_quality(data: dict[str, Any]) -> list[dict[str, str]]:
     """Validate unit_economics.json content quality."""
     issues: list[dict[str, str]] = []
+
+    # If partial_analysis or insufficient_data, accept with warning (mirror of
+    # _check_runway_quality) — a genuinely sparse model has <2 computable metrics
+    # by construction, not a fabrication.
+    if data.get("partial_analysis") or data.get("insufficient_data"):
+        issues.append(_issue("warning", "Unit economics are partial or have insufficient data"))
+        return issues
 
     # Use summary.computed from unit_economics.py which counts all metrics
     # with non-null values (regardless of rating).  This avoids undercounting
@@ -400,18 +429,72 @@ def _check_cross_consistency(
 
 
 # ---------------------------------------------------------------------------
+# Tier 4 — Stray-file check (end-of-run only, gate 2)
+# ---------------------------------------------------------------------------
+
+# Glob allowlist of everything a legitimate run may leave in the work dir.
+# Optional entries (html, corrections round-trip, founder extras) are why
+# this is a WARN, not an error: hard-fail only after one clean release cycle.
+_STRAY_ALLOWLIST = [
+    "inputs.json",
+    "model_data.json",
+    "checklist.json",
+    "unit_economics.json",
+    "runway.json",
+    "report.json",
+    "report.md",
+    "commentary.json",
+    "report.html",
+    "explore.html",
+    "inputs_review.html",
+    "review.html",
+    "extraction_validation.json",
+    "corrected_inputs.json",
+    "extraction_corrections.json",
+    "corrections*.json",
+    "verify*.json",
+    # Context A hand-off audit trail (per-run subdirs; permanent by design)
+    "handoff/*",
+]
+
+
+def _check_stray_files(dir_path: str) -> list[dict[str, str]]:
+    """Warn on files in the work dir outside the glob allowlist.
+
+    A sub-agent writing canonical-looking files directly (instead of its
+    handoff/ OUTPUT_PATH) is the fabrication pattern this catches. WARN
+    severity: founder-requested extras are legitimate.
+    """
+    issues: list[dict[str, str]] = []
+    if not os.path.isdir(dir_path):
+        return issues
+    for root, _dirs, files in os.walk(dir_path):
+        for fname in files:
+            rel = os.path.relpath(os.path.join(root, fname), dir_path)
+            rel_posix = rel.replace(os.sep, "/")
+            if rel_posix.startswith("handoff/"):
+                continue
+            if any(fnmatch.fnmatch(rel_posix, pat) for pat in _STRAY_ALLOWLIST):
+                continue
+            issues.append(
+                _issue(
+                    "warning",
+                    f"stray file outside the allowlist: {rel_posix} — if a sub-agent wrote it, "
+                    f"re-run the producer pipe; if founder-requested, ignore",
+                )
+            )
+    return issues
+
+
+# ---------------------------------------------------------------------------
 # Main verification
 # ---------------------------------------------------------------------------
 
 
 def verify(dir_path: str, gate: int = 2) -> dict[str, Any]:
     """Run all verification checks and return the result dict."""
-    # First, try to load inputs.json to get model_format (needed for existence checks)
-    inputs_data, inputs_valid, inputs_corrupt = _load_artifact(dir_path, "inputs.json")
-    model_format = _deep_get(inputs_data, "company", "model_format") if inputs_data else None
-
     # Tier 1: existence
-    artifacts = _check_existence(dir_path, gate, model_format)
+    artifacts = _check_existence(dir_path, gate)
 
     # Tier 2: quality checks on valid, non-skipped artifacts
     for name, check_fn in _QUALITY_CHECKS.items():
@@ -426,6 +509,12 @@ def verify(dir_path: str, gate: int = 2) -> dict[str, Any]:
 
     # Tier 3: cross-artifact consistency
     cross_checks = _check_cross_consistency(artifacts)
+
+    # Tier 4: stray-file allowlist (end-of-run gate only — mid-pipeline the
+    # work dir legitimately lacks the later deliverables and this check
+    # would be noise)
+    if gate >= 2:
+        cross_checks.extend(_check_stray_files(dir_path))
 
     # Build summary
     all_errors: list[str] = []
@@ -504,9 +593,17 @@ def main() -> None:
     output = json.dumps(result, indent=indent)
 
     if args.output_file:
-        with open(args.output_file, "w") as f:
+        abs_path = os.path.abspath(args.output_file)
+        parent = os.path.dirname(abs_path)
+        if parent == "/":
+            print(f"Error: output path resolves to root directory: {args.output_file}", file=sys.stderr)
+            sys.exit(1)
+        os.makedirs(parent, exist_ok=True)
+        with open(abs_path, "w", encoding="utf-8") as f:
             f.write(output)
             f.write("\n")
+        receipt = {"ok": True, "path": abs_path, "bytes": len((output + "\n").encode("utf-8"))}
+        sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     else:
         print(output)
 

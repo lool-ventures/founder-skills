@@ -44,90 +44,99 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Financial Model Review</title>
 <style>
+/*__BRAND_CSS__*/
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-    background: #f9fafb; color: #1f2937; line-height: 1.5;
+    font-family: var(--font-body);
+    background: var(--lool-white); color: var(--lool-ink); line-height: 1.5;
     min-height: 100vh; padding-bottom: 80px;
+    -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
   }
 
   /* Header */
   .header { padding: 24px 32px 16px; display: flex; align-items: center; gap: 12px; }
-  .header h1 { font-size: 1.5rem; font-weight: 600; margin: 0; }
+  .header h1 {
+    font-size: 1.6rem; font-weight: 400; color: var(--lool-blue);
+    letter-spacing: -0.01em; margin: 0;
+  }
   .stage-badge {
-    display: inline-block; padding: 2px 10px; border-radius: 12px;
-    font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
-    background: #dbeafe; color: #0d549d; letter-spacing: 0.05em;
+    display: inline-block; padding: 3px 10px; border-radius: var(--r-input);
+    font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    border: 1px solid var(--lool-azure); color: var(--lool-azure);
+    background: var(--lool-white); letter-spacing: 0.06em;
   }
 
   /* Sanity strip */
   .sanity-strip { display: flex; gap: 16px; padding: 0 32px 16px; flex-wrap: wrap; }
   .sanity-card {
-    background: #ffffff; border-radius: 8px; padding: 14px 20px;
-    min-width: 160px; flex: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    border-left: 3px solid #e5e7eb;
+    background: var(--lool-paper); padding: 14px 20px;
+    min-width: 160px; flex: 1;
+    border: 1px solid var(--lool-line-2);
+    border-left: 3px solid var(--lool-line);
   }
-  .sanity-card.pass { border-left-color: #10b981; }
-  .sanity-card.warn { border-left-color: #f59e0b; }
+  .sanity-card.pass { border-left-color: var(--lool-success); }
+  .sanity-card.warn { border-left-color: var(--lool-warning); }
   .sanity-card .label {
-    font-size: 0.75rem; color: #6b7280; text-transform: uppercase;
-    letter-spacing: 0.04em; margin-bottom: 4px;
+    font-size: 0.7rem; color: var(--lool-subtle); text-transform: uppercase;
+    letter-spacing: 0.06em; margin-bottom: 4px; font-weight: 500;
   }
   .sanity-card .value {
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-    font-size: 1.25rem; font-weight: 600;
+    font-family: var(--font-mono);
+    font-size: 1.25rem; font-weight: 600; color: var(--lool-slate);
   }
 
   /* Warnings container */
   #warnings-container { padding: 0 32px; }
   .warning-card {
-    background: #fef3c7; border-left: 4px solid #f59e0b;
-    padding: 0.75rem 1rem; margin-bottom: 0.5rem; border-radius: 4px;
+    background: var(--lool-warning-tint); border-left: 3px solid var(--lool-warning);
+    padding: 0.75rem 1rem; margin-bottom: 0.5rem;
     display: flex; justify-content: space-between; align-items: center;
   }
-  .warning-card .msg { color: #92400e; font-size: 0.9rem; }
+  .warning-card .msg { color: var(--lool-ink); font-size: 0.9rem; }
   .warning-card .dismiss-btn {
-    background: none; border: 1px solid #d97706; color: #d97706;
-    padding: 0.25rem 0.5rem; border-radius: 4px; cursor: pointer; font-size: 0.8rem;
+    background: none; border: 1px solid var(--lool-warning); color: var(--lool-warning);
+    padding: 0.25rem 0.5rem; border-radius: var(--r-input); cursor: pointer; font-size: 0.8rem;
     flex-shrink: 0; margin-left: 12px;
   }
-  .warning-card .dismiss-btn:hover { background: #fef3c7; }
+  .warning-card .dismiss-btn:hover { background: var(--lool-white); }
 
   /* Field warning highlight */
-  .field-warning { border-color: #f59e0b !important; box-shadow: 0 0 0 2px rgba(245,158,11,0.2); }
+  .field-warning { border-color: var(--lool-warning) !important; box-shadow: 0 0 0 2px rgba(201,137,43,0.2); }
 
   /* Tabs */
   .tab-bar {
-    display: flex; gap: 0; padding: 0 32px; border-bottom: 1px solid #e5e7eb;
+    display: flex; gap: 0; padding: 0 32px; border-bottom: 1px solid var(--lool-line-2);
     margin-bottom: 16px;
   }
   .tab-btn {
-    background: transparent; border: none; color: #6b7280;
+    background: transparent; border: none; color: var(--lool-nav);
     padding: 10px 20px; font-size: 0.875rem; font-weight: 500;
+    font-family: var(--font-body);
     cursor: pointer; border-bottom: 2px solid transparent;
   }
-  .tab-btn.active { background: #eef2ff; color: #0d549d; border-bottom-color: #0071e3; }
+  .tab-btn:hover { color: var(--lool-blue); }
+  .tab-btn.active { color: var(--lool-blue); border-bottom-color: var(--lool-azure); }
   .tab-content { padding: 16px 32px; display: none; }
   .tab-content.active { display: block; }
 
   /* Field groups */
   .field-group { margin-bottom: 16px; }
-  .field-group.changed { border-left: 3px solid #21a2e3; padding-left: 8px; }
+  .field-group.changed { border-left: 3px solid var(--lool-azure); padding-left: 8px; }
   .field-label {
-    display: block; font-size: 0.8rem; color: #6b7280;
+    display: block; font-size: 0.8rem; color: var(--lool-mute);
     margin-bottom: 4px; font-weight: 500;
   }
-  .field-helper { font-size: 0.75rem; color: #9ca3af; margin-top: 2px; }
-  .field-was { color: #9ca3af; font-size: 0.8rem; font-style: italic; }
+  .field-helper { font-size: 0.75rem; color: var(--lool-faint); margin-top: 2px; }
+  .field-was { color: var(--lool-faint); font-size: 0.8rem; font-style: italic; }
 
   .input-field {
-    background: #ffffff; border: 1px solid #d1d5db; border-radius: 6px;
-    color: #1f2937; padding: 8px 12px;
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    background: var(--lool-white); border: 1px solid var(--lool-line-form); border-radius: var(--r-input);
+    color: var(--lool-ink); padding: 8px 12px;
+    font-family: var(--font-mono);
     font-size: 0.875rem; width: 100%; outline: none;
   }
-  .input-field:focus { border-color: #0071e3; }
-  .input-field.readonly { background: #f3f4f6; color: #9ca3af; border-color: #e5e7eb; }
+  .input-field:focus { border-color: var(--lool-azure); }
+  .input-field.readonly { background: var(--lool-paper-2); color: var(--lool-faint); border-color: var(--lool-line-2); }
 
   select.input-field { appearance: auto; }
 
@@ -137,54 +146,57 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   /* Currency toggle */
   .currency-toggle {
-    display: inline-flex; border-radius: 6px; overflow: hidden;
-    border: 1px solid #d1d5db; flex-shrink: 0;
+    display: inline-flex; border-radius: var(--r-input); overflow: hidden;
+    border: 1px solid var(--lool-line-form); flex-shrink: 0;
   }
   .currency-toggle button {
-    background: #ffffff; border: none; color: #6b7280;
+    background: var(--lool-white); border: none; color: var(--lool-mute);
+    font-family: var(--font-body);
     padding: 6px 10px; font-size: 0.8rem; cursor: pointer;
   }
-  .currency-toggle button.active { background: #0d549d; color: #ffffff; }
+  .currency-toggle button.active { background: var(--lool-blue); color: var(--lool-white); }
   .currency-row { display: flex; gap: 8px; align-items: center; }
-  .currency-equiv { font-size: 0.8rem; color: #9ca3af; margin-top: 2px; }
+  .currency-equiv { font-size: 0.8rem; color: var(--lool-faint); margin-top: 2px; }
 
   /* Tag chips */
   .chip-container { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
   .chip {
-    display: inline-block; padding: 4px 12px; border-radius: 14px;
+    display: inline-block; padding: 4px 12px; border-radius: var(--r-pill);
     font-size: 0.8rem; cursor: pointer; user-select: none;
-    border: 1px solid #d1d5db; background: #ffffff; color: #6b7280;
+    border: 1px solid var(--lool-line-form); background: var(--lool-white); color: var(--lool-mute);
   }
-  .chip.selected { border-color: #21a2e3; background: #0d549d; color: #ffffff; }
+  .chip.selected { border-color: var(--lool-blue); background: var(--lool-blue); color: var(--lool-white); }
 
   /* Section header */
   .section-header {
-    font-size: 0.9rem; font-weight: 600; margin: 20px 0 10px;
-    padding-bottom: 4px; border-bottom: 1px solid #e5e7eb;
+    font-size: 0.95rem; font-weight: 500; color: var(--lool-royal); margin: 20px 0 10px;
+    padding-bottom: 4px; border-bottom: 1px solid var(--lool-line-2);
   }
 
   /* Tables */
   .edit-table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; }
   .edit-table th {
-    text-align: left; font-size: 0.75rem; color: #6b7280;
-    padding: 6px 8px; border-bottom: 1px solid #e5e7eb;
+    text-align: left; font-size: 0.75rem; color: var(--lool-subtle);
+    padding: 6px 8px; border-bottom: 1px solid var(--lool-line-2);
   }
   .edit-table td { padding: 4px 8px; }
   .edit-table .input-field { width: 100%; }
   .add-row-btn {
-    background: #0d549d; border: none; color: #ffffff;
-    padding: 6px 16px; border-radius: 4px; cursor: pointer;
+    background: var(--lool-blue); border: none; color: var(--lool-white);
+    font-family: var(--font-body);
+    padding: 6px 16px; border-radius: var(--r-input); cursor: pointer;
     font-size: 0.8rem; margin-top: 4px;
   }
+  .add-row-btn:hover { background: var(--lool-blue-deep); }
   .remove-row-btn {
-    background: transparent; border: none; color: #ef4444;
+    background: transparent; border: none; color: var(--lool-danger);
     cursor: pointer; font-size: 0.8rem;
   }
 
   /* Accordion */
   .accordion-header {
-    font-size: 0.9rem; font-weight: 600; margin: 20px 0 10px;
-    padding-bottom: 4px; border-bottom: 1px solid #e5e7eb; cursor: pointer;
+    font-size: 0.95rem; font-weight: 500; color: var(--lool-royal); margin: 20px 0 10px;
+    padding-bottom: 4px; border-bottom: 1px solid var(--lool-line-2); cursor: pointer;
   }
   .accordion-body { padding: 8px 0 8px 8px; display: none; }
   .accordion-body.open { display: block; }
@@ -192,19 +204,19 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   /* Corrections drawer */
   .corrections-bar {
     position: fixed; bottom: 0; left: 0; right: 0;
-    background: #ffffff; border-top: 1px solid #e5e7eb;
-    z-index: 100; box-shadow: 0 -2px 8px rgba(0,0,0,0.05);
+    background: var(--lool-white); border-top: 3px solid var(--lool-blue);
+    z-index: 100; box-shadow: 0 -8px 30px rgba(16,32,64,0.12);
     transition: max-height 0.25s ease;
   }
   .corrections-summary {
     padding: 12px 32px; display: flex; align-items: center;
     gap: 16px; cursor: pointer; user-select: none;
   }
-  .corrections-summary:hover { background: #f9fafb; }
-  .corrections-count { font-size: 0.875rem; color: #6b7280; }
-  .corrections-count strong { color: #0d549d; }
+  .corrections-summary:hover { background: var(--lool-paper); }
+  .corrections-count { font-size: 0.875rem; color: var(--lool-mute); }
+  .corrections-count strong { color: var(--lool-blue); }
   .corrections-toggle {
-    font-size: 0.8rem; color: #6b7280; margin-left: auto;
+    font-size: 0.8rem; color: var(--lool-subtle); margin-left: auto;
     display: flex; align-items: center; gap: 4px;
   }
   .corrections-toggle .arrow {
@@ -214,7 +226,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   .corrections-bar.open .corrections-toggle .arrow { transform: rotate(180deg); }
   .corrections-drawer {
     max-height: 0; overflow: hidden; transition: max-height 0.25s ease;
-    border-top: 1px solid #e5e7eb;
+    border-top: 1px solid var(--lool-line-2);
   }
   .corrections-bar.open .corrections-drawer {
     max-height: 300px; overflow-y: auto;
@@ -223,53 +235,54 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
     width: 100%; border-collapse: collapse; font-size: 0.85rem;
   }
   .corrections-table th {
-    text-align: left; padding: 8px 32px; background: #f9fafb;
-    color: #6b7280; font-weight: 600; font-size: 0.75rem;
-    text-transform: uppercase; letter-spacing: 0.03em;
+    text-align: left; padding: 8px 32px; background: var(--lool-paper);
+    color: var(--lool-subtle); font-weight: 600; font-size: 0.75rem;
+    text-transform: uppercase; letter-spacing: 0.06em;
     position: sticky; top: 0;
   }
   .corrections-table td {
-    padding: 8px 32px; border-top: 1px solid #f3f4f6;
+    padding: 8px 32px; border-top: 1px solid var(--lool-paper-2);
   }
-  .corrections-table .field-col { color: #1f2937; font-weight: 500; }
-  .corrections-table .old-val { color: #9ca3af; text-decoration: line-through; }
-  .corrections-table .new-val { color: #0d549d; font-weight: 500; }
+  .corrections-table .field-col { color: var(--lool-ink); font-weight: 500; }
+  .corrections-table .old-val { color: var(--lool-faint); text-decoration: line-through; }
+  .corrections-table .new-val { color: var(--lool-blue); font-weight: 500; }
   .corrections-table .undo-btn {
-    background: none; border: 1px solid #d1d5db; color: #6b7280;
-    border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 0.75rem;
+    background: none; border: 1px solid var(--lool-line-form); color: var(--lool-mute);
+    border-radius: var(--r-input); padding: 2px 8px; cursor: pointer; font-size: 0.75rem;
   }
-  .corrections-table .undo-btn:hover { background: #f3f4f6; color: #1f2937; }
+  .corrections-table .undo-btn:hover { background: var(--lool-paper-2); color: var(--lool-ink); }
   .corrections-empty {
-    padding: 16px 32px; color: #9ca3af; font-size: 0.85rem; text-align: center;
+    padding: 16px 32px; color: var(--lool-faint); font-size: 0.85rem; text-align: center;
   }
   .corrections-actions {
     padding: 12px 32px; display: flex; justify-content: flex-end;
-    border-top: 1px solid #e5e7eb;
+    border-top: 1px solid var(--lool-line-2);
   }
   .submit-btn {
-    background: #0d549d; color: #ffffff; border: none;
-    border-radius: 6px; padding: 8px 24px; font-weight: 600;
+    background: var(--lool-blue); color: var(--lool-white); border: none;
+    font-family: var(--font-body);
+    border-radius: var(--r-input); padding: 8px 24px; font-weight: 600;
     font-size: 0.875rem; cursor: pointer;
   }
-  .submit-btn:hover { background: #0071e3; }
+  .submit-btn:hover { background: var(--lool-blue-deep); }
 
   /* Overlay */
   .overlay {
-    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    display: none; position: fixed; inset: 0; background: rgba(20,30,45,0.34);
     justify-content: center; align-items: center; z-index: 200;
   }
   .overlay.show { display: flex; }
   .overlay-box {
-    background: #ffffff; border-radius: 12px; padding: 2rem; text-align: center;
-    max-width: 420px;
+    background: var(--lool-white); padding: 2rem; text-align: center;
+    max-width: 420px; box-shadow: var(--shadow-soft);
   }
-  .overlay-box h2 { color: #10b981; margin-bottom: 0.75rem; }
-  .overlay-box p { color: #6b7280; font-size: 0.9rem; }
+  .overlay-box h2 { color: var(--lool-success); font-weight: 500; margin-bottom: 0.75rem; }
+  .overlay-box p { color: var(--lool-mute); font-size: 0.9rem; }
 
   /* Pct suffix */
   .pct-row { display: flex; align-items: center; gap: 6px; }
   .pct-row .input-field { flex: 1; }
-  .pct-suffix { color: #6b7280; font-size: 0.9rem; }
+  .pct-suffix { color: var(--lool-mute); font-size: 0.9rem; }
 </style>
 </head>
 <body>
@@ -277,7 +290,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <div class="header">
   <h1 id="header-title"></h1>
   <span class="stage-badge" id="stage-badge"></span>
-  <div style="font-size:0.75rem;color:#9ca3af;margin-top:4px;">All values in USD</div>
+  <div style="font-size:0.75rem;color:var(--lool-subtle);margin-top:4px;">All values in USD</div>
 </div>
 
 <div class="sanity-strip" id="sanity-strip"></div>
@@ -288,9 +301,11 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <div id="tab-panels"></div>
 
+<div class="footer-credit">founder-skills by lool ventures &middot; <a href="https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback" style="color:inherit">Share feedback</a></div>
+
 <div class="corrections-bar" id="corrections-bar">
   <div class="corrections-summary" id="corrections-summary">
-    <div class="corrections-count"><strong id="corr-count">0</strong> corrections</div>
+    <div class="corrections-count"><strong id="corr-count">0</strong> <span id="corr-noun">corrections</span></div>
     <div class="corrections-toggle"><span>Show changes</span> <span class="arrow">&#9650;</span></div>
   </div>
   <div class="corrections-drawer" id="corrections-drawer">
@@ -309,7 +324,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   <div class="overlay-box">
     <h2>Feedback Submitted</h2>
     <p id="overlay-msg">Your corrections have been saved.</p>
-    <p id="overlay-hint" style="margin-top:1rem;color:#9ca3af;font-size:0.85rem;"></p>
+    <p id="overlay-hint" style="margin-top:1rem;color:var(--lool-faint);font-size:0.85rem;"></p>
   </div>
 </div>
 
@@ -385,7 +400,9 @@ function updateField(path, newVal) {
   if (same) {
     corrections.delete(path);
   } else {
-    corrections.set(path, { path: path, label: path.split(".").pop(), was: origVal, now: newVal });
+    // human-readable field identity: full dotted path, not just the leaf
+    // ("revenue › mrr › value" beats a bare "value" in the corrections tray)
+    corrections.set(path, { path: path, label: path.replace(/\./g, " › ").replace(/_/g, " "), was: origVal, now: newVal });
   }
   refreshSanity();
   refreshCorrectionsBar();
@@ -423,21 +440,35 @@ function fmtNumber(v) {
 function stripCommas(s) { return String(s).replace(/,/g, ""); }
 function fmtCurrency(v) {
   if (v == null) return "\u2014";
-  return "$" + Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 });
+  return CUR_PREFIX + Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 }) + CUR_SUFFIX;
+}
+function curUnitLabel() {
+  return CURRENCY === "USD" ? "$" : CURRENCY;
 }
 
 /* ===== Sanity metrics ===== */
+/* An absent figure is not a zero. `|| 0` conflates them, and for a numerator
+   that turns "we don't know" into a confident, wrong number: a model with no
+   cash balance rendered "RUNWAY 0 mo" in warn styling, which reads as an
+   out-of-cash emergency. Unknown must render as the em-dash. A real zero still
+   computes, so a genuinely broke company still sees 0. */
+function numOrNull(v) {
+  if (v == null || v === "") return null;
+  var n = Number(v);
+  return isFinite(n) ? n : null;
+}
+
 function computeSanity() {
-  var cash = getByPath(state, "cash.current_balance") || 0;
+  var cash = numOrNull(getByPath(state, "cash.current_balance"));
   var burn = getByPath(state, "cash.monthly_net_burn") || 0;
   var mrr = getByPath(state, "revenue.mrr.value") || 0;
   var customers = getByPath(state, "revenue.customers") || 0;
   var growthRate = getByPath(state, "revenue.growth_rate_monthly") || 0;
   var arpuInput = getByPath(state, "unit_economics.ltv.inputs.arpu_monthly");
 
-  var runway = burn > 0 ? Math.round(cash / burn * 10) / 10 : null;
-  var monthlyNewArr = mrr * growthRate * 12;
-  var burnMultiple = monthlyNewArr > 0 ? Math.round(burn / (monthlyNewArr / 12) * 10) / 10 : null;
+  var runway = (cash != null && burn > 0) ? Math.round(cash / burn * 10) / 10 : null;
+  var monthlyNewArr = mrr * growthRate * 12;  // ΔMRR × 12 = monthly net-new ARR
+  var burnMultiple = monthlyNewArr > 0 ? Math.round(burn / monthlyNewArr * 10) / 10 : null;
   var arpu = customers > 0 ? Math.round(mrr / customers * 100) / 100 : null;
 
   var hc = getByPath(state, "expenses.headcount") || [];
@@ -467,6 +498,11 @@ function computeSanity() {
 
 function refreshSanity() {
   var s = computeSanity();
+  /* This path always computes runway as cash / burn — the static convention —
+     regardless of why it ran (static-mode build, or a failed /api/check
+     falling back here). Relabel every time so a prior server-projected label
+     never survives past a value that is no longer projected. */
+  updateMetricLabel("runway", "Runway (static)");
   updateMetricCard("runway", s.runway.value, " mo", s.runway.warn);
   updateMetricCard("burn-multiple", s.burnMultiple.value, "x", s.burnMultiple.warn);
   updateMetricCard("arpu-check", s.arpu.value != null ? fmtCurrency(s.arpu.value) : null, "", s.arpu.warn);
@@ -479,6 +515,19 @@ function updateMetricCard(id, value, unit, warn) {
   var valEl = card.querySelector(".value");
   if (valEl) valEl.textContent = value != null ? String(value) + (unit || "") : "\u2014";
   card.className = "sanity-card" + (value == null ? "" : (warn ? " warn" : " pass"));
+}
+
+/* Runway is computed two different ways depending on where the number came
+   from \u2014 a client-side cash/burn division (static) vs. the server's
+   month-by-month projection (projected, which can differ once revenue growth
+   or expense ramp are modeled). Swapping between them with an identical
+   "Runway" label reads as the same number when it isn't; the card's label
+   must always say which convention is on screen. */
+function updateMetricLabel(id, text) {
+  var card = document.getElementById("sanity-" + id);
+  if (!card) return;
+  var lbl = card.querySelector(".label");
+  if (lbl) lbl.textContent = text;
 }
 
 function buildSanityStrip() {
@@ -510,8 +559,9 @@ function buildSanityStrip() {
 var checkTimeout = null;
 function scheduleCheck() {
   clearTimeout(checkTimeout);
-  /* file:// URLs cannot use fetch — just refresh JS sanity */
-  if (window.location.protocol === "file:") {
+  /* Static mode has no backing server (and may be served from an http origin,
+     so a file:// check alone is not enough) — just refresh JS sanity. */
+  if (IS_STATIC || window.location.protocol === "file:") {
     refreshSanity();
     return;
   }
@@ -520,7 +570,10 @@ function scheduleCheck() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ state: state, ils_fields: ilsFields })
-    }).then(function(r) { return r.json(); }).then(function(result) {
+    }).then(function(resp) {
+      if (!resp.ok) throw new Error("Server error");
+      return resp.json();
+    }).then(function(result) {
       updateWarnings(result.warnings || []);
       if (result.sanity) updateSanityFromServer(result.sanity);
     }).catch(function() {
@@ -570,7 +623,16 @@ function updateWarnings(warnings) {
 }
 
 function updateSanityFromServer(sanity) {
-  if (sanity.runway_months != null) updateMetricCard("runway", sanity.runway_months, " mo", sanity.runway_months < 6);
+  if (sanity.runway_months != null) {
+    /* The server sends which convention runway_months is: "projected" (the
+       month-by-month scenario run) when available, "static" (cash / burn,
+       its own fallback) when the base scenario has no projected figure —
+       e.g. a default-alive model. Label it so the card never silently swaps
+       conventions on the founder. */
+    var conventionLabel = sanity.runway_convention === "static" ? "static" : "projected";
+    updateMetricLabel("runway", "Runway (" + conventionLabel + ")");
+    updateMetricCard("runway", sanity.runway_months, " mo", sanity.runway_months < 6);
+  }
   if (sanity.burn_multiple != null) updateMetricCard("burn-multiple", sanity.burn_multiple, "x", sanity.burn_multiple > 3);
   if (sanity.arpu_computed != null) {
     var arpuWarn = false;
@@ -588,6 +650,7 @@ function updateSanityFromServer(sanity) {
 /* ===== Corrections drawer ===== */
 function refreshCorrectionsBar() {
   document.getElementById("corr-count").textContent = String(corrections.size);
+  document.getElementById("corr-noun").textContent = corrections.size === 1 ? "correction" : "corrections";
   var tbody = document.getElementById("corrections-tbody");
   while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
   var empty = document.getElementById("corrections-empty");
@@ -750,33 +813,41 @@ function submitFeedback() {
     ils_fields: cleanIlsFields
   }, null, 2);
 
-  /* file:// URLs cannot use fetch — go straight to download */
-  if (window.location.protocol === "file:") {
+  /* Static mode has no backing server — go straight to download. A file://
+     check alone is insufficient: served from an http origin, the /api/feedback
+     POST resolves to a stray non-ok response instead of failing fast, and if
+     that origin answers 200 the founder is falsely told the corrections were
+     saved. The build-time IS_STATIC flag makes the mode unambiguous. */
+  if (IS_STATIC || window.location.protocol === "file:") {
     triggerDownload(payload);
     showOverlay(true);
-    return;
+  } else {
+    fetch("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    }).then(function(resp) {
+      if (!resp.ok) throw new Error("Server error");
+      showOverlay(false);
+    }).catch(function() {
+      triggerDownload(payload);
+      showOverlay(true);
+    });
   }
-
-  fetch("/api/feedback", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: payload
-  }).then(function(resp) {
-    if (!resp.ok) throw new Error("Server error");
-    showOverlay(false);
-  }).catch(function() {
-    triggerDownload(payload);
-    showOverlay(true);
-  });
 }
 
 function showOverlay(wasDownload) {
   var btn = document.getElementById("submit-btn");
   btn.textContent = "Submitted";
+  var msg = document.getElementById("overlay-msg");
   var hint = document.getElementById("overlay-hint");
   if (wasDownload) {
+    /* Download mode: nothing is persisted server-side until the founder
+       uploads the file \u2014 say "downloaded", not "saved". */
+    if (msg) msg.textContent = "Your corrections.json has been downloaded.";
     hint.textContent = "Go back to your session and upload the corrections.json file.";
   } else {
+    if (msg) msg.textContent = "Your corrections have been saved.";
     hint.textContent = "Go back to your session and tell Claude you\u2019re done.";
   }
   document.getElementById("overlay").classList.add("show");
@@ -1229,7 +1300,10 @@ function updateTableCell(arrayPath, rowIdx, colKey, newVal, renderFn) {
   if (JSON.stringify(origVal) === JSON.stringify(newVal)) {
     corrections.delete(changePath);
   } else {
-    corrections.set(changePath, { path: changePath, label: colKey, was: origVal, now: newVal });
+    // identify the row by its month/name when available, not a bare column key
+    var rowTag = (arr[rowIdx] && (arr[rowIdx].month || arr[rowIdx].name)) || ("row " + (rowIdx + 1));
+    var label = arrayPath.replace(/\./g, " › ").replace(/_/g, " ") + " [" + rowTag + "] › " + colKey;
+    corrections.set(changePath, { path: changePath, label: label, was: origVal, now: newVal });
   }
   refreshSanity();
   refreshCorrectionsBar();
@@ -1279,13 +1353,13 @@ function renderCompanyTab() {
   c.appendChild(createTextInput("company.company_name", "Company Name"));
   c.appendChild(createTextInput("company.slug", "Slug", { readOnly: true }));
   c.appendChild(createTextInput("company.sector", "Sector", {
-    datalist: ["B2B SaaS", "Fintech", "HealthTech", "EdTech", "Cybersecurity", "AI/ML", "DevTools", "Consumer", "Marketplace", "Hardware"]
+    datalist: ["B2B SaaS", "Fintech", "HealthTech", "EdTech", "Cybersecurity", "AI/ML", "DevTools", "Consumer", "Marketplace", "Hardware", "Retail", "E-commerce"]
   }));
   c.appendChild(createTextInput("company.geography", "Geography", {
     datalist: ["Israel", "US", "Europe", "UK", "APAC", "LATAM", "Global"]
   }));
-  c.appendChild(createDropdown("company.stage", "Stage", ["pre-seed", "seed", "series-a", "series-b", "later"]));
-  c.appendChild(createDropdown("company.revenue_model_type", "Revenue Model Type", ["saas-plg", "saas-sales-led", "marketplace", "ai-native", "usage-based", "hardware", "hardware-subscription", "consumer-subscription", "transactional-fintech", "annual-contracts"]));
+  c.appendChild(createDropdown("company.stage", "Stage", ["pre-seed", "seed", "series-a", "series-b", "series-c", "series-d", "later"]));
+  c.appendChild(createDropdown("company.revenue_model_type", "Revenue Model Type", ["saas-plg", "saas-sales-led", "marketplace", "ai-native", "usage-based", "hardware", "hardware-subscription", "consumer-subscription", "transactional-fintech", "annual-contracts", "retail"]));
   c.appendChild(createDropdown("company.model_format", "Model Format", ["spreadsheet", "deck", "conversational", "partial"]));
   c.appendChild(createDropdown("company.data_confidence", "Data Confidence", ["exact", "estimated", "mixed"]));
   c.appendChild(createTagChips("company.traits", "Traits", ["multi-currency", "multi-entity", "multi-market", "annual-contracts", "ai-powered"]));
@@ -1315,8 +1389,8 @@ function renderRevenueTab() {
     c.appendChild(createSectionHeader("Monthly Revenue"));
     c.appendChild(createEditableTable("revenue.monthly", [
       { key: "month", label: "Month", type: "text", width: "100px" },
-      { key: "total", label: "Total ($)", type: "number" },
-      { key: "arr", label: "ARR ($)", type: "number" },
+      { key: "total", label: "Total (" + curUnitLabel() + ")", type: "number" },
+      { key: "arr", label: "ARR (" + curUnitLabel() + ")", type: "number" },
       { key: "actual", label: "Actual?", type: "bool", width: "60px" }
     ]));
   }
@@ -1327,8 +1401,8 @@ function renderRevenueTab() {
     c.appendChild(createSectionHeader("Quarterly Revenue"));
     c.appendChild(createEditableTable("revenue.quarterly", [
       { key: "quarter", label: "Quarter", type: "text", width: "100px" },
-      { key: "total", label: "Total ($)", type: "number" },
-      { key: "arr", label: "ARR ($)", type: "number" },
+      { key: "total", label: "Total (" + curUnitLabel() + ")", type: "number" },
+      { key: "arr", label: "ARR (" + curUnitLabel() + ")", type: "number" },
       { key: "actual", label: "Actual?", type: "bool", width: "60px" }
     ]));
   }
@@ -1365,14 +1439,14 @@ function renderTeamCostsTab() {
     { key: "role", label: "Role", type: "text" },
     { key: "count", label: "Count", type: "number" },
     { key: "start_month", label: "Start Month", type: "month" },
-    { key: "salary_annual", label: "Annual Salary ($)", type: "currency" },
+    { key: "salary_annual", label: "Annual Salary (" + curUnitLabel() + ")", type: "currency" },
     { key: "geography", label: "Geography", type: "text" },
     { key: "burden_pct", label: "Burden %", type: "pct" }
   ]));
   c.appendChild(createSectionHeader("Monthly Operating Expenses"));
   c.appendChild(createEditableTable("expenses.opex_monthly", [
     { key: "category", label: "Category", type: "text" },
-    { key: "amount", label: "Amount ($)", type: "currency" },
+    { key: "amount", label: "Amount (" + curUnitLabel() + ")", type: "currency" },
     { key: "start_month", label: "Start Month", type: "month" }
   ]));
   c.appendChild(createSectionHeader("Cost of Goods Sold (COGS)"));
@@ -1391,6 +1465,7 @@ function renderUnitEconomicsTab() {
   c.appendChild(createPctInput("unit_economics.ltv.inputs.churn_monthly", "Monthly Churn (for LTV)"));
   c.appendChild(createPctInput("unit_economics.ltv.inputs.gross_margin", "Gross Margin (for LTV)"));
   c.appendChild(createPctInput("unit_economics.gross_margin", "Gross Margin"));
+  c.appendChild(createDropdown("unit_economics.gross_margin_basis", "Gross Margin Basis", ["product", "store_contribution", "net_revenue", "gross_revenue", "blended"]));
   c.appendChild(createNumberInput("unit_economics.payback_months", "CAC Payback (months)"));
   c.appendChild(createNumberInput("unit_economics.burn_multiple", "Burn Multiple", { helper: "Net burn / net new ARR" }));
   return c;
@@ -1506,17 +1581,49 @@ init();
 
 
 def _embed_json(data: Any, **dumps_kwargs: Any) -> str:
-    """JSON-encode for safe embedding inside a <script> block: escape '<' so a
-    string containing '</script>' cannot terminate the block (XSS/breakage)."""
+    """JSON-encode for safe embedding inside an inline script element: escape
+    '<' so an embedded closing-script-tag sequence cannot terminate the block
+    early (XSS/breakage)."""
     return json.dumps(data, **dumps_kwargs).replace("<", "\\u003c")
 
 
-def _build_html(inputs: dict[str, Any], extraction_warnings: dict[str, Any] | None = None) -> str:
-    """Inject embedded data into the HTML template."""
+def _build_html(
+    inputs: dict[str, Any],
+    extraction_warnings: dict[str, Any] | None = None,
+    is_static: bool = False,
+) -> str:
+    """Inject brand CSS and embedded data into the HTML template.
+
+    ``is_static`` bakes a build-time IS_STATIC flag into the page. Static-mode
+    artifacts have no backing server, so the JS must skip the /api/* round-trip
+    and go straight to the download the founder uploads back. A runtime
+    ``window.location.protocol === "file:"`` check is NOT sufficient on its own:
+    when the artifact is shown through a viewer that serves it from an http
+    origin, that check is false and the POST would fire and resolve to a stray
+    non-ok response. The build-time flag makes the mode explicit.
+    """
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _theme
+
     canonical = json.dumps(inputs, sort_keys=True, separators=(",", ":"))
     base_hash = "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
-    data_js = f"const DATA = {_embed_json(inputs)};\nconst BASE_HASH = {json.dumps(base_hash)};"
-    html = _HTML_TEMPLATE.replace("/*__EMBEDDED_DATA__*/", data_js)
+    # Native model currency, baked in at build time (never fetched) so the
+    # static/Cowork branch stays write-back-safe. Absent/"USD" preserves today's
+    # bare-'$' formatting; any other ISO code renders every monetary value with
+    # that code instead of a bare '$' that would misrepresent the model.
+    currency_code = str(inputs.get("currency") or "USD").strip().upper() or "USD"
+    data_js = (
+        f"const DATA = {_embed_json(inputs)};\n"
+        f"const BASE_HASH = {json.dumps(base_hash)};\n"
+        f"const IS_STATIC = {json.dumps(is_static)};\n"
+        f"const CURRENCY = {json.dumps(currency_code)};\n"
+        'const CUR_PREFIX = CURRENCY === "USD" ? "$" : "";\n'
+        'const CUR_SUFFIX = CURRENCY === "USD" ? "" : " " + CURRENCY;'
+    )
+    html = _HTML_TEMPLATE.replace("/*__BRAND_CSS__*/", _theme.brand_css())
+    html = html.replace("/*__EMBEDDED_DATA__*/", data_js)
 
     # Inject extraction warnings banner above the warnings container
     if extraction_warnings and extraction_warnings.get("status") == "warn":
@@ -1539,41 +1646,48 @@ def _extraction_warnings_html(ew: dict[str, Any]) -> str:
         detail = ""
         if w.get("candidates"):
             detail = (
-                f' <span style="color:#6b7280;font-size:0.8rem">'
+                f' <span style="color:var(--lool-mute);font-size:0.8rem">'
                 f"(candidates: {', '.join(_html.escape(str(c)) for c in w['candidates'][:3])})</span>"
             )
         if w.get("untraceable"):
             items = w["untraceable"]
             if w["id"] == "SALARY_TRACEABILITY":
                 names = [_html.escape(str(u.get("role", "?"))) for u in items]
-                detail = f' <span style="color:#6b7280;font-size:0.8rem">({", ".join(names)})</span>'
+                detail = f' <span style="color:var(--lool-mute);font-size:0.8rem">({", ".join(names)})</span>'
             elif w["id"] == "REVENUE_TRACEABILITY":
                 names = [_html.escape(str(u.get("field", "?"))) for u in items]
-                detail = f' <span style="color:#6b7280;font-size:0.8rem">({", ".join(names)})</span>'
+                detail = f' <span style="color:var(--lool-mute);font-size:0.8rem">({", ".join(names)})</span>'
         cards.append(
-            f'<div class="extraction-warn-card" style="background:#fef2f2;border-left:4px solid #ef4444;'
-            f"padding:0.75rem 1rem;margin-bottom:0.5rem;border-radius:4px;"
-            f'display:flex;justify-content:space-between;align-items:center;">'
-            f'<span style="color:#991b1b;font-size:0.9rem">{msg}{detail}</span>'
-            f'<button onclick="this.parentElement.remove()" style="background:none;border:1px solid #dc2626;'
-            f"color:#dc2626;padding:0.25rem 0.5rem;border-radius:4px;cursor:pointer;font-size:0.8rem;"
-            f'flex-shrink:0;margin-left:12px;">Dismiss</button>'
-            f"</div>"
+            '<div class="extraction-warn-card" style="background:var(--lool-danger-tint);'
+            "border-left:3px solid var(--lool-danger);"
+            "padding:0.75rem 1rem;margin-bottom:0.5rem;"
+            'display:flex;justify-content:space-between;align-items:center;">'
+            f'<span style="color:var(--lool-ink);font-size:0.9rem">{msg}{detail}</span>'
+            '<button onclick="this.parentElement.remove()" style="background:none;'
+            "border:1px solid var(--lool-danger);"
+            "color:var(--lool-danger);padding:0.25rem 0.5rem;border-radius:var(--r-input);cursor:pointer;font-size:0.8rem;"
+            'flex-shrink:0;margin-left:12px;">Dismiss</button>'
+            "</div>"
         )
 
     return (
         '<div id="extraction-warnings" style="padding:0 32px;margin-bottom:8px;">'
-        '<div style="font-size:0.8rem;font-weight:600;color:#991b1b;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em;">'
+        '<div style="font-size:0.8rem;font-weight:600;color:var(--lool-danger);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">'
         "Extraction Warnings</div>" + "\n".join(cards) + "</div>"
     )
 
 
 def _write_static(inputs: dict[str, Any], output_path: str, extraction_warnings: dict[str, Any] | None = None) -> None:
     """Write self-contained HTML to a file, print JSON status to stdout."""
-    html = _build_html(inputs, extraction_warnings=extraction_warnings)
-    with open(output_path, "w") as f:
-        f.write(html)
+    html = _build_html(inputs, extraction_warnings=extraction_warnings, is_static=True)
     abs_path = os.path.abspath(output_path)
+    parent = os.path.dirname(abs_path)
+    if parent == "/":
+        print(f"Error: output path resolves to root directory: {output_path}", file=sys.stderr)
+        sys.exit(1)
+    os.makedirs(parent, exist_ok=True)
+    with open(abs_path, "w", encoding="utf-8") as f:
+        f.write(html)
     print(json.dumps({"ok": True, "mode": "static", "path": abs_path, "bytes": len(html.encode("utf-8"))}))
 
 
@@ -1904,7 +2018,7 @@ class _Handler(BaseHTTPRequestHandler):
                         ew = json.load(ewf)
                 except (OSError, json.JSONDecodeError):
                     pass
-            html = _build_html(inputs, extraction_warnings=ew)
+            html = _build_html(inputs, extraction_warnings=ew, is_static=False)
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
@@ -1977,8 +2091,8 @@ class _Handler(BaseHTTPRequestHandler):
             validation = validate_inputs.validate(state)
             all_errors.extend(validation.get("errors", []))
             warnings = validation.get("warnings", [])
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[review_inputs] /api/check validate_inputs failed: {exc!r}", file=sys.stderr)
 
         # Step 5: Compute sanity metrics
         sanity: dict[str, Any] = {}
@@ -1992,8 +2106,8 @@ class _Handler(BaseHTTPRequestHandler):
             for m in ue_result.get("metrics", []):
                 if m.get("id") == "burn_multiple" and m.get("value") is not None:
                     sanity["burn_multiple"] = m["value"]
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[review_inputs] /api/check unit_economics failed: {exc!r}", file=sys.stderr)
 
         try:
             if _scripts_dir not in sys.path:
@@ -2003,11 +2117,26 @@ class _Handler(BaseHTTPRequestHandler):
             rw_result = runway._compute_runway(state)
             if not rw_result.get("insufficient_data"):
                 for s in rw_result.get("scenarios", []):
-                    if s.get("name") == "base" and s.get("runway_months") is not None:
+                    if s.get("name") != "base":
+                        continue
+                    # Prefer the projected (month-by-month) figure; fall back to
+                    # the static cash/burn figure on the same scenario dict when
+                    # there is no projected number (e.g. a default-alive base
+                    # scenario, where revenue covers expenses before cash-out).
+                    # Either way, disclose which convention shipped — a bare
+                    # runway_months with no fallback silently went missing for
+                    # default-alive models, and the client would then keep
+                    # showing its own static figure with nothing distinguishing
+                    # it from a server-projected one for non-default-alive models.
+                    if s.get("runway_months") is not None:
                         sanity["runway_months"] = s["runway_months"]
-                        break
-        except Exception:
-            pass
+                        sanity["runway_convention"] = "projected"
+                    elif s.get("static_runway_months") is not None:
+                        sanity["runway_months"] = s["static_runway_months"]
+                        sanity["runway_convention"] = "static"
+                    break
+        except Exception as exc:
+            print(f"[review_inputs] /api/check runway failed: {exc!r}", file=sys.stderr)
 
         # ARPU check
         mrr = _deep_get_by_path(state, "revenue.mrr.value")

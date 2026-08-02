@@ -39,18 +39,27 @@ def validate(data: Any, schema: dict[str, Any], path: str = "") -> list[str]:
 
     expected_type = schema.get("type")
     if expected_type:
-        py_type = _TYPE_CHECKS.get(expected_type)
-        if py_type is None:
-            errors.append(f"{path or '<root>'}: schema has unknown type '{expected_type}'")
+        # type may be a string (e.g. "boolean") or a list of strings
+        # (e.g. ["boolean", "null"]) per JSON Schema draft-07+.
+        type_names: list[str] = expected_type if isinstance(expected_type, list) else [expected_type]
+        unknown = [t for t in type_names if t not in _TYPE_CHECKS]
+        if unknown:
+            errors.append(f"{path or '<root>'}: schema has unknown type(s) {unknown!r}")
             return errors
-        # bool is a subclass of int in Python — disambiguate
-        if expected_type == "integer" and isinstance(data, bool):
-            errors.append(f"{path or '<root>'}: expected integer, got boolean")
+        # bool is a subclass of int — disambiguate so True/False don't satisfy
+        # "integer" or "number" fields unless "boolean" is also an allowed type.
+        numeric_types = {"integer", "number"}
+        if any(t in numeric_types for t in type_names) and "boolean" not in type_names and isinstance(data, bool):
+            errors.append(f"{path or '<root>'}: expected {type_names}, got boolean")
             return errors
-        if not isinstance(data, py_type):
+        allowed_py_types = tuple(_TYPE_CHECKS[t] for t in type_names)
+        if not isinstance(data, allowed_py_types):
             actual = type(data).__name__
-            errors.append(f"{path or '<root>'}: expected {expected_type}, got {actual}")
+            errors.append(f"{path or '<root>'}: expected {type_names}, got {actual}")
             return errors
+        # For single-type schemas keep backward-compatible behaviour: use the
+        # original single string for subtype dispatch below.
+        expected_type = type_names[0] if len(type_names) == 1 else None
 
     if "enum" in schema and data not in schema["enum"]:
         errors.append(f"{path or '<root>'}: value {data!r} not in enum {schema['enum']}")

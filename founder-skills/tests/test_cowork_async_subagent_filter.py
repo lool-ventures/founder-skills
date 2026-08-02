@@ -14,7 +14,9 @@ def test_allowlist_excludes_bash() -> None:
 
 
 def test_allowlist_excludes_task_and_askuserquestion() -> None:
-    """Cowork strips dispatch + interactive tools from async sub-agents."""
+    """Dispatch + interactive tool names don't resolve in Cowork async
+    sub-agent contexts (parent-only; not registered for the dispatch
+    context)."""
     assert "Task" not in COWORK_ASYNC_SUBAGENT_ALLOWLIST
     assert "AskUserQuestion" not in COWORK_ASYNC_SUBAGENT_ALLOWLIST
 
@@ -44,12 +46,31 @@ def test_apply_filter_intersects_to_allowlist() -> None:
 # suite doesn't currently use, so future contributors don't assume them.
 
 
-@pytest.mark.parametrize("mcp_name", ["mcp__foo__bar", "mcp__claude_ai_Slack__send"])
-def test_mcp_tools_are_filtered_out(mcp_name: str) -> None:
-    """MCP-tool names go through the same allowlist intersection. Since none
-    of them are in the frozenset, all are filtered. Documenting current
-    behavior — if Cowork ever passes MCP tools through, update the allowlist."""
-    assert apply_filter([mcp_name]) == []
+@pytest.mark.parametrize(
+    "mcp_name",
+    ["mcp__workspace__bash", "mcp__foo__bar", "mcp__claude_ai_Slack__send"],
+)
+def test_mcp_tools_pass_through(mcp_name: str) -> None:
+    """`mcp__*` names take the runtime's MCP fast-path: they resolve against
+    the MCP server registry, not the native-tool allowlist, so the helper
+    passes them through unconditionally. (Repo POLICY still forbids agents
+    declaring any `mcp__*` name — that's enforced in
+    test_cowork_invariants.py, not here.)"""
+    assert apply_filter([mcp_name]) == [mcp_name]
+
+
+def test_workspace_bash_survives_but_literal_bash_does_not() -> None:
+    """The v0.4.7 probe finding in one assertion pair: Cowork registers shell
+    as `mcp__workspace__bash` (resolvable if declared), while the literal
+    `Bash` name doesn't exist in the sub-agent registry."""
+    assert apply_filter(["mcp__workspace__bash", "Bash"]) == ["mcp__workspace__bash"]
+
+
+def test_toolsearch_survives() -> None:
+    """ToolSearch is immediate-tier and available to sub-agents — it's what
+    loads a deferred MCP tool's schema on demand."""
+    assert "ToolSearch" in COWORK_ASYNC_SUBAGENT_ALLOWLIST
+    assert apply_filter(["ToolSearch"]) == ["ToolSearch"]
 
 
 @pytest.mark.parametrize("bg_tool", ["BashOutput", "KillShell"])

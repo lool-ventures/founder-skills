@@ -56,6 +56,39 @@ def _deep_get(data: dict[str, Any], *keys: str, default: Any = None) -> Any:
     return current
 
 
+def _currency_code(inputs: dict[str, Any]) -> str:
+    """Return the model's native currency code, defaulting to 'USD'.
+
+    Absent or non-string `currency` is the back-compat default (USD-equivalent);
+    messaging keeps today's bare-'$' formatting in that case.
+    """
+    currency = inputs.get("currency")
+    if isinstance(currency, str) and currency.strip():
+        return currency.strip().upper()
+    return "USD"
+
+
+def _fmt_money(value: float, currency_code: str) -> str:
+    """Format a monetary value, tagging non-USD currencies instead of a bare '$'."""
+    if currency_code == "USD":
+        return f"${value:,.0f}"
+    return f"{value:,.0f} {currency_code}"
+
+
+def _num(x: Any, default: float) -> float:
+    """Coerce x to a numeric value, falling back to default for null/non-numeric.
+
+    The dict.get() default only applies to missing keys, not to keys present
+    with an explicit JSON null. Blank/cleared fields are coerced to None by the
+    corrections layers, so numeric reads must guard against None explicitly.
+    """
+    if isinstance(x, bool):
+        return default
+    if isinstance(x, (int, float)):
+        return x
+    return default
+
+
 # ---------------------------------------------------------------------------
 # Date helpers
 # ---------------------------------------------------------------------------
@@ -249,18 +282,50 @@ def _project_scenario(
         # Never runs out within projection window
         decision_point = None
 
+    # Find the first month where net_burn <= 0 (cash-flow breakeven), if any
+    breakeven_month: int | None = None
+    for proj in projections:
+        if proj["net_burn"] <= 0:
+            breakeven_month = proj["month"]
+            break
+
+    # STATIC runway: cash divided by the CURRENT net burn, with no growth and no decay. This is the
+    # honest floor under every projected number here, and it exists because the projection holds opex
+    # FLAT (`effective_opex = opex`, only FX touches it — there is no coupling to a headcount plan) while
+    # revenue compounds. A seed company almost never holds burn flat through the growth that makes it
+    # default-alive: it hires. So a short static runway can be projected into "default alive / low risk",
+    # and a founder reading only the projected verdict would not see the cash position they actually have.
+    # Report both; let the reader hold the assumption alongside the conclusion.
+    _initial_net_burn = (opex0 * (1 + burn_change)) - revenue0
+    static_runway_months: float | None = None
+    if _initial_net_burn > 0 and cash0 > 0:
+        static_runway_months = round(cash0 / _initial_net_burn, 1)
+
     result: dict[str, Any] = {
         "name": name,
         "growth_rate": growth_rate,
         "burn_change": burn_change,
         "fx_adjustment": fx_adjustment,
         "runway_months": runway_months,
+        "static_runway_months": static_runway_months,
         "cash_out_date": cash_out_date,
         "decision_point": decision_point,
         "default_alive": default_alive,
         "became_profitable": became_profitable,
         "monthly_projections": projections,
     }
+    # runway_months: null is ambiguous to a reader of the raw artifact — make
+    # the default-alive meaning explicit alongside the null, and name the
+    # projected breakeven month when derivable.
+    if runway_months is None and default_alive:
+        note = (
+            "default_alive: projected cash never depletes within the projection "
+            "window (revenue covers expenses before cash-out); runway_months is "
+            "null by design, not missing data"
+        )
+        if breakeven_month is not None:
+            note += f"; projected to reach cash-flow breakeven around month {breakeven_month} of the projection"
+        result["note"] = note
     if cash_direction_warning:
         result["cash_direction_warning"] = cash_direction_warning
     return result
@@ -422,13 +487,31 @@ def _assess_risk(scenario_results: list[dict[str, Any]]) -> str:
         threshold_suffix = f" You need at least {threshold['growth_rate']:.1%} MoM growth to stay default-alive."
 
     if base["default_alive"]:
+        # `default_alive` is set both when net burn goes non-positive (:241) AND when cash simply never
+        # depletes in the window (:250, which includes grant-driven survival) — so it does not by itself
+        # mean "profitable". Qualify the verdict with the static runway whenever the projection is what
+        # produced it, because that projection holds burn flat while revenue compounds.
+        static = base.get("static_runway_months")
         if base.get("became_profitable"):
             base_text = "Low risk: company reaches profitability under base scenario before running out of cash."
+            if static is not None and static < 12:
+                base_text += (
+                    f" Note the assumption: only {static} months of runway at TODAY's net burn, so this"
+                    " verdict depends on burn staying flat while revenue grows — it does not survive a"
+                    " hiring plan that scales with growth."
+                )
         else:
             base_text = (
                 "Low risk: company does not run out of cash under base scenario "
                 "within projection window, though operational profitability is not reached."
             )
+            if static is not None:
+                base_text = (
+                    f"Moderate risk: {static} months of runway at TODAY's net burn. Cash does not deplete"
+                    " within the projection window, but only because the projection holds burn flat while"
+                    " revenue compounds — and operational profitability is never reached. Treat the static"
+                    f" {static} months as the planning number unless burn really is fixed."
+                )
         return base_text + threshold_suffix
 
     runway = base.get("runway_months")
@@ -465,6 +548,8 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
     revenue_data = inputs.get("revenue", {})
     warnings: list[str] = []
     limitations: list[str] = []
+    # Currency determinism: absent/"USD" keeps today's bare-'$' formatting exactly.
+    currency_code = _currency_code(inputs)
 
     # --- Check for sufficient data ---
     current_balance = cash_data.get("current_balance")
@@ -486,6 +571,7 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
             "insufficient_data": True,
             "limitations": limitations,
             "warnings": warnings,
+            "currency": currency_code,
         }
 
     if current_balance is None and monthly_net_burn is not None:
@@ -501,15 +587,28 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
             "Missing: cash.current_balance — producing burn-based sensitivity "
             "table instead of full projection. Ask the founder for current cash balance."
         )
-        cash_scenarios = [500_000, 1_000_000, 2_000_000, 3_000_000, 5_000_000]
+        # The 500K-5M grid below is a fixed set of round-number USD cash levels —
+        # a USD-hypothetical sensitivity table, not a native-currency one. For a
+        # non-USD model, presenting these raw numbers tagged with the native
+        # currency would misrepresent them as native-currency amounts, so the
+        # table is skipped rather than mislabeled (the risk_assessment above
+        # already gives the burn rate in the model's native currency).
         sensitivity: list[dict[str, Any]] = []
-        for starting_cash in cash_scenarios:
-            months = round(starting_cash / burn, 1) if burn > 0 else None
-            sensitivity.append(
-                {
-                    "starting_cash": starting_cash,
-                    "runway_months": months,
-                }
+        if currency_code == "USD":
+            cash_scenarios = [500_000, 1_000_000, 2_000_000, 3_000_000, 5_000_000]
+            for starting_cash in cash_scenarios:
+                months = round(starting_cash / burn, 1) if burn > 0 else None
+                sensitivity.append(
+                    {
+                        "starting_cash": starting_cash,
+                        "runway_months": months,
+                    }
+                )
+        else:
+            warnings.append(
+                "Burn-based cash-sensitivity table uses fixed USD cash levels and is not "
+                f"produced for a {currency_code}-denominated model; ask the founder for the "
+                f"native {currency_code} cash balance instead."
             )
         return {
             "company": {
@@ -524,12 +623,15 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
             },
             "scenarios": [],
             "post_raise": None,
-            "risk_assessment": f"Monthly burn is ${burn:,.0f}. Cash balance unknown — ask founder.",
+            "risk_assessment": (
+                f"Monthly burn is {_fmt_money(burn, currency_code)}. Cash balance unknown — ask founder."
+            ),
             "insufficient_data": True,
             "partial_analysis": True,
             "burn_sensitivity": sensitivity,
             "limitations": limitations,
             "warnings": warnings,
+            "currency": currency_code,
         }
 
     if monthly_net_burn is None:
@@ -548,14 +650,15 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
             },
             "scenarios": [],
             "post_raise": None,
-            "risk_assessment": f"Cash balance is ${current_balance:,.0f} but burn rate unknown.",
+            "risk_assessment": f"Cash balance is {_fmt_money(current_balance, currency_code)} but burn rate unknown.",
             "insufficient_data": True,
             "limitations": limitations,
             "warnings": warnings,
+            "currency": currency_code,
         }
 
     # --- Derive baselines ---
-    debt = cash_data.get("debt", 0)
+    debt = _num(cash_data.get("debt", 0), 0)
     cash0 = current_balance - debt
 
     # Revenue
@@ -567,16 +670,17 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
     elif arr_value is not None:
         revenue0 = arr_value / 12
         print(
-            f"Warning: using ARR/12 (${revenue0:,.0f}) as MRR proxy — revenue.mrr.value not provided",
+            f"Warning: using ARR/12 ({_fmt_money(revenue0, currency_code)}) as MRR proxy — "
+            "revenue.mrr.value not provided",
             file=sys.stderr,
         )
-        warnings.append(f"Using ARR/12 (${revenue0:,.0f}) as MRR proxy (no MRR provided).")
+        warnings.append(f"Using ARR/12 ({_fmt_money(revenue0, currency_code)}) as MRR proxy (no MRR provided).")
     elif monthly_total is not None:
         revenue0 = monthly_total
         warnings.append("Using revenue.monthly_total (no MRR provided).")
     else:
         revenue0 = 0.0
-        warnings.append("No revenue data found; assuming $0 monthly revenue.")
+        warnings.append(f"No revenue data found; assuming {_fmt_money(0, currency_code)} monthly revenue.")
 
     # OpEx: back-solve from net_burn = opex - revenue => opex = revenue + net_burn
     opex0 = revenue0 + monthly_net_burn
@@ -591,7 +695,8 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
 
     if monthly_net_burn < 0:
         warnings.append(
-            f"Monthly net burn is negative (${monthly_net_burn:,.0f}), indicating the company is cash-flow positive."
+            f"Monthly net burn is negative ({_fmt_money(monthly_net_burn, currency_code)}), "
+            "indicating the company is cash-flow positive."
         )
 
     # Balance date
@@ -605,9 +710,9 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
 
     # --- IIA grant disbursement ---
     grants = cash_data.get("grants", {})
-    iia_approved = grants.get("iia_approved", 0) or 0
-    iia_disburse_months = grants.get("iia_disbursement_months", 12)
-    iia_start = grants.get("iia_start_month", 1)
+    iia_approved = _num(grants.get("iia_approved", 0), 0)
+    iia_disburse_months = int(_num(grants.get("iia_disbursement_months", 12), 12))
+    iia_start = int(_num(grants.get("iia_start_month", 1), 1))
     if iia_approved > 0 and iia_disburse_months > 0:
         grant_monthly = iia_approved / iia_disburse_months
         grant_end_month = iia_start + iia_disburse_months - 1
@@ -618,7 +723,7 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
     # --- FX exposure ---
     israel = inputs.get("israel_specific", {})
     fx_rate = israel.get("fx_rate_ils_usd")
-    ils_fraction = israel.get("ils_expense_fraction", 0.5) if fx_rate is not None else 0.0
+    ils_fraction = _num(israel.get("ils_expense_fraction", 0.5), 0.5) if fx_rate is not None else 0.0
     has_fx = fx_rate is not None
 
     # --- Build & run scenarios ---
@@ -664,7 +769,7 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
     fundraising = cash_data.get("fundraising", {})
     target_raise = fundraising.get("target_raise")
     bridge = inputs.get("bridge", {})
-    runway_target = bridge.get("runway_target_months", 24)
+    runway_target = _num(bridge.get("runway_target_months", 24), 24)
     post_raise: dict[str, Any] | None = None
 
     if target_raise is not None and target_raise > 0:
@@ -699,8 +804,8 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
     )
     if iia_approved > 0:
         limitations.append(
-            f"IIA grant of ${iia_approved:,.0f} disbursed evenly over {iia_disburse_months} months "
-            f"starting month {iia_start}."
+            f"IIA grant of {_fmt_money(iia_approved, currency_code)} disbursed evenly over "
+            f"{iia_disburse_months} months starting month {iia_start}."
         )
     if has_fx:
         limitations.append(f"FX adjustment applied to {ils_fraction:.0%} of expenses (ILS-denominated).")
@@ -721,6 +826,7 @@ def _compute_runway(inputs: dict[str, Any]) -> dict[str, Any]:
         "risk_assessment": risk_assessment,
         "limitations": limitations,
         "warnings": warnings,
+        "currency": currency_code,
     }
     if data_confidence != "exact":
         result["data_confidence"] = data_confidence
@@ -736,6 +842,11 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Multi-scenario runway stress-test (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
+    p.add_argument(
+        "--run-id",
+        default=None,
+        help="Stamp metadata.run_id (overrides any run_id from stdin metadata)",
+    )
     return p.parse_args()
 
 
@@ -772,6 +883,8 @@ def main() -> None:
     _input_metadata = data.get("metadata")
     if isinstance(_input_metadata, dict) and isinstance(_input_metadata.get("run_id"), str):
         result.setdefault("metadata", {})["run_id"] = _input_metadata["run_id"]
+    if getattr(args, "run_id", None):  # CLI run_id overrides stdin passthrough
+        result.setdefault("metadata", {})["run_id"] = args.run_id
     out = json.dumps(result, indent=indent) + "\n"
     scenarios = result.get("scenarios", [])
     base_s = next((s for s in scenarios if s["name"] == "base"), None)

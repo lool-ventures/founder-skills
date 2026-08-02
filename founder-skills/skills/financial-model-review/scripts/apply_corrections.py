@@ -512,25 +512,46 @@ def main() -> None:
     parser.add_argument("--original", required=True, help="Path to original inputs.json")
     parser.add_argument("--output-dir", required=True, help="Directory for output files")
     parser.add_argument("--pretty", action="store_true", help="Pretty-print stdout JSON")
+    parser.add_argument(
+        "-o",
+        "--output",
+        help="Write the status JSON to this file instead of stdout (emits a JSON receipt on stdout)",
+    )
     args = parser.parse_args()
+
+    def _emit(result: dict[str, Any], args: argparse.Namespace) -> None:
+        """Write the status JSON to stdout, or to -o with a stdout receipt."""
+        data = json.dumps(result, indent=2 if args.pretty else None)
+        if args.output:
+            abs_path = os.path.abspath(args.output)
+            parent = os.path.dirname(abs_path)
+            if parent == "/":
+                print(f"Error: output path resolves to root directory: {args.output}", file=sys.stderr)
+                sys.exit(1)
+            os.makedirs(parent, exist_ok=True)
+            with open(abs_path, "w", encoding="utf-8") as f:
+                f.write(data)
+            receipt = {"ok": True, "path": abs_path, "bytes": len(data.encode("utf-8"))}
+            sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
+        else:
+            sys.stdout.write(data)
+            sys.stdout.write("\n")
 
     def _read_json_file(path: str, field: str) -> dict[str, Any]:
         try:
             with open(path, encoding="utf-8") as f:
                 loaded = json.load(f)
         except (OSError, json.JSONDecodeError) as e:
-            json.dump(
+            _emit(
                 {
                     "status": "error",
                     "errors": [{"code": "READ_ERROR", "message": str(e), "field": field, "layer": 0}],
                 },
-                sys.stdout,
-                indent=2 if args.pretty else None,
+                args,
             )
-            sys.stdout.write("\n")
             sys.exit(1)
         if not isinstance(loaded, dict):
-            json.dump(
+            _emit(
                 {
                     "status": "error",
                     "errors": [
@@ -542,10 +563,8 @@ def main() -> None:
                         }
                     ],
                 },
-                sys.stdout,
-                indent=2 if args.pretty else None,
+                args,
             )
-            sys.stdout.write("\n")
             sys.exit(1)
         return loaded
 
@@ -556,13 +575,26 @@ def main() -> None:
     if "changes" in payload:
         corrected, corrections, patch_errors = _apply_patches(original, payload)
         if patch_errors:
-            json.dump({"status": "error", "errors": patch_errors}, sys.stdout, indent=2 if args.pretty else None)
-            sys.stdout.write("\n")
+            _emit({"status": "error", "errors": patch_errors}, args)
             sys.exit(1)
     elif "corrected" in payload:
-        print("Warning: legacy payload format — using 'corrected' object directly", file=sys.stderr)
+        print("Info: corrected-object payload (dispatch shape) — applying directly.", file=sys.stderr)
         corrections = payload.get("corrections", [])
         corrected = payload["corrected"]
+        if not isinstance(corrected, dict):
+            err = {
+                "status": "error",
+                "errors": [
+                    {
+                        "code": "INVALID_PAYLOAD",
+                        "message": f"'corrected' must be a JSON object, got {type(corrected).__name__}",
+                        "field": "corrected",
+                        "layer": 0,
+                    }
+                ],
+            }
+            _emit(err, args)
+            sys.exit(1)
     else:
         err = {
             "status": "error",
@@ -575,8 +607,7 @@ def main() -> None:
                 }
             ],
         }
-        json.dump(err, sys.stdout, indent=2 if args.pretty else None)
-        sys.stdout.write("\n")
+        _emit(err, args)
         sys.exit(1)
 
     overrides = payload.get("warning_overrides", [])
@@ -590,8 +621,7 @@ def main() -> None:
 
     all_errors = coercion_errors + ts_errors
     if all_errors:
-        json.dump({"status": "error", "errors": all_errors}, sys.stdout, indent=2 if args.pretty else None)
-        sys.stdout.write("\n")
+        _emit({"status": "error", "errors": all_errors}, args)
         sys.exit(1)
 
     # 3. Normalize ILS → USD
@@ -644,8 +674,7 @@ def main() -> None:
         "corrected_inputs": corrected_path,
         "extraction_corrections": audit_path,
     }
-    json.dump(result, sys.stdout, indent=2 if args.pretty else None)
-    sys.stdout.write("\n")
+    _emit(result, args)
 
 
 if __name__ == "__main__":

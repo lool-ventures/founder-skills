@@ -1,0 +1,10 @@
+# Session for Lane-2 Carta XLSX extraction (P2-a).
+# Whole-plugin mount + the synthetic Carta multi-sheet export.
+model: claude-sonnet-4-6
+plugins:
+  local_plugins:
+    - ../../founder-skills
+  enabled:
+    - founder-skills@local
+uploads:
+  - ../fixtures/synthetic_carta.xlsx

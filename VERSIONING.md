@@ -30,15 +30,22 @@ We follow [SemVer 2.0.0](https://semver.org/).
 ### When to Bump PATCH (bug fix, backwards-compatible)
 
 - Fixing script bugs without changing the output contract
-- Skill content rewrites or improvements
+- Skill content rewrites or improvements (SKILL.md, agent prompts)
 - Reference material updates
-- Documentation improvements
+- Documentation improvements that ship inside the plugin
+
+These are bumps by *policy*, and the CI path filter (below) enforces them: it
+forces a bump for any non-test file under `founder-skills/` — including in-plugin
+Markdown (`skills/*/SKILL.md`, `skills/*/references/*.md`, `agents/*.md`) — and for
+`pyproject.toml`. Only repository-level Markdown (README, CONTRIBUTING, `docs/`) is
+exempt.
 
 ### No Version Bump Needed
 
-- Metadata-only changes (description, author in plugin.json)
-- CI workflow changes
-- Test additions or fixes
+- CI workflow changes (`.github/`)
+- Test additions or fixes (`founder-skills/tests/`)
+- Repository-level docs and other markdown (`*.md`: README, CONTRIBUTING, this file, `docs/`)
+- `.gitignore` / `.editorconfig` / `uv.lock`
 
 ## Pre-1.0
 
@@ -77,7 +84,7 @@ Two non-negotiable rules. CI enforces the second mechanically (see `.github/work
 The marketplace clone tracks `main`. A release that lives on a feature branch — even if tagged — has not been released to consumers.
 
 - Every release must merge to `main`. No long-lived `release/*` branches as a substitute.
-- Tagging is a courtesy for `git log` archeology; the `version` field on `main` is what users actually see.
+- The `version` field on `main` is what users actually see (the marketplace clone tracks `main`). Tags do not change what users install, but pushing a `vX.Y.Z` tag triggers the `deck-review-e2e-smoke` release gate in `.github/workflows/skill-quality.yml`, whose preflight fails fast unless the tag matches both `pyproject.toml` and `plugin.json`. Distribution must wait for that job to go green — see "How to Release" below and the Release Process section of CLAUDE.md.
 
 ### 2. Every content change on `main` must bump the version
 
@@ -87,7 +94,7 @@ The marketplace clone tracks `main`. A release that lives on a feature branch �
 - If you've already pushed `0.4.0` and need to add a fix: bump to `0.4.1`. Don't sneak fixes under the existing version.
 - The version bump should be the **last** commit of a release branch (or part of the merge commit) — never the first. If you bump early and then add more commits, bump again before merging.
 
-The "No Version Bump Needed" cases above (test-only changes, CI workflow changes, etc.) are exceptions enforced by the path filter in the CI check.
+The "No Version Bump Needed" cases above (CI workflow changes, test-only changes, repository markdown, lockfile) are exactly the paths the CI check's `requires_bump()` filter exempts. The filter forces a bump for any other file under `founder-skills/` and for `pyproject.toml` — note this includes `plugin.json` metadata-only edits (description/author), which therefore do require a bump despite being non-functional.
 
 ## How to Release
 
@@ -97,15 +104,21 @@ Releases are manual. On version bump:
 2. Update `version` in `pyproject.toml` to match
 3. Update `CHANGELOG.md` — move items from `[Unreleased]` to the new version, add `### Highlights`
 4. Commit, push to `main` (this should be the **last** commit of the release; if more fixes follow, bump the patch version again)
-5. Tag and create a GitHub Release:
+5. Tag and push:
 
 ```bash
 git tag -a v0.2.0 -m "v0.2.0"
 git push origin v0.2.0
-gh release create v0.2.0 --title "v0.2.0" --notes-file <(sed -n '/^## \[0.2.0\]/,/^## \[/p' CHANGELOG.md | head -n -1)
 ```
 
-The `gh release create` command extracts the changelog entry for the release notes.
+6. **Wait for `deck-review-e2e-smoke` to go green** in the GitHub Actions UI (the tag push triggers it; its preflight fails fast if the tag doesn't match `pyproject.toml` and `plugin.json`). Only after green do consumers get a build that passed the release gate.
+7. Create the GitHub Release once the gate is green:
+
+```bash
+gh release create v0.2.0 --title "v0.2.0" --notes-file <(sed -n '/^## \[0.2.0\]/,/^## \[/p' CHANGELOG.md | sed '$d')
+```
+
+The `gh release create` command extracts the changelog entry for the release notes. `sed '$d'` drops the trailing line (the start of the next entry); it is portable, unlike GNU-only `head -n -1`, which errors on the BSD `head` shipped with macOS.
 
 ## Tag Naming
 

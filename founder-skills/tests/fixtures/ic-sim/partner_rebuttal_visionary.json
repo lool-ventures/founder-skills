@@ -1,0 +1,16 @@
+{
+  "partner": "visionary",
+  "revised_verdict": "invest",
+  "verdict_changed": false,
+  "changed_because": "",
+  "responses": [
+    {"to": "operator", "point": "Agreed the channel mix isn't proven yet, but 18% MoM with zero paid spend is still a strong category-pull signal even before we see per-channel CAC.", "concedes": false},
+    {"to": "analyst", "point": "Fair point on unit economics being unproven — I'd still weight the category timing bet heavily, but I don't dispute we need the numbers.", "concedes": true}
+  ],
+  "dealbreakers": [],
+  "diligence_requirements": [
+    "Competitive teardown of QuickBooks/Xero AI roadmap",
+    "3 customer reference calls on why they switched"
+  ],
+  "metadata": {"run_id": "fixture-ic-sim-001"}
+}

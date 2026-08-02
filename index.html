@@ -1,0 +1,633 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>founder skills — investor-grade analysis, run on your own material</title>
+<meta name="description" content="Six investor-grade analyses — deck, model, market, competition, cap table, and a simulated investment committee — run on your own material inside Claude Cowork. Free and open source from lool ventures.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#151D2B">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23151D2B'/%3E%3Ctext x='16' y='23' text-anchor='middle' font-family='Helvetica,Arial,sans-serif' font-size='18' font-weight='700' fill='%23ffffff'%3Efs%3C/text%3E%3C/svg%3E">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="founder skills — run the diligence on yourself first">
+<meta property="og:description" content="Six investor-grade analyses, run on your own material inside Claude Cowork. Free, open source, script-backed: the numbers are computed, not narrated.">
+<meta property="og:url" content="https://lool-ventures.github.io/founder-skills/">
+<meta property="og:image" content="https://lool-ventures.github.io/founder-skills/assets/github_header.png">
+<meta name="twitter:card" content="summary_large_image">
+
+<style>
+/* ------------------------------------------------------------------
+   founder skills — landing page
+   Self-contained by design: no CDN, no external fonts, no analytics,
+   no third-party scripts. The page's own privacy section rules them out.
+   Sora is served from the copy this repo already ships for its artifacts.
+   ------------------------------------------------------------------ */
+
+@font-face{
+  font-family:'Sora';
+  font-style:normal;
+  font-weight:100 800;
+  font-display:swap;
+  src:url('founder-skills/references/brand/fonts/Sora-variable.woff2') format('woff2');
+}
+
+:root{
+  --font-body:'Sora',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+
+  --fs-bg:#FFFFFF; --fs-bg-alt:#FAFAFA; --fs-art:#F7F8FA;
+  --fs-ink:#333333; --fs-head:#0D549D; --fs-strong:#0D549D;
+  /* #6B7683 measured 4.35:1 on the card surface and 4.43:1 on --fs-bg-alt,
+     both under AA. #5E6A76 clears 5.2:1 on every light surface. */
+  --fs-mute:#5E6A76; --fs-line:#D7DBE0; --fs-azure:#0D549D; --fs-eyebrow:#1B5FB2;
+  --fs-band:#151D2B; --fs-band-line:rgba(255,255,255,.16);
+
+  --btn-bg:#0D549D; --btn-fg:#FFFFFF; --btn-bg-hover:#093F78;
+  /* Focus ring: #21A2E3 is only 2.86:1 on white — below the 3:1 non-text
+     minimum — so light theme uses the deeper blue (7.58:1). */
+  --fs-focus:#0D549D;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --fs-bg:#0F1622; --fs-bg-alt:#131A26; --fs-art:#151D2B;
+    --fs-ink:rgba(255,255,255,.82); --fs-head:#FFFFFF; --fs-strong:#FFFFFF;
+    --fs-mute:rgba(255,255,255,.62); --fs-line:rgba(255,255,255,.16);
+    --fs-azure:#6CCDFF; --fs-eyebrow:#6CCDFF;
+    --fs-focus:#21A2E3;
+  }
+}
+
+*{box-sizing:border-box}
+/* overflow-x stays on html ONLY. On body it makes body a scroll container,
+   which silently kills position:sticky on the header. */
+html{overflow-x:hidden}
+html,body{margin:0;padding:0}
+section[id]{scroll-margin-top:80px}
+body{
+  background:var(--fs-bg);color:var(--fs-ink);
+  font-family:var(--font-body);font-weight:300;font-size:16px;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+}
+img{max-width:100%}
+a{color:var(--fs-azure);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--fs-focus);outline-offset:3px}
+.band :focus-visible,.ftr :focus-visible{outline-color:#21A2E3}
+::selection{background:rgba(33,162,227,.22)}
+
+.skip{position:absolute;left:-9999px;top:0;z-index:60;background:#fff;color:#0D549D;padding:12px 18px}
+.skip:focus{left:0;top:0}
+
+.wrap{max-width:1200px;margin:0 auto;padding-left:clamp(20px,5vw,64px);padding-right:clamp(20px,5vw,64px)}
+.sec{padding-top:clamp(56px,8vw,110px);padding-bottom:clamp(56px,8vw,110px)}
+.band{background:var(--fs-band);color:rgba(255,255,255,.94)}
+.alt{background:var(--fs-bg-alt)}
+.rule-top{border-top:1px solid var(--fs-line)}
+.band .rule-top,.band.rule-top{border-top-color:var(--fs-band-line)}
+
+.eyebrow{font-size:13px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--fs-eyebrow);margin:0 0 16px}
+.band .eyebrow{color:#6CCDFF}
+
+h1,h2,h3{font-weight:400;letter-spacing:-.018em;text-wrap:pretty;margin:0}
+h1{font-size:clamp(38px,5.6vw,72px);line-height:1.05;color:#FFFFFF;max-width:17ch}
+h2{font-size:clamp(30px,4vw,48px);line-height:1.1;color:var(--fs-head)}
+.band h2{color:#FFFFFF}
+.lede{font-size:18px;line-height:1.7;color:var(--fs-mute);max-width:64ch;margin:0 0 clamp(36px,5vw,56px)}
+
+.mono{font-family:var(--font-mono)}
+.prompt{
+  font-family:var(--font-mono);font-size:14px;line-height:1.6;color:var(--fs-ink);
+  margin:0;padding:10px 0 10px 14px;border-left:2px solid #21A2E3;
+}
+
+/* Buttons — design system Button, 5px radius, 52px tall, trailing arrow */
+.btn{
+  display:inline-flex;align-items:center;gap:8px;height:52px;padding:0 26px;
+  font-family:var(--font-body);font-size:16px;font-weight:400;white-space:nowrap;
+  border:0;border-radius:5px;cursor:pointer;text-decoration:none;
+  transition:background .18s ease-out,color .18s ease-out,border-color .18s ease-out;
+}
+.btn:hover{text-decoration:none}
+.btn svg{flex:none}
+.btn--primary{background:var(--btn-bg);color:var(--btn-fg)}
+.btn--primary:hover{background:var(--btn-bg-hover);color:#fff}
+.btn--onblue{background:#fff;color:#0D549D}
+.btn--onblue:hover{background:#6CCDFF;color:#093F78}
+.btn--outline-onblue{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.32)}
+.btn--outline-onblue:hover{border-color:#fff;color:#fff}
+
+/* Header */
+.hdr{position:sticky;top:0;z-index:50;background:var(--fs-bg);border-bottom:1px solid var(--fs-line)}
+.hdr .wrap{height:64px;display:flex;align-items:center;justify-content:space-between;gap:24px}
+.wordmark{color:var(--fs-strong);font-size:17px;font-weight:600;letter-spacing:-.01em}
+.wordmark:hover{text-decoration:none}
+.nav{display:flex;align-items:center;gap:clamp(12px,2.2vw,28px);font-size:14px;flex-wrap:wrap;justify-content:flex-end}
+.nav a{color:var(--fs-mute)}
+.nav a.is-cta{color:var(--fs-strong);font-weight:500}
+@media (max-width:720px){.nav .opt{display:none}}
+
+/* Hero */
+/* top/bottom only — the `padding` shorthand here would reset .wrap's
+   horizontal padding to 0 and flush the hero against the screen edge below 1200px. */
+.hero{padding-top:clamp(56px,8vw,104px);padding-bottom:clamp(48px,6vw,80px)}
+.hero p.lead{font-size:clamp(18px,1.6vw,22px);line-height:1.7;color:rgba(255,255,255,.82);margin:28px 0 0;max-width:56ch;text-wrap:pretty}
+.hero .cta-row{display:flex;flex-wrap:wrap;gap:14px;margin:38px 0 0}
+.hero .qual{font-size:14px;color:rgba(255,255,255,.62);margin:24px 0 0}
+
+figure{margin:0}
+figcaption{font-size:14px;color:var(--fs-mute);margin:14px 0 0}
+.band figcaption{color:rgba(255,255,255,.62)}
+
+/* How it works */
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:clamp(28px,4vw,48px)}
+.step-rule{border-top:2px solid var(--fs-head);position:relative;padding-top:22px}
+.step-rule::before{content:"";position:absolute;top:-6px;left:0;width:11px;height:11px;border-radius:50%;background:var(--fs-head)}
+.step-n{font-family:var(--font-mono);font-size:13px;color:var(--fs-azure);margin:0 0 10px}
+.step h3{font-size:22px;color:var(--fs-strong);margin:0 0 12px;letter-spacing:-.01em}
+.step p{font-size:17px;line-height:1.7;color:var(--fs-ink);margin:0}
+.step p+.prompt{margin-top:16px}
+
+/* Six skills */
+.skills{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,430px),1fr));
+  gap:1px;background:var(--fs-line);border:1px solid var(--fs-line);
+}
+.card{background:var(--fs-art);display:flex;flex-direction:column}
+.card>picture>img{display:block;width:100%;height:auto;aspect-ratio:1600/550;object-fit:cover}
+.card-body{padding:clamp(22px,3vw,32px);display:flex;flex-direction:column;gap:14px;flex:1}
+.card-meta{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.card-meta .idx{font-family:var(--font-mono);font-size:12px;color:var(--fs-azure)}
+.tags{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.tag{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--fs-mute)}
+.tag--chip{color:var(--fs-strong);border:1px solid var(--fs-line);padding:4px 8px}
+.card h3{font-size:clamp(24px,2.4vw,30px);color:var(--fs-strong)}
+.promise{font-size:18px;line-height:1.65;color:var(--fs-ink);margin:0}
+.spec{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;margin:6px 0 0;font-size:15px;line-height:1.6}
+.spec dt{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--fs-mute);padding-top:3px}
+.spec dd{margin:0;color:var(--fs-ink)}
+.card .prompt{margin-top:auto}
+.legal{font-size:13px;line-height:1.6;color:var(--fs-mute);margin:0;padding-top:14px;border-top:1px solid var(--fs-line)}
+
+/* Artifact gallery */
+.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:clamp(24px,3vw,36px)}
+.gallery figcaption{font-size:15px;line-height:1.6;color:var(--fs-ink);margin:12px 0 0}
+.hero-figure{margin:clamp(40px,6vw,72px) 0 0}
+.m2{margin:0 0 clamp(32px,4vw,48px)}
+.m2 figcaption{font-size:16px;line-height:1.6;color:var(--fs-ink);margin:16px 0 0;max-width:70ch}
+.ratio-16x9{aspect-ratio:16/9}
+.ratio-4x3{aspect-ratio:4/3}
+
+/* Why it holds up */
+.rigor{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));
+  gap:1px;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.16);
+}
+.rigor>div{background:var(--fs-band);padding:clamp(24px,3vw,34px)}
+.rigor .n{font-family:var(--font-mono);font-size:13px;color:#6CCDFF;margin:0 0 14px}
+.rigor h3{font-size:20px;color:#FFFFFF;margin:0 0 12px;letter-spacing:-.01em}
+.rigor p{font-size:16px;line-height:1.7;color:rgba(255,255,255,.78);margin:0}
+.rigor a{color:#6CCDFF}
+
+/* Privacy */
+.privacy{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:clamp(32px,5vw,64px)}
+.privacy h2{margin:0 0 20px;max-width:20ch}
+.privacy .claim{font-size:18px;line-height:1.75;color:var(--fs-ink);margin:0}
+.exceptions{display:flex;flex-direction:column;gap:20px}
+.exceptions .label{font-size:13px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--fs-mute);margin:0}
+.exc{border-left:2px solid #21A2E3;padding:2px 0 2px 18px}
+.exc h3{font-size:18px;color:var(--fs-strong);margin:0 0 8px}
+.exc p{font-size:16px;line-height:1.7;color:var(--fs-ink);margin:0}
+
+/* Install */
+.install-card{border:1px solid var(--fs-line);background:var(--fs-bg);padding:clamp(26px,4vw,44px);display:flex;flex-direction:column;gap:26px}
+.install-head{display:flex;flex-wrap:wrap;align-items:center;gap:18px;justify-content:space-between}
+.install-head h3{font-size:clamp(22px,2.4vw,30px);color:var(--fs-strong)}
+.install-card p.intro{font-size:17px;line-height:1.7;color:var(--fs-ink);margin:0;max-width:70ch}
+.ol{margin:0;padding:0;list-style:none;display:grid;gap:18px}
+.ol li{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:start}
+.ol .n{font-family:var(--font-mono);font-size:13px;color:var(--fs-azure);padding-top:4px}
+.ol p{font-size:17px;line-height:1.7;color:var(--fs-ink);margin:0}
+.warn{border:1px solid var(--fs-line);background:var(--fs-bg-alt);padding:20px 22px;display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:center}
+.plus-pair{display:flex;gap:10px;align-items:center}
+.plus{display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--fs-line);font-size:19px;color:var(--fs-mute);background:var(--fs-bg)}
+.plus.is-it{border-color:#21A2E3;color:var(--fs-strong)}
+.warn p{font-size:15px;line-height:1.65;color:var(--fs-ink);margin:0}
+details{border:1px solid var(--fs-line);background:var(--fs-bg);margin:20px 0 0}
+summary{cursor:pointer;padding:18px clamp(20px,3vw,28px);font-size:16px;color:var(--fs-strong);list-style:none;display:flex;justify-content:space-between;gap:16px;align-items:center}
+summary::-webkit-details-marker{display:none}
+summary .hint{font-size:13px;color:var(--fs-mute);display:flex;align-items:center;gap:12px}
+/* display:flex on summary removes the marker in every engine, so supply one. */
+summary .hint::after{content:"+";font-family:var(--font-mono);font-size:16px;color:var(--fs-strong);line-height:1}
+details[open] summary .hint::after{content:"\2212"}
+.details-body{padding:0 clamp(20px,3vw,28px) 26px;display:flex;flex-direction:column;gap:16px}
+.snippet{
+  font-family:var(--font-mono);font-size:14px;line-height:1.9;color:var(--fs-ink);margin:0;
+  padding:14px 16px;border:1px solid var(--fs-line);background:var(--fs-bg-alt);
+  overflow-x:auto;white-space:pre;
+}
+.snippet code{font:inherit;color:inherit}
+.note{font-size:15px;line-height:1.7;color:var(--fs-mute);margin:0}
+.roadmap{font-size:15px;line-height:1.7;color:var(--fs-mute);margin:28px 0 0;max-width:70ch}
+
+/* Footer */
+.ftr{background:var(--fs-band);color:rgba(255,255,255,.82);border-top:1px solid var(--fs-band-line)}
+.ftr .wrap{padding-top:clamp(48px,6vw,84px);padding-bottom:clamp(48px,6vw,84px);display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:clamp(32px,5vw,56px)}
+.ftr img{display:block;width:100%;max-width:420px;height:auto;border:1px solid rgba(255,255,255,.16)}
+.ftr .about{font-size:15px;line-height:1.7;color:rgba(255,255,255,.62);margin:20px 0 0;max-width:44ch}
+.ftr a{color:rgba(255,255,255,.82)}
+.ftr .about a{color:#6CCDFF}
+.col{display:flex;flex-direction:column;gap:12px;font-size:15px}
+.col .label{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.5);margin:0 0 6px}
+.col p{margin:0;color:rgba(255,255,255,.62)}
+
+@media (prefers-reduced-motion:reduce){
+  *{animation:none !important;transition:none !important;scroll-behavior:auto !important}
+}
+</style>
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="hdr">
+  <div class="wrap">
+    <a class="wordmark" href="#top">founder skills</a>
+    <nav class="nav" aria-label="Sections">
+      <a class="opt" href="#how">How it works</a>
+      <a href="#skills">Six skills</a>
+      <a class="opt" href="#output">Output</a>
+      <a class="opt" href="#rigor">Why it holds up</a>
+      <a class="opt" href="#privacy">Privacy</a>
+      <a class="is-cta" href="#install">Install</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" tabindex="-1">
+
+<section id="top" class="band">
+  <div class="wrap hero">
+    <p class="eyebrow">An open-source Claude plugin from lool ventures</p>
+    <h1>Run the diligence on yourself first.</h1>
+    <p class="lead">Six investor-grade analyses — your deck, your model, your market, your competition, your cap table, and a simulated investment committee — run on your own material, inside Claude Cowork. Free, open source, and script-backed: the numbers are computed, not narrated.</p>
+    <div class="cta-row">
+      <a class="btn btn--onblue" href="#install">Install in Claude<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+      <a class="btn btn--outline-onblue" href="https://github.com/lool-ventures/founder-skills">View on GitHub</a>
+    </div>
+    <p class="qual">Free · Apache 2.0 · runs in Claude Cowork · your documents stay in your session</p>
+
+    <figure class="hero-figure">
+      <video class="ratio-16x9" data-autoplay muted loop playsinline controls
+             preload="metadata" width="1440" height="810"
+             poster="assets/landing/hero-session-poster.png"
+             style="width:100%;height:auto;display:block;background:#151D2B">
+        <source src="assets/landing/hero-session.mp4" type="video/mp4">
+      </video>
+      <figcaption>A real Cowork run reviewing a seed deck — prompt, narration, and the finished report landing in the Working folder. It takes minutes, not seconds; the recording is cut down and says so on screen.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap sec">
+    <p class="eyebrow">How it works</p>
+    <h2 style="margin-bottom:clamp(36px,5vw,64px);max-width:22ch">Three steps, then a wait that is doing something.</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-rule"></div>
+        <p class="step-n">01</p>
+        <h3>Install the plugin</h3>
+        <p>One install in Claude Cowork puts all six skills in the session. There is no account, no key, and nothing to configure.</p>
+      </div>
+      <div class="step">
+        <div class="step-rule"></div>
+        <p class="step-n">02</p>
+        <h3>Name the skill, hand it your file</h3>
+        <p>Name it, and give it something to work with. A vague fundraising question may not fire anything; naming the skill and attaching the file is what reliably does. This is the most common first-run mistake.</p>
+        <p class="prompt">Use the deck-review skill on our seed deck.</p>
+      </div>
+      <div class="step">
+        <div class="step-rule"></div>
+        <p class="step-n">03</p>
+        <h3>Get a report you can send on</h3>
+        <p>Every skill writes a <span class="mono" style="font-size:14px">report.md</span> and an HTML report to your Working folder. Three of them — cap table, financial model review, competitive positioning — also write an interactive explorer. Expect minutes: each run researches, computes and cross-checks before it writes a word.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="skills" class="rule-top">
+  <div class="wrap sec">
+    <p class="eyebrow">The six skills</p>
+    <h2 style="margin-bottom:20px;max-width:24ch">One plugin. Six analyses that read each other.</h2>
+    <p class="lede">Each is script-backed: deterministic producers compute the scores and the math, and the model does judgment and research inside that structure. Run several and they compound — IC simulation imports your market sizing and deck review; competitive positioning cross-validates your competition slide against a prior deck review.</p>
+
+    <div class="skills">
+
+      <article class="card">
+        <picture>
+          <source srcset="assets/deck_review.png" media="(prefers-color-scheme: dark)">
+          <img src="assets/deck_review-light.png" alt="" width="1600" height="550" loading="lazy" decoding="async">
+        </picture>
+        <div class="card-body">
+          <div class="card-meta"><span class="idx">01</span><span class="tags"><span class="tag">Stays in your session</span></span></div>
+          <h3>Deck review</h3>
+          <p class="promise">Your deck read the way an investor reads it — slide by slide, at your stage, against a named principle each time.</p>
+          <dl class="spec">
+            <dt>Give it</dt>
+            <dd>A PDF, PPTX, markdown, or pasted slide text.</dd>
+            <dt>Get back</dt>
+            <dd>35 criteria scored across 7 categories, a slide-by-slide review, and an overall readiness rating — strong, solid, needs work, or major revision. Grounded in published investor guidance and data from Sequoia, DocSend, YC, a16z and Carta.</dd>
+          </dl>
+          <p class="prompt">Use the deck-review skill on our seed deck.</p>
+        </div>
+      </article>
+
+      <article class="card">
+        <picture>
+          <source srcset="assets/cap_table.png" media="(prefers-color-scheme: dark)">
+          <img src="assets/cap_table-light.png" alt="" width="1600" height="550" loading="lazy" decoding="async">
+        </picture>
+        <div class="card-body">
+          <div class="card-meta"><span class="idx">02</span><span class="tags"><span class="tag">Stays in your session</span><span class="tag tag--chip">Interactive explorer</span></span></div>
+          <h3>Cap table</h3>
+          <p class="promise">What each instrument actually does to your ownership, with the rule that says so cited next to the number.</p>
+          <dl class="spec">
+            <dt>Give it</dt>
+            <dd>A signed or draft SAFE, convertible note, term sheet, option plan, warrant, articles of association, a Carta XLSX export — or just a described set of holders and instruments.</dd>
+            <dt>Get back</dt>
+            <dd>SAFE conversion across all forms — post-money cap, discount and MFN chains, cap-and-discount, and the legacy pre-money variants — full-branch convertible-note math, priced-round dilution with broad-based weighted-average, narrow-based or full-ratchet anti-dilution, pool top-ups, warrants, Israeli ↔ Delaware flips and dual-class voting. Pay-to-play provisions are detected and flagged for counsel rather than modelled. Plus a pre/post snapshot and a counsel-handoff packet. Every calculation cites a rule from a versioned pack sourced to NVCA model documents, the YC SAFE primer, Cooley GO and Israeli Companies Law — and the explorer's pre-money slider is not interpolated: every frame is a real solved round.</dd>
+          </dl>
+          <p class="prompt" style="margin-top:0">Use the cap-table skill on this SAFE and our current holders.</p>
+          <p class="legal" style="margin-top:auto">Not legal, tax or investment advice.</p>
+        </div>
+      </article>
+
+      <article class="card">
+        <picture>
+          <source srcset="assets/financial_model_review.png" media="(prefers-color-scheme: dark)">
+          <img src="assets/financial_model_review-light.png" alt="" width="1600" height="550" loading="lazy" decoding="async">
+        </picture>
+        <div class="card-body">
+          <div class="card-meta"><span class="idx">03</span><span class="tags"><span class="tag">Stays in your session</span><span class="tag tag--chip">Interactive explorer</span></span></div>
+          <h3>Financial model review</h3>
+          <p class="promise">Your model checked, benchmarked, and stress-tested to the month the cash runs out.</p>
+          <dl class="spec">
+            <dt>Give it</dt>
+            <dd>An .xlsx, a CSV, a link to a Google Sheet, the financial slides from your deck, or numbers described in conversation.</dd>
+            <dt>Get back</dt>
+            <dd>46 criteria across 7 categories, auto-skipping the ones that do not apply to your stage, geography or sector; 11 unit-economics metrics benchmarked against stage-appropriate targets; runway under base, slow-growth and crisis scenarios with cash-out dates, decision points and default-alive analysis. An extraction gate cross-checks what it read out of the spreadsheet against your own stated inputs first — including a model kept in thousands.</dd>
+          </dl>
+          <p class="prompt">Use the financial-model-review skill on this model.</p>
+        </div>
+      </article>
+
+      <article class="card">
+        <picture>
+          <source srcset="assets/market_sizing.png" media="(prefers-color-scheme: dark)">
+          <img src="assets/market_sizing-light.png" alt="" width="1600" height="550" loading="lazy" decoding="async">
+        </picture>
+        <div class="card-body">
+          <div class="card-meta"><span class="idx">04</span><span class="tags"><span class="tag">Searches the web</span></span></div>
+          <h3>Market sizing</h3>
+          <p class="promise">A market number that survives the follow-up question, with the range it becomes when you are wrong.</p>
+          <dl class="spec">
+            <dt>Give it</dt>
+            <dd>A deck, a model, market data — or just a description of the business: product, customer, geography, pricing.</dd>
+            <dt>Get back</dt>
+            <dd>TAM/SAM/SOM top-down, bottom-up or both; sensitivity ranges that widen automatically when confidence is low; a 22-item self-check against common sizing pitfalls; and every figure cross-checked for internal agreement before anything is written. Claims are validated against analyst reports, government data and industry statistics.</dd>
+          </dl>
+          <p class="prompt">Use the market-sizing skill for our business.</p>
+        </div>
+      </article>
+
+      <article class="card">
+        <picture>
+          <source srcset="assets/competitive_positioning.png" media="(prefers-color-scheme: dark)">
+          <img src="assets/competitive_positioning-light.png" alt="" width="1600" height="550" loading="lazy" decoding="async">
+        </picture>
+        <div class="card-body">
+          <div class="card-meta"><span class="idx">05</span><span class="tags"><span class="tag">Optional web search</span><span class="tag tag--chip">Interactive explorer</span></span></div>
+          <h3>Competitive positioning</h3>
+          <p class="promise">The competitor missing from your slide, and the axis you chose because it flatters you.</p>
+          <dl class="spec">
+            <dt>Give it</dt>
+            <dd>A deck, a product description, or a conversation. It works best after a deck review, which it cross-validates against.</dd>
+            <dt>Get back</dt>
+            <dd>5–7 competitors across direct, adjacent, emerging and do-nothing; a positioning map that calls out an axis chosen to flatter rather than inform; 6 canonical moat dimensions per company with trajectory; differentiation claims stress-tested against evidence; a ~25-item quality checklist scoped to how much you gave it. The competitor set itself gets an adversarial pass — genuine, adjacent, or not actually a competitor, with reasoning — and it asks who is missing.</dd>
+          </dl>
+          <p class="prompt">Use the competitive-positioning skill on our deck.</p>
+        </div>
+      </article>
+
+      <article class="card">
+        <picture>
+          <source srcset="assets/ic_sim.png" media="(prefers-color-scheme: dark)">
+          <img src="assets/ic_sim-light.png" alt="" width="1600" height="550" loading="lazy" decoding="async">
+        </picture>
+        <div class="card-body">
+          <div class="card-meta"><span class="idx">06</span><span class="tags"><span class="tag">Searches the web for a named fund</span></span></div>
+          <h3>IC simulation</h3>
+          <p class="promise">Three partners argue about your company. They form their views independently, so they genuinely disagree.</p>
+          <dl class="spec">
+            <dt>Give it</dt>
+            <dd>A deck, a model, data-room contents, or a description — optionally the name of a specific fund. Prior market-sizing and deck-review artifacts import automatically.</dd>
+            <dt>Get back</dt>
+            <dd>A simulated debate in three distinct voices — The Visionary on markets and timing, The Operator on execution and GTM, The Analyst on unit economics — scored across 28 dimensions in 7 categories, with conviction scores, a portfolio-conflict check, a consensus verdict — invest, more diligence, pass, or hard pass — and coaching on what to prepare before the real meeting.</dd>
+          </dl>
+          <p class="prompt">Use the ic-sim skill on our deck and model.</p>
+        </div>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+<section id="output" class="alt rule-top">
+  <div class="wrap sec">
+    <p class="eyebrow">What lands on disk</p>
+    <h2 style="margin-bottom:20px;max-width:24ch">Output you would be willing to forward.</h2>
+    <p class="lede">A written report and an HTML version for all six skills, written into your task's workspace under <span class="mono" style="font-size:15px">artifacts/&lt;skill&gt;-&lt;company&gt;/</span> and usually attached to the conversation too. Cap table, financial model review and competitive positioning add an interactive explorer. A cloud task's workspace is temporary, so download anything you want to keep. Every capture below uses a synthetic company.</p>
+
+    <figure class="m2">
+      <video class="ratio-16x9" data-autoplay muted loop playsinline controls
+             preload="metadata" width="1600" height="900"
+             poster="assets/landing/explorer-captable-poster.png"
+             style="width:100%;height:auto;display:block;background:#151D2B">
+        <source src="assets/landing/explorer-captable.mp4" type="video/mp4">
+      </video>
+      <figcaption>Drag the pre-money and watch your ownership move. Nothing here is interpolated — each frame is a priced round solved from scratch, which is why the numbers stay honest at the extremes.</figcaption>
+    </figure>
+
+    <div class="gallery">
+      <figure>
+        <img src="assets/landing/artifact-deck-review.png" alt="Deck review report showing a 43% Major Revision score gauge and key findings naming specific slides" width="1600" height="1200" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;aspect-ratio:4/3;border:1px solid var(--fs-line)">
+        <figcaption>The critique names the slide and the fix, not the category.</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/landing/artifact-cap-table.png" alt="Cap-table scenario showing the Series A priced round with per-holder ownership before and after" width="1600" height="1200" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;aspect-ratio:4/3;border:1px solid var(--fs-line)">
+        <figcaption>Every line of math points at the rule it came from.</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/landing/artifact-financial-model-review.png" alt="Runway scenarios chart with cash-out dates for base, slow-growth and crisis cases" width="1600" height="1200" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;aspect-ratio:4/3;border:1px solid var(--fs-line)">
+        <figcaption>A date, not an adjective — and the decision points before it.</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/landing/artifact-market-sizing.png" alt="Market sizing sensitivity analysis showing how TAM, SAM and SOM move with each assumption" width="1600" height="1200" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;aspect-ratio:4/3;border:1px solid var(--fs-line)">
+        <figcaption>A range you can defend beats a number you cannot.</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/landing/artifact-competitive-positioning.png" alt="Positioning map plotting Acmecorp against ten competitors on AI-agent autonomy and team size" width="1600" height="1200" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;aspect-ratio:4/3;border:1px solid var(--fs-line)">
+        <figcaption>Where you actually sit, including the competitors you did not list.</figcaption>
+      </figure>
+      <figure>
+        <img src="assets/landing/artifact-ic-simulation.png" alt="Partner verdicts from three simulated investors, each with their reasoning" width="1600" height="1200" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;aspect-ratio:4/3;border:1px solid var(--fs-line)">
+        <figcaption>Three partners, one deck — and the Visionary changed his mind. He backed the team until the other two surfaced a runway gap he had missed, then moved to decline with them.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section id="rigor" class="band rule-top">
+  <div class="wrap sec">
+    <p class="eyebrow">Why it holds up</p>
+    <h2 style="margin-bottom:clamp(36px,5vw,56px);max-width:24ch">The reason to use it is that the output survives someone reading it.</h2>
+    <div class="rigor">
+      <div>
+        <p class="n">01</p>
+        <h3>Deterministic producers, not vibes</h3>
+        <p>Scores, conversions, dilution and runway are computed by versioned Python. The same inputs give the same numbers.</p>
+      </div>
+      <div>
+        <p class="n">02</p>
+        <h3>Cited to primary sources</h3>
+        <p>Cap-table math cites a rule pack sourced to NVCA model documents, the YC SAFE primer, Cooley GO and Israeli Companies Law. Deck and model benchmarks are grounded in published investor data.</p>
+      </div>
+      <div>
+        <p class="n">03</p>
+        <h3>Anti-hallucination gates</h3>
+        <p>An extracted figure has to clear the source before it is used: quote present, value present in the quote, value present in the document — plus real-world bounds checks. Competitor sets get an adversarial pass.</p>
+      </div>
+      <div>
+        <p class="n">04</p>
+        <h3>Cross-artifact consistency</h3>
+        <p>Every skill validates its figures against each other before a report is written, so the report does not contradict itself.</p>
+      </div>
+      <div>
+        <p class="n">05</p>
+        <h3>Tested against the runtime it runs in</h3>
+        <p>Beyond unit tests, every change to a skill replays recorded Claude Cowork runs, and every pull request statically analyzes each skill body — because the Cowork runtime differs from the CLI in ways unit tests cannot see.</p>
+      </div>
+      <div>
+        <p class="n">06</p>
+        <h3>Open source, Apache 2.0</h3>
+        <p>Read exactly what it does before you run it on your own numbers. <a href="https://github.com/lool-ventures/founder-skills">The source is here</a>, and pull requests are welcome — a criterion we got wrong is worth an issue.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="privacy" class="rule-top">
+  <div class="wrap sec privacy">
+    <div>
+      <p class="eyebrow">Privacy</p>
+      <h2>Your documents stay in your session.</h2>
+      <p class="claim">Nothing is collected, transmitted or shared with lool. There is no account, no telemetry, no analytics — not in the plugin, and not on this page. Feedback is opt-in and only ever sent when you ask for it.</p>
+    </div>
+    <div class="exceptions">
+      <p class="label">Two exceptions, stated plainly</p>
+      <div class="exc">
+        <h3>Three skills search the web</h3>
+        <p>Market sizing always, IC simulation when you name a fund, competitive positioning optionally. Queries derived from your material pass through Claude to a search provider. The other three never touch the network.</p>
+      </div>
+      <div class="exc">
+        <h3>One optional chart library</h3>
+        <p>The competitive-positioning explorer's optional 3D tab loads a charting library from a public CDN the first time you open that tab. Everything else in every artifact is self-contained.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="install" class="alt rule-top">
+  <div class="wrap sec">
+    <p class="eyebrow">Install</p>
+    <h2 style="margin-bottom:clamp(32px,4vw,48px);max-width:22ch">Install once in Claude Cowork.</h2>
+
+    <div class="install-card">
+      <div class="install-head">
+        <h3>Claude Cowork — the way to run this</h3>
+        <a class="btn btn--primary" href="static/install-claude-desktop.html">Install in Claude<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+      </div>
+      <p class="intro">Claude Cowork, inside the Claude desktop app, is where these skills are designed, tested and tuned. If you do it manually, two steps, in this order:</p>
+      <ol class="ol" role="list">
+        <li><span class="n" aria-hidden="true">01</span><p>Add the marketplace: <span class="mono" style="font-size:15px">lool-ventures/founder-skills</span>.</p></li>
+        <li><span class="n" aria-hidden="true">02</span><p>Then install the <span class="mono" style="font-size:15px">founder-skills</span> plugin from it.</p></li>
+      </ol>
+      <div class="warn">
+        <div class="plus-pair" aria-hidden="true"><span class="plus">+</span><span class="plus is-it">+</span></div>
+        <p>Two <span class="mono">+</span> buttons look alike. The first adds the marketplace; the second installs the plugin. Syncing a marketplace does not install anything — this is the most common failure.</p>
+      </div>
+    </div>
+
+    <details>
+      <summary><span>Already live in a terminal? Claude Code works too</span><span class="hint">Secondary path</span></summary>
+      <div class="details-body">
+        <pre class="snippet"><code>claude plugin marketplace add lool-ventures/founder-skills
+claude plugin install founder-skills@lool-founder-skills</code></pre>
+        <p class="note">The producer scripts run locally, so you need Python 3.10 or later. Reading Excel models needs <span class="mono">openpyxl</span> and reading PDFs needs <span class="mono">pdfplumber</span> — install them if you hit a missing-module error on your first file. Artifacts land in <span class="mono">artifacts/</span>, in whatever directory you started from.</p>
+      </div>
+    </details>
+
+    <p class="roadmap">ChatGPT Work support is on the roadmap — it may already work, but we have not tested it.</p>
+  </div>
+</section>
+
+</main>
+
+<footer class="ftr">
+  <div class="wrap">
+    <div>
+      <img src="assets/github_header.png" alt="founder skills — AI coaching agents for startup founders" width="1600" height="791" loading="lazy" decoding="async">
+      <p class="about">Built by <a href="https://lool.vc">lool ventures</a>, Israel's seed fund — backing founders to invent the future faster.</p>
+    </div>
+    <div class="col">
+      <p class="label">Project</p>
+      <a href="https://github.com/lool-ventures/founder-skills">Source on GitHub</a>
+      <a href="https://github.com/lool-ventures/founder-skills/issues">Issues</a>
+      <a href="https://github.com/lool-ventures/founder-skills/blob/main/CONTRIBUTING.md">Contributing</a>
+      <a href="https://github.com/lool-ventures/founder-skills/discussions">Discussions</a>
+      <a href="https://github.com/lool-ventures/founder-skills/security/policy">Report a security issue</a>
+    </div>
+    <div class="col">
+      <p class="label">Contact and license</p>
+      <a href="mailto:founder-skills@lool.vc">founder-skills@lool.vc</a>
+      <p>Code under Apache 2.0.</p>
+      <p>Sora typeface under OFL 1.1.</p>
+      <p>No trackers on this page.</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+/* The only script on this page: first-party, inline, ~7 lines, loads nothing.
+   The privacy claim above is about analytics and third-party code — this is neither.
+
+   No `autoplay` attribute exists anywhere in the markup on purpose. Playback is
+   JS-driven and gated on prefers-reduced-motion, so a visitor who asked for less
+   motion never sees a frame of it — which an HTML attribute cannot express.
+   Every video keeps `controls`, so a browser that blocks autoplay (iOS Low Power
+   Mode, data saver) still leaves the clip playable rather than a dead poster.
+
+   No-op until the media slots are filled. */
+(function () {
+  if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  document.querySelectorAll('video[data-autoplay]').forEach(function (v) {
+    var p = v.play();
+    if (p && p.catch) { p.catch(function () {}); }   /* blocked autoplay is fine, not an error */
+  });
+})();
+</script>
+
+</body>
+</html>

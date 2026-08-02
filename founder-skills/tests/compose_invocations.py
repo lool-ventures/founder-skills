@@ -72,10 +72,10 @@ _COMPOSE_FLAGS: dict[str, list[str]] = {
     # cap-table also requires --write-md; the harness substitutes REPORT_JSON_OUT
     # but also needs a markdown sibling path. We pass an explicit md path.
     "cap-table": ["-o", "REPORT_JSON_OUT", "--write-md", "REPORT_MD_OUT", "--run-id", "test-run"],
-    # "market-sizing": [...],            # confirm before adding
-    # "ic-sim": [...],                   # confirm before adding
+    "market-sizing": ["-o", "REPORT_JSON_OUT", "--write-md", "REPORT_MD_OUT"],
+    "ic-sim": ["-o", "REPORT_JSON_OUT", "--write-md", "REPORT_MD_OUT"],
     "financial-model-review": ["-o", "REPORT_JSON_OUT", "--write-md", "REPORT_MD_OUT"],
-    # "competitive-positioning": [...],  # confirm before adding
+    "competitive-positioning": ["-o", "REPORT_JSON_OUT", "--write-md", "REPORT_MD_OUT"],
 }
 
 # Per-skill artifact name to mutate when testing run_id-parity behavior.
@@ -92,10 +92,10 @@ _COMPOSE_FLAGS: dict[str, list[str]] = {
 _RUN_ID_MUTATION_TARGET: dict[str, str] = {
     "deck-review": "deck_inventory.json",
     "cap-table": "inputs.json",
-    # "market-sizing": "inputs.json",            # confirm before adding
-    # "ic-sim": "startup_profile.json",          # confirm before adding
+    "market-sizing": "inputs.json",
+    "ic-sim": "startup_profile.json",
     "financial-model-review": "inputs.json",
-    # "competitive-positioning": "landscape.json", # confirm before adding
+    "competitive-positioning": "landscape.json",
 }
 
 

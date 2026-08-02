@@ -62,6 +62,20 @@ def _deep_get(data: dict[str, Any], *keys: str, default: Any = None) -> Any:
     return current
 
 
+def _num(x: Any, default: float) -> float:
+    """Coerce x to a numeric value, falling back to default for null/non-numeric.
+
+    The dict.get() default only applies to missing keys, not to keys present
+    with an explicit JSON null. Used inside sanity arithmetic so a present-but-
+    null headcount cell is reported (Layer 1 TYPE_ERROR) rather than crashing.
+    """
+    if isinstance(x, bool):
+        return default
+    if isinstance(x, (int, float)):
+        return x
+    return default
+
+
 def _deep_get_by_path(data: dict[str, Any], dotted_path: str) -> Any:
     """Navigate nested dict by dotted path like 'cash.monthly_net_burn'."""
     obj: Any = data
@@ -77,13 +91,48 @@ def _deep_get_by_path(data: dict[str, Any], dotted_path: str) -> Any:
 # Stage helpers
 # ---------------------------------------------------------------------------
 
-_STAGE_ORDER = ["pre-seed", "seed", "series-a", "series-b", "later"]
+# The stage ladder, lowest to highest. Every stage the shared founder context
+# admits appears here, and the seed+/series-a+ groups below are DERIVED from it
+# rather than written out — a hand-written membership set omits whatever stage
+# nobody thought about, and it fails open: an unlisted stage falls through to
+# the lowest branch and is silently held to no threshold at all.
+_STAGE_LADDER = (
+    "pre-seed",
+    "seed",
+    "series-a",
+    "series-b",
+    "series-c",
+    "series-d",
+    "later",
+)
 
-_SEED_PLUS = {"seed", "series-a", "series-b", "later"}
-_SERIES_A_PLUS = {"series-a", "series-b", "later"}
+# Fields that feed a COMPUTATION rather than merely describing the company, so a
+# silently-defaulted value changes an output the founder reads. Kept short and
+# explicit — this is a disclosure list, not a schema.
+_COMPUTATION_FEEDING_FIELDS = (
+    "bridge.runway_target_months",
+    "bridge.raise_amount",
+    "fundraising.target_raise",
+    "fundraising.expected_close",
+    "growth.growth_rate_monthly",
+)
 
 
-def _stage_in(stage: str | None, group: set[str]) -> bool:
+def _stages_at_or_above(stage: str) -> frozenset[str]:
+    """Every ladder stage from *stage* upward.
+
+    Excluding a stage below the floor is the point — pre-seed is absent from
+    _SEED_PLUS by construction, not by omission, and stays absent when the
+    ladder grows.
+    """
+    return frozenset(_STAGE_LADDER[_STAGE_LADDER.index(stage) :])
+
+
+_SEED_PLUS = _stages_at_or_above("seed")
+_SERIES_A_PLUS = _stages_at_or_above("series-a")
+
+
+def _stage_in(stage: str | None, group: frozenset[str]) -> bool:
     """Return True if *stage* (lowercased) is in *group*."""
     if stage is None:
         return False
@@ -139,6 +188,31 @@ def _validate_structural(
                     "layer": 1,
                 }
             )
+
+    # --- Type correctness for headcount numeric cells ---
+    # Present-but-null count/salary_annual cells (produced by the corrections
+    # coercion layer for blank fields) make the entry unusable and would crash
+    # the downstream Layer-3 sanity arithmetic; report them here as TYPE_ERROR.
+    headcount_entries = _deep_get(inputs, "expenses", "headcount")
+    if isinstance(headcount_entries, list):
+        for idx, entry in enumerate(headcount_entries):
+            if not isinstance(entry, dict):
+                continue
+            for hc_field in ("count", "salary_annual"):
+                if hc_field not in entry:
+                    continue
+                cell = entry[hc_field]
+                if isinstance(cell, bool) or not isinstance(cell, (int, float)):
+                    field_path = f"expenses.headcount[{idx}].{hc_field}"
+                    got = "null" if cell is None else type(cell).__name__
+                    errors.append(
+                        {
+                            "code": "TYPE_ERROR",
+                            "message": f"Field '{field_path}' must be numeric, got {got}",
+                            "field": field_path,
+                            "layer": 1,
+                        }
+                    )
 
     # --- Burn sign check ---
     burn = _deep_get(inputs, "cash", "monthly_net_burn")
@@ -288,9 +362,25 @@ def _validate_structural(
                         }
                     )
 
+    # --- Currency field type check ---
+    # Top-level `currency` is an optional ISO 4217 code (e.g., "USD", "INR").
+    # Absent is the back-compat default (treated as USD-equivalent downstream);
+    # when present, only the type is validated here — the code isn't matched
+    # against a fixed enum since ISO 4217 has ~180 valid codes.
+    currency = inputs.get("currency")
+    if currency is not None and not isinstance(currency, str):
+        errors.append(
+            {
+                "code": "TYPE_ERROR",
+                "message": f"Field 'currency' must be a string (ISO 4217 code), got {type(currency).__name__}",
+                "field": "currency",
+                "layer": 1,
+            }
+        )
+
     # --- Enum field checks ---
     _ENUM_FIELDS: dict[str, tuple[tuple[str, ...], list[str]]] = {
-        "stage": (("company", "stage"), ["pre-seed", "seed", "series-a", "series-b", "later"]),
+        "stage": (("company", "stage"), list(_STAGE_LADDER)),
         "revenue_model_type": (
             ("company", "revenue_model_type"),
             [
@@ -304,6 +394,7 @@ def _validate_structural(
                 "consumer-subscription",
                 "transactional-fintech",
                 "annual-contracts",
+                "retail",
             ],
         ),
         "model_format": (
@@ -311,6 +402,10 @@ def _validate_structural(
             ["spreadsheet", "deck", "conversational", "partial"],
         ),
         "data_confidence": (("company", "data_confidence"), ["exact", "estimated", "mixed"]),
+        "gross_margin_basis": (
+            ("unit_economics", "gross_margin_basis"),
+            ["product", "store_contribution", "net_revenue", "gross_revenue", "blended"],
+        ),
         "formatting_quality": (("structure", "formatting_quality"), ["good", "acceptable", "poor"]),
         "source_periodicity": (
             ("metadata", "source_periodicity"),
@@ -532,6 +627,24 @@ def _validate_sanity(inputs: dict[str, Any]) -> list[dict[str, Any]]:
                 }
             )
 
+    # GRR > 1.0 is impossible by definition: gross revenue retention nets out churn
+    # and downgrades but does not include expansion, so it is bounded by 1.0.
+    grr_val = _deep_get(inputs, "revenue", "grr")
+    if isinstance(grr_val, (int, float)) and grr_val > 1.0:
+        warnings.append(
+            {
+                "code": "GRR_ABOVE_ONE",
+                "message": (
+                    f"GRR ({grr_val:.2%}) exceeds 100% — impossible by definition. "
+                    "GRR only nets out churn and downgrades; it cannot include expansion revenue. "
+                    "Check whether NRR was entered instead of GRR."
+                ),
+                "field": "revenue.grr",
+                "layer": 3,
+                "critical": True,
+            }
+        )
+
     # Burn multiple sanity (data-error detector — checklist scores the metric)
     # Prefer time-series net new ARR over growth-rate shortcut to avoid
     # false positives for enterprise SaaS with lumpy deal flow.
@@ -584,7 +697,10 @@ def _validate_sanity(inputs: dict[str, Any]) -> list[dict[str, Any]]:
         if _ts_net_new_arr is not None and _ts_net_new_arr > 0:
             net_new_arr = _ts_net_new_arr
         elif isinstance(mrr, (int, float)) and isinstance(growth, (int, float)) and growth > 0 and mrr > 0:
-            net_new_arr = mrr * growth * 12
+            # The divisor below is annual burn, so the estimate must be ANNUAL
+            # net-new ARR: ΔMRR per month (mrr*growth) adds 12x that to ARR each
+            # month, sustained over 12 months.
+            net_new_arr = mrr * growth * 12 * 12
             _bm_method = "growth-rate estimate"
         if net_new_arr is not None and net_new_arr > 0:
             burn_multiple = (burn * 12) / net_new_arr
@@ -605,9 +721,9 @@ def _validate_sanity(inputs: dict[str, Any]) -> list[dict[str, Any]]:
     # Expense coverage: headcount costs should roughly account for stated burn
     headcount = _deep_get(inputs, "expenses", "headcount")
     if isinstance(burn, (int, float)) and burn > 0 and isinstance(headcount, list) and len(headcount) > 0:
-        total_hc = sum(h.get("count", 0) for h in headcount if isinstance(h, dict))
+        total_hc = sum(_num(h.get("count", 0), 0) for h in headcount if isinstance(h, dict))
         total_salary_monthly = sum(
-            h.get("salary_annual", 0) / 12 * h.get("count", 1)
+            h.get("salary_annual", 0) / 12 * _num(h.get("count", 1), 1)
             for h in headcount
             if isinstance(h, dict) and isinstance(h.get("salary_annual"), (int, float))
         )
@@ -617,7 +733,7 @@ def _validate_sanity(inputs: dict[str, Any]) -> list[dict[str, Any]]:
                 burden = h.get("burden_pct")
                 if isinstance(burden, (int, float)) and burden > 0:
                     sal = h.get("salary_annual", 0)
-                    cnt = h.get("count", 1)
+                    cnt = _num(h.get("count", 1), 1)
                     if isinstance(sal, (int, float)):
                         total_salary_monthly += sal / 12 * cnt * burden
         # Sum opex and COGS for total extracted expenses
@@ -642,19 +758,82 @@ def _validate_sanity(inputs: dict[str, Any]) -> list[dict[str, Any]]:
             rev = 0
         expected_expenses = burn + rev
         if total_hc > 0 and expected_expenses > 0 and total_extracted < expected_expenses * 0.50:
+            # A CONVERSATIONAL / partial source legitimately lacks an opex breakdown: the founder gives
+            # total burn plus headcount and nothing else. That is the intake mode working as designed, not
+            # a missed extraction — so this must NOT be critical there. Firing critical on a conversational
+            # source made the gate self-defeating: the only way to clear a STOP is to produce the missing
+            # expenses, and with nothing to extract from, a reconciling opex line gets INVENTED. An
+            # anti-hallucination gate must never be satisfiable only by fabrication.
+            #
+            # `spreadsheet`/`deck` sources DO carry a breakdown, so there the gate keeps its teeth: sub-50%
+            # coverage means the extractor missed department-level payroll or a non-payroll block.
+            fmt = _deep_get(inputs, "company", "model_format") or "spreadsheet"
+            sparse_by_design = fmt in ("conversational", "partial")
+            # Currency-neutral: the figures are whatever `inputs.currency` says. Hardcoding `$` here
+            # leaked a bare dollar sign into a non-USD review (the report itself is otherwise clean).
+            cur = inputs.get("currency") or "USD"
+            unit = "" if cur == "USD" else f" {cur}"
+            money = "$" if cur == "USD" else ""
+            if sparse_by_design:
+                message = (
+                    f"Only {total_extracted / expected_expenses:.0%} of implied total expenses are itemized "
+                    f"({money}{total_extracted:,.0f}{unit}/mo from headcount + opex + COGS, against "
+                    f"{money}{expected_expenses:,.0f}{unit}/mo = burn {money}{burn:,.0f}{unit} + revenue "
+                    f"{money}{rev:,.0f}{unit}). Expected for a {fmt} source — the remainder is unitemized "
+                    "non-payroll opex. Totals are used as stated; per-category analysis is limited to what "
+                    "was itemized. Do NOT invent a reconciling opex line to close the gap."
+                )
+            else:
+                message = (
+                    f"Extracted expenses ({money}{total_extracted:,.0f}{unit}/mo from headcount + opex + "
+                    f"COGS) cover only {total_extracted / expected_expenses:.0%} of implied total expenses "
+                    f"({money}{expected_expenses:,.0f}{unit}/mo = burn {money}{burn:,.0f}{unit} + revenue "
+                    f"{money}{rev:,.0f}{unit}). Major cost categories likely missed — check for "
+                    "department-level payroll (R&D, S&M, G&A) and non-payroll opex."
+                )
             warnings.append(
                 {
                     "code": "EXPENSE_COVERAGE_SUSPECT",
-                    "message": (
-                        f"Extracted expenses (${total_extracted:,.0f}/mo from headcount + opex + COGS) "
-                        f"cover only {total_extracted / expected_expenses:.0%} of implied total expenses "
-                        f"(${expected_expenses:,.0f}/mo = burn ${burn:,.0f} + revenue ${rev:,.0f}). "
-                        "Major cost categories likely missed — check for department-level payroll "
-                        "(R&D, S&M, G&A) and non-payroll opex."
-                    ),
+                    "message": message,
                     "field": "expenses",
                     "layer": 3,
-                    "critical": True,
+                    "critical": not sparse_by_design,
+                }
+            )
+
+    # UNDECLARED_AGENT_VALUE — a field the founder never stated, recorded
+    # indistinguishably from one they did.
+    #
+    # Observed live: a conversational run wrote `bridge.runway_target_months: 24`
+    # after a founder who never mentioned a runway target. The VALUE was harmless
+    # (runway.py defaults to 24 anyway), but inputs.json records it as founder
+    # input, and the next reader — a sub-agent, the checklist, or the founder
+    # reviewing their own file — cannot tell the difference. That is the same
+    # defect market-sizing fixed with `founder_stated_inputs`.
+    #
+    # The fix is provenance, not prohibition: the agent MAY supply a default, and
+    # must declare it in `agent_supplied` so the report can disclose it. An absent
+    # declaration on a conversational run is the thing we flag — the founder was
+    # never asked whether these are right.
+    fmt = _deep_get(inputs, "company", "model_format") or "spreadsheet"
+    if fmt in ("conversational", "deck"):
+        declared = inputs.get("agent_supplied")
+        undeclared = [path for path in _COMPUTATION_FEEDING_FIELDS if _deep_get(inputs, *path.split(".")) is not None]
+        if undeclared and declared is None:
+            warnings.append(
+                {
+                    "code": "UNDECLARED_AGENT_VALUE",
+                    "message": (
+                        "On a conversational/deck run, inputs.json carries "
+                        + ", ".join(undeclared)
+                        + " but no `agent_supplied` declaration, so there is no way to tell which of "
+                        "these the founder actually stated. Set `agent_supplied` to the list of field "
+                        "paths you defaulted (or `[]` if the founder stated all of them) and surface "
+                        "every entry in the Step 3.6 Path B confirmation table before the math runs."
+                    ),
+                    "field": "agent_supplied",
+                    "layer": 3,
+                    "critical": False,
                 }
             )
 
@@ -848,7 +1027,8 @@ def validate(inputs: dict[str, Any], *, fix: bool = False) -> dict[str, Any]:
     # Layer 4
     all_warnings.extend(_validate_completeness(inputs))
 
-    overrides = inputs.get("metadata", {}).get("warning_overrides", [])
+    metadata = inputs.get("metadata")
+    overrides = metadata.get("warning_overrides", []) if isinstance(metadata, dict) else []
 
     return {
         "valid": len(all_errors) == 0,

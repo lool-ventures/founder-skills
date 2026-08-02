@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "cap-table coverage_disclosure.json",
+  "type": "object",
+  "required": ["schema_version", "covered", "computation_method"],
+  "properties": {
+    "schema_version": { "const": "v0.1-coverage-disclosure" },
+    "covered": { "type": "boolean" },
+    "computation_method": { "enum": ["deterministic_pipeline", "manual_outside_pipeline", "extraction_only"] },
+    "required_primitives": { "type": "array", "items": { "type": "string" } },
+    "uncovered_parts": { "type": "array" },
+    "counsel_review": { "type": "boolean" },
+    "reconciliation": { "type": "object" },
+    "manual_artifacts": { "type": "array", "items": { "type": "string" } }
+  }
+}

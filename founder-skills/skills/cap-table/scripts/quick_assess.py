@@ -44,12 +44,12 @@ import sys
 from typing import Any
 
 # Import sibling math producers
-sys.path.insert(0, __file__.rsplit("/", 1)[0])
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 from cap_state import build_cap_state  # noqa: E402
 from priced_round import solve_priced_round  # noqa: E402
 
 SCHEMA_VERSION = "v0.1.0-cap-table-fast-assess"
-RULE_PACK_VERSION = "0.4.0"
 
 
 def _fingerprint(prompt: str, attached_docs: list[str]) -> dict[str, Any]:
@@ -90,7 +90,8 @@ def quick_assess(
     pre_money: float,
     new_money: float,
     target_pool_percent: float | None,
-    target_basis: str,
+    target_basis: str | None,
+    event_date: str | None = None,
     founder_prompt: str = "",
     attached_docs: list[str] | None = None,
     run_id_override: str | None = None,
@@ -110,6 +111,34 @@ def quick_assess(
     }
     cs = build_cap_state(inputs, instruments)
 
+    # When notes are present but no conversion date was supplied, fast-assess
+    # defaults to today's date AND discloses the assumption (the math producer
+    # solve_priced_round NEVER defaults — it returns a structural blocker). This
+    # keeps the directional answer flowing while flagging the assumption.
+    assumptions: list[str] = []
+    resolved_event_date = event_date
+    if (notes or []) and not resolved_event_date:
+        resolved_event_date = _dt.date.today().isoformat()
+        assumptions.append(
+            f"No note conversion date supplied; assumed today ({resolved_event_date}) "
+            f"for convertible-note conversion math."
+        )
+
+    # Mirrors the conversion-date default above: when a pool top-up is being modeled but no
+    # target_basis was supplied, the solver still needs a definite denominator string — but
+    # pre-money vs post-money is a term-sheet-specific negotiation point, not a settled default.
+    # Disclose it the same way rather than presenting an assumed basis as founder-confirmed.
+    resolved_target_basis = target_basis or "pre_money"
+    if target_pool_percent and not target_basis:
+        assumptions.append(
+            "No pool-sizing basis supplied for the pool top-up; assumed pre-money. Pre-money vs "
+            "post-money changes the pool top-up and post-round ownership — confirm which basis "
+            "your term sheet uses."
+        )
+
+    # Scope note: fast-assess does NOT honor scenario-level mfn_elections overrides — it has
+    # no scenario parameters. Baked instrument elections (mfn_provision) still resolve inside
+    # the solver. For counterfactual MFN elections, use the full pipeline (run_scenario).
     solver_result = solve_priced_round(
         cap_state=cs,
         safes=safes,
@@ -117,7 +146,8 @@ def quick_assess(
         pre_money=pre_money,
         new_money=new_money,
         target_pool_percent=target_pool_percent,
-        target_basis=target_basis,
+        target_basis=resolved_target_basis,
+        conversion_event_date=resolved_event_date,
     )
 
     completeness = solver_result.get("completeness", "structural_only")
@@ -174,12 +204,31 @@ def quick_assess(
             "For full structured artifacts (scenarios, counsel packet, anti-dilution, "
             "rule_audit), re-run cap-table without fast-assess mode."
         ),
+        "assumptions": assumptions,
     }
+    # Surface cap_state warnings (S2 W_CAP_BASE_ASSUMED, S3 W_FOUNDER_LOOKS_LIKE_INVESTOR) into the
+    # sentinel too — only when non-empty (the schema declares `warnings` optional; an empty array
+    # would still validate but adds noise). This carries the same backstops the full pipeline shows.
+    _cs_warnings = list(cs.get("warnings") or [])
+    if _cs_warnings:
+        sentinel["warnings"] = _cs_warnings
 
     # Founder-facing markdown
     md_lines: list[str] = []
     md_lines.append(f"# {company_name} — Fast-Assess Cap Table")
     md_lines.append("")
+    if "W_CAP_BASE_ASSUMED" in _cs_warnings:
+        md_lines.append(
+            "> ⚠ **Cap base assumed, not confirmed** — these ownership figures are directional; "
+            "confirm founder share counts / pool before relying on them."
+        )
+        md_lines.append("")
+    if "W_FOUNDER_LOOKS_LIKE_INVESTOR" in _cs_warnings:
+        md_lines.append(
+            "> ⚠ **A listed founder resembles an investment entity** (Ventures/Capital/Fund) — "
+            "confirm it is a founder, not an investor."
+        )
+        md_lines.append("")
     md_lines.append(
         "_Fast-assess mode: a 1-page directional answer. For the full review "
         "(counsel packet, rule audit, anti-dilution, interactive explorer), "
@@ -192,11 +241,16 @@ def quick_assess(
     md_lines.append(f"- New money: {_money(new_money)}")
     md_lines.append(f"- Post-money valuation: {_money(pre_money + new_money)}")
     if target_pool_percent:
-        md_lines.append(f"- Pool target: {target_pool_percent:.0%} ({target_basis.replace('_', ' ')})")
+        md_lines.append(f"- Pool target: {target_pool_percent:.0%} ({resolved_target_basis.replace('_', ' ')})")
     else:
+        # This file has no stage input, so it cannot say what investors expect of
+        # THIS company. Pool asks are also a market benchmark, not a requirement
+        # (rule pack: option_pool.us_market_benchmarks, benchmark_only). Name the
+        # stage each range belongs to rather than asserting one of them as universal.
         md_lines.append(
-            "_No pool top-up modeled — seed investors typically require a 10–15% post-money "
-            "unallocated pool; re-run with a pool target to see that dilution._"
+            "_No pool top-up modeled. Pool size is a market benchmark rather than a rule, and the "
+            "usual ask varies by stage — roughly 10–15% at seed and 10–20% at Series A in the US "
+            "market. Re-run with a pool target to see that dilution._"
         )
     md_lines.append("")
     md_lines.append("## Outstanding instruments")
@@ -206,7 +260,9 @@ def quick_assess(
         for s in safes:
             cap = s.get("post_money_valuation_cap")
             cap_str = f"@ {_money(cap)} cap" if cap else "(uncapped)"
-            md_lines.append(f"  - {_money(s['purchase_amount'])} {cap_str}")
+            amt = s.get("purchase_amount")
+            amt_str = _money(amt) if isinstance(amt, (int, float)) and not isinstance(amt, bool) else "amount n/a"
+            md_lines.append(f"  - {amt_str} {cap_str}")
     if notes:
         md_lines.append(f"- **{len(notes)} convertible note(s)** (see full review for branch enumeration)")
     if not safes and not notes:
@@ -353,6 +409,13 @@ def quick_assess(
     md_lines.append("_Ask for the full review to get all of the above plus the counsel-handoff packet._")
     md_lines.append("")
 
+    if assumptions:
+        md_lines.append("## Assumptions")
+        md_lines.append("")
+        for a in assumptions:
+            md_lines.append(f"- {a}")
+        md_lines.append("")
+
     sentinel["_report_md"] = "\n".join(md_lines)
     return sentinel
 
@@ -372,7 +435,20 @@ def _cli() -> int:
     p.add_argument("--pre-money", type=float, required=True)
     p.add_argument("--new-money", type=float, required=True)
     p.add_argument("--target-pool-percent", type=float, default=None)
-    p.add_argument("--target-basis", default="post_money")
+    p.add_argument(
+        "--target-basis",
+        default=None,
+        help="pre_money | post_money | post_money_excluding_converting_securities. Omit only when no "
+        "pool top-up is being modeled (--target-pool-percent also omitted); if a pool target IS "
+        "given without this flag, the assumption is disclosed in the report rather than silently "
+        "defaulted.",
+    )
+    p.add_argument(
+        "--event-date",
+        default=None,
+        help="ISO conversion event date for convertible notes. If notes are present and "
+        "this is omitted, fast-assess defaults to today and discloses the assumption.",
+    )
     p.add_argument("--review-dir", required=True, help="Output directory (e.g. cap-table-{slug}-fastassess/)")
     p.add_argument("--founder-prompt", default="")
     p.add_argument("--attached-doc", action="append", default=[])
@@ -407,6 +483,7 @@ def _cli() -> int:
         new_money=args.new_money,
         target_pool_percent=args.target_pool_percent,
         target_basis=args.target_basis,
+        event_date=args.event_date,
         founder_prompt=args.founder_prompt,
         attached_docs=args.attached_doc,
         run_id_override=args.run_id,

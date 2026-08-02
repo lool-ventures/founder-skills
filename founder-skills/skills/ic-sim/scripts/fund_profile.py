@@ -55,8 +55,9 @@ def validate_fund_profile(profile: dict[str, Any]) -> dict[str, Any]:
     """Validate fund profile and return enriched profile with validation results."""
     errors: list[str] = []
 
-    # Required top-level fields
-    for field in ["fund_name", "mode", "thesis_areas", "check_size_range", "stage_focus", "archetypes", "portfolio"]:
+    # Required top-level fields. `portfolio` is NOT unconditionally required —
+    # see below: it's only required for fund_specific mode.
+    for field in ["fund_name", "mode", "thesis_areas", "check_size_range", "stage_focus", "archetypes"]:
         if field not in profile:
             errors.append(f"Missing required field: {field}")
 
@@ -64,6 +65,15 @@ def validate_fund_profile(profile: dict[str, Any]) -> dict[str, Any]:
     mode = profile.get("mode", "")
     if mode not in VALID_MODES:
         errors.append(f"Invalid mode '{mode}'. Must be one of: {sorted(VALID_MODES)}")
+
+    # Portfolio is required for fund_specific mode (a real fund's actual
+    # holdings). It is OPTIONAL in generic mode: a synthesized/illustrative
+    # fund has no real holdings, and forcing this field manufactures a
+    # fabricated portfolio — and with it, fabricated conflicts that can
+    # override the merits-based verdict (see score_dimensions.py's
+    # fund-mode-aware dealbreaker handling).
+    if mode == "fund_specific" and "portfolio" not in profile:
+        errors.append("Missing required field: portfolio (required for fund_specific mode)")
 
     # Thesis areas: at least 1
     thesis = profile.get("thesis_areas", [])
@@ -162,6 +172,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Fund profile validator (reads JSON from stdin)")
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
+    p.add_argument("--run-id", required=True, help="Run identifier injected into metadata.run_id")
     return p.parse_args()
 
 
@@ -187,6 +198,9 @@ def main() -> None:
         sys.exit(1)
 
     result = validate_fund_profile(data)
+
+    # Inject metadata.run_id as the last step before serialization (overrides any stdin metadata).
+    result["metadata"] = {"run_id": args.run_id}
 
     indent = 2 if args.pretty else None
     out = json.dumps(result, indent=indent) + "\n"

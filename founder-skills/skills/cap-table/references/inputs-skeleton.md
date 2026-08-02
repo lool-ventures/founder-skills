@@ -51,6 +51,12 @@ If the validator passes but `cap_state.py` reports "founders: 0" or "preferred-a
   "metadata": {"run_id": "20260521T120000Z", "schema_version": "v0.5.0-inputs"}
 }
 ```
+**`incorporated_date` above is a PLACEHOLDER, not a default.** If the founder has not stated the date,
+**delete that line** — `jurisdiction` has no `required` array, so omitting the key is schema-valid, while
+`null` is not (the field is typed `string`). Ask for it when the engagement touches QSBS or §102 timing;
+otherwise omit it and say so. A live run copied `2024-06-01` straight out of this example for a company
+whose founder never gave a date, then drove a QSBS holding-period item off it — the same never-fabricate
+rule as `issuance_date` applies here.
 
 ## Adding preferred-series (Series Seed BBWA, no prior AD)
 
@@ -75,9 +81,17 @@ Insert this block before `option_pool`:
   ],
 ```
 
+**Anti-dilution field (don't get this wrong — it drives the down-round adjustment).** The key is
+`anti_dilution_protection`, and its value MUST be one of the canonical enum
+`none | broad_based_weighted_average | narrow_based_weighted_average | full_ratchet` — NOT a shorthand
+like `anti_dilution`/`bbwa`/`ratchet`. A wrong key or abbreviation that lands as `none` would silently
+skip the anti-dilution math a founder asked for. `cap_state.py` recovers common slips and emits a
+`W_ANTI_DILUTION_NONCANONICAL` warning so nothing is dropped silently, but write the canonical field
+directly.
+
 ### Why three price fields
 
-- `original_issue_price` (OIP) — per-share consideration investors paid. Used as the anti-dilution **trigger threshold** by NVCA default (per §4.4.4(b)).
+- `original_issue_price` (OIP) — per-share consideration investors paid. The NVCA model trigger is the conversion price in effect immediately prior (CP1); the OIP trigger is a charter-specific variant this pipeline uses as its soft default — counsel confirms which the charter adopts.
 - `original_conversion_price` (OCP) — drives the as-converted ratio. `preferred_shares_as_converted = shares × OCP / CCP` in `cap_state.py:_compute_as_converted_totals`.
 - `current_conversion_price` (CCP) — the present conversion price. Equals OCP unless anti-dilution has previously triggered (CCP then < OCP).
 
@@ -101,6 +115,10 @@ Insert this block after `founders`:
 
 Omit the whole `common_batches` array if not applicable. `purpose` enum: `founder_issuance | restricted_stock_purchase | exercise | conversion | other`.
 
+**Field-name discipline (avoids the recurring schema-thrash):** the holder reference is **`holder_id`** — there is **no `batch_id`** field on `common_batches` (a common mis-key; using `batch_id` is silently ignored / fails validation depending on the field). The only canonical item fields are: `holder_id`, `shares`, `issuance_date`, `consideration`, `purpose`, `common_class`, `voting_rights_multiple`. Warrants are **NOT** a top-level `inputs.json` array — they live in `instruments.json` (`warrants[]`); do not add a `warrants` key to `inputs.json`. `option_pool.plan_type` must be one of the §102/jurisdiction enums below — `iso | nso | section_102_cg | section_102_oi | section_3i | mixed` (not `102_cg` / `israeli_102` / `none`).
+
+**`option_grants[]` — usually leave it EMPTY.** Individual option grants live in `instruments.json` `option_grants[]`, NOT `inputs.json`. You almost never need them: the **`option_pool` aggregate** (authorized / issued / unallocated) in `inputs.json` already captures the pool for cap-table math. Only populate `option_grants[]` for genuine per-grant detail (e.g. a specific §102 grant's vesting/tax analysis). In **Lane 3 (freeform)** individual grants are **not supported** — use an `option_pool_block`. If you DO build a grant, the required fields are exactly `id, holder_id, grant_date, shares_granted, strike_price, plan_type` (NOT `quantity` / `exercise_price` / `name` — those mis-keys fail validation). `strike_price` may be `null` ONLY when the source genuinely does not state it — the grant persists as a partial and `cap_state.py` emits `W_OPTION_GRANT_STRIKE_MISSING`; never fabricate a strike. When in doubt, write `"option_grants": []` and rely on the pool aggregate. **Flip carve-out:** when `mode=flip_focused` or a flip scenario is requested and the pool has issued grants, DO populate `option_grants[]` per holder with `plan_type` (tax route) and `grant_date` (+ `section_102_trustee_deposit_date` when known) even when `strike_price` is undisclosed (`null`) — §102 continuity analysis reads per-grant `plan_type`, not the pool aggregate, so an empty `option_grants[]` reports zero §102 grants. **Ordering:** populate `option_grants[]` AFTER any Lane-3 freeform emit for the same workspace — `--mode=freeform-emit` writes `instruments.json` wholesale (it does not merge existing instrument arrays), so grants authored before it are silently dropped.
+
 ## Option-pool plan_type by jurisdiction
 
 | Jurisdiction | Typical plan_type |
@@ -112,7 +130,7 @@ Omit the whole `common_batches` array if not applicable. `purpose` enum: `founde
 | Israeli, non-employees | `section_3i` |
 | Multi-track | `mixed` |
 
-There is **no enum value for "no plan adopted yet" / "unallocated authorized"** in v0.3.x. For a Delaware engagement with authorized-but-no-grants pool, use `iso` as the intended-tax-treatment placeholder; a future schema revision may add `none` / `unallocated`.
+There is **no enum value for "no plan adopted yet" / "unallocated authorized"**. For a Delaware engagement with authorized-but-no-grants pool, use `iso` as the intended-tax-treatment placeholder.
 
 ## Cross-references
 

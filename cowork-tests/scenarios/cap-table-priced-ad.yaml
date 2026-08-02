@@ -1,0 +1,103 @@
+name: cap-table-priced-ad
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: first   # no scripted answers: every gate here is immaterial to the asserts (AD is
+                       # prompt-driven), so option-1 is the robust, paraphrase-proof choice
+skills: [cap-table]                # 0.5.0: scope the staleness hash to this skill + shared roots (F-6)
+
+# Scripted answers are LIMITED to jurisdiction + IIA (below) — deliberately NOT the cap-base gate,
+# for the reason that follows. The cap-base gate can REFRAME into a pool-authorized multiple-choice when
+# the pool spec is incomplete — a `choose: "Confirmed"` then names no offered option and hard-fails per
+# gotcha #15. The pool is now fully specified in the prompt (authorized / issued / unallocated), and the
+# AD assert is prompt-driven, so on_unanswered: first robustly answers whatever the cap-base gate becomes.
+
+# P2-b — priced round + broad-based weighted-average (BBWA) anti-dilution (Gotcha #2). Lane 4
+# conversational with a prior preferred series and a DOWN round that triggers anti-dilution. Synthetic.
+prompt: |
+  I need the full cap-table review for Cadence (US Delaware seed-stage B2B SaaS) before our next
+  round.
+
+  Cap table today:
+  - Founder Alex Stone: 4,000,000 common shares
+  - Founder Sam Lee: 3,500,000 common shares
+  - Option pool: 1,000,000 authorized, all 1,000,000 issued, 0 unallocated
+  - Series Seed preferred: Foobar Ventures holds 2,000,000 shares, issued at $1.00/share, with
+    broad-based weighted-average anti-dilution protection.
+
+  Incoming round: a DOWN round — $2,000,000 of new money at $0.50/share (below the Series Seed price),
+  which should trigger the Series Seed anti-dilution adjustment.
+
+  Give me the full cap-table review — show the anti-dilution adjustment to the Series Seed conversion
+  and the resulting dilution — and build the interactive explorer.
+
+answers:
+  # Jurisdiction + IIA pinned by LABEL, not position. `b752162` reordered the Gate Catalog's
+  # jurisdiction row to `israeli | delaware | ...`, so `on_unanswered: first` now resolves to
+  # "Israeli company" — the opposite of this prompt's US-Delaware company. Anchors are leading
+  # substrings and are uniqueness-guarded: the full "Delaware (already flipped)" is required, since a
+  # bare "Delaware" also prefixes "Delaware with Israeli subsidiary" and would be ambiguous.
+  - when_question: "jurisdiction structure"
+    choose: "Delaware (already flipped)"
+  # Benign at slot 1 today ("No IIA grants" leads the row) — pinned anyway so the same reorder class
+  # cannot un-benign it silently.
+  - when_question: "IIA"
+    choose: "No IIA grants"
+
+assert:
+  - result: success
+  # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
+  # the deliverable but stranded steps, which result:success alone misses.
+  - all_tasks_completed: true
+  - file_exists: outputs/artifacts/cap-table-cadence/scenarios.json
+  - file_exists: outputs/artifacts/cap-table-cadence/report.json
+  # The coupled solver computed a fully-diluted total (structural, stable).
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-cadence/cap_state.json
+      path: as_converted_totals.fully_diluted_shares
+      gt: 0
+  # Regression guard for the AD silent-drop bug: the founder's BBWA request must LAND (not default to
+  # 'none' and silently skip the down-round adjustment). cap_state.py recovers a wrong-key/abbreviation
+  # intent to the canonical enum, so this is broad_based_weighted_average — never 'none'.
+  - artifact_json:
+      artifact: outputs/artifacts/cap-table-cadence/cap_state.json
+      path: preferred_series.0.anti_dilution_protection
+      equals: broad_based_weighted_average
+  - transcript_matches: 'anti-dilution|weighted.average|down round|conversion'
+  # host-path posture: hostloop exposes real host paths by design; the leak class is covered
+  # by the container-tier host-path-canary scenario + the privacy scan's path class on cassettes.
+  # --- fleet contract asserts (adopted at the 0.24.0 pin; budgets tightened from discovery actuals) ---
+  # The pipeline entered through the Skill tool (prefix-tolerant; id shape confirmed at discovery).
+  - skill_triggered: '(founder-skills:)?cap-table$'
+  # Every computer:// deliverable link shared with the founder must resolve (zero links pass).
+  - computer_links_resolve: true
+  # No delete under outputs/ (live-lane key; replay skips it loudly).
+  - no_delete_in_outputs: true
+  # Dispatch contract: sub-agents declare no Bash (agents/*.md) — regression tripwire.
+  - subagent_tool_absent: 'Bash'
+  # Usability budget: gates asked before value (observed + headroom, from discovery).
+  - questions_count_max: 8
+  # Author-chosen dispatch budget (production has NO Task-fan-out cap; this is an
+  # efficiency tripwire, not a platform mirror). tightened from discovery actuals (observed x1.5).
+  - dispatch_count_max: 6
+  # Efficiency budgets — generous ceilings; tightened to observed x1.5 post-record.
+  - max_turns: 115
+  - tool_calls_max: 110
+  # Stray-file guard (new-files-only; overwrite-in-place is covered by producer stamps).
+  # Allowlist = artifact namespace (incl. handoff/**) + founder-context sidecar + promoted
+  # deliverables. Pre-0.24 cassettes exclude loudly (no preRunPaths). tightened from discovery actuals (observed x1.5).
+  - no_unexpected_files:
+      - 'outputs/artifacts/cap-table-cadence/**'
+      - 'outputs/artifacts/founder-context-cadence.json'
+      - 'outputs/Cadence_*'
+  # GATE FLOOR. `questions_count_max` above is a CEILING — it caps interruption but has never once
+  # asserted that the skill asked anything at all. A run that silently skips its confirmation gates and
+  # assumes the answers produces a well-formed report, a green suite, and a founder who was never
+  # consulted. Measured: a committed cassette for this fleet once froze exactly that (0 gates) and went
+  # green for weeks. `gate_answers_delivered` alone does NOT close it — it passes VACUOUSLY when zero
+  # gates fire, which is why the two are always paired.
+  # Floor is deliberately 1, well BELOW the count observed at record time: gate firing is
+  # model-dependent (the same batch saw one cap-table lane fire the founder-context pack and another
+  # skip it), so a floor set AT the observed count converts ordinary variance into a red suite. This
+  # asserts the property — "it asked" — not the model's exact behaviour.
+  - gate_answers_delivered: true
+  - gate_answer_count_min: 1

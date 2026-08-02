@@ -33,19 +33,23 @@ def _parse_frontmatter(path: Path) -> dict[str, Any]:
 
 @pytest.mark.parametrize("agent_path", AGENT_FILES, ids=lambda p: p.stem)
 def test_agent_has_persistence_in_cowork_subagent_registry(agent_path: Path) -> None:
-    """Every agent must declare a tool name that resolves to a persistence
-    tool (Write or Edit) in Cowork's sub-agent tool registry.
+    """Every agent must declare `Write` (resolving in Cowork's sub-agent
+    tool registry).
 
-    Without a resolving persistence name, the sub-agent can't produce
-    artifacts. This is the v0.3.1 invariant — see
-    archived/fmr-cowork-postmortem.md.
+    Originally the v0.3.1 invariant (Write-or-Edit so the sub-agent can
+    persist at all — see archived/fmr-cowork-postmortem.md). Since the
+    Context A file hand-off, `Write` specifically is load-bearing: the
+    agent must create its OUTPUT_PATH hand-off file (Edit can't create
+    files), so Write-only is now a hard requirement, not one of two
+    options.
     """
     fm = _parse_frontmatter(agent_path)
     declared = fm.get("tools", [])
     assert declared, f"{agent_path.name} has no `tools:` declaration"
     surviving = apply_filter(declared)
-    assert "Write" in surviving or "Edit" in surviving, (
-        f"{agent_path.name} sub-agent declares no persistence tool name resolving in Cowork sub-agent registry"
+    assert "Write" in surviving, (
+        f"{agent_path.name} sub-agent doesn't declare Write (required to create its "
+        f"Context A OUTPUT_PATH hand-off file) or the name doesn't survive the Cowork registry filter"
     )
 
 
@@ -61,9 +65,11 @@ def test_agent_has_persistence_in_cowork_subagent_registry(agent_path: Path) -> 
 #   - The 5 desktop-side scope-excluded names (Bash/NotebookEdit/REPL/
 #     JavaScript/WebFetch) are removed from the registry BEFORE the CLI's
 #     filter runs. They're not in any sub-agent's tool surface regardless of
-#     declaration. Bash is replaced by `mcp__workspace__bash` (deferred MCP),
-#     reachable only via explicit declaration + ToolSearch — not from the
-#     literal `Bash` name.
+#     declaration. Bash is replaced by `mcp__workspace__bash` (in the default
+#     sub-agent toolset's MCP tier per the v0.4.7 probe), reachable via
+#     explicit declaration + ToolSearch — not from the literal `Bash` name.
+#     Declaring it would WORK; repo policy forbids it (see
+#     test_agent_declares_no_mcp_tools below).
 #   - Task / AskUserQuestion / SendMessage aren't scope-excluded; they're
 #     parent-only or non-sub-agent tools (Task is canonicalized to Agent at
 #     parse time but is a filter no-op for nested dispatch).
@@ -115,6 +121,30 @@ def test_agent_declares_no_dangerous_tools(agent_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize("agent_path", AGENT_FILES, ids=lambda p: p.stem)
+def test_agent_declares_no_mcp_tools(agent_path: Path) -> None:
+    """Repo POLICY (not a resolution question): no agent declares any
+    `mcp__*` tool name.
+
+    `mcp__workspace__bash` / `mcp__workspace__web_fetch` WOULD resolve for a
+    Cowork sub-agent that declared them (v0.4.7 probe), but they are
+    Cowork-only names — they don't exist in the standalone CLI or other
+    hosts — and a sub-agent shell would blur the producer-script-only
+    boundary for canonical artifacts (anti-fabrication). The portable
+    sub-agent surface is Read/Write/Edit/Glob/Grep (+ WebSearch where
+    declared). See references/skill-execution-model.md "Why Inline" and the
+    2026-07-04 plan in docs/internal.
+    """
+    fm = _parse_frontmatter(agent_path)
+    declared = fm.get("tools", [])
+    mcp_declared = [t for t in declared if isinstance(t, str) and t.startswith("mcp__")]
+    assert not mcp_declared, (
+        f"{agent_path.name} declares MCP tool names {mcp_declared}. These are "
+        f"host-specific (Cowork-only) and grant capabilities repo policy "
+        f"reserves for the main thread. Remove them from `tools:`."
+    )
+
+
 # Agents whose SKILL.md dispatch prompts instruct them to research
 # competitors, markets, etc. via WebSearch. These MUST declare WebSearch in
 # their tools allowlist — Cowork's named-sub-agent dispatch is strict
@@ -152,4 +182,56 @@ def test_research_agents_declare_websearch(agent_stem: str) -> None:
         f"named-sub-agent dispatch is strict allowlist mode; undeclared "
         f"tools don't bind. Add 'WebSearch' to the tools list or remove "
         f"the WebSearch references from the dispatch prompts."
+    )
+
+
+# Agents whose SKILL.md dispatch prompts hand off a Context A/B artifact via
+# an `OUTPUT_PATH:` line — the sub-agent writes its output JSON (or coaching
+# markdown) to that path with its Write tool and returns a receipt echoing
+# it (see check_handoff.py). These MUST declare Write in their tools
+# allowlist — same strict-allowlist reasoning as
+# test_research_agents_declare_websearch above, but for the transport every
+# Context A/B dispatch depends on rather than one research capability. A
+# sub-agent whose declared tools omit Write cannot create OUTPUT_PATH at
+# all, and the resulting missing file is indistinguishable at the gate from
+# a fabricated receipt (check_handoff.py exit 3) — the redo-dispatch it
+# triggers fails identically, burning retry budget before anything points
+# at the real cause.
+#
+# Adding/removing an agent here is intentional — call it out in CHANGELOG.
+_AGENTS_REQUIRING_WRITE: frozenset[str] = frozenset(
+    {
+        "cap-table",
+        "competitive-positioning",
+        "deck-review",
+        "financial-model-review",
+        "ic-sim",
+        "market-sizing",
+    }
+)
+
+
+@pytest.mark.parametrize("agent_stem", sorted(_AGENTS_REQUIRING_WRITE), ids=lambda s: s)
+def test_handoff_agents_declare_write(agent_stem: str) -> None:
+    """Regression detector: agents whose dispatch prompts hand off via
+    OUTPUT_PATH must declare Write. Without the declaration the tool
+    doesn't bind at runtime and the hand-off silently fails as a phantom
+    missing file — check_handoff.py's exit 3 reads identically to a
+    fabricated receipt, so the SKILL.md state machine spends a
+    redo-dispatch on a sub-agent that was never able to comply.
+    """
+    agent_path = AGENTS_DIR / f"{agent_stem}.md"
+    assert agent_path.exists(), (
+        f"agent {agent_stem} not found at {agent_path} — update _AGENTS_REQUIRING_WRITE or rename the agent file"
+    )
+    fm = _parse_frontmatter(agent_path)
+    declared = set(fm.get("tools", []))
+    assert "Write" in declared, (
+        f"{agent_stem}.md SKILL.md dispatch prompts carry an OUTPUT_PATH: "
+        f"line instructing the sub-agent to hand off via Write, but the "
+        f"agent's `tools:` declaration is {sorted(declared)} — Write "
+        f"missing. Cowork's named-sub-agent dispatch is strict allowlist "
+        f"mode; undeclared tools don't bind. Add 'Write' to the tools list "
+        f"or remove the OUTPUT_PATH/Write references from the dispatch "
+        f"prompts."
     )

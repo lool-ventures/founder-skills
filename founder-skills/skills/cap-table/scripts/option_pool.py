@@ -9,7 +9,11 @@ Per Gotcha #1 + the rule's warnings: when target_basis is `pre_money`, the
 top-up increases pre-money FD; when `post_money`, denominator includes new
 money. The rule pack's `target_basis` enum has four values
 (`pre_money | post_money | post_money_excluding_converting_securities |
-custom`). This script implements all four.
+custom`). `pre_money`, `post_money`, and `custom` (a `pre_money` fallback)
+have distinct formulas here. `post_money_excluding_converting_securities`
+shares the `post_money` formula: the converting-securities exclusion is the
+caller's responsibility (it must pre-adjust pre_topup_FD to remove SAFE/note
+shares before calling), so no separate branch is needed.
 
 Formula (rule pack):
   For post-money target:
@@ -21,11 +25,13 @@ Formula (rule pack):
 from __future__ import annotations
 
 import argparse
-import json
+import os
 import sys
 from typing import Any
 
-RULE_PACK_VERSION = "0.4.0"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _emit import add_output_args, emit  # noqa: E402
+from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 
 
 def required_topup(
@@ -35,6 +41,7 @@ def required_topup(
     target_pool_percent: float,
     new_money_shares: int | float | None,
     target_basis: str,
+    acquisition_shares: int | float = 0.0,
 ) -> dict[str, Any]:
     """Solve for required_pool_topup_shares.
 
@@ -61,10 +68,9 @@ def required_topup(
         x = (target * pre_fd - existing) / (1 - target)
     elif target_basis in {"post_money", "post_money_excluding_converting_securities"}:
         nm = float(new_money_shares or 0)
-        # (existing + x) / (pre_fd + x + nm) = target
-        # x - target * x = target * (pre_fd + nm) - existing
-        # x = (target * (pre_fd + nm) - existing) / (1 - target)
-        x = (target * (pre_fd + nm) - existing) / (1 - target)
+        acq = float(acquisition_shares or 0)
+        # (existing + x) / (pre_fd + x + nm + acq) = target
+        x = (target * (pre_fd + nm + acq) - existing) / (1 - target)
     elif target_basis == "custom":
         # Custom denominator policy is document-defined; for v0.1 we treat it
         # as pre_money fallback with a counsel-review flag (caller responsibility).
@@ -78,7 +84,7 @@ def required_topup(
     if target_basis == "pre_money" or target_basis == "custom":
         denom = pre_fd + required
     else:
-        denom = pre_fd + required + float(new_money_shares or 0)
+        denom = pre_fd + required + float(new_money_shares or 0) + float(acquisition_shares or 0)
     realized = (existing + required) / denom if denom > 0 else 0.0
 
     # Phase M+S: when the founder-supplied target_basis would silently no-op
@@ -118,9 +124,9 @@ def required_topup(
         )
         clarifying_question = {
             "question": (
-                "You asked for a 10% pool refresh on a pre-money basis. Under the literal "
+                f"You asked for a {target:.1%} pool refresh on a pre-money basis. Under the literal "
                 "reading, the existing pool already meets that target so the refresh is "
-                'a no-op. Series A term sheets usually mean "10% post-close unallocated" — '
+                f'a no-op. Series A term sheets usually mean "{target:.1%} post-close unallocated" — '
                 "which would require a real top-up. Which interpretation matches your term sheet?"
             ),
             "options": [
@@ -168,7 +174,7 @@ def _cli() -> int:
         required=True,
         choices=["pre_money", "post_money", "post_money_excluding_converting_securities", "custom"],
     )
-    p.add_argument("--pretty", action="store_true")
+    add_output_args(p)
     args = p.parse_args()
 
     result = required_topup(
@@ -178,7 +184,7 @@ def _cli() -> int:
         new_money_shares=args.new_money_shares,
         target_basis=args.basis,
     )
-    print(json.dumps(result, indent=2 if args.pretty else None))
+    emit(result, args)
     return 0
 
 

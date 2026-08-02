@@ -213,7 +213,7 @@ def test_deck_review_smoke(tmp_path: Path) -> None:
 
     plugin_path = REPO_ROOT / "founder-skills"
 
-    options = ClaudeAgentOptions(
+    options = ClaudeAgentOptions(  # type: ignore[call-arg]
         cwd=str(workdir),
         # Plugin discovery: `plugins=[{type, path}]` is the SDK's plugin loader.
         # `setting_sources` is for filesystem-based Skill discovery (~/.claude/
