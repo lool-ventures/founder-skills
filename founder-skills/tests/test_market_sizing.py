@@ -4547,8 +4547,9 @@ def test_founder_value_tolerance_allows_unit_normalization() -> None:
 
 def test_founder_value_check_is_opt_in_on_empty_object() -> None:
     """Absent/empty founder_stated_inputs disables the check rather than failing."""
+    stated: dict[str, Any] | None
     for stated in ({}, None):
-        inputs = {**_VALID_INPUTS}
+        inputs: dict[str, Any] = {**_VALID_INPUTS}
         if stated is not None:
             inputs["founder_stated_inputs"] = stated
         d = _make_artifact_dir(

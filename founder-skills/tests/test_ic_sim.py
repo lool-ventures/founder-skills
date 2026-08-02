@@ -1535,7 +1535,8 @@ def _score_with_dealbreakers(ids: list[str]) -> dict[str, Any]:
         }
         for i in ids
     ]
-    return score
+    typed_score: dict[str, Any] = score
+    return typed_score
 
 
 def _debated(dimension: str, raised_by: list[str]) -> dict[str, Any]:

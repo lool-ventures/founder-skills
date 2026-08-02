@@ -12955,7 +12955,7 @@ def test_watchlist_carries_applies_when_matched_through() -> None:
             }
         },
     }
-    rules = {"domains": {}}
+    rules: dict[str, Any] = {"domains": {}}
     out = mod.build_watchlist(gating, rules)
 
     by_id = {w["rule_id"]: w for w in out}

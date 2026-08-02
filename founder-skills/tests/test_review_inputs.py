@@ -1147,7 +1147,8 @@ class TestStaticSanityMetricsExecute:
         script = f"const state = {state_json};\n{fns}\nconsole.log(JSON.stringify(computeSanity()));"
         out = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30)
         assert out.returncode == 0, f"node failed: {out.stderr}"
-        return json.loads(out.stdout)
+        parsed: dict[Any, Any] = json.loads(out.stdout)
+        return parsed
 
     def test_absent_cash_balance_yields_unknown_runway_not_zero(self) -> None:
         """No cash balance in the model must render as unknown, never 0 months."""

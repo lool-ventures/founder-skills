@@ -8167,7 +8167,8 @@ def _checklist_with_evidence(evidence: str) -> dict[str, Any]:
     checklist = json.loads(json.dumps(_VALID_CHECKLIST))
     checklist["items"][0]["evidence"] = evidence
     checklist["items"][0]["id"] = "METRIC_34"
-    return checklist
+    typed_checklist: dict[str, Any] = checklist
+    return typed_checklist
 
 
 def _compose_codes(unit_economics: dict[str, Any], checklist: dict[str, Any]) -> list[str]:
