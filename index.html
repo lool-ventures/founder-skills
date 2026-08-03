@@ -189,13 +189,15 @@ figcaption{font-size:14px;color:var(--fs-mute);margin:14px 0 0}
    disappear and it reads as page furniture rather than a captured app.
    A hairline plus a label bar frames it. Square corners, no shadow — the
    artifacts the skills generate look the same way. */
-.screencap{border:1px solid rgba(255,255,255,.22);background:#151D2B}
+.screencap{border:1px solid var(--fs-line);background:var(--fs-art)}
+.band .screencap{border-color:rgba(255,255,255,.22);background:#151D2B}
 .screencap-bar{
   display:flex;align-items:center;gap:9px;margin:0;
-  padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.16);
+  padding:9px 14px;border-bottom:1px solid var(--fs-line);
   font-family:var(--font-mono);font-size:11.5px;letter-spacing:.1em;
-  text-transform:uppercase;color:rgba(255,255,255,.62);
+  text-transform:uppercase;color:var(--fs-mute);
 }
+.band .screencap-bar{color:rgba(255,255,255,.62);border-bottom-color:rgba(255,255,255,.16)}
 @media (max-width:520px){
   .screencap-bar{font-size:10px;letter-spacing:.06em}
 }
@@ -501,12 +503,15 @@ details[open] summary .hint::after{content:"\2212"}
     <p class="lede">A written report and an HTML version for all six skills, written into your task's workspace under <span class="mono" style="font-size:15px">artifacts/&lt;skill&gt;-&lt;company&gt;/</span> and usually attached to the conversation too. Cap table, financial model review and competitive positioning add an interactive explorer. A cloud task's workspace is temporary, so download anything you want to keep. Every capture below uses a synthetic company.</p>
 
     <figure class="m2">
-      <video class="ratio-16x9" data-autoplay muted loop playsinline controls
-             preload="metadata" width="1600" height="900"
-             poster="assets/landing/explorer-captable-poster.png"
-             style="width:100%;height:auto;display:block;background:#151D2B">
-        <source src="assets/landing/explorer-captable.mp4" type="video/mp4">
-      </video>
+      <div class="screencap">
+        <p class="screencap-bar">Interactive explorer — a file the skill writes for you</p>
+        <video class="ratio-16x9" data-autoplay muted loop playsinline controls
+               preload="metadata" width="1600" height="900"
+               poster="assets/landing/explorer-captable-poster.png"
+               style="width:100%;height:auto;display:block;background:#151D2B">
+          <source src="assets/landing/explorer-captable.mp4" type="video/mp4">
+        </video>
+      </div>
       <figcaption>Drag the pre-money and watch your ownership move. Nothing here is interpolated — each frame is a priced round solved from scratch, which is why the numbers stay honest at the extremes.</figcaption>
     </figure>
 
