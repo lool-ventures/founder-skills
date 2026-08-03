@@ -61,7 +61,10 @@
 *{box-sizing:border-box}
 /* overflow-x stays on html ONLY. On body it makes body a scroll container,
    which silently kills position:sticky on the header. */
-html{overflow-x:hidden}
+/* Anchor jumps animate so the reader keeps their bearings — which section they
+   left and which they arrived at. Overridden to `auto` under
+   prefers-reduced-motion below; smooth scrolling is a vestibular trigger. */
+html{overflow-x:hidden;scroll-behavior:smooth}
 html,body{margin:0;padding:0}
 section[id]{scroll-margin-top:80px}
 body{
@@ -133,7 +136,16 @@ h2{font-size:clamp(30px,4vw,48px);line-height:1.1;color:var(--fs-head)}
 .hero{padding-top:clamp(56px,8vw,104px);padding-bottom:clamp(48px,6vw,80px)}
 .hero p.lead{font-size:clamp(18px,1.6vw,22px);line-height:1.7;color:rgba(255,255,255,.82);margin:28px 0 0;max-width:56ch;text-wrap:pretty}
 .hero .cta-row{display:flex;flex-wrap:wrap;gap:14px;margin:38px 0 0}
-.hero .qual{font-size:14px;color:rgba(255,255,255,.62);margin:24px 0 0}
+.hero .qual{font-size:14px;color:rgba(255,255,255,.62);margin:14px 0 0}
+/* Privacy is one of the first questions a founder asks, not a footnote —
+   so it gets a real line in the hero with a route to the full section. */
+.hero .assure{
+  font-size:16px;line-height:1.65;color:rgba(255,255,255,.82);
+  margin:30px 0 0;max-width:62ch;padding-left:16px;border-left:2px solid #21A2E3;
+}
+.hero .assure strong{font-weight:500;color:#fff}
+.hero .assure a{color:#6CCDFF}
+.lead-link{color:#6CCDFF;white-space:nowrap}
 
 figure{margin:0}
 figcaption{font-size:14px;color:var(--fs-mute);margin:14px 0 0}
@@ -173,6 +185,20 @@ figcaption{font-size:14px;color:var(--fs-mute);margin:14px 0 0}
 .gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:clamp(24px,3vw,36px)}
 .gallery figcaption{font-size:15px;line-height:1.6;color:var(--fs-ink);margin:12px 0 0}
 .hero-figure{margin:clamp(40px,6vw,72px) 0 0}
+/* The recording is near-black content on a near-black band, so its edges
+   disappear and it reads as page furniture rather than a captured app.
+   A hairline plus a label bar frames it. Square corners, no shadow — the
+   artifacts the skills generate look the same way. */
+.screencap{border:1px solid rgba(255,255,255,.22);background:#151D2B}
+.screencap-bar{
+  display:flex;align-items:center;gap:9px;margin:0;
+  padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.16);
+  font-family:var(--font-mono);font-size:11.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:rgba(255,255,255,.62);
+}
+@media (max-width:520px){
+  .screencap-bar{font-size:10px;letter-spacing:.06em}
+}
 .m2{margin:0 0 clamp(32px,4vw,48px)}
 .m2 figcaption{font-size:16px;line-height:1.6;color:var(--fs-ink);margin:16px 0 0;max-width:70ch}
 .ratio-16x9{aspect-ratio:16/9}
@@ -256,9 +282,9 @@ details[open] summary .hint::after{content:"\2212"}
     <nav class="nav" aria-label="Sections">
       <a class="opt" href="#how">How it works</a>
       <a href="#skills">Six skills</a>
+      <a class="opt" href="#privacy">Privacy</a>
       <a class="opt" href="#output">Output</a>
       <a class="opt" href="#rigor">Why it holds up</a>
-      <a class="opt" href="#privacy">Privacy</a>
       <a class="is-cta" href="#install">Install</a>
     </nav>
   </div>
@@ -270,20 +296,24 @@ details[open] summary .hint::after{content:"\2212"}
   <div class="wrap hero">
     <p class="eyebrow">An open-source Claude plugin from lool ventures</p>
     <h1>Run the diligence on yourself first.</h1>
-    <p class="lead">Six investor-grade analyses — your deck, your model, your market, your competition, your cap table, and a simulated investment committee — run on your own material, inside Claude Cowork. Free, open source, and script-backed: the numbers are computed, not narrated.</p>
+    <p class="lead">Six investor-grade analyses, run on your own material inside Claude Cowork. Free, open source, and script-backed: the numbers are computed, not narrated. <a class="lead-link" href="#skills">See what the six cover ↓</a></p>
     <div class="cta-row">
       <a class="btn btn--onblue" href="#install">Install in Claude<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
       <a class="btn btn--outline-onblue" href="https://github.com/lool-ventures/founder-skills">View on GitHub</a>
     </div>
-    <p class="qual">Free · Apache 2.0 · runs in Claude Cowork · your documents stay in your session</p>
+    <p class="assure"><strong>Your documents stay in your session.</strong> Nothing is collected, transmitted or shared with lool — no account, no telemetry, no analytics. <a href="#privacy">What that means exactly</a></p>
+    <p class="qual">Free · Apache 2.0 · runs in Claude Cowork</p>
 
     <figure class="hero-figure">
-      <video class="ratio-16x9" data-autoplay muted loop playsinline controls
-             preload="metadata" width="1440" height="810"
-             poster="assets/landing/hero-session-poster.png"
-             style="width:100%;height:auto;display:block;background:#151D2B">
-        <source src="assets/landing/hero-session.mp4" type="video/mp4">
-      </video>
+      <div class="screencap">
+        <p class="screencap-bar">Screen recording — Claude Cowork</p>
+        <video class="ratio-16x9" data-autoplay muted loop playsinline controls
+               preload="metadata" width="1440" height="810"
+               poster="assets/landing/hero-session-poster.png"
+               style="width:100%;height:auto;display:block;background:#151D2B">
+          <source src="assets/landing/hero-session.mp4" type="video/mp4">
+        </video>
+      </div>
       <figcaption>A real Cowork run reviewing a seed deck — prompt, narration, and the finished report landing in the Working folder. It takes minutes, not seconds; the recording is cut down and says so on screen.</figcaption>
     </figure>
   </div>
@@ -444,7 +474,27 @@ details[open] summary .hint::after{content:"\2212"}
   </div>
 </section>
 
-<section id="output" class="alt rule-top">
+<section id="privacy" class="alt rule-top">
+  <div class="wrap sec privacy">
+    <div>
+      <p class="eyebrow">Privacy</p>
+      <h2>Your documents stay in your session.</h2>
+      <p class="claim">Nothing is collected, transmitted or shared with lool. There is no account, no telemetry, no analytics — not in the plugin, and not on this page. Feedback is opt-in and only ever sent when you ask for it.</p>
+    </div>
+    <div class="exceptions">
+      <p class="label">Two exceptions, stated plainly</p>
+      <div class="exc">
+        <h3>Three skills search the web</h3>
+        <p>Market sizing always, IC simulation when you name a fund, competitive positioning optionally. Queries derived from your material pass through Claude to a search provider. The other three never touch the network.</p>
+      </div>
+      <div class="exc">
+        <h3>One optional chart library</h3>
+        <p>The competitive-positioning explorer's optional 3D tab loads a charting library from a public CDN the first time you open that tab. Everything else in every artifact is self-contained.</p>
+      </div>
+    </div>
+  </div>
+</section>
+<section id="output" class="rule-top">
   <div class="wrap sec">
     <p class="eyebrow">What lands on disk</p>
     <h2 style="margin-bottom:20px;max-width:24ch">Output you would be willing to forward.</h2>
@@ -516,34 +566,13 @@ details[open] summary .hint::after{content:"\2212"}
       </div>
       <div>
         <p class="n">05</p>
-        <h3>Tested against the runtime it runs in</h3>
-        <p>Beyond unit tests, every change to a skill replays recorded Claude Cowork runs, and every pull request statically analyzes each skill body — because the Cowork runtime differs from the CLI in ways unit tests cannot see.</p>
+        <h3>It will contradict your deck</h3>
+        <p>Ask it to size your market and it may come back below the figure on your slide, and say why. Name your competitors and it may tell you some of them are integration partners rather than rivals — then find the ones you left out. It is not built to agree with you.</p>
       </div>
       <div>
         <p class="n">06</p>
         <h3>Open source, Apache 2.0</h3>
         <p>Read exactly what it does before you run it on your own numbers. <a href="https://github.com/lool-ventures/founder-skills">The source is here</a>, and pull requests are welcome — a criterion we got wrong is worth an issue.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section id="privacy" class="rule-top">
-  <div class="wrap sec privacy">
-    <div>
-      <p class="eyebrow">Privacy</p>
-      <h2>Your documents stay in your session.</h2>
-      <p class="claim">Nothing is collected, transmitted or shared with lool. There is no account, no telemetry, no analytics — not in the plugin, and not on this page. Feedback is opt-in and only ever sent when you ask for it.</p>
-    </div>
-    <div class="exceptions">
-      <p class="label">Two exceptions, stated plainly</p>
-      <div class="exc">
-        <h3>Three skills search the web</h3>
-        <p>Market sizing always, IC simulation when you name a fund, competitive positioning optionally. Queries derived from your material pass through Claude to a search provider. The other three never touch the network.</p>
-      </div>
-      <div class="exc">
-        <h3>One optional chart library</h3>
-        <p>The competitive-positioning explorer's optional 3D tab loads a charting library from a public CDN the first time you open that tab. Everything else in every artifact is self-contained.</p>
       </div>
     </div>
   </div>
