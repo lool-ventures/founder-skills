@@ -182,6 +182,23 @@ figcaption{font-size:14px;color:var(--fs-mute);margin:14px 0 0}
 .legal{font-size:13px;line-height:1.6;color:var(--fs-mute);margin:0;padding-top:14px;border-top:1px solid var(--fs-line)}
 
 /* Artifact gallery */
+/* Gallery stills open full-size. At 390px a 1600x1200 report is illegible in a
+   single column, so the image has to be reachable at its own resolution. A plain
+   link, not a lightbox: the browser's image view already does pinch-zoom, and
+   this page runs one small script and no more. */
+.shot{position:relative;display:block;cursor:zoom-in}
+.shot img{display:block;width:100%;height:auto;aspect-ratio:4/3;border:1px solid var(--fs-line)}
+.shot:hover img,.shot:focus-visible img{border-color:#21A2E3}
+.shot-hint{
+  position:absolute;right:10px;bottom:10px;
+  font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  background:rgba(21,29,43,.82);color:#fff;padding:5px 8px;
+}
+/* Gated on WIDTH, not pointer type. The problem is a 350px-wide render of a
+   1600x1200 report, which is about screen size; a touchscreen laptop reports
+   hover:hover and would never have seen the hint. */
+.shot-hint{display:none}
+@media (max-width:720px){ .shot-hint{display:block} }
 .gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:clamp(24px,3vw,36px)}
 .gallery figcaption{font-size:15px;line-height:1.6;color:var(--fs-ink);margin:12px 0 0}
 .hero-figure{margin:clamp(40px,6vw,72px) 0 0}
@@ -517,27 +534,27 @@ details[open] summary .hint::after{content:"\2212"}
 
     <div class="gallery">
       <figure>
-        <img src="assets/landing/artifact-deck-review.png" alt="Deck review report showing a 43% Major Revision score gauge and key findings naming specific slides" width="1600" height="1200" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;aspect-ratio:4/3;border:1px solid var(--fs-line)">
+        <a class="shot" href="assets/landing/artifact-deck-review.png" target="_blank" rel="noopener"><img src="assets/landing/artifact-deck-review.png" alt="Deck review report showing a 43% Major Revision score gauge and key findings naming specific slides" width="1600" height="1200" loading="lazy" decoding="async"><span class="shot-hint" aria-hidden="true">Tap to enlarge</span></a>
         <figcaption>The critique names the slide and the fix, not the category.</figcaption>
       </figure>
       <figure>
-        <img src="assets/landing/artifact-cap-table.png" alt="Cap-table scenario showing the Series A priced round with per-holder ownership before and after" width="1600" height="1200" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;aspect-ratio:4/3;border:1px solid var(--fs-line)">
+        <a class="shot" href="assets/landing/artifact-cap-table.png" target="_blank" rel="noopener"><img src="assets/landing/artifact-cap-table.png" alt="Cap-table scenario showing the Series A priced round with per-holder ownership before and after" width="1600" height="1200" loading="lazy" decoding="async"><span class="shot-hint" aria-hidden="true">Tap to enlarge</span></a>
         <figcaption>Every line of math points at the rule it came from.</figcaption>
       </figure>
       <figure>
-        <img src="assets/landing/artifact-financial-model-review.png" alt="Runway scenarios chart with cash-out dates for base, slow-growth and crisis cases" width="1600" height="1200" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;aspect-ratio:4/3;border:1px solid var(--fs-line)">
+        <a class="shot" href="assets/landing/artifact-financial-model-review.png" target="_blank" rel="noopener"><img src="assets/landing/artifact-financial-model-review.png" alt="Runway scenarios chart with cash-out dates for base, slow-growth and crisis cases" width="1600" height="1200" loading="lazy" decoding="async"><span class="shot-hint" aria-hidden="true">Tap to enlarge</span></a>
         <figcaption>A date, not an adjective — and the decision points before it.</figcaption>
       </figure>
       <figure>
-        <img src="assets/landing/artifact-market-sizing.png" alt="Market sizing sensitivity analysis showing how TAM, SAM and SOM move with each assumption" width="1600" height="1200" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;aspect-ratio:4/3;border:1px solid var(--fs-line)">
+        <a class="shot" href="assets/landing/artifact-market-sizing.png" target="_blank" rel="noopener"><img src="assets/landing/artifact-market-sizing.png" alt="Market sizing sensitivity analysis showing how TAM, SAM and SOM move with each assumption" width="1600" height="1200" loading="lazy" decoding="async"><span class="shot-hint" aria-hidden="true">Tap to enlarge</span></a>
         <figcaption>A range you can defend beats a number you cannot.</figcaption>
       </figure>
       <figure>
-        <img src="assets/landing/artifact-competitive-positioning.png" alt="Positioning map plotting Acmecorp against ten competitors on AI-agent autonomy and team size" width="1600" height="1200" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;aspect-ratio:4/3;border:1px solid var(--fs-line)">
+        <a class="shot" href="assets/landing/artifact-competitive-positioning.png" target="_blank" rel="noopener"><img src="assets/landing/artifact-competitive-positioning.png" alt="Positioning map plotting Acmecorp against ten competitors on AI-agent autonomy and team size" width="1600" height="1200" loading="lazy" decoding="async"><span class="shot-hint" aria-hidden="true">Tap to enlarge</span></a>
         <figcaption>Where you actually sit, including the competitors you did not list.</figcaption>
       </figure>
       <figure>
-        <img src="assets/landing/artifact-ic-simulation.png" alt="Partner verdicts from three simulated investors, each with their reasoning" width="1600" height="1200" loading="lazy" decoding="async" style="display:block;width:100%;height:auto;aspect-ratio:4/3;border:1px solid var(--fs-line)">
+        <a class="shot" href="assets/landing/artifact-ic-simulation.png" target="_blank" rel="noopener"><img src="assets/landing/artifact-ic-simulation.png" alt="Partner verdicts from three simulated investors, each with their reasoning" width="1600" height="1200" loading="lazy" decoding="async"><span class="shot-hint" aria-hidden="true">Tap to enlarge</span></a>
         <figcaption>Three partners, one deck — and the Visionary changed his mind. He backed the team until the other two surfaced a runway gap he had missed, then moved to decline with them.</figcaption>
       </figure>
     </div>
