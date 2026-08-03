@@ -9,7 +9,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/lool-ventures/founder-skills)
 [![Built with Skill Creator Plus](https://img.shields.io/badge/Built_with-Skill_Creator_Plus-4ecdc4?style=flat-square)](https://github.com/yaniv-golan/skill-creator-plus)
-[![Install in Claude](https://img.shields.io/badge/Install_in_Claude-D97757?style=for-the-badge&logo=claude&logoColor=white)](https://lool-ventures.github.io/founder-skills/static/install-claude-desktop.html)
+[![Install in Claude](https://img.shields.io/badge/Install_in_Claude-D97757?style=for-the-badge&logo=claude&logoColor=white)](https://founderskills.lool.vc/static/install-claude-desktop.html)
 
 Skills for startup founders by [lool ventures](https://lool.vc).
 
@@ -228,7 +228,7 @@ Claude Cowork is the primary target — most founders run these skills there. Cl
 
 ### Claude Cowork
 
-[![Install in Claude](https://img.shields.io/badge/Install_in_Claude-D97757?style=for-the-badge&logo=claude&logoColor=white)](https://lool-ventures.github.io/founder-skills/static/install-claude-desktop.html)
+[![Install in Claude](https://img.shields.io/badge/Install_in_Claude-D97757?style=for-the-badge&logo=claude&logoColor=white)](https://founderskills.lool.vc/static/install-claude-desktop.html)
 
 *— or install manually —*
 
