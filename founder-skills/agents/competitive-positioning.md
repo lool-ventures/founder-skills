@@ -414,7 +414,9 @@ keys (do not refetch from disk):
 - `summary` (score_pct, overall_status, total, pass, fail, warn,
   not_applicable)
 - `failed_items`, `warned_items`
-- `high_severity_warnings` (codes only)
+- `high_severity_warnings` — each entry is `{code, label, message}`. **Use the `label` and the
+  `message`, never the `code`.** A code is an internal token: it means nothing to the founder and
+  citing one in the commentary is the leak this section forbids.
 - `defensibility` — the SCORED moat picture: `moat_count`, `strongest_moat`,
   `overall_defensibility` (`high`/`moderate`/`low`), and `moats[]` with each
   dimension's `id` and `status`. This is your ONLY source for moat claims.

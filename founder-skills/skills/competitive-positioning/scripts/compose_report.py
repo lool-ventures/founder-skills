@@ -1516,7 +1516,15 @@ def _emit_coaching_payload(
         },
         "failed_items": summary.get("failed_items", []),
         "warned_items": summary.get("warned_items", []),
-        "high_severity_warnings": [w["code"] for w in warnings if w.get("severity") == "high"],
+        # Each entry carries a human LABEL beside the code. A bare code list is a latent nudge:
+        # the coaching sub-agent is handed `NARR_03`-shaped tokens with nothing else to call them
+        # by, and then asked to write founder-facing prose. `failed_items` already pairs its id
+        # with a prose `criterion`; this did not, and it is the same class of pressure.
+        "high_severity_warnings": [
+            {"code": w["code"], "label": _humanize_warning(w["code"]), "message": w.get("message", "")}
+            for w in warnings
+            if w.get("severity") == "high"
+        ],
         "company_name": product_profile.get("company_name"),
         "review_dir": review_dir,
         "report_path": report_path,

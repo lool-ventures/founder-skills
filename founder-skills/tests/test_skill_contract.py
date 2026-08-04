@@ -462,7 +462,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
-    "competitive-positioning": 117_465,
+    "competitive-positioning": 119_027,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1703,4 +1703,47 @@ def test_producer_stamps_match_module_names() -> None:
         "producer stamp(s) do not match their module name. compose_report.py's UNVALIDATED_ARTIFACT "
         "check compares against the module name, so a mismatched stamp makes the artifact "
         "un-provenance-checkable rather than merely oddly named:\n  " + "\n  ".join(offenders)
+    )
+
+
+@pytest.mark.parametrize("skill", sorted(SKILL_MD_CEILING))
+def test_plugin_root_block_pipes_candidates_on_stdin_with_expected_version(skill: str) -> None:
+    """The Step-0 resolution block must wire the selector the way the selector requires.
+
+    Three properties, each of which failed a real check when absent:
+
+    * candidates reach the selector on **stdin**, never argv — the host CLI path contains
+      "Application Support", so an argv form word-splits on the space;
+    * `--expect-version` is passed, or the selector falls back to the first `find` hit and a
+      two-version mount is resolved arbitrarily again (measured: one session had 0.6.0 and 0.5.922
+      mounted at once, and a hand-run of this block picks 0.6.0 ONLY because of this flag — the
+      first hit was the older tree);
+    * a provisional root is derived first, because `$SHARED_SCRIPTS` is only known after a root is
+      chosen and the selector lives under it.
+
+    This tests the PROSE, which is the part no unit test of the selector can reach.
+    """
+    text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
+    assert "select_plugin_root.py" in text, f"{skill}/SKILL.md never invokes select_plugin_root.py"
+
+    # Bound on STRUCTURE — the fenced block that actually invokes it — not on a character window
+    # around the first mention. Several skills discuss the selector in prose above the block, so a
+    # windowed slice lands on the prose and fails on content that is present a few lines lower.
+    # This is the fixed-window anchor hazard this file warns about elsewhere; the first draft of
+    # this very test walked into it.
+    blocks = [b for b in text.split("```") if "select_plugin_root.py" in b]
+    assert blocks, f"{skill}/SKILL.md mentions the selector but never inside a fenced block"
+    block = "\n".join(blocks)
+
+    assert "--expect-version" in block, (
+        f"{skill}/SKILL.md invokes the selector without --expect-version, so a two-version mount "
+        f"resolves to whichever candidate `find` happened to list first"
+    )
+    assert "printf" in block and "| python3" in block.replace("| \\\n  python3", "| python3"), (
+        f"{skill}/SKILL.md must pipe candidates into the selector on stdin (a path containing a "
+        f"space cannot be passed via argv)"
+    )
+    assert "PROVISIONAL_ROOT" in block, (
+        f"{skill}/SKILL.md must derive a provisional root before invoking the selector — the "
+        f"selector lives under the root it is choosing"
     )
