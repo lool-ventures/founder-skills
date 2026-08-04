@@ -62,6 +62,7 @@ All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/scripts
 - **`compose_report.py`** — Assembles report with cross-artifact validation; `--strict` exits 1 on high-severity warnings
 - **`visualize.py`** — Generates self-contained HTML with SVG charts (not JSON)
 - **`explore.py`** — Generates interactive HTML explorer with Chart.js scatter plot, view switching, bubble encoding controls, and company detail panels (not JSON)
+- **`gate3_triggers.py`** — Evaluates the four Gate 3 positioning-reality-check triggers from `positioning_scores.json` and returns founder-ready descriptions. Thresholds pinned and exhaustively tested; reports `not_evaluated` separately from "did not fire". Reports only — Gate 3 is a founder decision, so it never exits non-zero
 - **`verify_positioning.py`** — Delivery gate (Step 7f). Checks that the deliverable SHOWS what the artifacts contain (axis rationales, claim verdicts, the adversarial competitor verdicts, the explorer's scored layer) and that no internal token reached the founder (raw enums, field names, slugs, criterion IDs in the coaching commentary), plus cross-artifact consistency. `--gate 1` mid-pipeline, `--gate 2` pre-delivery. Exit 0 = publishable, exit 1 = gaps
 
 Also available from `${CLAUDE_PLUGIN_ROOT}/scripts/` (shared):
@@ -910,7 +911,23 @@ the points merge.
 
 ### Gate 3: Positioning Reality Check (conditional)
 
-**CONDITIONAL — only stop when one of the triggers below fires. An unconditional stop here would tax every run.** After the merge above, check **every view** in `positioning_scores.json` — vanity flags, rank, and `overall_differentiation` live there, not in `positioning.json`. **Primary view = `views[0]`** — real runs use descriptive slug ids rather than the documented `primary`/`secondary`, so do not look for those literal strings when deciding which view is primary; a `views[]` entry may also carry an optional `label` field used for display, which is not a signal of which view is primary either. Evaluate every trigger below **per view, not on the primary view alone** — a trade-off or flattering shape on a secondary view is invisible if only the primary view is checked:
+**CONDITIONAL — only stop when one of the triggers below fires. An unconditional stop here would tax every run.** Run the evaluator rather than working the arithmetic out in prose:
+
+```bash
+python3 "$SCRIPTS/gate3_triggers.py" --scores "$ANALYSIS_DIR/positioning_scores.json" --pretty
+```
+
+`fired: false` → skip this gate silently and continue. `fired: true` → each entry in `triggers[]`
+carries a founder-ready `description`; use it for the Step-A message below. An entry in
+`not_evaluated[]` means the check could not run on that view (too few competitors for a quartile to
+mean anything) — that is not "did not fire", and if you mention the gate at all, say which reading was
+unavailable rather than implying everything was checked.
+
+The thresholds are pinned in the script and exhaustively tested, which is the point: one of these
+triggers is effectively unreachable in a live run, and the arithmetic ("bottom quartile" of what
+denominator, ties which way, what happens on a three-competitor set) has no single obvious reading.
+Do NOT re-derive it here. For reference, the triggers it evaluates — check **every view** in
+`positioning_scores.json` — vanity flags, rank, and `overall_differentiation` live there, not in `positioning.json`. **Primary view = `views[0]`** — real runs use descriptive slug ids rather than the documented `primary`/`secondary`, so do not look for those literal strings when deciding which view is primary; a `views[]` entry may also carry an optional `label` field used for display, which is not a signal of which view is primary either. Evaluate every trigger below **per view, not on the primary view alone** — a trade-off or flattering shape on a secondary view is invisible if only the primary view is checked:
 
 - `_startup`'s rank (`startup_x_rank` / `startup_y_rank`) is in the bottom half of the competitive set on BOTH axes, on any view. **This trigger is PROVISIONAL** — like the differentiation trigger below, it is calibrated on a single observed run, not a validated threshold. Treat it as a soft prompt to look again, not a settled bound.
 - `_startup` is top-2 on BOTH axes (by rank) AND both vanity-axis flags (`x_axis_vanity_flag` / `y_axis_vanity_flag`) on that view are false, on any view — the suspiciously-flattering pattern the methodology reference warns about, not a genuine strong result.
@@ -1157,8 +1174,12 @@ python3 "$SCRIPTS/explore.py" --dir "$ANALYSIS_DIR" -o "$ANALYSIS_DIR/explore.ht
 **7f — Delivery gate (REQUIRED, and it is a gate, not a report):**
 
 ```bash
-python3 "$SCRIPTS/verify_positioning.py" --dir "$ANALYSIS_DIR" --gate 2 --pretty
+python3 "$SCRIPTS/verify_positioning.py" --dir "$ANALYSIS_DIR" --gate 2 --pretty \
+  -o "$ANALYSIS_DIR/verification.json"
 ```
+
+Writing the result is not decoration: it is what makes "the gate ran and passed" provable after the
+fact, by a test or by a reader of the artifacts, instead of something the transcript merely claims.
 
 **Exit 0** — publishable. Proceed to Step 8.
 

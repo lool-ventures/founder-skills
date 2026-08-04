@@ -270,7 +270,7 @@ def test_cp_verification_verdicts_reach_the_report(tmp_path: Path) -> None:
                     ],
                     "probable_duplicates": [],
                 },
-                "_produced_by": "verify_competitors.py",
+                "_produced_by": "verify_competitors",
                 "metadata": _read(d, "landscape.json")["metadata"],
             },
         )

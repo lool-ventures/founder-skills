@@ -525,8 +525,13 @@ def validate_landscape(enriched: dict[str, Any], as_of: str | None = None) -> tu
         output["data_confidence"] = enriched["data_confidence"]
     if "suggested_additions" in enriched:
         output["suggested_additions"] = enriched["suggested_additions"]
-    if "deferred_recall_candidates" in enriched:
-        output["deferred_recall_candidates"] = enriched["deferred_recall_candidates"]
+    # ALWAYS write deferred_recall_candidates, `[]` when there is nothing to carry or derive.
+    # This is what makes ABSENCE discriminating downstream: an artifact WITHOUT the key predates this
+    # producer and has genuinely unknown provenance (stay silent), while an artifact WITH an empty key
+    # asserts "this producer ran and found none" (evaluable). Measured: with the key omitted on empty,
+    # verify_positioning.py's declined-candidate check went silent on the exact shape where a
+    # sub-agent had dropped the field — a false negative that looked identical to a clean run.
+    output["deferred_recall_candidates"] = enriched.get("deferred_recall_candidates") or []
 
     return output, []
 

@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **competitive-positioning:** `gate3_triggers.py` evaluates the positioning reality-check triggers
+  from the scored map instead of the model working the arithmetic out per run, and distinguishes "not
+  evaluated" (too few competitors for a quartile to mean anything) from "did not fire".
 - **competitive-positioning:** `verify_positioning.py`, a pre-delivery gate. It checks that the report
   shows what the artifacts contain — axis rationales, claim verdicts, the competitor-set verdicts, the
   explorer's scored layer — and that no internal token reached the founder, plus cross-artifact
@@ -45,6 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - **competitive-positioning:** warning text now names competitors by display name rather than internal
   slug.
+- **competitive-positioning:** the trade-off trigger for the positioning reality check now fires on a
+  strong-on-one-axis position (top third) rather than only a top-2 one, so it catches the shape it was
+  added for.
 - All six skills resolve their plugin root once per run via `select_plugin_root.py`, deterministically,
   instead of re-running a filesystem search in each shell. Duplicate installations are named on stderr.
 

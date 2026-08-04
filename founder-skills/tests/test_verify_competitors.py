@@ -124,7 +124,9 @@ def test_output_file_written_and_receipt_emitted(tmp_path: pathlib.Path) -> None
     receipt = json.loads(p.stdout)
     assert receipt["ok"] is True and receipt["flagged"] == 1
     written = json.loads(out_path.read_text())
-    assert written["_produced_by"] == "verify_competitors.py"
+    assert written["_produced_by"] == "verify_competitors", (
+        "the stamp is the BARE module name, derived from __file__ — see test_producer_stamps_match_module_names"
+    )
     assert written["summary"]["flagged_slugs"] == ["calendly"]
 
 

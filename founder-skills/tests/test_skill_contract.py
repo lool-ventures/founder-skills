@@ -462,7 +462,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
-    "competitive-positioning": 113_618,
+    "competitive-positioning": 115_167,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -1656,4 +1656,51 @@ def test_plugin_root_selection_is_deterministic(skill: str) -> None:
     text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
     assert "select_plugin_root.py" in text, (
         f"{skill}/SKILL.md does not route plugin-root candidates through select_plugin_root.py"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Producer provenance stamps
+#
+# compose_report.py's UNVALIDATED_ARTIFACT check compares an artifact's
+# `_produced_by` against an expected value, so the stamp is a contract, not a
+# label. One producer stamped `"verify_competitors.py"` — with the extension —
+# while every sibling stamped a bare module name, and the consequence was not a
+# failing test: it was that the artifact could not be provenance-checked at all
+# without a special case, so it was quietly left out of the map. The fix removed
+# the class rather than the instance (the stamp is derived from `__file__`), and
+# this test is what stops a third spelling from appearing.
+# ---------------------------------------------------------------------------
+
+_PRODUCED_BY_RE = re.compile(r"""_produced_by"\]?\s*[:=]\s*(?:"([^"]+)"|pathlib\.Path\(__file__\)\.stem)""")
+
+
+def test_producer_stamps_match_module_names() -> None:
+    """Every `_produced_by` stamp must equal its own module's stem.
+
+    A derived stamp (`pathlib.Path(__file__).stem`) satisfies this by construction and is the
+    preferred form; a literal is accepted only while it matches.
+    """
+    offenders: list[str] = []
+    checked = 0
+    for script in sorted(SKILLS_ROOT.glob("*/scripts/*.py")):
+        text = script.read_text(encoding="utf-8")
+        m = _PRODUCED_BY_RE.search(text)
+        if not m:
+            continue
+        checked += 1
+        literal = m.group(1)
+        if literal is None:
+            continue  # derived from __file__ — correct by construction
+        if literal != script.stem:
+            offenders.append(f"{script.relative_to(SKILLS_ROOT)}: stamps {literal!r}, module stem is {script.stem!r}")
+
+    assert checked >= 6, (
+        f"only found {checked} producer stamp(s) — the regex probably stopped matching, which would "
+        f"make this test pass vacuously"
+    )
+    assert not offenders, (
+        "producer stamp(s) do not match their module name. compose_report.py's UNVALIDATED_ARTIFACT "
+        "check compares against the module name, so a mismatched stamp makes the artifact "
+        "un-provenance-checkable rather than merely oddly named:\n  " + "\n  ".join(offenders)
     )

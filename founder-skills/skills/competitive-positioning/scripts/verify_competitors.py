@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pathlib
 import re
 import sys
 from typing import Any
@@ -521,7 +522,12 @@ def validate(
     }
     if run_id is not None:
         payload.setdefault("metadata", {})["run_id"] = run_id
-    payload["_produced_by"] = "verify_competitors.py"
+    # Derived from the module name, never a literal. Every sibling producer stamps a BARE module
+    # name; this one carried the extension, which is why compose_report.py could not provenance-check
+    # its artifact without a special case. Deriving it removes the class rather than the instance —
+    # a renamed script cannot silently keep a stale stamp, and a new producer cannot invent a third
+    # spelling. Enforced fleet-wide by test_producer_stamps_match_module_names.
+    payload["_produced_by"] = pathlib.Path(__file__).stem
     payload["validation"] = {"status": "error" if errors else "ok", "errors": errors}
     return payload, errors
 

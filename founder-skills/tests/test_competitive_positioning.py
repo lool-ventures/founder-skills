@@ -527,8 +527,12 @@ class TestValidateLandscapeDeferredRecallCandidates:
         rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
         assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
         assert data is not None
-        assert "deferred_recall_candidates" not in data, (
-            "deferred_recall_candidates must not be fabricated in the output when the input never had it"
+        # The key is ALWAYS written, `[]` when the input had none — that is what makes absence
+        # discriminating for the delivery gate (no key = an artifact predating this producer;
+        # empty key = this producer ran and found none). What must never happen is a FABRICATED
+        # entry, which is what this test now guards.
+        assert data["deferred_recall_candidates"] == [], (
+            "an input with no deferred candidates must yield an empty list, never invented entries"
         )
 
     def test_deferred_recall_candidates_non_list_rejected(self) -> None:
@@ -5580,7 +5584,7 @@ class TestValidateLandscapeDeferredCarryAndDerive:
         rc, data, stderr = self._run(_make_valid_landscape(), "--carry-deferred", str(tmp_path / "nope.json"))
         assert rc == 0, stderr
         assert data is not None
-        assert "deferred_recall_candidates" not in data
+        assert data["deferred_recall_candidates"] == [], "an unreadable draft yields an empty list, not entries"
         assert "carry-deferred" in stderr
 
     # --- derive --------------------------------------------------------
@@ -5626,8 +5630,10 @@ class TestValidateLandscapeDeferredCarryAndDerive:
         assert data is not None
         assert [c["slug"] for c in data["deferred_recall_candidates"]] == ["from-draft"]
 
-    def test_no_flags_means_no_field_invented(self) -> None:
+    def test_no_flags_means_an_empty_list_never_invented_entries(self) -> None:
+        """The key is always present so absence is discriminating for the delivery gate; what must
+        never appear is a fabricated candidate."""
         rc, data, stderr = self._run(_make_valid_landscape())
         assert rc == 0, stderr
         assert data is not None
-        assert "deferred_recall_candidates" not in data
+        assert data["deferred_recall_candidates"] == []

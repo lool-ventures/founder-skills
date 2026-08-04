@@ -519,6 +519,10 @@ def validate_artifacts(
         "moat_scores.json": "score_moats",
         "positioning_scores.json": "score_positioning",
         "checklist.json": "checklist",
+        # Provenance-checkable now that its stamp is the bare module name like every sibling's.
+        # Optional artifact, and the loop below only inspects artifacts that are present, so a run
+        # that legitimately skipped verification gains no failure mode.
+        "competitor_verification.json": "verify_competitors",
     }
     for name, expected in EXPECTED_PRODUCERS.items():
         data = artifacts.get(name)

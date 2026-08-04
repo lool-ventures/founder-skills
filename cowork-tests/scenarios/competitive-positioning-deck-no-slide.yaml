@@ -93,6 +93,15 @@ assert:
       path: recall_gaps.probable_duplicates
       exists: true
 
+  # The delivery gate ran AND passed. This is the strongest single assert in the lane: the gate
+  # checks that the report SHOWS what the artifacts contain and that no internal token reached the
+  # founder, so `publishable` subsumes a dozen individual rendering asserts — and unlike them it
+  # cannot pass vacuously, because a missing verification.json fails the artifact_json read.
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-acmecorp/verification.json
+      path: status
+      equals: publishable
+
   # --- fleet contract asserts (same set the sibling cp lanes carry) ---
   - subagent_dispatched: 'competitive-positioning'
   - skill_triggered: '(founder-skills:)?competitive-positioning$'
