@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 Fleet-wide:
 
+- Three skills told an analysis step to hand its whole result back in a message as well as writing it
+  to disk. Restating a long analysis is where truncation and drift come from; each now returns only a
+  confirmation that the file was written.
 - Internal tokens reached founder-facing report text in every skill: private enums, field names and,
   in one case, a shell command the founder had no shell to run.
 - Some tokens were then kept verbatim by mistake — a field name reached through an `id` field
@@ -28,11 +31,21 @@ Fleet-wide:
 
 **cap-table:**
 
+- Guidance said a missing cap base produced silent zeros in artifacts that "look right". It stops the
+  run instead, and saying otherwise invited invented founders and share counts. Two places also
+  claimed the extraction step produces the cap-state snapshot; it does not.
 - Field names printed as raw tokens (`safe_price`).
 - The explorer embedded three values its script never read.
 
 **competitive-positioning:**
 
+- A deck with no competition slide was graded as "not applicable" rather than flagged, which dropped
+  the item out of the score — so a deck that never engaged competition scored *higher* than one that
+  engaged it poorly. It is now a warning, as the criteria always said.
+- The positioning reality-check described one of its own triggers with an out-of-date threshold, so
+  the explanation and the check disagreed about when it fires. The explanation no longer restates the
+  numbers, and a trigger calibrated on limited evidence is now presented to you as a soft signal
+  rather than a settled finding.
 - Positioning-map axis rationales were blank in `report.md` and absent from the visual report and
   explorer; the checklist could grade POS_05 as a pass on unrendered text.
 - The explorer embedded differentiation scores, per-axis ranks, vanity-axis flags and claim verdicts,
@@ -62,6 +75,8 @@ Fleet-wide:
 
 **financial-model-review:**
 
+- Two runway figures the report relies on were missing from the documented artifact, including the one
+  to lead with when a company is projected default-alive — where a blank runway is a result, not a gap.
 - The explorer embedded the review checklist score but did not render it.
 - The coaching template asks for investor talking points; they were embedded in the explorer and
   rendered nowhere.
@@ -78,6 +93,10 @@ Fleet-wide:
 
 **ic-sim:**
 
+- The evaluation reference omitted the "to confirm" status entirely and gave a scoring formula that
+  counted it against you. Undisclosed dimensions are excluded from the score, and past six of them the
+  verdict is held at more-diligence in both directions — you cannot be declined for what you weren't
+  asked. The reference also claimed a generic run invents a fund thesis; it never does.
 - Partner and consensus verdicts printed as raw tokens (`more_diligence`, `hard_pass`), including in
   the report's headline verdict lines.
 

@@ -13,13 +13,29 @@ Each dimension receives one of 5 statuses:
 | `concern` | Weakness identified. Partners would raise this in discussion. | 0.0 |
 | `dealbreaker` | Fatal flaw. Any single dealbreaker forces a `hard_pass` verdict. | 0.0 (forces hard_pass) |
 | `not_applicable` | Dimension doesn't apply to this company's stage or model. | excluded |
+| `to_confirm` | The materials don't disclose the data to judge this dimension — UNKNOWN, not weak. | excluded |
+
+**`to_confirm` vs `concern` vs `not_applicable` — this drives the verdict.** Use `to_confirm` ONLY
+when the data is simply undisclosed and the founder could supply it; it is neutral, so honest
+non-disclosure never drags the score to a false decline. Use `concern` when the evidence you DO have
+is weak or negative — **absence that is itself evidence of weakness is NOT `to_confirm`** (no traction
+at a large ask, no unit economics at Series A: the absence is the finding). Use `not_applicable` only
+when the dimension structurally cannot apply, e.g. a SaaS metric for a hardware company.
 
 ## Scoring Formula
 
 ```
-applicable = count of items where status != "not_applicable"
+applicable = count of items where status is neither "not_applicable" nor "to_confirm"
 conviction_score = (strong*1.0 + moderate*0.5) / applicable * 100
 ```
+
+Both excluded statuses leave the denominator. `to_confirm` in particular must not deflate the score:
+a dimension the materials never addressed is not a weakness, and counting it as one would penalise a
+founder for a question nobody asked.
+
+**Coverage cap.** More than 6 `to_confirm` dimensions holds the verdict at `more_diligence` in BOTH
+directions — capped down from `invest` (thin coverage cannot earn conviction) and floored up from
+`pass` (you cannot decline a company on the grounds that you weren't told anything).
 
 ### Verdicts
 
@@ -131,7 +147,9 @@ If all 28 dimensions are marked `not_applicable` (or no items provided), the sco
 
 **Stage calibration:**
 - Applies equally across all stages
-- In generic mode: evaluate against a hypothetical early-stage fund thesis
+- In generic mode: evaluate against the validated generic `fund_profile.json` — canonical archetypes
+  and a stated early-stage thesis. **Never invent a hypothetical fund thesis, in either mode**;
+  `FUND_PROFILE` is an input, not something the model authors.
 - In fund-specific mode: evaluate against the researched fund's actual thesis, portfolio, and focus
 
 ---

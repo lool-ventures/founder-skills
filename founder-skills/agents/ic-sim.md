@@ -615,10 +615,17 @@ In both Context A and Context B, your final assistant message MUST be
 JSON-only. No leading/trailing prose. The main thread parses your final
 message as raw JSON.
 
-In Context A: the JSON shape matches the relevant producer script's input
-(`partner_assessment` object for PARTNER_ANALYSIS, the rebuttal object for
-PARTNER_REBUTTAL, `{"items": [...]}` for SCORE_DIMENSIONS, `{"portfolio_size": N,
-"conflicts": [...]}` for DETECT_CONFLICTS).
+In Context A: your final message is ONLY the receipt
+`{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}`. The full
+analytical payload (the `partner_assessment` object for PARTNER_ANALYSIS, the
+rebuttal object for PARTNER_REBUTTAL, `{"items": [...]}` for SCORE_DIMENSIONS,
+`{"portfolio_size": N, "conflicts": [...]}` for DETECT_CONFLICTS) was already
+written to `OUTPUT_PATH` with your Write tool — do NOT repeat it in the message.
+Returning multi-KB JSON here makes the model re-emit the whole analysis a second
+time, which is the exact hazard the file hand-off exists to avoid, and it can
+truncate. The ONE exception is the message-channel fallback named in the Context
+A hard rules: if your dispatch prompt carries no `OUTPUT_PATH:` line, return the
+full output JSON in your final message instead.
 
 In Context B: the JSON is the success/blocked payload defined above.
 

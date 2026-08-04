@@ -73,7 +73,7 @@ Read each when first needed — do NOT load all upfront. At `${CLAUDE_PLUGIN_ROO
 
 - **`partner-archetypes.md`** — Read before Step 4 (main-thread use ONLY: mapping real partners to archetypes in fund-specific mode). The operative archetype rubric the PARTNER_ANALYSIS sub-agent needs is duplicated in `agents/ic-sim.md` — the sub-agent never reads this file (see "Context A hand-off protocol" below); this is a documented split, not an oversight.
 - **`evaluation-criteria.md`** — No longer read by any workflow step. The operative 28-dimension rubric (status values, categories, stage calibration, dealbreaker thresholds, SaaS metrics) now lives in `agents/ic-sim.md`, inlined into the SCORE_DIMENSIONS sub-agent's system prompt. This file is kept as human-readable documentation only; edits to it do NOT propagate to sub-agent behavior — edit `agents/ic-sim.md` directly.
-- **`ic-dynamics.md`** — Read before composing discussion.json. How real VC ICs work: formats, decisions, what kills deals
+- **`ic-dynamics.md`** — Background on how real VC ICs work: formats, decisions, what kills deals. Not read on a normal run — `discussion.json` is derived by `compose_discussion.py` from the partners' own assessments and rebuttals, with nothing authored by the main thread.
 - **`artifact-schemas.md`** — Consult as needed when depositing agent-written artifacts
 
 ## Artifact Pipeline
@@ -751,8 +751,6 @@ with open('$SIM_DIR/partner_rebuttal_visionary.json', 'w') as f:
 **Verify after writes:** check that `$SIM_DIR` contains all three `partner_rebuttal_*.json` files. If any are missing, re-run that dispatch before proceeding.
 
 ### Step 7: Compose Discussion -> `discussion.json` (producer pipe)
-
-**REQUIRED — read `${CLAUDE_PLUGIN_ROOT}/skills/ic-sim/references/ic-dynamics.md` now.** (Literal token, not `$REFS` — a file-tool Read of the `find /sessions` path is denied on host-loop.)
 
 `discussion.json` is now composed the same way every other producer-script artifact is: run the
 script against the six files already on disk (three `partner_assessment_*.json` from Step 6, three

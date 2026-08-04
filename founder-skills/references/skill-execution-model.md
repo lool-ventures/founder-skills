@@ -141,11 +141,15 @@ tool surface and different rules.
 - Tool surface: Read/Write/Glob/Grep (no Bash). The agent's ONLY write
   is its `OUTPUT_PATH` hand-off file — it never touches `report.md` or
   any canonical artifact.
-- Role: read `coaching_payload` from dispatch prompt; reason about
-  outcomes from structured data; compose the coaching commentary; WRITE
-  it to the `OUTPUT_PATH` hand-off file as
-  `{"commentary_markdown": ...}` (the same file transport as Context A);
-  return a small receipt `{"status": "complete", "output_path": ...}`.
+- Role: Read the STAGED `coaching_payload.json` from the hand-off dir
+  (the main thread writes it there; it is NOT inlined into the dispatch
+  prompt); reason about outcomes from structured data; compose the
+  coaching commentary; WRITE it to the `OUTPUT_PATH` hand-off file as
+  **plain markdown** — a `.md` file, no JSON, no escaping — and return a
+  small receipt `{"status": "complete", "output_path": ...}`. The main
+  thread wraps that markdown into the JSON envelope with
+  `md_to_commentary.py`, so the commentary leaves the model exactly once,
+  into the Write call, and nothing has to hand-escape quotes or newlines.
 - The MAIN THREAD gates the hand-off file (`check_handoff.py`), then
   inserts the commentary via the shared `scripts/insert_coaching.py`
   script, which handles the 6-state idempotency matrix, the exact-uuid
@@ -214,14 +218,18 @@ two simultaneously for MOAT_SCORING + POSITIONING_SCORING.
 ## Mitigation 2: Trimmed Context B Coaching Context
 
 v0.4.2 introduces structured `coaching_payload` in `report.json`.
-Context B reads payload inline from dispatch prompt (~5K tokens)
-instead of full `report.md` (10-30K tokens). Saves the difference
-per coaching dispatch.
+Context B reads the payload (~5K tokens) instead of the full `report.md`
+(10-30K tokens), and saves the difference per coaching dispatch. The
+payload is STAGED AS A FILE in the hand-off dir and Read from there — a
+required read, so a wrong path prefix fails loudly before anything is
+written. It is not inlined into the dispatch prompt.
 
 The agent composes the commentary and WRITES it to the `OUTPUT_PATH`
-hand-off file (`{"commentary_markdown": ...}`), returning only a small
-`{"status": "complete", "output_path": ...}` receipt (the same file
-transport as Context A). The main thread gates that file
+hand-off file as **plain markdown** (a `.md` file — no JSON, no
+escaping), returning only a small
+`{"status": "complete", "output_path": ...}` receipt. The main thread
+gates it with `check_handoff.py --format=markdown` and wraps it via
+`md_to_commentary.py`, whose `json.dumps` cannot emit malformed JSON. The main thread gates that file
 (`check_handoff.py`) and inserts the commentary via the shared
 `scripts/insert_coaching.py` script at a per-run uuid marker
 (`<!-- COACHING_INSERTION_POINT_<8-hex> -->`) — the deterministic

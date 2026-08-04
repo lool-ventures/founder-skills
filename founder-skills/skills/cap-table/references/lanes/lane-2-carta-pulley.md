@@ -27,4 +27,4 @@ The script will refuse to run if the fingerprint doesn't match the declared `--m
 
 ## After ingestion
 
-The script emits `instruments.json` + `cap_state.json` directly (no sub-agent dispatch needed for Carta). Skip ahead to **Step 4** in the main workflow (`cap_state.py` validation).
+The script emits `instruments.json` + `extraction_audit.json` (no sub-agent dispatch needed for Carta). It does **not** emit `cap_state.json` — a Carta export carries no founder identities or pool structure, so `inputs.json` is built from founder answers and `cap_state.json` is produced by `cap_state.py` at **Step 4** in the main workflow, as on every other lane.

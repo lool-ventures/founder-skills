@@ -469,7 +469,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # --inputs so the scoring records a fingerprint of what it graded — without it that fingerprint is
     # null and staleness cannot be detected for this artifact at all.
     "financial-model-review": 78_092,
-    "ic-sim": 87_397,
+    # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
+    # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
+    # is authored by the main thread — so the read informed no decision while pulling a whole
+    # reference into context. The Available References entry now says it is background, not a read.
+    "ic-sim": 87_355,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -481,7 +485,13 @@ SKILL_MD_CEILING: dict[str, int] = {
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
-    "competitive-positioning": 116_292,
+    # competitive-positioning SHRANK: Gate 3's four threshold bullets are deleted. They restated
+    # arithmetic gate3_triggers.py owns, under a sentence saying "Do NOT re-derive it here", and the
+    # copy had already drifted — SKILL.md said the trade-off trigger's strong side was top-2 where
+    # the script had corrected it to top-tercile, its docstring recording top-2 as WRONG (it excludes
+    # 3rd of 11, the exact shape the trigger exists for). Replaced by a relay instruction: present a
+    # `provisional` trigger as a soft signal. Also NARR_03, which changed a graded score.
+    "competitive-positioning": 115_975,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -500,7 +510,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # not. (2) The note told the model to paste RUN_ID's printed literal, but Step 0 never echoed
     # RUN_ID (only ARTIFACTS_ROOT and HANDOFF_AGENT were printed) — added an echo so the remedy is
     # satisfiable.
-    "cap-table": 143_744,
+    # cap-table +96 B: the script catalog claimed extract_cap_table.py emits cap_state.json. It does
+    # not — that is cap_state.py's output at Step 4 — and the same file said so correctly two lines
+    # earlier, so a model reading the catalog was told to expect an artifact that never appears.
+    "cap-table": 143_840,
 }
 
 
@@ -657,11 +670,21 @@ REFERENCES_CEILING: dict[str, int] = {
     # fmr raised to document `graded_against` on the three producer outputs that stamp it — a new
     # artifact field is not discoverable from a schema doc that omits it, and the field exists to make
     # staleness detectable at all (run_id parity cannot see corrections applied within a run).
-    "financial-model-review": 72_961,
-    "ic-sim": 54_359,
+    # fmr +667 B: the coaching_payload table was missing static_runway_months and base_runway_note —
+    # two fields compose EMITS and SKILL.md instructs the model to read. It also now states that a
+    # null runway_months is a RESULT (default-alive), not a gap.
+    "financial-model-review": 73_628,
+    # ic-sim +1446 B: evaluation-criteria.md omitted `to_confirm` from the status table AND from the
+    # scoring formula, which excluded only not_applicable. Following it changed the conviction
+    # score, since score_dimensions.py excludes both. The >6 coverage cap was undocumented too.
+    "ic-sim": 55_805,
     "deck-review": 49_039,
     "competitive-positioning": 136_835,
-    "cap-table": 45_241,
+    # cap-table +422 B: inputs-skeleton.md promised "no warning, and downstream artifacts that look
+    # right but contain zeros" — the PRE-FIX world. cap_state.py hard-errors E_NO_EQUITY_BASE now,
+    # and prose telling a model that a missing base yields plausible zeros invites it to invent one.
+    # lane-2 also claimed extract_cap_table.py emits cap_state.json directly; it does not.
+    "cap-table": 45_663,
 }
 
 

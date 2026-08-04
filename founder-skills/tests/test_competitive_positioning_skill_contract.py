@@ -1691,8 +1691,22 @@ def test_gate3_positioning_reality_check_two_step_and_provisional_threshold() ->
     assert "Step A:" in block, "Gate 3 must have a Step A (chat message) before the question"
     assert "Step B:" in block, "Gate 3 must have a Step B (AskUserQuestion), separate from Step A"
     assert "AskUserQuestion" in block, "Gate 3's Step B must call AskUserQuestion"
-    assert "PROVISIONAL" in block, (
-        "Gate 3's <25% overall-differentiation trigger must be explicitly marked PROVISIONAL "
-        "(calibrated on a single run, not a validated threshold)"
+    # RETARGETED. This used to assert the literal tokens "PROVISIONAL" and "25%" inside the SKILL.md
+    # block — i.e. it required the threshold arithmetic to be RESTATED here, next to the sentence that
+    # says "Do NOT re-derive it here". That duplication then drifted: SKILL.md described the trade-off
+    # trigger's strong side as top-2 while `gate3_triggers.py` had already corrected it to top-tercile,
+    # its own docstring recording top-2 as WRONG (it excludes 3rd of 11, the exact shape the trigger was
+    # added for). The prose was kept in step with a test rather than with the code.
+    #
+    # The numbers now live only in the script, whose suite exercises them exhaustively on synthetic
+    # inputs. What SKILL.md still owes the founder is the RELAY: a `provisional` trigger must be
+    # presented as a soft signal, not a settled finding.
+    assert "provisional" in block.lower(), (
+        "Gate 3 must tell the model to relay the script's `provisional` flag — a trigger calibrated on a "
+        "single observed run must reach the founder as a soft signal, not a settled finding"
     )
-    assert "25%" in block, "Gate 3 must state the differentiation threshold (25%) the provisional trigger uses"
+    assert "25%" not in block, (
+        "Gate 3 must NOT restate the script's thresholds. gate3_triggers.py owns them and is "
+        "exhaustively tested; a copy here is what drifted last time (SKILL.md said top-2 where the "
+        "script had already moved to top-tercile). Name the triggers, not their arithmetic."
+    )

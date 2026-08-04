@@ -676,7 +676,11 @@ def test_checklist_dispatch_requires_visuals_cross_check_before_absence_claims()
     agent_anchor = "For `CHECKLIST`"
     agent_start = agent_text.find(agent_anchor)
     assert agent_start != -1, f"{AGENT_MD.name} has no '{agent_anchor}' section"
-    agent_section = agent_text[agent_start : agent_start + 900]
+    # Bounded on STRUCTURE, not a character count. A fixed window is the documented trap here
+    # (CLAUDE.md, "Contract tests slice a fixed character window from an anchor"): an additive edit
+    # above the asserted line pushes it past the boundary and the test fails on content that is still
+    # present. Widening N only defers the next break; the section's own closing heading does not.
+    agent_section = agent_text[agent_start : agent_text.find("**Hard rules in this context:**", agent_start)]
     assert "visuals" in agent_section, f"{AGENT_MD.name} CHECKLIST section must reference the visuals field"
 
 
@@ -751,7 +755,11 @@ def test_checklist_dispatch_return_shape_keys() -> None:
     agent_anchor = "For `CHECKLIST`"
     agent_start = agent_text.find(agent_anchor)
     assert agent_start != -1, f"{AGENT_MD.name} has no 'For `CHECKLIST`' section"
-    agent_section = agent_text[agent_start : agent_start + 900]
+    # Bounded on STRUCTURE, not a character count. A fixed window is the documented trap here
+    # (CLAUDE.md, "Contract tests slice a fixed character window from an anchor"): an additive edit
+    # above the asserted line pushes it past the boundary and the test fails on content that is still
+    # present. Widening N only defers the next break; the section's own closing heading does not.
+    agent_section = agent_text[agent_start : agent_text.find("**Hard rules in this context:**", agent_start)]
     assert '"items"' in agent_section, (
         f"{AGENT_MD.name} CHECKLIST section must show the '{{\"items\": [...]}}' return shape"
     )

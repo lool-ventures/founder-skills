@@ -926,13 +926,17 @@ unavailable rather than implying everything was checked.
 The thresholds are pinned in the script and exhaustively tested, which is the point: one of these
 triggers is effectively unreachable in a live run, and the arithmetic ("bottom quartile" of what
 denominator, ties which way, what happens on a three-competitor set) has no single obvious reading.
-Do NOT re-derive it here. For reference, the triggers it evaluates — check **every view** in
+Do NOT re-derive it here — that is exactly how this section once came to name a threshold the
+script had already corrected. The triggers it evaluates — check **every view** in
 `positioning_scores.json` — vanity flags, rank, and `overall_differentiation` live there, not in `positioning.json`. **Primary view = `views[0]`** — real runs use descriptive slug ids rather than the documented `primary`/`secondary`, so do not look for those literal strings when deciding which view is primary; a `views[]` entry may also carry an optional `label` field used for display, which is not a signal of which view is primary either. Evaluate every trigger below **per view, not on the primary view alone** — a trade-off or flattering shape on a secondary view is invisible if only the primary view is checked:
 
-- `_startup`'s rank (`startup_x_rank` / `startup_y_rank`) is in the bottom half of the competitive set on BOTH axes, on any view. **This trigger is PROVISIONAL** — like the differentiation trigger below, it is calibrated on a single observed run, not a validated threshold. Treat it as a soft prompt to look again, not a settled bound.
-- `_startup` is top-2 on BOTH axes (by rank) AND both vanity-axis flags (`x_axis_vanity_flag` / `y_axis_vanity_flag`) on that view are false, on any view — the suspiciously-flattering pattern the methodology reference warns about, not a genuine strong result.
-- **Trade-off shape** — `_startup` is in the bottom quartile (roughly the worst 25%) on ONE axis AND top-2 on the OTHER axis, on any view. **This trigger is PROVISIONAL**, added after a live run the bottom-half-on-both trigger above could not see (rank 10 of 11 on one axis, 3 of 11 on the other). The mean-based `overall_differentiation` trigger below caught that run only incidentally, because its 50/50 rank-and-gap blend happened to average out below 25% — a genuine one-axis trade-off can just as easily average out to something unremarkable, so this trigger checks the two axes directly instead of relying on the mean to notice.
-- `overall_differentiation` is below 25%, on any view. **This trigger is PROVISIONAL** — it is calibrated on a single observed run, not a validated threshold. Treat it as a soft prompt to look again, not a settled bound.
+- **Bottom-half-on-both**, **suspiciously-flattering**, **trade-off shape**, and **low overall
+  differentiation**. The exact predicates, thresholds and tie-handling live in the script and are
+  exhaustively tested there — this list names them so you can recognise what fired; it does not
+  restate the arithmetic, which is what let a stale copy here drift out of step with the script.
+- **Relay the script's `provisional` flag to the founder.** A trigger carrying `provisional: true` is
+  calibrated on a single observed run, not a validated threshold: present it as a soft signal worth a
+  second look, not a finding. Say so in the Step-A message rather than reporting it as settled.
 
 If none fire on any view, skip this gate silently and continue.
 
@@ -965,9 +969,14 @@ product_profile.json's deck_competition_slide field (deck mode) and
 landscape_draft.json's deck_competitors_excluded field are what the
 competition-slide cross-check item (NARR_03) needs — without them it has
 nothing to grade. When deck_competition_slide.present is false (the deck had
-no competition slide at all), grade NARR_03 not_applicable using the stated
-reason as your evidence — do not treat the field's absence as "nothing to
-grade" once a present:false record with a reason exists.
+no competition slide at all), that IS a concrete answer — grade NARR_03 **warn**,
+never not_applicable, using the stated reason as your evidence and saying plainly
+that the deck names no competitor. not_applicable would drop the item out of the
+score denominator, inflating the score while hiding the finding, and a deck that
+never engages competition is one of the strongest findings this review returns.
+Do not treat the field's absence as "nothing to grade" once a present:false
+record with a reason exists. references/checklist-criteria.md's NARR_03 bands are
+the authority.
 
 Assess all 25 checklist items (COVER_01..05, POS_01..05, MOAT_01..04,
 EVID_01..04, NARR_01..04, MISS_01..03). Mode-based gating applies: when

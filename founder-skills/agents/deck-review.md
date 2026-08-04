@@ -68,9 +68,13 @@ the producer script). Required top-level fields:
 - `overall_narrative_assessment`: string summarising the deck's narrative arc
 
 For `CHECKLIST`: evaluate all 35 criteria from
-`references/checklist-criteria.md`. Mark AI-category items
-`not_applicable` for non-AI companies. Score every Design & Readability
-criterion too, even when `deck_inventory.json`'s `input_format` is `"text"`
+`references/checklist-criteria.md`. **Score the AI-category items too — do
+NOT mark them `not_applicable` yourself for a non-AI company.** Gating is
+the producer's job and it is deterministic: `checklist.py` forces those
+four to `not_applicable` from `ai_company_status` after you return, and a
+sub-agent that pre-empts it produces a checklist whose gating depends on
+the model's read rather than the recorded status. Score every Design &
+Readability criterion too, even when `deck_inventory.json`'s `input_format` is `"text"`
 (the founder described slides in conversation rather than uploading a
 file) — `checklist.py` applies deterministic Design-criteria gating from
 `input_format` after you return, the same way it gates AI criteria from
@@ -262,8 +266,15 @@ In both Context A and Context B, your final assistant message MUST be
 JSON-only. No leading/trailing prose. The main thread parses your final
 message as raw JSON.
 
-In Context A: the JSON shape matches the relevant producer script's input
-(`slide_reviews.json` schema or `checklist.json` schema).
+In Context A: your final message is ONLY the receipt
+`{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}`. The full
+analytical payload (matching `slide_reviews.json` or `checklist.json`) was
+already written to `OUTPUT_PATH` with your Write tool — do NOT repeat it in the
+message. Returning multi-KB JSON here makes the model re-emit the whole analysis
+a second time, which is the exact hazard the file hand-off exists to avoid, and
+it can truncate. The ONE exception is the message-channel fallback named in the
+Context A hard rules: if your dispatch prompt carries no `OUTPUT_PATH:` line,
+return the full output JSON in your final message instead.
 
 In Context B: the JSON is the success/blocked payload defined above.
 

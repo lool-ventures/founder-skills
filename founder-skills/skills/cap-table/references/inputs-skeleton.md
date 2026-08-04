@@ -1,6 +1,6 @@
 # inputs.json — common-case shape
 
-The skill's SKILL.md Step 2 shows a minimal `inputs.json` heredoc that omits `founders`, `common_batches`, `preferred_series`, and `option_pool`. Those blocks are silently optional in `inputs.schema.json`, but **`cap_state.py` and most downstream rules need them to produce meaningful output**. Skipping them produces an empty pre-financing snapshot, no warning, and downstream artifacts that look right but contain zeros.
+The skill's SKILL.md Step 2 shows a minimal `inputs.json` heredoc that omits `founders`, `common_batches`, `preferred_series`, and `option_pool`. Those blocks are optional in `inputs.schema.json`, but **`cap_state.py` and most downstream rules need them to produce meaningful output**. Omitting the equity base entirely no longer passes silently: with instruments present and none of `founders`, `common_batches`, `preferred_series` or `option_pool`, `cap_state.py` hard-errors `E_NO_EQUITY_BASE` (exit 1) rather than computing an all-zero base for conversions to divide into. So a missing base STOPS the run — it does not produce plausible-looking zeros, and it is never a reason to invent founders or share counts. A single instrument with no surrounding cap table is the expected case for this and takes the **no-cap-base fork** in Step 2.
 
 This reference shows the full common-case shape. Copy-and-fill for any engagement where someone actually owns shares.
 

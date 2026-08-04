@@ -257,7 +257,9 @@ Assembled report from all artifacts with cross-artifact validation.
 | `warned_items` | object[] | yes | Warned checklist items (subject to the same truncation) |
 | `high_severity_warnings` | string[] | yes | High-severity validation warning codes |
 | `company_name` | string | yes | Company name |
-| `runway_months` | number \| null | yes | Base-case runway months (`null` when not computed) |
+| `runway_months` | number \| null | yes | Base-case runway months. **`null` is a RESULT, not a gap**: it means cash never depletes in the projection window (default-alive), so never report it as unknown, missing or an error. |
+| `static_runway_months` | number \| null | yes | Cash at today's net burn, independent of the projection. Lead with this when `runway_months` is `null` — the projection that produced default-alive holds burn flat while revenue compounds, so the static figure is the concrete number a founder can act on. When both exist and this one is materially lower, give both. |
+| `base_runway_note` | string | no | Present only when the base scenario is default-alive with a null `runway_months`; carries the wording that explains the null. |
 | `review_dir` | string | yes | Absolute review directory path |
 | `report_path` | string | yes | Absolute `report.md` path |
 | `insertion_marker` | string | yes | The exact per-run uuid marker compose emitted into `report.md` |
