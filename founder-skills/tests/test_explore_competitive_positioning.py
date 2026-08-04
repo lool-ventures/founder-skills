@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -450,3 +451,213 @@ def test_docstring_discloses_plotly_cdn() -> None:
     docstring = src[:doc_end]
     assert "3D" in docstring or "Plotly" in docstring
     assert "CDN" in docstring
+
+
+# ---------------------------------------------------------------------------
+# Sibling-shaped axis rationale (Task 1), scored-layer rendering (Task 3),
+# and optional view label (Task 4)
+# ---------------------------------------------------------------------------
+
+
+def test_sibling_shaped_rationale_normalized_into_embedded_data() -> None:
+    """Regression guard for the silently-lost axis rationale defect: a view
+    carrying the axis rationale as a view-level sibling (x_axis_rationale /
+    y_axis_rationale — the shape the dispatch templates used to instruct)
+    must be normalized server-side into the nested view.x_axis.rationale
+    shape the embedded JS reads (render2D reads view.x_axis.rationale
+    directly — that read path is deliberately untouched by this fix)."""
+    arts = _all_artifacts()
+    pos = dict(arts["positioning.json"])
+    new_views = []
+    for v in pos["views"]:
+        v2 = dict(v)
+        x_rationale = v2["x_axis"].get("rationale", "")
+        y_rationale = v2["y_axis"].get("rationale", "")
+        v2["x_axis"] = {k: val for k, val in v2["x_axis"].items() if k != "rationale"}
+        v2["y_axis"] = {k: val for k, val in v2["y_axis"].items() if k != "rationale"}
+        v2["x_axis_rationale"] = x_rationale
+        v2["y_axis_rationale"] = y_rationale
+        new_views.append(v2)
+    pos["views"] = new_views
+    arts["positioning.json"] = pos
+
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        data = _extract_data_payload(stdout)
+        v = data["views"][0]
+        assert v.get("x_axis", {}).get("rationale"), (
+            "sibling-shaped rationale must be folded into the nested x_axis.rationale the JS reads"
+        )
+        assert "key differentiator" in v["x_axis"]["rationale"].lower()
+
+
+def test_sibling_shaped_rationale_nested_wins_when_both_present() -> None:
+    """When a view carries both shapes and they differ, the nested (canonical)
+    value must win — the normalization must not overwrite an already-nested
+    rationale with the sibling's."""
+    arts = _all_artifacts()
+    pos = dict(arts["positioning.json"])
+    v2 = dict(pos["views"][0])
+    v2["x_axis"] = dict(v2["x_axis"])
+    v2["x_axis"]["rationale"] = "Nested wins this one"
+    v2["x_axis_rationale"] = "Sibling loses this one"
+    pos["views"] = [v2] + [dict(v) for v in pos["views"][1:]]
+    arts["positioning.json"] = pos
+
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        data = _extract_data_payload(stdout)
+        assert data["views"][0]["x_axis"]["rationale"] == "Nested wins this one"
+
+
+def test_view_score_panel_container_exists() -> None:
+    """Explorer HTML contains the view-score-panel container element (Task 3:
+    the scored layer — differentiation score, rank, vanity flags — must
+    render, not just sit unused in DATA.view_scores)."""
+    arts = _all_artifacts()
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        assert 'id="view-score-panel"' in stdout
+
+
+def test_view_score_panel_renders_differentiation_score_and_rank() -> None:
+    """The JS must read DATA.view_scores and render a differentiation score
+    and a rank string following the 'Rank N of M ranked' convention — M is
+    competitor_count + 1 (the startup counted among the ranked entities),
+    never 'of M competitors'."""
+    arts = _all_artifacts()
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        assert "DATA.view_scores" in stdout
+        assert "Differentiation score" in stdout
+        assert "totalRanked = (vs.competitor_count || 0) + 1" in stdout
+        assert "totalRanked + ' ranked" in stdout
+        assert "competitors</div>" not in stdout, "must never render 'of M competitors'"
+
+
+def test_view_score_panel_renders_vanity_flags() -> None:
+    """A vanity-flagged axis (the fixture's secondary view has
+    x_axis_vanity_flag=True) must be capable of rendering a vanity warning in
+    the score panel."""
+    arts = _all_artifacts()
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        assert "x_axis_vanity_flag" in stdout
+        assert "y_axis_vanity_flag" in stdout
+        assert "vanity-flag" in stdout
+        assert "Vanity axis warning" in stdout
+
+
+def test_diff_claims_panel_renders_humanized_verdict() -> None:
+    """Task 3: DATA.diff_claims must actually be rendered — a claim card with
+    the claim text and a humanized verdict badge, not just embedded and
+    ignored. The fixture's differentiation_claims include a
+    'partially_holds' verdict, which humanize() must convert away from the
+    raw snake_case token."""
+    arts = _all_artifacts()
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        assert 'id="diff-claims-panel"' in stdout
+        assert 'id="diff-claims-list"' in stdout
+        assert "renderDiffClaims" in stdout
+        assert "DATA.diff_claims" in stdout
+        assert "humanize(verdict)" in stdout
+        assert "verdict-badge" in stdout
+        data = _extract_data_payload(stdout)
+        assert any(c.get("verdict") == "partially_holds" for c in data["diff_claims"]), (
+            "fixture must actually carry a snake_case verdict for this test to be meaningful"
+        )
+
+
+def test_diff_claims_panel_placeholder_when_no_claims() -> None:
+    """No differentiation claims (neither scored nor draft) must render a
+    clear empty-state message, not a blank panel."""
+    arts = _all_artifacts()
+    ps = dict(arts["positioning_scores.json"])
+    ps["differentiation_claims"] = []
+    arts["positioning_scores.json"] = ps
+    pos = dict(arts["positioning.json"])
+    pos["differentiation_claims"] = []
+    arts["positioning.json"] = pos
+
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        assert "No differentiation claims tested" in stdout
+
+
+def test_view_label_preferred_in_selector_option() -> None:
+    """Task 4: an optional views[].label, when present, is used verbatim for
+    the view-selector option text instead of the title-cased `id`."""
+    arts = _all_artifacts()
+    pos = dict(arts["positioning.json"])
+    pos["views"] = [dict(pos["views"][0])]
+    pos["views"][0]["label"] = "Speed vs. Privacy"
+    arts["positioning.json"] = pos
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        assert "v.label ||" in stdout
+        data = _extract_data_payload(stdout)
+        assert data["views"][0]["label"] == "Speed vs. Privacy"
+
+
+def test_explorer_stays_self_contained_with_new_panels() -> None:
+    """The new view-score and differentiation-claims panels must not
+    introduce any new external network requests — the explorer stays
+    self-contained apart from the pre-existing, deliberately-lazy 3D Plotly
+    CDN load (which is injected at runtime, not a static tag, and so never
+    shows up here either)."""
+    arts = _all_artifacts()
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        checker = _ExternalResourceChecker()
+        checker.feed(stdout)
+        assert len(checker.external_stylesheets) == 0
+        assert len(checker.external_scripts) == 0, f"top-level external scripts found: {checker.external_scripts}"
+
+
+# ---------------------------------------------------------------------------
+# Dead-payload guard
+#
+# Measured in a live run: explore.py computed and embedded `view_scores` and
+# `diff_claims` — the entire scored layer — and the emitted JavaScript never
+# referenced either. The delivered 522 KB explorer therefore showed no
+# differentiation score, no rank, no vanity flag and no claim verdict, while
+# paying for all of it in payload. Nothing detected it: the file rendered, the
+# tests passed, the data was simply unreachable.
+# ---------------------------------------------------------------------------
+
+
+def test_every_embedded_data_key_is_read_by_the_script() -> None:
+    """Every top-level DATA key must be referenced at least once in the emitted script.
+
+    Both explorers access their payload with dotted `DATA.key` only (verified — no bracket
+    notation, no destructuring), so a plain reference scan is sound. If that ever changes, this
+    test will fail loudly rather than silently passing, which is the correct direction.
+    """
+    arts = _all_artifacts()
+    with _make_artifact_dir(arts) as d:
+        rc, html, stderr = _run_explore(d)
+    assert rc == 0, f"exit {rc}, stderr={stderr}"
+    match = re.search(r"const\s+DATA\s*=\s*(\{.*?\});", html, re.DOTALL)
+    assert match, "could not locate the embedded DATA object in the generated explorer"
+    payload = json.loads(match.group(1))
+    # Non-vacuity: an empty payload would make `unread` trivially empty and pass for the wrong
+    # reason — the failure mode this whole test exists to catch.
+    assert len(payload) >= 5, f"DATA payload parsed as only {len(payload)} key(s) — the scan would be vacuous"
+    unread = sorted(k for k in payload if f"DATA.{k}" not in html)
+    assert not unread, (
+        f"explore.py embeds DATA key(s) its script never reads: {unread}. Either render them or stop "
+        "embedding them — an unread key is a founder-facing feature that silently does not exist, and "
+        "it still costs payload. (This is how the entire scored layer went missing from a delivered "
+        "explorer: differentiation score, ranks, vanity flags and claim verdicts were all embedded and "
+        "none was rendered.)"
+    )

@@ -105,25 +105,47 @@ Every analysis deposits structured JSON artifacts into a working directory. The 
 - If a step is not applicable, deposit a stub: `{"skipped": true, "reason": "..."}`
 - **Do NOT use `isolation: "worktree"`** for sub-agents — files written in a worktree won't appear in the main `$ANALYSIS_DIR`
 
-Keep the founder informed with brief, plain-language updates at each step. **Narrate the founder-visible OUTCOME, never the internal step.** That is the test to apply, and it catches more than a word list can: the forbidden thing is not a syntax, it is talking about the machinery. Bad — "Gating and piping the extraction through the producer, then staging the coaching hand-off"; good — "I've checked your numbers and I'm writing up what stood out." Bad — "schema-drift warning on `coaching_payload`"; good — nothing, because the founder has no stake in it. **Never name an internal artifact, field, or token** (a payload key, a marker name, an artifact filename, a hand-off dir) even in plain prose with no backticks — a detector keyed on syntax cannot see "gated", "hand-off" or "canonical artifacts", but the founder still reads them and they still mean nothing to them. **The between-step progress lines are the primary leak vector, not the final summary.** They feel internal — you are narrating what you are about to do — but the founder reads every one of them, and this is where the leaks actually appear: *"Now gating the hand-off before piping through the checklist producer"*, *"Gate 1 passes"*, *"Running the final verification gate"*. Rewrite each pipeline transition as the founder-visible outcome: *"Checking your numbers against the 46-point review"*, *"Your inputs look consistent — moving on to unit economics"*, *"Finishing up and putting the report together"*. If a progress line would mean nothing to someone who has never seen this skill's internals, it does not belong in the channel. Also excluded, as before: file/script names, paths, `*.py`, `--flags`, `$vars`, exit codes ("Exit N", "not found"), `W_`/`E_` codes, JSON, and step/route labels ("Lane N", "Context A/B", "Phase N", "structure detection", "the grid", any `ALL_CAPS_TOKEN`). After each analytical step (4-6), share a one-sentence finding before moving on. **The task tracker is founder-visible too — the same rule governs its labels.** "Gate the inputs review handoff", "Validate inputs.json", "resolve agent namespace paths", "Initialize founder context" are leaks even though each names a real step, and even when the prose around them is clean. Label each task by the founder-visible outcome — "Check your inputs", "Score against the review", "Write up what I found" — never by a file, directory, script, or pipeline stage.
+Keep the founder informed with brief, plain-language updates at each step. **Narrate the founder-visible OUTCOME, never the internal step.** That is the test to apply, and it catches more than a word list can: the forbidden thing is not a syntax, it is talking about the machinery. Bad — "Gating and piping the extraction through the producer, then staging the coaching hand-off"; good — "I've checked your numbers and I'm writing up what stood out." Bad — "schema-drift warning on `coaching_payload`"; good — nothing, because the founder has no stake in it. **Never name an internal artifact, field, or token** (a payload key, a marker name, an artifact filename, a hand-off dir) even in plain prose with no backticks — a detector keyed on syntax cannot see "gated", "hand-off" or "canonical artifacts", but the founder still reads them and they still mean nothing to them. **The between-step progress lines are the primary leak vector, not the final summary.** They feel internal — you are narrating what you are about to do — but the founder reads every one of them, and this is where the leaks actually appear: *"Now gating the hand-off before piping through the checklist producer"*, *"Gate 1 passes"*, *"Running the final verification gate"*. Rewrite each pipeline transition as the founder-visible outcome: *"Checking your numbers against the 46-point review"*, *"Your inputs look consistent — moving on to unit economics"*, *"Finishing up and putting the report together"*. If a progress line would mean nothing to someone who has never seen this skill's internals, it does not belong in the channel. Also excluded, as before: file/script names, paths, `*.py`, `--flags`, `$vars`, exit codes ("Exit N", "not found"), `W_`/`E_` codes, JSON, and step/route labels ("Lane N", "Context A/B", "Phase N", "structure detection", "the grid", any `ALL_CAPS_TOKEN`). After each analytical step (4-6), share a one-sentence finding before moving on. **The task tracker is founder-visible too — the same rule governs its labels.** "Gate the inputs review handoff", "Validate inputs.json", "resolve agent namespace paths", "Initialize founder context" are leaks even though each names a real step, and even when the prose around them is clean. Label each task by the founder-visible outcome — "Check your inputs", "Score against the review", "Write up what I found" — never by a file, directory, script, or pipeline stage. **The Coaching Commentary section appended to the report is founder-visible too — the same rule governs its text.** A checklist criterion ID (`NARR_03`) or an internal field name (`moat_count`) means exactly as little to a founder there as it does in a progress line, backticked or not — see the post-compose coaching dispatch template (Step 7c) for the specific instruction.
 
 ## Workflow
 
 ### Step 0: Path Setup
 
-**Every Bash tool call runs in a fresh shell — variables do not persist.** Prefix every Bash call that uses these paths with the variable block below, or substitute absolute paths directly:
+**Every Bash tool call runs in a fresh shell — variables do not persist.** Run the block below exactly **once**: it resolves `$PLUGIN_ROOT` deterministically, and every later block must substitute the printed value as a literal rather than re-running the resolution — repeating the self-heal search can land on a different mount than Step 0 picked when more than one is present (see why in the block's comments).
+
+Optional, best-effort, and via the **Read tool** (not a shell command): before the block below, Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and note its `version` field as `EXPECT_VERSION`. Passing it to `select_plugin_root.py` below lets an exact version match win over an arbitrary first hit. If the Read fails, skip it and omit `--expect-version` — selection is still deterministic without it.
 
 ```bash
 SCRIPTS="${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/scripts"
-# In Cowork, CLAUDE_PLUGIN_ROOT substitutes to a host-side path that does not
-# exist inside the session VM — self-heal by locating the plugin mount:
 if [ ! -d "$SCRIPTS" ]; then
-  SCRIPTS="$(find /sessions -type d -path '*/skills/competitive-positioning/scripts' 2>/dev/null | head -1)"
-fi
-if [ -z "$SCRIPTS" ] || [ ! -d "$SCRIPTS" ]; then
-  SCRIPTS="$(find / -type d -path '*/skills/competitive-positioning/scripts' 2>/dev/null | head -1)"
+  # In Cowork, CLAUDE_PLUGIN_ROOT substitutes to a host-side path absent inside
+  # the session VM — self-heal by collecting EVERY candidate mount (a session can
+  # have more than one at once: a stale host-side cache, a test marketplace, even
+  # a symlink into a different session's tree) and handing them to
+  # select_plugin_root.py, which picks ONE deterministically and names the
+  # rejects — never trust `find`'s arbitrary first hit, which can silently mix
+  # scripts across plugin versions mid-pipeline.
+  CANDIDATES="$(find /sessions -type d -path '*/skills/competitive-positioning/scripts' 2>/dev/null)"
+  [ -n "$CANDIDATES" ] || CANDIDATES="$(find / -type d -path '*/skills/competitive-positioning/scripts' 2>/dev/null)"
+  PROVISIONAL_ROOT="$(printf '%s\n' "$CANDIDATES" | head -1)"
+  PROVISIONAL_ROOT="${PROVISIONAL_ROOT%/skills/*}"
+  # Bootstrap order: $SHARED_SCRIPTS isn't known until a root is chosen, so use the
+  # provisional root's OWN copy of the selector; an older plugin copy without one
+  # falls back to the provisional root unchanged.
+  SELECTOR="$PROVISIONAL_ROOT/scripts/select_plugin_root.py"
+  if [ -f "$SELECTOR" ]; then
+    if [ -n "$EXPECT_VERSION" ]; then
+      PLUGIN_ROOT="$(printf '%s\n' "$CANDIDATES" | python3 "$SELECTOR" --expect-version "$EXPECT_VERSION")"
+    else
+      PLUGIN_ROOT="$(printf '%s\n' "$CANDIDATES" | python3 "$SELECTOR")"
+    fi
+  else
+    PLUGIN_ROOT="$PROVISIONAL_ROOT"
+  fi
+  SCRIPTS="$PLUGIN_ROOT/skills/competitive-positioning/scripts"
 fi
 PLUGIN_ROOT="${SCRIPTS%/skills/*}"
+echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; never re-run this resolution
 REFS="$PLUGIN_ROOT/skills/competitive-positioning/references"
 SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
 SHARED_REFS="$PLUGIN_ROOT/references"
@@ -132,7 +154,7 @@ SHARED_REFS="$PLUGIN_ROOT/references"
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py"   # prints ARTIFACTS_ROOT — use the printed path verbatim as ARTIFACTS_ROOT in every later block (a captured var dies in the next fresh shell)
 ```
 
-The path setup handles both Claude Code (local filesystem) and Cowork (mounted sessions). The Step 0 block self-heals when `${CLAUDE_PLUGIN_ROOT}` doesn't resolve (Cowork). **In Cowork the `find` is normally THE path, not a last resort** — `${CLAUDE_PLUGIN_ROOT}` resolves to a HOST path that does not exist inside the VM, so a bash test against it fails by design rather than by misconfiguration. Expect to locate the anchor and derive the variables from it: `find / -path '*/skills/competitive-positioning/scripts/validate_landscape.py' 2>/dev/null | head -5`. Reaching this branch is normal; it is not a sign anything is wrong, and it is not worth narrating to the founder.
+Reaching the self-heal branch is normal in Cowork — `${CLAUDE_PLUGIN_ROOT}` resolves to a HOST path that does not exist inside the VM, so the `[ ! -d "$SCRIPTS" ]` test fails by design rather than by misconfiguration. It is not a sign anything is wrong, and it is not worth narrating to the founder.
 
 **Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$ANALYSIS_DIR`) is write-allowed and delete-denied by the platform: never `rm`, move away, or empty anything under it — **including files you created yourself**. Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless.
 
@@ -292,7 +314,7 @@ run, whatever the transcript says.
 
 Extract from the founder's materials or conversation: company name, product description, target customers, value propositions, differentiation claims, stage, sector, business model, and input_mode (`"deck"`, `"conversation"`, or `"document"`).
 
-**For deck mode:** Read ALL pages of the deck systematically — not just the competition slide. Problem, solution, traction, and team slides contain competitive claims and differentiation context that inform the analysis. If the deck has a competition slide, record it in `product_profile.json` under `deck_competition_slide` — `{axes: {x, y}, plotted: [{name, category}], claimed_position, source_slide}` — capturing the axis pair, which companies the slide plots and how it categorizes them, where it places the startup, and which slide number it came from; this generalises the earlier `deck_axes` field and is what makes the later competition-slide cross-check and the report's basis-vs-deck delta note possible. **Decks over ~10 pages:** the Read tool requires an explicit page range for PDFs beyond that length (max 20 pages per call) — read in page-range chunks (e.g. `pages: "1-10"`, then `"11-20"`) rather than one call for the whole file.
+**For deck mode:** Read ALL pages of the deck systematically — not just the competition slide. Problem, solution, traction, and team slides contain competitive claims and differentiation context that inform the analysis. If the deck has a competition slide, record it in `product_profile.json` under `deck_competition_slide` — `{axes: {x, y}, plotted: [{name, category}], claimed_position, source_slide}` — capturing the axis pair, which companies the slide plots and how it categorizes them, where it places the startup, and which slide number it came from; this generalises the earlier `deck_axes` field and is what makes the later competition-slide cross-check and the report's basis-vs-deck delta note possible. **If the deck has NO competition slide at all**, write the documented absent form instead of leaving the field out or inventing an unschema'd note field: `deck_competition_slide: {present: false, reason: "..."}`, stating plainly why (e.g. "12-page deck; no slide named or shaped as competition"). This is what lets the CHECKLIST dispatch grade the competition-slide cross-check as a **warn** with a real reason, instead of having nothing at all to check against — never `not_applicable`, which would drop it out of the score denominator and hide the finding. **Decks over ~10 pages:** the Read tool requires an explicit page range for PDFs beyond that length (max 20 pages per call) — read in page-range chunks (e.g. `pages: "1-10"`, then `"11-20"`) rather than one call for the whole file.
 
 **Check the deck's vintage.** If a footer date, copyright year, event slide, or embedded metadata shows the materials are noticeably older than today (a rule of thumb: more than ~12 months), flag this to the founder before proceeding — competitor pricing, funding, and positioning claims from a stale deck may already be outdated. Note the observed vintage in `product_profile.json`'s `source_materials` (e.g. `"pitch deck (PDF, copyright 2024)"`).
 
@@ -309,6 +331,8 @@ If materials are sparse, use `AskUserQuestion` to gather missing fields. At mini
 **REQUIRED — read `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/competitive-analysis-methodology.md` now.**
 
 Identify 5-7 competitors across categories: 2-3 direct, 1-2 adjacent, 1 do-nothing, 0-1 emerging. For each competitor, record: name, slug, category, description, key differentiators, and why included.
+
+**When one entry represents several companies as a cohort** (e.g. "PCM/next-gen entrants (Rondo, Antora, Sunamp)"), record the member company names in an optional `constituents: ["Rondo", "Antora", "Sunamp"]` array on that entry. This turns the blind-recall duplicate check (Step 3.6) from a text heuristic into an exact lookup — without it, a recall candidate that IS one of the cohort's named members can misread as a genuine gap.
 
 Select 2-3 candidate positioning axis pairs with rationale for each. Follow the axis selection principles from the methodology reference — axes must differentiate, matter to the buyer, and be measurable.
 
@@ -409,6 +433,19 @@ Apply the substitution test.
 Return 5-10 candidates, each with name, slug (kebab-case), category,
 why_considered, and at least one source URL you actually retrieved. Return fewer
 rather than padding — unsourced candidates are dropped downstream anyway.
+
+Use your Write tool to write to OUTPUT_PATH:
+{
+  "candidates": [
+    {"name": "...", "slug": "...", "category": "direct|adjacent|do_nothing|emerging",
+     "why_considered": "why THIS buyer would weigh this for THIS job",
+     "sources": ["https://..."]}
+  ],
+  "metadata": {"run_id": "<RUN_ID>"}
+}
+Then return ONLY the receipt JSON in your final assistant message:
+{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
+Do NOT write any file other than OUTPUT_PATH.
 ```
 
 **After both sub-agents return:** gate each hand-off per the Context A hand-off protocol, then pipe
@@ -454,6 +491,8 @@ Options: `No changes — looks good as drafted` / `Missing competitors` / `Remov
 If founder requests changes, apply corrections and repeat Steps A+B.
 
 Apply all corrections to `landscape_draft.json` before proceeding. **This is also how an approved recall candidate enters the set** — add it to `landscape_draft.json` as a draft entry (name, slug, category, description, `key_differentiators`, plus `why_included` citing the recall check), and Step 4 then enriches it like any other draft entry. Do not route it through Step 4's `suggested_additions` promotion path: that path operates on the *Step 4 output's* additions and does not exist yet at this point in the run. Never exceed `MAX_COMPETITORS` (10) — if the founder approves more than the remaining slots, ask which to keep rather than silently truncating.
+
+**A recall candidate the founder does NOT approve is not simply dropped.** Write it into `landscape_draft.json`'s top-level `deferred_recall_candidates[]` array — `{name, slug, category, why_considered, sources}`, copied from how the recall dispatch returned it — rather than discarding it. Step 4's additions gate below draws candidates from this array too, so a declined recall candidate stays reachable if the analysis later needs it, instead of becoming permanently unaddable the moment Step 4's own `suggested_additions` fill the remaining slots.
 
 ### Context A hand-off protocol (file transport + gate)
 
@@ -569,6 +608,9 @@ You are the competitive-positioning agent dispatched in Context A (LANDSCAPE_RES
 Read landscape_draft.json at <ANALYSIS_DIR_AGENT>/landscape_draft.json and
 product_profile.json at <ANALYSIS_DIR_AGENT>/product_profile.json.
 
+You do NOT need to carry landscape_draft.json's deferred_recall_candidates array
+through — the producer reads it directly. Ignore that field.
+
 Phase A — Enrich existing competitors: For each competitor in landscape_draft.json,
 use WebSearch to find pricing model, funding history, team size, target customers,
 strengths, weaknesses. Issue separate searches per competitor as needed. Record
@@ -593,6 +635,13 @@ relevance. A URL is required — a search query is not a valid source for a date
 about a named company — and evidence_source "agent_estimate" is rejected for this field.
 An EMPTY ARRAY IS CORRECT for a competitor that has not visibly moved; do not stretch to
 fill it. A present-tense fact is enrichment, not a development — only a dated change.
+**recent_developments[] has an 18-month recency window** (validate_landscape.py rejects
+anything dated more than 18 months before the as-of date, though it now retains a
+rejected entry separately rather than failing the run). If a real, sourced, relevant
+event falls outside that window, do NOT stretch to include it here — give it a legal
+home instead: fold it into that competitor's top-level `description` or `weaknesses`
+prose, where there is no recency bound. Dropping an older-but-relevant fact entirely is
+the failure this note exists to prevent.
 
 Phase B — Gap detection: After enriching, check for missing competitor categories.
 Use WebSearch ("<product category> competitors", "<adjacent category> tools", etc.)
@@ -628,13 +677,13 @@ producer-script-only; anything else you write bypasses schema validation and
 run_id stamping.
 ```
 
-**After the sub-agent returns:** gate the hand-off per the Context A hand-off protocol. Read `suggested_additions` from the gated file. **If it is empty, skip straight to piping below — there is nothing to gate.** If it is non-empty:
+**After the sub-agent returns:** gate the hand-off per the Context A hand-off protocol. Read `suggested_additions` from the gated file, and read `deferred_recall_candidates` from `landscape_draft.json` (declined Gate-1 recall candidates — see Gate 1 above). **The two compete for the same open slots — build one candidate pool as `suggested_additions[]` ∪ `deferred_recall_candidates[]`.** **If that pool is empty, skip straight to piping below — there is nothing to gate.** If it is non-empty:
 
 **Before the gate, compute the open slots:** `slots = 10 (the landscape maximum from the methodology reference) - len(competitors)`, counting only entries already in `competitors[]`. This is what makes the gate's options runnable — an option that cannot execute must never be offered.
 
 **MANDATORY STOP — TWO SEPARATE STEPS, same pattern as Gates 1 and 2.** This is a real decision point, not a formality — do not conflate the two steps or skip either one.
 
-**Step A: Output a chat message** listing each suggested addition (name, category, and the gap-detection rationale). **If the number of suggested additions exceeds the open slots, say so plainly** — e.g. "You're already at <len(competitors)> of the 10 I can track, so at most <slots> of these can be added" — so the founder understands the constraint before choosing.
+**Step A: Output a chat message** listing each candidate in the pool — a `suggested_additions[]` entry with its name, category, and gap-detection rationale, or a `deferred_recall_candidates[]` entry with its name, category, and `why_considered`. **If the number of candidates exceeds the open slots, say so plainly** — e.g. "You're already at <len(competitors)> of the 10 I can track, so at most <slots> of these can be added" — so the founder understands the constraint before choosing. **Also note that including any of these means another research pass, a couple of minutes** — so the choice is informed on cost as well as value.
 
 **Consolidation merges — when research shows two already-confirmed competitors are now one company.** Research sometimes finds that two entries already in `competitors[]` have become a single corporate entity (an acquisition or merger, not a new competitor). This is report-only by default — never merge automatically. If it comes up, add a line to the Step-A chat message naming both entries, the finding, and its citation (e.g. "My research also found that <A> and <B> are now one company as of <date>, per <source> — want me to combine them?"). Only on founder approval, execute the merge by **re-dispatching `LANDSCAPE_RESEARCH`** with an instruction to combine the two named competitors into one sourced, cited entry — never by hand-editing either entry's fields in the main thread, which is content authoring, not the mechanical relocation the carve-out above permits. This is also the mechanism behind the `Free a slot by merging` option below.
 
@@ -644,22 +693,35 @@ run_id stamping.
 - **no slots are open, and a consolidation candidate exists:** `Found <N> more competitors during research, but the set is already full — want to free up a slot?` Options: `No changes — skip these` / `Free a slot by merging`. Offer this **only** when a consolidation candidate exists (see "Consolidation merges" above).
 - **no slots are open and there is no consolidation candidate: do NOT ask.** Every branch would land on the same outcome, and `AskUserQuestion` cannot render a one-option gate — it requires at least two. Instead say it plainly in the Step-A message, exactly as Gate 1 does when additions would exceed the cap: name the competitors research found, state that the set is full at 10 and nothing can be added without removing something, and continue. **Naming them is not optional** — dropping the gate is fine, dropping the finding is not, and a founder who is never told what research surfaced is worse off than one asked a broken question.
 
-`Include all` must never appear when it cannot execute (suggestions exceed the open slots), and never render `Include top 0` — that case collapses into the no-slots-open row above. If "Include some" or "Include top <slots>," follow up asking which by name. The labels are runtime data — the candidates are whatever research surfaced — so build them from `suggested_additions[]`: **one option per candidate, labelled with that competitor's name**, capped at the open slots (never offer more than can be added), plus a final `None of these` when fewer than four candidates fill the list. Never ask this as bare free text: a name typed from memory can miss the slug the enrichment re-dispatch needs.
+`Include all` must never appear when it cannot execute (suggestions exceed the open slots), and never render `Include top 0` — that case collapses into the no-slots-open row above. If "Include some" or "Include top <slots>," follow up asking which by name. The labels are runtime data — the candidates are whatever research surfaced or the founder previously declined — so build them from the pool (`suggested_additions[]` ∪ `deferred_recall_candidates[]`): **one option per candidate, labelled with that competitor's name**, capped at the open slots (never offer more than can be added), plus a final `None of these` when fewer than four candidates fill the list. Never ask this as bare free text: a name typed from memory can miss the slug the enrichment re-dispatch needs.
 
 **A raw `suggested_additions` entry cannot be piped into `competitors[]` as-is.** It has no `key_differentiators`, no `research_depth`, and its `description` sits inside `partial_profile` — piping it verbatim hits `validate_landscape.py`'s required-field check and fails. If the founder approves additions, promote them via the enrichment path (see "Promoting an approved `suggested_addition` into `competitors[]`" in the Context A hand-off protocol above), in this order:
 
 1. **Re-dispatch `LANDSCAPE_RESEARCH`, scoped to the approved addition(s) by name**, to a fresh `OUTPUT_PATH` (e.g. `<HANDOFF_AGENT>/landscape_research_enrichment_output.json`). The sub-agent enriches each approved addition the same way it enriched the original draft — real `research_depth`, `key_differentiators`, per-field `evidence_source`/`sources`, and a top-level `description`.
 2. Gate that hand-off per the Context A hand-off protocol, same as any other dispatch.
 3. Write a merged copy to `$STAGING_DIR/landscape_input.json`: start from the original hand-off file's contents, and for each approved addition replace its `suggested_additions[]` entry with the corresponding enriched entry from step 1, relocated into `competitors[]`.
-4. Pipe `$STAGING_DIR/landscape_input.json` through `validate_landscape.py` — this replaces the bash block below for this branch.
+4. Pipe `$STAGING_DIR/landscape_input.json` through `validate_landscape.py` — this replaces the bash block below for this branch. **Pass the same `--carry-deferred` / `--derive-deferred` flags the block below uses**, so a declined candidate survives this branch too.
+
+**Why those two flags exist rather than an instruction.** Declined recall candidates used to reach
+`landscape.json` by being written into `landscape_draft.json` at Gate 1 and copied through by the
+research sub-agent. Measured across two live runs, BOTH hops failed — in one the sub-agent dropped
+the field, in the other the main thread created the key and left it empty — so the producer now reads
+the draft itself, and falls back to deriving the set from the blind-recall diff (a candidate still
+absent from `competitors[]` was not adopted; adoption is the only way one leaves). Nothing about this
+depends on a model remembering to copy a field it has no other reason to touch.
+
+**Promoting a `deferred_recall_candidates[]` entry uses this same enrichment re-dispatch path, unchanged** — a declined recall candidate approved later has no `suggested_additions[]` entry to replace in step 3, so relocate the enriched result directly into `competitors[]` instead, and remove the promoted candidate from `landscape_draft.json`'s `deferred_recall_candidates[]` so it is not offered again on a future run.
 
 With no approved additions (or none suggested), pipe the hand-off file directly, unchanged — that is the bash block below.
 
-**Retain the declined ones — do not discard them.** Any suggested addition the founder does NOT approve stays in `suggested_additions[]` with `merged: false` (leave the entry in place; only approved entries move to `competitors[]`). This preserves the gap-detection knowledge in `landscape.json` and lets the coaching commentary note "you flagged X as not-a-competitor" rather than silently losing what research surfaced.
+**Retain the declined ones — do not discard them.** Any suggested addition the founder does NOT approve stays in `suggested_additions[]` with `merged: false` (leave the entry in place; only approved entries move to `competitors[]`). This preserves the gap-detection knowledge in `landscape.json` and lets the coaching commentary note "you flagged X as not-a-competitor" rather than silently losing what research surfaced. The same applies to `deferred_recall_candidates[]`: any entry not promoted this round stays in `landscape_draft.json` for exactly the reason Gate 1 put it there — reachable for a later run, not lost.
 
 ```bash
 cat "$HANDOFF_DIR/landscape_research_output.json" | \
-  python3 "$SCRIPTS/validate_landscape.py" --pretty --run-id "$RUN_ID" -o "$ANALYSIS_DIR/landscape.json"
+  python3 "$SCRIPTS/validate_landscape.py" --pretty --run-id "$RUN_ID" \
+    --carry-deferred "$ANALYSIS_DIR/landscape_draft.json" \
+    --derive-deferred "$ANALYSIS_DIR/competitor_verification.json" \
+    -o "$ANALYSIS_DIR/landscape.json"
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
@@ -696,8 +758,12 @@ OUTPUT_PATH: <HANDOFF_AGENT>/moat_scoring_output.json
 RUN_ID: <RUN_ID>
 
 You are the competitive-positioning agent dispatched in Context A (MOAT_SCORING).
-Read positioning.json at <ANALYSIS_DIR_AGENT>/positioning.json and landscape.json at
-<ANALYSIS_DIR_AGENT>/landscape.json.
+Read positioning.json at <ANALYSIS_DIR_AGENT>/positioning.json, landscape.json at
+<ANALYSIS_DIR_AGENT>/landscape.json, and product_profile.json at
+<ANALYSIS_DIR_AGENT>/product_profile.json. You are scoring _startup among the others, and
+product_profile.json is the ONLY source for what the startup actually does — positioning.json's
+pre-dispatch block carries placeholder evidence, so without it you would be scoring the startup
+from nothing.
 
 Score every slug (including _startup) across the 6 canonical moat dimensions from
 ${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/moat-definitions.md:
@@ -707,6 +773,10 @@ cost_structure, brand_reputation.
 Each moat: status (strong/moderate/weak/absent/not_applicable), evidence (required),
 evidence_source (researched/agent_estimate/founder_override), trajectory
 (building/stable/eroding).
+
+trajectory is a DIFFERENT enum from status — it is one of building/stable/eroding only. Never write
+a status value (strong/moderate/weak/absent/not_applicable) into trajectory: the producer rejects it
+and the whole file comes back for repair, costing a round-trip.
 
 For trajectory and any moat where landscape.json evidence is thin, use WebSearch
 to find recent (last 12 months) signals — funding rounds, M&A, hiring, executive
@@ -747,7 +817,9 @@ RUN_ID: <RUN_ID>
 SCORING_BASIS: <shipped|roadmap_12mo|mixed — default "shipped" unless Gate 2 recorded a change>
 
 You are the competitive-positioning agent dispatched in Context A (POSITIONING_SCORING).
-Read positioning.json at <ANALYSIS_DIR_AGENT>/positioning.json.
+Read positioning.json at <ANALYSIS_DIR_AGENT>/positioning.json and product_profile.json at
+<ANALYSIS_DIR_AGENT>/product_profile.json (the only source for what the startup actually does —
+you are placing _startup on the map alongside researched competitors).
 
 Position every competitor and _startup according to SCORING_BASIS: "shipped" means
 score only what is live and verifiable today, ignoring roadmap claims; "roadmap_12mo"
@@ -775,8 +847,7 @@ score_positioning.py:
   "scoring_basis": "<echo of SCORING_BASIS>",
   "views": [
     {
-      "id": "...", "x_axis": {"name": "..."}, "y_axis": {"name": "..."},
-      "x_axis_rationale": "...", "y_axis_rationale": "...",
+      "id": "...", "x_axis": {"name": "...", "rationale": "..."}, "y_axis": {"name": "...", "rationale": "..."},
       "points": [
         {"competitor": "...", "x": 0-100, "y": 0-100,
          "x_evidence": "...", "y_evidence": "...",
@@ -838,21 +909,22 @@ the points merge.
 
 ### Gate 3: Positioning Reality Check (conditional)
 
-**CONDITIONAL — only stop when one of the triggers below fires. An unconditional stop here would tax every run.** After the merge above, check the primary view in `positioning_scores.json` — vanity flags, rank, and `overall_differentiation` live there, not in `positioning.json` — against:
+**CONDITIONAL — only stop when one of the triggers below fires. An unconditional stop here would tax every run.** After the merge above, check **every view** in `positioning_scores.json` — vanity flags, rank, and `overall_differentiation` live there, not in `positioning.json`. **Primary view = `views[0]`** — real runs use descriptive slug ids rather than the documented `primary`/`secondary`, so do not look for those literal strings when deciding which view is primary; a `views[]` entry may also carry an optional `label` field used for display, which is not a signal of which view is primary either. Evaluate every trigger below **per view, not on the primary view alone** — a trade-off or flattering shape on a secondary view is invisible if only the primary view is checked:
 
-- `_startup`'s rank (`startup_x_rank` / `startup_y_rank`) is in the bottom half of the competitive set on BOTH axes. **This trigger is PROVISIONAL** — like the differentiation trigger below, it is calibrated on a single observed run, not a validated threshold. Treat it as a soft prompt to look again, not a settled bound.
-- `_startup` is top-2 on BOTH axes (by rank) AND both vanity-axis flags (`x_axis_vanity_flag` / `y_axis_vanity_flag`) on that view are false — the suspiciously-flattering pattern the methodology reference warns about, not a genuine strong result.
-- `overall_differentiation` is below 25%. **This trigger is PROVISIONAL** — it is calibrated on a single observed run, not a validated threshold. Treat it as a soft prompt to look again, not a settled bound.
+- `_startup`'s rank (`startup_x_rank` / `startup_y_rank`) is in the bottom half of the competitive set on BOTH axes, on any view. **This trigger is PROVISIONAL** — like the differentiation trigger below, it is calibrated on a single observed run, not a validated threshold. Treat it as a soft prompt to look again, not a settled bound.
+- `_startup` is top-2 on BOTH axes (by rank) AND both vanity-axis flags (`x_axis_vanity_flag` / `y_axis_vanity_flag`) on that view are false, on any view — the suspiciously-flattering pattern the methodology reference warns about, not a genuine strong result.
+- **Trade-off shape** — `_startup` is in the bottom quartile (roughly the worst 25%) on ONE axis AND top-2 on the OTHER axis, on any view. **This trigger is PROVISIONAL**, added after a live run the bottom-half-on-both trigger above could not see (rank 10 of 11 on one axis, 3 of 11 on the other). The mean-based `overall_differentiation` trigger below caught that run only incidentally, because its 50/50 rank-and-gap blend happened to average out below 25% — a genuine one-axis trade-off can just as easily average out to something unremarkable, so this trigger checks the two axes directly instead of relying on the mean to notice.
+- `overall_differentiation` is below 25%, on any view. **This trigger is PROVISIONAL** — it is calibrated on a single observed run, not a validated threshold. Treat it as a soft prompt to look again, not a settled bound.
 
-If none fire, skip this gate silently and continue.
+If none fire on any view, skip this gate silently and continue.
 
 If one fires: **Step A: Output a chat message** naming which pattern triggered, in plain language, alongside the scored position and — when available — the position the deck's own competition slide claimed, for comparison.
 
 **Step B: AFTER the chat message, call `AskUserQuestion`**, plain text, one sentence, no markdown/tables: `The scored position <plain-language description of the trigger> — keep it, dig deeper, or reconsider how it's scored?` Options: `No changes — keep the scoring` / `Re-score with founder facts` / `Change scoring basis` / `Show both positions`.
 
-If the founder picks `Re-score with founder facts`, gather the additional detail and re-dispatch POSITIONING_SCORING (and MOAT_SCORING if the new facts bear on a moat) before re-merging into `positioning.json`. If `Change scoring basis`, follow the same basis-change mechanism as Gate 2. If `Show both positions`, note both the scored map and the deck's claimed position in the report rather than picking one.
+If the founder picks `Re-score with founder facts`, gather the additional detail and re-dispatch POSITIONING_SCORING (and MOAT_SCORING if the new facts bear on a moat) before re-merging into `positioning.json`. **Then re-run Step 6's checklist pipe too** (with `--positioning-scores` pointed at the refreshed `positioning_scores.json`) — `score_positioning.py`'s rank and differentiation numbers just moved, and POS_04 reads that data directly, so a checklist graded before this re-score no longer matches the map it is grading. If `Change scoring basis`, follow the same basis-change mechanism as Gate 2. If `Show both positions`, note both the scored map and the deck's claimed position in the report rather than picking one.
 
-**Founder coordinate-override flow (optional):** Now that competitor coordinates exist, present the positioned map to the founder if they ask to adjust positions in chat, or if Gate 3 above triggered and the founder picked `Re-score with founder facts`. If the founder corrects a specific coordinate, update the corresponding point in `positioning.json` and re-run `score_positioning.py`, stamping `x_evidence_source` / `y_evidence_source: "founder_override"` on the changed coordinate so `compose_report.py` records it via `FOUNDER_OVERRIDE_COUNT`. Re-pipe the updated `positioning.json` views through `score_positioning.py` to refresh `positioning_scores.json`.
+**Founder coordinate-override flow (optional):** Now that competitor coordinates exist, present the positioned map to the founder if they ask to adjust positions in chat, or if Gate 3 above triggered and the founder picked `Re-score with founder facts`. If the founder corrects a specific coordinate, update the corresponding point in `positioning.json` and re-run `score_positioning.py`, stamping `x_evidence_source` / `y_evidence_source: "founder_override"` on the changed coordinate so `compose_report.py` records it via `FOUNDER_OVERRIDE_COUNT`. Re-pipe the updated `positioning.json` views through `score_positioning.py` to refresh `positioning_scores.json` — **then re-run Step 6's checklist pipe as well**, so `checklist.json`'s recorded fingerprint matches the map the founder just changed, not the one from before the override.
 
 ### Step 6: Score Checklist -> `checklist.json` (Context A: CHECKLIST dispatch)
 
@@ -874,7 +946,10 @@ ${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/checklist-criter
 product_profile.json's deck_competition_slide field (deck mode) and
 landscape_draft.json's deck_competitors_excluded field are what the
 competition-slide cross-check item (NARR_03) needs — without them it has
-nothing to grade.
+nothing to grade. When deck_competition_slide.present is false (the deck had
+no competition slide at all), grade NARR_03 not_applicable using the stated
+reason as your evidence — do not treat the field's absence as "nothing to
+grade" once a present:false record with a reason exists.
 
 Assess all 25 checklist items (COVER_01..05, POS_01..05, MOAT_01..04,
 EVID_01..04, NARR_01..04, MISS_01..03). Mode-based gating applies: when
@@ -898,11 +973,12 @@ run_id stamping.
 
 ```bash
 cat "$HANDOFF_DIR/checklist_output.json" | python3 "$SCRIPTS/checklist.py" --pretty \
-  --input-mode "$INPUT_MODE" --run-id "$RUN_ID" -o "$ANALYSIS_DIR/checklist.json"
+  --input-mode "$INPUT_MODE" --run-id "$RUN_ID" \
+  --positioning-scores "$ANALYSIS_DIR/positioning_scores.json" -o "$ANALYSIS_DIR/checklist.json"
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
-`$INPUT_MODE` is the mode established in Steps 1-2 (`deck`, `conversation`, or `document`). Without `--input-mode`, deck/document runs silently default to `conversation` and mis-gate NARR_03/EVID_04; without `--run-id`, `checklist.json` carries no run_id and the Step 7c verifier blocks.
+`$INPUT_MODE` is the mode established in Steps 1-2 (`deck`, `conversation`, or `document`). Without `--input-mode`, deck/document runs silently default to `conversation` and mis-gate NARR_03/EVID_04; without `--run-id`, `checklist.json` carries no run_id and the Step 7c verifier blocks. `--positioning-scores` records which scored positioning map this checklist graded (a `views_fingerprint` copied verbatim from `positioning_scores.json`), so a later `compose_report.py` run can detect a checklist that was graded against a map that has since moved — this is the ONLY place `checklist.json` is produced on a normal run, so omitting the flag here means the whole staleness check can never fire.
 
 ### Step 7: Compose, Validate, and Post-Compose Coaching
 
@@ -996,6 +1072,11 @@ Follow your agent body's Context B procedure (POST_COMPOSE_COACHING):
    warned_items, summary, high_severity_warnings, company_name).
    Do NOT Read the full report.md. Do NOT edit report.md or any canonical artifact.
    No WebSearch in this context — commentary is payload-grounded only.
+   Write for the founder, not for someone debugging the pipeline: never use a
+   checklist criterion ID (e.g. NARR_03), an internal field name (e.g.
+   moat_count), or any other internal label in the commentary text, backticked
+   or not — say what the finding actually IS, in plain language, the same rule
+   that governs every other founder-visible message in this skill.
 2. Use your Write tool to write to OUTPUT_PATH exactly the coaching commentary
    as plain markdown — do NOT wrap it in JSON, do NOT escape anything (your
    Write tool handles newlines and quotes). WITHOUT a '## Coaching Commentary'
@@ -1014,14 +1095,11 @@ Stop after returning the receipt JSON. Do not narrate.
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash
-# Re-derive the shared-scripts path (fresh shell — Step 0's vars don't survive here). Same self-heal
-# as Step 0: in Cowork ${CLAUDE_PLUGIN_ROOT} is a host path absent inside the session VM shell.
-SHARED_SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-if [ ! -d "$SHARED_SCRIPTS" ]; then
-  CP_SCRIPTS="$(find /sessions -type d -path '*/skills/competitive-positioning/scripts' 2>/dev/null | head -1)"
-  [ -n "$CP_SCRIPTS" ] || CP_SCRIPTS="$(find / -type d -path '*/skills/competitive-positioning/scripts' 2>/dev/null | head -1)"
-  SHARED_SCRIPTS="${CP_SCRIPTS%/skills/*}/scripts"
-fi
+# Use the PLUGIN_ROOT Step 0 printed, verbatim — substitute the absolute path directly.
+# Do NOT re-run find here: a fresh find in this fresh shell can land on a different
+# plugin-root mount than the one Step 0 selected, mixing scripts across versions
+# mid-pipeline (that non-determinism is what select_plugin_root.py in Step 0 exists to kill).
+SHARED_SCRIPTS="<PLUGIN_ROOT printed by Step 0>/scripts"
 printf '%s' '<agent final message verbatim>' | \
   python3 "$SHARED_SCRIPTS/check_handoff.py" "$HANDOFF_DIR/coaching.md" \
     --format=markdown --agent-path "$HANDOFF_AGENT/coaching.md" --receipt-json - \
@@ -1032,12 +1110,9 @@ printf '%s' '<agent final message verbatim>' | \
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash
-SHARED_SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-if [ ! -d "$SHARED_SCRIPTS" ]; then
-  CP_SCRIPTS="$(find /sessions -type d -path '*/skills/competitive-positioning/scripts' 2>/dev/null | head -1)"
-  [ -n "$CP_SCRIPTS" ] || CP_SCRIPTS="$(find / -type d -path '*/skills/competitive-positioning/scripts' 2>/dev/null | head -1)"
-  SHARED_SCRIPTS="${CP_SCRIPTS%/skills/*}/scripts"
-fi
+# Use the PLUGIN_ROOT Step 0 printed, verbatim — substitute the absolute path directly.
+# Do NOT re-run find here — same reasoning as the block above.
+SHARED_SCRIPTS="<PLUGIN_ROOT printed by Step 0>/scripts"
 python3 "$SHARED_SCRIPTS/md_to_commentary.py" "$HANDOFF_DIR/coaching.md" | \
   python3 "$SHARED_SCRIPTS/insert_coaching.py" \
     --report "$ANALYSIS_DIR/report.md" \
@@ -1124,7 +1199,7 @@ Where `COMPANY_NAME` is the company name with spaces replaced by underscores (e.
 
 **Presenting the report to the founder:**
 - Answer placement and moat questions **from the points/evidence tables in report.md** — never re-derive or restate coordinates from memory.
-- If the founder disputes a coordinate (e.g., "we're faster than you placed us"), use the **founder coordinate-override flow** (Step 5): update the specific point in `positioning.json` with `x_evidence_source: "founder_override"` and re-run `score_positioning.py` to refresh `positioning_scores.json`, then re-run `compose_report.py`. Do NOT re-explain a placement from chat context.
+- If the founder disputes a coordinate (e.g., "we're faster than you placed us"), use the **founder coordinate-override flow** (Step 5): update the specific point in `positioning.json` with `x_evidence_source: "founder_override"` and re-run `score_positioning.py` to refresh `positioning_scores.json`, then re-run the Step 6 checklist pipe (so `checklist.json`'s recorded fingerprint matches the changed map) and `compose_report.py`. Do NOT re-explain a placement from chat context.
 - For what-if competitive scenarios (e.g., "what if we added this moat?"), note the gap and invite the founder to re-run the full skill after updating the relevant data.
 - **If the scoring basis diverges from the deck's own competition slide, say so explicitly rather than letting the scored map silently contradict it** — follow the delta rule in `competitive-analysis-methodology.md` §7 ("When the basis diverges from the founder's deck").
 
@@ -1143,7 +1218,6 @@ Where `COMPANY_NAME` is the company name with spaces replaced by underscores (e.
 ### Positioning Scoring
 - Distance-weighted differentiation: rank contributes 50% (where the startup ranks among competitors) + gap contributes 50% (how far ahead of the next-best competitor). This distinguishes "barely ahead" from "dramatically ahead" at the same rank.
 - Vanity axis detection: >80% of competitors within 20% range on either axis
-- Differentiation strength: `strong` (top quartile both axes), `moderate` (top quartile one axis), `weak` (middle of pack), `undifferentiated` (bottom half both axes)
 
 ### Checklist Scoring
 - 25 items, each: pass / fail / warn / not_applicable

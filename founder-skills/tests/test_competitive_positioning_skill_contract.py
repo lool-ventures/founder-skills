@@ -810,14 +810,25 @@ def test_competitor_recall_dispatch_return_shape_keys() -> None:
     stops asking for 'sources' would not error anywhere, it would just make
     every candidate quietly vanish downstream.
 
-    SKILL.md's dispatch template describes the candidate shape in PROSE ("each
+    SKILL.md's dispatch template describes the candidate shape in prose ("each
     with name, slug (kebab-case), category, why_considered, and at least one
-    source URL") rather than a JSON key/value snippet, so it is checked with
-    word-boundary regex on the prose terms — the same technique the pre-existing
-    MOAT_SCORING test uses for its per-moat prose fields. The agent body's
-    subtype, by contrast, does carry a literal ```json schema block with quoted
-    keys (including the literal 'sources' key, plural, that the prose never
-    spells out) and an enum-valued 'category' field, both checked directly.
+    source URL"), so the SKILL.md side is checked with word-boundary regex on the
+    prose terms — the same technique the pre-existing MOAT_SCORING test uses for
+    its per-moat prose fields. The agent body's subtype carries a literal ```json
+    schema block with quoted keys (including the literal 'sources' key, plural,
+    that the prose never spells out) and an enum-valued 'category' field, both
+    checked directly.
+
+    Since the 2026-08 remediation the SKILL.md template ALSO carries the Write
+    instruction, the JSON return shape and the receipt line — it was previously
+    the only one of seven dispatch templates with none of the three, and a live
+    run's model hand-authored them, risking drift from the agent body's shape.
+    The prose-term assertions below are unaffected (they check presence, and the
+    added JSON block sits inside the same fence), so this test still guards the
+    silent-drop behaviour it was written for: a candidate missing 'name',
+    'why_considered' or a non-empty 'sources' is DROPPED downstream rather than
+    failing the run, which is exactly the regression a template that stopped
+    asking for sources would cause.
     """
     required_prose_terms = {"name", "slug", "category", "why_considered"}
     required_json_keys = {"candidates", "name", "slug", "category", "why_considered", "sources", "metadata"}
@@ -1066,8 +1077,12 @@ def test_never_capture_instruction_is_present_in_step7c() -> None:
     verifies the fix is present, not just that the bad pattern is absent.
     """
     skill_text = SKILL_MD.read_text(encoding="utf-8")
-    step7c = skill_text.find("POST_COMPOSE_COACHING")
-    assert step7c != -1, f"{SKILL_MD.name} has no POST_COMPOSE_COACHING section"
+    # Anchor on the Step 7c HEADING, not on the first mention of the dispatch name. The name is
+    # also mentioned in the founder-facing narration rule near the top of the file, and anchoring
+    # on the first occurrence silently relocated this assertion into Step 3.6 — where it failed on
+    # content that was still present in Step 7c. Bound on structure, never on first-match.
+    step7c = skill_text.find("**7c — Post-Compose Coaching Commentary")
+    assert step7c != -1, f"{SKILL_MD.name} has no '7c — Post-Compose Coaching Commentary' heading"
     anchor = "<!-- skill-quality-ci: bash-after-subagent-ok -->"
     start = skill_text.find(anchor, step7c)
     assert start != -1, f"{SKILL_MD.name} has no 'skill-quality-ci: bash-after-subagent-ok' marker in Step 7c"

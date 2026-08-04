@@ -271,19 +271,41 @@ When neither the term sheet nor the AoA settles these questions, batch them into
 
 **EVERY BASH CALL IS A FRESH SHELL — no variable set here survives into the next block.** This is the single most likely place a run silently drifts, because `$SCRIPTS`, `$REVIEW_DIR`, `$RUN_ID` and `$HANDOFF_DIR` do not error when they are unset: they expand to the empty string, so a path quietly becomes `/inputs.json` and a `--run-id` quietly becomes blank (which then fails compose's run_id-parity check, several steps and one sub-agent dispatch later, far from the cause). Two lines below already say this individually for `ARTIFACTS_ROOT` and `HANDOFF_AGENT`; it is true of all of them.
 
-**So: read the printed values out of Step 0's output and paste them as literals into every later block that uses them.** Do not carry a variable forward and assume it survived. Re-deriving a pure path variable (`$SCRIPTS`, `$PLUGIN_ROOT`, `$REFS`, `$SHARED_SCRIPTS`, `$ARTIFACTS_ROOT`) again at the top of a block is fine — each is a deterministic filesystem lookup with no state. `$RUN_ID` is the one exception: it is minted once, below, and must stay constant for the whole engagement (compose enforces parity) — re-running that mint line in a later block re-mints a DIFFERENT value in the fresh shell and silently splits the hand-off dir mid-run. Paste the `RUN_ID` literal the block below prints instead of re-running the line that made it. What is NOT fine, either way, is referencing `$REVIEW_DIR` in Step 6 because Step 0 set it.
+**So: read the printed values out of Step 0's output and paste them as literals into every later block that uses them.** Do not carry a variable forward and assume it survived. `$PLUGIN_ROOT` — and everything derived from it (`$SCRIPTS`, `$REFS`, `$SHARED_SCRIPTS`) — is resolved via `select_plugin_root.py` exactly ONCE, below: re-running that self-heal search in a later block can land on a DIFFERENT candidate mount than Step 0 picked when more than one is present (see why in the block's comments), so paste the printed `PLUGIN_ROOT` literal rather than re-deriving it. `$ARTIFACTS_ROOT` stays fine to recompute from a pasted `$SHARED_SCRIPTS` literal — once the plugin root is fixed it is a deterministic filesystem lookup with no state. `$RUN_ID` is the one exception with a different failure mode: it is minted once, below, and must stay constant for the whole engagement (compose enforces parity) — re-running that mint line in a later block re-mints a DIFFERENT value in the fresh shell and silently splits the hand-off dir mid-run. Paste the `RUN_ID` literal the block below prints instead of re-running the line that made it. What is NOT fine, either way, is referencing `$REVIEW_DIR` in Step 6 because Step 0 set it.
+
+Optional, best-effort, and via the **Read tool** (not a shell command): before the block below, Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and note its `version` field as `EXPECT_VERSION`. Passing it to `select_plugin_root.py` below lets an exact version match win over an arbitrary first hit. If the Read fails, skip it and omit `--expect-version` — selection is still deterministic without it.
 
 ```bash
 SCRIPTS="${CLAUDE_PLUGIN_ROOT}/skills/cap-table/scripts"
-# In Cowork, CLAUDE_PLUGIN_ROOT substitutes to a host-side path that does not
-# exist inside the session VM — self-heal by locating the plugin mount:
 if [ ! -d "$SCRIPTS" ]; then
-  SCRIPTS="$(find /sessions -type d -path '*/skills/cap-table/scripts' 2>/dev/null | head -1)"
-fi
-if [ -z "$SCRIPTS" ] || [ ! -d "$SCRIPTS" ]; then
-  SCRIPTS="$(find / -type d -path '*/skills/cap-table/scripts' 2>/dev/null | head -1)"
+  # In Cowork, CLAUDE_PLUGIN_ROOT substitutes to a host-side path absent inside
+  # the session VM — self-heal by collecting EVERY candidate mount (a session can
+  # have more than one at once: a stale host-side cache, a test marketplace, even
+  # a symlink into a different session's tree) and handing them to
+  # select_plugin_root.py, which picks ONE deterministically and names the
+  # rejects — never trust `find`'s arbitrary first hit, which can silently mix
+  # scripts across plugin versions mid-pipeline.
+  CANDIDATES="$(find /sessions -type d -path '*/skills/cap-table/scripts' 2>/dev/null)"
+  [ -n "$CANDIDATES" ] || CANDIDATES="$(find / -type d -path '*/skills/cap-table/scripts' 2>/dev/null)"
+  PROVISIONAL_ROOT="$(printf '%s\n' "$CANDIDATES" | head -1)"
+  PROVISIONAL_ROOT="${PROVISIONAL_ROOT%/skills/*}"
+  # Bootstrap order: $SHARED_SCRIPTS isn't known until a root is chosen, so use the
+  # provisional root's OWN copy of the selector; an older plugin copy without one
+  # falls back to the provisional root unchanged.
+  SELECTOR="$PROVISIONAL_ROOT/scripts/select_plugin_root.py"
+  if [ -f "$SELECTOR" ]; then
+    if [ -n "$EXPECT_VERSION" ]; then
+      PLUGIN_ROOT="$(printf '%s\n' "$CANDIDATES" | python3 "$SELECTOR" --expect-version "$EXPECT_VERSION")"
+    else
+      PLUGIN_ROOT="$(printf '%s\n' "$CANDIDATES" | python3 "$SELECTOR")"
+    fi
+  else
+    PLUGIN_ROOT="$PROVISIONAL_ROOT"
+  fi
+  SCRIPTS="$PLUGIN_ROOT/skills/cap-table/scripts"
 fi
 PLUGIN_ROOT="${SCRIPTS%/skills/*}"
+echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; never re-run this resolution
 REFS="$PLUGIN_ROOT/skills/cap-table/references"
 SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
 # Resolve the canonical artifacts root via a SCRIPT, not inline bash. An inline path computation is
@@ -298,7 +320,7 @@ RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 echo "RUN_ID=$RUN_ID"   # prints RUN_ID — paste this literal into every later block; never re-run this mint line, or a fresh shell mints a DIFFERENT run_id and silently splits the hand-off dir mid-run
 ```
 
-The Step 0 block self-heals when `${CLAUDE_PLUGIN_ROOT}` doesn't resolve (Cowork). **In Cowork the `find` is normally THE path, not a last resort** — `${CLAUDE_PLUGIN_ROOT}` resolves to a HOST path that does not exist inside the VM, so a bash test against it fails by design rather than by misconfiguration. Expect to locate the anchor and derive the variables from it: `find / -path '*/skills/cap-table/scripts/cap_state.py' 2>/dev/null | head -5`. Reaching this branch is normal; it is not a sign anything is wrong, and it is not worth narrating to the founder.
+Reaching the self-heal branch is normal in Cowork — `${CLAUDE_PLUGIN_ROOT}` resolves to a HOST path that does not exist inside the VM, so the `[ ! -d "$SCRIPTS" ]` test fails by design rather than by misconfiguration. It is not a sign anything is wrong, and it is not worth narrating to the founder.
 
 **Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$REVIEW_DIR`) is write-allowed and delete-denied by the platform: never `rm`, move away, or empty anything under it — **including files you created yourself**. Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless. The uploaded document is already readable in place from the uploads mount; never copy it under outputs to make it readable.
 
@@ -1004,14 +1026,9 @@ Stop after returning the receipt JSON. Do not narrate.
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash
-# Re-derive the shared-scripts path (fresh shell — Step 0's vars don't survive here). Same self-heal
-# as Step 0: in Cowork ${CLAUDE_PLUGIN_ROOT} is a host path absent inside the session VM shell.
-SHARED_SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-if [ ! -d "$SHARED_SCRIPTS" ]; then
-  CT_SCRIPTS="$(find /sessions -type d -path '*/skills/cap-table/scripts' 2>/dev/null | head -1)"
-  [ -n "$CT_SCRIPTS" ] || CT_SCRIPTS="$(find / -type d -path '*/skills/cap-table/scripts' 2>/dev/null | head -1)"
-  SHARED_SCRIPTS="${CT_SCRIPTS%/skills/*}/scripts"
-fi
+# Step 0 already resolved PLUGIN_ROOT once, deterministically — reuse its printed
+# value here rather than re-running the self-heal search in this fresh shell.
+SHARED_SCRIPTS="<printed PLUGIN_ROOT>/scripts"
 printf '%s' '<agent final message verbatim>' | \
   python3 "$SHARED_SCRIPTS/check_handoff.py" "$HANDOFF_DIR/coaching.md" \
     --format=markdown --agent-path "$HANDOFF_AGENT/coaching.md" --receipt-json - \
@@ -1022,12 +1039,7 @@ printf '%s' '<agent final message verbatim>' | \
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash
-SHARED_SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-if [ ! -d "$SHARED_SCRIPTS" ]; then
-  CT_SCRIPTS="$(find /sessions -type d -path '*/skills/cap-table/scripts' 2>/dev/null | head -1)"
-  [ -n "$CT_SCRIPTS" ] || CT_SCRIPTS="$(find / -type d -path '*/skills/cap-table/scripts' 2>/dev/null | head -1)"
-  SHARED_SCRIPTS="${CT_SCRIPTS%/skills/*}/scripts"
-fi
+SHARED_SCRIPTS="<printed PLUGIN_ROOT>/scripts"
 python3 "$SHARED_SCRIPTS/md_to_commentary.py" "$HANDOFF_DIR/coaching.md" | \
   python3 "$SHARED_SCRIPTS/insert_coaching.py" \
     --report "$REVIEW_DIR/report.md" \

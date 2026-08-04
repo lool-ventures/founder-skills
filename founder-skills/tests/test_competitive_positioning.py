@@ -499,6 +499,47 @@ class TestValidateLandscapeSuggestedAdditions:
         )
 
 
+class TestValidateLandscapeDeferredRecallCandidates:
+    """deferred_recall_candidates is an optional top-level passthrough. The
+    output dict is an explicit allowlist, so this must be added by name or it
+    silently vanishes; it must never be fabricated when absent."""
+
+    def test_deferred_recall_candidates_round_trips_when_present(self) -> None:
+        payload = _make_valid_landscape()
+        payload["deferred_recall_candidates"] = [
+            {
+                "name": "Nomad Thermal",
+                "slug": "nomad-thermal",
+                "category": "adjacent",
+                "why_considered": "Recalled from prior research but not re-verified this run.",
+                "sources": ["https://example.com/nomad-thermal"],
+            }
+        ]
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert "deferred_recall_candidates" in data
+        assert data["deferred_recall_candidates"] == payload["deferred_recall_candidates"]
+
+    def test_deferred_recall_candidates_absent_when_not_in_input(self) -> None:
+        payload = _make_valid_landscape()
+        assert "deferred_recall_candidates" not in payload
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        assert "deferred_recall_candidates" not in data, (
+            "deferred_recall_candidates must not be fabricated in the output when the input never had it"
+        )
+
+    def test_deferred_recall_candidates_non_list_rejected(self) -> None:
+        payload = _make_valid_landscape()
+        payload["deferred_recall_candidates"] = "Nomad Thermal"
+        rc, data, stderr = run_script("validate_landscape.py", stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+        assert "deferred_recall_candidates" in stderr.lower()
+        assert "array" in stderr.lower()
+
+
 # ---------------------------------------------------------------------------
 # recent_developments[] + --as-of / landscape_as_of tests
 #
@@ -582,12 +623,93 @@ class TestValidateLandscapeRecentDevelopments:
         assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
         assert "future" in stderr.lower()
 
-    def test_out_of_window_date_rejected(self) -> None:
+    def test_out_of_window_date_dropped_with_warning(self) -> None:
+        """The 18-month recency window is editorial freshness, not an
+        integrity guard: an out-of-window entry must not fail the whole
+        payload. It is relocated to out_of_window_developments and raises a
+        medium STALE_DEVELOPMENT warning instead — nothing is silently lost."""
         # window_start (month granularity) = 2024-12; 2024-11 is one month too old.
-        payload = _make_landscape_with_dev([_make_recent_development(date="2024-11")])
+        payload = _make_landscape_with_dev([_make_recent_development(date="2024-11", summary="Raised a Series B.")])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        alpha = next(c for c in data["competitors"] if c["slug"] == "alpha-corp")
+        assert alpha["recent_developments"] == [], "the out-of-window entry must be gone from recent_developments"
+        assert "out_of_window_developments" in alpha
+        assert len(alpha["out_of_window_developments"]) == 1
+        moved = alpha["out_of_window_developments"][0]
+        assert moved["date"] == "2024-11"
+        assert moved["summary"] == "Raised a Series B."
+        codes = [w["code"] for w in data["warnings"]]
+        assert "STALE_DEVELOPMENT" in codes
+        warn = next(w for w in data["warnings"] if w["code"] == "STALE_DEVELOPMENT")
+        assert warn["severity"] == "medium"
+        # The message is rendered into report.md's warning list, so it must read as prose to a
+        # founder: the competitor's DISPLAY NAME, not its slug, and no internal field names. A
+        # snake_case key in the deliverable is the same leak class as a slug in a heading.
+        assert "Alpha Corp" in warn["message"], "the warning must name the competitor, not its slug"
+        assert "alpha-corp" not in warn["message"]
+        for internal in ("recent_developments", "out_of_window_developments"):
+            assert internal not in warn["message"], (
+                f"the founder-facing warning message leaks the internal field name {internal!r}"
+            )
+        assert "2024-11" in warn["message"]
+        assert "Raised a Series B." in warn["message"]
+
+    def test_out_of_window_entry_with_non_url_source_still_rejected(self) -> None:
+        """Relocation is not an exemption from the other guards: an
+        out-of-window entry with a non-URL source must still fail the whole
+        payload, not be silently relocated with unverifiable content."""
+        payload = _make_landscape_with_dev(
+            [_make_recent_development(date="2024-11", source="saw it on their blog, no link")]
+        )
         rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
         assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
-        assert "recency window" in stderr.lower()
+        assert "source" in stderr.lower()
+        assert "url" in stderr.lower()
+
+    def test_out_of_window_entry_with_bad_type_still_rejected(self) -> None:
+        """Same guard-still-applies property as the non-URL-source case, for
+        the 'type' enum."""
+        payload = _make_landscape_with_dev([_make_recent_development(date="2024-11", dev_type="rumor")])
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 1, f"Expected exit 1, got {rc}. stderr: {stderr}"
+        assert "type" in stderr.lower()
+
+    def test_multiple_out_of_window_entries_each_get_own_warning(self) -> None:
+        payload = _make_landscape_with_dev(
+            [
+                _make_recent_development(date="2024-11", summary="First stale event."),
+                _make_recent_development(date="2024-10", summary="Second stale event."),
+            ]
+        )
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        alpha = next(c for c in data["competitors"] if c["slug"] == "alpha-corp")
+        assert alpha["recent_developments"] == []
+        assert len(alpha["out_of_window_developments"]) == 2
+        stale_warnings = [w for w in data["warnings"] if w["code"] == "STALE_DEVELOPMENT"]
+        assert len(stale_warnings) == 2
+
+    def test_competitor_with_only_out_of_window_developments_does_not_trip_no_recent_developments(self) -> None:
+        """A landscape whose only development for EVERY competitor is
+        out-of-window must not newly trip NO_RECENT_DEVELOPMENTS: the research
+        happened, it just aged out of the render window. has_recent_developments
+        must be computed BEFORE the drop, not after."""
+        stale_dev = [_make_recent_development(date="2024-11")]
+        payload = _make_landscape_with_dev(stale_dev, other_competitors_dev=stale_dev)
+        rc, data, stderr = run_script("validate_landscape.py", args=["--as-of", AS_OF], stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        codes = [w["code"] for w in data["warnings"]]
+        assert "NO_RECENT_DEVELOPMENTS" not in codes, (
+            "an all-out-of-window landscape still proves research happened; must not be mistaken for shallow research"
+        )
+        # And the drop itself did still happen for every competitor.
+        for comp in data["competitors"]:
+            assert comp["recent_developments"] == []
+            assert len(comp.get("out_of_window_developments", [])) == 1
 
     def test_within_window_boundary_accepted(self) -> None:
         # Exactly at the 18-month floor should be accepted (not strictly less-than).
@@ -4988,3 +5110,512 @@ def test_the_exemption_is_mode_sensitive() -> None:
     )
     assert rc == 1, "NARR_03 is not gated in deck mode, so blank evidence must still fail"
     assert "NARR_03" in err
+
+
+# ===========================================================================
+# _axis_compat.py — axis_rationale() unit tests
+#
+# Regression coverage for the silently-lost axis rationale defect: dispatch
+# templates instructed the sub-agent to write the rationale as a view-level
+# sibling (view["x_axis_rationale"]) while the canonical schema shape is
+# nested (view["x_axis"]["rationale"]). _axis_compat.axis_rationale() is the
+# single tolerant reader shared by score_positioning.py, visualize.py, and
+# explore.py — no per-file reimplementation.
+# ===========================================================================
+
+
+def _import_axis_rationale() -> Any:
+    """Import _axis_compat.axis_rationale via sys.path, matching the existing
+    _dispatch_json import convention used elsewhere in this file."""
+    import sys as _sys
+
+    scripts_dir = os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "competitive-positioning", "scripts")
+    if scripts_dir not in _sys.path:
+        _sys.path.insert(0, scripts_dir)
+    from _axis_compat import axis_rationale  # type: ignore[import-not-found]
+
+    return axis_rationale
+
+
+def test_axis_compat_nested_wins_when_only_nested_present() -> None:
+    axis_rationale = _import_axis_rationale()
+    view = {"x_axis": {"name": "Speed", "rationale": "Nested rationale"}}
+    assert axis_rationale(view, "x") == "Nested rationale"
+
+
+def test_axis_compat_sibling_fallback_when_nested_absent() -> None:
+    axis_rationale = _import_axis_rationale()
+    view = {"x_axis": {"name": "Speed"}, "x_axis_rationale": "Sibling rationale"}
+    assert axis_rationale(view, "x") == "Sibling rationale"
+
+
+def test_axis_compat_nested_wins_when_both_present_and_differ() -> None:
+    """Precedence is fixed: nested wins silently, even when both are present
+    and disagree — the schema is the authority."""
+    axis_rationale = _import_axis_rationale()
+    view = {
+        "x_axis": {"name": "Speed", "rationale": "Nested wins"},
+        "x_axis_rationale": "Sibling loses",
+    }
+    assert axis_rationale(view, "x") == "Nested wins"
+
+
+def test_axis_compat_empty_string_when_neither_present() -> None:
+    axis_rationale = _import_axis_rationale()
+    view = {"x_axis": {"name": "Speed"}}
+    assert axis_rationale(view, "x") == ""
+
+
+def test_axis_compat_empty_string_when_view_has_no_axis_key_at_all() -> None:
+    axis_rationale = _import_axis_rationale()
+    assert axis_rationale({}, "y") == ""
+
+
+def test_axis_compat_axis_parameter_selects_the_right_key() -> None:
+    """Confirms the `axis` parameter selects the matching nested/sibling key
+    pair, not just "x" regardless of the argument."""
+    axis_rationale = _import_axis_rationale()
+    view = {"y_axis_rationale": "Y sibling rationale"}
+    assert axis_rationale(view, "y") == "Y sibling rationale"
+    assert axis_rationale(view, "x") == ""
+
+
+def test_axis_compat_non_string_nested_rationale_falls_back_to_sibling() -> None:
+    """A malformed nested rationale (wrong type) must not crash — and must not
+    be treated as a present value that blocks the sibling fallback."""
+    axis_rationale = _import_axis_rationale()
+    view = {"x_axis": {"name": "Speed", "rationale": 123}, "x_axis_rationale": "Sibling rationale"}
+    assert axis_rationale(view, "x") == "Sibling rationale"
+
+
+# ===========================================================================
+# score_positioning.py — sibling-shaped rationale, RATIONALE_MISSING,
+# optional label, views_fingerprint
+# ===========================================================================
+
+
+def _make_sibling_rationale_view(view_id: str = "primary") -> dict[str, Any]:
+    """A view carrying axis rationale as a view-level sibling instead of
+    nested — the shape real dispatch templates historically produced."""
+    return {
+        "id": view_id,
+        "x_axis": {"name": "Deployment Speed"},
+        "x_axis_rationale": "Speed-to-value differentiates for SMB buyers",
+        "y_axis": {"name": "Data Privacy Level"},
+        "y_axis_rationale": "Privacy is a growing buyer concern",
+        "points": [
+            _make_positioning_point("_startup", 90, 85),
+            _make_positioning_point("acme-corp", 60, 40),
+        ],
+    }
+
+
+class TestScorePositioningAxisRationale:
+    """Regression coverage for the silently-lost axis rationale defect (Task 1)."""
+
+    def test_sibling_shaped_rationale_surfaces_in_output(self) -> None:
+        payload = _make_valid_positioning_input(views=[_make_sibling_rationale_view()])
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None
+        view = data["views"][0]
+        assert view["x_axis_rationale"] == "Speed-to-value differentiates for SMB buyers"
+        assert view["y_axis_rationale"] == "Privacy is a growing buyer concern"
+
+    def test_nested_rationale_still_wins_over_sibling(self) -> None:
+        view = _make_sibling_rationale_view()
+        view["x_axis"]["rationale"] = "Nested wins"
+        payload = _make_valid_positioning_input(views=[view])
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None
+        assert data["views"][0]["x_axis_rationale"] == "Nested wins"
+
+    def test_missing_rationale_on_both_axes_emits_two_rationale_missing_warnings(self) -> None:
+        view = {
+            "id": "primary",
+            "x_axis": {"name": "Deployment Speed"},
+            "y_axis": {"name": "Data Privacy Level"},
+            "points": [
+                _make_positioning_point("_startup", 90, 85),
+                _make_positioning_point("acme-corp", 60, 40),
+            ],
+        }
+        payload = _make_valid_positioning_input(views=[view])
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None
+        codes = [w["code"] for w in data["warnings"]]
+        assert codes.count("RATIONALE_MISSING") == 2
+        rationale_warnings = [w for w in data["warnings"] if w["code"] == "RATIONALE_MISSING"]
+        messages = " ".join(w["message"] for w in rationale_warnings)
+        assert "primary" in messages
+        assert "X-axis" in messages
+        assert "Y-axis" in messages
+        for w in rationale_warnings:
+            assert w["severity"] == "medium"
+
+    def test_missing_rationale_on_one_axis_emits_exactly_one_warning(self) -> None:
+        view = _make_sibling_rationale_view()
+        del view["y_axis_rationale"]
+        payload = _make_valid_positioning_input(views=[view])
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None
+        rationale_warnings = [w for w in data["warnings"] if w["code"] == "RATIONALE_MISSING"]
+        assert len(rationale_warnings) == 1
+        assert "Y-axis" in rationale_warnings[0]["message"]
+        assert "primary" in rationale_warnings[0]["message"]
+
+    def test_fully_present_nested_rationale_emits_no_rationale_missing_warning(self) -> None:
+        """Regression guard: the baseline factory's canonical nested-shaped
+        view must not spuriously trip the new warning."""
+        payload = _make_valid_positioning_input()
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None
+        codes = [w["code"] for w in data["warnings"]]
+        assert "RATIONALE_MISSING" not in codes
+
+
+class TestScorePositioningLabel:
+    """Optional `label` on views[] (Task 4) — passthrough only, never
+    required, never inferred from `id`."""
+
+    def test_label_passes_through_when_present(self) -> None:
+        view = _make_valid_positioning_input()["views"][0]
+        view["label"] = "Speed vs. Privacy"
+        payload = _make_valid_positioning_input(views=[view])
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None
+        assert data["views"][0]["label"] == "Speed vs. Privacy"
+
+    def test_label_absent_stays_absent(self) -> None:
+        """Every existing artifact/fixture lacks `label` — absence must be
+        silent, never defaulted or inferred from `id`."""
+        payload = _make_valid_positioning_input()
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None
+        assert "label" not in data["views"][0]
+
+    def test_non_enum_id_does_not_fail_validation(self) -> None:
+        """`id` accepts a descriptive slug, not just primary/secondary —
+        validation must not enforce an enum on it."""
+        view = _make_valid_positioning_input()["views"][0]
+        view["id"] = "speed-vs-privacy"
+        payload = _make_valid_positioning_input(views=[view])
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None
+        assert data["views"][0]["view_id"] == "speed-vs-privacy"
+
+
+class TestScorePositioningViewsFingerprint:
+    """views_fingerprint (Task 2) — order-insensitive over views/points,
+    prose-excluded (evidence, rationale, provenance don't move the map)."""
+
+    def test_fingerprint_is_present_and_stable_for_identical_input(self) -> None:
+        payload = _make_valid_positioning_input()
+        rc1, data1, stderr1 = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        rc2, data2, stderr2 = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc1 == 0, stderr1
+        assert rc2 == 0, stderr2
+        assert data1 is not None
+        assert data2 is not None
+        assert "views_fingerprint" in data1
+        assert len(data1["views_fingerprint"]) == 64  # sha256 hex digest length
+        assert data1["views_fingerprint"] == data2["views_fingerprint"]
+
+    def test_fingerprint_ignores_point_order(self) -> None:
+        base = _make_valid_positioning_input()
+        rc1, data1, stderr1 = run_script("score_positioning.py", stdin_data=json.dumps(base))
+        assert rc1 == 0, stderr1
+        assert data1 is not None
+
+        reordered = _make_valid_positioning_input()
+        reordered["views"][0]["points"] = list(reversed(reordered["views"][0]["points"]))
+        rc2, data2, stderr2 = run_script("score_positioning.py", stdin_data=json.dumps(reordered))
+        assert rc2 == 0, stderr2
+        assert data2 is not None
+
+        assert data1["views_fingerprint"] == data2["views_fingerprint"]
+
+    def test_fingerprint_ignores_reworded_evidence(self) -> None:
+        base = _make_valid_positioning_input()
+        rc1, data1, stderr1 = run_script("score_positioning.py", stdin_data=json.dumps(base))
+        assert rc1 == 0, stderr1
+        assert data1 is not None
+
+        reworded = _make_valid_positioning_input()
+        for p in reworded["views"][0]["points"]:
+            p["x_evidence"] = "Completely reworded evidence text, same coordinates"
+            p["y_evidence"] = "Another completely different sentence"
+        rc2, data2, stderr2 = run_script("score_positioning.py", stdin_data=json.dumps(reworded))
+        assert rc2 == 0, stderr2
+        assert data2 is not None
+
+        assert data1["views_fingerprint"] == data2["views_fingerprint"], (
+            "reworded evidence text must not change the fingerprint — it is prose, not identity"
+        )
+
+    def test_fingerprint_changes_on_moved_coordinate(self) -> None:
+        base = _make_valid_positioning_input()
+        rc1, data1, stderr1 = run_script("score_positioning.py", stdin_data=json.dumps(base))
+        assert rc1 == 0, stderr1
+        assert data1 is not None
+
+        moved = _make_valid_positioning_input()
+        moved["views"][0]["points"][0]["x"] = moved["views"][0]["points"][0]["x"] - 1
+        rc2, data2, stderr2 = run_script("score_positioning.py", stdin_data=json.dumps(moved))
+        assert rc2 == 0, stderr2
+        assert data2 is not None
+
+        assert data1["views_fingerprint"] != data2["views_fingerprint"]
+
+    def test_fingerprint_ignores_view_order(self) -> None:
+        view_a = _make_valid_positioning_input()["views"][0]
+        view_b = {
+            "id": "secondary",
+            "x_axis": {"name": "Price"},
+            "y_axis": {"name": "Support"},
+            "points": [
+                _make_positioning_point("_startup", 20, 20),
+                _make_positioning_point("acme-corp", 80, 80),
+            ],
+        }
+        payload_ab = _make_valid_positioning_input(views=[view_a, view_b])
+        payload_ba = _make_valid_positioning_input(views=[view_b, view_a])
+
+        rc1, data1, stderr1 = run_script("score_positioning.py", stdin_data=json.dumps(payload_ab))
+        rc2, data2, stderr2 = run_script("score_positioning.py", stdin_data=json.dumps(payload_ba))
+        assert rc1 == 0, stderr1
+        assert rc2 == 0, stderr2
+        assert data1 is not None
+        assert data2 is not None
+
+        assert data1["views_fingerprint"] == data2["views_fingerprint"]
+
+
+# ---------------------------------------------------------------------------
+# checklist.py --positioning-scores / graded_against
+#
+# A live run re-scored positioning (a second view added, coordinates moved) and
+# re-composed the report WITHOUT re-running the checklist. Nothing detected it:
+# the run_id was unchanged, so STALE_ARTIFACT cannot fire — while POS_04's pass
+# condition reads score_positioning.py's rank data directly. graded_against
+# records which map was graded so compose can catch the mismatch.
+# ---------------------------------------------------------------------------
+
+
+class TestChecklistGradedAgainst:
+    """`--positioning-scores` records the graded map's fingerprint. Absent is silent."""
+
+    @staticmethod
+    def _ps_file(tmp_path: Any, payload: Any) -> str:
+        p = tmp_path / "positioning_scores.json"
+        p.write_text(json.dumps(payload) if not isinstance(payload, str) else payload, encoding="utf-8")
+        return str(p)
+
+    def test_records_fingerprint_verbatim_when_given(self, tmp_path: Any) -> None:
+        fp = "ab12" * 16
+        path = self._ps_file(tmp_path, {"views_fingerprint": fp, "views": []})
+        payload = _make_valid_checklist_input()
+        rc, data, stderr = run_script(
+            "checklist.py",
+            args=["--input-mode", "deck", "--run-id", "R1", "--positioning-scores", path],
+            stdin_data=json.dumps(payload),
+        )
+        assert rc == 0, stderr
+        assert data is not None
+        assert data["graded_against"] == {"views_fingerprint": fp}, (
+            "the fingerprint must be copied verbatim — checklist.py must never recompute it"
+        )
+
+    def test_absent_when_flag_omitted(self) -> None:
+        payload = _make_valid_checklist_input()
+        rc, data, stderr = run_script(
+            "checklist.py",
+            args=["--input-mode", "deck", "--run-id", "R1"],
+            stdin_data=json.dumps(payload),
+        )
+        assert rc == 0, stderr
+        assert data is not None
+        assert "graded_against" not in data, "absent must stay absent — never inferred"
+
+    def test_missing_file_omits_field_without_failing(self, tmp_path: Any) -> None:
+        """The checklist is deliverable-critical; an optional provenance read must not block it."""
+        payload = _make_valid_checklist_input()
+        rc, data, stderr = run_script(
+            "checklist.py",
+            args=[
+                "--input-mode",
+                "deck",
+                "--run-id",
+                "R1",
+                "--positioning-scores",
+                str(tmp_path / "nope.json"),
+            ],
+            stdin_data=json.dumps(payload),
+        )
+        assert rc == 0, stderr
+        assert data is not None
+        assert "graded_against" not in data
+        assert "graded_against" in stderr, "the omission must be visible on stderr"
+
+    def test_invalid_json_omits_field_without_failing(self, tmp_path: Any) -> None:
+        path = self._ps_file(tmp_path, "{not json")
+        payload = _make_valid_checklist_input()
+        rc, data, stderr = run_script(
+            "checklist.py",
+            args=["--input-mode", "deck", "--run-id", "R1", "--positioning-scores", path],
+            stdin_data=json.dumps(payload),
+        )
+        assert rc == 0, stderr
+        assert data is not None
+        assert "graded_against" not in data
+        assert "graded_against" in stderr
+
+    def test_file_without_fingerprint_omits_field(self, tmp_path: Any) -> None:
+        path = self._ps_file(tmp_path, {"views": [], "overall_differentiation": 50})
+        payload = _make_valid_checklist_input()
+        rc, data, stderr = run_script(
+            "checklist.py",
+            args=["--input-mode", "deck", "--run-id", "R1", "--positioning-scores", path],
+            stdin_data=json.dumps(payload),
+        )
+        assert rc == 0, stderr
+        assert data is not None
+        assert "graded_against" not in data
+
+    def test_existing_gating_and_run_id_unaffected(self, tmp_path: Any) -> None:
+        """The new flag must not disturb mode gating or run_id stamping."""
+        path = self._ps_file(tmp_path, {"views_fingerprint": "cd" * 32})
+        payload = _make_valid_checklist_input(input_mode="conversation")
+        rc, data, stderr = run_script(
+            "checklist.py",
+            args=["--input-mode", "conversation", "--run-id", "RX", "--positioning-scores", path],
+            stdin_data=json.dumps(payload),
+        )
+        assert rc == 0, stderr
+        assert data is not None
+        assert data["metadata"]["run_id"] == "RX"
+        gated = [i for i in data["items"] if i["status"] == "not_applicable"]
+        assert gated, "conversation mode must still auto-gate research-dependent items"
+
+
+class TestValidateLandscapeDeferredCarryAndDerive:
+    """`--carry-deferred` / `--derive-deferred`: the deferred-candidate chain, made mechanical.
+
+    Both of these replace an INSTRUCTION that was measured unreliable across two live Cowork runs.
+    The field has to survive from the competitor-set gate into `landscape.json` so the later
+    additions gate can re-offer the declined candidates. Originally the main thread wrote it into
+    `landscape_draft.json` and the research sub-agent copied it through. Run A's sub-agent dropped
+    the field entirely; run B's main thread created the key and left it empty. A courier that
+    complies half the time is not a mechanism, so the producer now reads the draft directly and, as a
+    last resort, derives the set from the blind-recall diff.
+    """
+
+    @staticmethod
+    def _draft(tmp_path: Any, deferred: Any) -> str:
+        p = tmp_path / "landscape_draft.json"
+        p.write_text(json.dumps({"competitors": [], "deferred_recall_candidates": deferred}), encoding="utf-8")
+        return str(p)
+
+    @staticmethod
+    def _verification(tmp_path: Any, unmatched: list[dict[str, Any]]) -> str:
+        p = tmp_path / "competitor_verification.json"
+        p.write_text(json.dumps({"recall_gaps": {"unmatched": unmatched}}), encoding="utf-8")
+        return str(p)
+
+    def _run(self, payload: dict[str, Any], *args: str) -> tuple[int, dict | None, str]:
+        return run_script("validate_landscape.py", args=["--as-of", AS_OF, *args], stdin_data=json.dumps(payload))
+
+    # --- carry ---------------------------------------------------------
+
+    def test_carries_deferred_from_the_draft_when_stdin_lacks_it(self, tmp_path: Any) -> None:
+        """Run A's shape: the sub-agent dropped the field, so stdin has none."""
+        draft = self._draft(tmp_path, [{"name": "Backstage", "slug": "backstage"}])
+        rc, data, stderr = self._run(_make_valid_landscape(), "--carry-deferred", draft)
+        assert rc == 0, stderr
+        assert data is not None
+        assert [c["slug"] for c in data["deferred_recall_candidates"]] == ["backstage"]
+
+    def test_stdin_value_wins_over_the_draft(self, tmp_path: Any) -> None:
+        """A sub-agent that DID copy (and may have enriched) must not be clobbered."""
+        draft = self._draft(tmp_path, [{"name": "Backstage", "slug": "backstage"}])
+        payload = _make_valid_landscape()
+        payload["deferred_recall_candidates"] = [{"name": "FromStdin", "slug": "from-stdin"}]
+        rc, data, stderr = self._run(payload, "--carry-deferred", draft)
+        assert rc == 0, stderr
+        assert data is not None
+        assert [c["slug"] for c in data["deferred_recall_candidates"]] == ["from-stdin"]
+
+    def test_a_promoted_candidate_is_dropped_from_the_carry(self, tmp_path: Any) -> None:
+        """A candidate that reached competitors[] is no longer deferred — re-offering it would
+        re-propose something the founder already accepted."""
+        payload = _make_valid_landscape()
+        adopted = payload["competitors"][0]["slug"]
+        draft = self._draft(tmp_path, [{"name": "A", "slug": adopted}, {"name": "B", "slug": "still-deferred"}])
+        rc, data, stderr = self._run(payload, "--carry-deferred", draft)
+        assert rc == 0, stderr
+        assert data is not None
+        assert [c["slug"] for c in data["deferred_recall_candidates"]] == ["still-deferred"]
+
+    def test_unreadable_draft_is_a_note_not_a_failure(self, tmp_path: Any) -> None:
+        """A convenience field must never block the landscape producer."""
+        rc, data, stderr = self._run(_make_valid_landscape(), "--carry-deferred", str(tmp_path / "nope.json"))
+        assert rc == 0, stderr
+        assert data is not None
+        assert "deferred_recall_candidates" not in data
+        assert "carry-deferred" in stderr
+
+    # --- derive --------------------------------------------------------
+
+    def test_derives_from_the_recall_diff_when_the_draft_is_empty(self, tmp_path: Any) -> None:
+        """Run B's shape: the key existed but was an empty list, so there was nothing to carry.
+
+        A recall candidate still absent from competitors[] was not adopted — that IS the definition
+        of deferred, so it is derivable rather than remembered.
+        """
+        draft = self._draft(tmp_path, [])
+        verification = self._verification(
+            tmp_path,
+            [{"name": "Pipedream", "slug": "pipedream", "why_considered": "same job", "sources": ["https://x"]}],
+        )
+        rc, data, stderr = self._run(
+            _make_valid_landscape(), "--carry-deferred", draft, "--derive-deferred", verification
+        )
+        assert rc == 0, stderr
+        assert data is not None
+        derived = data["deferred_recall_candidates"]
+        assert [c["slug"] for c in derived] == ["pipedream"]
+        assert derived[0]["why_considered"] == "same job", "the derivation must keep the candidate's rationale"
+
+    def test_derivation_excludes_an_adopted_candidate(self, tmp_path: Any) -> None:
+        payload = _make_valid_landscape()
+        adopted = payload["competitors"][0]["slug"]
+        verification = self._verification(
+            tmp_path, [{"name": "A", "slug": adopted}, {"name": "B", "slug": "not-adopted"}]
+        )
+        rc, data, stderr = self._run(payload, "--derive-deferred", verification)
+        assert rc == 0, stderr
+        assert data is not None
+        assert [c["slug"] for c in data["deferred_recall_candidates"]] == ["not-adopted"]
+
+    def test_carry_takes_precedence_over_derive(self, tmp_path: Any) -> None:
+        draft = self._draft(tmp_path, [{"name": "FromDraft", "slug": "from-draft"}])
+        verification = self._verification(tmp_path, [{"name": "FromDiff", "slug": "from-diff"}])
+        rc, data, stderr = self._run(
+            _make_valid_landscape(), "--carry-deferred", draft, "--derive-deferred", verification
+        )
+        assert rc == 0, stderr
+        assert data is not None
+        assert [c["slug"] for c in data["deferred_recall_candidates"]] == ["from-draft"]
+
+    def test_no_flags_means_no_field_invented(self) -> None:
+        rc, data, stderr = self._run(_make_valid_landscape())
+        assert rc == 0, stderr
+        assert data is not None
+        assert "deferred_recall_candidates" not in data

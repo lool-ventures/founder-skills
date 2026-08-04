@@ -1,0 +1,13 @@
+# Session for the competitive-positioning DECK-mode lane.
+# Whole-plugin mount (locked constraint #1: the skillHash must cover rules + references/ + scripts/,
+# so a content edit trips `verify-cassettes --staleness`; narrowing it reintroduces a false-green)
+# plus the synthetic 6-slide seed deck whose deliberate weaknesses include having NO competition
+# slide — the input shape the 2026-08 remediation found unhandled, and which no other fleet lane has.
+model: claude-sonnet-4-6        # parity with the other cowork lanes
+plugins:
+  local_plugins:
+    - ../../founder-skills                 # founder-skills plugin root (whole plugin)
+  enabled:
+    - founder-skills@local
+uploads:
+  - ../../founder-skills/tests/fixtures/decks/synthetic-seed-deck.txt

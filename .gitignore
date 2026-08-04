@@ -30,3 +30,10 @@ evals-local/
 # save us here: it reports clean while the file is merely untracked.
 ~$*
 .~lock.*#
+
+# cowork-harness `critique --out` reports. Run OUTPUT, not source: they embed the
+# run's host paths (/Users/..., /var/folders/...) and the graded run's transcript
+# excerpts. Keep them out of history the same way runs/ is kept out — a wildcard
+# stage would otherwise put a host path into a public commit. privacy_guard.py
+# does not flag them (its path class is not in the tree scan).
+cowork-tests/*-critique.json

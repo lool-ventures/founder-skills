@@ -116,8 +116,38 @@ _DEFENSIBILITY_COLORS: dict[str, str] = {
 }
 
 
+def _normalize_view_rationale(view: dict[str, Any], axis_compat: Any) -> dict[str, Any]:
+    """Copy `view`, folding a resolved axis rationale back into the nested shape.
+
+    The embedded JS reads view.x_axis.rationale / view.y_axis.rationale directly (no
+    fallback logic client-side, by design). Some artifacts carry the rationale as a
+    view-level sibling (x_axis_rationale) instead, because the dispatch templates used
+    to instruct that shape. `axis_compat.axis_rationale()` resolves either shape server
+    side; this folds the resolved value into the nested `rationale` key so the JS's
+    single read path keeps working regardless of which shape the artifact used. A view
+    whose axis already carries a nested rationale is left untouched.
+    """
+    normalized = dict(view)
+    for axis_key, axis_name in (("x_axis", "x"), ("y_axis", "y")):
+        axis_val = normalized.get(axis_key)
+        if isinstance(axis_val, dict) and axis_val.get("rationale"):
+            continue  # already nested — nothing to resolve
+        rationale = axis_compat.axis_rationale(view, axis_name)
+        if not rationale:
+            continue  # neither shape carries one — leave axis_val as-is
+        axis_obj = dict(axis_val) if isinstance(axis_val, dict) else {}
+        axis_obj["rationale"] = rationale
+        normalized[axis_key] = axis_obj
+    return normalized
+
+
 def _build_data_payload(dir_path: str) -> dict[str, Any]:
     """Load all artifacts and assemble the explorer data payload."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _axis_compat
+
     artifacts: dict[str, dict[str, Any] | None] = {}
     for name in REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS:
         artifacts[name] = _load_artifact(dir_path, name)
@@ -142,7 +172,7 @@ def _build_data_payload(dir_path: str) -> dict[str, Any]:
     if _usable(positioning):
         for v in _as_list(positioning.get("views")):
             if isinstance(v, dict) and _as_list(v.get("points")):
-                views.append(v)
+                views.append(_normalize_view_rationale(v, _axis_compat))
 
     # View scores keyed by view id
     view_scores_map: dict[str, dict[str, Any]] = {}
@@ -289,6 +319,24 @@ def _css(brand_css: str) -> str:
         padding: 0.75rem; margin-top: 0.5rem; line-height: 1.5;
     }
     .axis-rationale strong { color: var(--lool-slate); }
+    .view-score-panel {
+        font-size: 0.75rem; color: var(--lool-mute); background: var(--lool-paper);
+        border: 1px solid var(--lool-line-2);
+        padding: 0.75rem; margin-top: 0.5rem; line-height: 1.6;
+    }
+    .view-score-panel strong { color: var(--lool-slate); }
+    .view-score-panel .vanity-flag { color: var(--lool-warning); font-style: italic; margin-top: 2px; }
+    .claim-card {
+        background: var(--lool-paper); border: 1px solid var(--lool-line-2);
+        border-radius: var(--r-input); padding: 0.6rem 0.75rem; margin-bottom: 0.5rem;
+        font-size: 0.75rem; line-height: 1.5;
+    }
+    .claim-card .claim-text { font-weight: 500; color: var(--lool-ink); margin-bottom: 0.25rem; }
+    .claim-card strong { color: var(--lool-slate); }
+    .verdict-badge {
+        display: inline-block; padding: 1px 8px; border-radius: var(--r-pill);
+        font-size: 0.65rem; font-weight: 600; color: #fff;
+    }
     .scoring-basis-caption { font-size: 0.75rem; color: var(--lool-mute);
         padding: 0.5rem 2rem; background: var(--lool-paper);
         border-bottom: 1px solid var(--lool-line-2); }
@@ -389,11 +437,16 @@ def compose_explorer(dir_path: str) -> str:
     <div class="chart-area">
       <canvas id="chart-2d"></canvas>
       <div id="axis-rationale" class="axis-rationale" style="display:none;"></div>
+      <div id="view-score-panel" class="view-score-panel" style="display:none;"></div>
     </div>
     <div class="sidebar" id="sidebar">
       <h3>Companies</h3>
       <div id="company-list"></div>
       <div class="detail-panel" id="detail-panel" style="display:none;"></div>
+      <div class="detail-panel" id="diff-claims-panel">
+        <h3>Differentiation Stress-Test</h3>
+        <div id="diff-claims-list"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -438,6 +491,11 @@ const SCORING_BASIS_LABELS = {{
 }};
 const DEFENSIBILITY_RADII = {{high: 12, moderate: 8, low: 5}};
 const STARTUP_MIN_RADIUS = 8;
+const VERDICT_COLORS = {{
+  holds: 'var(--lool-success)',
+  partially_holds: 'var(--lool-warning)',
+  does_not_hold: 'var(--lool-danger)'
+}};
 
 // State
 var currentView = null;
@@ -533,7 +591,8 @@ function populateViewSelector() {{
     opt.value = i;
     var xName = (v.x_axis && v.x_axis.name) || 'X';
     var yName = (v.y_axis && v.y_axis.name) || 'Y';
-    opt.textContent = humanize(v.id || 'view-' + i) + ': ' + xName + ' vs ' + yName;
+    var viewLabel = v.label || humanize(v.id || 'view-' + i);
+    opt.textContent = viewLabel + ': ' + xName + ' vs ' + yName;
     sel.appendChild(opt);
   }});
   if (DATA.views.length > 0) {{
@@ -758,6 +817,69 @@ function render2D() {{
   }} else {{
     ratDiv.style.display = 'none';
   }}
+
+  // Update view score panel (differentiation score, per-axis rank, vanity flags).
+  // Rank convention: "Rank N of M ranked", where M = competitor_count + 1 (the
+  // startup counted among the ranked entities) \u2014 never "of M competitors".
+  var scorePanel = document.getElementById('view-score-panel');
+  var vs = DATA.view_scores[String(view.id || '')];
+  if (vs) {{
+    var totalRanked = (vs.competitor_count || 0) + 1;
+    var lines = [];
+    if (vs.differentiation_score !== undefined && vs.differentiation_score !== null) {{
+      lines.push('<div><strong>Differentiation score:</strong> ' + vs.differentiation_score + '%</div>');
+    }}
+    if (vs.startup_x_rank !== undefined && vs.startup_x_rank !== null) {{
+      lines.push('<div><strong>' + escHtml(xName) + ' rank:</strong> Rank ' + vs.startup_x_rank +
+        ' of ' + totalRanked + ' ranked</div>');
+    }}
+    if (vs.startup_y_rank !== undefined && vs.startup_y_rank !== null) {{
+      lines.push('<div><strong>' + escHtml(yName) + ' rank:</strong> Rank ' + vs.startup_y_rank +
+        ' of ' + totalRanked + ' ranked</div>');
+    }}
+    if (vs.x_axis_vanity_flag) {{
+      lines.push('<div class="vanity-flag">Vanity axis warning: ' + escHtml(xName) + '</div>');
+    }}
+    if (vs.y_axis_vanity_flag) {{
+      lines.push('<div class="vanity-flag">Vanity axis warning: ' + escHtml(yName) + '</div>');
+    }}
+    if (lines.length) {{
+      scorePanel.innerHTML = lines.join('');
+      scorePanel.style.display = 'block';
+    }} else {{
+      scorePanel.style.display = 'none';
+    }}
+  }} else {{
+    scorePanel.style.display = 'none';
+  }}
+}}
+
+// ---- Differentiation Claims ----
+
+function renderDiffClaims() {{
+  var list = document.getElementById('diff-claims-list');
+  var claims = DATA.diff_claims || [];
+  if (!claims.length) {{
+    list.innerHTML = '<div style="font-size:0.75rem;color:var(--lool-faint);font-style:italic;padding:0.25rem 0;">' +
+      'No differentiation claims tested.</div>';
+    return;
+  }}
+  var html = '';
+  claims.forEach(function(c) {{
+    var verdict = c.verdict || 'untested';
+    var color = VERDICT_COLORS[verdict] || 'var(--lool-faint)';
+    html += '<div class="claim-card">';
+    html += '<div class="claim-text">' + escHtml(c.claim || '') + '</div>';
+    html += '<span class="verdict-badge" style="background:' + color + '">' + humanize(verdict) + '</span>';
+    if (c.evidence) {{
+      html += '<div style="margin-top:4px;"><strong>Evidence:</strong> ' + escHtml(c.evidence) + '</div>';
+    }}
+    if (c.challenge) {{
+      html += '<div style="margin-top:2px;"><strong>Investor Challenge:</strong> ' + escHtml(c.challenge) + '</div>';
+    }}
+    html += '</div>';
+  }});
+  list.innerHTML = html;
 }}
 
 function updateLegend() {{
@@ -929,6 +1051,7 @@ function render3D() {{
 populateViewSelector();
 buildCompanyList();
 renderScoringBasisCaption();
+renderDiffClaims();
 if (DATA.views.length > 0) {{
   render2D();
 }} else {{

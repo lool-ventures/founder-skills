@@ -216,9 +216,9 @@ Items are auto-gated to `not_applicable` based on `input_mode`. The main thread 
 **Label:** Competition slide alignment (deck cross-check)
 **Pass:** If a pitch deck was provided, the competitive analysis aligns with the competition slide. Discrepancies (competitors omitted from deck, different positioning claims) are flagged and explained.
 **Fail:** Significant discrepancies between the deck's competition slide and the analysis, with no acknowledgment. Investor would see contradictions.
-**Warn:** Minor discrepancies acknowledged (e.g., deck omits one competitor that the analysis includes) with reasonable explanation.
+**Warn:** Minor discrepancies acknowledged (e.g., deck omits one competitor that the analysis includes) with reasonable explanation. **Also warn** when `deck_competition_slide.present == false` — the deck names no competitor at all. The absence itself is the evidence (e.g. "deck's competition slide names no competitor across N pages"): a deck that never engages competition reads to an investor as a blind spot, worth flagging even though there is no slide to cross-check against.
 **Basis:** If the founder is using this analysis to improve their deck, the two must be consistent. An investor who sees the deck AND a competitive analysis expects alignment.
-**Mode gating:** Auto-gated to `not_applicable` in `conversation` and `document` modes (no deck to cross-check).
+**Mode gating:** Auto-gated to `not_applicable` in `conversation` and `document` modes (no deck to cross-check). **Stays active in `deck` mode even when `deck_competition_slide.present == false`** — do not extend the gating to treat a slide-less deck as `not_applicable`, which would hide the finding.
 
 ### `NARR_04`
 **Label:** Defensibility roadmap articulated

@@ -1143,3 +1143,96 @@ class TestExploreBurnMultipleFormula:
             f"Found body:\n{body}\n"
             f"Expected pattern: 'mrr * growth_rate * 12' or equivalent."
         )
+
+
+# ---------------------------------------------------------------------------
+# explore.py must render DATA.checklist -- the payload has long carried a
+# "checklist" key (score_pct/overall/fails/warns) but no client-side JS ever
+# read it and no server-side markup ever rendered it, so the review's own
+# checklist score was silently absent from the explorer. Fixed by rendering
+# a static "Review Checklist" summary box server-side (_render_checklist_summary).
+# ---------------------------------------------------------------------------
+
+
+def test_explore_checklist_score_and_counts_rendered() -> None:
+    """The explorer must surface the checklist score and fail/warn counts.
+
+    _VALID_CHECKLIST's summary has score_pct=95.9 (rounds to 96%), 1 failed
+    item, 1 warned item.
+    """
+    d = _make_artifact_dir()
+    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    assert "Review Checklist" in stdout
+    assert "96%" in stdout
+    assert "1 failing" in stdout
+    assert "1 warning" in stdout
+
+
+def test_explore_checklist_failing_and_warned_items_listed() -> None:
+    """Failing/warning items (id, label, evidence) from checklist.json's
+    summary must appear in the rendered explorer, not just the aggregate
+    score."""
+    d = _make_artifact_dir()
+    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    assert "UNIT_11" in stdout
+    assert "Churn modeled" in stdout
+    assert "Zero churn" in stdout
+    assert "CASH_23" in stdout
+    assert "Runway calc" in stdout
+
+
+def test_explore_checklist_absent_renders_without_crash() -> None:
+    """Missing checklist.json (optional artifact) -- explorer still renders,
+    exit 0, and the checklist summary box is simply omitted (no placeholder,
+    no crash)."""
+    d = _make_artifact_dir(overrides={"checklist.json": None})
+    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    assert stdout.startswith("<!DOCTYPE html>")
+    assert 'class="checklist-summary"' not in stdout
+
+
+def test_explore_checklist_summary_self_contained() -> None:
+    """Rendering the checklist summary must not introduce any new external
+    requests -- same allowlist as visualize.py's test_self_contained."""
+    d = _make_artifact_dir()
+    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    allowed = {
+        "https://github.com/lool-ventures/founder-skills",
+        "https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback",
+        "https://lool.vc",
+    }
+    src_matches = re.findall(r'(?:src|href)\s*=\s*"([^"]*)"', stdout)
+    for url in src_matches:
+        if url in allowed:
+            continue
+        assert not url.startswith("http://"), f"External HTTP URL in attribute: {url}"
+        assert not url.startswith("https://"), f"External HTTPS URL in attribute: {url}"
+
+
+def test_explore_every_embedded_data_key_is_read_by_the_script() -> None:
+    """Every top-level DATA key must be referenced at least once in the emitted script.
+
+    Measured: this explorer embedded `checklist` and its JavaScript never referenced
+    `DATA.checklist`, so the review score and its failing items were paid for in payload and
+    rendered nowhere. The sibling competitive-positioning explorer had the same defect across its
+    entire scored layer. An unread key is a founder-facing feature that silently does not exist.
+
+    Both explorers access their payload with dotted `DATA.key` only (verified — no bracket
+    notation, no destructuring), so a plain reference scan is sound; if that changes this test
+    fails loudly rather than passing silently, which is the correct direction.
+    """
+    d = _make_artifact_dir()
+    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
+    assert rc == 0
+    match = re.search(r"const\s+DATA\s*=\s*(\{.*?\});", stdout, re.DOTALL)
+    assert match, "could not locate the embedded DATA object in the generated explorer"
+    payload = json.loads(match.group(1))
+    assert len(payload) >= 5, f"DATA payload parsed as only {len(payload)} key(s) — the scan would be vacuous"
+    unread = sorted(k for k in payload if f"DATA.{k}" not in stdout)
+    assert not unread, (
+        f"explore.py embeds DATA key(s) its script never reads: {unread}. Either render them or stop embedding them."
+    )

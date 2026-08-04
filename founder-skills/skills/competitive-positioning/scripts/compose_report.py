@@ -42,6 +42,11 @@ WARNING_SEVERITY: dict[str, str] = {
     "CORRUPT_ARTIFACT": "high",
     "STALE_ARTIFACT": "high",
     "UNVALIDATED_ARTIFACT": "high",
+    # A checklist graded against a positioning map that has since moved. run_id parity cannot
+    # catch this (the run_id is unchanged by a re-score), so the fingerprint comparison is the
+    # only detector. High because POS_04's pass condition reads rank data directly, so a
+    # mismatch means a graded criterion describes a map that no longer exists.
+    "CHECKLIST_STALE_VS_POSITIONING": "high",
     # Medium — show in report
     "SHALLOW_COMPETITOR_PROFILE": "medium",
     "VANITY_AXIS_WARNING": "medium",
@@ -52,6 +57,13 @@ WARNING_SEVERITY: dict[str, str] = {
     "INCOMPLETE_SCORING": "medium",
     "RESEARCHED_WITHOUT_SOURCE": "medium",
     "NO_RECENT_DEVELOPMENTS": "medium",
+    # A dated competitor move that fell outside the recency window. Dropped from
+    # recent_developments and preserved under out_of_window_developments by
+    # validate_landscape.py — reported so the exclusion is visible, never silent.
+    "STALE_DEVELOPMENT": "medium",
+    # A scored view ended up with an empty axis rationale. Emitted by score_positioning.py so a
+    # blank rationale can never again pass the checklist's POS_05 unnoticed.
+    "RATIONALE_MISSING": "medium",
     # Low
     "FOUNDER_OVERRIDE_COUNT": "low",
     # v0.4.2 Mitigation 2 — informational only (uuid is per-run, won't collide)
@@ -83,6 +95,9 @@ WARNING_LABELS: dict[str, str] = {
     "INCOMPLETE_SCORING": "Incomplete Scoring",
     "RESEARCHED_WITHOUT_SOURCE": "Researched Without Source",
     "NO_RECENT_DEVELOPMENTS": "No Recent Developments",
+    "STALE_DEVELOPMENT": "Stale Development",
+    "RATIONALE_MISSING": "Rationale Missing",
+    "CHECKLIST_STALE_VS_POSITIONING": "Checklist Stale vs Positioning",
     "FOUNDER_OVERRIDE_COUNT": "Founder Override Count",
     "MARKER_COLLISION": "Marker Collision",
     "SEQUENTIAL_FALLBACK": "Sequential Fallback",
@@ -101,6 +116,11 @@ REQUIRED_ARTIFACTS = [
 # Optional artifacts — nice to have for richer report.
 OPTIONAL_ARTIFACTS = [
     "product_profile.json",
+    # The adversarial competitor-set verdicts. Optional because a run may legitimately skip the
+    # verification dispatch, but when present it MUST reach the deliverable: a competitor the
+    # verification judged `not_a_competitor` was previously scored, ranked and tabled
+    # indistinguishably from a genuine one, so the challenge survived only in chat.
+    "competitor_verification.json",
 ]
 
 # Map artifact filename to missing-warning code.
@@ -133,6 +153,33 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _competitor_names(landscape: dict[str, Any] | None) -> dict[str, str]:
+    """Map competitor slug -> display name from landscape.json.
+
+    Used so a rendered surface never shows a slug. Returns {} when the landscape is absent or
+    unusable — callers fall back to the slug, which is worse but never wrong.
+    """
+    out: dict[str, str] = {}
+    if not isinstance(landscape, dict):
+        return out
+    for comp in _as_list(landscape.get("competitors")):
+        comp = _as_dict(comp)
+        slug = comp.get("slug")
+        name = comp.get("name")
+        if isinstance(slug, str) and slug and isinstance(name, str) and name.strip():
+            out[slug] = name.strip()
+    return out
+
+
+def _display_name(slug: str, name_by_slug: dict[str, str] | None) -> str:
+    """Render a competitor's display name; fall back to the slug when unknown."""
+    if slug == "_startup":
+        return "This company"
+    if name_by_slug:
+        return name_by_slug.get(slug, slug)
+    return slug
+
+
 def _humanize(value: str) -> str:
     """Convert machine IDs to human-readable labels for report output."""
     _LABELS: dict[str, str] = {
@@ -155,6 +202,14 @@ def _humanize(value: str) -> str:
         "weak": "Weak",
         "absent": "Absent",
         "not_applicable": "N/A",
+        "holds": "Holds",
+        "partially_holds": "Partially holds",
+        "does_not_hold": "Does not hold",
+        "genuine": "Genuine competitor",
+        "not_a_competitor": "Not a competitor",
+        "keep": "Keep",
+        "reclassify_adjacent": "Reclassify as adjacent",
+        "challenge_removal": "Consider removing",
         "high": "High",
         "low": "Low",
         "network_effects": "Network Effects",
@@ -472,6 +527,31 @@ def validate_artifacts(
                     "UNVALIDATED_ARTIFACT",
                     f"Artifact '{name}' exists but was not produced by {expected}.py — "
                     f"run the script instead of writing the file directly",
+                )
+            )
+
+    # 0b. CHECKLIST_STALE_VS_POSITIONING — the checklist graded a map that has since moved.
+    # checklist.py copies the positioning_scores views_fingerprint it read into
+    # graded_against; a mismatch means positioning was re-scored without re-running the
+    # checklist. Absent on either side is SILENT — an artifact predating the field has a
+    # genuinely unknown provenance and must not be asserted to be either fresh or stale.
+    checklist_art = artifacts.get("checklist.json")
+    if _usable(positioning_scores) and _usable(checklist_art):
+        current_fp = positioning_scores.get("views_fingerprint")
+        graded_fp = _as_dict(checklist_art.get("graded_against")).get("views_fingerprint")
+        if (
+            isinstance(current_fp, str)
+            and current_fp
+            and isinstance(graded_fp, str)
+            and graded_fp
+            and current_fp != graded_fp
+        ):
+            warnings.append(
+                _warn(
+                    "CHECKLIST_STALE_VS_POSITIONING",
+                    "checklist.json was graded against a different positioning map than the "
+                    "current positioning_scores.json (fingerprint mismatch) — re-run "
+                    "checklist.py against the current scores before composing",
                 )
             )
 
@@ -934,6 +1014,89 @@ def _section_recent_developments(landscape: dict[str, Any] | None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _section_competitor_verification(
+    competitor_verification: dict[str, Any] | None,
+    name_by_slug: dict[str, str] | None = None,
+) -> str:
+    """Adversarial competitor-set verification: the per-competitor verdicts and the blind-recall gaps.
+
+    This section exists because the verdicts previously reached the founder only in chat. A
+    competitor the verification judged `not_a_competitor` was still scored on every axis, counted in
+    every moat denominator, and tabled indistinguishably from a genuine one — so the single most
+    valuable check in the run left no trace in the artifact the founder keeps. A founder who
+    overrode a flag should see that decision recorded, not silently normalised away.
+    """
+    if competitor_verification is None or _is_stub(competitor_verification):
+        return ""
+
+    verdicts = [_as_dict(v) for v in _as_list(competitor_verification.get("verdicts"))]
+    recall = _as_dict(competitor_verification.get("recall_gaps"))
+    if not verdicts and not recall:
+        return ""
+
+    lines = ["## Competitor Set Verification\n"]
+    lines.append(
+        "Each competitor below was independently re-researched by a separate pass that did not see "
+        "the drafted list, and judged on whether the same buyer would weigh both for the same job."
+    )
+    lines.append("")
+
+    if verdicts:
+        summary = _as_dict(competitor_verification.get("summary"))
+        genuine = summary.get("genuine")
+        flagged = summary.get("flagged")
+        if isinstance(genuine, int) and isinstance(flagged, int):
+            lines.append(f"**{genuine} confirmed as genuine competitors; {flagged} came up for a second look.**")
+            lines.append("")
+        lines.append("| Competitor | Verdict | Why |")
+        lines.append("|------------|---------|-----|")
+        for v in verdicts:
+            slug = str(v.get("slug", "?"))
+            verdict = _humanize(str(v.get("verdict", "?")))
+            reasoning = str(v.get("reasoning", "") or "").strip().replace("|", "\\|")
+            if len(reasoning) > 300:
+                reasoning = reasoning[:297].rstrip() + "..."
+            lines.append(f"| {_display_name(slug, name_by_slug)} | {verdict} | {reasoning or '—'} |")
+        lines.append("")
+        kept = [v for v in verdicts if str(v.get("verdict")) == "not_a_competitor"]
+        if kept:
+            names = ", ".join(_display_name(str(v.get("slug", "?")), name_by_slug) for v in kept)
+            lines.append(
+                f"**Retained despite the challenge:** {names}. This entry is scored and ranked "
+                f"alongside the rest, so read its position with the verdict above in mind."
+            )
+            lines.append("")
+
+    unmatched = [_as_dict(u) for u in _as_list(recall.get("unmatched"))]
+    if unmatched:
+        lines.append("### Companies an independent search surfaced\n")
+        lines.append(
+            "Found by a pass that never saw the drafted list. Not omissions — candidates worth a second thought."
+        )
+        lines.append("")
+        for u in unmatched:
+            label = str(u.get("name", u.get("slug", "?")))
+            why = str(u.get("why_considered", "") or "").strip()
+            if len(why) > 240:
+                why = why[:237].rstrip() + "..."
+            overlap = u.get("possible_overlap_with")
+            note = ""
+            if isinstance(overlap, str) and overlap:
+                note = f" (may already be covered by {_display_name(overlap, name_by_slug)})"
+            lines.append(f"- **{label}**{note} — {why}")
+        lines.append("")
+
+    dupes = [_as_dict(d) for d in _as_list(recall.get("probable_duplicates"))]
+    if dupes:
+        lines.append(
+            f"*{len(dupes)} further candidate(s) matched a competitor already in the set and were "
+            f"set aside as duplicates.*"
+        )
+        lines.append("")
+
+    return "\n".join(lines) + "\n"
+
+
 def _section_positioning(
     positioning_scores: dict[str, Any] | None,
     positioning: dict[str, Any] | None = None,
@@ -960,8 +1123,10 @@ def _section_positioning(
 
     for view in _as_list(positioning_scores.get("views")):
         view = _as_dict(view)
-        vid = str(view.get("view_id", "?")).title()
         vid_key = str(view.get("view_id", ""))
+        # Prefer an explicit human-readable label; fall back to title-casing the id. Real runs use
+        # descriptive slug ids, and title-casing a slug leaks it into a founder-facing heading.
+        vid = str(view.get("label") or "").strip() or str(view.get("view_id", "?")).title()
         lines.append(f"### {vid} View\n")
         lines.append(f"- **X-Axis:** {view.get('x_axis_name', '?')}")
         lines.append(f"  - Rationale: {view.get('x_axis_rationale', '?')}")
@@ -972,10 +1137,17 @@ def _section_positioning(
         vanity_y = "Yes — axis may not reveal meaningful differentiation" if view.get("y_axis_vanity_flag") else "No"
         lines.append(f"  - Vanity axis: {vanity_y}")
         lines.append(f"- **Differentiation Score:** {view.get('differentiation_score', '?')}%")
+        # `_compute_rank` counts competitors strictly ahead, +1 — so rank `competitor_count + 1`
+        # is reachable and means "behind every competitor". Rendering that against
+        # `competitor_count` produced the literal nonsense "Y=11 (of 10 competitors)". Report the
+        # denominator as the number of entities actually ranked, startup included, which is also
+        # the convention the moat section uses.
+        _ccount = view.get("competitor_count")
+        _ranked = f"{_ccount + 1}" if isinstance(_ccount, int) else "?"
         lines.append(
             f"- **Startup Rank:** X={view.get('startup_x_rank', '?')}, "
             f"Y={view.get('startup_y_rank', '?')} "
-            f"(of {view.get('competitor_count', '?')} competitors)"
+            f"(of {_ranked} ranked)"
         )
         lines.append("")
 
@@ -1002,8 +1174,15 @@ def _section_positioning(
     return "\n".join(lines) + "\n"
 
 
-def _section_moat_assessment(moat_scores: dict[str, Any] | None) -> str:
-    """Moat assessment section with evidence, leader context, and per-dimension matrix."""
+def _section_moat_assessment(
+    moat_scores: dict[str, Any] | None,
+    name_by_slug: dict[str, str] | None = None,
+) -> str:
+    """Moat assessment section with evidence, leader context, and per-dimension matrix.
+
+    `name_by_slug` maps competitor slug -> display name so rendered leader references show a name
+    rather than an internal slug; when omitted the slug is used.
+    """
     if moat_scores is None or _is_stub(moat_scores):
         return "## Moat Assessment\n\n*No moat scores available.*\n"
 
@@ -1066,8 +1245,10 @@ def _section_moat_assessment(moat_scores: dict[str, Any] | None) -> str:
                     leader_status = s
             leader_note = ""
             if leader_name and leader_status and rank_val != 1:
-                leader_note = f" — leader: {leader_name} ({_humanize(leader_status)})"
-            lines.append(f"- **{_humanize(dim)}:** Rank {rank_val} of {total_val}{leader_note}")
+                # Render the competitor's display name, never its slug — a slug in the
+                # deliverable is an internal token the founder has no use for.
+                leader_note = f" — leader: {_display_name(leader_name, name_by_slug)} ({_humanize(leader_status)})"
+            lines.append(f"- **{_humanize(dim)}:** Rank {rank_val} of {total_val} ranked{leader_note}")
         lines.append("")
 
     # Per-dimension comparison matrix (rows=companies, cols=6 canonical moat dimensions)
@@ -1125,7 +1306,7 @@ def _section_stress_test(positioning_scores: dict[str, Any] | None) -> str:
         verdict = c.get("verdict", "?")
         verifiable = "Yes" if c.get("verifiable") else "No"
         lines.append(f"### {claim}\n")
-        lines.append(f"- **Verdict:** {verdict}")
+        lines.append(f"- **Verdict:** {_humanize(str(verdict))}")
         lines.append(f"- **Verifiable:** {verifiable}")
         lines.append(f"- **Evidence:** {c.get('evidence', '?')}")
         lines.append(f"- **Investor Challenge:** {c.get('challenge', '?')}")
@@ -1376,18 +1557,21 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     moat_scores = _render_safe(artifacts.get("moat_scores.json"))
     positioning_scores = _render_safe(artifacts.get("positioning_scores.json"))
     checklist = _render_safe(artifacts.get("checklist.json"))
+    competitor_verification = _render_safe(artifacts.get("competitor_verification.json"))
 
     # Assemble report sections — render everything EXCEPT the Warnings section
     # first. The Warnings section must be spliced in only after the marker
     # prescan has had a chance to append MARKER_COLLISION, otherwise that
     # warning would never reach the rendered ## Warnings list.
+    name_by_slug = _competitor_names(landscape)
     sections = [
         _section_title(product_profile, landscape),
         _section_executive_summary(product_profile, positioning_scores, moat_scores, checklist),
         _section_competitor_landscape(landscape),
         _section_recent_developments(landscape),
+        _section_competitor_verification(competitor_verification, name_by_slug),
         _section_positioning(positioning_scores, positioning_safe),
-        _section_moat_assessment(moat_scores),
+        _section_moat_assessment(moat_scores, name_by_slug),
         _section_stress_test(positioning_scores),
         _section_key_findings(positioning_scores, moat_scores, checklist),
     ]

@@ -123,19 +123,41 @@ Keep the founder informed with brief, plain-language updates at each step. **Nar
 
 ### Step 0: Path Setup
 
-**Every Bash tool call runs in a fresh shell — variables do not persist.** Prefix every Bash call that uses these paths with the variable block below, or substitute absolute paths directly:
+**Every Bash tool call runs in a fresh shell — variables do not persist.** Run the block below exactly **once**: it resolves `$PLUGIN_ROOT` deterministically, and every later block must substitute the printed value as a literal rather than re-running the resolution — repeating the self-heal search can land on a different mount than Step 0 picked when more than one is present (see why in the block's comments).
+
+Optional, best-effort, and via the **Read tool** (not a shell command): before the block below, Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and note its `version` field as `EXPECT_VERSION`. Passing it to `select_plugin_root.py` below lets an exact version match win over an arbitrary first hit. If the Read fails, skip it and omit `--expect-version` — selection is still deterministic without it.
 
 ```bash
 SCRIPTS="${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/scripts"
-# In Cowork, CLAUDE_PLUGIN_ROOT substitutes to a host-side path that does not
-# exist inside the session VM — self-heal by locating the plugin mount:
 if [ ! -d "$SCRIPTS" ]; then
-  SCRIPTS="$(find /sessions -type d -path '*/skills/financial-model-review/scripts' 2>/dev/null | head -1)"
-fi
-if [ -z "$SCRIPTS" ] || [ ! -d "$SCRIPTS" ]; then
-  SCRIPTS="$(find / -type d -path '*/skills/financial-model-review/scripts' 2>/dev/null | head -1)"
+  # In Cowork, CLAUDE_PLUGIN_ROOT substitutes to a host-side path absent inside
+  # the session VM — self-heal by collecting EVERY candidate mount (a session can
+  # have more than one at once: a stale host-side cache, a test marketplace, even
+  # a symlink into a different session's tree) and handing them to
+  # select_plugin_root.py, which picks ONE deterministically and names the
+  # rejects — never trust `find`'s arbitrary first hit, which can silently mix
+  # scripts across plugin versions mid-pipeline.
+  CANDIDATES="$(find /sessions -type d -path '*/skills/financial-model-review/scripts' 2>/dev/null)"
+  [ -n "$CANDIDATES" ] || CANDIDATES="$(find / -type d -path '*/skills/financial-model-review/scripts' 2>/dev/null)"
+  PROVISIONAL_ROOT="$(printf '%s\n' "$CANDIDATES" | head -1)"
+  PROVISIONAL_ROOT="${PROVISIONAL_ROOT%/skills/*}"
+  # Bootstrap order: $SHARED_SCRIPTS isn't known until a root is chosen, so use the
+  # provisional root's OWN copy of the selector; an older plugin copy without one
+  # falls back to the provisional root unchanged.
+  SELECTOR="$PROVISIONAL_ROOT/scripts/select_plugin_root.py"
+  if [ -f "$SELECTOR" ]; then
+    if [ -n "$EXPECT_VERSION" ]; then
+      PLUGIN_ROOT="$(printf '%s\n' "$CANDIDATES" | python3 "$SELECTOR" --expect-version "$EXPECT_VERSION")"
+    else
+      PLUGIN_ROOT="$(printf '%s\n' "$CANDIDATES" | python3 "$SELECTOR")"
+    fi
+  else
+    PLUGIN_ROOT="$PROVISIONAL_ROOT"
+  fi
+  SCRIPTS="$PLUGIN_ROOT/skills/financial-model-review/scripts"
 fi
 PLUGIN_ROOT="${SCRIPTS%/skills/*}"
+echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; never re-run this resolution
 REFS="$PLUGIN_ROOT/skills/financial-model-review/references"
 SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
 SHARED_REFS="$PLUGIN_ROOT/references"
@@ -144,7 +166,7 @@ SHARED_REFS="$PLUGIN_ROOT/references"
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py"   # prints ARTIFACTS_ROOT — use the printed path verbatim as ARTIFACTS_ROOT in every later block (a captured var dies in the next fresh shell)
 ```
 
-The Step 0 block self-heals when `${CLAUDE_PLUGIN_ROOT}` doesn't resolve (Cowork). **In Cowork the `find` is normally THE path, not a last resort** — `${CLAUDE_PLUGIN_ROOT}` resolves to a HOST path that does not exist inside the VM, so a bash test against it fails by design rather than by misconfiguration. Expect to locate the anchor and derive the variables from it: `find / -path '*/skills/financial-model-review/scripts/checklist.py' 2>/dev/null | head -5`. Reaching this branch is normal; it is not a sign anything is wrong, and it is not worth narrating to the founder.
+Reaching the self-heal branch is normal in Cowork — `${CLAUDE_PLUGIN_ROOT}` resolves to a HOST path that does not exist inside the VM, so the `[ ! -d "$SCRIPTS" ]` test fails by design rather than by misconfiguration. It is not a sign anything is wrong, and it is not worth narrating to the founder.
 
 **Outputs mount is append-only.** Everything under the promoted outputs mount (`.../mnt/outputs/`, not just `$REVIEW_DIR`) is write-allowed and delete-denied by the platform: never `rm`, move away, or empty anything under it — **including files you created yourself**. Never create ad-hoc scratch anywhere under the outputs mount (no `_src/` copies, no run-state note files); scratch belongs in `$STAGING_DIR` (a `/tmp` dir, defined below). Do not "clean up" the outputs folder before delivering — extra working files there are expected and harmless. The uploaded document is already readable in place from the uploads mount; never copy it under outputs to make it readable.
 
@@ -657,14 +679,9 @@ multi-KB financial JSON risks silently corrupting numbers, and it saves no
 context since the JSON would land in the main thread anyway):
 
 ```bash
-# Fresh shell — re-derive SCRIPTS with the self-heal (in Cowork ${CLAUDE_PLUGIN_ROOT} is a host path
-# absent inside the session VM shell; without the self-heal this block clobbers a prefixed SCRIPTS with
-# the dead host path and both producers fail). Same shape as the coaching-block self-heal below.
-SCRIPTS="${CLAUDE_PLUGIN_ROOT}/skills/financial-model-review/scripts"
-if [ ! -d "$SCRIPTS" ]; then
-  SCRIPTS="$(find /sessions -type d -path '*/skills/financial-model-review/scripts' 2>/dev/null | head -1)"
-  [ -n "$SCRIPTS" ] || SCRIPTS="$(find / -type d -path '*/skills/financial-model-review/scripts' 2>/dev/null | head -1)"
-fi
+# Step 0 already resolved PLUGIN_ROOT once, deterministically — reuse its printed
+# value here rather than re-running the self-heal search in this fresh shell.
+SCRIPTS="<printed PLUGIN_ROOT>/skills/financial-model-review/scripts"
 cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/unit_economics.py" --pretty --run-id "$RUN_ID" -o "$REVIEW_DIR/unit_economics.json"
 cat "$REVIEW_DIR/inputs.json" | python3 "$SCRIPTS/runway.py" --pretty --run-id "$RUN_ID" -o "$REVIEW_DIR/runway.json"
 ```
@@ -815,14 +832,9 @@ Stop after returning the receipt JSON. Do not narrate.
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash
-# Re-derive the shared-scripts path (fresh shell — Step 0's vars don't survive here). Same self-heal
-# as Step 0: in Cowork ${CLAUDE_PLUGIN_ROOT} is a host path absent inside the session VM shell.
-SHARED_SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-if [ ! -d "$SHARED_SCRIPTS" ]; then
-  FMR_SCRIPTS="$(find /sessions -type d -path '*/skills/financial-model-review/scripts' 2>/dev/null | head -1)"
-  [ -n "$FMR_SCRIPTS" ] || FMR_SCRIPTS="$(find / -type d -path '*/skills/financial-model-review/scripts' 2>/dev/null | head -1)"
-  SHARED_SCRIPTS="${FMR_SCRIPTS%/skills/*}/scripts"
-fi
+# Step 0 already resolved PLUGIN_ROOT once, deterministically — reuse its printed
+# value here rather than re-running the self-heal search in this fresh shell.
+SHARED_SCRIPTS="<printed PLUGIN_ROOT>/scripts"
 printf '%s' '<agent final message verbatim>' | \
   python3 "$SHARED_SCRIPTS/check_handoff.py" "$HANDOFF_DIR/coaching.md" \
     --format=markdown --agent-path "$HANDOFF_AGENT/coaching.md" --receipt-json - \
@@ -833,12 +845,7 @@ printf '%s' '<agent final message verbatim>' | \
 
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 ```bash
-SHARED_SCRIPTS="${CLAUDE_PLUGIN_ROOT}/scripts"
-if [ ! -d "$SHARED_SCRIPTS" ]; then
-  FMR_SCRIPTS="$(find /sessions -type d -path '*/skills/financial-model-review/scripts' 2>/dev/null | head -1)"
-  [ -n "$FMR_SCRIPTS" ] || FMR_SCRIPTS="$(find / -type d -path '*/skills/financial-model-review/scripts' 2>/dev/null | head -1)"
-  SHARED_SCRIPTS="${FMR_SCRIPTS%/skills/*}/scripts"
-fi
+SHARED_SCRIPTS="<printed PLUGIN_ROOT>/scripts"
 python3 "$SHARED_SCRIPTS/md_to_commentary.py" "$HANDOFF_DIR/coaching.md" | \
   python3 "$SHARED_SCRIPTS/insert_coaching.py" \
     --report "$REVIEW_DIR/report.md" \

@@ -100,6 +100,14 @@ none. Do not stretch to fill this field. Note also what does NOT belong here: a
 present-tense fact ("they charge $99/seat") is enrichment, not a development; only
 a *change* with a date is.
 
+**`recent_developments[]` has an 18-month recency window.** `validate_landscape.py`
+rejects (moves to a separate retained list, not a run failure) any entry dated more
+than 18 months before the as-of date. A real, sourced, relevant event that falls
+outside that window still deserves to be reported — it just does not belong in
+`recent_developments[]`. Give it a legal home instead: fold it into that
+competitor's top-level `description` or `weaknesses` field, where no recency bound
+applies. Do not drop an older-but-relevant fact just because it missed the window.
+
 **Phase B — Gap detection:** Check for missing competitor categories. Add newly
 discovered competitors to `suggested_additions[]` with `merged: false`. Do NOT
 add to `competitors[]`. Note this runs after you have already read the drafted
@@ -225,7 +233,9 @@ Slugs kebab-case. Do NOT write any file other than OUTPUT_PATH.
 
 #### MOAT_SCORING subtype
 
-Read `positioning.json` and `landscape.json` from the ANALYSIS_DIR. Also read
+Read `positioning.json`, `landscape.json` and `product_profile.json` from the
+ANALYSIS_DIR — `product_profile.json` is the only source for what the startup itself
+does, and you are scoring `_startup` alongside the competitors. Also read
 `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/moat-definitions.md`.
 
 Score every slug (including `_startup`) across the 6 canonical moat dimensions:
@@ -296,10 +306,8 @@ Write to OUTPUT_PATH the JSON matching `score_positioning.py`'s input schema:
   "views": [
     {
       "id": "...",
-      "x_axis": {"name": "..."},
-      "y_axis": {"name": "..."},
-      "x_axis_rationale": "...",
-      "y_axis_rationale": "...",
+      "x_axis": {"name": "...", "rationale": "..."},
+      "y_axis": {"name": "...", "rationale": "..."},
       "points": [
         {
           "competitor": "...", "x": 50, "y": 75,
@@ -337,7 +345,14 @@ position) and `landscape_draft.json`'s `deck_competitors_excluded`
 (competitors the analysis intentionally left out of the deck's set, with
 reasons). Without these two fields `NARR_03` has nothing concrete to assess
 against — grade it `not_applicable` rather than guessing, and say so in the
-evidence.
+evidence. When `deck_competition_slide.present` is `false` (the deck had no
+competition slide at all), that IS a concrete answer — but it is **`warn`, never
+`not_applicable`**: use the recorded `reason` as your evidence and say plainly
+that the deck names no competitor. `not_applicable` would drop the item out of
+the score denominator, inflating the score while hiding the finding — and a deck
+that never engages competition is itself one of the strongest findings a
+competitive review can return. See `references/checklist-criteria.md`'s NARR_03
+bands, which are the authority here.
 
 Assess all 25 checklist items: COVER_01..05, POS_01..05, MOAT_01..04,
 EVID_01..04, NARR_01..04, MISS_01..03. Mode-based gating applies: when
@@ -505,6 +520,12 @@ moat_scores.json / positioning_scores.json / checklist.json) deterministically.
   and zero markers after insert.
 - Do NOT inline report content in your final assistant message.
 - No WebSearch in this context — commentary is payload-grounded only.
+- Do NOT surface an internal label in the commentary text itself, backticked
+  or not: no checklist criterion ID (`NARR_03`), no internal field name
+  (`moat_count`), no other token that only means something to someone who has
+  seen this skill's internals. Say what the finding actually IS, in plain
+  language — the same founder-visible-narration rule SKILL.md states for chat
+  progress lines and the task tracker governs this commentary too.
 
 The required action for this dispatch is:
 `compose_commentary_from_payload`. The forbidden actions are:

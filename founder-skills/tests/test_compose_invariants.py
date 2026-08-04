@@ -148,3 +148,199 @@ def test_compose_enforces_run_id_parity(tmp_path: Path, skill: str) -> None:
     assert "STALE_ARTIFACT" in codes, (
         f"{skill} compose did not surface STALE_ARTIFACT for mismatched run_id; got warning codes: {codes}"
     )
+
+
+# ---------------------------------------------------------------------------
+# competitive-positioning: rendering contracts added in the 2026-08 remediation
+#
+# Every test below guards a defect that shipped to a real founder in a live run:
+# a rank of "11 of 10 competitors", raw enum tokens, a competitor slug, the
+# adversarial verdicts never reaching the deliverable at all, and a checklist
+# graded against a positioning map that had since moved.
+# ---------------------------------------------------------------------------
+
+CP_FIXTURES = REPO_ROOT / "founder-skills" / "tests" / "fixtures" / "competitive-positioning"
+
+
+def _cp_compose(tmp_path: Path, mutate: object = None) -> str:
+    """Stage the competitive-positioning fixtures, optionally mutate them, compose, return report.md.
+
+    `mutate` is called with the staged work dir before compose runs.
+    """
+    if not CP_FIXTURES.exists():
+        pytest.skip("No competitive-positioning fixtures")
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    stage = tmp_path / "stage"
+    shutil.copytree(CP_FIXTURES, stage)
+    if callable(mutate):
+        mutate(stage)
+    drive_compose("competitive-positioning", stage, work_dir)
+    return (work_dir / "report.md").read_text(encoding="utf-8")
+
+
+def _read(d: Path, name: str) -> dict:
+    return json.loads((d / name).read_text(encoding="utf-8"))
+
+
+def _write(d: Path, name: str, obj: dict) -> None:
+    (d / name).write_text(json.dumps(obj, indent=2), encoding="utf-8")
+
+
+def test_cp_rank_denominator_counts_ranked_entities_not_competitors(tmp_path: Path) -> None:
+    """`_compute_rank` returns competitor_count+1 when the startup is behind all competitors, so
+    rendering that against competitor_count produced the literal nonsense "Y=11 (of 10
+    competitors)" in a delivered report. The denominator must be the number of entities ranked."""
+
+    def mutate(d: Path) -> None:
+        ps = _read(d, "positioning_scores.json")
+        # startup behind every competitor on Y: rank == competitor_count + 1
+        ps["views"][0]["startup_y_rank"] = ps["views"][0]["competitor_count"] + 1
+        _write(d, "positioning_scores.json", ps)
+
+    md = _cp_compose(tmp_path, mutate)
+    assert "(of 6 ranked)" in md, f"expected 'of 6 ranked' (competitor_count 5 + startup); got:\n{md[:2000]}"
+    assert "competitors)" not in md.split("## Moat")[0], "positioning section still renders 'of N competitors'"
+
+
+def test_cp_moat_rank_wording_matches_positioning_convention(tmp_path: Path) -> None:
+    """The moat section's denominator already includes the startup. One report must not carry two
+    meanings of 'of N' — the wording is unified on 'ranked'."""
+    md = _cp_compose(tmp_path)
+    if "Startup Ranking by Moat Dimension" in md:
+        moat_block = md.split("Startup Ranking by Moat Dimension")[1]
+        assert "ranked" in moat_block, "moat rank lines no longer say 'ranked'"
+
+
+def test_cp_claim_verdicts_are_humanized(tmp_path: Path) -> None:
+    """Raw underscored enum tokens (`partially_holds`) reached a founder's report 8 times."""
+    md = _cp_compose(tmp_path)
+    assert "**Verdict:** partially_holds" not in md
+    assert "**Verdict:** does_not_hold" not in md
+    assert "Partially holds" in md or "Does not hold" in md
+
+
+def test_cp_moat_leader_renders_name_not_slug(tmp_path: Path) -> None:
+    """`— leader: trane-calmac` shipped a slug to the founder; render the display name."""
+    md = _cp_compose(tmp_path)
+    if "— leader:" in md:
+        for line in md.splitlines():
+            if "— leader:" in line:
+                leader = line.split("— leader:")[1].split("(")[0].strip()
+                assert "-" not in leader or " " in leader, f"leader looks like a slug: {leader!r}"
+
+
+def test_cp_view_label_preferred_over_title_cased_id(tmp_path: Path) -> None:
+    """Descriptive slug ids get title-cased into headings like
+    '### Firmness-X-Integration-Burden View'. An explicit label wins when present."""
+
+    def mutate(d: Path) -> None:
+        ps = _read(d, "positioning_scores.json")
+        ps["views"][0]["label"] = "Capacity firmness vs integration burden"
+        _write(d, "positioning_scores.json", ps)
+
+    md = _cp_compose(tmp_path, mutate)
+    assert "### Capacity firmness vs integration burden View" in md
+
+
+def test_cp_verification_verdicts_reach_the_report(tmp_path: Path) -> None:
+    """The adversarial competitor-set verdicts previously reached the founder only in chat: a
+    competitor judged `not_a_competitor` was scored, ranked and tabled indistinguishably from a
+    genuine one, and the verdict appeared nowhere in the artifact."""
+
+    def mutate(d: Path) -> None:
+        ls = _read(d, "landscape.json")
+        first = ls["competitors"][0]["slug"]
+        _write(
+            d,
+            "competitor_verification.json",
+            {
+                "startup_characterization": {"buyer": "b", "job_to_be_done": "j"},
+                "verdicts": [
+                    {
+                        "slug": first,
+                        "verdict": "not_a_competitor",
+                        "reasoning": "Sells to a different buyer for a different job entirely.",
+                    }
+                ],
+                "summary": {"total": 1, "genuine": 0, "flagged": 1},
+                "recall_gaps": {
+                    "unmatched": [
+                        {"slug": "acme-tanks", "name": "Acme Tanks", "why_considered": "commodity substitute"}
+                    ],
+                    "probable_duplicates": [],
+                },
+                "_produced_by": "verify_competitors.py",
+                "metadata": _read(d, "landscape.json")["metadata"],
+            },
+        )
+
+    md = _cp_compose(tmp_path, mutate)
+    assert "## Competitor Set Verification" in md
+    assert "Not a competitor" in md, "the verdict enum was not rendered (or not humanized)"
+    assert "Retained despite the challenge" in md, "a kept not_a_competitor entry must be flagged"
+    assert "Acme Tanks" in md, "blind-recall gaps did not reach the report"
+
+
+def test_cp_verification_section_absent_when_artifact_absent(tmp_path: Path) -> None:
+    """The artifact is optional — a run that skipped verification must not gain an empty section."""
+    md = _cp_compose(tmp_path)
+    assert "## Competitor Set Verification" not in md
+
+
+def test_cp_checklist_stale_vs_positioning_fires_on_fingerprint_mismatch(tmp_path: Path) -> None:
+    """A re-score without re-running the checklist is invisible to run_id parity (the run_id does
+    not change), so the fingerprint comparison is the only detector. POS_04 reads rank data
+    directly, so a mismatch means a graded criterion describes a map that no longer exists."""
+
+    def mutate(d: Path) -> None:
+        ps = _read(d, "positioning_scores.json")
+        ps["views_fingerprint"] = "a" * 64
+        _write(d, "positioning_scores.json", ps)
+        cl = _read(d, "checklist.json")
+        cl["graded_against"] = {"views_fingerprint": "b" * 64}
+        _write(d, "checklist.json", cl)
+
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    stage = tmp_path / "stage"
+    shutil.copytree(CP_FIXTURES, stage)
+    mutate(stage)
+    result = run_compose_capturing("competitive-positioning", stage, work_dir)
+    assert "CHECKLIST_STALE_VS_POSITIONING" in result.stdout + result.stderr
+
+
+def test_cp_checklist_stale_silent_when_fingerprints_match(tmp_path: Path) -> None:
+    def mutate(d: Path) -> None:
+        ps = _read(d, "positioning_scores.json")
+        ps["views_fingerprint"] = "c" * 64
+        _write(d, "positioning_scores.json", ps)
+        cl = _read(d, "checklist.json")
+        cl["graded_against"] = {"views_fingerprint": "c" * 64}
+        _write(d, "checklist.json", cl)
+
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    stage = tmp_path / "stage"
+    shutil.copytree(CP_FIXTURES, stage)
+    mutate(stage)
+    result = run_compose_capturing("competitive-positioning", stage, work_dir)
+    assert "CHECKLIST_STALE_VS_POSITIONING" not in result.stdout + result.stderr
+
+
+def test_cp_checklist_stale_silent_when_either_side_absent(tmp_path: Path) -> None:
+    """Absent is silent, never inferred — an artifact predating the field has unknown provenance."""
+
+    def mutate(d: Path) -> None:
+        ps = _read(d, "positioning_scores.json")
+        ps["views_fingerprint"] = "d" * 64
+        _write(d, "positioning_scores.json", ps)
+        # checklist.json deliberately carries no graded_against
+
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    stage = tmp_path / "stage"
+    shutil.copytree(CP_FIXTURES, stage)
+    mutate(stage)
+    result = run_compose_capturing("competitive-positioning", stage, work_dir)
+    assert "CHECKLIST_STALE_VS_POSITIONING" not in result.stdout + result.stderr

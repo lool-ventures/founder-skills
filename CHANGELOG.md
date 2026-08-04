@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **competitive-positioning:** positioning-map axis rationales were blank in `report.md` and absent
+  from the visual report and explorer; the checklist could grade POS_05 as a pass on unrendered text.
+- **competitive-positioning:** the explorer embedded differentiation scores, per-axis ranks,
+  vanity-axis flags and claim verdicts, and rendered none of them.
+- **competitive-positioning:** adversarial competitor-set verdicts did not reach the report — a
+  competitor judged not-a-competitor was scored, ranked and tabled like a genuine one.
+- **competitive-positioning:** startup rank could print as "11 of 10 competitors". Ranks now read
+  "N of M ranked", with the same wording in the moat section.
+- **competitive-positioning:** differentiation verdicts and moat statuses printed as raw enum tokens;
+  competitors were named by internal slug.
+- **competitive-positioning:** a deck with no competition slide had nothing to grade. It is now
+  recorded explicitly, graded `warn`, and kept in the score.
+- **competitive-positioning:** a competitor development older than the 18-month window failed the
+  whole landscape step. Out-of-window moves are retained and reported instead; the checks against
+  invented events are unchanged and still stop the run.
+- **competitive-positioning:** the blind-recall duplicate check compared slugs literally, so a
+  competitor already in the set could reappear as a gap and a company named inside a cohort entry
+  read as missing.
+- **competitive-positioning:** recall candidates declined at the first gate were dropped instead of
+  re-offered at the later gate.
+- **competitive-positioning:** re-scoring the map without re-running the checklist left the review
+  describing a map that no longer existed. The checklist records which map it graded and compose
+  flags a mismatch.
+- **financial-model-review:** the explorer embedded the review checklist score but did not render it.
+
+### Changed
+
+- All six skills resolve their plugin root once per run via `select_plugin_root.py`, deterministically,
+  instead of re-running a filesystem search in each shell. Duplicate installations are named on stderr.
+
 ## [0.6.0] - 2026-08-02 — Fits more companies, reports more honestly
 
 

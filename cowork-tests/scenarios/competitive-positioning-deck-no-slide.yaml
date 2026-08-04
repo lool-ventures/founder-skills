@@ -1,0 +1,110 @@
+name: competitive-positioning-deck-no-slide
+session: ../sessions/deck-no-slide.yaml
+fidelity: cowork
+skills: [competitive-positioning]
+
+# Live verification lane for the 2026-08 remediation. Four of its fixes are PROSE in SKILL.md or the
+# agent body — the class this repo has shipped inert before — so a green unit suite is not evidence
+# they changed agent behaviour. This lane is the run that makes them evidence.
+#
+# It is deliberately DECK mode with a deck that names no competitor, which is the input shape the
+# remediation found unhandled. The uploaded fixture is a 6-slide synthetic seed deck (fictional
+# "Acmecorp") whose deliberate weaknesses include having no competition slide at all — so
+# `deck_competition_slide.present: false` is reachable here and nowhere else in the fleet.
+#
+# What each assert below is evidence FOR (stated, because an assert whose purpose is not written down
+# is an assert nobody maintains):
+#
+#   * `deck_competition_slide.present == false` — the Step 2 prose fix landed AND the model followed
+#     it. Before the fix a run invented an unschema'd note field instead; the value being literally
+#     `false` (not merely present) is what distinguishes the two.
+#   * `checklist.json.graded_against.views_fingerprint` — the ARMING edit on the canonical Step-6
+#     checklist pipe fires in a real run. This is the one that mattered: the staleness detector was
+#     wired end-to-end but the pipe never passed `--positioning-scores`, so it could never fire.
+#     Unit tests cover the flag; only a run covers the pipe.
+#   * `positioning_scores.views_fingerprint` — its producer half.
+#   * `landscape.deferred_recall_candidates.0.slug` — the declined-then-retained chain, which crosses
+#     four hops (gate → draft file → sub-agent passthrough → producer allowlist). Any hop dropping it
+#     is invisible to unit tests, which exercise the hops separately.
+#   * `recall_gaps.probable_duplicates` — the demotion pass's output shape reaches the artifact.
+#
+# NOT asserted here, deliberately, and verified post-hoc instead: axis-rationale non-emptiness. The
+# `artifact_json` operator set is equals/gt/in/exists/absent/is_null — and `exists` is VACUOUS for
+# this defect, because the pre-fix value was the empty string, which exists. Asserting it would be a
+# check that cannot fail on the bug it names. Read the run's own `positioning_scores.json` instead
+# (`cowork-harness inspect <run-dir>`), together with report.md's rationale lines.
+#
+# Also verified post-hoc rather than asserted: the report's rank wording, the absence of raw enum
+# tokens, the verification section, and that the plugin root was resolved exactly ONCE (count the
+# `find`/selector calls in `trace --view tools`). None of those has a non-vacuous assertion key.
+
+prompt: |
+  I've attached our seed deck. Use the competitive-positioning skill to map our competitive
+  landscape and moats from it, then produce the positioning report and the explorer.
+
+answers:
+  # THREE rules, ordered — the decider takes the FIRST match (`Array.find`, dist/decide/decider.js),
+  # so the catch-all must stay last.
+  #
+  # Why not one label-anchored rule like the no-change lane uses: this lane needs two gates answered
+  # DIFFERENTLY, and both of them offer a `No changes — …` option. A label-only anchor cannot
+  # distinguish "decline the recall candidates" from "skip the research additions", so the two
+  # load-bearing gates are anchored on question text and only the remainder falls to a label anchor.
+  #
+  # The two question anchors are literal template text in SKILL.md's gate specs, not model prose —
+  # `does this set look right?` and `include any?` — which is what makes them safe to anchor on. If a
+  # gate ever stops offering the anchored option the run fails LOUD (a matched rule whose `choose:`
+  # names no offered option is an authoring error, never absorbed), which is the tripwire we want.
+  - when_question: "does this set look right"
+    choose: "No changes"
+  - when_question: "include any"
+    choose: "Include"
+  - when_question: "."
+    choose: "No changes"
+
+assert:
+  - result: success
+  - all_tasks_completed: true
+  - file_exists: outputs/artifacts/competitive-positioning-acmecorp/report.json
+
+  # Gates must actually have fired, or the decline-then-accept sequence is vacuous.
+  - gate_answer_count_min: 2
+  - gate_answers_delivered: true
+
+  # --- the remediation's own evidence ---
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-acmecorp/product_profile.json
+      path: deck_competition_slide.present
+      equals: false
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-acmecorp/positioning_scores.json
+      path: views_fingerprint
+      exists: true
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-acmecorp/checklist.json
+      path: graded_against.views_fingerprint
+      exists: true
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-acmecorp/landscape.json
+      path: deferred_recall_candidates.0.slug
+      exists: true
+  - artifact_json:
+      artifact: outputs/artifacts/competitive-positioning-acmecorp/competitor_verification.json
+      path: recall_gaps.probable_duplicates
+      exists: true
+
+  # --- fleet contract asserts (same set the sibling cp lanes carry) ---
+  - subagent_dispatched: 'competitive-positioning'
+  - skill_triggered: '(founder-skills:)?competitive-positioning$'
+  - computer_links_resolve: true
+  - no_delete_in_outputs: true
+  - subagent_tool_absent: 'Bash'
+  - questions_count_max: 8
+  - dispatch_count_max: 12
+  - max_turns: 170
+  - tool_calls_max: 160
+  - input_unmodified: 'uploads/**'
+  - no_unexpected_files:
+      - 'outputs/artifacts/competitive-positioning-acmecorp/**'
+      - 'outputs/artifacts/founder-context-acmecorp.json'
+      - 'outputs/Acmecorp_*'

@@ -492,13 +492,19 @@ def _chart_positioning_map(
     point_styles: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     """Render a 2D SVG scatter plot for one positioning view."""
+    scripts_dir = os.path.dirname(os.path.abspath(__file__))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import _axis_compat
+
     view_id = str(view.get("id", "primary"))
+    view_label = view.get("label")
     x_axis = _as_dict(view.get("x_axis"))
     y_axis = _as_dict(view.get("y_axis"))
     x_name = str(x_axis.get("name", "X"))
     y_name = str(y_axis.get("name", "Y"))
-    x_rationale = str(x_axis.get("rationale", ""))
-    y_rationale = str(y_axis.get("rationale", ""))
+    x_rationale = _axis_compat.axis_rationale(view, "x")
+    y_rationale = _axis_compat.axis_rationale(view, "y")
     points = _as_list(view.get("points"))
 
     # Check vanity flags from scores
@@ -627,7 +633,8 @@ def _chart_positioning_map(
 
     svg.append("</svg>")
 
-    title = f"Positioning Map: {_esc(view_id.title())}"
+    display_title = view_label.strip() if isinstance(view_label, str) and view_label.strip() else view_id.title()
+    title = f"Positioning Map: {_esc(display_title)}"
     vanity_note = ""
     if x_vanity or y_vanity:
         flagged = []

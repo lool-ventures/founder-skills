@@ -298,7 +298,55 @@ def parse_args() -> argparse.Namespace:
         help="Run identifier stamped into result.metadata.run_id. Overrides any "
         "'metadata' in the stdin JSON (the sub-agent returns items only).",
     )
+    p.add_argument(
+        "--positioning-scores",
+        help="Path to positioning_scores.json. When given, its top-level "
+        "'views_fingerprint' is copied verbatim into this checklist's output as "
+        "graded_against.views_fingerprint — a record of which scored map this "
+        "checklist run graded. Never recomputed here (score_positioning.py owns "
+        "the one implementation). Absent flag: graded_against is omitted "
+        "entirely. Missing/unparseable file or missing key: graded_against is "
+        "omitted and a note is printed to stderr — this is an optional "
+        "provenance read and must never block the checklist, which is "
+        "deliverable-critical.",
+    )
     return p.parse_args()
+
+
+def _read_views_fingerprint(path: str) -> str | None:
+    """Read 'views_fingerprint' verbatim from a positioning_scores.json file.
+
+    Returns None (never raises) on any failure — missing file, unreadable
+    file, invalid JSON, non-dict content, or a missing/non-string key. Prints
+    a stderr note describing the failure so the omission is visible without
+    blocking the (deliverable-critical) checklist run.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except OSError as e:
+        print(f"Note: --positioning-scores file could not be read ({e}); omitting graded_against", file=sys.stderr)
+        return None
+    except json.JSONDecodeError as e:
+        print(f"Note: --positioning-scores file is not valid JSON ({e}); omitting graded_against", file=sys.stderr)
+        return None
+
+    if not isinstance(data, dict):
+        print(
+            "Note: --positioning-scores file is not a JSON object; omitting graded_against",
+            file=sys.stderr,
+        )
+        return None
+
+    fingerprint = data.get("views_fingerprint")
+    if not isinstance(fingerprint, str) or not fingerprint:
+        print(
+            "Note: --positioning-scores file has no 'views_fingerprint' string; omitting graded_against",
+            file=sys.stderr,
+        )
+        return None
+
+    return fingerprint
 
 
 def main() -> None:
@@ -349,6 +397,16 @@ def main() -> None:
     result["_produced_by"] = "checklist"
     result["metadata"] = metadata
     result["input_mode"] = input_mode
+
+    # graded_against: optional provenance recording which scored positioning
+    # map this checklist run graded against. Absent flag -> absent field
+    # (never inferred). A missing/unparseable file or missing key also omits
+    # the field (with a stderr note) rather than blocking this deliverable-
+    # critical producer.
+    if args.positioning_scores:
+        fingerprint = _read_views_fingerprint(args.positioning_scores)
+        if fingerprint is not None:
+            result["graded_against"] = {"views_fingerprint": fingerprint}
 
     if result["fail_count"] == 0 and result["warn_count"] == 0:
         print("Note: all items passed — verify assessments are evidence-based, not defaulting to pass", file=sys.stderr)

@@ -43,6 +43,14 @@ SCENARIOS_DIR = Path(__file__).resolve().parents[2] / "cowork-tests" / "scenario
 # quietly matching nothing (a directory glob finding zero new scenarios is not evidence
 # anything is fine — see leak_scan.py's own docstring on that exact failure mode).
 _NO_CASSETTE_ALLOWLIST: dict[str, str] = {
+    "competitive-positioning-deck-no-slide": (
+        "deliberately un-cassetted: this is the LIVE verification lane for the 2026-08 remediation, "
+        "whose whole purpose is to exercise prose fixes against a real agent. A cassette freezes the "
+        "scenario AND the agent's recorded behaviour, so replaying one would re-assert a past run "
+        "rather than test the current skill — exactly the property this lane exists to avoid. Record "
+        "it only if it is ever wanted as a regression gate, and note that recording it costs a paid "
+        "run and pins the behaviour it currently measures."
+    ),
     "competitive-positioning-recall-adoption": (
         "not yet recorded (paid; pending the next rerecord.sh batch — see "
         "cowork-tests/rerecord.sh's cumulative cost pre-flight comment for the current count)"

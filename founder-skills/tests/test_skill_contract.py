@@ -404,6 +404,27 @@ LEGACY_REFERENCES_CAP = 8 * 1024  # historical; references now ship whole
 # `Options:` line, so `_labelled_line_specs` never saw it. Verified by running the parser BEFORE
 # claiming "declared" in any report. Restructured all five into a real `Options:` line (a few extra
 # bytes, one line break) so the gate is actually machine-checkable, not merely worded like it is.
+# 2026-08 remediation — all six raised. One fleet-wide edit plus per-skill ones, each a fix for a
+# defect that could reach a founder or silently corrupt a run:
+#
+# FLEET-WIDE — the plugin root is now resolved ONCE and reused. Measured, a single session mounted
+# two DIFFERENT versions of this plugin at the same time (different SKILL.md, different producer
+# scripts), plus host-side cache copies, one symlinking into another session's tree. Every skill's
+# Step 0 self-healed with `find ... | head -1`, and each re-ran that find in two-to-three LATER
+# blocks in separate shells — so one run could silently mix producer scripts across plugin versions
+# with no error anywhere. Those later blocks are deleted (which SHRINKS the files) and replaced by
+# the printed value; Step 0 now pipes candidates into select_plugin_root.py, which is deterministic
+# and names every rejected mount on stderr. The net growth is the explanation of WHY, which is the
+# part a model needs in order not to "helpfully" re-resolve the root later.
+#
+# competitive-positioning also carries: the axis-rationale nesting fix (its template instructed a
+# shape the producer does not read, so every compliant run shipped blank rationales while the
+# checklist graded POS_05 pass on text no founder could see); the 18-month recency bound, previously
+# documented nowhere the sub-agent reads and fatal to the whole payload; --positioning-scores on the
+# canonical checklist pipe (without it the staleness detector can never fire); NARR_03 guidance for
+# a deck naming no competitor; deferred recall candidates; cohort constituents; and a per-view
+# Gate-3 trade-off trigger. It also LOST the invented "Differentiation strength" band scale, which
+# described a field existing in no script or artifact.
 SKILL_MD_CEILING: dict[str, int] = {
     # market-sizing raised to pin subagent_type on both fenced Task( calls: the prose above them already
     # instructed it, and the pseudocode four lines below omitted it on both — a type-less dispatch resolves
@@ -427,9 +448,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # market-sizing: + the BOTTOM_UP dispatch's missing CURRENCY block. TOP_DOWN had one and BOTTOM_UP
     # did not, so a sub-agent could convert an ILS arpu to USD and the TAM would still be LABELLED ILS
     # — nothing in the pipeline performs FX, so nothing catches it.
-    "market-sizing": 82_090,
-    "financial-model-review": 77_276,
-    "ic-sim": 86_454,
+    "market-sizing": 83_010,
+    "financial-model-review": 77_753,
+    "ic-sim": 87_397,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -437,11 +458,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # mid-engagement. Added its own fact-plus-remedy sentence instead: re-deriving the pure path vars is
     # safe, but RUN_ID is re-established from setup_run.py's printed run_id, never from re-running the
     # mint line.
-    "deck-review": 67_685,
+    "deck-review": 68_562,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
-    "competitive-positioning": 101_887,
+    "competitive-positioning": 111_841,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -460,7 +481,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # not. (2) The note told the model to paste RUN_ID's printed literal, but Step 0 never echoed
     # RUN_ID (only ARTIFACTS_ROOT and HANDOFF_AGENT were printed) — added an echo so the remedy is
     # satisfiable.
-    "cap-table": 142_633,
+    "cap-table": 143_744,
 }
 
 
@@ -486,10 +507,19 @@ SKILL_MD_CEILING: dict[str, int] = {
 
 FRESH_SHELL_FACT_SENTENCE = "Every Bash tool call runs in a fresh shell — variables do not persist."
 
+# Updated 2026-08 remediation: the banner previously said "Prefix every Bash call that uses these
+# paths with the variable block below, or substitute absolute paths directly" — which licensed
+# re-running the block, and the block contains the plugin-root `find` self-heal. Measured, one
+# session mounted two DIFFERENT plugin versions at once, so a per-call re-resolution can land on a
+# different mount than Step 0 picked and silently mix producer scripts mid-pipeline. The banner now
+# makes resolve-once-then-substitute-the-printed-value the instruction. Still byte-identical across
+# all four skills — edit one and re-copy.
 FRESH_SHELL_BANNER = (
     "**Every Bash tool call runs in a fresh shell — variables do not persist.** "
-    "Prefix every Bash call that uses these paths with the variable block below, "
-    "or substitute absolute paths directly:"
+    "Run the block below exactly **once**: it resolves `$PLUGIN_ROOT` deterministically, and every "
+    "later block must substitute the printed value as a literal rather than re-running the "
+    "resolution — repeating the self-heal search can land on a different mount than Step 0 picked "
+    "when more than one is present (see why in the block's comments)."
 )
 
 FRESH_SHELL_BANNER_SKILLS = frozenset({"market-sizing", "ic-sim", "competitive-positioning", "financial-model-review"})
@@ -593,12 +623,19 @@ def test_cap_table_echoes_run_id_so_the_paste_remedy_is_satisfiable() -> None:
 # a live run scored four dealbreakers against three the debate raised and the report narrated all
 # four as "independent fatal flaws". The row has to carry the absent-vs-empty distinction, since
 # reading a missing channel as "none debated" is the specific way this check goes quietly wrong.
+# competitive-positioning raised 127,661 -> 136,835 for the 2026-08 remediation. Every added row
+# documents a field or warning code a producer now emits, or corrects a documented shape that a live
+# run proved wrong: the axis-rationale nesting rule (a compliant run emitted blank rationales while
+# the checklist graded POS_05 pass on text no founder could see), the rank convention (a delivered
+# report read "Y=11 (of 10 competitors)"), the recency window's downgrade from fatal to
+# drop-with-warning, and NARR_03's missing band for a deck that names no competitor. Schema drift
+# that ships to a founder is the expensive kind; these rows are the cheap kind.
 REFERENCES_CEILING: dict[str, int] = {
     "market-sizing": 40_174,
     "financial-model-review": 71_535,
     "ic-sim": 54_359,
     "deck-review": 49_039,
-    "competitive-positioning": 127_661,
+    "competitive-positioning": 136_835,
     "cap-table": 45_241,
 }
 
@@ -1560,3 +1597,63 @@ def test_skill_without_a_checklist_never_points_at_one(skill: str) -> None:
             f"{skill}/SKILL.md names a bare `checklist.json`. This skill produces none — "
             f"reference another skill's explicitly (e.g. `deck-review:checklist.json`)."
         )
+
+
+# ---------------------------------------------------------------------------
+# Plugin-root resolution: exactly ONE site per skill
+#
+# Measured in a live Cowork session: TWO different versions of this plugin were
+# mounted at once (different SKILL.md, different producer scripts), plus
+# host-side cache copies — one of them a symlink into a DIFFERENT session's
+# plugin tree. Every skill's Step 0 self-healed with `find … | head -1`, and
+# each skill re-ran that find in two-to-three LATER blocks, in separate shells.
+# So one run could silently mix producer scripts across plugin versions with no
+# error anywhere. The remedy is structural: resolve once, echo the value, and
+# substitute the printed literal thereafter.
+#
+# This test is the ratchet on that. It counts `find … -path '*/skills/…/scripts'`
+# occurrences and requires them all to sit in ONE resolution site. Two commands
+# per site is expected and correct — the `/sessions` fast path and the `/`
+# fallback are two branches of a single resolution, not two sites.
+# ---------------------------------------------------------------------------
+
+_FIND_SCRIPTS_RE = re.compile(r"find\s+/\S*\s+-type\s+d\s+-path\s+'\*/skills/[^']+/scripts'")
+
+# Two = the /sessions fast path plus the / fallback, both inside Step 0.
+PLUGIN_ROOT_FIND_COMMANDS_PER_SKILL = 2
+
+
+@pytest.mark.parametrize("skill", sorted(SKILL_MD_CEILING))
+def test_plugin_root_resolved_in_exactly_one_site(skill: str) -> None:
+    text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
+    matches = list(_FIND_SCRIPTS_RE.finditer(text))
+    assert len(matches) == PLUGIN_ROOT_FIND_COMMANDS_PER_SKILL, (
+        f"{skill}/SKILL.md has {len(matches)} plugin-root `find` command(s), expected "
+        f"{PLUGIN_ROOT_FIND_COMMANDS_PER_SKILL} (the /sessions fast path and the / fallback, both in "
+        "Step 0). A find outside Step 0 re-resolves the plugin root in a fresh shell and can land on "
+        "a different mount than Step 0 chose — measured, a single session had two plugin versions "
+        "mounted at once. Resolve once, echo it, substitute the printed literal."
+    )
+    # All occurrences must be in one contiguous region: no later re-resolution.
+    if len(matches) > 1:
+        span = matches[-1].end() - matches[0].start()
+        assert span < 2000, (
+            f"{skill}/SKILL.md's plugin-root find commands are {span:,} chars apart — they are not one "
+            "resolution site. A later re-resolution is the defect this test exists to prevent."
+        )
+
+
+@pytest.mark.parametrize("skill", sorted(SKILL_MD_CEILING))
+def test_plugin_root_selection_is_deterministic(skill: str) -> None:
+    """Step 0 must route candidates through the shared selector, not `head -1`.
+
+    `head -1` on `find /` output is arbitrary when more than one plugin copy is mounted. The
+    selector is deterministic, prefers an exact `--expect-version` match, and names every
+    rejected mount on stderr so a duplicate install is visible rather than silent. It must
+    NEVER select by highest version — a higher version in a stale host-side cache can be a tree
+    the session never installed, which is reliably wrong rather than merely arbitrary.
+    """
+    text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
+    assert "select_plugin_root.py" in text, (
+        f"{skill}/SKILL.md does not route plugin-root candidates through select_plugin_root.py"
+    )

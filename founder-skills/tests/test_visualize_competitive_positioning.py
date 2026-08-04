@@ -508,6 +508,79 @@ def test_axis_rationale_xss() -> None:
         assert "&lt;script&gt;" in block, "Script tag should be HTML-escaped"
 
 
+def test_axis_rationale_sibling_shape_displayed() -> None:
+    """Regression guard for the silently-lost axis rationale defect: a view
+    carrying the rationale as a view-level sibling (x_axis_rationale /
+    y_axis_rationale — the shape the dispatch templates used to instruct)
+    must still surface in the rendered caption, not render as a silent blank
+    (which is what happened before _axis_compat.axis_rationale() existed)."""
+    arts = _all_artifacts()
+    pos = dict(arts["positioning.json"])
+    new_views = []
+    for v in pos["views"]:
+        v2 = dict(v)
+        x_rationale = v2["x_axis"].get("rationale", "")
+        y_rationale = v2["y_axis"].get("rationale", "")
+        v2["x_axis"] = {k: val for k, val in v2["x_axis"].items() if k != "rationale"}
+        v2["y_axis"] = {k: val for k, val in v2["y_axis"].items() if k != "rationale"}
+        v2["x_axis_rationale"] = x_rationale
+        v2["y_axis_rationale"] = y_rationale
+        new_views.append(v2)
+    pos["views"] = new_views
+    arts["positioning.json"] = pos
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_visualize(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        assert 'class="axis-rationale"' in stdout, "Sibling-shaped rationale must still render a caption"
+        assert "SDK vs proxy is the key differentiator" in stdout
+        assert "Accuracy is table-stakes" in stdout
+
+
+def test_axis_rationale_nested_wins_when_both_shapes_present() -> None:
+    """When a view carries both the nested and sibling rationale and they
+    differ, the nested (canonical) value must win, silently — this is the
+    schema-authority precedent from _axis_compat.axis_rationale()."""
+    arts = _all_artifacts()
+    pos = dict(arts["positioning.json"])
+    v2 = dict(pos["views"][0])
+    v2["x_axis"] = dict(v2["x_axis"])
+    v2["x_axis"]["rationale"] = "Nested wins this one"
+    v2["x_axis_rationale"] = "Sibling loses this one"
+    pos["views"] = [v2] + [dict(v) for v in pos["views"][1:]]
+    arts["positioning.json"] = pos
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_visualize(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        assert "Nested wins this one" in stdout
+        assert "Sibling loses this one" not in stdout
+
+
+def test_view_label_preferred_over_titlecased_id() -> None:
+    """positioning.json views[].label (Task 4), when present, is used verbatim
+    as the map title instead of the title-cased `id`."""
+    arts = _all_artifacts()
+    pos = dict(arts["positioning.json"])
+    pos["views"] = [dict(pos["views"][0])]
+    pos["views"][0]["label"] = "Speed vs. Privacy"
+    arts["positioning.json"] = pos
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_visualize(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        assert "Positioning Map: Speed vs. Privacy" in stdout
+        assert "Positioning Map: Primary" not in stdout
+
+
+def test_view_label_absent_falls_back_to_titlecased_id() -> None:
+    """Absence of `label` must be silent — every existing artifact lacks it,
+    so the title must keep falling back to the title-cased `id`, unchanged
+    from before Task 4."""
+    arts = _all_artifacts()
+    with _make_artifact_dir(arts) as d:
+        rc, stdout, stderr = _run_visualize(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        assert "Positioning Map: Primary" in stdout
+
+
 # ---------------------------------------------------------------------------
 # Audit regression test (a4: visualize.py)
 # ---------------------------------------------------------------------------

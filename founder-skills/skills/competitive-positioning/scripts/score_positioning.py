@@ -22,10 +22,16 @@ Output: JSON with per-view scores, overall differentiation, and warnings.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
 from typing import Any
+
+_SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+import _axis_compat  # noqa: E402
 
 
 def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
@@ -170,12 +176,42 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
     else:
         diff_score = 0.0
 
+    # Axis rationale — read tolerantly through the shared helper. Canonical shape is
+    # nested (view["x_axis"]["rationale"]); a large body of already-written artifacts
+    # carries it as a view-level sibling (view["x_axis_rationale"]) because the dispatch
+    # templates used to instruct that shape. See _axis_compat.py.
+    x_rationale = _axis_compat.axis_rationale(view, "x")
+    y_rationale = _axis_compat.axis_rationale(view, "y")
+
+    if not x_rationale:
+        warnings.append(
+            {
+                "code": "RATIONALE_MISSING",
+                "severity": "medium",
+                "message": (
+                    f"View '{view['id']}': X-axis rationale is missing "
+                    "(checked both x_axis.rationale and the x_axis_rationale sibling)"
+                ),
+            }
+        )
+    if not y_rationale:
+        warnings.append(
+            {
+                "code": "RATIONALE_MISSING",
+                "severity": "medium",
+                "message": (
+                    f"View '{view['id']}': Y-axis rationale is missing "
+                    "(checked both y_axis.rationale and the y_axis_rationale sibling)"
+                ),
+            }
+        )
+
     scored_view = {
         "view_id": view["id"],
         "x_axis_name": view.get("x_axis", {}).get("name", "X"),
         "y_axis_name": view.get("y_axis", {}).get("name", "Y"),
-        "x_axis_rationale": view.get("x_axis", {}).get("rationale", ""),
-        "y_axis_rationale": view.get("y_axis", {}).get("rationale", ""),
+        "x_axis_rationale": x_rationale,
+        "y_axis_rationale": y_rationale,
         "x_axis_vanity_flag": x_vanity,
         "y_axis_vanity_flag": y_vanity,
         "differentiation_score": diff_score,
@@ -189,7 +225,43 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
         # instead of forcing every downstream consumer back to positioning.json for points[].
         "points": points,
     }
+
+    # Optional human-readable view label (e.g. "Speed vs. Price") passed through when the
+    # main thread supplied one on the input view. Absent must stay absent — never inferred
+    # from `id`, never required. Consumers title-case `id` when this key is missing.
+    if isinstance(view.get("label"), str) and view["label"].strip():
+        scored_view["label"] = view["label"]
+
     return scored_view, warnings
+
+
+# ---------------------------------------------------------------------------
+# Views fingerprint
+# ---------------------------------------------------------------------------
+
+
+def views_fingerprint(views: list[dict]) -> str:
+    """Stable hash of the scored map's identity. Excludes ALL prose (evidence, rationale,
+    provenance) so a reworded evidence string is not a moved map. Order-insensitive over
+    views and over points."""
+    payload = []
+    for v in sorted(views, key=lambda d: str(d.get("view_id", d.get("id", "")))):
+        pts = sorted(
+            [
+                [str(p.get("competitor", "")), round(float(p.get("x", 0) or 0), 4), round(float(p.get("y", 0) or 0), 4)]
+                for p in v.get("points", []) or []
+                if isinstance(p, dict)
+            ]
+        )
+        payload.append(
+            {
+                "view_id": str(v.get("view_id", v.get("id", ""))),
+                "x_axis_name": str(v.get("x_axis_name", "")),
+                "y_axis_name": str(v.get("y_axis_name", "")),
+                "points": pts,
+            }
+        )
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -425,6 +497,11 @@ def main() -> None:
         "warnings": all_warnings,
         "_produced_by": "score_positioning",
         "metadata": data.get("metadata", {}),
+        # Order-insensitive identity hash of the scored map (views + points only, no
+        # prose). checklist.py copies this verbatim into checklist.json's
+        # graded_against.views_fingerprint rather than recomputing it — one
+        # implementation, no drift. See views_fingerprint() above.
+        "views_fingerprint": views_fingerprint(scored_views),
     }
 
     # Passthrough data_confidence if present

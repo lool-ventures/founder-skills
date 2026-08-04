@@ -444,6 +444,89 @@ def _compute_lens_status(data: dict[str, Any]) -> dict[str, bool]:
 
 
 # ---------------------------------------------------------------------------
+# Checklist summary rendering
+#
+# The DATA payload has carried a "checklist" key (score_pct/overall/fails/
+# warns, built in _build_data_payload) since it was added, but no client-side
+# JS ever read DATA.checklist and no server-side markup rendered it either --
+# a founder-facing feature (the review's own checklist score) was silently
+# missing from the explorer. Rendered here, server-side, from the same Python
+# dict visualize.py's executive summary uses (score_pct >= 80/60 thresholds
+# mirror visualize.py:1131/1141) so the score/verdict never depends on
+# client-side JS running correctly.
+# ---------------------------------------------------------------------------
+
+
+def _checklist_badge_class(score_pct: float) -> str:
+    """Map a checklist score_pct to the existing .badge color classes."""
+    if score_pct >= 80:
+        return "strong"
+    if score_pct >= 60:
+        return "warning"
+    return "fail"
+
+
+def _checklist_item_row(item: Any, kind: str) -> str:
+    """Render one failing/warning checklist item as a <li>."""
+    if not isinstance(item, dict):
+        return ""
+    item_id = str(item.get("id") or "").strip()
+    label = str(item.get("label") or item.get("criterion") or "").strip()
+    evidence = str(item.get("evidence") or "").strip()
+    badge_class = "fail" if kind == "fail" else "warning"
+    icon = "✗" if kind == "fail" else "⚠"
+    title = ": ".join(part for part in (item_id, label) if part)
+    detail = f' <span class="checklist-item-evidence">&mdash; {_esc(evidence)}</span>' if evidence else ""
+    return f'<li><span class="badge {badge_class}">{icon}</span> {_esc(title)}{detail}</li>'
+
+
+def _render_checklist_summary(checklist: dict[str, Any] | None) -> str:
+    """Render the review checklist's score, pass/fail/warn signal, and any
+    failing/warning items as a static summary box. Returns "" when no
+    checklist data is available (nothing to render, no placeholder needed --
+    the disabled-lens reasons already cover missing-artifact messaging)."""
+    if not isinstance(checklist, dict):
+        return ""
+
+    score_pct = checklist.get("score_pct")
+    overall = checklist.get("overall")
+    fails = checklist.get("fails")
+    warns = checklist.get("warns")
+    fails = fails if isinstance(fails, list) else []
+    warns = warns if isinstance(warns, list) else []
+
+    header_bits: list[str] = []
+    if isinstance(score_pct, (int, float)):
+        badge_class = _checklist_badge_class(float(score_pct))
+        header_bits.append(f'<span class="badge {badge_class}">{score_pct:.0f}%</span>')
+    if overall:
+        header_bits.append(_esc(str(overall).replace("_", " ").title()))
+    count_bits = []
+    if fails:
+        count_bits.append(f"{len(fails)} failing")
+    if warns:
+        count_bits.append(f"{len(warns)} warning")
+    if count_bits:
+        header_bits.append(f'<span class="checklist-counts">{" &middot; ".join(count_bits)}</span>')
+
+    if not header_bits:
+        return ""
+
+    items_html = "".join(_checklist_item_row(item, "fail") for item in fails) + "".join(
+        _checklist_item_row(item, "warning") for item in warns
+    )
+    list_html = f'<ul class="checklist-item-list">{items_html}</ul>' if items_html else ""
+
+    return (
+        '<div class="checklist-summary">'
+        '<div class="checklist-summary-header">'
+        "<strong>Review Checklist</strong> &nbsp; " + " &nbsp; ".join(header_bits) + "</div>"
+        f"{list_html}"
+        "</div>"
+    )
+
+
+# ---------------------------------------------------------------------------
 # HTML generation
 # ---------------------------------------------------------------------------
 
@@ -454,7 +537,13 @@ def _generate_html(data: dict[str, Any]) -> str:
     stub_reasons = data.get("_stub_reasons", {})
 
     # Remove internal field before embedding
-    data_for_embed = {k: v for k, v in data.items() if not k.startswith("_")}
+    # `checklist` is rendered SERVER-SIDE (see _render_checklist_summary) so the score never
+    # depends on client-side JS running. It is therefore excluded from the embedded payload rather
+    # than shipped twice: an embedded key no script reads is dead weight, and a dead DATA key is
+    # exactly how the checklist score came to be missing from this explorer in the first place.
+    # Guarded by test_explore_every_embedded_data_key_is_read_by_the_script.
+    _SERVER_RENDERED_ONLY = {"checklist"}
+    data_for_embed = {k: v for k, v in data.items() if not k.startswith("_") and k not in _SERVER_RENDERED_ONLY}
     data_json = _embed_json(data_for_embed, indent=2, default=str)
 
     company_name = _esc(data.get("company", {}).get("name", ""))
@@ -493,6 +582,7 @@ def _generate_html(data: dict[str, Any]) -> str:
 
     enabled_count = sum(1 for v in lens_status.values() if v)
     disabled_names = [lens for lens in _LENSES if not lens_status[lens]]
+    checklist_html = _render_checklist_summary(data.get("checklist"))
 
     return _build_html_string(
         data_json=data_json,
@@ -505,6 +595,7 @@ def _generate_html(data: dict[str, Any]) -> str:
         enabled_count=enabled_count,
         disabled_names=disabled_names,
         chartjs_source=_chartjs_source(),
+        checklist_html=checklist_html,
     )
 
 
@@ -520,6 +611,7 @@ def _build_html_string(
     enabled_count: int,
     disabled_names: list[str],
     chartjs_source: str,
+    checklist_html: str,
 ) -> str:
     """Build the full HTML document string."""
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
@@ -644,6 +736,17 @@ def _build_html_string(
         "}",
         ".clickable:hover { background: var(--lool-paper-2); }",
         ".clickable.active { background: var(--lool-line-2); }",
+        ".checklist-summary {",
+        "  background: var(--lool-paper); border: 1px solid var(--lool-line-2);",
+        "  padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.875rem;",
+        "}",
+        ".checklist-summary-header { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; }",
+        ".checklist-counts { color: var(--lool-mute); }",
+        ".checklist-item-list { list-style: none; margin: 0.5rem 0 0; padding: 0; }",
+        ".checklist-item-list li {",
+        "  padding: 0.2rem 0; display: flex; align-items: baseline; gap: 0.4rem;",
+        "}",
+        ".checklist-item-evidence { color: var(--lool-mute); }",
     ]
     css = _theme.brand_css() + "\n" + "\n".join(css_lines)
 
@@ -685,6 +788,8 @@ def _build_html_string(
   <div class="meta">{stage} &middot; {sector}</div>
   {hl_div}
 </div>
+
+{checklist_html}
 
 <div class="tab-bar">
 {tabs_html}  <button class="reset-btn" onclick="resetAll()">Reset</button>
