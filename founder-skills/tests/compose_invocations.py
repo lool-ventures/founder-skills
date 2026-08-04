@@ -68,7 +68,11 @@ def _run_compose_subprocess(skill: str, work_dir: Path, extra_args: list[str]) -
 # the work_dir so report.json lands where drive_compose() can find it.
 # (deck-review compose writes to stdout by default; -o redirects.)
 _COMPOSE_FLAGS: dict[str, list[str]] = {
-    "deck-review": ["-o", "REPORT_JSON_OUT"],  # REPORT_JSON_OUT replaced at call time
+    # Every row must pass --write-md: a row that omits it produces no report.md, and a
+    # fixture-driven scan over the fleet then reports that skill CLEAN when in fact it was never
+    # looked at. deck-review was that row, and the false-clean it produced reached a written
+    # analysis before being caught.
+    "deck-review": ["-o", "REPORT_JSON_OUT", "--write-md", "REPORT_MD_OUT"],
     # cap-table also requires --write-md; the harness substitutes REPORT_JSON_OUT
     # but also needs a markdown sibling path. We pass an explicit md path.
     "cap-table": ["-o", "REPORT_JSON_OUT", "--write-md", "REPORT_MD_OUT", "--run-id", "test-run"],

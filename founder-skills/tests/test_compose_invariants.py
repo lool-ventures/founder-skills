@@ -344,3 +344,67 @@ def test_cp_checklist_stale_silent_when_either_side_absent(tmp_path: Path) -> No
     mutate(stage)
     result = run_compose_capturing("competitive-positioning", stage, work_dir)
     assert "CHECKLIST_STALE_VS_POSITIONING" not in result.stdout + result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Fleet-wide founder-text policy: every composed report.md is clean
+# ---------------------------------------------------------------------------
+
+
+def _founder_text_module():  # type: ignore[no-untyped-def]
+    import importlib.util
+
+    path = REPO_ROOT / "founder-skills" / "scripts" / "_founder_text.py"
+    spec = importlib.util.spec_from_file_location("_founder_text", path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _cap_table_keep() -> frozenset[str]:
+    """cap-table's `_labels.py` vocabulary — the one skill that keeps its own glossed enums."""
+    import importlib.util
+
+    path = SKILLS_DIR / "cap-table" / "scripts" / "_labels.py"
+    spec = importlib.util.spec_from_file_location("_labels", path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return frozenset(k for m in mod.MAPS.values() for k in m)
+
+
+@pytest.mark.parametrize("skill", COACHING_SKILLS)
+def test_composed_report_carries_no_internal_tokens(skill: str, tmp_path: Path) -> None:
+    """No composed report.md may contain a private enum, field name, or internal filename.
+
+    This is a ZERO ratchet, not a baseline — the fleet measured 0 when it was written, so any new
+    occurrence is a regression introduced by that change and is cheap to fix at authoring time.
+
+    SCOPE, stated so a green here is not over-read: fixtures are schema-correct by construction, so
+    this proves the RENDERERS emit no tokens. It cannot see a token a sub-agent writes into its
+    free-text evidence at runtime (`inputs.json gtm_evidence_notes is null` was observed in a live
+    market-sizing run). That residue is a dispatch-template concern, not a producer one.
+    """
+    ft = _founder_text_module()
+    fixture_dir = REPO_ROOT / "founder-skills" / "tests" / "fixtures" / skill
+    if not fixture_dir.exists():
+        pytest.skip(f"No fixtures at {fixture_dir.relative_to(REPO_ROOT)}")
+    work_dir = tmp_path / skill
+    work_dir.mkdir(parents=True)
+    drive_compose(skill, fixture_dir, work_dir)
+
+    report_md = work_dir / "report.md"
+    assert report_md.exists(), (
+        f"{skill} composed no report.md — every _COMPOSE_FLAGS row must pass --write-md, or this "
+        f"scan reports the skill clean without having looked at it"
+    )
+    text = report_md.read_text(encoding="utf-8")
+    # Non-vacuity: a scan of an empty/trivial report would pass trivially.
+    assert len(text) > 500, f"{skill} report.md is only {len(text)}B — too small to be a real report"
+
+    keep = _cap_table_keep() if skill == "cap-table" else None
+    found = ft.scan(text, extra_keep=keep)
+    assert found == {"enums": [], "filenames": []}, (
+        f"{skill} report.md leaks internal tokens: enums={found['enums']} files={found['filenames']}"
+    )

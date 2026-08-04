@@ -58,7 +58,13 @@ WARNING_SEVERITY: dict[str, str] = {
     "INCOMPLETE_SCORING": "medium",
     "RESEARCHED_WITHOUT_SOURCE": "medium",
     "NO_RECENT_DEVELOPMENTS": "medium",
-    "FOUNDER_TEXT_TOKEN": "medium",
+    # "low" deliberately, NOT medium: by the time this fires the text has ALREADY been corrected by
+    # substitute(), so the report the founder reads is clean. What remains is an AUTHORING task (a
+    # producer that should stop emitting the token, or a filename that must be dropped rather than
+    # renamed), and ic-sim / market-sizing / deck-review all block strict mode on medium — which would
+    # abort a founder's run over a cosmetic issue that was already fixed. The fleet ratchet in
+    # test_compose_invariants.py is the real gate; this is the runtime breadcrumb.
+    "FOUNDER_TEXT_TOKEN": "low",
     # A dated competitor move that fell outside the recency window. Dropped from
     # recent_developments and preserved under out_of_window_developments by
     # validate_landscape.py — reported so the exclusion is visible, never silent.

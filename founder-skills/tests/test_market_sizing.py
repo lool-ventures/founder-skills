@@ -892,7 +892,7 @@ def test_compose_surfaces_implausible_pct_scale_warning() -> None:
     assert data is not None
     codes = [w["code"] for w in data["validation"]["warnings"]]
     assert "IMPLAUSIBLE_PCT_SCALE" in codes
-    assert "segment_pct" in data["report_markdown"]
+    assert "segment %" in data["report_markdown"]  # humanized by the shared founder-text policy (_founder_text.py)
 
 
 def test_compose_som_discrepancy_warning() -> None:
@@ -957,6 +957,7 @@ def test_compose_severity_map_complete() -> None:
         raise AssertionError(f"can't import WARNING_SEVERITY: stdout={result.stdout}, stderr={result.stderr}") from exc
 
     expected_codes = [
+        "FOUNDER_TEXT_TOKEN",
         "CORRUPT_ARTIFACT",
         "MISSING_ARTIFACT",
         "STALE_ARTIFACT",
@@ -983,7 +984,7 @@ def test_compose_severity_map_complete() -> None:
         "CURRENCY_MISMATCH",
         "FOUNDER_VALUE_OVERRIDDEN",
     ]
-    assert len(sev_map) == 25, f"expected 25 codes, got {len(sev_map)}"
+    assert len(sev_map) == 26, f"expected 26 codes, got {len(sev_map)}"
     for code in expected_codes:
         assert code in sev_map, f"{code} missing from severity map"
     # All values are "high", "medium", or "low"
@@ -1894,7 +1895,7 @@ def test_compose_validation_figure_no_label_fallback() -> None:
     validation_end = report.index("\n## ", validation_start + 1)
     validation_section = report[validation_start:validation_end]
     # Without label, raw figure name should appear
-    assert "passenger_count_y5" in validation_section
+    assert "passenger count y5" in validation_section  # humanized by the shared founder-text policy (_founder_text.py)
     assert "**TAM**" in validation_section
 
 
@@ -3507,7 +3508,7 @@ def test_deck_claims_narrative_rendered_when_detail_present() -> None:
     assert data is not None
     md = data["report_markdown"]
     assert "## Deck Claims (Narrative)" in md
-    assert "regional_sam_north_america" in md
+    assert "regional SAM north america" in md  # humanized by the shared founder-text policy (_founder_text.py)
     assert "som_year_3_target" in md
 
 

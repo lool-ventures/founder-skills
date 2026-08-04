@@ -105,6 +105,13 @@ def _stage_slug(value: Any) -> str:
 
 
 WARNING_SEVERITY: dict[str, str] = {
+    # "low" deliberately, NOT medium: by the time this fires the text has ALREADY been corrected by
+    # substitute(), so the report the founder reads is clean. What remains is an AUTHORING task (a
+    # producer that should stop emitting the token, or a filename that must be dropped rather than
+    # renamed), and ic-sim / market-sizing / deck-review all block strict mode on medium — which would
+    # abort a founder's run over a cosmetic issue that was already fixed. The fleet ratchet in
+    # test_compose_invariants.py is the real gate; this is the runtime breadcrumb.
+    "FOUNDER_TEXT_TOKEN": "low",
     # High — structural integrity violations
     "CORRUPT_ARTIFACT": "high",
     "MISSING_ARTIFACT": "high",
@@ -144,6 +151,7 @@ ACCEPTIBLE_SEVERITIES = {"medium"}
 
 # Human-readable warning code labels
 WARNING_LABELS: dict[str, str] = {
+    "FOUNDER_TEXT_TOKEN": "Internal Token In Report",
     "CORRUPT_ARTIFACT": "Corrupt Artifact",
     "MISSING_ARTIFACT": "Missing Artifact",
     "STALE_ARTIFACT": "Stale Artifact",
@@ -234,6 +242,25 @@ def _as_dict(value: Any) -> dict[str, Any]:
 def _md_safe(text: Any) -> str:
     """Escape text for safe markdown table cell interpolation."""
     return str(text).replace("|", "\\|").replace("\n", " ")
+
+
+def _founder_text_policy() -> Any:
+    """Import the fleet's shared founder-text policy from `founder-skills/scripts/`.
+
+    Parent-relative rather than duplicated: this file lives at
+    `skills/<skill>/scripts/compose_report.py`, so `parents[2]/scripts` is the shared dir. Returns
+    None if unavailable — a missing policy module must never block a report, since the scan is a
+    warning and not a gate.
+    """
+    try:
+        shared = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts"))
+        if shared not in sys.path:
+            sys.path.insert(0, shared)
+        import _founder_text  # type: ignore[import-not-found]
+
+        return _founder_text
+    except ImportError:
+        return None
 
 
 def _warn(code: str, message: str, founder_message: str | None = None) -> dict[str, str]:
@@ -1032,6 +1059,36 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         " — Deck Review Agent"
         " · [Share feedback](https://github.com/lool-ventures/founder-skills/discussions/new?category=ideas-feedback)*\n"
     )
+
+    # --- founder-text policy (shared fleet module) ------------------------------------------------
+    # Runs on the FINAL assembled markdown — after the warnings section and footer — because that is
+    # the exact string the founder reads, and because producer warning messages are where the
+    # internal tokens actually live. Wiring this into competitive-positioning before the warnings
+    # splice silently substituted nothing and then reported a clean body while 21 tokens sat in a
+    # section appended two lines later.
+    _ft = _founder_text_policy()
+    if _ft is not None:
+        # Identifier keep-set derived from the DATA, not hand-listed: an id present in the artifacts
+        # is an id whatever its shape, and rewriting one makes the markdown disagree with the JSON
+        # about what a thing is called (cap-table's `safe_conv` is the case that proved this).
+        _keep = _ft.identifier_values(artifacts)
+        report_markdown = _ft.substitute(report_markdown, extra_keep=_keep)
+        _found = _ft.scan(report_markdown, extra_keep=_keep)
+        for _tok in _found["enums"]:
+            warnings.append(
+                _warn(
+                    "FOUNDER_TEXT_TOKEN",
+                    f"the report contains the internal token '{_tok}' — a founder cannot act on it; "
+                    f"render it through the shared founder-text policy or stop emitting it",
+                )
+            )
+        for _fn in _found["filenames"]:
+            warnings.append(
+                _warn(
+                    "FOUNDER_TEXT_TOKEN",
+                    f"the report names the internal file '{_fn}' — drop the reference rather than renaming it",
+                )
+            )
 
     # Stderr summary
     print(f"Artifacts found: {len(artifacts_found)}/{len(all_names)}", file=sys.stderr)

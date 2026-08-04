@@ -171,6 +171,44 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def _scan_commentary(commentary: str) -> dict[str, list[str]]:
+    """Report internal tokens in the coaching commentary. Never rewrites it.
+
+    WHY THIS LIVES HERE. Each skill's `compose_report.py` scans the report it assembles, but the
+    Coaching Commentary is not in that string — compose emits a marker, and this script replaces the
+    marker afterwards. So the compose-time scan structurally CANNOT see the commentary, which is
+    model-authored prose and therefore the likeliest place for an internal token to appear. This is the
+    one shared place every skill's commentary passes through.
+
+    REPORTS, does not substitute. Two reasons: this script's contract is verbatim insertion (its test
+    suite pins that, and transport fidelity for quotes/newlines is the reason the envelope exists), and
+    commentary may legitimately quote the founder's OWN field or column names, which we must not
+    silently reword. The actionable fix is upstream in the coaching dispatch template.
+
+    Non-blocking by design — a token in coaching text must never cost a founder their report. Delivery
+    enforcement, where a skill has it, belongs in that skill's verify gate.
+    """
+    try:
+        shared = os.path.dirname(os.path.abspath(__file__))
+        if shared not in sys.path:
+            sys.path.insert(0, shared)
+        import _founder_text  # type: ignore[import-not-found]
+    except ImportError:
+        return {"enums": [], "filenames": []}
+    found: dict[str, list[str]] = _founder_text.scan(commentary)
+    for token in found["enums"]:
+        print(
+            f"note: coaching commentary contains the internal token '{token}' — a founder cannot act on it",
+            file=sys.stderr,
+        )
+    for name in found["filenames"]:
+        print(
+            f"note: coaching commentary names the internal file '{name}' — drop the reference",
+            file=sys.stderr,
+        )
+    return found
+
+
 def main() -> None:
     args = parse_args()
     pretty: bool = args.pretty
@@ -246,6 +284,7 @@ def main() -> None:
             "run_id": run_id,
             "verified_artifacts": len(args.verify_artifact),
             "commentary_bytes": len(commentary.encode("utf-8")),
+            "founder_text_findings": _scan_commentary(commentary),
         },
         pretty,
         output,

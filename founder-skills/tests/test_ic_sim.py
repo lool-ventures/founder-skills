@@ -2083,6 +2083,7 @@ def test_compose_severity_map_complete() -> None:
         raise AssertionError(f"can't import WARNING_SEVERITY: stdout={result.stdout}, stderr={result.stderr}") from exc
 
     expected = [
+        "FOUNDER_TEXT_TOKEN",
         "CORRUPT_ARTIFACT",
         "MISSING_ARTIFACT",
         "STALE_ARTIFACT",
@@ -4022,7 +4023,7 @@ def test_compose_exec_summary_conviction_footnote() -> None:
     assert data is not None
     md = data["report_markdown"]
     assert "Conviction score = (strong" in md or "strong × 1.0" in md
-    assert "hard_pass" in md
+    assert "Decline — hard pass" in md  # humanized by the shared founder-text policy (_founder_text.py)
     assert "applicable dimensions" in md
 
 

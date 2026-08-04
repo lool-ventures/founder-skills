@@ -472,3 +472,55 @@ class TestMdToCommentaryComposition:
         assert MARKER not in new_report
         assert HEADING in new_report
         assert raw_text.strip() in new_report
+
+
+# ---------------------------------------------------------------------------
+# Founder-text scan over the coaching commentary
+# ---------------------------------------------------------------------------
+
+
+def test_receipt_reports_internal_tokens_in_commentary(tmp_path: Path) -> None:
+    """The compose-time scan cannot see the commentary — compose emits a marker, this fills it in.
+
+    Without a check here the Coaching Commentary is the one founder-visible section of the report that
+    no scan covers, and it is model-authored prose, so it is the likeliest place for a token to appear.
+    """
+    marker = "<!-- COACHING_INSERTION_POINT_deadbeef -->"
+    report = tmp_path / "report.md"
+    report.write_text(f"# R\n\nbody\n\n{marker}\n", encoding="utf-8")
+    payload = tmp_path / "c.json"
+    payload.write_text(
+        json.dumps({"commentary_markdown": "Your moat_count is low and model_data.json was thin."}),
+        encoding="utf-8",
+    )
+    rc, receipt, err = run_insert(["--report", str(report), "--marker", marker, "--commentary-file", str(payload)])
+    assert rc == 0, err
+    assert receipt["status"] == "inserted"
+    assert receipt["founder_text_findings"]["enums"] == ["moat_count"]
+    assert receipt["founder_text_findings"]["filenames"] == ["model_data.json"]
+
+
+def test_commentary_is_inserted_verbatim_despite_the_scan(tmp_path: Path) -> None:
+    """The scan REPORTS; it must not rewrite. Commentary may quote the founder's own field names."""
+    marker = "<!-- COACHING_INSERTION_POINT_cafe1234 -->"
+    report = tmp_path / "report.md"
+    report.write_text(f"# R\n\nbody\n\n{marker}\n", encoding="utf-8")
+    payload = tmp_path / "c.json"
+    payload.write_text(json.dumps({"commentary_markdown": "Your moat_count is low."}), encoding="utf-8")
+    rc, _receipt, err = run_insert(["--report", str(report), "--marker", marker, "--commentary-file", str(payload)])
+    assert rc == 0, err
+    assert "Your moat_count is low." in report.read_text(encoding="utf-8")
+
+
+def test_clean_commentary_reports_no_findings(tmp_path: Path) -> None:
+    marker = "<!-- COACHING_INSERTION_POINT_0badcafe -->"
+    report = tmp_path / "report.md"
+    report.write_text(f"# R\n\nbody\n\n{marker}\n", encoding="utf-8")
+    payload = tmp_path / "c.json"
+    payload.write_text(
+        json.dumps({"commentary_markdown": "Your defensibility story needs a second proof point."}),
+        encoding="utf-8",
+    )
+    rc, receipt, err = run_insert(["--report", str(report), "--marker", marker, "--commentary-file", str(payload)])
+    assert rc == 0, err
+    assert receipt is not None and receipt["founder_text_findings"] == {"enums": [], "filenames": []}

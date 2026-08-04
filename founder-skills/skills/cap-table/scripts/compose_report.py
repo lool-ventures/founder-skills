@@ -74,6 +74,25 @@ _SELF_REFERENTIAL_SOURCE_MARKERS = (
 )
 
 
+def _founder_text_policy() -> Any:
+    """Import the fleet's shared founder-text policy from `founder-skills/scripts/`.
+
+    Parent-relative rather than duplicated: this file lives at
+    `skills/<skill>/scripts/compose_report.py`, so `parents[2]/scripts` is the shared dir. Returns
+    None if unavailable — a missing policy module must never block a report, since the scan is a
+    warning and not a gate.
+    """
+    try:
+        shared = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts"))
+        if shared not in sys.path:
+            sys.path.insert(0, shared)
+        import _founder_text  # type: ignore[import-not-found]
+
+        return _founder_text
+    except ImportError:
+        return None
+
+
 def _rule_md(
     rule_id: str,
     *,
@@ -1671,6 +1690,44 @@ def main() -> int:
         insertion_marker=insertion_marker,
         extraction_audit_path=_extraction_audit_path,
     )
+
+    # --- founder-text policy (shared fleet module) ------------------------------------------------
+    # cap-table is the one skill that does NOT hand its vocabulary to the shared module. `_labels.py`
+    # is the authority here and its convention is deliberate: lead with plain language, keep the raw
+    # code as a small-print parenthetical, because counsel and power users need the exact term. So its
+    # own enum keys are passed as `extra_keep` and survive untouched; what the policy still catches is
+    # everything `_labels.py` never mapped (field names like `safe_price`).
+    #
+    # Rule ids need no keep-list — they are dot-namespaced (`safe.post_money_cap_conversion`) and the
+    # detector excludes namespaced identifiers by construction. Scenario and instrument ids DO need
+    # one: `safe_conv` looks like vocabulary and is not, and rewriting it would make the markdown
+    # disagree with the JSON, the explorer and the counsel packet about what a scenario is called.
+    _ft = _founder_text_policy()
+    if _ft is not None:
+        _keep = frozenset(k for _m in _labels.MAPS.values() for k in _m) | _ft.identifier_values(artifacts)
+        report_md = _ft.substitute(report_md, extra_keep=_keep)
+        _found = _ft.scan(report_md, extra_keep=_keep)
+        for _tok in _found["enums"]:
+            validation_warnings.append(
+                {
+                    "code": "FOUNDER_TEXT_TOKEN",
+                    "severity": "low",
+                    "message": (
+                        f"the report contains the internal token '{_tok}' — a founder cannot act on "
+                        f"it; map it in _labels.py or stop emitting it"
+                    ),
+                }
+            )
+        for _fn in _found["filenames"]:
+            validation_warnings.append(
+                {
+                    "code": "FOUNDER_TEXT_TOKEN",
+                    "severity": "low",
+                    "message": (
+                        f"the report names the internal file '{_fn}' — drop the reference rather than renaming it"
+                    ),
+                }
+            )
 
     # Write report.md
     md_path = os.path.abspath(args.write_md)

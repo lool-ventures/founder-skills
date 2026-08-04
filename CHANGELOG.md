@@ -33,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   describing a map that no longer existed. The checklist records which map it graded and compose
   flags a mismatch.
 - **financial-model-review:** the explorer embedded the review checklist score but did not render it.
+- **financial-model-review:** the report ended with a command line for the founder to run
+  (`explore.py --dir … -o …`), which they have no shell for. It now asks for the explorer in words.
+- **financial-model-review:** warnings about missing optional data named the internal file rather than
+  the data ("the figures extracted from your spreadsheet").
+- **market-sizing:** support strength, estimate provenance and driver names printed as raw tokens
+  (`partially_supported`, `agent_estimate`, `customer_count`); the checklist listed internal filenames.
+- **ic-sim:** partner and consensus verdicts printed as raw tokens (`more_diligence`, `hard_pass`),
+  including in the report's headline verdict lines.
+- **deck-review:** slide types printed as raw tokens (`purpose_traction`, `business_model`).
+- **cap-table:** field names printed as raw tokens (`safe_price`).
 
 ### Added
 
@@ -46,10 +56,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- **competitive-positioning:** report text now renders internal enum and field names as English
-  ("switching costs evidence source" rather than `switching_costs evidence_source`). Stable
-  identifiers a founder can cross-reference against their own documents — a SAFE's id, for instance —
-  are deliberately left unchanged.
+- All six skills render internal enum and field names as English ("switching costs evidence source"
+  rather than `switching_costs evidence_source`), from one shared policy. Stable identifiers a founder
+  can cross-reference against their own documents — a SAFE's id, a scenario's name — and diagnostic
+  codes are deliberately left unchanged. cap-table's own label map remains the authority for its
+  vocabulary.
+- Reports are checked for internal tokens as they are composed, and the coaching commentary is checked
+  as it is inserted; findings are reported without blocking a run.
 - **competitive-positioning:** warning text now names competitors by display name rather than internal
   slug.
 - **competitive-positioning:** the trade-off trigger for the positioning reality check now fires on a

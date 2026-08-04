@@ -115,3 +115,76 @@ def test_substitute_handles_a_token_that_prefixes_another() -> None:
     """Longest-first ordering: `evidence_source` must not be half-replaced by `evidence`."""
     out = ft.substitute("evidence_source and evidence_source_detail differ")
     assert "evidence source and evidence source detail differ" == out
+
+
+# ---------------------------------------------------------------------------
+# Dot-namespaced identifiers (cap-table's rule ids)
+# ---------------------------------------------------------------------------
+
+
+def test_scan_ignores_dot_namespaced_rule_ids() -> None:
+    """cap-table's 85 rule ids are dotted and deliberately verbatim — counsel cites them.
+
+    Without the namespacing guard the scanner reports every one as a violation, which is how a
+    detector becomes noise nobody reads.
+    """
+    found = ft.scan("Per `safe.post_money_cap_conversion` the cap binds.")
+    assert found["enums"] == []
+
+
+def test_substitute_leaves_dot_namespaced_rule_ids_intact() -> None:
+    text = "see safe.post_money_cap_conversion and convertible_notes.accrued_interest"
+    assert ft.substitute(text) == text
+
+
+def test_scan_still_catches_a_sentence_final_token() -> None:
+    """The namespacing guard must not swallow a token that merely ends a sentence.
+
+    A blunter `(?![\\w.])` trailing guard excludes both, silently losing this case.
+    """
+    assert ft.scan("the field is switching_costs.")["enums"] == ["switching_costs"]
+
+
+def test_substitute_rewrites_a_sentence_final_token() -> None:
+    assert ft.substitute("the field is switching_costs.") == "the field is switching costs."
+
+
+# ---------------------------------------------------------------------------
+# Capitalization is decided by TYPE, not position
+# ---------------------------------------------------------------------------
+
+
+def test_enum_values_capitalize_but_field_names_do_not() -> None:
+    """`**X**: partially_supported` and `supports: customer_count` are the same markdown shape.
+
+    Position cannot tell them apart; type can. Getting this wrong put lowercase verdicts in
+    ic-sim's headline lines (`### Operator: more diligence`).
+    """
+    assert ft.substitute("- **Serviceable %**: partially_supported") == "- **Serviceable %**: Partially supported"
+    assert ft.substitute("— supports: customer_count") == "— supports: customer count"
+
+
+def test_known_verdict_enums_capitalize_in_headings() -> None:
+    assert ft.substitute("### Operator: more_diligence") == "### Operator: More diligence"
+    assert ft.substitute("**Consensus Verdict:** more_diligence") == "**Consensus Verdict:** More diligence"
+
+
+def test_enum_value_list_failure_is_cosmetic_not_a_detection_hole() -> None:
+    """An unlisted enum must still be SUBSTITUTED (lowercase) and still be SCANNED."""
+    assert "made up state" in ft.substitute("status is made_up_state")
+    assert ft.scan("status is made_up_state")["enums"] == ["made_up_state"]
+
+
+# ---------------------------------------------------------------------------
+# extra_keep parity between scan and substitute
+# ---------------------------------------------------------------------------
+
+
+def test_scan_honours_extra_keep_so_a_kept_token_is_not_warned_about() -> None:
+    """cap-table keeps its own glossed vocabulary; warning about it trains readers to ignore warnings."""
+    keep = frozenset({"structural_only"})
+    text = "**Stage:** Structure only — no priced round yet (`structural_only`)"
+    assert ft.substitute(text, extra_keep=keep) == text
+    assert ft.scan(text, extra_keep=keep)["enums"] == []
+    # ...and without the keep-set it IS reported, so the test is not vacuous.
+    assert ft.scan(text)["enums"] == ["structural_only"]

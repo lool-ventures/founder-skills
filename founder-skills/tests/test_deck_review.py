@@ -1154,6 +1154,7 @@ def test_compose_severity_map_complete() -> None:
         raise AssertionError(f"can't import WARNING_SEVERITY: stdout={result.stdout}, stderr={result.stderr}") from exc
 
     expected = [
+        "FOUNDER_TEXT_TOKEN",
         "CORRUPT_ARTIFACT",
         "MISSING_ARTIFACT",
         "STALE_ARTIFACT",
@@ -2596,7 +2597,7 @@ def test_compose_slide_feedback_graceful_without_inventory() -> None:
     assert data is not None
     md = data["report_markdown"]
     # Falls back to plain slide header
-    assert "### Slide 1 (purpose_traction)" in md
+    assert "### Slide 1 (Purpose / traction)" in md  # humanized by the shared founder-text policy
 
 
 def test_compose_full_checklist_has_evidence_column() -> None:

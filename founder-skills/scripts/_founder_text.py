@@ -61,9 +61,59 @@ def is_verbatim_token(token: str) -> bool:
     return bool(_IDENTIFIER_RE.fullmatch(token)) or token in DIAGNOSTIC_CODES
 
 
+# Keys whose VALUES are identifiers by contract. Used by `identifier_values` below.
+_ID_KEY_SUFFIXES = ("_id", "_ids", "_slug", "_slugs")
+
+
+def identifier_values(obj: object, *, _depth: int = 0) -> frozenset[str]:
+    """Collect identifier values out of a loaded artifact tree, for use as `extra_keep`.
+
+    `_IDENTIFIER_RE` only recognises the `<prefix>_<digits>` form (`safe_001`). Plenty of real
+    identifiers do not look like that — cap-table names a scenario `safe_conv` — and mangling one is
+    the exact traceability harm type 3 exists to prevent, because the SAME id then reads `safe_conv`
+    in the JSON and "safe conv" in the markdown, breaking correlation across the report, the explorer
+    and the counsel packet.
+
+    Deriving the keep-set from the DATA rather than a hand-maintained list is what makes this hold as
+    new scenarios and instruments appear: an id present in the artifacts is an id, whatever its shape.
+    """
+    keep: set[str] = set()
+    if _depth > 12:  # artifact trees are shallow; this only guards a pathological cycle-free depth
+        return frozenset()
+    if isinstance(obj, dict):
+        # An ID-KEYED MAP: `per_safe: {safe_conv: {...}, safe_ci: {...}}`. The ids are the KEYS, so the
+        # `*_id`-value rule below never sees them. Recognised by every value being a dict — in an
+        # artifact tree that shape is a collection-keyed-by-id, whereas a record has scalar leaves
+        # (`as_converted_totals: {shares: 100}` is correctly not matched).
+        #
+        # Erring toward KEEPING is deliberate. Over-keeping leaves a token raw, which the fleet ratchet
+        # catches at authoring time; under-keeping rewrites an identifier, which silently makes the
+        # markdown disagree with the JSON and is not caught by anything.
+        values = list(obj.values())
+        if values and all(isinstance(v, dict) for v in values):
+            keep.update(k for k in obj if isinstance(k, str))
+        for key, value in obj.items():
+            is_id_key = isinstance(key, str) and (key == "id" or key.endswith(_ID_KEY_SUFFIXES))
+            if is_id_key:
+                if isinstance(value, str):
+                    keep.add(value)
+                elif isinstance(value, list):
+                    keep.update(v for v in value if isinstance(v, str))
+            keep |= identifier_values(value, _depth=_depth + 1)
+    elif isinstance(obj, list):
+        for item in obj:
+            keep |= identifier_values(item, _depth=_depth + 1)
+    return frozenset(keep)
+
+
 # ---------------------------------------------------------------------------
 # Types 1 + 2 — humanize
 # ---------------------------------------------------------------------------
+
+# Abbreviated word-parts that read badly spelled out. `segment_pct` -> "segment %", matching the
+# labels market-sizing already writes by hand ("**Serviceable %**") rather than inventing a second
+# convention for the same idea.
+_PART_REWRITES = {"pct": "%"}
 
 # Words that must not be title-cased or spaced when they appear inside a token.
 _ACRONYMS = {"arpu", "tam", "sam", "som", "roi", "cac", "ltv", "mrr", "arr", "api", "ai", "url", "safe"}
@@ -86,6 +136,46 @@ _OVERRIDES: dict[str, str] = {
     "purpose_traction": "Purpose / traction",
 }
 
+# Known STATE vocabulary across the fleet — the type-1 private enums. Membership decides only
+# CAPITALIZATION during bulk substitution, and it exists because position cannot decide it:
+# `**Serviceable %**: partially_supported` and `— supports: customer_count` are the same markdown
+# shape but want different cases, since the first is a value ("Partially supported") and the second a
+# field name in a list ("customer count"). Type, not position, is the discriminator.
+#
+# Failure mode of an omission is COSMETIC — an unlisted enum renders lowercase, which is readable.
+# That is deliberate: this list must never become load-bearing for detection.
+_ENUM_VALUES: frozenset[str] = frozenset(
+    {
+        # verdicts / recommendations
+        "hard_pass",
+        "more_diligence",
+        "not_a_competitor",
+        "do_nothing",
+        # evidence + support strength
+        "partially_supported",
+        "fully_supported",
+        "well_supported",
+        "agent_estimate",
+        "founder_provided",
+        "founder_override",
+        # claim outcomes
+        "partially_holds",
+        "does_not_hold",
+        # section / stage types
+        "purpose_traction",
+        "business_model",
+        "structural_only",
+        "not_applicable",
+    }
+)
+
+# LIMITATION, recorded because it is invisible: a SINGLE-WORD enum (`pass`, `invest`, `warn`,
+# `adjacent`) is structurally undetectable here. `_CANDIDATE_RE` requires an underscore precisely so
+# the scanner does not flag every English word in the report, which means bare `pass` neither scans
+# nor substitutes. Such tokens must be handled by the emitting skill — ic-sim's verdict legend glosses
+# `pass` and `invest` explicitly, which is the working pattern. Do NOT "fix" this by dropping the
+# underscore requirement: the resulting false-positive rate makes the scan unusable.
+
 # A skill that already ships its own label map (cap-table's `_labels.py`) is the better authority for
 # its own vocabulary — this module must not shadow it. Callers pass those tokens via `extra_keep` and
 # apply their own map first; `structural_only` is cap-table's, and its own wording ("Structure only —
@@ -103,7 +193,7 @@ def humanize_token(token: str, *, capitalize: bool = True) -> str:
     if token in _OVERRIDES:
         out = _OVERRIDES[token]
         return out if capitalize else out[0].lower() + out[1:]
-    parts = [p.upper() if p in _ACRONYMS else p for p in token.split("_")]
+    parts = [_PART_REWRITES.get(p, p.upper() if p in _ACRONYMS else p) for p in token.split("_")]
     text = " ".join(parts)
     return text[0].upper() + text[1:] if capitalize and text else text
 
@@ -113,28 +203,48 @@ def humanize_token(token: str, *, capitalize: bool = True) -> str:
 # ---------------------------------------------------------------------------
 
 # A token shaped like our vocabulary: lowercase, at least one underscore, no digits-only tail.
-_CANDIDATE_RE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z][a-z0-9]*)+\b")
+#
+# The lookarounds exclude a DOT-NAMESPACED identifier, and they are load-bearing: cap-table's rule ids
+# are dotted (`safe.post_money_cap_conversion`) and are deliberately kept verbatim because counsel
+# cites them, so a scanner without this reports all 85 of them as violations and a substituter without
+# it rewrites a legal citation into prose.
+#
+# Why not the simpler `(?![\w.])` trailing guard: that also excludes a SENTENCE-FINAL token
+# (`… is switching_costs.`), a real miss. Namespacing is specifically a dot ADJACENT TO a word char,
+# so `(?!\.\w)` excludes `foo_bar.baz` while still matching a token that merely ends a sentence.
+_CANDIDATE_RE = re.compile(r"(?<![\w.])[a-z][a-z0-9]*(?:_[a-z][a-z0-9]*)+(?!\w)(?!\.\w)")
 
 # Substrings whose presence means the match is a filename or path, reported separately: a founder
 # cannot use `model_data.json` either, but the fix is different (drop the reference, not rename it).
 _FILENAME_RE = re.compile(r"\b[a-z][a-z0-9_]*\.(?:json|py|md|html|xlsx|csv)\b")
 
 
-def scan(text: str) -> dict[str, list[str]]:
+def scan(text: str, *, extra_keep: frozenset[str] | None = None) -> dict[str, list[str]]:
     """Find founder-facing text that violates the policy.
 
     Returns {"enums": [...], "filenames": [...]} — sorted, de-duplicated. An empty result means the
     text carries no private enum, field name, or internal filename.
+
+    `extra_keep` MUST accept the same set the caller passed to `substitute` — a skill that
+    deliberately keeps a token (cap-table glosses its own vocabulary via `_labels.py`) would otherwise
+    be warned about the exact string it chose to keep, which trains the reader to ignore the warning.
 
     Deliberately NOT a markdown-shape regex. An earlier attempt matched `**Label:** value`, missed
     `**Label**: value`, and a corrected version missed the first — two regexes, two different single
     hits, neither catching both. Matching the TOKEN rather than its surrounding markdown is what
     makes this reliable across the fleet's differing report dialects.
     """
+    keep = (extra_keep or frozenset()) | DIAGNOSTIC_CODES
     filenames = sorted({m.group(0) for m in _FILENAME_RE.finditer(text)})
     # Strip filenames first so `model_data.json` is not also reported as the enum `model_data`.
     without_files = _FILENAME_RE.sub(" ", text)
-    enums = sorted({m.group(0) for m in _CANDIDATE_RE.finditer(without_files) if not is_verbatim_token(m.group(0))})
+    enums = sorted(
+        {
+            m.group(0)
+            for m in _CANDIDATE_RE.finditer(without_files)
+            if not is_verbatim_token(m.group(0)) and m.group(0) not in keep
+        }
+    )
     return {"enums": enums, "filenames": filenames}
 
 
@@ -152,8 +262,8 @@ def substitute(text: str, *, extra_keep: frozenset[str] | None = None) -> str:
         if is_verbatim_token(token) or token in keep:
             continue
         text = re.sub(
-            rf"(?<![\w.]){re.escape(token)}(?![\w.])",
-            humanize_token(token, capitalize=False),
+            rf"(?<![\w.]){re.escape(token)}(?!\w)(?!\.\w)",
+            humanize_token(token, capitalize=token in _ENUM_VALUES),
             text,
         )
     return text
