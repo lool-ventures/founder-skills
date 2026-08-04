@@ -1,1 +1,436 @@
-{"items": [{"id": "STRUCT_01", "category": "Structure & Presentation", "label": "Assumptions isolated on dedicated tab", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "STRUCT_02", "category": "Structure & Presentation", "label": "Tab structure is navigable", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "STRUCT_03", "category": "Structure & Presentation", "label": "Actuals vs. projections separated", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "STRUCT_04", "category": "Structure & Presentation", "label": "Scenario toggles (base/up/down)", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "STRUCT_05", "category": "Structure & Presentation", "label": "Model matches pitch deck", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "STRUCT_06", "category": "Structure & Presentation", "label": "Version/date included", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "STRUCT_07", "category": "Structure & Presentation", "label": "Monthly granularity appropriate to stage", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "STRUCT_08", "category": "Structure & Presentation", "label": "No structural errors", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "STRUCT_09", "category": "Structure & Presentation", "label": "Professional formatting", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "UNIT_10", "category": "Revenue & Unit Economics", "label": "Revenue is bottom-up", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "UNIT_11", "category": "Revenue & Unit Economics", "label": "Churn modeled explicitly", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "UNIT_12", "category": "Revenue & Unit Economics", "label": "Pricing logic explicit", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "UNIT_13", "category": "Revenue & Unit Economics", "label": "Expansion revenue modeled", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "UNIT_14", "category": "Revenue & Unit Economics", "label": "COGS/margin matches model type", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "UNIT_15", "category": "Revenue & Unit Economics", "label": "CAC fully loaded", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "UNIT_16", "category": "Revenue & Unit Economics", "label": "CAC payback computed", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "UNIT_17", "category": "Revenue & Unit Economics", "label": "LTV/CAC shown", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "UNIT_18", "category": "Revenue & Unit Economics", "label": "Sales capacity constrains revenue", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "UNIT_19", "category": "Revenue & Unit Economics", "label": "Conversion rates grounded", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "CASH_20", "category": "Expenses, Cash & Runway", "label": "Headcount plan drives expenses", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "CASH_21", "category": "Expenses, Cash & Runway", "label": "Benefits/tax burden included", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "CASH_22", "category": "Expenses, Cash & Runway", "label": "Working capital modeled", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "CASH_23", "category": "Expenses, Cash & Runway", "label": "Cash runway computed correctly", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "CASH_24", "category": "Expenses, Cash & Runway", "label": "Runway length adequate", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "CASH_25", "category": "Expenses, Cash & Runway", "label": "Cash-out date explicit", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "CASH_26", "category": "Expenses, Cash & Runway", "label": "Step costs captured", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "CASH_27", "category": "Expenses, Cash & Runway", "label": "OpEx scales with revenue", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "CASH_28", "category": "Expenses, Cash & Runway", "label": "FX sensitivity modeled", "status": "not_applicable", "evidence": "Auto-gated: geography_gate '['multi-currency']' does not match company profile", "notes": null}, {"id": "CASH_29", "category": "Expenses, Cash & Runway", "label": "Entity-level cash solvent", "status": "not_applicable", "evidence": "Auto-gated: geography_gate '['israel', 'multi-entity']' does not match company profile", "notes": null}, {"id": "CASH_30", "category": "Expenses, Cash & Runway", "label": "Israel statutory costs itemized", "status": "not_applicable", "evidence": "Auto-gated: geography_gate '['israel']' does not match company profile", "notes": null}, {"id": "CASH_31", "category": "Expenses, Cash & Runway", "label": "Government grants modeled", "status": "not_applicable", "evidence": "Auto-gated: geography_gate '['israel']' does not match company profile", "notes": null}, {"id": "CASH_32", "category": "Expenses, Cash & Runway", "label": "VAT/indirect tax cash timing", "status": "not_applicable", "evidence": "Auto-gated: geography_gate '['israel']' does not match company profile", "notes": null}, {"id": "METRIC_33", "category": "Metrics & Efficiency", "label": "KPI summary visible", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "METRIC_34", "category": "Metrics & Efficiency", "label": "Burn multiple tracked", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "METRIC_35", "category": "Metrics & Efficiency", "label": "Benchmark awareness", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "BRIDGE_36", "category": "Fundraising Bridge", "label": "Raise-runway-milestones-next round", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "BRIDGE_37", "category": "Fundraising Bridge", "label": "Next-round milestones identified", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "BRIDGE_38", "category": "Fundraising Bridge", "label": "Dilution/ownership shown", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "SECTOR_39", "category": "Sector-Specific", "label": "Marketplace: two-sided mechanics", "status": "not_applicable", "evidence": "Auto-gated: sector_gate '['marketplace']' does not match company profile", "notes": null}, {"id": "SECTOR_40", "category": "Sector-Specific", "label": "AI: inference costs modeled", "status": "not_applicable", "evidence": "Auto-gated: sector_gate '['ai-native', 'usage-based', 'ai-powered']' does not match company profile", "notes": null}, {"id": "SECTOR_41", "category": "Sector-Specific", "label": "Hardware/deep-tech: milestones + capex", "status": "not_applicable", "evidence": "Auto-gated: sector_gate '['hardware', 'hardware-subscription']' does not match company profile", "notes": null}, {"id": "SECTOR_42", "category": "Sector-Specific", "label": "Usage-based: margin at scale", "status": "not_applicable", "evidence": "Auto-gated: sector_gate '['usage-based']' does not match company profile", "notes": null}, {"id": "SECTOR_43", "category": "Sector-Specific", "label": "Consumer: retention curves", "status": "not_applicable", "evidence": "Auto-gated: sector_gate '['consumer-subscription']' does not match company profile", "notes": null}, {"id": "SECTOR_44", "category": "Sector-Specific", "label": "Deferred revenue", "status": "not_applicable", "evidence": "Auto-gated: sector_gate '['annual-contracts']' does not match company profile", "notes": null}, {"id": "OVERALL_45", "category": "Overall", "label": "5-minute audit possible", "status": "pass", "evidence": "fixture", "notes": null}, {"id": "OVERALL_46", "category": "Overall", "label": "Country-level metrics tracked", "status": "not_applicable", "evidence": "Auto-gated: geography_gate '['multi-market']' does not match company profile", "notes": null}], "summary": {"total": 46, "pass": 34, "fail": 0, "warn": 0, "not_applicable": 12, "score_pct": 100.0, "business_quality_pct": 100.0, "model_maturity_pct": 100.0, "overall_status": "strong", "by_category": {"Structure & Presentation": {"pass": 9, "fail": 0, "warn": 0, "not_applicable": 0}, "Revenue & Unit Economics": {"pass": 10, "fail": 0, "warn": 0, "not_applicable": 0}, "Expenses, Cash & Runway": {"pass": 8, "fail": 0, "warn": 0, "not_applicable": 5}, "Metrics & Efficiency": {"pass": 3, "fail": 0, "warn": 0, "not_applicable": 0}, "Fundraising Bridge": {"pass": 3, "fail": 0, "warn": 0, "not_applicable": 0}, "Sector-Specific": {"pass": 0, "fail": 0, "warn": 0, "not_applicable": 6}, "Overall": {"pass": 1, "fail": 0, "warn": 0, "not_applicable": 1}}, "failed_items": [], "warned_items": []}, "validation": {"status": "valid", "errors": []}, "metadata": {"run_id": "fixture-run"}}
+{
+  "items": [
+    {
+      "id": "STRUCT_01",
+      "category": "Structure & Presentation",
+      "label": "Assumptions isolated on dedicated tab",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "STRUCT_02",
+      "category": "Structure & Presentation",
+      "label": "Tab structure is navigable",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "STRUCT_03",
+      "category": "Structure & Presentation",
+      "label": "Actuals vs. projections separated",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "STRUCT_04",
+      "category": "Structure & Presentation",
+      "label": "Scenario toggles (base/up/down)",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "STRUCT_05",
+      "category": "Structure & Presentation",
+      "label": "Model matches pitch deck",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "STRUCT_06",
+      "category": "Structure & Presentation",
+      "label": "Version/date included",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "STRUCT_07",
+      "category": "Structure & Presentation",
+      "label": "Monthly granularity appropriate to stage",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "STRUCT_08",
+      "category": "Structure & Presentation",
+      "label": "No structural errors",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "STRUCT_09",
+      "category": "Structure & Presentation",
+      "label": "Professional formatting",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "UNIT_10",
+      "category": "Revenue & Unit Economics",
+      "label": "Revenue is bottom-up",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "UNIT_11",
+      "category": "Revenue & Unit Economics",
+      "label": "Churn modeled explicitly",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "UNIT_12",
+      "category": "Revenue & Unit Economics",
+      "label": "Pricing logic explicit",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "UNIT_13",
+      "category": "Revenue & Unit Economics",
+      "label": "Expansion revenue modeled",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "UNIT_14",
+      "category": "Revenue & Unit Economics",
+      "label": "COGS/margin matches model type",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "UNIT_15",
+      "category": "Revenue & Unit Economics",
+      "label": "CAC fully loaded",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "UNIT_16",
+      "category": "Revenue & Unit Economics",
+      "label": "CAC payback computed",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "UNIT_17",
+      "category": "Revenue & Unit Economics",
+      "label": "LTV/CAC shown",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "UNIT_18",
+      "category": "Revenue & Unit Economics",
+      "label": "Sales capacity constrains revenue",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "UNIT_19",
+      "category": "Revenue & Unit Economics",
+      "label": "Conversion rates grounded",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "CASH_20",
+      "category": "Expenses, Cash & Runway",
+      "label": "Headcount plan drives expenses",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "CASH_21",
+      "category": "Expenses, Cash & Runway",
+      "label": "Benefits/tax burden included",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "CASH_22",
+      "category": "Expenses, Cash & Runway",
+      "label": "Working capital modeled",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "CASH_23",
+      "category": "Expenses, Cash & Runway",
+      "label": "Cash runway computed correctly",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "CASH_24",
+      "category": "Expenses, Cash & Runway",
+      "label": "Runway length adequate",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "CASH_25",
+      "category": "Expenses, Cash & Runway",
+      "label": "Cash-out date explicit",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "CASH_26",
+      "category": "Expenses, Cash & Runway",
+      "label": "Step costs captured",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "CASH_27",
+      "category": "Expenses, Cash & Runway",
+      "label": "OpEx scales with revenue",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "CASH_28",
+      "category": "Expenses, Cash & Runway",
+      "label": "FX sensitivity modeled",
+      "status": "not_applicable",
+      "evidence": "Not applicable \u2014 applies to a different geography",
+      "notes": null
+    },
+    {
+      "id": "CASH_29",
+      "category": "Expenses, Cash & Runway",
+      "label": "Entity-level cash solvent",
+      "status": "not_applicable",
+      "evidence": "Not applicable \u2014 applies to a different geography",
+      "notes": null
+    },
+    {
+      "id": "CASH_30",
+      "category": "Expenses, Cash & Runway",
+      "label": "Israel statutory costs itemized",
+      "status": "not_applicable",
+      "evidence": "Not applicable \u2014 applies to a different geography",
+      "notes": null
+    },
+    {
+      "id": "CASH_31",
+      "category": "Expenses, Cash & Runway",
+      "label": "Government grants modeled",
+      "status": "not_applicable",
+      "evidence": "Not applicable \u2014 applies to a different geography",
+      "notes": null
+    },
+    {
+      "id": "CASH_32",
+      "category": "Expenses, Cash & Runway",
+      "label": "VAT/indirect tax cash timing",
+      "status": "not_applicable",
+      "evidence": "Not applicable \u2014 applies to a different geography",
+      "notes": null
+    },
+    {
+      "id": "METRIC_33",
+      "category": "Metrics & Efficiency",
+      "label": "KPI summary visible",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "METRIC_34",
+      "category": "Metrics & Efficiency",
+      "label": "Burn multiple tracked",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "METRIC_35",
+      "category": "Metrics & Efficiency",
+      "label": "Benchmark awareness",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "BRIDGE_36",
+      "category": "Fundraising Bridge",
+      "label": "Raise-runway-milestones-next round",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "BRIDGE_37",
+      "category": "Fundraising Bridge",
+      "label": "Next-round milestones identified",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "BRIDGE_38",
+      "category": "Fundraising Bridge",
+      "label": "Dilution/ownership shown",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "SECTOR_39",
+      "category": "Sector-Specific",
+      "label": "Marketplace: two-sided mechanics",
+      "status": "not_applicable",
+      "evidence": "Not applicable \u2014 applies to a different sector",
+      "notes": null
+    },
+    {
+      "id": "SECTOR_40",
+      "category": "Sector-Specific",
+      "label": "AI: inference costs modeled",
+      "status": "not_applicable",
+      "evidence": "Not applicable \u2014 applies to a different sector",
+      "notes": null
+    },
+    {
+      "id": "SECTOR_41",
+      "category": "Sector-Specific",
+      "label": "Hardware/deep-tech: milestones + capex",
+      "status": "not_applicable",
+      "evidence": "Not applicable \u2014 applies to a different sector",
+      "notes": null
+    },
+    {
+      "id": "SECTOR_42",
+      "category": "Sector-Specific",
+      "label": "Usage-based: margin at scale",
+      "status": "not_applicable",
+      "evidence": "Not applicable \u2014 applies to a different sector",
+      "notes": null
+    },
+    {
+      "id": "SECTOR_43",
+      "category": "Sector-Specific",
+      "label": "Consumer: retention curves",
+      "status": "not_applicable",
+      "evidence": "Not applicable \u2014 applies to a different sector",
+      "notes": null
+    },
+    {
+      "id": "SECTOR_44",
+      "category": "Sector-Specific",
+      "label": "Deferred revenue",
+      "status": "not_applicable",
+      "evidence": "Not applicable \u2014 applies to a different sector",
+      "notes": null
+    },
+    {
+      "id": "OVERALL_45",
+      "category": "Overall",
+      "label": "5-minute audit possible",
+      "status": "pass",
+      "evidence": "fixture",
+      "notes": null
+    },
+    {
+      "id": "OVERALL_46",
+      "category": "Overall",
+      "label": "Country-level metrics tracked",
+      "status": "not_applicable",
+      "evidence": "Not applicable \u2014 applies to a different geography",
+      "notes": null
+    }
+  ],
+  "summary": {
+    "total": 46,
+    "pass": 34,
+    "fail": 0,
+    "warn": 0,
+    "not_applicable": 12,
+    "score_pct": 100.0,
+    "business_quality_pct": 100.0,
+    "model_maturity_pct": 100.0,
+    "overall_status": "strong",
+    "by_category": {
+      "Structure & Presentation": {
+        "pass": 9,
+        "fail": 0,
+        "warn": 0,
+        "not_applicable": 0
+      },
+      "Revenue & Unit Economics": {
+        "pass": 10,
+        "fail": 0,
+        "warn": 0,
+        "not_applicable": 0
+      },
+      "Expenses, Cash & Runway": {
+        "pass": 8,
+        "fail": 0,
+        "warn": 0,
+        "not_applicable": 5
+      },
+      "Metrics & Efficiency": {
+        "pass": 3,
+        "fail": 0,
+        "warn": 0,
+        "not_applicable": 0
+      },
+      "Fundraising Bridge": {
+        "pass": 3,
+        "fail": 0,
+        "warn": 0,
+        "not_applicable": 0
+      },
+      "Sector-Specific": {
+        "pass": 0,
+        "fail": 0,
+        "warn": 0,
+        "not_applicable": 6
+      },
+      "Overall": {
+        "pass": 1,
+        "fail": 0,
+        "warn": 0,
+        "not_applicable": 1
+      }
+    },
+    "failed_items": [],
+    "warned_items": []
+  },
+  "validation": {
+    "status": "valid",
+    "errors": []
+  },
+  "metadata": {
+    "run_id": "fixture-run"
+  }
+}

@@ -694,6 +694,18 @@ def _run_compose(artifact_dir: str, extra_args: list[str] | None = None) -> tupl
     return run_script("compose_report.py", args)
 
 
+def _all_artifacts() -> dict[str, Any]:
+    """The canonical complete artifact set, for tests that vary one artifact."""
+    return {
+        "inputs.json": _VALID_INPUTS,
+        "methodology.json": _VALID_METHODOLOGY,
+        "validation.json": _VALID_VALIDATION,
+        "sizing.json": _VALID_SIZING,
+        "sensitivity.json": _VALID_SENSITIVITY,
+        "checklist.json": _VALID_CHECKLIST,
+    }
+
+
 def test_compose_complete_set() -> None:
     """All 6 artifacts valid -> no missing artifacts, report non-empty."""
     d = _make_artifact_dir(
@@ -4802,3 +4814,55 @@ def test_artifact_schemas_documents_gtm_and_projections_fields() -> None:
     schemas_md = _read(MARKET_SIZING_ARTIFACT_SCHEMAS_MD)
     assert "gtm_evidence_notes" in schemas_md
     assert "projections_alignment_notes" in schemas_md
+
+
+# ---------------------------------------------------------------------------
+# Source strength and per-assumption attribution
+#
+# The sub-agent is asked to judge each source's tier and segment match, and to attribute each
+# assumption to a source. All four fields were collected and none reached the report, leaving the
+# founder unable to weigh a figure they are being asked to defend.
+# ---------------------------------------------------------------------------
+
+
+def test_compose_renders_source_quality_tier_and_segment_match() -> None:
+    validation = json.loads(json.dumps(_VALID_VALIDATION))
+    validation["sources"][0]["quality_tier"] = "analyst_firm"
+    validation["sources"][0]["segment_match"] = "adjacent"
+    arts = dict(_all_artifacts())
+    arts["validation.json"] = validation
+    d = _make_artifact_dir(arts)
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0, stderr
+    assert data is not None
+    md = data["report_markdown"]
+    assert "Analyst Firm" in md, "source quality tier did not reach the report"
+    assert "Adjacent segment match" in md, "segment match did not reach the report"
+    assert "analyst_firm" not in md, "the raw token leaked instead of being humanized"
+
+
+def test_compose_renders_assumption_source_attribution() -> None:
+    validation = json.loads(json.dumps(_VALID_VALIDATION))
+    validation["assumptions"][0]["source_title"] = "Census SMB Table"
+    validation["assumptions"][0]["source_url"] = "https://example.com/census"
+    arts = dict(_all_artifacts())
+    arts["validation.json"] = validation
+    d = _make_artifact_dir(arts)
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0, stderr
+    assert data is not None
+    md = data["report_markdown"]
+    assert "[Census SMB Table](https://example.com/census)" in md, (
+        "a sourced assumption's attribution did not reach the report — 'Sourced' without the source is "
+        "a claim the founder cannot check"
+    )
+
+
+def test_compose_omits_source_strength_when_absent() -> None:
+    """Absent fields must not render empty parentheses or stray separators."""
+    d = _make_artifact_dir(_all_artifacts())
+    rc, data, stderr = _run_compose(d)
+    assert rc == 0, stderr
+    assert data is not None
+    assert ", )" not in data["report_markdown"]
+    assert " — [" not in data["report_markdown"].split("## Sources Used")[0]

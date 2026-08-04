@@ -11,6 +11,8 @@ import sys
 import tempfile
 from typing import Any
 
+import pytest
+
 _SCRIPTS = os.path.join(
     os.path.dirname(__file__),
     "..",
@@ -1007,21 +1009,76 @@ def test_metadata_is_excluded_from_the_fingerprint() -> None:
     assert _fingerprint_of(base) == _fingerprint_of(with_meta)
 
 
-def test_producers_record_the_fingerprint_end_to_end() -> None:
-    """The stamp must survive a real producer run, not just the helper's unit behaviour."""
+def _shared_inputs() -> dict[str, Any]:
     import test_financial_model_review as t
 
-    inputs = t._VALID_INPUTS if hasattr(t, "_VALID_INPUTS") else None
-    if inputs is None:
-        import pytest
+    assert hasattr(t, "_VALID_INPUTS"), "shared inputs fixture went missing"
+    return dict(t._VALID_INPUTS)
 
-        pytest.skip("no shared inputs fixture available")
+
+@pytest.mark.parametrize("producer", ["runway.py", "unit_economics.py"])
+def test_direct_pipe_producers_record_the_fingerprint_end_to_end(producer: str) -> None:
+    """The stamp must survive a real producer run, not just the helper's unit behaviour.
+
+    Both of these consume inputs.json verbatim, so the payload IS the document to fingerprint.
+    """
+    inputs = _shared_inputs()
     result = subprocess.run(
-        [sys.executable, os.path.join(_SCRIPTS, "runway.py")],
+        [sys.executable, os.path.join(_SCRIPTS, producer)],
         input=json.dumps(inputs),
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, result.stderr
     produced = json.loads(result.stdout)
+    assert produced.get("graded_against", {}).get("inputs.json") == _fingerprint_of(inputs), (
+        f"{producer} did not record the fingerprint of the inputs it computed from"
+    )
+
+
+def test_checklist_records_the_fingerprint_of_its_embedded_inputs() -> None:
+    """checklist.py receives the inputs under an `inputs` key rather than as the whole payload."""
+    inputs = _shared_inputs()
+    payload = {"items": [], "inputs": inputs}
+    result = subprocess.run(
+        [sys.executable, os.path.join(_SCRIPTS, "checklist.py")],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    produced = json.loads(result.stdout)
     assert produced.get("graded_against", {}).get("inputs.json") == _fingerprint_of(inputs)
+
+
+def test_checklist_records_null_when_it_cannot_see_the_inputs() -> None:
+    """`inputs` is optional in that payload; a null must be recorded rather than the key omitted.
+
+    Omitting it is indistinguishable from a producer that predates fingerprints, which the verifier
+    passes over silently.
+    """
+    result = subprocess.run(
+        [sys.executable, os.path.join(_SCRIPTS, "checklist.py")],
+        input=json.dumps({"items": []}),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    graded = json.loads(result.stdout).get("graded_against", {})
+    assert "inputs.json" in graded
+    assert graded["inputs.json"] is None
+
+
+def test_every_fingerprinting_producer_is_covered_by_this_module() -> None:
+    """A new producer that stamps must gain a test here, or its coverage is silently absent."""
+    stampers = set()
+    for py in os.listdir(_SCRIPTS):
+        if not py.endswith(".py") or py.startswith("_"):
+            continue
+        with open(os.path.join(_SCRIPTS, py), encoding="utf-8") as f:
+            if "_fingerprint.stamp(" in f.read():
+                stampers.add(py)
+    assert stampers == {"runway.py", "unit_economics.py", "checklist.py"}, (
+        f"the set of fingerprint-stamping producers changed: {sorted(stampers)}. Add the new one to the "
+        f"end-to-end tests above."
+    )

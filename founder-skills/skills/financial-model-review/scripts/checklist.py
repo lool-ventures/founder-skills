@@ -626,19 +626,29 @@ def _gate_matches(
     return True
 
 
+# Founder-facing wording for each gate. The description reaches report.md and report.html as the
+# evidence line on a skipped item, so it must read as a reason and not as our field name.
+_GATE_LABELS = {
+    "stage_gate": "applies at a different stage",
+    "geography_gate": "applies to a different geography",
+    "sector_gate": "applies to a different sector",
+    "model_format_gate": "needs a spreadsheet model",
+}
+
+
 def _item_applicable(meta: dict[str, Any], company: dict[str, Any]) -> tuple[bool, str]:
     """Check all four gates for an item. Returns (applicable, gate_description)."""
     for gate_type in ("stage_gate", "geography_gate", "sector_gate"):
         gate_value = meta.get(gate_type, "all")
         if not _gate_matches(gate_value, gate_type, company):
-            return False, f"{gate_type} '{gate_value}'"
+            return False, _GATE_LABELS[gate_type]
     # Model format gate: items gated to "spreadsheet" are N/A for deck/conversational.
     # "partial" = incomplete spreadsheet — structure is still assessable, so it evaluates
     # all 46 items just like "spreadsheet". Only deck/conversational remain fully gated.
     model_format = company.get("model_format", "spreadsheet")
     mf_gate = meta.get("model_format_gate", "all")
     if mf_gate == "spreadsheet" and model_format in ("deck", "conversational"):
-        return False, f"model_format_gate '{mf_gate}' does not match format '{model_format}'"
+        return False, _GATE_LABELS["model_format_gate"]
     return True, ""
 
 
@@ -731,7 +741,7 @@ def validate_checklist(
             is_applicable, gate_desc = _item_applicable(meta, norm_company)
             if not is_applicable:
                 status = "not_applicable"
-                evidence = f"Auto-gated: {gate_desc} does not match company profile"
+                evidence = f"Not applicable — {gate_desc}"
 
         # Special-case: SECTOR_40 (AI inference costs) should apply when
         # expenses.cogs contains AI-related cost keys, even if the sector

@@ -1213,26 +1213,6 @@ def test_explore_checklist_summary_self_contained() -> None:
         assert not url.startswith("https://"), f"External HTTPS URL in attribute: {url}"
 
 
-def test_explore_every_embedded_data_key_is_read_by_the_script() -> None:
-    """Every top-level DATA key must be referenced at least once in the emitted script.
-
-    Measured: this explorer embedded `checklist` and its JavaScript never referenced
-    `DATA.checklist`, so the review score and its failing items were paid for in payload and
-    rendered nowhere. The sibling competitive-positioning explorer had the same defect across its
-    entire scored layer. An unread key is a founder-facing feature that silently does not exist.
-
-    Both explorers access their payload with dotted `DATA.key` only (verified — no bracket
-    notation, no destructuring), so a plain reference scan is sound; if that changes this test
-    fails loudly rather than passing silently, which is the correct direction.
-    """
-    d = _make_artifact_dir()
-    rc, stdout, _stderr = run_script_raw("explore.py", ["--dir", d])
-    assert rc == 0
-    match = re.search(r"const\s+DATA\s*=\s*(\{.*?\});", stdout, re.DOTALL)
-    assert match, "could not locate the embedded DATA object in the generated explorer"
-    payload = json.loads(match.group(1))
-    assert len(payload) >= 5, f"DATA payload parsed as only {len(payload)} key(s) — the scan would be vacuous"
-    unread = sorted(k for k in payload if f"DATA.{k}" not in stdout)
-    assert not unread, (
-        f"explore.py embeds DATA key(s) its script never reads: {unread}. Either render them or stop embedding them."
-    )
+# Dead-payload coverage for this explorer lives in test_dead_payload.py, which scans every
+# embedder in one place and distinguishes 'unread' from 'unverifiable'. The scan that used to be
+# here matched dotted access only, so a computed-name read would have read as a dead key.

@@ -1244,7 +1244,18 @@ def _section_assumptions(validation: dict[str, Any] | None) -> str:
             formatted_val = _fmt_number(value)
         else:
             formatted_val = str(value)
-        lines.append(f"- **{display_name}** = {formatted_val} ({cat_display})")
+        line = f"- **{display_name}** = {formatted_val} ({cat_display})"
+        # Per-assumption attribution. "Sourced" without the source is a claim the founder cannot check,
+        # and the sub-agent is asked for exactly this pair on each assumption.
+        src_title = str(a.get("source_title", "") or "").strip()
+        src_url = str(a.get("source_url", "") or "").strip()
+        if src_title and src_url:
+            line += f" — [{src_title}]({src_url})"
+        elif src_title:
+            line += f" — {src_title}"
+        elif src_url:
+            line += f" — {src_url}"
+        lines.append(line)
     return "\n".join(lines) + "\n"
 
 
@@ -1460,6 +1471,15 @@ def _section_sources(validation: dict[str, Any] | None) -> str:
             parts.append(publisher)
         if date:
             parts.append(f"accessed {date}")
+        # Source STRENGTH, not just identity. An analyst-firm figure for the exact segment and a blog
+        # post about an adjacent one support a number very differently, and the sub-agent is asked to
+        # judge both — so withholding them leaves the founder unable to weigh the sizing.
+        tier = str(s.get("quality_tier", "") or "").strip()
+        if tier:
+            parts.append(_humanize_param(tier))
+        match = str(s.get("segment_match", "") or "").strip()
+        if match:
+            parts.append(f"{_humanize_param(match)} segment match")
         line = f"- {parts[0]}"
         meta = [p for p in parts[1:]]
         if meta:

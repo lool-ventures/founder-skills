@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **competitive-positioning:** a competitor's researched pricing model was never shown, and the
   competitor-set verdicts showed neither which dimensions overlapped nor the verdict's confidence.
 - **cap-table:** the explorer embedded three values its script never read.
+- **financial-model-review:** the coaching template asks for investor talking points; they were
+  embedded in the explorer and rendered nowhere.
+- **financial-model-review:** a skipped checklist item explained itself by naming the internal gate
+  field (`Auto-gated: geography_gate '[...]'`); it now states the reason.
+- **market-sizing:** each source's quality tier and segment match, and each assumption's source
+  attribution, were collected and never shown — leaving no way to weigh a figure being defended.
 - **financial-model-review:** an output computed before the founder's corrections were applied could
   not be distinguished from one computed after; each output now records a fingerprint of the inputs it
   used, and `verify_review.py` compares it against the inputs as they stand.

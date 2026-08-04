@@ -834,7 +834,9 @@ def test_checklist_gating_us_saas_company() -> None:
     for item in data["items"]:
         if item["id"] in gated_ids:
             assert item["status"] == "not_applicable", f"{item['id']} should be auto-gated but was {item['status']}"
-            assert "Auto-gated" in item["evidence"]
+            # Founder-facing wording: the evidence line reaches report.md and report.html, so it
+            # states a reason rather than naming the gate field.
+            assert item["evidence"].startswith("Not applicable — ")
     s40 = next(i for i in data["items"] if i["id"] == "SECTOR_40")
     assert s40["status"] == "not_applicable"
     assert data["summary"]["not_applicable"] >= 11
@@ -1169,7 +1171,7 @@ def test_checklist_dispatch_shape_propagates_run_id_and_gates() -> None:
     gated = [
         i
         for i in data["items"]
-        if i["status"] == "not_applicable" and str(i.get("evidence", "")).startswith("Auto-gated")
+        if i["status"] == "not_applicable" and str(i.get("evidence", "")).startswith("Not applicable — ")
     ]
     assert gated, "company block present but no profile auto-gating engaged"
 

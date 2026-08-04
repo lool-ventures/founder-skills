@@ -550,8 +550,15 @@ def _generate_html(data: dict[str, Any]) -> str:
     stage = _esc(data.get("company", {}).get("stage", ""))
     sector = _esc(data.get("company", {}).get("sector", ""))
     headline = ""
-    if data.get("commentary") and data["commentary"].get("headline"):
-        headline = _esc(data["commentary"]["headline"])
+    talking_points: list[str] = []
+    if data.get("commentary"):
+        if data["commentary"].get("headline"):
+            headline = _esc(data["commentary"]["headline"])
+        # The coaching template asks for sentences the founder can say out loud in a fundraise
+        # conversation. They were embedded in the payload and rendered nowhere.
+        raw_points = data["commentary"].get("investor_talking_points")
+        if isinstance(raw_points, list):
+            talking_points = [_esc(str(p)) for p in raw_points if str(p).strip()]
 
     # Build tab bar
     tabs_html = ""
@@ -590,6 +597,7 @@ def _generate_html(data: dict[str, Any]) -> str:
         stage=stage,
         sector=sector,
         headline=headline,
+        talking_points=talking_points,
         tabs_html=tabs_html,
         disabled_reasons_html=disabled_reasons_html,
         enabled_count=enabled_count,
@@ -606,6 +614,7 @@ def _build_html_string(
     stage: str,
     sector: str,
     headline: str,
+    talking_points: list[str],
     tabs_html: str,
     disabled_reasons_html: str,
     enabled_count: int,
@@ -636,6 +645,10 @@ def _build_html_string(
         "  color: var(--lool-blue); font-weight: 400;",
         "}",
         ".header .meta { color: var(--lool-mute); font-size: 0.875rem; }",
+        ".talking-points {margin-top:0.6rem;font-size:0.9rem;}",
+        ".talking-points .tp-label {font-weight:600;opacity:0.75;margin-bottom:0.2rem;}",
+        ".talking-points ul {margin:0;padding-left:1.1rem;}",
+        ".talking-points li {margin:0.15rem 0;}",
         ".header .headline {",
         "  margin-top: 0.75rem; color: var(--lool-ink);",
         "  font-size: 1rem; line-height: 1.5;",
@@ -751,6 +764,11 @@ def _build_html_string(
     css = _theme.brand_css() + "\n" + "\n".join(css_lines)
 
     hl_div = "<div class='headline'>" + headline + "</div>" if headline else ""
+    if talking_points:
+        hl_div += (
+            "<div class='talking-points'><div class='tp-label'>Talking points for investor "
+            "conversations</div><ul>" + "".join(f"<li>{p}</li>" for p in talking_points) + "</ul></div>"
+        )
 
     # Lens panels — each on multiple lines for readability
     panels = []
