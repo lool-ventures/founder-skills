@@ -46,6 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **competitive-positioning:** report text now renders internal enum and field names as English
+  ("switching costs evidence source" rather than `switching_costs evidence_source`). Stable
+  identifiers a founder can cross-reference against their own documents — a SAFE's id, for instance —
+  are deliberately left unchanged.
 - **competitive-positioning:** warning text now names competitors by display name rather than internal
   slug.
 - **competitive-positioning:** the trade-off trigger for the positioning reality check now fires on a

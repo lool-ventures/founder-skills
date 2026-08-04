@@ -1,0 +1,117 @@
+"""Tests for the fleet's shared founder-facing text policy.
+
+The policy exists because the same defect was found in four skills independently, and because the
+naive rule ("no internal tokens") is WRONG for one of the four token types: it would delete
+`safe_001` and cost a founder the ability to cross-reference their own SAFE. Each test below pins one
+type's behaviour, so a change to the policy must break a test rather than silently re-render every
+report in the fleet.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "founder-skills" / "scripts"))
+
+import _founder_text as ft  # noqa: E402
+
+
+# --- type 1: private enums -> humanize ---------------------------------------
+
+
+def test_private_enums_are_humanized() -> None:
+    assert ft.humanize_token("partially_supported") == "Partially supported"
+    assert ft.humanize_token("more_diligence") == "More diligence"
+
+
+def test_enums_whose_plain_form_reads_wrong_have_overrides() -> None:
+    """`pass` is the trap 0.6.0 already fixed semantically: a bare 'Pass' reads as approval and means
+    the opposite."""
+    assert ft.humanize_token("pass") == "Decline"
+    assert ft.humanize_token("hard_pass") == "Decline — hard pass"
+    assert ft.humanize_token("purpose_traction") == "Purpose / traction"
+
+
+# --- type 2: field names -> humanize ----------------------------------------
+
+
+def test_field_names_are_humanized() -> None:
+    assert ft.humanize_token("evidence_source") == "Evidence source"
+    assert ft.humanize_token("switching_costs") == "Switching costs"
+
+
+def test_acronyms_keep_their_casing() -> None:
+    assert ft.humanize_token("safe_price") == "SAFE price"
+    assert ft.humanize_token("target_arpu") == "Target ARPU"
+
+
+# --- type 3: stable public identifiers -> KEEP ------------------------------
+
+
+def test_identifiers_are_never_rewritten() -> None:
+    """This is the case the naive 'no internal tokens' rule gets wrong. `safe_001` is traceability:
+    the founder matches it against their own instrument. Humanizing it harms them."""
+    for ident in ("safe_001", "note_002", "holder_014"):
+        assert ft.is_verbatim_token(ident), ident
+        assert ft.humanize_token(ident) == ident
+
+
+def test_identifiers_survive_substitution_in_prose() -> None:
+    line = "- safe_001: 5.0% cap-implied (safe_price $0.4545)"
+    out = ft.substitute(line)
+    assert "safe_001" in out, "the identifier must survive"
+    assert "SAFE price" in out, "the field name beside it must still be humanized"
+
+
+# --- type 4: diagnostic codes -> KEEP ---------------------------------------
+
+
+def test_declared_diagnostic_codes_are_kept() -> None:
+    assert ft.is_verbatim_token("ai_claimed_unverified")
+    assert ft.substitute("shows no AI-core evidence (ai_claimed_unverified)").endswith("(ai_claimed_unverified)")
+
+
+def test_an_undeclared_code_is_treated_as_an_enum() -> None:
+    """The safe default: a humanized diagnostic is merely less greppable, while an unrendered enum is
+    unreadable. So an unlisted code is humanized rather than passed through."""
+    assert not ft.is_verbatim_token("some_undeclared_code")
+    assert ft.humanize_token("some_undeclared_code") == "Some undeclared code"
+
+
+# --- the detector ------------------------------------------------------------
+
+
+def test_scan_finds_tokens_regardless_of_markdown_shape() -> None:
+    """The reason this matches TOKENS, not markdown: an earlier regex matched `**Label:** value` and
+    missed `**Label**: value`; the corrected one missed the first. Two regexes, two different single
+    hits, neither catching both."""
+    for line in (
+        "**Consensus Verdict:** more_diligence",
+        "- **Serviceable %**: partially_supported (1 source)",
+        "| SOM | $141.8M | Bottom-up | agent_estimate |",
+    ):
+        assert ft.scan(line)["enums"], f"missed: {line}"
+
+
+def test_scan_separates_filenames_from_enums() -> None:
+    """A filename is a different fix: drop the reference, do not rename it."""
+    found = ft.scan("Optional artifact missing: model_data.json")
+    assert found["filenames"] == ["model_data.json"]
+    assert "model_data" not in found["enums"], "a filename must not double-report as an enum"
+
+
+def test_scan_is_clean_on_already_humanized_text() -> None:
+    assert ft.scan("- **Verdict:** Partially holds") == {"enums": [], "filenames": []}
+
+
+def test_substitute_does_not_rewrite_filenames() -> None:
+    out = ft.substitute("see model_data.json")
+    assert "model_data.json" in out
+
+
+def test_substitute_handles_a_token_that_prefixes_another() -> None:
+    """Longest-first ordering: `evidence_source` must not be half-replaced by `evidence`."""
+    out = ft.substitute("evidence_source and evidence_source_detail differ")
+    assert "evidence source and evidence source detail differ" == out

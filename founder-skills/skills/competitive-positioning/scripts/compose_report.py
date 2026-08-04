@@ -58,6 +58,7 @@ WARNING_SEVERITY: dict[str, str] = {
     "INCOMPLETE_SCORING": "medium",
     "RESEARCHED_WITHOUT_SOURCE": "medium",
     "NO_RECENT_DEVELOPMENTS": "medium",
+    "FOUNDER_TEXT_TOKEN": "medium",
     # A dated competitor move that fell outside the recency window. Dropped from
     # recent_developments and preserved under out_of_window_developments by
     # validate_landscape.py — reported so the exclusion is visible, never silent.
@@ -96,6 +97,7 @@ WARNING_LABELS: dict[str, str] = {
     "INCOMPLETE_SCORING": "Incomplete Scoring",
     "RESEARCHED_WITHOUT_SOURCE": "Researched Without Source",
     "NO_RECENT_DEVELOPMENTS": "No Recent Developments",
+    "FOUNDER_TEXT_TOKEN": "Internal Token In Report",
     "STALE_DEVELOPMENT": "Stale Development",
     "RATIONALE_MISSING": "Rationale Missing",
     "CHECKLIST_STALE_VS_POSITIONING": "Checklist Stale vs Positioning",
@@ -152,6 +154,26 @@ def _as_list(value: Any) -> list[Any]:
 def _as_dict(value: Any) -> dict[str, Any]:
     """Coerce to dict — returns {} if not a dict."""
     return value if isinstance(value, dict) else {}
+
+
+def _founder_text_policy() -> Any:
+    """Import the fleet's shared founder-text policy from `founder-skills/scripts/`.
+
+    Parent-relative rather than duplicated: this file lives at
+    `skills/<skill>/scripts/compose_report.py`, so `parents[2]/scripts` is the shared dir. Returns
+    None if unavailable, because a missing policy module must never block a report — the scan is a
+    warning, not a gate.
+    """
+    try:
+        shared = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts")
+        shared = os.path.normpath(shared)
+        if shared not in sys.path:
+            sys.path.insert(0, shared)
+        import _founder_text  # type: ignore[import-not-found]
+
+        return _founder_text
+    except ImportError:
+        return None
 
 
 def _competitor_names(landscape: dict[str, Any] | None) -> dict[str, str]:
@@ -1646,6 +1668,36 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     warnings_section = _section_warnings(warnings, name_by_slug)
     if warnings_section:
         report_markdown += "\n" + warnings_section
+
+    # --- founder-text policy: substitute, then scan what remains --------------------------------
+    # MUST run after the Warnings section is spliced in. compose assembles the body first and appends
+    # warnings last (so the marker prescan sees only body content), and the warnings are exactly where
+    # the internal tokens live — producer messages naming a field. A first attempt hooked in before
+    # this splice and silently substituted nothing; the scan then reported a clean body while 21
+    # tokens sat in the section appended two lines later.
+    #
+    # It runs HERE, on the assembled markdown, rather than in CI over fixtures: a fixture is
+    # schema-correct by construction, so a fixture-only scan answers "does the renderer behave on good
+    # input" — not the question any measured defect lived in. This is the string the founder reads.
+    _ft = _founder_text_policy()
+    if _ft is not None:
+        report_markdown = _ft.substitute(report_markdown)
+        found = _ft.scan(report_markdown)
+        for token in found["enums"]:
+            warnings.append(
+                _warn(
+                    "FOUNDER_TEXT_TOKEN",
+                    f"the report contains the internal token '{token}' — a founder cannot act on it; "
+                    f"render it through the shared founder-text policy or stop emitting it",
+                )
+            )
+        for name in found["filenames"]:
+            warnings.append(
+                _warn(
+                    "FOUNDER_TEXT_TOKEN",
+                    f"the report names the internal file '{name}' — drop the reference rather than renaming it",
+                )
+            )
 
     report_markdown += (
         f"\n\n{marker}\n\n---\n"
