@@ -188,3 +188,50 @@ def test_scan_honours_extra_keep_so_a_kept_token_is_not_warned_about() -> None:
     assert ft.scan(text, extra_keep=keep)["enums"] == []
     # ...and without the keep-set it IS reported, so the test is not vacuous.
     assert ft.scan(text)["enums"] == ["structural_only"]
+
+
+# ---------------------------------------------------------------------------
+# identifier_values is cap-table-only
+# ---------------------------------------------------------------------------
+
+
+def test_identifier_values_does_not_harvest_map_keys_by_default() -> None:
+    """A metrics map is keyed by FIELD NAME, not by id; keeping those leaves our vocabulary in place."""
+    doc = {"metrics": {"gross_margin": {"value": 0.75}, "cac_payback": {"value": 9}}}
+    assert ft.identifier_values(doc) == frozenset()
+    assert "gross_margin" in ft.identifier_values(doc, include_map_keys=True)
+
+
+def test_an_id_field_holding_a_field_name_is_still_harvested_which_is_why_callers_must_opt_in() -> None:
+    """Documents the hazard rather than pretending the helper can tell the difference.
+
+    financial-model-review names a metric with `id`. The helper cannot distinguish that from a
+    traceability handle, so the decision belongs to the caller: only cap-table uses it.
+    """
+    fmr_shaped = {"metrics": [{"id": "gross_margin", "value": 0.75}]}
+    assert "gross_margin" in ft.identifier_values(fmr_shaped)
+
+
+def test_keeping_a_token_also_silences_the_scan() -> None:
+    """Why over-keeping is not the safe direction: the warning disappears with the substitution."""
+    keep = frozenset({"gross_margin"})
+    text = "ARPU $500 x gross_margin 0.75"
+    assert ft.substitute(text, extra_keep=keep) == text
+    assert ft.scan(text, extra_keep=keep)["enums"] == []
+    assert ft.scan(text)["enums"] == ["gross_margin"]
+
+
+# ---------------------------------------------------------------------------
+# Internal vs founder-supplied filenames
+# ---------------------------------------------------------------------------
+
+
+def test_a_founder_supplied_filename_is_not_reported() -> None:
+    """The founder's own upload is legitimately nameable; flagging it trains readers to ignore warnings."""
+    text = "Source file is named 'sample_model.xlsx' — a generic filename that suggests a template."
+    assert ft.scan(text)["filenames"] == []
+
+
+def test_our_own_artifact_filenames_are_still_reported() -> None:
+    assert ft.scan("inputs.json reports actuals separated: false")["filenames"] == ["inputs.json"]
+    assert ft.scan("run explore.py first")["filenames"] == ["explore.py"]

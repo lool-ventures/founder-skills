@@ -1753,12 +1753,13 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # live. Hooking in before the warnings splice substitutes nothing and reports a clean body.
     _ft = _founder_text_policy()
     if _ft is not None:
-        # Identifier keep-set derived from the DATA, not hand-listed: an id present in the artifacts
-        # is an id whatever its shape, and rewriting one makes the markdown disagree with the JSON
-        # about what a thing is called (cap-table's `safe_conv` is the case that proved this).
-        _keep = _ft.identifier_values(artifacts)
-        report_markdown = _ft.substitute(report_markdown, extra_keep=_keep)
-        _found = _ft.scan(report_markdown, extra_keep=_keep)
+        # No data-derived keep-set here. `identifier_values` is cap-table-only by design: this skill
+        # uses `id` for a metric's NAME (`unit_economics.metrics[].id == "gross_margin"`), which is our
+        # vocabulary and must be humanized, not a handle the founder cross-references. Keeping it left
+        # "ARPU $500 x gross_margin 0.75" in a delivered report AND suppressed the warning, since the
+        # scan honours the same keep-set.
+        report_markdown = _ft.substitute(report_markdown)
+        _found = _ft.scan(report_markdown)
         for _tok in _found["enums"]:
             warnings.append(
                 _warn(

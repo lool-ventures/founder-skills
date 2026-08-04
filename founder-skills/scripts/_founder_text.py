@@ -60,7 +60,7 @@ def is_verbatim_token(token: str) -> bool:
 _ID_KEY_SUFFIXES = ("_id", "_ids", "_slug", "_slugs")
 
 
-def identifier_values(obj: object, *, _depth: int = 0) -> frozenset[str]:
+def identifier_values(obj: object, *, include_map_keys: bool = False, _depth: int = 0) -> frozenset[str]:
     """Collect identifier values out of a loaded artifact tree, for use as `extra_keep`.
 
     `_IDENTIFIER_RE` only recognises the `<prefix>_<digits>` form (`safe_001`), and plenty of real
@@ -70,6 +70,17 @@ def identifier_values(obj: object, *, _depth: int = 0) -> frozenset[str]:
 
     Derived from the DATA rather than hand-maintained, so it holds as new scenarios and instruments
     appear: an id present in the artifacts is an id, whatever its shape.
+
+    CAP-TABLE ONLY. Do not call this from another skill's compose. An `id` field does not universally
+    hold a traceability handle: financial-model-review names a METRIC with it
+    (`unit_economics.metrics[].id == "gross_margin"`), and keeping that leaves our vocabulary in the
+    founder's report while also silencing the warning, because `scan` honours the same keep-set. Only
+    reach for this where ids are genuinely handles the founder matches against their own documents.
+
+    `include_map_keys` is OFF by default and should stay off unless a skill keys collections by id.
+    Harvesting the keys of every dict-of-dicts is too broad to be safe generally: a metrics map like
+    `{"gross_margin": {...}, "cac_payback": {...}}` is keyed by FIELD NAME, not by id, and keeping those
+    leaves real tokens raw in the report. Only cap-table needs it (`per_safe: {safe_conv: {...}}`).
     """
     keep: set[str] = set()
     if _depth > 12:  # artifact trees are shallow; this only guards a pathological cycle-free depth
@@ -81,9 +92,10 @@ def identifier_values(obj: object, *, _depth: int = 0) -> frozenset[str]:
         #
         # Erring toward KEEPING is deliberate: over-keeping leaves a token raw, which the fleet ratchet
         # catches, while under-keeping rewrites an identifier and nothing catches it.
-        values = list(obj.values())
-        if values and all(isinstance(v, dict) for v in values):
-            keep.update(k for k in obj if isinstance(k, str))
+        if include_map_keys:
+            values = list(obj.values())
+            if values and all(isinstance(v, dict) for v in values):
+                keep.update(k for k in obj if isinstance(k, str))
         for key, value in obj.items():
             is_id_key = isinstance(key, str) and (key == "id" or key.endswith(_ID_KEY_SUFFIXES))
             if is_id_key:
@@ -91,10 +103,10 @@ def identifier_values(obj: object, *, _depth: int = 0) -> frozenset[str]:
                     keep.add(value)
                 elif isinstance(value, list):
                     keep.update(v for v in value if isinstance(v, str))
-            keep |= identifier_values(value, _depth=_depth + 1)
+            keep |= identifier_values(value, include_map_keys=include_map_keys, _depth=_depth + 1)
     elif isinstance(obj, list):
         for item in obj:
-            keep |= identifier_values(item, _depth=_depth + 1)
+            keep |= identifier_values(item, include_map_keys=include_map_keys, _depth=_depth + 1)
     return frozenset(keep)
 
 
@@ -202,9 +214,52 @@ def humanize_token(token: str, *, capitalize: bool = True) -> str:
 # so `(?!\.\w)` excludes `foo_bar.baz` while still matching a token that merely ends a sentence.
 _CANDIDATE_RE = re.compile(r"(?<![\w.])[a-z][a-z0-9]*(?:_[a-z][a-z0-9]*)+(?!\w)(?!\.\w)")
 
-# Substrings whose presence means the match is a filename or path, reported separately: a founder
-# cannot use `model_data.json` either, but the fix is different (drop the reference, not rename it).
+# File-shaped tokens. Used to strip filenames before enum matching so `model_data.json` is not also
+# reported as the enum `model_data`.
 _FILENAME_RE = re.compile(r"\b[a-z][a-z0-9_]*\.(?:json|py|md|html|xlsx|csv)\b")
+
+# OUR artifact and script filenames — the only file-shaped tokens a founder cannot act on. A founder's
+# OWN uploaded filename is legitimately founder-facing ("the file is named sample_model.xlsx, which
+# looks like a template") and must not be reported: flagging it trains the reader to ignore the warning.
+_INTERNAL_FILE_STEMS = frozenset(
+    {
+        "inputs",
+        "corrected_inputs",
+        "model_data",
+        "extraction_corrections",
+        "extraction_validation",
+        "checklist",
+        "unit_economics",
+        "runway",
+        "report",
+        "commentary",
+        "coaching_payload",
+        "landscape",
+        "positioning",
+        "positioning_scores",
+        "moats",
+        "competitor_verification",
+        "sizing",
+        "methodology",
+        "sensitivity",
+        "validation",
+        "cap_state",
+        "scenarios",
+        "instruments",
+        "rule_audit",
+        "sweep",
+        "startup_profile",
+        "fund_profile",
+        "score_dimensions",
+        "deck_inventory",
+        "slide_reviews",
+    }
+)
+
+
+def _is_internal_file(token: str) -> bool:
+    stem, _, ext = token.rpartition(".")
+    return stem in _INTERNAL_FILE_STEMS or ext == "py"
 
 
 def scan(text: str, *, extra_keep: frozenset[str] | None = None) -> dict[str, list[str]]:
@@ -221,7 +276,7 @@ def scan(text: str, *, extra_keep: frozenset[str] | None = None) -> dict[str, li
     not survive the fleet's differing report dialects (`**Label**: value` and others).
     """
     keep = (extra_keep or frozenset()) | DIAGNOSTIC_CODES
-    filenames = sorted({m.group(0) for m in _FILENAME_RE.finditer(text)})
+    filenames = sorted({m.group(0) for m in _FILENAME_RE.finditer(text) if _is_internal_file(m.group(0))})
     # Strip filenames first so `model_data.json` is not also reported as the enum `model_data`.
     without_files = _FILENAME_RE.sub(" ", text)
     enums = sorted(

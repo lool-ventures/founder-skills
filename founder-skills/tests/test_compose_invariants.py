@@ -414,3 +414,29 @@ def test_composed_report_carries_no_internal_tokens(skill: str, tmp_path: Path) 
     assert found == {"enums": [], "filenames": []}, (
         f"{skill} report.md leaks internal tokens: enums={found['enums']} files={found['filenames']}"
     )
+
+
+@pytest.mark.parametrize("skill", ["ic-sim", "market-sizing", "deck-review", "financial-model-review"])
+def test_compose_does_not_use_a_data_derived_keep_set(skill: str) -> None:
+    """`identifier_values` is cap-table-only.
+
+    Elsewhere an `id` field can hold a field name — financial-model-review's
+    `unit_economics.metrics[].id` is `gross_margin` — and keeping it left our vocabulary in a delivered
+    report while also suppressing the warning, since the scan honours the same keep-set. Found in a live
+    run, invisible to fixtures because no fixture carries such a token in prose.
+    """
+    body = (SKILLS_DIR / skill / "scripts" / "compose_report.py").read_text(encoding="utf-8")
+    assert "_ft.identifier_values(" not in body, (  # the CALL, not a mention in a comment
+        f"{skill}'s compose calls identifier_values. Only cap-table may: its ids are handles the founder "
+        f"matches against their own documents, while an id elsewhere may be our name for a field."
+    )
+
+
+def test_cap_table_still_uses_the_keep_set_it_needs() -> None:
+    """Reverse direction: cap-table's scenario ids must stay verbatim across report/explorer/packet."""
+    body = (SKILLS_DIR / "cap-table" / "scripts" / "compose_report.py").read_text(encoding="utf-8")
+    # Whitespace-insensitive: the formatter wraps this call across lines.
+    collapsed = " ".join(body.split())
+    assert "_ft.identifier_values( artifacts, include_map_keys=True" in collapsed or (
+        "_ft.identifier_values(artifacts, include_map_keys=True" in collapsed
+    ), "cap-table must opt into map-key harvesting — per_safe is keyed by instrument id (safe_conv)"

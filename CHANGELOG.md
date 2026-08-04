@@ -46,6 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **competitive-positioning:** a competitor's researched pricing model was never shown, and the
   competitor-set verdicts showed neither which dimensions overlapped nor the verdict's confidence.
 - **cap-table:** the explorer embedded three values its script never read.
+- Report text kept some internal tokens verbatim by mistake: a field name reached by an `id` field
+  (`gross_margin`) stayed raw and its warning was suppressed with it. Identifier preservation is now
+  scoped to cap-table, where ids are handles a founder matches against their own documents.
+- A founder's own uploaded filename was reported as an internal file reference.
 - **financial-model-review:** the coaching template asks for investor talking points; they were
   embedded in the explorer and rendered nowhere.
 - **financial-model-review:** a skipped checklist item explained itself by naming the internal gate
