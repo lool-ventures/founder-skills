@@ -281,3 +281,38 @@ def test_receipt_shape_with_output_flag(tmp_path: Path) -> None:
     assert rc == 0
     assert data is not None and data["ok"] is True and data["status"] == "publishable"
     assert json.loads(out.read_text())["_produced_by"] == "verify_positioning"
+
+
+def test_a_slug_identical_to_its_display_name_is_not_a_leak(tmp_path: Path) -> None:
+    """Measured false positive on a live run: a competitor literally named 'n8n' has slug 'n8n', so
+    the founder is already seeing the name. Flagging it told the operator to fix something correct.
+
+    The comparison is on a normalized form, so 'Acme Co' / 'acme-co' is still caught."""
+    _publishable(tmp_path)
+    _write(
+        tmp_path,
+        "landscape.json",
+        {"competitors": [{"slug": "n8n", "name": "n8n"}], "metadata": {"run_id": "R"}},
+    )
+    _write(
+        tmp_path,
+        "moat_scores.json",
+        {"companies": {"_startup": {}, "n8n": {}}, "metadata": {"run_id": "R"}},
+    )
+    ps = json.loads((tmp_path / "positioning_scores.json").read_text())
+    ps["views"][0]["points"] = [{"competitor": "_startup"}, {"competitor": "n8n"}]
+    _write(tmp_path, "positioning_scores.json", ps)
+    md = (tmp_path / "report.md").read_text() + "\n- [~] **Researched Without Source:** n8n: no source\n"
+    _write(tmp_path, "report.md", md)
+    rc, _, stderr = _run(tmp_path)
+    assert rc == 0, f"a slug identical to its name must not be flagged: {stderr}"
+
+
+def test_a_slug_differing_from_its_name_is_still_a_leak(tmp_path: Path) -> None:
+    """The counterpart — the normalization must not weaken the real check."""
+    _publishable(tmp_path)
+    md = (tmp_path / "report.md").read_text() + "\n- [~] **Shallow Competitor Profile:** acme-co: thin\n"
+    _write(tmp_path, "report.md", md)
+    rc, _, stderr = _run(tmp_path)
+    assert rc == 1
+    assert "acme-co" in stderr

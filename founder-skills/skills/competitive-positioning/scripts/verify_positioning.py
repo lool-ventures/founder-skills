@@ -240,6 +240,15 @@ def _check_rendered(artifacts: dict[str, dict[str, Any]], gate: int) -> list[dic
         slug, name = comp.get("slug"), comp.get("name")
         if not (isinstance(slug, str) and slug and isinstance(name, str) and name.strip()):
             continue
+        # When the slug and the display name are the same string, the founder is already seeing the
+        # name and there is nothing to substitute. Measured as a false positive on a live run: a
+        # competitor literally named "n8n" has slug "n8n", and flagging it told the operator to fix
+        # Compare with CASE FOLDING ONLY. Stripping punctuation too was the first attempt and it was
+        # wrong: "acme-co" and "Acme Co" both reduce to "acmeco", which would have silenced a genuine
+        # leak. A test caught it. The rule is literal — if the slug string IS the displayed name there
+        # is nothing to substitute; a hyphen where the founder should see a space is still a leak.
+        if slug.strip().lower() == name.strip().lower():
+            continue
         # A slug is only a leak when it appears OUTSIDE a code span; the evidence tables
         # legitimately key on slug. Restrict to the prose-bearing "leader:" construction and
         # the warnings list, which is where it was measured.
