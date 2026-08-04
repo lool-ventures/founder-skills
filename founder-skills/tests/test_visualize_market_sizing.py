@@ -1433,3 +1433,71 @@ class TestMarketSizingChecklistColorCoverage:
         assert len(viz._CHECKLIST_COLORS) >= len(produced), (
             f"visualize._CHECKLIST_COLORS has only {len(viz._CHECKLIST_COLORS)} entries; expected >= {len(produced)}."
         )
+
+
+# --- FX disclosure ------------------------------------------------------------
+#
+# The HTML is a founder deliverable in its own right — someone opens it without the
+# markdown beside it. So a converted figure has to carry its rate HERE too, not only
+# in report.md. Verified once in a live run (2026-08-04); these pin it so an edit to
+# visualize.py cannot silently drop it between live runs, which are paid and on-demand.
+
+
+def _sizing_with_fx() -> dict:
+    import copy
+
+    sizing = copy.deepcopy(_VALID_SIZING)
+    sizing["currency"] = "ILS"
+    sizing["fx"] = {
+        "as_of": "2026-08-04",
+        "source": "https://example.test/usd-ils",
+        "conversions": [
+            {
+                "field": "industry_total",
+                "from": "USD",
+                "to": "ILS",
+                "rate": 3.0026,
+                "original_value": 880_000_000.0,
+                "converted_value": 2_642_288_000.0,
+            }
+        ],
+    }
+    return sizing
+
+
+def test_visualize_discloses_the_conversion_rate() -> None:
+    """A converted run must state the rate, its date and its source in the HTML."""
+    arts = _all_artifacts()
+    arts["sizing.json"] = _sizing_with_fx()
+    rc, stdout, stderr = _run_visualize(_make_artifact_dir(arts))
+    assert rc == 0, stderr
+    assert "1 USD = 3.0026 ILS" in stdout, "the rate itself must be on the page"
+    assert "2026-08-04" in stdout, "a rate with no date is not auditable"
+    assert "example.test/usd-ils" in stdout, "a rate with no source is not auditable"
+
+
+def test_visualize_says_nothing_about_fx_when_nothing_was_converted() -> None:
+    """The unconverted path is unchanged — this is the regression pin for the edit.
+
+    Every existing run converts nothing, so the disclosure must be absent rather than
+    rendering an empty or zero-valued row.
+    """
+    rc, stdout, stderr = _run_visualize(_make_artifact_dir(_all_artifacts()))
+    assert rc == 0, stderr
+    assert "Converted into" not in stdout
+
+
+def test_visualize_survives_a_malformed_fx_block() -> None:
+    """A hand-edited or partial `fx` block must not take the whole report down.
+
+    The HTML is the deliverable; failing to render it over a cosmetic disclosure would
+    trade a missing sentence for a missing report.
+    """
+    for bad in ({"conversions": []}, {"conversions": "nope"}, {"conversions": [None, 42]}, {}):
+        arts = _all_artifacts()
+        sizing = _sizing_with_fx()
+        sizing["fx"] = bad
+        arts["sizing.json"] = sizing
+        rc, stdout, stderr = _run_visualize(_make_artifact_dir(arts))
+        assert rc == 0, f"fx={bad!r} broke the render: {stderr}"
+        assert stdout.startswith("<!DOCTYPE html>"), f"fx={bad!r} produced no document"
