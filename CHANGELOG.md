@@ -9,61 +9,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- **competitive-positioning:** positioning-map axis rationales were blank in `report.md` and absent
-  from the visual report and explorer; the checklist could grade POS_05 as a pass on unrendered text.
-- **competitive-positioning:** the explorer embedded differentiation scores, per-axis ranks,
-  vanity-axis flags and claim verdicts, and rendered none of them.
-- **competitive-positioning:** adversarial competitor-set verdicts did not reach the report — a
-  competitor judged not-a-competitor was scored, ranked and tabled like a genuine one.
-- **competitive-positioning:** startup rank could print as "11 of 10 competitors". Ranks now read
-  "N of M ranked", with the same wording in the moat section.
-- **competitive-positioning:** differentiation verdicts and moat statuses printed as raw enum tokens;
-  competitors were named by internal slug.
-- **competitive-positioning:** a deck with no competition slide had nothing to grade. It is now
-  recorded explicitly, graded `warn`, and kept in the score.
-- **competitive-positioning:** a competitor development older than the 18-month window failed the
-  whole landscape step. Out-of-window moves are retained and reported instead; the checks against
-  invented events are unchanged and still stop the run.
-- **competitive-positioning:** the blind-recall duplicate check compared slugs literally, so a
-  competitor already in the set could reappear as a gap and a company named inside a cohort entry
-  read as missing.
-- **competitive-positioning:** recall candidates declined at the first gate were dropped instead of
-  re-offered at the later gate.
-- **competitive-positioning:** re-scoring the map without re-running the checklist left the review
-  describing a map that no longer existed. The checklist records which map it graded and compose
-  flags a mismatch.
-- **financial-model-review:** the explorer embedded the review checklist score but did not render it.
-- **financial-model-review:** the report ended with a command line for the founder to run
-  (`explore.py --dir … -o …`), which they have no shell for. It now asks for the explorer in words.
-- **financial-model-review:** warnings about missing optional data named the internal file rather than
-  the data ("the figures extracted from your spreadsheet").
-- **market-sizing:** support strength, estimate provenance and driver names printed as raw tokens
-  (`partially_supported`, `agent_estimate`, `customer_count`); the checklist listed internal filenames.
-- **ic-sim:** partner and consensus verdicts printed as raw tokens (`more_diligence`, `hard_pass`),
-  including in the report's headline verdict lines.
-- **deck-review:** slide types printed as raw tokens (`purpose_traction`, `business_model`).
-- **cap-table:** field names printed as raw tokens (`safe_price`).
-- **competitive-positioning:** a competitor's researched pricing model was never shown, and the
-  competitor-set verdicts showed neither which dimensions overlapped nor the verdict's confidence.
-- **cap-table:** the explorer embedded three values its script never read.
-- Report text kept some internal tokens verbatim by mistake: a field name reached by an `id` field
-  (`gross_margin`) stayed raw and its warning was suppressed with it. Identifier preservation is now
-  scoped to cap-table, where ids are handles a founder matches against their own documents.
+Fleet-wide:
+
+- Internal tokens reached founder-facing report text in every skill: private enums, field names and,
+  in one case, a shell command the founder had no shell to run.
+- Some tokens were then kept verbatim by mistake — a field name reached through an `id` field
+  (`gross_margin`) stayed raw and suppressed its own warning. Identifier preservation is now scoped to
+  cap-table, where ids are handles a founder matches against their own documents.
 - A founder's own uploaded filename was reported as an internal file reference.
-- **financial-model-review:** checklist evidence cited our artifact filenames ("inputs.json reports
-  actuals separated: false") and that text is printed verbatim in the report. Evidence now states what
-  is true of the model, and the delivery gate flags a filename in evidence.
-- **financial-model-review:** checklist scoring recorded no fingerprint of the inputs it graded, so
-  staleness could not be detected for it; the producer pipe now passes the inputs it was scored against.
-- **financial-model-review:** the coaching template asks for investor talking points; they were
-  embedded in the explorer and rendered nowhere.
-- **financial-model-review:** a skipped checklist item explained itself by naming the internal gate
-  field (`Auto-gated: geography_gate '[...]'`); it now states the reason.
-- **market-sizing:** each source's quality tier and segment match, and each assumption's source
-  attribution, were collected and never shown — leaving no way to weigh a figure being defended.
-- **financial-model-review:** an output computed before the founder's corrections were applied could
-  not be distinguished from one computed after; each output now records a fingerprint of the inputs it
-  used, and `verify_review.py` compares it against the inputs as they stand.
+- Sub-agent evidence cited our artifact filenames ("inputs.json reports actuals separated: false") and
+  that text prints verbatim in the report. Evidence now states what is true of the company or model;
+  financial-model-review and competitive-positioning check it at their delivery gate.
+
+**cap-table:**
+
+- Field names printed as raw tokens (`safe_price`).
+- The explorer embedded three values its script never read.
+
+**competitive-positioning:**
+
+- Positioning-map axis rationales were blank in `report.md` and absent from the visual report and
+  explorer; the checklist could grade POS_05 as a pass on unrendered text.
+- The explorer embedded differentiation scores, per-axis ranks, vanity-axis flags and claim verdicts,
+  and rendered none of them.
+- Adversarial competitor-set verdicts did not reach the report — a competitor judged not-a-competitor
+  was scored, ranked and tabled like a genuine one.
+- A competitor's researched pricing model was never shown, and the competitor-set verdicts showed
+  neither which dimensions overlapped nor the verdict's confidence.
+- Startup rank could print as "11 of 10 competitors". Ranks now read "N of M ranked", with the same
+  wording in the moat section.
+- Differentiation verdicts and moat statuses printed as raw enum tokens; competitors were named by
+  internal slug.
+- A deck with no competition slide had nothing to grade. It is now recorded explicitly, graded `warn`,
+  and kept in the score.
+- A competitor development older than the 18-month window failed the whole landscape step.
+  Out-of-window moves are retained and reported instead; the checks against invented events are
+  unchanged and still stop the run.
+- The blind-recall duplicate check compared slugs literally, so a competitor already in the set could
+  reappear as a gap and a company named inside a cohort entry read as missing.
+- Recall candidates declined at the first gate were dropped instead of re-offered at the later gate.
+- Re-scoring the map without re-running the checklist left the review describing a map that no longer
+  existed. The checklist records which map it graded and compose flags a mismatch.
+
+**deck-review:**
+
+- Slide types printed as raw tokens (`purpose_traction`, `business_model`).
+
+**financial-model-review:**
+
+- The explorer embedded the review checklist score but did not render it.
+- The coaching template asks for investor talking points; they were embedded in the explorer and
+  rendered nowhere.
+- The report ended with a command line for the founder to run (`explore.py --dir … -o …`), which they
+  have no shell for. It now asks for the explorer in words.
+- Warnings about missing optional data named the internal file rather than the data.
+- A skipped checklist item explained itself by naming the internal gate field
+  (`Auto-gated: geography_gate '[...]'`); it now states the reason.
+- An output computed before the founder's corrections were applied could not be distinguished from one
+  computed after. Each output now records a fingerprint of the inputs it used, and `verify_review.py`
+  compares it against the inputs as they stand.
+- Checklist scoring recorded no fingerprint of the inputs it graded, so staleness was undetectable for
+  it; the producer pipe now passes the inputs it was scored against.
+
+**ic-sim:**
+
+- Partner and consensus verdicts printed as raw tokens (`more_diligence`, `hard_pass`), including in
+  the report's headline verdict lines.
+
+**market-sizing:**
+
+- Support strength, estimate provenance and driver names printed as raw tokens
+  (`partially_supported`, `agent_estimate`, `customer_count`); the checklist listed internal filenames.
+- Each source's quality tier and segment match, and each assumption's source attribution, were
+  collected and never shown — leaving no way to weigh a figure being defended.
 
 ### Added
 

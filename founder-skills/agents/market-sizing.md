@@ -184,6 +184,12 @@ auto-widening above never fires:
 
 #### CHECKLIST subtype
 
+Evidence and notes print VERBATIM in the founder's report, so cite the source the
+way the founder knows it — never by our filename. They never saw `inputs.json` or
+`sizing.json`; they saw their deck and the figures they gave you. Write "the deck
+states no go-to-market plan", not "inputs.json gtm_evidence_notes is null". State
+what is true of the MARKET or the founder's own materials.
+
 Read:
 - `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/pitfalls-checklist.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/artifact-schemas.md`

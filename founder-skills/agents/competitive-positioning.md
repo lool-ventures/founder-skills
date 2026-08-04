@@ -362,6 +362,12 @@ EVID_01..04, NARR_01..04, MISS_01..03. Mode-based gating applies: when
 Every `fail` and `warn` MUST cite specific evidence. Every `pass` MUST note what
 was checked. Empty evidence produces blank lines in the report.
 
+Evidence prints VERBATIM in the founder's report, so cite the source the way the
+founder knows it — never by our filename. They never saw `landscape.json` or
+`positioning.json`; they saw their deck and the competitors discussed. Write "no
+competitor slide appears in the deck", not "landscape.json reports input_mode:
+deck". State what is true of the COMPANY or its competitive set.
+
 Write to OUTPUT_PATH the JSON matching `checklist.py`'s input format (items
 only — producer script computes the summary):
 ```json

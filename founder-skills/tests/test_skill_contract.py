@@ -637,7 +637,10 @@ def test_cap_table_echoes_run_id_so_the_paste_remedy_is_satisfiable() -> None:
 # that ships to a founder is the expensive kind; these rows are the cheap kind.
 REFERENCES_CEILING: dict[str, int] = {
     "market-sizing": 40_174,
-    "financial-model-review": 71_535,
+    # fmr raised to document `graded_against` on the three producer outputs that stamp it — a new
+    # artifact field is not discoverable from a schema doc that omits it, and the field exists to make
+    # staleness detectable at all (run_id parity cannot see corrections applied within a run).
+    "financial-model-review": 72_650,
     "ic-sim": 54_359,
     "deck-review": 49_039,
     "competitive-positioning": 136_835,

@@ -316,3 +316,22 @@ def test_a_slug_differing_from_its_name_is_still_a_leak(tmp_path: Path) -> None:
     rc, _, stderr = _run(tmp_path)
     assert rc == 1
     assert "acme-co" in stderr
+
+
+def test_gate_flags_an_internal_artifact_filename_in_the_report(tmp_path: Path) -> None:
+    """Sub-agent evidence is printed verbatim; a sibling skill's live run put inputs.json in ten items."""
+    _publishable(tmp_path)
+    md = (tmp_path / "report.md").read_text()
+    (tmp_path / "report.md").write_text(md + "\n- **COVER_01**: landscape.json reports input_mode: deck\n")
+    rc, out, _err = _run(tmp_path)
+    msgs = json.dumps(out)
+    assert "names the internal file 'landscape.json'" in msgs, "an artifact filename in the report was not flagged"
+    assert rc == 1, "a founder-facing filename must fail the delivery gate"
+
+
+def test_gate_does_not_flag_a_founder_supplied_filename(tmp_path: Path) -> None:
+    _publishable(tmp_path)
+    md = (tmp_path / "report.md").read_text()
+    (tmp_path / "report.md").write_text(md + "\n- the deck you sent, acme_pitch.xlsx, names no competitor\n")
+    _rc, out, _err = _run(tmp_path)
+    assert "names the internal file" not in json.dumps(out)

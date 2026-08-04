@@ -115,6 +115,23 @@ _GATE2_REQUIRED = ["report.json", "report.md"]
 _OPTIONAL = ["product_profile.json", "competitor_verification.json", "report.html", "explore.html"]
 
 
+def _internal_files_in(text: str) -> list[str]:
+    """Internal artifact/script filenames present in founder-facing text.
+
+    Returns [] when the shared founder-text policy is unavailable: a missing policy must never fail a
+    review that is otherwise complete.
+    """
+    try:
+        shared = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts"))
+        if shared not in sys.path:
+            sys.path.insert(0, shared)
+        import _founder_text  # type: ignore[import-not-found]
+    except ImportError:
+        return []
+    found: list[str] = _founder_text.scan(text)["filenames"]
+    return found
+
+
 def _check_existence(dir_path: str, gate: int) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     required = list(_ALWAYS_REQUIRED) + (list(_GATE2_REQUIRED) if gate >= 2 else [])
@@ -221,6 +238,20 @@ def _check_rendered(artifacts: dict[str, dict[str, Any]], gate: int) -> list[dic
     # --- 3. no internal field names -------------------------------------------------------
     for m in sorted(set(_FIELD_NAME_RE.findall(report_md))):
         issues.append(_issue("error", f"report.md names the internal field '{m}' — a founder cannot use it"))
+
+    # --- 3b. no internal artifact filenames -----------------------------------------------
+    # Evidence text from a sub-agent is printed verbatim, and a live run of a sibling skill put
+    # `inputs.json` in ten items' evidence. Delegated to the shared policy so "internal" means one thing
+    # fleet-wide, and so a founder's OWN uploaded filename is never flagged — naming their file back to
+    # them is useful.
+    for name in _internal_files_in(report_md):
+        issues.append(
+            _issue(
+                "error",
+                f"report.md names the internal file '{name}' — the founder never saw it; say what is "
+                f"true of the company or its competitive set instead",
+            )
+        )
 
     # --- 4. no criterion IDs in the coaching commentary ----------------------------------
     if "## Coaching Commentary" in report_md:

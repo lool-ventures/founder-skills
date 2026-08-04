@@ -90,6 +90,7 @@ The `company` block is used for gate evaluation. Items whose gate doesn't match 
 |-------|------|-------------|
 | `items` | object[] | All 46 items enriched with category and label |
 | `summary` | object | Aggregate scores and status |
+| `graded_against` | object | Producer-written. `{"inputs.json": "<sha256>"}` — a fingerprint of the inputs this scoring was computed from, so a later verifier can tell a stale output from a current one. Supplied by `--inputs`; `null` when the producer could not see the inputs, which means "cannot compare" and is not a match. `metadata` is excluded from the hash so stamping a run_id is not an inputs change. |
 
 ### items[] entry (output)
 
@@ -120,6 +121,11 @@ The `company` block is used for gate evaluation. Items whose gate doesn't match 
 ---
 
 ## unit_economics.json
+
+`graded_against` is written here too — `{"inputs.json": "<sha256>"}`, the fingerprint of the inputs this
+output was computed from. `verify_review.py` recompares it against `inputs.json` as it stands, which
+`run_id` parity cannot do: corrections rewrite the inputs inside a single run, so a pre- and a
+post-correction output carry the same run_id.
 
 **Producer:** `unit_economics.py`
 
@@ -158,6 +164,11 @@ Computed unit economics metrics with benchmark ratings.
 ---
 
 ## runway.json
+
+`graded_against` is written here too — `{"inputs.json": "<sha256>"}`, the fingerprint of the inputs this
+output was computed from. `verify_review.py` recompares it against `inputs.json` as it stands, which
+`run_id` parity cannot do: corrections rewrite the inputs inside a single run, so a pre- and a
+post-correction output carry the same run_id.
 
 **Producer:** `runway.py`
 

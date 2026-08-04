@@ -18,6 +18,7 @@
 - `founder-skills/scripts/check_handoff.py` — Shared Context A file hand-off gate (typed exit codes for main-thread branching)
 - `founder-skills/scripts/merge_json.py` — Shallow-merge of parallel sub-agent hand-off files for producer pipes
 - `founder-skills/scripts/md_to_commentary.py` — Wraps a sub-agent's raw-markdown coaching commentary into the JSON envelope `insert_coaching.py` consumes (the model never hand-escapes the commentary)
+- `founder-skills/scripts/_founder_text.py` — Shared founder-facing text policy: which internal tokens may reach a founder and how they render. Four token types, three behaviours (humanize private enums + field names; keep stable identifiers and diagnostic codes verbatim). Every skill's `compose_report.py` substitutes then scans with it; `insert_coaching.py` scans the coaching commentary. `identifier_values()` is **cap-table-only** — elsewhere an `id` field can hold a field name (fmr's `unit_economics.metrics[].id` is `gross_margin`), and keeping it leaves our vocabulary in the report *and* silences the warning.
 - `founder-skills/scripts/resolve_artifacts_root.py` — Canonical + agent-namespace artifacts-root resolver (`--agent` for HANDOFF_AGENT derivation)
 - `founder-skills/references/` — Shared reference files (benchmarks, Israel guidance, etc.)
 - `founder-skills/references/brand/` — Brand tokens + Sora variable webfont (OFL) for generated HTML artifacts; embedded base64-inline so artifacts stay self-contained
@@ -53,6 +54,11 @@
 - `founder-skills/tests/test_check_handoff.py` — `check_handoff.py` suite (typed exit paths 0/3/4/5/6, adversarial file states, tolerant receipt extraction)
 - `founder-skills/tests/test_merge_json.py` — `merge_json.py` suite (merge order, --set overrides, error paths)
 - `founder-skills/tests/test_resolve_artifacts_root.py` — Artifacts-root resolver suite (Cowork mount signatures + agent-namespace root)
+- `founder-skills/tests/dead_payload.py` — Shared analyzer for embedded-but-unread JS payload keys. Three verdicts, because two cannot express what is known: `read`, `unread`, and **`unverifiable`** (the script indexes the payload by computed name, so no read can be attributed to a specific key). Treating dynamic access as blanket consumption hides real dead keys; treating it as death reports false ones.
+- `founder-skills/tests/test_dead_payload.py` — Analyzer unit tests + all four embedders (three `explore.py` + `review_inputs.py`). Pins which payload objects are dynamic, so a generator switching to computed access cannot quietly reduce coverage.
+- `founder-skills/tests/test_dispatch_schema_drift.py` — Guards a dispatch template instructing a field nothing consumes. Reads **every** fenced block on both prompt surfaces (templates also appear untagged and in `bash` heredocs; json-only sees about a third). Consumers include shared scripts, JSON schemas, and JS member access. **Cannot** detect shape-level drift for a name consumed elsewhere — `x_axis_rationale` is the obsolete authoring shape *and* the legitimate internal shape of `positioning_scores.json` — so a direct axis-shape assertion covers that regression.
+- `founder-skills/tests/test_html_founder_text.py` — Fleet ratchet: no internal token in founder-visible text of any generated HTML. Text nodes only; attribute values and script bodies are not founder-facing prose.
+- `founder-skills/tests/test_delivery_coverage.py` — The fleet's delivery-defect coverage map, asserted rather than described. Records the known gap: the downstream half of "computed, not rendered" is gated only in competitive-positioning and financial-model-review.
 - `founder-skills/tests/test_theme_sync.py` — Brand-theme invariants: per-skill `_theme.py` copies identical, brand font present, font embeds in CSS
 - `founder-skills/tests/test_e2e_deck_review.py` — End-to-end smoke; LLM-driven; carries `e2e` marker
 - `founder-skills/tests/fixtures/` — Synthetic test inputs (deck-review compose-invariant fixtures + synthetic deck for e2e + golden expected file)
@@ -110,7 +116,7 @@
 - **`extract_model.py`** — Extracts structured data from Excel (.xlsx) and CSV files into model_data.json
 - **`validate_extraction.py`** — Anti-hallucination gate: cross-references model_data.json against inputs.json (company name, salary, revenue, cash traceability, scale plausibility); `--fix` auto-corrects scale denomination issues (e.g., model in $000)
 - **`validate_inputs.py`** — Four-layer validation of inputs.json (structural, consistency, sanity, completeness); `--fix` auto-corrects sign errors
-- **`checklist.py`** — Scores 46 criteria across 7 categories with profile-based auto-gating by stage/geography/sector
+- **`checklist.py`** — Scores 46 criteria across 7 categories with profile-based auto-gating by stage/geography/sector; `--inputs <path>` supplies the document to fingerprint (the sub-agent's payload carries `company`, not the whole inputs, so without it the fingerprint is null and staleness is undetectable for this artifact)
 - **`unit_economics.py`** — Computes and benchmarks 11 unit economics metrics against stage-appropriate targets
 - **`runway.py`** — Multi-scenario runway stress-test with decision points and default-alive analysis
 - **`compose_report.py`** — Assembles financial model review artifacts into final report with cross-artifact validation
@@ -119,6 +125,7 @@
 - **`review_inputs.py`** — Dual-mode review viewer: HTTP server with live validation (Claude Code) or self-contained static HTML with JS sanity metrics (Cowork); outputs HTML. The static/Cowork branch must stay write-back-safe: guard every `/api/*` `fetch` behind the build-time `IS_STATIC` flag with a lexical `if/else` (an early-return guard reads as unguarded to the write-back analyzer), name the fetch response `resp`/`res`/`response` and check `resp.ok`, and keep literal `<script>`/`</script>` tokens out of docstrings (the block extractor mis-reads them). The `financial-model-review-smoke` cassette's `no_lost_write_back` assert locks this in.
 - **`_theme.py`** — Brand theme helper: design-token CSS + base64 @font-face from `references/brand/`; every skill's scripts dir carries an identical copy (standalone scripts can't import across skills) and all HTML generators inject `_theme.brand_css()`; `tests/test_theme_sync.py` enforces the copies stay identical — edit one, re-copy to all
 - **`apply_corrections.py`** — Processes founder's downloaded corrections file: coerces, normalizes, merges overrides, writes corrected_inputs.json + extraction_corrections.json
+- **`_fingerprint.py`** — Stable fingerprints of a producer's inputs, so a stale output is detectable. `run_id` parity cannot see this class: `apply_corrections.py` rewrites `inputs.json` **within** a run, so pre- and post-correction outputs share a run_id. `checklist.py` / `unit_economics.py` / `runway.py` stamp `graded_against`; `verify_review.py` recomputes the current `inputs.json` hash and compares. Comparing outputs to each other is insufficient — they agree while all are stale.
 - **`verify_review.py`** — Review completeness gate: checks artifact existence, content quality (evidence, critical fields, metrics), and cross-artifact consistency; exit 0 = publishable, exit 1 = gaps
 
 ## Cap Table Scripts
