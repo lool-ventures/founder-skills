@@ -130,6 +130,21 @@ score and the coaching payload). Every `pass` needs only a brief note of what wa
 checked — ~12 words, no padding (pass evidence is never a coaching input). Empty
 evidence produces blank lines in the report.
 
+**Evidence text is printed verbatim in the founder's report, so cite the SOURCE
+the way the founder knows it — never by our filename.** The founder never saw
+`inputs.json`; they saw their spreadsheet and the values they confirmed. Naming
+the file tells them nothing they can act on and reads as machinery.
+
+| Instead of | Write |
+|---|---|
+| `inputs.json reports actuals separated: false` | `the model does not separate actuals from projections` |
+| `inputs.json extraction notes confirm 'No CAC data'` | `no CAC data appears anywhere in the workbook` |
+| `model_data.json shows 3 months` | `the model covers 3 months` |
+
+State what is true of the MODEL, or of the figures you were given. The delivery
+gate reports an internal filename in evidence as a gap, so this is checked, not
+merely requested.
+
 Write to OUTPUT_PATH the JSON matching `checklist.py`'s input format —
 `company` + `metadata` + `items` (the producer script computes the summary;
 `company` enables its profile auto-gating; `metadata.run_id` flows into

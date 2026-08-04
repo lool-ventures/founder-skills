@@ -649,6 +649,11 @@ brief note of what was checked — keep it to ~12 words (e.g. "checked runway vs
 burn; consistent"); do not pad passing items with long evidence, it is never a
 coaching input.
 
+Evidence prints VERBATIM in the founder's report: state what is true of the MODEL,
+never citing our filenames. "the model does not separate actuals from projections",
+not "inputs.json reports actuals separated: false". The delivery gate flags an
+internal filename in evidence, so this is checked.
+
 Use your Write tool to write to OUTPUT_PATH — company + metadata + items
 (producer script computes summary):
 {
@@ -667,7 +672,8 @@ run_id stamping.
 
 ```bash
 cat "$HANDOFF_DIR/checklist_output.json" | \
-  python3 "$SCRIPTS/checklist.py" --pretty --run-id "$RUN_ID" -o "$REVIEW_DIR/checklist.json"
+  python3 "$SCRIPTS/checklist.py" --pretty --run-id "$RUN_ID" \
+    --inputs "$REVIEW_DIR/inputs.json" -o "$REVIEW_DIR/checklist.json"
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 

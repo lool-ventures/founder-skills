@@ -1082,3 +1082,65 @@ def test_every_fingerprinting_producer_is_covered_by_this_module() -> None:
         f"the set of fingerprint-stamping producers changed: {sorted(stampers)}. Add the new one to the "
         f"end-to-end tests above."
     )
+
+
+# ---------------------------------------------------------------------------
+# Evidence must not name internal files
+#
+# Evidence reaches report.md verbatim. A live run produced 10 items citing inputs.json, which the
+# founder never saw. Prose guidance alone has measured as inert in this fleet, so the gate checks it.
+# ---------------------------------------------------------------------------
+
+
+def _artifacts_with_evidence(evidence: str) -> dict[str, Any]:
+    arts = _full_artifacts()
+    arts["checklist.json"]["items"][0]["status"] = "fail"
+    arts["checklist.json"]["items"][0]["evidence"] = evidence
+    return arts
+
+
+def _checklist_warnings(out: dict[str, Any]) -> list[str]:
+    entry = out.get("artifacts", {}).get("checklist.json", {})
+    return [str(i.get("message", "")) for i in entry.get("issues", [])]
+
+
+def test_evidence_naming_an_internal_artifact_is_flagged() -> None:
+    _rc, out, _err = _run(_artifacts_with_evidence("inputs.json reports actuals separated: false"))
+    hits = [m for m in _checklist_warnings(out) if "names internal file" in m]
+    assert hits, "evidence citing inputs.json was not flagged"
+    assert "inputs.json" in hits[0]
+
+
+def test_evidence_naming_the_founders_own_upload_is_not_flagged() -> None:
+    """Naming their upload back to them is useful; flagging it trains readers to ignore the warning."""
+    _rc, out, _err = _run(_artifacts_with_evidence("the workbook sample_model.xlsx has no assumptions tab"))
+    assert not [m for m in _checklist_warnings(out) if "names internal file" in m]
+
+
+def test_founder_facing_evidence_passes_clean() -> None:
+    _rc, out, _err = _run(_artifacts_with_evidence("the model does not separate actuals from projections"))
+    assert not [m for m in _checklist_warnings(out) if "names internal file" in m]
+
+
+def test_the_flag_is_a_warning_not_a_publish_block() -> None:
+    """A wording slip must not cost the founder their review."""
+    _rc, out, _err = _run(_artifacts_with_evidence("inputs.json reports actuals separated: false"))
+    assert out.get("status") != "fail", "an evidence-wording issue must not fail the gate"
+
+
+def test_checklist_fingerprint_resolves_when_inputs_are_passed() -> None:
+    """--inputs closes the null-fingerprint hole: the payload carries `company`, not the whole doc."""
+    inputs = _shared_inputs()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "inputs.json")
+        with open(path, "w") as f:
+            json.dump(inputs, f)
+        result = subprocess.run(
+            [sys.executable, os.path.join(_SCRIPTS, "checklist.py"), "--inputs", path],
+            input=json.dumps({"items": []}),
+            capture_output=True,
+            text=True,
+        )
+    assert result.returncode == 0, result.stderr
+    graded = json.loads(result.stdout).get("graded_against", {})
+    assert graded.get("inputs.json") == _fingerprint_of(inputs)

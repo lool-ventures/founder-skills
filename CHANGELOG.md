@@ -50,6 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   (`gross_margin`) stayed raw and its warning was suppressed with it. Identifier preservation is now
   scoped to cap-table, where ids are handles a founder matches against their own documents.
 - A founder's own uploaded filename was reported as an internal file reference.
+- **financial-model-review:** checklist evidence cited our artifact filenames ("inputs.json reports
+  actuals separated: false") and that text is printed verbatim in the report. Evidence now states what
+  is true of the model, and the delivery gate flags a filename in evidence.
+- **financial-model-review:** checklist scoring recorded no fingerprint of the inputs it graded, so
+  staleness could not be detected for it; the producer pipe now passes the inputs it was scored against.
 - **financial-model-review:** the coaching template asks for investor talking points; they were
   embedded in the explorer and rendered nowhere.
 - **financial-model-review:** a skipped checklist item explained itself by naming the internal gate

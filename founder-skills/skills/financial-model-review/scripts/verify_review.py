@@ -227,6 +227,26 @@ def _check_inputs_quality(data: dict[str, Any]) -> list[dict[str, str]]:
     return issues
 
 
+def _internal_files_in(text: str) -> list[str]:
+    """Internal artifact/script filenames present in founder-facing text.
+
+    Delegates to the shared founder-text policy so "internal" means one thing across the fleet, and so
+    a founder's OWN uploaded filename is not flagged — naming their upload back to them is useful
+    ("the file is called sample_model.xlsx, which looks like a template").
+
+    Returns [] when the shared module is unavailable: a missing policy must never fail a review.
+    """
+    try:
+        shared = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts"))
+        if shared not in sys.path:
+            sys.path.insert(0, shared)
+        import _founder_text  # type: ignore[import-not-found]
+    except ImportError:
+        return []
+    found: list[str] = _founder_text.scan(text)["filenames"]
+    return found
+
+
 def _check_checklist_quality(data: dict[str, Any]) -> list[dict[str, str]]:
     """Validate checklist.json content quality."""
     issues: list[dict[str, str]] = []
@@ -251,6 +271,21 @@ def _check_checklist_quality(data: dict[str, Any]) -> list[dict[str, str]]:
                         f"Item {item.get('id', '?')}: empty evidence for status '{status}'",
                     )
                 )
+            elif isinstance(evidence, str):
+                # Evidence is printed verbatim in the founder's report, so an internal filename in it
+                # reaches the founder. The agent body asks for the source named the way the founder
+                # knows it; this is what makes that checkable rather than merely requested — prose
+                # guidance on its own has measured as inert in this fleet.
+                leaked = _internal_files_in(evidence)
+                if leaked:
+                    issues.append(
+                        _issue(
+                            "warning",
+                            f"Item {item.get('id', '?')}: evidence names internal file(s) "
+                            f"{', '.join(leaked)} — the founder never saw them; cite what is true of "
+                            f"the model instead",
+                        )
+                    )
 
     return issues
 

@@ -449,7 +449,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # did not, so a sub-agent could convert an ILS arpu to USD and the TAM would still be LABELLED ILS
     # — nothing in the pipeline performs FX, so nothing catches it.
     "market-sizing": 83_010,
-    "financial-model-review": 77_753,
+    # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
+    # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
+    # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
+    # --inputs so the scoring records a fingerprint of what it graded — without it that fingerprint is
+    # null and staleness cannot be detected for this artifact at all.
+    "financial-model-review": 78_092,
     "ic-sim": 87_397,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.

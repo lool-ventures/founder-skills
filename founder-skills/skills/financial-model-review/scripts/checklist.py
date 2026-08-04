@@ -881,6 +881,14 @@ def validate_checklist(
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Financial model review checklist scorer (reads JSON from stdin)")
+    p.add_argument(
+        "--inputs",
+        help=(
+            "Path to inputs.json, used only to fingerprint what this scoring was computed from. The "
+            "sub-agent's payload carries `company` but not the full inputs, so without this the "
+            "fingerprint is null and staleness cannot be detected for this artifact."
+        ),
+    )
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
     p.add_argument(
@@ -941,9 +949,18 @@ def main() -> None:
         result.setdefault("metadata", {})["run_id"] = _input_metadata["run_id"]
     if getattr(args, "run_id", None):  # CLI run_id overrides stdin passthrough
         result.setdefault("metadata", {})["run_id"] = args.run_id
-    # `inputs` is optional in this payload; absent records None, which means "cannot compare" and must
-    # not be read as a match.
-    _fingerprint.stamp(result, {"inputs.json": inputs_data})
+    # Prefer --inputs (the file the main thread pipes from) over the payload's partial `inputs`, since
+    # the payload carries `company` but not the whole document. Absent both, None records "cannot
+    # compare" rather than a false match.
+    _fp_source = inputs_data
+    if getattr(args, "inputs", None):
+        try:
+            with open(args.inputs, encoding="utf-8") as _f:
+                _fp_source = json.load(_f)
+        except (OSError, json.JSONDecodeError) as _e:
+            print(f"Warning: --inputs unreadable, fingerprint will be null: {_e}", file=sys.stderr)
+            _fp_source = None
+    _fingerprint.stamp(result, {"inputs.json": _fp_source})
 
     out = json.dumps(result, indent=indent) + "\n"
     s = result["summary"]
