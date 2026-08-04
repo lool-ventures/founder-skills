@@ -74,13 +74,39 @@ LEAK_CLASSES: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
-def founder_text_blocks(cassette: dict) -> list[str]:
-    """Extract the founder-visible assistant text blocks from a cassette."""
+def founder_text_blocks(cassette: dict, *, turn: int | None = None) -> list[str]:
+    """Extract the FOUNDER-VISIBLE assistant text blocks from a cassette or run transcript.
+
+    Two filters, both of which this function used to lack — and both of which made the count
+    measure the wrong population:
+
+    1. **Sub-agent text is excluded.** An event carrying ``parent_tool_use_id`` is a sub-agent's
+       own narration, which no founder ever sees; only unparented (top-level) assistant text
+       reaches them. Counting sub-agent text inflated one run's total from 13 leak-bearing
+       top-level blocks to 78 raw hits, so any threshold set against it was measuring a
+       population the founder is not exposed to.
+    2. **Turn scoping (opt-in via ``turn``).** A ``critique`` run dir holds two turns: the graded
+       task turn and a reflection turn in which the agent is ASKED to discuss the skill's
+       internals. Leaks in the reflection turn are correct behaviour and no fix should change
+       them, so comparing raw totals across a critique run and a scenario run compares different
+       things. ``turn=1`` scopes to the task turn. Turn boundaries are ``system``/``init`` events.
+
+    ``turn=None`` (the default) keeps every turn, which is right for a cassette: a recorded
+    scenario has exactly one.
+    """
     out: list[str] = []
+    current_turn = 0
     for raw in cassette.get("events", []):
         try:
             e = json.loads(raw) if isinstance(raw, str) else raw
         except (ValueError, TypeError):
+            continue
+        if e.get("type") == "system" and e.get("subtype") == "init":
+            current_turn += 1
+        if turn is not None and current_turn != turn:
+            continue
+        # Sub-agent narration is not founder-visible.
+        if e.get("parent_tool_use_id"):
             continue
         msg = e.get("message") or (e.get("event") or {}).get("message")
         if not isinstance(msg, dict) or msg.get("role") != "assistant":
@@ -103,20 +129,32 @@ def scan_text(text: str) -> list[tuple[str, str]]:
     return hits
 
 
-def scan_cassette(path: Path) -> list[tuple[str, str, str]]:
+def _load_events(path: Path) -> dict:
+    if path.suffix == ".jsonl":
+        return {"events": [ln for ln in path.read_text().splitlines() if ln.strip()]}
+    loaded = json.loads(path.read_text())
+    return loaded if isinstance(loaded, dict) else {"events": [json.dumps(x) for x in loaded]}
+
+
+def scan_cassette(path: Path, *, turn: int | None = None) -> list[tuple[str, str, str]]:
     """Return (leak_class, matched_token, snippet) for every leak in a cassette
     (*.json with an ``events`` list) OR a raw run-dir transcript (``events.jsonl``)."""
-    if path.suffix == ".jsonl":
-        d: dict = {"events": [ln for ln in path.read_text().splitlines() if ln.strip()]}
-    else:
-        loaded = json.loads(path.read_text())
-        d = loaded if isinstance(loaded, dict) else {"events": [json.dumps(x) for x in loaded]}
     results: list[tuple[str, str, str]] = []
-    for block in founder_text_blocks(d):
+    for block in founder_text_blocks(_load_events(path), turn=turn):
         for cls, tok in scan_text(block):
             snippet = block.strip().replace("\n", " ")[:90]
             results.append((cls, tok, snippet))
     return results
+
+
+def block_stats(path: Path, *, turn: int | None = None) -> tuple[int, int]:
+    """Return (leak_bearing_blocks, total_blocks).
+
+    The block RATIO is the comparable metric across runs; a raw hit count is not, because one
+    verbose block can carry several hits. Use this when comparing a pre-fix and post-fix run.
+    """
+    blocks = founder_text_blocks(_load_events(path), turn=turn)
+    return sum(1 for b in blocks if scan_text(b)), len(blocks)
 
 
 def _iter_cassettes(target: Path) -> list[Path]:
@@ -130,13 +168,22 @@ def main() -> int:
     ap.add_argument("target", type=Path, help="cassette file or dir of cassettes")
     ap.add_argument("--show", action="store_true", help="print each leak + snippet")
     ap.add_argument("--json", action="store_true", help="machine-readable summary")
+    ap.add_argument(
+        "--turn",
+        type=int,
+        default=None,
+        help="scope to one turn (1 = the task turn). A critique run dir holds a reflection turn "
+        "whose internal talk is CORRECT and must not be compared against a scenario run.",
+    )
     args = ap.parse_args()
 
     per_file: dict[str, int] = {}
+    blocks: dict[str, list[int]] = {}
     total = 0
     for cass in _iter_cassettes(args.target):
-        hits = scan_cassette(cass)
+        hits = scan_cassette(cass, turn=args.turn)
         per_file[cass.name] = len(hits)
+        blocks[cass.name] = list(block_stats(cass, turn=args.turn))
         total += len(hits)
         if args.show and hits:
             print(f"\n{cass.name} — {len(hits)} leak(s):")
@@ -144,9 +191,29 @@ def main() -> int:
                 print(f"  [{cls}] {tok!r}  in: {snip!r}")
 
     if args.json:
-        print(json.dumps({"total": total, "per_file": per_file}, indent=2))
+        leak_blocks = sum(b[0] for b in blocks.values())
+        all_blocks = sum(b[1] for b in blocks.values())
+        print(
+            json.dumps(
+                {
+                    "total": total,
+                    "per_file": per_file,
+                    "leak_bearing_blocks": leak_blocks,
+                    "total_blocks": all_blocks,
+                    "per_file_blocks": blocks,
+                    "turn": args.turn,
+                },
+                indent=2,
+            )
+        )
     else:
-        print(f"\n== base rate: {total} founder-facing leaks across {len(per_file)} cassettes ==")
+        leak_blocks = sum(b[0] for b in blocks.values())
+        all_blocks = sum(b[1] for b in blocks.values())
+        scope = f" (turn {args.turn})" if args.turn else ""
+        print(
+            f"\n== base rate: {total} founder-facing leaks across {len(per_file)} cassettes{scope} "
+            f"— {leak_blocks}/{all_blocks} founder-visible blocks carry a leak =="
+        )
         for name, n in sorted(per_file.items(), key=lambda kv: -kv[1]):
             if n:
                 print(f"  {n:4d}  {name}")

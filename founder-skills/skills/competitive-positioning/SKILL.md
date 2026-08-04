@@ -348,6 +348,8 @@ Before asking the founder to validate the set, independently challenge its **pre
 
 **Dispatch the competitive-positioning sub-agent in Context A (COMPETITOR_VERIFICATION).** **Call the `Task` tool with `subagent_type: "founder-skills:competitive-positioning"`.**
 
+> **Say the outcome, not the step.** Whatever you tell the founder around this dispatch names what they are getting — "checking whether these really compete" — never the machinery: no step number, no `ALL_CAPS` label, no "gating", "piping", "hand-off" or "producer". Measured, this is where the leaks actually happen, and the rule at the top of the file did not reach this far.
+
 **Dispatch prompt template:**
 
 ```
@@ -388,7 +390,9 @@ If the producer exits 1 on a show-your-work violation (a flag with no reasoning 
 
 Step 3.5 challenges the competitors that ARE on the list. This is its mirror: it asks who is
 **missing**. Both run against the same draft, so **dispatch them in parallel — two `Task` calls in
-one message**, exactly as Step 5 does for MOAT_SCORING + POSITIONING_SCORING. The recall result is
+one message**, exactly as Step 5 does for MOAT_SCORING + POSITIONING_SCORING.
+
+> **Say the outcome, not the step.** Whatever you tell the founder around this dispatch names what they are getting — "checking whether these really compete" — never the machinery: no step number, no `ALL_CAPS` label, no "gating", "piping", "hand-off" or "producer". Measured, this is where the leaks actually happen, and the rule at the top of the file did not reach this far. The recall result is
 consumed after both return.
 
 **Why a separate dispatch rather than one more instruction to an existing one.** Step 4's Phase B
@@ -599,6 +603,8 @@ files"). Hard rule: never stage scratch anywhere under the outputs mount (which 
 
 **Dispatch the competitive-positioning sub-agent in Context A (LANDSCAPE_RESEARCH).** The sub-agent declares `WebSearch` in its tool allowlist and performs the research itself. **Call the `Task` tool with `subagent_type: "founder-skills:competitive-positioning"`** so the research runs in an isolated context.
 
+> **Say the outcome, not the step.** Whatever you tell the founder around this dispatch names what they are getting — "checking whether these really compete" — never the machinery: no step number, no `ALL_CAPS` label, no "gating", "piping", "hand-off" or "producer". Measured, this is where the leaks actually happen, and the rule at the top of the file did not reach this far.
+
 **Dispatch prompt template:**
 
 ```
@@ -751,6 +757,8 @@ If the founder changes an axis pair or the competitor set, apply the change befo
 **REQUIRED — read `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/references/moat-definitions.md` now.**
 
 Write `positioning.json` to `$ANALYSIS_DIR` (consult `references/artifact-schemas.md` for the schema). **`moat_assessments` in this draft is optional — write `{}` or omit the key rather than authoring a full per-competitor draft.** It is superseded by `moat_scores.json` once MOAT_SCORING returns below, and nothing reads the draft block for scoring, so drafting one for every slug is effort with no consumer. Then dispatch the sub-agent **twice in parallel** (two Task calls in one message, both with `subagent_type: "founder-skills:competitive-positioning"`) — once for MOAT_SCORING and once for POSITIONING_SCORING.
+
+> **Say the outcome, not the step.** Whatever you tell the founder around this dispatch names what they are getting — "checking whether these really compete" — never the machinery: no step number, no `ALL_CAPS` label, no "gating", "piping", "hand-off" or "producer". Measured, this is where the leaks actually happen, and the rule at the top of the file did not reach this far.
 
 **MOAT_SCORING dispatch prompt:**
 
@@ -950,6 +958,8 @@ If the founder picks `Re-score with founder facts`, gather the additional detail
 
 **Dispatch the competitive-positioning sub-agent in Context A (CHECKLIST).** **Call the `Task` tool with `subagent_type: "founder-skills:competitive-positioning"`.**
 
+> **Say the outcome, not the step.** Whatever you tell the founder around this dispatch names what they are getting — "checking whether these really compete" — never the machinery: no step number, no `ALL_CAPS` label, no "gating", "piping", "hand-off" or "producer". Measured, this is where the leaks actually happen, and the rule at the top of the file did not reach this far.
+
 **Dispatch prompt template:**
 
 ```
@@ -1035,6 +1045,8 @@ python3 "$SHARED_SCRIPTS/find_artifact.py" --skill market-sizing --artifact sizi
 **7c — Post-Compose Coaching Commentary (Context B dispatch — POST_COMPOSE_COACHING):**
 
 **Dispatch the competitive-positioning sub-agent in Context B.** **Call the `Task` tool with `subagent_type: "founder-skills:competitive-positioning"`** after `compose_report.py` has successfully written both `report.json` and `report.md`.
+
+> **Say the outcome, not the step.** Whatever you tell the founder around this dispatch names what they are getting — "checking whether these really compete" — never the machinery: no step number, no `ALL_CAPS` label, no "gating", "piping", "hand-off" or "producer". Measured, this is where the leaks actually happen, and the rule at the top of the file did not reach this far.
 
 **Mitigation 2 protocol:** the main thread reads the structured `coaching_payload` from `report.json` and STAGES it as a file in the hand-off dir; the sub-agent Reads it from the agent namespace (a functionally required read, so a wrong prefix fails loudly before anything is written). The sub-agent does NOT Read full `report.md` — it consumes the staged `coaching_payload.json` directly, composes the coaching commentary, and **WRITES it as plain markdown to the `OUTPUT_PATH` hand-off file (a `.md` file) with its Write tool — no JSON, no escaping — returning only a small receipt** (the same file transport as Context A — the commentary leaves the model exactly once, into the Write call; the main thread never re-types it). The main thread gates that file with `check_handoff.py --format=markdown`, transforms it into the JSON transport envelope with `md_to_commentary.py` (deterministic escaping — `json.dumps` cannot emit malformed JSON), then pipes it into the shared `insert_coaching.py` script (idempotency matrix, uuid-marker replacement, run_id-parity verification — all deterministic, unchanged). See the competitive-positioning agent body's "Context B — Post-compose coaching dispatch (POST_COMPOSE_COACHING)" section for the full procedure.
 
