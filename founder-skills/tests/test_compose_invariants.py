@@ -261,6 +261,8 @@ def test_cp_verification_verdicts_reach_the_report(tmp_path: Path) -> None:
                         "slug": first,
                         "verdict": "not_a_competitor",
                         "reasoning": "Sells to a different buyer for a different job entirely.",
+                        "overlap": {"buyer": True, "job_to_be_done": False, "category": False},
+                        "confidence": "high",
                     }
                 ],
                 "summary": {"total": 1, "genuine": 0, "flagged": 1},
@@ -280,6 +282,10 @@ def test_cp_verification_verdicts_reach_the_report(tmp_path: Path) -> None:
     assert "Not a competitor" in md, "the verdict enum was not rendered (or not humanized)"
     assert "Retained despite the challenge" in md, "a kept not_a_competitor entry must be flagged"
     assert "Acme Tanks" in md, "blind-recall gaps did not reach the report"
+    # The substitution test's own result and the verdict's confidence: the sub-agent is asked for both,
+    # so both must be visible. "adjacent" alone does not say on WHICH dimension it overlaps.
+    assert "| buyer |" in md, "the overlap dimensions were not rendered"
+    assert "High" in md, "verdict confidence was not rendered"
 
 
 def test_cp_verification_section_absent_when_artifact_absent(tmp_path: Path) -> None:

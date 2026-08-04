@@ -21,6 +21,12 @@ import sys
 from datetime import datetime
 from typing import Any
 
+# Sibling helper: fingerprints of this producer's inputs, so a later verifier can detect an output
+# computed against inputs that have since changed (run_id parity cannot see that — corrections rewrite
+# inputs.json within a single run).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _fingerprint  # noqa: E402
+
 
 def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
     """Write JSON string to file or stdout."""
@@ -885,6 +891,7 @@ def main() -> None:
         result.setdefault("metadata", {})["run_id"] = _input_metadata["run_id"]
     if getattr(args, "run_id", None):  # CLI run_id overrides stdin passthrough
         result.setdefault("metadata", {})["run_id"] = args.run_id
+    _fingerprint.stamp(result, {"inputs.json": data})
     out = json.dumps(result, indent=indent) + "\n"
     scenarios = result.get("scenarios", [])
     base_s = next((s for s in scenarios if s["name"] == "base"), None)

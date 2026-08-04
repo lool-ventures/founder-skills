@@ -923,3 +923,105 @@ class TestEdgeCases:
         runway_issues = out["artifacts"]["runway.json"]["issues"]
         runway_errors = [i for i in runway_issues if i["severity"] == "error"]
         assert not runway_errors, f"Unexpected runway errors for default-alive company: {runway_errors}"
+
+
+# ---------------------------------------------------------------------------
+# Inputs-drift fingerprints
+#
+# run_id parity cannot see this class: apply_corrections.py rewrites inputs.json inside a single run,
+# so an output computed before the corrections carries the same run_id as one computed after.
+# ---------------------------------------------------------------------------
+
+
+def _fingerprint_of(doc: dict[str, Any]) -> str:
+    import importlib.util
+
+    path = os.path.join(_SCRIPTS, "_fingerprint.py")
+    spec = importlib.util.spec_from_file_location("_fingerprint", path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return str(mod.fingerprint(doc))
+
+
+def test_matching_inputs_fingerprint_raises_no_drift_issue() -> None:
+    arts = _full_artifacts()
+    fp = _fingerprint_of(arts["inputs.json"])
+    for name in ("checklist.json", "unit_economics.json", "runway.json"):
+        arts[name]["graded_against"] = {"inputs.json": fp}
+    _rc, out, _err = _run(arts)
+    text = json.dumps(out)
+    assert "different version of the inputs" not in text
+
+
+def test_stale_output_is_flagged_when_inputs_changed_after_it_ran() -> None:
+    """The whole point: outputs can agree with each other while all are stale."""
+    arts = _full_artifacts()
+    stale = _fingerprint_of({"cash": {"current_balance": 1}})
+    for name in ("checklist.json", "unit_economics.json", "runway.json"):
+        arts[name]["graded_against"] = {"inputs.json": stale}
+    _rc, out, _err = _run(arts)
+    text = json.dumps(out)
+    assert "different version of the inputs" in text, "drift against current inputs was not detected"
+    for name in ("checklist.json", "unit_economics.json", "runway.json"):
+        assert name in text
+
+
+def test_a_recorded_null_fingerprint_is_reported_not_passed_over() -> None:
+    """ "No fingerprint" and "matching fingerprint" are different claims."""
+    arts = _full_artifacts()
+    arts["runway.json"]["graded_against"] = {"inputs.json": None}
+    _rc, out, _err = _run(arts)
+    assert "records no fingerprint" in json.dumps(out)
+
+
+def test_absent_graded_against_is_not_an_error() -> None:
+    """An artifact produced before fingerprints existed has nothing to compare, not a failure."""
+    arts = _full_artifacts()
+    for name in ("checklist.json", "unit_economics.json", "runway.json"):
+        arts[name].pop("graded_against", None)
+    _rc, out, _err = _run(arts)
+    text = json.dumps(out)
+    assert "different version of the inputs" not in text
+    assert "records no fingerprint" not in text
+
+
+def test_run_id_parity_alone_would_miss_this() -> None:
+    """Every artifact shares one run_id and the drift is still detected."""
+    arts = _full_artifacts()
+    stale = _fingerprint_of({"cash": {"current_balance": 1}})
+    arts["runway.json"]["graded_against"] = {"inputs.json": stale}
+    run_ids = {
+        json.dumps(a.get("metadata", {}).get("run_id"))
+        for a in arts.values()
+        if isinstance(a, dict) and a.get("metadata")
+    }
+    assert len(run_ids) == 1, f"fixture must share one run_id for this test to mean anything: {run_ids}"
+    assert "different version of the inputs" in json.dumps(_run(arts)[1])
+
+
+def test_metadata_is_excluded_from_the_fingerprint() -> None:
+    """Stamping a run_id must not read as an inputs change."""
+    base = {"cash": {"current_balance": 100}}
+    with_meta = {"cash": {"current_balance": 100}, "metadata": {"run_id": "abc"}}
+    assert _fingerprint_of(base) == _fingerprint_of(with_meta)
+
+
+def test_producers_record_the_fingerprint_end_to_end() -> None:
+    """The stamp must survive a real producer run, not just the helper's unit behaviour."""
+    import test_financial_model_review as t
+
+    inputs = t._VALID_INPUTS if hasattr(t, "_VALID_INPUTS") else None
+    if inputs is None:
+        import pytest
+
+        pytest.skip("no shared inputs fixture available")
+    result = subprocess.run(
+        [sys.executable, os.path.join(_SCRIPTS, "runway.py")],
+        input=json.dumps(inputs),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    produced = json.loads(result.stdout)
+    assert produced.get("graded_against", {}).get("inputs.json") == _fingerprint_of(inputs)

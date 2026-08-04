@@ -172,10 +172,12 @@ def render_explorer_html(
 
     # Build data payload for client-side JS. Includes pre-financing baseline
     # for the Sankey source pools.
+    # Every key here must be READ by the JS below. `mode`, `company_name` and `as_of_date` were
+    # embedded and never read — `company_name` and `as_of_date` are rendered server-side (the page
+    # header), and nothing consumed `mode` at all. An unread key is not free: it is the same shape as
+    # the defect where a whole scored layer was embedded, paid for, and never rendered, and it makes a
+    # dead-key scan report a false positive on the ones that ARE dead.
     payload = {
-        "company_name": inputs.get("company_name", ""),
-        "as_of_date": cap_state.get("as_of_date", ""),
-        "mode": inputs.get("mode", "standard"),
         "pre_financing": {
             "common": cap_state["as_converted_totals"]["common_shares"],
             "preferred_as_converted": cap_state["as_converted_totals"]["preferred_shares_as_converted"],

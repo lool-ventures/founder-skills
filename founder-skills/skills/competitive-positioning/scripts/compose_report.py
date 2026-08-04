@@ -58,12 +58,10 @@ WARNING_SEVERITY: dict[str, str] = {
     "INCOMPLETE_SCORING": "medium",
     "RESEARCHED_WITHOUT_SOURCE": "medium",
     "NO_RECENT_DEVELOPMENTS": "medium",
-    # "low" deliberately, NOT medium: by the time this fires the text has ALREADY been corrected by
-    # substitute(), so the report the founder reads is clean. What remains is an AUTHORING task (a
-    # producer that should stop emitting the token, or a filename that must be dropped rather than
-    # renamed), and ic-sim / market-sizing / deck-review all block strict mode on medium — which would
-    # abort a founder's run over a cosmetic issue that was already fixed. The fleet ratchet in
-    # test_compose_invariants.py is the real gate; this is the runtime breadcrumb.
+    # "low", not medium: by the time this fires, substitute() has already corrected the text, so the
+    # report is clean and what remains is an authoring task. ic-sim / market-sizing / deck-review block
+    # strict mode on medium, which would fail a run over an already-fixed issue. The fleet ratchet in
+    # test_compose_invariants.py is the gate; this is the runtime breadcrumb.
     "FOUNDER_TEXT_TOKEN": "low",
     # A dated competitor move that fell outside the recency window. Dropped from
     # recent_developments and preserved under out_of_window_developments by
@@ -991,15 +989,21 @@ def _section_competitor_landscape(landscape: dict[str, Any] | None) -> str:
     lines.append(f"**Input Mode:** {_humanize(str(landscape.get('input_mode', '?')))}")
     lines.append("")
 
-    lines.append("| Name | Category | Research Depth | Sourced Fields |")
-    lines.append("|------|----------|---------------|----------------|")
+    # `pricing_model` is researched per competitor and belongs in the table: how a rival charges is
+    # part of the competitive picture a founder is reading this for, and researching it without
+    # showing it is work the founder paid for and cannot see.
+    lines.append("| Name | Category | Pricing | Research Depth | Sourced Fields |")
+    lines.append("|------|----------|---------|---------------|----------------|")
     for c in competitors:
         c = _as_dict(c)
         name = c.get("name", "?")
         cat = _humanize(str(c.get("category", "?")))
         rd = _humanize(str(c.get("research_depth", "?")))
         sfc = c.get("sourced_fields_count", "?")
-        lines.append(f"| {name} | {cat} | {rd} | {sfc} |")
+        pricing = str(c.get("pricing_model", "") or "").strip().replace("|", "\\|") or "—"
+        if len(pricing) > 60:
+            pricing = pricing[:57].rstrip() + "..."
+        lines.append(f"| {name} | {cat} | {pricing} | {rd} | {sfc} |")
 
     return "\n".join(lines) + "\n"
 
@@ -1047,6 +1051,24 @@ def _section_recent_developments(landscape: dict[str, Any] | None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _overlap_summary(overlap: Any) -> str:
+    """Render the substitution test's three dimensions as the axes that matched.
+
+    The verdict alone says "adjacent"; this says on what — a competitor sharing the buyer but not the
+    job is a different conversation from one sharing the job but not the buyer.
+    """
+    data = _as_dict(overlap)
+    if not data:
+        return "—"
+    labels = {"buyer": "buyer", "job_to_be_done": "job", "category": "category"}
+    matched = [label for key, label in labels.items() if data.get(key) is True]
+    if not matched:
+        return "none"
+    if len(matched) == len(labels):
+        return "buyer, job, category"
+    return ", ".join(matched)
+
+
 def _section_competitor_verification(
     competitor_verification: dict[str, Any] | None,
     name_by_slug: dict[str, str] | None = None,
@@ -1081,15 +1103,18 @@ def _section_competitor_verification(
         if isinstance(genuine, int) and isinstance(flagged, int):
             lines.append(f"**{genuine} confirmed as genuine competitors; {flagged} came up for a second look.**")
             lines.append("")
-        lines.append("| Competitor | Verdict | Why |")
-        lines.append("|------------|---------|-----|")
+        lines.append("| Competitor | Verdict | Overlap | Confidence | Why |")
+        lines.append("|------------|---------|---------|------------|-----|")
         for v in verdicts:
             slug = str(v.get("slug", "?"))
             verdict = _humanize(str(v.get("verdict", "?")))
             reasoning = str(v.get("reasoning", "") or "").strip().replace("|", "\\|")
             if len(reasoning) > 300:
                 reasoning = reasoning[:297].rstrip() + "..."
-            lines.append(f"| {_display_name(slug, name_by_slug)} | {verdict} | {reasoning or '—'} |")
+            lines.append(
+                f"| {_display_name(slug, name_by_slug)} | {verdict} | {_overlap_summary(v.get('overlap'))} "
+                f"| {_humanize(str(v.get('confidence', '') or '')) or '—'} | {reasoning or '—'} |"
+            )
         lines.append("")
         kept = [v for v in verdicts if str(v.get("verdict")) == "not_a_competitor"]
         if kept:
@@ -1678,9 +1703,8 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # --- founder-text policy: substitute, then scan what remains --------------------------------
     # MUST run after the Warnings section is spliced in. compose assembles the body first and appends
     # warnings last (so the marker prescan sees only body content), and the warnings are exactly where
-    # the internal tokens live — producer messages naming a field. A first attempt hooked in before
-    # this splice and silently substituted nothing; the scan then reported a clean body while 21
-    # tokens sat in the section appended two lines later.
+    # the internal tokens live — producer messages naming a field. Hooking in before the splice
+    # substitutes nothing and then reports a clean body.
     #
     # It runs HERE, on the assembled markdown, rather than in CI over fixtures: a fixture is
     # schema-correct by construction, so a fixture-only scan answers "does the renderer behave on good

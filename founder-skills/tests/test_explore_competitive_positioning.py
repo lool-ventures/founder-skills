@@ -625,39 +625,6 @@ def test_explorer_stays_self_contained_with_new_panels() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Dead-payload guard
-#
-# Measured in a live run: explore.py computed and embedded `view_scores` and
-# `diff_claims` — the entire scored layer — and the emitted JavaScript never
-# referenced either. The delivered 522 KB explorer therefore showed no
-# differentiation score, no rank, no vanity flag and no claim verdict, while
-# paying for all of it in payload. Nothing detected it: the file rendered, the
-# tests passed, the data was simply unreachable.
-# ---------------------------------------------------------------------------
-
-
-def test_every_embedded_data_key_is_read_by_the_script() -> None:
-    """Every top-level DATA key must be referenced at least once in the emitted script.
-
-    Both explorers access their payload with dotted `DATA.key` only (verified — no bracket
-    notation, no destructuring), so a plain reference scan is sound. If that ever changes, this
-    test will fail loudly rather than silently passing, which is the correct direction.
-    """
-    arts = _all_artifacts()
-    with _make_artifact_dir(arts) as d:
-        rc, html, stderr = _run_explore(d)
-    assert rc == 0, f"exit {rc}, stderr={stderr}"
-    match = re.search(r"const\s+DATA\s*=\s*(\{.*?\});", html, re.DOTALL)
-    assert match, "could not locate the embedded DATA object in the generated explorer"
-    payload = json.loads(match.group(1))
-    # Non-vacuity: an empty payload would make `unread` trivially empty and pass for the wrong
-    # reason — the failure mode this whole test exists to catch.
-    assert len(payload) >= 5, f"DATA payload parsed as only {len(payload)} key(s) — the scan would be vacuous"
-    unread = sorted(k for k in payload if f"DATA.{k}" not in html)
-    assert not unread, (
-        f"explore.py embeds DATA key(s) its script never reads: {unread}. Either render them or stop "
-        "embedding them — an unread key is a founder-facing feature that silently does not exist, and "
-        "it still costs payload. (This is how the entire scored layer went missing from a delivered "
-        "explorer: differentiation score, ranks, vanity flags and claim verdicts were all embedded and "
-        "none was rendered.)"
-    )
+# Dead-payload coverage lives in test_dead_payload.py, which scans every embedder in one place
+# and distinguishes 'unread' from 'unverifiable' (this file's earlier scan matched dotted access
+# only, so a computed-name read read as a dead key).

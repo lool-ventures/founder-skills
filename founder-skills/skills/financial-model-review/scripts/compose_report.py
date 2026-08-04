@@ -31,12 +31,10 @@ _CORRUPT: dict[str, Any] = {"__corrupt__": True}
 
 # Canonical warning severity map -- stable API, tested for completeness
 WARNING_SEVERITY: dict[str, str] = {
-    # "low" deliberately, NOT medium: by the time this fires the text has ALREADY been corrected by
-    # substitute(), so the report the founder reads is clean. What remains is an AUTHORING task (a
-    # producer that should stop emitting the token, or a filename that must be dropped rather than
-    # renamed), and ic-sim / market-sizing / deck-review all block strict mode on medium — which would
-    # abort a founder's run over a cosmetic issue that was already fixed. The fleet ratchet in
-    # test_compose_invariants.py is the real gate; this is the runtime breadcrumb.
+    # "low", not medium: by the time this fires, substitute() has already corrected the text, so the
+    # report is clean and what remains is an authoring task. ic-sim / market-sizing / deck-review block
+    # strict mode on medium, which would fail a run over an already-fixed issue. The fleet ratchet in
+    # test_compose_invariants.py is the gate; this is the runtime breadcrumb.
     "FOUNDER_TEXT_TOKEN": "low",
     # High severity -- agent must fix before presenting report
     "CORRUPT_ARTIFACT": "high",
@@ -1332,9 +1330,9 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     )
 
     # --- founder-text policy (shared fleet module) ------------------------------------------------
-    # Runs on the FINAL assembled markdown — after the warnings section and footer — because that is
-    # the exact string the founder reads, and because producer warning messages are where the
-    # internal tokens actually live.
+    # MUST run on the FINAL assembled markdown, after the warnings section and the footer: that is the
+    # exact string the founder reads, and producer warning messages are where the internal tokens
+    # live. Hooking in before the warnings splice substitutes nothing and reports a clean body.
     _ft = _founder_text_policy()
     if _ft is not None:
         # Identifier keep-set derived from the DATA, not hand-listed: an id present in the artifacts

@@ -43,6 +43,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   including in the report's headline verdict lines.
 - **deck-review:** slide types printed as raw tokens (`purpose_traction`, `business_model`).
 - **cap-table:** field names printed as raw tokens (`safe_price`).
+- **competitive-positioning:** a competitor's researched pricing model was never shown, and the
+  competitor-set verdicts showed neither which dimensions overlapped nor the verdict's confidence.
+- **cap-table:** the explorer embedded three values its script never read.
+- **financial-model-review:** an output computed before the founder's corrections were applied could
+  not be distinguished from one computed after; each output now records a fingerprint of the inputs it
+  used, and `verify_review.py` compares it against the inputs as they stand.
 
 ### Added
 

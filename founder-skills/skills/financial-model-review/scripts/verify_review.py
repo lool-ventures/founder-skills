@@ -24,6 +24,10 @@ import os
 import sys
 from typing import Any
 
+# Sibling helper: recompute the fingerprint of the inputs each output was graded against.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _fingerprint  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -349,6 +353,51 @@ _QUALITY_CHECKS: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 
+def _check_inputs_drift(
+    artifacts: dict[str, dict[str, Any]],
+    inputs_data: dict[str, Any],
+) -> list[dict[str, str]]:
+    """Flag an output computed against a version of inputs.json that no longer exists.
+
+    Compared against the CURRENT inputs, recomputed here — not against the other outputs. Outputs can
+    all agree with each other while all of them are stale, which is exactly what happens when
+    corrections land after they ran. run_id parity cannot see it: corrections rewrite inputs.json
+    inside one run, so every artifact still carries the same run_id.
+
+    A recorded None means the producer could not see its inputs, which is reported as unverifiable
+    rather than passed over: "no fingerprint" and "matching fingerprint" are different claims.
+    """
+    checks: list[dict[str, str]] = []
+    current = _fingerprint.fingerprint(inputs_data)
+
+    for name in ("checklist.json", "unit_economics.json", "runway.json"):
+        entry = artifacts.get(name, {})
+        data = entry.get("_data")
+        if data is None or entry.get("_skipped"):
+            continue
+        graded = data.get(_fingerprint.GRADED_AGAINST)
+        if not isinstance(graded, dict) or "inputs.json" not in graded:
+            # Produced before fingerprints were recorded; nothing to compare.
+            continue
+        recorded = graded.get("inputs.json")
+        if recorded is None:
+            checks.append(
+                _issue(
+                    "warning",
+                    f"{name} records no fingerprint of the inputs it was computed from, so it cannot be shown current",
+                )
+            )
+        elif recorded != current:
+            checks.append(
+                _issue(
+                    "error",
+                    f"{name} was computed from a different version of the inputs than the one on disk "
+                    f"now — re-run it, or its figures describe a model that no longer exists",
+                )
+            )
+    return checks
+
+
 def _check_cross_consistency(
     artifacts: dict[str, dict[str, Any]],
 ) -> list[dict[str, str]]:
@@ -379,6 +428,8 @@ def _check_cross_consistency(
     inputs_data = artifacts.get("inputs.json", {}).get("_data")
     if inputs_data is None or artifacts.get("inputs.json", {}).get("_skipped"):
         return checks
+
+    checks.extend(_check_inputs_drift(artifacts, inputs_data))
 
     # runway.baseline.net_cash vs inputs net cash (current_balance - debt)
     runway_entry = artifacts.get("runway.json", {})

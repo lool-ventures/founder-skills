@@ -1,9 +1,7 @@
 """Shared founder-facing text policy: what may appear in a report, and how to render it.
 
-ONE module for the whole fleet, imported by each skill's `compose_report.py`. It exists because the
-same defect was found in four skills independently, and because a per-skill copy would drift.
-
-THE POLICY (decided 2026-08-04; do not change it here without changing the decision).
+ONE module for the whole fleet, imported by each skill's `compose_report.py`; a per-skill copy would
+drift.
 
 Tokens that reach a founder are not all the same kind of thing, and a single rule is wrong for at
 least three of them. Four types, three behaviours:
@@ -24,14 +22,11 @@ least three of them. Four types, three behaviours:
      that it does not change between runs.
      -> KEEP VERBATIM.
 
-Why the split rather than "no internal tokens", which is what competitive-positioning shipped first:
-that rule would delete `safe_001` and cost a founder the ability to find their own SAFE. And why not
-"gloss everything" (cap-table's `_labels.py` convention): ic-sim already proves glossing does not
-finish the job — it ships a verdict legend AND still puts `more_diligence` in five sentences, so the
-reader has to hold a mapping while reading a judgement about their company.
+A blanket "no internal tokens" rule is wrong because it would rewrite `safe_001` and cost a founder
+the ability to find their own SAFE. Glossing everything is also insufficient: a legend beside a raw
+token still makes the reader hold a mapping while reading a judgement about their company.
 
-The distinction that matters is not which skill produced the line. It is whether the token is
-something the founder can ACT on. An identifier is a key; an enum is a password.
+The test is whether the founder can ACT on the token. An identifier is a key; an enum is a password.
 """
 
 from __future__ import annotations
@@ -68,27 +63,24 @@ _ID_KEY_SUFFIXES = ("_id", "_ids", "_slug", "_slugs")
 def identifier_values(obj: object, *, _depth: int = 0) -> frozenset[str]:
     """Collect identifier values out of a loaded artifact tree, for use as `extra_keep`.
 
-    `_IDENTIFIER_RE` only recognises the `<prefix>_<digits>` form (`safe_001`). Plenty of real
-    identifiers do not look like that — cap-table names a scenario `safe_conv` — and mangling one is
-    the exact traceability harm type 3 exists to prevent, because the SAME id then reads `safe_conv`
-    in the JSON and "safe conv" in the markdown, breaking correlation across the report, the explorer
-    and the counsel packet.
+    `_IDENTIFIER_RE` only recognises the `<prefix>_<digits>` form (`safe_001`), and plenty of real
+    identifiers do not look like that (cap-table names a scenario `safe_conv`). Rewriting one is the
+    traceability harm type 3 exists to prevent: the same id then reads one way in the JSON and another
+    in the markdown, breaking correlation across the report, the explorer and the counsel packet.
 
-    Deriving the keep-set from the DATA rather than a hand-maintained list is what makes this hold as
-    new scenarios and instruments appear: an id present in the artifacts is an id, whatever its shape.
+    Derived from the DATA rather than hand-maintained, so it holds as new scenarios and instruments
+    appear: an id present in the artifacts is an id, whatever its shape.
     """
     keep: set[str] = set()
     if _depth > 12:  # artifact trees are shallow; this only guards a pathological cycle-free depth
         return frozenset()
     if isinstance(obj, dict):
-        # An ID-KEYED MAP: `per_safe: {safe_conv: {...}, safe_ci: {...}}`. The ids are the KEYS, so the
-        # `*_id`-value rule below never sees them. Recognised by every value being a dict — in an
-        # artifact tree that shape is a collection-keyed-by-id, whereas a record has scalar leaves
-        # (`as_converted_totals: {shares: 100}` is correctly not matched).
+        # An ID-KEYED MAP: `per_safe: {safe_conv: {...}}`. The ids are the KEYS, so the `*_id`-value
+        # rule below never sees them. Recognised by every value being a dict; a record has scalar
+        # leaves (`as_converted_totals: {shares: 100}`) and is correctly not matched.
         #
-        # Erring toward KEEPING is deliberate. Over-keeping leaves a token raw, which the fleet ratchet
-        # catches at authoring time; under-keeping rewrites an identifier, which silently makes the
-        # markdown disagree with the JSON and is not caught by anything.
+        # Erring toward KEEPING is deliberate: over-keeping leaves a token raw, which the fleet ratchet
+        # catches, while under-keeping rewrites an identifier and nothing catches it.
         values = list(obj.values())
         if values and all(isinstance(v, dict) for v in values):
             keep.update(k for k in obj if isinstance(k, str))
@@ -111,8 +103,7 @@ def identifier_values(obj: object, *, _depth: int = 0) -> frozenset[str]:
 # ---------------------------------------------------------------------------
 
 # Abbreviated word-parts that read badly spelled out. `segment_pct` -> "segment %", matching the
-# labels market-sizing already writes by hand ("**Serviceable %**") rather than inventing a second
-# convention for the same idea.
+# labels market-sizing already writes by hand ("**Serviceable %**").
 _PART_REWRITES = {"pct": "%"}
 
 # Words that must not be title-cased or spaced when they appear inside a token.
@@ -137,13 +128,12 @@ _OVERRIDES: dict[str, str] = {
 }
 
 # Known STATE vocabulary across the fleet — the type-1 private enums. Membership decides only
-# CAPITALIZATION during bulk substitution, and it exists because position cannot decide it:
-# `**Serviceable %**: partially_supported` and `— supports: customer_count` are the same markdown
-# shape but want different cases, since the first is a value ("Partially supported") and the second a
-# field name in a list ("customer count"). Type, not position, is the discriminator.
+# CAPITALIZATION during bulk substitution. Position cannot decide it: `**Serviceable %**:
+# partially_supported` and `— supports: customer_count` are the same markdown shape but want different
+# cases, the first being a value and the second a field name in a list.
 #
-# Failure mode of an omission is COSMETIC — an unlisted enum renders lowercase, which is readable.
-# That is deliberate: this list must never become load-bearing for detection.
+# An omission is COSMETIC — an unlisted enum renders lowercase, which is readable. This list must never
+# become load-bearing for detection.
 _ENUM_VALUES: frozenset[str] = frozenset(
     {
         # verdicts / recommendations
@@ -169,12 +159,10 @@ _ENUM_VALUES: frozenset[str] = frozenset(
     }
 )
 
-# LIMITATION, recorded because it is invisible: a SINGLE-WORD enum (`pass`, `invest`, `warn`,
-# `adjacent`) is structurally undetectable here. `_CANDIDATE_RE` requires an underscore precisely so
-# the scanner does not flag every English word in the report, which means bare `pass` neither scans
-# nor substitutes. Such tokens must be handled by the emitting skill — ic-sim's verdict legend glosses
-# `pass` and `invest` explicitly, which is the working pattern. Do NOT "fix" this by dropping the
-# underscore requirement: the resulting false-positive rate makes the scan unusable.
+# LIMITATION: a SINGLE-WORD enum (`pass`, `invest`, `warn`) is undetectable here. `_CANDIDATE_RE`
+# requires an underscore so the scanner does not flag every English word, so bare `pass` neither scans
+# nor substitutes; dropping that requirement makes the false-positive rate unusable. Such tokens must
+# be glossed by the emitting skill instead.
 
 # A skill that already ships its own label map (cap-table's `_labels.py`) is the better authority for
 # its own vocabulary — this module must not shadow it. Callers pass those tokens via `extra_keep` and
@@ -229,10 +217,8 @@ def scan(text: str, *, extra_keep: frozenset[str] | None = None) -> dict[str, li
     deliberately keeps a token (cap-table glosses its own vocabulary via `_labels.py`) would otherwise
     be warned about the exact string it chose to keep, which trains the reader to ignore the warning.
 
-    Deliberately NOT a markdown-shape regex. An earlier attempt matched `**Label:** value`, missed
-    `**Label**: value`, and a corrected version missed the first — two regexes, two different single
-    hits, neither catching both. Matching the TOKEN rather than its surrounding markdown is what
-    makes this reliable across the fleet's differing report dialects.
+    Matches the TOKEN, never its surrounding markdown: a shape regex keyed on `**Label:** value` does
+    not survive the fleet's differing report dialects (`**Label**: value` and others).
     """
     keep = (extra_keep or frozenset()) | DIAGNOSTIC_CODES
     filenames = sorted({m.group(0) for m in _FILENAME_RE.finditer(text)})
