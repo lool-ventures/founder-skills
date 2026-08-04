@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import uuid
 from datetime import date
@@ -1402,8 +1403,34 @@ def _section_key_findings(
     return "\n".join(lines) + "\n"
 
 
-def _section_warnings(warnings: list[dict[str, Any]]) -> str:
-    """Validation warnings from cross-artifact checks."""
+def _substitute_slugs(text: str, name_by_slug: dict[str, str] | None) -> str:
+    """Replace competitor slugs with display names in founder-visible prose.
+
+    Producers author their warning `message` strings as prose and legitimately quote the slug of
+    the competitor at fault — the slug is what a producer HAS. Rewriting every producer's message
+    to carry a name would mean a warnings-schema change across five-plus scripts and would fight
+    the code+message pairing tests, so the substitution happens once here, at the render boundary,
+    where the landscape's slug -> name map is already in hand.
+
+    Longest slug first, so a slug that is a prefix of another cannot be partially replaced.
+    """
+    if not name_by_slug:
+        return text
+    for slug in sorted(name_by_slug, key=len, reverse=True):
+        name = name_by_slug[slug]
+        text = re.sub(rf"(?<![\w-]){re.escape(slug)}(?![\w-])", name, text)
+    return text
+
+
+def _section_warnings(
+    warnings: list[dict[str, Any]],
+    name_by_slug: dict[str, str] | None = None,
+) -> str:
+    """Validation warnings from cross-artifact checks.
+
+    `name_by_slug` substitutes competitor display names into producer-authored message text; a
+    slug in the warnings list is as unusable to a founder as one in a heading.
+    """
     # Only show medium+ warnings in the report
     reportable = [w for w in warnings if w.get("severity") in ("high", "medium", "acknowledged")]
     if not reportable:
@@ -1420,7 +1447,7 @@ def _section_warnings(warnings: list[dict[str, Any]]) -> str:
     for w in reportable:
         sev = w.get("severity", "?")
         code = w.get("code", "?")
-        msg = w.get("founder_message") or w.get("message", "?")
+        msg = _substitute_slugs(str(w.get("founder_message") or w.get("message", "?")), name_by_slug)
         label = _humanize_warning(code)
         icon = sev_icons.get(sev, "")
         prefix = f"[{icon}] " if icon else ""
@@ -1604,7 +1631,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     # so the low-severity MARKER_COLLISION still won't surface in the report,
     # but the data flow is now correct for any future reportable warning the
     # prescan might add.
-    warnings_section = _section_warnings(warnings)
+    warnings_section = _section_warnings(warnings, name_by_slug)
     if warnings_section:
         report_markdown += "\n" + warnings_section
 

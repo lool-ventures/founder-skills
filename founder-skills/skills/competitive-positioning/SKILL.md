@@ -62,6 +62,7 @@ All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/competitive-positioning/scripts
 - **`compose_report.py`** — Assembles report with cross-artifact validation; `--strict` exits 1 on high-severity warnings
 - **`visualize.py`** — Generates self-contained HTML with SVG charts (not JSON)
 - **`explore.py`** — Generates interactive HTML explorer with Chart.js scatter plot, view switching, bubble encoding controls, and company detail panels (not JSON)
+- **`verify_positioning.py`** — Delivery gate (Step 7f). Checks that the deliverable SHOWS what the artifacts contain (axis rationales, claim verdicts, the adversarial competitor verdicts, the explorer's scored layer) and that no internal token reached the founder (raw enums, field names, slugs, criterion IDs in the coaching commentary), plus cross-artifact consistency. `--gate 1` mid-pipeline, `--gate 2` pre-delivery. Exit 0 = publishable, exit 1 = gaps
 
 Also available from `${CLAUDE_PLUGIN_ROOT}/scripts/` (shared):
 
@@ -1152,6 +1153,28 @@ python3 "$SCRIPTS/explore.py" --dir "$ANALYSIS_DIR" -o "$ANALYSIS_DIR/explore.ht
 ```
 
 **Do not hand this over here** — the Deliver step below is the only place work reaches the founder, and it sends the complete set as files. A path presented here is the partial-delivery bug.
+
+**7f — Delivery gate (REQUIRED, and it is a gate, not a report):**
+
+```bash
+python3 "$SCRIPTS/verify_positioning.py" --dir "$ANALYSIS_DIR" --gate 2 --pretty
+```
+
+**Exit 0** — publishable. Proceed to Step 8.
+
+**Exit 1** — the deliverable is missing something the artifacts already contain, or contains
+something the founder cannot use. Each gap names the artifact and the defect. **Fix the cause and
+re-run the affected producer, then re-run this gate.** Do NOT hand over a report the gate rejected,
+and do NOT hand-edit `report.md` to satisfy it — the gate checks the rendered surface precisely
+because hand-editing it is how a defect gets hidden rather than fixed. If a gap is genuinely a false
+positive, say so to the founder in plain language and deliver anyway; that is a judgement you state,
+not one you make silently.
+
+Why this step exists, so it does not get "simplified" away later: three of this skill's worst
+defects were analysis that was computed and never rendered — blank axis rationales the review then
+graded as a pass, an explorer that embedded its entire scored layer and displayed none of it, and
+adversarial competitor verdicts that reached no renderer. Each was found by hand-reading one live
+run's artifacts against what reached the founder. This gate makes that free and automatic.
 
 ### Step 8: Deliver Artifacts
 

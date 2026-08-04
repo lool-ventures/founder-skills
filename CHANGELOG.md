@@ -34,8 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   flags a mismatch.
 - **financial-model-review:** the explorer embedded the review checklist score but did not render it.
 
+### Added
+
+- **competitive-positioning:** `verify_positioning.py`, a pre-delivery gate. It checks that the report
+  shows what the artifacts contain — axis rationales, claim verdicts, the competitor-set verdicts, the
+  explorer's scored layer — and that no internal token reached the founder, plus cross-artifact
+  consistency. A run with gaps does not hand over.
+
 ### Changed
 
+- **competitive-positioning:** warning text now names competitors by display name rather than internal
+  slug.
 - All six skills resolve their plugin root once per run via `select_plugin_root.py`, deterministically,
   instead of re-running a filesystem search in each shell. Duplicate installations are named on stderr.
 

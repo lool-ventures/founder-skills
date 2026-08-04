@@ -2806,8 +2806,17 @@ class TestCompose:
             founder_msg = warn["founder_message"]
             assert "research_depth" not in founder_msg
             assert "partial" not in founder_msg
-            assert "shallow-co" in founder_msg
-            assert founder_msg in data["report_markdown"]
+            assert "shallow-co" in founder_msg, (
+                "the producer authors the message with the slug it has — substitution happens at render"
+            )
+            # The RENDERED warning must carry the display NAME, not the slug: a slug in the warnings
+            # list is as unusable to a founder as one in a heading, and compose substitutes it at the
+            # render boundary rather than every producer rewriting its message text.
+            rendered = founder_msg.replace("shallow-co", "Shallow Co")
+            assert rendered in data["report_markdown"], (
+                "the warning should be rendered with the competitor's display name substituted"
+            )
+            assert "'shallow-co'" not in data["report_markdown"]
 
     # 8. Vanity-flagged view -> VANITY_AXIS_WARNING
     def test_compose_vanity_axis_warns(self) -> None:
@@ -3338,7 +3347,10 @@ class TestCompose:
                 assert "founder_message" in w
                 founder_msg = w["founder_message"]
                 assert "moat_scores" not in founder_msg
-                assert founder_msg in data["report_markdown"]
+                # Rendered with the display name substituted for the slug (see the shallow-profile
+                # test above for why the substitution lives at the render boundary).
+                rendered = founder_msg.replace("foo", "Foo Corp")
+                assert rendered in data["report_markdown"]
 
 
 class TestComposeRecentDevelopmentsSection:
