@@ -17,7 +17,6 @@ sys.path.insert(0, str(REPO_ROOT / "founder-skills" / "scripts"))
 
 import _founder_text as ft  # noqa: E402
 
-
 # --- type 1: private enums -> humanize ---------------------------------------
 
 
@@ -114,7 +113,7 @@ def test_substitute_does_not_rewrite_filenames() -> None:
 def test_substitute_handles_a_token_that_prefixes_another() -> None:
     """Longest-first ordering: `evidence_source` must not be half-replaced by `evidence`."""
     out = ft.substitute("evidence_source and evidence_source_detail differ")
-    assert "evidence source and evidence source detail differ" == out
+    assert out == "evidence source and evidence source detail differ"
 
 
 # ---------------------------------------------------------------------------

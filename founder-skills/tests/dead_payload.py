@@ -71,9 +71,8 @@ def _reads_key(script: str, name: str, key: str) -> bool:
     n = re.escape(name)
     if re.search(rf"\b{n}\s*\??\s*\.\s*{k}\b", script):  # DATA.key / DATA?.key
         return True
-    if re.search(rf"\b{n}\s*(?:\?\.)?\s*\[\s*(['\"]){k}\1\s*\]", script):  # DATA["key"] / DATA?.["key"]
-        return True
-    return False
+    # DATA["key"] / DATA?.["key"]
+    return bool(re.search(rf"\b{n}\s*(?:\?\.)?\s*\[\s*(['\"]){k}\1\s*\]", script))
 
 
 def analyze(script: str, keys: list[str] | set[str], *, var: str = "DATA") -> dict[str, Any]:

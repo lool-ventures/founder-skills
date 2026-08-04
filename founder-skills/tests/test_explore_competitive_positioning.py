@@ -161,7 +161,6 @@ def test_no_external_stylesheets() -> None:
 
 def test_data_embedding() -> None:
     """const DATA = ... is present and contains valid JSON with expected keys."""
-    import re
 
     arts = _all_artifacts()
     with _make_artifact_dir(arts) as d:
@@ -292,7 +291,6 @@ def test_axis_rationale_render_uses_escaping() -> None:
 
 def test_axis_rationale_in_embedded_data() -> None:
     """Rationale text from fixtures is present in the embedded DATA payload."""
-    import re
 
     arts = _all_artifacts()
     with _make_artifact_dir(arts) as d:
@@ -349,7 +347,6 @@ def test_3d_axes_bar_initially_hidden() -> None:
 
 def _extract_data_payload(stdout: str) -> dict[str, Any]:
     """Extract and parse the embedded `const DATA = ...` JSON payload."""
-    import re
 
     match = re.search(r"/\*DATA_START\*/\s*const DATA = (.*?);\s*/\*DATA_END\*/", stdout, re.DOTALL)
     assert match is not None, "DATA sentinel comments not found"

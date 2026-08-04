@@ -8,10 +8,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-import pytest
-
 import dead_payload as dp
-
+import pytest
 
 # ---------------------------------------------------------------------------
 # Static access
