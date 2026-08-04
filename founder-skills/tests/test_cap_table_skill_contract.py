@@ -1035,8 +1035,16 @@ def test_skill_canonical_gate_phrasing_present() -> None:
     assert "Don't have the terms handy" in block, "canonical SAFE-terms gate missing"
     # GATE-B (folded in): the no-embellishment rule must be present.
     assert "NEVER append run-specific text to a catalog label" in block, "no-embellishment rule missing"
+    # Bounded on the label's own closing backtick, not a character count. This is a NEGATIVE
+    # assertion, which is the silent direction of the fixed-window trap: if the label ever grows,
+    # an appended "(Recommended)" moves past a fixed offset and the assert stops checking anything
+    # while still passing. Measured before this change: the label ran 96 chars against a 120-char
+    # window — 24 chars of slack, i.e. one modest edit from going vacuous.
     denom_idx = block.find("Fully-diluted pre-financing")
-    assert "(Recommended)" not in block[denom_idx : denom_idx + 120], (
+    assert denom_idx != -1, "the fully-diluted denominator option label is missing"
+    denom_end = block.find("`", denom_idx)
+    assert denom_end != -1, "the denominator option label is not backtick-delimited as expected"
+    assert "(Recommended)" not in block[denom_idx:denom_end], (
         "the denominator label must not append '(Recommended)' — it breaks the cassette anchor"
     )
 
@@ -1045,12 +1053,22 @@ def test_no_stale_empty_snapshot_claim() -> None:
     """cap_state.py hard-errors E_NO_EQUITY_BASE on a fully-absent equity base; the old
     'produces an empty pre-financing snapshot ... with no warning' description was false and
     must not reappear (the doc-vs-behavior drift this guards against)."""
-    body = SKILL_MD.read_text()
-    assert "empty pre-financing snapshot" not in body, (
-        "SKILL.md re-introduced the stale 'empty pre-financing snapshot' claim; "
-        "cap_state.py raises E_NO_EQUITY_BASE instead — keep the description in sync."
+    # Scoped to the WHOLE corpus, not just SKILL.md. Measured: this guard was green for as long as
+    # it existed while `references/inputs-skeleton.md` carried the identical false claim two files
+    # away — "Skipping them produces an empty pre-financing snapshot, no warning, and downstream
+    # artifacts that look right but contain zeros". A model reads the reference too, and prose
+    # telling it a missing base yields plausible zeros is an invitation to invent founders and share
+    # counts. A guard that names one file cannot see the same defect in its neighbour.
+    corpus = {SKILL_MD: SKILL_MD.read_text(encoding="utf-8")}
+    refs = SKILL_MD.parent / "references"
+    for ref in sorted(refs.rglob("*.md")):
+        corpus[ref] = ref.read_text(encoding="utf-8")
+    offenders = [p.name for p, text in corpus.items() if "empty pre-financing snapshot" in text]
+    assert not offenders, (
+        f"{offenders} re-introduced the stale 'empty pre-financing snapshot' claim; cap_state.py "
+        "raises E_NO_EQUITY_BASE instead — keep the description in sync."
     )
-    assert "E_NO_EQUITY_BASE" in body, "SKILL.md must describe the E_NO_EQUITY_BASE hard error"
+    assert "E_NO_EQUITY_BASE" in corpus[SKILL_MD], "SKILL.md must describe the E_NO_EQUITY_BASE hard error"
 
 
 def test_extraction_only_fork_wired() -> None:
