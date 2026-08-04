@@ -1,0 +1,78 @@
+name: market-sizing-fx-conversion
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: first
+skills: [market-sizing]
+
+# Behavioural verification of producer-side FX.
+#
+# WHY THIS LANE EXISTS. The FX fix is only half deterministic. The producer half is unit-tested
+# (conversion, refusal-without-a-rate, no inverse inference, post-conversion re-validation). The other
+# half is PROSE — the dispatch templates ask the sub-agent to report a figure in its source's currency
+# and tag it with `<field>_currency`, and SKILL.md asks the main thread to look a rate up and re-pipe.
+# Nothing in the unit suite can prove a model does either. This repo has measured prose guardrails
+# inert three times, so "landed + green" is not evidence here.
+#
+# THE SETUP. An Israeli company pricing in shekels, in a category whose market data is published in
+# USD — the common real case, and the one SKILL.md calls out ("industry totals are almost always
+# quoted in USD"). If the pipeline works, `inputs.currency` is ILS, the sub-agent hands back a
+# USD-tagged industry total, the sizing step stops for a rate, and the re-pipe lands an `fx` block.
+#
+# READING A FAILURE. `fx.conversions` absent is NOT automatically a defect — a run that legitimately
+# found an ILS-denominated market figure needs no conversion. Check `sizing.json`'s currency and the
+# sub-agent's hand-off before concluding the tag was dropped. What WOULD be a defect: a USD-sourced
+# figure sitting unconverted under an ILS label, which is the exact pre-fix behaviour.
+prompt: |
+  I'm the founder of Meridian, a seed-stage Israeli B2B SaaS company based in Tel Aviv. We sell
+  warehouse inventory-optimisation software to mid-sized food and beverage distributors, and we price
+  and bill everything in shekels — our plans run ₪1,800-₪7,500 per month per site. Our market is
+  global, and the analyst reports I've found on warehouse management software all size it in dollars.
+
+  Please use the market-sizing skill to build a full TAM/SAM/SOM analysis for Meridian — top-down and
+  bottom-up — with a sensitivity test, and produce the written report. I need the analysis denominated
+  in shekels, since that's what my board and my model use. Keep all figures illustrative; where you
+  would cite an external market source, label it clearly.
+
+assert:
+  - result: success
+  - all_tasks_completed: true
+  - file_exists: outputs/artifacts/market-sizing-meridian/report.json
+
+  # --- the point of this lane ---------------------------------------------------------------
+  # The analysis is denominated in the founder's currency, not silently in dollars.
+  - artifact_json:
+      artifact: outputs/artifacts/market-sizing-meridian/sizing.json
+      path: currency
+      equals: ILS
+  # A conversion actually happened and was recorded. This is the assert that fails if the sub-agent
+  # never emits `<field>_currency` (nothing to convert) or if the main thread never supplies a rate
+  # (the run stops instead) — i.e. it fails on exactly the two prose-dependent steps.
+  - artifact_json:
+      artifact: outputs/artifacts/market-sizing-meridian/sizing.json
+      path: fx.conversions.0.rate
+      exists: true
+  # Provenance travelled with it. A rate with no date/source is a `FX_UNSOURCED` warning, not an
+  # error, so this is the key that distinguishes "converted properly" from "converted at a number
+  # someone made up".
+  - artifact_json:
+      artifact: outputs/artifacts/market-sizing-meridian/sizing.json
+      path: fx.as_of
+      exists: true
+  # -------------------------------------------------------------------------------------------
+
+  - subagent_dispatched: 'market-sizing'
+  - skill_triggered: '(founder-skills:)?market-sizing$'
+  - computer_links_resolve: true
+  - no_delete_in_outputs: true
+  - present_files_called: true
+  - subagent_tool_absent: 'Bash'
+  - questions_count_max: 8
+  - dispatch_count_max: 8
+  - max_turns: 140
+  - tool_calls_max: 130
+  - no_unexpected_files:
+      - 'outputs/artifacts/market-sizing-meridian/**'
+      - 'outputs/artifacts/founder-context-meridian.json'
+      - 'outputs/Meridian_Market_Sizing.*'
+  - gate_answers_delivered: true
+  - gate_answer_count_min: 1

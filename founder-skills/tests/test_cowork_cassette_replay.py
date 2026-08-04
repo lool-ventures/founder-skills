@@ -51,6 +51,15 @@ _NO_CASSETTE_ALLOWLIST: dict[str, str] = {
         "it only if it is ever wanted as a regression gate, and note that recording it costs a paid "
         "run and pins the behaviour it currently measures."
     ),
+    "market-sizing-fx-conversion": (
+        "deliberately un-cassetted, same reasoning as the deck-no-slide lane above: this is the LIVE "
+        "verification lane for producer-side FX, and half that fix is PROSE — the dispatch templates "
+        "ask a sub-agent to tag a foreign-currency figure, and SKILL.md asks the main thread to look a "
+        "rate up and re-pipe. A cassette would freeze one past agent's behaviour and re-assert it, "
+        "which is precisely what this lane must not do. Verified live 2026-08-04: the sub-agent "
+        "emitted industry_total_currency=USD, the main thread supplied a sourced dated rate, and the "
+        "conversion landed in sizing.json and in both deliverables ($4.84, 1283s)."
+    ),
     "competitive-positioning-recall-adoption": (
         "not yet recorded (paid; pending the next rerecord.sh batch — see "
         "cowork-tests/rerecord.sh's cumulative cost pre-flight comment for the current count)"
