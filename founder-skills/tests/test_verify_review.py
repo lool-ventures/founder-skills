@@ -1046,7 +1046,10 @@ def test_checklist_records_the_fingerprint_of_its_embedded_inputs() -> None:
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 1, (
+        result.stderr
+    )  # `items: []` is a deliberately-invalid probe payload; checklist.py now refuses it (exit 1)
+    # while still stamping provenance, so the fingerprint stays observable on stdout.
     produced = json.loads(result.stdout)
     assert produced.get("graded_against", {}).get("inputs.json") == _fingerprint_of(inputs)
 
@@ -1063,7 +1066,10 @@ def test_checklist_records_null_when_it_cannot_see_the_inputs() -> None:
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 1, (
+        result.stderr
+    )  # `items: []` is a deliberately-invalid probe payload; checklist.py now refuses it (exit 1)
+    # while still stamping provenance, so the fingerprint stays observable on stdout.
     graded = json.loads(result.stdout).get("graded_against", {})
     assert "inputs.json" in graded
     assert graded["inputs.json"] is None
@@ -1141,6 +1147,9 @@ def test_checklist_fingerprint_resolves_when_inputs_are_passed() -> None:
             capture_output=True,
             text=True,
         )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 1, (
+        result.stderr
+    )  # `items: []` is a deliberately-invalid probe payload; checklist.py now refuses it (exit 1)
+    # while still stamping provenance, so the fingerprint stays observable on stdout.
     graded = json.loads(result.stdout).get("graded_against", {})
     assert graded.get("inputs.json") == _fingerprint_of(inputs)

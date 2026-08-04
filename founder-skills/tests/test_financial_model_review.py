@@ -947,7 +947,7 @@ def test_checklist_missing_items() -> None:
     items = _make_checklist_items(exclude={"STRUCT_01", "UNIT_10"})
     payload = json.dumps({"items": items})
     rc, data, _ = run_script("checklist.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "STRUCT_01")
 
 
@@ -955,7 +955,7 @@ def test_checklist_invalid_status() -> None:
     items = _make_checklist_items(overrides={"STRUCT_01": {"status": "maybe"}})
     payload = json.dumps({"items": items})
     rc, data, _ = run_script("checklist.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "invalid")
 
 
@@ -8509,3 +8509,54 @@ def test_undeclared_agent_value_is_not_critical() -> None:
     assert data is not None
     w = next(x for x in data["warnings"] if x["code"] == "UNDECLARED_AGENT_VALUE")
     assert w["critical"] is False
+
+
+# --- producer refusal + downstream detection (fleet-wide loud-failure pass) ----
+
+
+def test_fmr_producers_refuse_loudly_instead_of_clobbering() -> None:
+    """`checklist.py`, `unit_economics.py` and `runway.py` all shared one defect.
+
+    Each exited 0 on a validation error, printed an `{"ok":true}` receipt, and wrote an
+    analysis-free stub over its own canonical artifact. SKILL.md's producer-error branch is
+    written as "the pipe fails next", so with exit 0 it could never fire, and the prior good
+    artifact was gone. Exit 1 + not writing `-o` is the fix; both halves are asserted.
+    """
+    cases = [
+        ("checklist.py", "checklist.json", json.dumps({"notitems": 1})),
+        ("unit_economics.py", "unit_economics.json", json.dumps({"nocompany": 1})),
+        ("runway.py", "runway.json", json.dumps({"nocompany": 1})),
+    ]
+    for script, artifact, payload in cases:
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, artifact)
+            with open(out, "w") as f:
+                f.write('{"sentinel": true}')
+            rc, data, stderr = run_script(script, ["-o", out], stdin_data=payload)
+            assert rc == 1, f"{script}: a rejected input must exit non-zero"
+            assert stderr.strip(), f"{script}: a rejected run must say so on stderr"
+            assert data is not None and data["validation"]["status"] == "invalid", script
+            with open(out) as f:
+                assert json.load(f) == {"sentinel": True}, f"{script}: canonical artifact clobbered"
+
+
+def test_compose_flags_an_invalid_fmr_artifact_at_high_severity() -> None:
+    """A rejected checklist/unit-economics/runway step must be loud downstream too.
+
+    Before this the only signals were medium — hence suppressible via accepted_warnings — and
+    each named a symptom rather than the cause.
+    """
+    for name in ("checklist.json", "unit_economics.json", "runway.json"):
+        arts: dict[str, Any] = {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+        arts[name] = {"validation": {"status": "invalid", "errors": ["bad input"]}}
+        d = _make_fmr_artifact_dir(arts)
+        rc, data, err = _run_compose(d)
+        assert data is not None, err
+        hits = [w for w in data["validation"]["warnings"] if w["code"] == "ARTIFACT_INVALID"]
+        assert hits, f"{name}: a rejected producer artifact must raise ARTIFACT_INVALID"
+        assert hits[0]["severity"] == "high", f"{name}: must not be acceptable-away"

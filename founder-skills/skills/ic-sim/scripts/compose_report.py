@@ -40,6 +40,10 @@ WARNING_SEVERITY: dict[str, str] = {
     # test_compose_invariants.py is the gate; this is the runtime breadcrumb.
     "FOUNDER_TEXT_TOKEN": "low",
     # High — structural integrity violations
+    # A producer rejected its input, so this artifact carries no analysis. High because the
+    # alternative signals are all MEDIUM (hence suppressible via accepted_warnings) and all
+    # name a symptom rather than the cause: an empty section reads as "nothing to report".
+    "ARTIFACT_INVALID": "high",
     "CORRUPT_ARTIFACT": "high",
     "MISSING_ARTIFACT": "high",
     "STALE_ARTIFACT": "high",
@@ -390,6 +394,25 @@ def _normalize_verdict(v: Any) -> str:
 def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict[str, str]]:
     """Run validation checks across artifacts. Returns list of warnings."""
     warnings: list[dict[str, str]] = []
+
+    # ARTIFACT_INVALID — a producer artifact carrying a rejected validation status. Its producer
+    # now exits non-zero and refuses to write, so reaching here means a stale or hand-edited file;
+    # either way the report must not be presented.
+    for _name, _label in (("score_dimensions.json", "the dimension scoring"),):
+        _art = artifacts.get(_name)
+        if not _usable(_art):
+            continue
+        if _as_dict(_art.get("validation")).get("status") != "invalid":
+            continue
+        _errs = "; ".join(str(e) for e in _as_list(_as_dict(_art.get("validation")).get("errors")))
+        warnings.append(
+            _warn(
+                "ARTIFACT_INVALID",
+                f"{_label.capitalize()} did not complete, so this report is missing part of its "
+                f"analysis" + (f" ({_errs})" if _errs else "") + ". Do not present it: correct the "
+                "inputs and run that step again.",
+            )
+        )
 
     fund_profile = artifacts.get("fund_profile.json")
     conflict_check = artifacts.get("conflict_check.json")

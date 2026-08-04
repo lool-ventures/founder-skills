@@ -343,14 +343,17 @@ does not trip it.)
 analysis is denominated in (`"USD"`, `"EUR"`, `"ILS"`, …). Derive it from the materials: an explicitly
 stated currency, the symbol on a pricing page or revenue line (`€`, `₪`, `£`), or the market the
 company sells into. Only default to `"USD"` when the materials genuinely give no signal. This is a
-**label, not a conversion** — nothing in this skill performs FX, so a wrong code puts a wrong unit on
+**target, not an assumption** — a wrong code puts a wrong unit on
 the headline TAM, and a wrong unit in a TAM travels into the founder's deck unchallenged.
 
 If the materials mix currencies — a EUR price list against an industry total sourced in USD, which is
-the common case since industry totals are almost always quoted in USD — do **not** silently pick one.
-Convert the inputs to a single currency yourself before writing them, state in
-`methodology.json`'s `rationale` which figures you converted and at what rate, and set `currency` to
-the currency you converted *to*. If you cannot establish a rate, ask the founder rather than guessing.
+the common case since industry totals are almost always quoted in USD — do **not** silently pick one,
+and do **not** do the arithmetic in your head. Set `currency` to the one currency the analysis will be
+denominated in, then let the sizing step convert: it takes a rate you supply and records it in the
+report, so the founder can see what was converted and at what rate. **You** are the one who looks the
+rate up — you have web access and the sizing sub-agent does not. If you cannot establish a rate from a
+real source, ask the founder rather than guessing; a rate you half-remember is the one failure mode
+nothing downstream can catch.
 
 **Sizing basis — declare current-year vs. forecast-year, don't leave it implicit.** Industry reports
 routinely quote both a current-year figure and a 3-5 year forecast figure for the same market, often
@@ -571,7 +574,7 @@ Branch on the exit code (complete state machine — do not improvise):
 - **Exit 4** (file exists, invalid JSON) → **repair-dispatch**: fresh Task: "Read `<OUTPUT_PATH>`; it fails JSON parsing with `<verbatim detail from the diagnostic>`; fix and rewrite it; return the receipt."
 - **Exit 5** (receipt echoes a different path) → **repair-dispatch** telling the agent the exact expected OUTPUT_PATH (it wrote somewhere else).
 - **Exit 6** (receipt unparseable / no `output_path` key) → **redo-dispatch** with "return ONLY the receipt JSON — no fences, no prose."
-- **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim.
+- **Producer schema rejection** (the pipe fails next) → **repair-dispatch** with the producer's stderr verbatim. **One exception: a message naming `E_FX_RATE_MISSING` is NOT a sub-agent fault and must NOT be repair-dispatched** — the sub-agent correctly reported a figure in its source's currency and has no network to look up a rate. You look the rate up and re-run the same pipe with the rate flags added (see the sizing step). Re-dispatching here burns the retry budget and invites the sub-agent to invent a rate.
 - **Any other exit** (script crash etc.) → STOP with the stderr.
 - **After ANY corrective dispatch, resume from `check_handoff.py`** — never pipe to the producer unchecked.
 
@@ -636,11 +639,12 @@ segment_pct and share_pct are percentage POINTS, not fractions — 35 means 35%,
 A fractional value silently computes ~100x low (market_sizing.py divides by 100 once already).
 segment_pct narrows TAM to SAM; share_pct narrows SAM to SOM — do not swap them.
 
-CURRENCY: this analysis is denominated in inputs.json's `currency`. industry_total must be
-expressed in THAT currency. If your research source quotes the industry total in a different
-currency (USD is the usual case), convert it and say so in your `sources` note — do NOT hand back
-a figure in the source's currency, because nothing downstream performs FX and the number would be
-rendered under the wrong unit.
+CURRENCY: this analysis is denominated in inputs.json's `currency`. Do NOT convert anything — you
+have no network and no exchange rate, so any rate you applied would come from memory. Report
+industry_total as the source states it, and add `industry_total_currency` with that source's ISO
+code (e.g. "USD"; industry totals usually are quoted in USD). Omit the field only when the figure
+is already in inputs.json's `currency`. The producer converts, using a rate the main thread
+supplies, and records it in the report.
 
 SIZING_BASIS: this analysis' declared basis is inputs.json's `sizing_basis`. When your research
 source quotes both a current-year and a forecast-year figure for the same market, pick the one that
@@ -652,7 +656,10 @@ Use your Write tool to write to OUTPUT_PATH exactly this JSON — the shape
 expected by market_sizing.py --stdin for approach "top_down":
 {
   "approach": "top_down",
-  "industry_total": <number>,
+  "industry_total": <number, AS THE SOURCE STATES IT — never converted by you>,
+  "industry_total_currency": <REQUIRED when the source's currency differs from inputs.json's
+    `currency`; the source's ISO code, e.g. "USD". Omit ONLY when the figure is already in
+    inputs.json's `currency`>,
   "segment_pct": <percentage POINTS, 0-100 — e.g. 35 for 35%, NOT 0.35 — narrows TAM to SAM>,
   "share_pct": <percentage POINTS, 0-100 — e.g. 5 for 5%, NOT 0.05 — narrows SAM to SOM>
 }
@@ -680,12 +687,12 @@ Using the bottom-up approach, compute TAM/SAM/SOM. Pre-fetched research data:
 `serviceable_pct` and `target_pct` are percentage POINTS, not fractions — 35 means 35%, not 0.35.
 A fractional value silently computes ~100x low (market_sizing.py divides by 100 once already).
 
-CURRENCY: this analysis is denominated in inputs.json's `currency`. `arpu` must be expressed in
-THAT currency. If your source quotes revenue-per-customer in a different currency (USD is the usual
-case), convert it and say so in your `sources` note — do NOT hand back a figure in the source's
-currency. Nothing downstream performs FX: the TAM is LABELLED with inputs.json's currency whatever
-the number actually is, so a USD arpu on an ILS analysis yields an ILS-labelled TAM carrying dollar
-figures, with nothing to catch it.
+CURRENCY: this analysis is denominated in inputs.json's `currency`. Do NOT convert anything — you
+have no network and no exchange rate, so any rate you applied would come from memory. Report `arpu`
+as the source states it, and add `arpu_currency` with that source's ISO code (e.g. "USD"). Omit the
+field only when the figure is already in inputs.json's `currency`. The producer converts, using a
+rate the main thread supplies. Getting this wrong is not caught by arithmetic: an unconverted USD
+arpu silently produces an ILS-labelled TAM carrying dollar figures.
 
 SIZING_BASIS: this analysis' declared basis is inputs.json's `sizing_basis`. If your `customer_count`
 or `arpu` benchmark comes from a source that quotes both a current figure and a forecast-year
@@ -696,7 +703,10 @@ expected by market_sizing.py --stdin for approach "bottom_up":
 {
   "approach": "bottom_up",
   "customer_count": <integer>,
-  "arpu": <number>,
+  "arpu": <number, AS THE SOURCE STATES IT — never converted by you>,
+  "arpu_currency": <REQUIRED when the source's currency differs from inputs.json's `currency`;
+    the source's ISO code, e.g. "USD". Omit ONLY when the figure is already in inputs.json's
+    `currency`>,
   "serviceable_pct": <percentage POINTS, 0-100 — e.g. 35 for 35%, NOT 0.35>,
   "target_pct": <percentage POINTS, 0-100 — e.g. 0.5 for 0.5%, NOT a fraction of 1>
 }
@@ -723,9 +733,41 @@ python3 "$SHARED_SCRIPTS/merge_json.py" \
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
 `--currency` carries the label from `inputs.json` into `sizing.json` so the report and HTML render the
-right unit. It converts nothing. Omitting it silently labels every figure in dollars — and if
+right unit. On its own it converts nothing. Omitting it silently labels every figure in dollars — and if
 `inputs.json` and `sizing.json` end up disagreeing, `compose_report.py` raises `CURRENCY_MISMATCH`
 rather than picking a winner.
+
+**When the sub-agent hands back a foreign-currency figure.** If its output carries
+`industry_total_currency` or `arpu_currency` naming a code other than `$CURRENCY`, the pipe above will
+stop with a nonzero exit and name the pair it needs. Look the rate up from a real source, then re-run
+the same pipe with the rate added:
+
+**Re-run the SAME pipe you just ran**, adding only the three rate flags — do not substitute a
+different one. For a single-methodology run that is the command above with:
+
+```
+  --fx-rate USD:"$CURRENCY"=<rate> --fx-as-of <YYYY-MM-DD> --fx-source "<url>"
+```
+
+appended. For a `both` run it is the `merge_json.py … | market_sizing.py …` pipe with the same three
+flags appended to the `market_sizing.py` end. **Re-running the single-methodology pipe after a `both`
+dispatch would silently drop `bottom_up` and `comparison` and still exit 0** — the artifact would
+look fine and be half an analysis. Pass the rate flags on the `market_sizing.py` invocation, never
+inside the merged JSON: merging two sub-agent files lets one file's rate block overwrite the other's.
+
+The rate is never inferred by inverting another pair, and never guessed — that is the point of the
+stop. Supply the rate for the exact direction named. It lands in `sizing.json` and is disclosed in the
+report, so the founder sees the conversion rather than inheriting it. **This stop is NOT a sub-agent
+repair** — do not re-dispatch, and do not quote the producer's message to the sub-agent. It did its
+job correctly by reporting the source's own currency; the missing piece is a rate, which only you can
+look up. **Tell the founder what you are doing in their terms** — "the market figure I found is in
+dollars, so I'm converting it to shekels at today's rate" — never the exit status, the flag names, or
+the pair syntax.
+
+If the founder's own stated figures or the deck's TAM/SAM/SOM claims are in a different currency from
+`$CURRENCY`, record which one in `inputs.json` (`founder_stated_inputs_currency`,
+`existing_claims_currency`). Without them a converted run cannot check the founder's numbers against
+the computed ones and says so instead of guessing.
 
 `--sizing-basis` carries `inputs.json`'s declared convention into `sizing.json` the same way. Passing
 an empty string (the shell variable is unset because `inputs.json` never declared it) is safe —
@@ -781,7 +823,10 @@ RUN_ID: <RUN_ID>
 You are the market-sizing agent dispatched in Context A (SENSITIVITY_TEST).
 Read:
 - <ANALYSIS_DIR_AGENT>/validation.json — for confidence tiers
-- <ANALYSIS_DIR_AGENT>/sizing.json — for base values and approach
+- <ANALYSIS_DIR_AGENT>/sizing.json — for base values and approach. Base values are the ones the
+  math used, under each figure's `inputs`. If an `fx` block is present, ignore its
+  `original_value` entries — those are pre-conversion figures in another currency, and mixing one
+  into a range would silently size a different market.
 
 Construct sensitivity input with confidence-based ranges. Tag each parameter
 with confidence from validation: `sourced` (**range stands — do NOT widen it, and do not invent one; a sourced figure's range is whatever the source states, or omit the parameter**), `derived`

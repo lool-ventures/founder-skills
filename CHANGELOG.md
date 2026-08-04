@@ -20,6 +20,11 @@ Fleet-wide:
 - Sub-agent evidence cited our artifact filenames ("inputs.json reports actuals separated: false") and
   that text prints verbatim in the report. Evidence now states what is true of the company or model;
   financial-model-review and competitive-positioning check it at their delivery gate.
+- A step that rejected its input said so nowhere. It overwrote its own finished work with an empty
+  placeholder and still reported success, so the report rendered an empty section and the only
+  warning pointed at a symptom rather than the cause. Six steps across four skills behaved this way.
+  Each now leaves existing work untouched, reports the problem, and stops; the report refuses to
+  present an analysis one of its steps never produced.
 
 **cap-table:**
 
@@ -78,6 +83,16 @@ Fleet-wide:
 
 **market-sizing:**
 
+- A market figure sourced in another currency was converted by an agent that had no exchange rate
+  and no way to look one up, so the rate came from memory — undated, unsourced, and impossible to
+  check. Conversion now happens in the sizing step, using a rate that must be supplied; it is
+  recorded and shown to you in both the report and the visual report, with its date and source. A
+  figure in another currency with no rate stops the run instead of being guessed at.
+- A converted figure could no longer be checked against the number you stated, or against your
+  deck's TAM/SAM/SOM — the comparison would have differed by exactly the exchange rate and flagged a
+  correct analysis as a mismatch. Stating which currency your own figures are in restores the check;
+  without it the report says it could not verify, rather than reporting a mismatch that isn't one.
+- Sensitivity ranges could skip their widening floor, producing a stress test that stressed nothing.
 - Support strength, estimate provenance and driver names printed as raw tokens
   (`partially_supported`, `agent_estimate`, `customer_count`); the checklist listed internal filenames.
 - Each source's quality tier and segment match, and each assumption's source attribution, were

@@ -78,6 +78,8 @@
 - Scripts output JSON to stdout, warnings/errors to stderr
 - All scripts support `--pretty` for human-readable output and `-o <file>` to write to file (skill scripts emit a JSON receipt to stdout confirming the write)
 - Skill-local scripts live in `founder-skills/skills/<skill>/scripts/`
+- **A producer that rejects its input MUST fail loudly: diagnostic to stdout, a line to stderr, `-o` left untouched, exit non-zero.** Six producers across four skills independently got this wrong — they wrote a `{"validation": {"status": "invalid"}}` stub *through* `-o` and returned 0, which both destroyed the prior good artifact and made every SKILL.md's "the pipe fails next" error branch unreachable; the only downstream signal was a *medium* warning naming a symptom. Use the `_fail_invalid` helper (canonical copy: `skills/market-sizing/scripts/market_sizing.py`). Stamp `metadata`/`graded_against` **before** calling it, so the diagnostic still carries provenance. `tests/test_skill_contract.py::test_producer_rejects_loudly_without_clobbering` runs each producer against a rejecting payload and asserts all three properties — deliberately behavioural, because the structural version ("must contain `_fail_invalid` or a `sys.exit(1)`") was measured **vacuous**: every one of these scripts already had `sys.exit(1)` for malformed-JSON errors. Add new producers to that registry.
+- Compose scripts pair with it: a canonical artifact carrying `validation.status == "invalid"` raises `ARTIFACT_INVALID` (or `SIZING_INVALID` in market-sizing) at **high** severity, so it cannot be accepted away via `accepted_warnings`.
 
 ## Shared Scripts
 
@@ -91,7 +93,7 @@
 
 ## Market Sizing Scripts
 
-- **`market_sizing.py`** — TAM/SAM/SOM calculator (top-down, bottom-up, or both)
+- **`market_sizing.py`** — TAM/SAM/SOM calculator (top-down, bottom-up, or both). Also the only place FX happens: a money input (`industry_total` / `arpu` — the only two) may declare its own source currency via `<field>_currency`, and conversion uses a rate the CALLER supplies (`--fx-rate SRC:TGT=RATE`, `--fx-as-of`, `--fx-source`). A declared foreign currency with **no** rate is a hard error, never a guess, and a rate is never inferred by inverting another pair — the sub-agent that produces these figures has no network, so FX done upstream could only come from model memory. Conversions are recorded in `sizing.json`'s `fx` block and disclosed to the founder in both `report.md` and `report.html`; the recorded `converted_value` IS the number the math consumed, which is what lets `compose_report.py` compare a founder-stated figure across the conversion.
 - **`sensitivity.py`** — Stress-test assumptions with low/base/high ranges and confidence-based auto-widening
 - **`checklist.py`** — Validates 22-item self-check with pass/fail per item
 - **`compose_report.py`** — Assembles report from artifacts, validates cross-artifact consistency

@@ -24,7 +24,7 @@ import argparse
 import json
 import os
 import sys
-from typing import Any
+from typing import Any, NoReturn
 
 
 def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
@@ -44,6 +44,28 @@ def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any]
         sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     else:
         sys.stdout.write(data)
+
+
+def _fail_invalid(result: dict[str, Any], output_path: str | None, indent: int | None) -> NoReturn:
+    """Emit a validation-error result and exit NON-ZERO, without touching `output_path`.
+
+    Mirrors the helper in every other producer, for the same two reasons.
+
+    The error JSON still goes to STDOUT so the caller can read the diagnostic; only the exit
+    code and stderr are new. It is deliberately NOT written to `--output`, because that path is
+    a canonical artifact: overwriting it with a figure-less stub destroys the prior good file
+    AND reads as truth to `compose_report.py`.
+
+    Exit 1 is what makes the failure reachable. Each SKILL.md's producer-error branch is written
+    as "the pipe fails next" — with exit 0 and an `{{"ok":true}}` receipt, that branch could never
+    fire, so a rejected run was indistinguishable from a successful one.
+    """
+    sys.stdout.write(json.dumps(result, indent=indent) + "\n")
+    errors = result.get("validation", {}).get("errors") or ["unspecified validation error"]
+    print(f"Error: input rejected, no output written: {'; '.join(str(e) for e in errors)}", file=sys.stderr)
+    if output_path:
+        print(f"Error: {os.path.abspath(output_path)} was left unchanged.", file=sys.stderr)
+    sys.exit(1)
 
 
 # Canonical 28 dimensions grouped by category.
@@ -407,6 +429,8 @@ def main() -> None:
     result["metadata"] = {"run_id": args.run_id}
 
     indent = 2 if args.pretty else None
+    if result.get("validation", {}).get("status") == "invalid":
+        _fail_invalid(result, args.output, indent)
     out = json.dumps(result, indent=indent) + "\n"
     s = result["summary"]
     _write_output(

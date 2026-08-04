@@ -20,9 +20,11 @@ JSON schemas for all analysis artifacts deposited during the market sizing workf
 | `revenue_model` | string | yes | Revenue model (e.g., `"subscription"`, `"usage"`) |
 | `existing_claims` | object | no | Deck's TAM/SAM/SOM figures. Must be a flat object with lowercase keys `tam`, `sam`, `som` (use `null` when the deck does not state a figure). Non-canonical keys are silently ignored by reconciliation and trigger `EXISTING_CLAIMS_SHAPE`. |
 | `existing_claims_detail` | object \| null | no | Narrative-only deck claims that don't fit the canonical `{tam, sam, som}` shape (regional sub-SAMs, time-anchored figures, alternative TAM frames). Rendered as a "Deck Claims (Narrative)" sub-section in the report; **not** validated, **not** reconciled. |
-| `currency` | string | no | ISO code every money figure in the analysis is denominated in (default `"USD"`). A **label only** — nothing in this skill performs FX conversion. `compose_report.py` and `visualize.py` render `"USD"` as a `$` prefix and any other code as a suffix (`270.0M EUR`); a non-USD analysis also gets an explicit no-FX disclosure in the report. Checked ahead of `sizing.json`'s own `currency`; a disagreement between the two raises `CURRENCY_MISMATCH`. |
+| `currency` | string | no | ISO code every money figure in the analysis is denominated in (default `"USD"`). A label, and the conversion TARGET. Nothing is converted unless a money input declares a different source currency (`industry_total_currency` / `arpu_currency`) **and** a rate is supplied (`--fx-rate SRC:TGT=RATE`); a declared foreign currency with no rate is a hard error, never a guess. Any conversion performed is recorded in `sizing.json`'s `fx` block and disclosed in the report. `compose_report.py` and `visualize.py` render `"USD"` as a `$` prefix and any other code as a suffix (`270.0M EUR`); a non-USD analysis that converted nothing gets an explicit no-FX disclosure, and a converted one gets the rate, its date and its source instead. Checked ahead of `sizing.json`'s own `currency`; a disagreement between the two raises `CURRENCY_MISMATCH`. |
 | `sizing_basis` | string | no | Convention this analysis' figures follow: `"current_year"` (default) \| `"forecast_year"` \| `"mixed"` — see `tam-sam-som-methodology.md` §5. Carried into `sizing.json` via `market_sizing.py --sizing-basis` (Step 5). Absence means not declared; `compose_report.py` and `visualize.py` render "Not declared", never a silent default to `"current_year"`. |
 | `founder_stated_inputs` | object | no | Flat object of quantitative parameters the founder **stated outright** — any of `customer_count`, `arpu`, `serviceable_pct`, `target_pct`, `industry_total`, `segment_pct`, `share_pct`. Not for researched, inferred, or estimated values. `compose_report.py` compares these against what the sizing math actually consumed and raises `FOUNDER_VALUE_OVERRIDDEN` on a >0.5% divergence, so a researched figure cannot silently replace a founder-stated one. Empty/absent disables the check. |
+| `founder_stated_inputs_currency` | string | no | ISO code the `founder_stated_inputs` money figures are in. Only consulted when a money input was FX-converted: without it the comparison against the converted figure would diverge by exactly the exchange rate, so `compose_report.py` reports `COMPARISON_CURRENCY_UNKNOWN` instead of a false `FOUNDER_VALUE_OVERRIDDEN`. Declare it whenever the founder's figures are not in `currency`. |
+| `existing_claims_currency` | string | no | ISO code the `existing_claims` figures are in — the deck's own currency, which is not always the analysis currency. Same rule as above: without it a converted run reports `COMPARISON_CURRENCY_UNKNOWN` rather than a false `DECK_CLAIM_MISMATCH`. |
 | `competitive_landscape_notes` | string \| null | no | Summary of any competitor/competitive-positioning content found in the deck (or `null` if the deck doesn't address competition). The CHECKLIST sub-agent never reads the deck itself — it scores `competitive_landscape_acknowledged` from this field only. |
 | `gtm_evidence_notes` | string \| null | no | Summary of any customer-acquisition strategy, sales-funnel metrics, or comparable-company benchmark found in the materials (or `null` if none found). The CHECKLIST sub-agent never reads the deck itself — it scores `som_backed_by_gtm` from this field only. Distinct from `projections_alignment_notes` below: this is customer-acquisition evidence, not financial-plan evidence, and one field cannot stand in for both. |
 | `projections_alignment_notes` | string \| null | no | Summary of whether the materials show the SOM figure lining up with the hiring plan, sales capacity, or burn rate (or `null` if not addressed). The CHECKLIST sub-agent never reads the financial model itself — it scores `som_consistent_with_projections` from this field only. |
@@ -197,7 +199,21 @@ This is the direct output of `market_sizing.py`. Structure depends on approach u
 | `top_down` | approach is `"top-down"` or `"both"` | Top-down results |
 | `bottom_up` | approach is `"bottom-up"` or `"both"` | Bottom-up results |
 | `comparison` | approach is `"both"` | Cross-validation results |
+| `fx` | only when a conversion happened | `{as_of, source, conversions: [{field, from, to, rate, original_value, converted_value}]}`. Present only when a money input declared a source currency differing from `currency` AND a rate was supplied. `converted_value` **is** the number the sizing math consumed, so `compose_report.py` can compare a founder-stated or deck-claimed figure across the conversion. Absent on every run that converted nothing — which is every run that does not opt in. |
 | `metadata` | when `--run-id` passed | `{"run_id": "<RUN_ID>"}` — stamped by the producer for `STALE_ARTIFACT` detection |
+
+**Rejected runs.** `market_sizing.py` refuses an invalid input rather than writing a figure-less stub:
+the diagnostic goes to stdout, a line to stderr, `-o` is left untouched, and it exits non-zero. So a
+`sizing.json` carrying `validation.status == "invalid"` means a **stale or hand-edited** file, and
+`compose_report.py` raises `SIZING_INVALID` at **high** severity (not acceptable-away) rather than
+rendering an empty sizing table. `sensitivity.py` and `checklist.py` behave the same way; a rejected
+artifact from either raises `ARTIFACT_INVALID`, also high.
+
+**Currency comparison.** When a money input was FX-converted, a founder-stated figure or deck claim
+that declares no currency cannot be compared against it — the divergence would be exactly the exchange
+rate. `compose_report.py` then raises `COMPARISON_CURRENCY_UNKNOWN` (medium) instead of a
+guaranteed-false `FOUNDER_VALUE_OVERRIDDEN` / `DECK_CLAIM_MISMATCH`. Declaring
+`founder_stated_inputs_currency` / `existing_claims_currency` restores the real check.
 
 ### top_down / bottom_up sub-object
 

@@ -417,7 +417,7 @@ def test_score_missing_items() -> None:
     items = _make_dimension_items(exclude=_DIMENSION_IDS[-3:])
     payload = json.dumps({"items": items})
     rc, data, _ = run_script("score_dimensions.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("missing" in e.lower() for e in data["validation"]["errors"])
@@ -429,7 +429,7 @@ def test_score_duplicate_id() -> None:
     items.append({"id": "team_founder_market_fit", "status": "strong_conviction", "evidence": "dup", "notes": None})
     payload = json.dumps({"items": items})
     rc, data, _ = run_script("score_dimensions.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("duplicate" in e.lower() for e in data["validation"]["errors"])
@@ -441,7 +441,7 @@ def test_score_unknown_id() -> None:
     items[0] = {"id": "bogus_dimension", "status": "strong_conviction", "evidence": "test", "notes": None}
     payload = json.dumps({"items": items})
     rc, data, _ = run_script("score_dimensions.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("bogus_dimension" in e.lower() for e in data["validation"]["errors"])
@@ -452,7 +452,7 @@ def test_score_invalid_status() -> None:
     overrides = {"team_founder_market_fit": {"status": "maybe", "evidence": "test", "notes": None}}
     payload = json.dumps({"items": _make_dimension_items(overrides=overrides)})
     rc, data, _ = run_script("score_dimensions.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("maybe" in e.lower() for e in data["validation"]["errors"])
@@ -2084,6 +2084,8 @@ def test_compose_severity_map_complete() -> None:
 
     expected = [
         "FOUNDER_TEXT_TOKEN",
+        # A producer rejected its input, so the artifact carries no analysis.
+        "ARTIFACT_INVALID",
         "CORRUPT_ARTIFACT",
         "MISSING_ARTIFACT",
         "STALE_ARTIFACT",
@@ -2652,7 +2654,7 @@ def test_score_multiple_errors_reported() -> None:
     items[0] = {"id": "bogus_dimension", "status": "maybe", "evidence": "test", "notes": None}
     payload = json.dumps({"items": items})
     rc, data, _ = run_script("score_dimensions.py", ["--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     errors_str = " ".join(data["validation"]["errors"]).lower()
@@ -2667,7 +2669,7 @@ def test_score_non_dict_item() -> None:
     """Non-dict item in dimension items array -> validation error with consistent shape."""
     payload = json.dumps({"items": ["not_a_dict"]})
     rc, data, _ = run_script("score_dimensions.py", [], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert any("must be an object" in e for e in data["validation"]["errors"])
@@ -3752,7 +3754,7 @@ def test_score_non_dict_item_reports_position_index() -> None:
     items[1] = "not_a_dict"  # type: ignore[call-overload]
     payload = json.dumps({"items": items})
     rc, data, _err = run_script("score_dimensions.py", [], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     assert data is not None
     msgs = [e for e in data["validation"]["errors"] if "must be an object" in e]
     assert msgs, data["validation"]["errors"]
@@ -4971,3 +4973,39 @@ def test_the_three_coverage_flags_are_mutually_exclusive() -> None:
         s = data["summary"]
         set_count = sum(bool(s[k]) for k in ("coverage_capped", "coverage_floored", "coverage_held"))
         assert set_count == 1, f"expected exactly one flag, got {set_count}: {s['verdict']}"
+
+
+# --- producer refusal + downstream detection (fleet-wide loud-failure pass) ----
+
+
+def test_score_dimensions_invalid_input_exits_nonzero_and_writes_nothing() -> None:
+    """`score_dimensions.py` refuses loudly instead of clobbering its own artifact.
+
+    It shared a defect with every other producer in the fleet: exit 0, an `{"ok":true}` receipt,
+    and an analysis-free stub written over the canonical file. SKILL.md's producer-error branch
+    is written as "the pipe fails next", so with exit 0 it could never fire — a rejected run and
+    a successful one were indistinguishable to the caller.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "score_dimensions.json")
+        with open(out, "w") as f:
+            f.write('{"sentinel": true}')
+        payload = json.dumps({"items": [{"id": "bogus", "status": "concern", "rationale": "x"}]})
+        rc, data, stderr = run_script("score_dimensions.py", ["--run-id", "RID", "-o", out], stdin_data=payload)
+        assert rc == 1, "a rejected dimension set must exit non-zero"
+        assert stderr.strip(), "a rejected run must say so on stderr"
+        assert data is not None and data["validation"]["status"] == "invalid"
+        with open(out) as f:
+            assert json.load(f) == {"sentinel": True}, "the canonical artifact was clobbered"
+
+
+def test_compose_flags_an_invalid_score_dimensions_at_high_severity() -> None:
+    """A rejected scoring step must not surface only as a medium symptom."""
+    arts = _all_required_artifacts()
+    arts["score_dimensions.json"] = {"validation": {"status": "invalid", "errors": ["bad input"]}}
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d)
+    assert data is not None, err
+    hits = [w for w in data["validation"]["warnings"] if w["code"] == "ARTIFACT_INVALID"]
+    assert hits, "a rejected producer artifact must raise ARTIFACT_INVALID"
+    assert hits[0]["severity"] == "high", "must not be acceptable-away"

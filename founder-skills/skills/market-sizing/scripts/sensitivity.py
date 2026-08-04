@@ -39,7 +39,7 @@ import argparse
 import json
 import os
 import sys
-from typing import Any
+from typing import Any, NoReturn
 
 VALID_APPROACHES = {"bottom_up", "top_down", "both"}
 TD_PARAMS = {"industry_total", "segment_pct", "share_pct"}
@@ -73,6 +73,28 @@ def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any]
         sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     else:
         sys.stdout.write(data)
+
+
+def _fail_invalid(result: dict[str, Any], output_path: str | None, indent: int | None) -> NoReturn:
+    """Emit a validation-error result and exit NON-ZERO, without touching `output_path`.
+
+    Mirrors `market_sizing.py`'s helper, for the same two reasons.
+
+    The error JSON still goes to STDOUT so the caller can read the diagnostic; only the exit
+    code and stderr are new. It is deliberately NOT written to `--output`, because that path is
+    a canonical artifact: overwriting it with a figure-less stub destroys the prior good file
+    AND reads as truth to `compose_report.py`.
+
+    Exit 1 is what makes the failure reachable. SKILL.md's producer-error branch is written as
+    "the pipe fails next" — with exit 0 and an `{{"ok":true}}` receipt, that branch could never
+    fire, so a rejected run was indistinguishable from a successful one.
+    """
+    sys.stdout.write(json.dumps(result, indent=indent) + "\n")
+    errors = result.get("validation", {}).get("errors") or ["unspecified validation error"]
+    print(f"Error: input rejected, no output written: {'; '.join(str(e) for e in errors)}", file=sys.stderr)
+    if output_path:
+        print(f"Error: {os.path.abspath(output_path)} was left unchanged.", file=sys.stderr)
+    sys.exit(1)
 
 
 def calc_top_down(params: dict[str, float]) -> dict[str, float]:
@@ -469,19 +491,20 @@ def main() -> None:
         print("Error: JSON must be an object", file=sys.stderr)
         sys.exit(1)
 
-    # --- Validation (JSON error dict, exit 0) ---
+    # --- Validation (JSON error dict on stdout, exit 1, no file written) ---
     approach, base_params, ranges, validation_confidence, errors = _validate_config(data)
 
     if errors:
         result: dict[str, Any] = {"validation": {"status": "invalid", "errors": errors}}
-        # On the error path no scenarios are produced — report 0 analyzed params.
-        analyzed_params = 0
-    else:
-        result = run_sensitivity(approach, base_params, ranges, validation_confidence)
-        result["validation"] = {"status": "valid", "errors": []}
-        # Count scenarios actually analyzed (irrelevant range params are filtered
-        # out with stderr warnings inside run_sensitivity), not the raw input count.
-        analyzed_params = len(result.get("scenarios", []))
+        if args.run_id:
+            result["metadata"] = {"run_id": args.run_id}
+        _fail_invalid(result, args.output, indent)
+
+    result = run_sensitivity(approach, base_params, ranges, validation_confidence)
+    result["validation"] = {"status": "valid", "errors": []}
+    # Count scenarios actually analyzed (irrelevant range params are filtered
+    # out with stderr warnings inside run_sensitivity), not the raw input count.
+    analyzed_params = len(result.get("scenarios", []))
 
     if args.run_id:
         result["metadata"] = {"run_id": args.run_id}

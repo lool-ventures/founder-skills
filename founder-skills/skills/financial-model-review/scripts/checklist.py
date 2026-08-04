@@ -24,7 +24,7 @@ import argparse
 import json
 import os
 import sys
-from typing import Any
+from typing import Any, NoReturn
 
 # Sibling helper: fingerprints of this producer's inputs, so a later verifier can detect an output
 # computed against inputs that have since changed (run_id parity cannot see that — corrections rewrite
@@ -50,6 +50,28 @@ def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any]
         sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     else:
         sys.stdout.write(data)
+
+
+def _fail_invalid(result: dict[str, Any], output_path: str | None, indent: int | None) -> NoReturn:
+    """Emit a validation-error result and exit NON-ZERO, without touching `output_path`.
+
+    Mirrors the helper in every other producer, for the same two reasons.
+
+    The error JSON still goes to STDOUT so the caller can read the diagnostic; only the exit
+    code and stderr are new. It is deliberately NOT written to `--output`, because that path is
+    a canonical artifact: overwriting it with a figure-less stub destroys the prior good file
+    AND reads as truth to `compose_report.py`.
+
+    Exit 1 is what makes the failure reachable. Each SKILL.md's producer-error branch is written
+    as "the pipe fails next" — with exit 0 and an `{{"ok":true}}` receipt, that branch could never
+    fire, so a rejected run was indistinguishable from a successful one.
+    """
+    sys.stdout.write(json.dumps(result, indent=indent) + "\n")
+    errors = result.get("validation", {}).get("errors") or ["unspecified validation error"]
+    print(f"Error: input rejected, no output written: {'; '.join(str(e) for e in errors)}", file=sys.stderr)
+    if output_path:
+        print(f"Error: {os.path.abspath(output_path)} was left unchanged.", file=sys.stderr)
+    sys.exit(1)
 
 
 # Canonical 46 checklist items grouped by category.
@@ -931,18 +953,18 @@ def main() -> None:
 
     if errors:
         result: dict[str, Any] = {"validation": {"status": "invalid", "errors": errors}, "items": [], "summary": None}
-        _write_output(json.dumps(result, indent=indent) + "\n", args.output)
-        return
+        _fail_invalid(result, args.output, indent)
 
     company = data.get("company")
     inputs_data = data.get("inputs")
     result, errors = validate_checklist(data["items"], company, inputs=inputs_data)
 
-    if errors:
-        result["validation"] = {"status": "invalid", "errors": errors}
-    else:
-        result["validation"] = {"status": "valid", "errors": []}
+    _rejected = bool(errors)
+    result["validation"] = {"status": "invalid", "errors": errors} if _rejected else {"status": "valid", "errors": []}
 
+    # Provenance is stamped BEFORE the refusal below, deliberately: a rejected run writes no
+    # artifact, but its diagnostic still goes to stdout, and a diagnostic that names the inputs it
+    # was graded against is more actionable than a bare list of errors.
     # Propagate run_id from input metadata into output for stale-artifact detection
     _input_metadata = data.get("metadata") or (data.get("inputs") or {}).get("metadata")
     if isinstance(_input_metadata, dict) and isinstance(_input_metadata.get("run_id"), str):
@@ -961,6 +983,9 @@ def main() -> None:
             print(f"Warning: --inputs unreadable, fingerprint will be null: {_e}", file=sys.stderr)
             _fp_source = None
     _fingerprint.stamp(result, {"inputs.json": _fp_source})
+
+    if _rejected:
+        _fail_invalid(result, args.output, indent)
 
     out = json.dumps(result, indent=indent) + "\n"
     s = result["summary"]

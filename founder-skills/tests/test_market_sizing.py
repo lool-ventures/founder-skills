@@ -20,6 +20,8 @@ import sys
 import tempfile
 from typing import Any
 
+import pytest
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Market-sizing scripts are colocated with the skill
 FOUNDER_SKILLS_DIR = os.path.dirname(SCRIPT_DIR)
@@ -233,7 +235,7 @@ def test_market_sizing_negative_pct_error() -> None:
             "10",
         ],
     )
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "negative")
 
 
@@ -347,7 +349,7 @@ def test_market_sizing_non_integer_customer_count() -> None:
         }
     )
     rc, data, _ = run_script("market_sizing.py", ["--stdin"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "whole number")
 
 
@@ -479,7 +481,7 @@ def test_checklist_missing_items() -> None:
     items = _make_checklist_items(exclude=["data_current", "sources_reputable", "figures_triangulated"])
     payload = json.dumps({"items": items})
     rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "missing")
 
 
@@ -489,7 +491,7 @@ def test_checklist_duplicate_id() -> None:
     items.append({"id": "data_current", "status": "pass", "notes": None})
     payload = json.dumps({"items": items})
     rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "duplicate")
 
 
@@ -500,7 +502,7 @@ def test_checklist_unknown_id() -> None:
     items[0] = {"id": "bogus", "status": "pass", "notes": None}
     payload = json.dumps({"items": items})
     rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "unknown")
 
 
@@ -509,7 +511,7 @@ def test_checklist_invalid_status() -> None:
     overrides = {"data_current": {"status": "maybe", "notes": None}}
     payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
     rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "invalid")
 
 
@@ -948,7 +950,7 @@ def test_compose_strict_mode() -> None:
 
 
 def test_compose_severity_map_complete() -> None:
-    """WARNING_SEVERITY contains all 20 codes with correct severities."""
+    """WARNING_SEVERITY contains all 29 codes with correct severities."""
     # Import WARNING_SEVERITY and ACCEPTIBLE_SEVERITIES by running a small Python snippet
     snippet = (
         f"import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath('{MARKET_SIZING_DIR}'))); "
@@ -995,8 +997,15 @@ def test_compose_severity_map_complete() -> None:
         "IMPLAUSIBLE_PCT_SCALE",
         "CURRENCY_MISMATCH",
         "FOUNDER_VALUE_OVERRIDDEN",
+        # A rejected sizing step used to reach compose with no code naming the cause.
+        "SIZING_INVALID",
+        # Emitted instead of a guaranteed-false FOUNDER_VALUE_OVERRIDDEN / DECK_CLAIM_MISMATCH
+        # when a money input was FX-converted and the comparand declares no currency.
+        "COMPARISON_CURRENCY_UNKNOWN",
+        # A rejected sensitivity/checklist step, same class as SIZING_INVALID.
+        "ARTIFACT_INVALID",
     ]
-    assert len(sev_map) == 26, f"expected 26 codes, got {len(sev_map)}"
+    assert len(sev_map) == 29, f"expected 29 codes, got {len(sev_map)}"
     for code in expected_codes:
         assert code in sev_map, f"{code} missing from severity map"
     # All values are "high", "medium", or "low"
@@ -1210,7 +1219,7 @@ def test_sensitivity_confidence_invalid() -> None:
         }
     )
     rc, data, _ = run_script("sensitivity.py", [], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "confidence")
 
 
@@ -1368,7 +1377,7 @@ def test_sensitivity_validation_confidence_invalid_value_errors() -> None:
         }
     )
     rc, data, _ = run_script("sensitivity.py", [], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "validation_confidence")
 
 
@@ -1383,7 +1392,7 @@ def test_sensitivity_validation_confidence_not_an_object_errors() -> None:
         }
     )
     rc, data, _ = run_script("sensitivity.py", [], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "validation_confidence")
 
 
@@ -1528,7 +1537,7 @@ def test_sensitivity_both_missing_params() -> None:
         }
     )
     rc, data, _ = run_script("sensitivity.py", [], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "industry_total")
 
 
@@ -2125,7 +2134,7 @@ def test_sensitivity_non_dict_range_entry() -> None:
         }
     )
     rc, data, _ = run_script("sensitivity.py", [], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "must be an object")
 
 
@@ -2133,7 +2142,7 @@ def test_checklist_non_dict_item() -> None:
     """Non-dict item in checklist items array -> validation error."""
     payload = json.dumps({"items": ["not_a_dict"]})
     rc, data, _ = run_script("checklist.py", [], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "must be an object")
 
 
@@ -2230,7 +2239,7 @@ def test_market_sizing_stdin_non_string_approach() -> None:
     """Non-string approach in stdin JSON should produce validation error."""
     payload = json.dumps({"approach": 123})
     rc, data, _ = run_script("market_sizing.py", ["--stdin"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "string")
 
 
@@ -2253,7 +2262,7 @@ def test_market_sizing_growth_rate_below_minus_100() -> None:
             "5",
         ],
     )
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "-100")
 
 
@@ -2263,7 +2272,7 @@ def test_market_sizing_zero_industry_total() -> None:
         "market_sizing.py",
         ["--approach", "top-down", "--industry-total", "0", "--segment-pct", "10", "--share-pct", "5"],
     )
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "positive")
 
 
@@ -2324,7 +2333,7 @@ def test_sensitivity_customer_count_fractional() -> None:
         }
     )
     rc, data, _ = run_script("sensitivity.py", [], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "whole number")
 
 
@@ -2359,7 +2368,7 @@ def test_sensitivity_all_irrelevant_error() -> None:
         }
     )
     rc, data, _ = run_script("sensitivity.py", [], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "no relevant")
 
 
@@ -2550,7 +2559,7 @@ def test_market_sizing_stdin_empty_object() -> None:
         ["--stdin", "--pretty"],
         stdin_data="{}",
     )
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "requires")
 
 
@@ -2561,7 +2570,7 @@ def test_market_sizing_stdin_empty_object_bottom_up() -> None:
         ["--stdin", "--pretty"],
         stdin_data='{"approach": "bottom_up"}',
     )
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     _assert_validation_errors(data, "bottom-up requires")
 
 
@@ -3720,7 +3729,7 @@ def test_market_sizing_run_id_stamped_on_validation_error() -> None:
     """run_id is stamped even when validation fails (error path still carries provenance)."""
     payload = json.dumps({"approach": "bottom_up", "customer_count": "not-a-number"})
     rc, data, _ = run_script("market_sizing.py", ["--stdin", "--run-id", "RID-ERR", "--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     assert data is not None
     assert data["validation"]["status"] == "invalid"
     assert data.get("metadata") == {"run_id": "RID-ERR"}
@@ -3773,7 +3782,7 @@ def test_both_mode_invalid_growth_single_error() -> None:
         }
     )
     rc, data, _ = run_script("market_sizing.py", ["--stdin", "--pretty"], stdin_data=payload)
-    assert rc == 0
+    assert rc == 1  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     assert data is not None
     errors = data["validation"]["errors"]
     years_errors = [e for e in errors if "years" in e]
@@ -4695,7 +4704,9 @@ def test_market_sizing_sizing_basis_invalid_value_rejected() -> None:
         "sizing_basis": "next_quarter",
     }
     code, result, _ = run_script("market_sizing.py", ["--stdin"], stdin_data=json.dumps(payload))
-    assert code == 0 and result is not None
+    assert (
+        code == 1 and result is not None
+    )  # rejected input now exits 1 (loud refusal); the diagnostic still lands on stdout
     assert result["validation"]["status"] == "invalid"
     assert any("sizing_basis" in e for e in result["validation"]["errors"])
 
@@ -4866,3 +4877,625 @@ def test_compose_omits_source_strength_when_absent() -> None:
     assert data is not None
     assert ", )" not in data["report_markdown"]
     assert " — [" not in data["report_markdown"].split("## Sources Used")[0]
+
+
+# ---------------------------------------------------------------------------
+# Producer-side FX + the loud-refusal contract it depends on.
+#
+# Two defects motivated this block, and the first one is the reason the second is
+# even reachable:
+#
+#   1. market_sizing.py used to exit 0 on a validation error, print an
+#      `{"ok":true}` receipt, and write a figure-less stub over the canonical
+#      sizing.json. SKILL.md's producer-error branch is written as "the pipe
+#      fails next", so it could never fire, and compose rendered an empty sizing
+#      table with no code naming the cause.
+#   2. The dispatch prompts told a NETWORK-LESS sub-agent to convert currencies
+#      with no rate supplied — i.e. from memory. FX now lives here, where a
+#      missing rate is a refusal rather than a guess.
+#
+# The refusal is the only non-prose guarantee in the design, so several of these
+# assert the EXIT CODE, not just the status string.
+# ---------------------------------------------------------------------------
+
+
+def _fx_stdin(**over: object) -> str:
+    base: dict[str, object] = {
+        "approach": "top_down",
+        "industry_total": 5_200_000_000,
+        "segment_pct": 12,
+        "share_pct": 3,
+        "currency": "ILS",
+    }
+    base.update(over)
+    return json.dumps(base)
+
+
+def test_fx_invalid_input_exits_nonzero_and_writes_nothing(tmp_path: Path) -> None:
+    """A rejected run must FAIL LOUDLY and leave the canonical artifact alone.
+
+    Both halves are load-bearing. Exit 1 is what makes SKILL.md's "the pipe fails"
+    branch reachable at all; not writing `-o` is what stops a figure-less stub
+    replacing a good sizing.json, which compose would then read as truth.
+    """
+    out = tmp_path / "sizing.json"
+    out.write_text('{"sentinel": true}')
+    rc, data, stderr = run_script(
+        "market_sizing.py",
+        ["--stdin", "-o", str(out)],
+        stdin_data=_fx_stdin(industry_total=-5),
+    )
+    assert rc == 1, "a validation error must exit non-zero, or the caller cannot detect it"
+    assert stderr.strip(), "a rejected run must say so on stderr"
+    _assert_validation_errors(data, "industry_total must be positive")
+    assert json.loads(out.read_text()) == {"sentinel": True}, "the canonical artifact was clobbered"
+
+
+def test_fx_absent_tag_is_byte_identical_passthrough() -> None:
+    """No `<field>_currency` anywhere => no conversion, no `fx` key.
+
+    This is the backwards-compatibility pin: every pre-existing caller supplies no
+    tag, so the whole feature must be inert for them.
+    """
+    rc, data, err = run_script("market_sizing.py", ["--stdin"], stdin_data=_fx_stdin())
+    assert rc == 0, err
+    assert data is not None
+    assert "fx" not in data
+    assert data["top_down"]["tam"]["inputs"]["industry_total"] == 5_200_000_000
+
+
+def test_fx_tag_equal_to_analysis_currency_does_not_convert() -> None:
+    """Tagging a field with the analysis currency is a no-op, not a 1.0 conversion."""
+    rc, data, err = run_script("market_sizing.py", ["--stdin"], stdin_data=_fx_stdin(industry_total_currency="ILS"))
+    assert rc == 0, err
+    assert data is not None and "fx" not in data
+
+
+def test_fx_conversion_applied_and_recorded() -> None:
+    """A supplied rate converts the figure and records the full provenance."""
+    rc, data, err = run_script(
+        "market_sizing.py",
+        ["--stdin"],
+        stdin_data=_fx_stdin(
+            industry_total_currency="USD",
+            fx={"rates": {"USD:ILS": 3.72}, "as_of": "2026-08-01", "source": "https://example"},
+        ),
+    )
+    assert rc == 0, err
+    assert data is not None
+    conv = data["fx"]["conversions"]
+    assert len(conv) == 1
+    assert conv[0] == {
+        "field": "industry_total",
+        "from": "USD",
+        "to": "ILS",
+        "rate": 3.72,
+        "original_value": 5_200_000_000.0,
+        "converted_value": 19_344_000_000.0,
+    }
+    assert data["fx"]["as_of"] == "2026-08-01"
+    assert data["validation"]["status"] == "valid"
+
+
+def test_fx_recorded_value_is_the_value_the_math_consumed() -> None:
+    """`converted_value` must BE the number the sizing used, not a rounded echo of it.
+
+    compose_report.py compares founder-stated figures through this record; if it
+    drifted from the value the math consumed, that comparison would be against a
+    number that never existed.
+    """
+    rc, data, err = run_script(
+        "market_sizing.py",
+        ["--stdin"],
+        stdin_data=_fx_stdin(
+            industry_total=1_234_567_891,
+            industry_total_currency="USD",
+            fx={"rates": {"USD:ILS": 3.7213}, "as_of": "d", "source": "s"},
+        ),
+    )
+    assert rc == 0, err
+    assert data is not None
+    assert data["fx"]["conversions"][0]["converted_value"] == data["top_down"]["tam"]["inputs"]["industry_total"]
+
+
+def test_fx_missing_rate_is_a_refusal_not_a_guess() -> None:
+    """The central safety property: no rate => stop, with an actionable remedy."""
+    rc, data, _ = run_script("market_sizing.py", ["--stdin"], stdin_data=_fx_stdin(industry_total_currency="USD"))
+    assert rc == 1, "a conversion with no supplied rate must exit non-zero"
+    _assert_validation_errors(data, "E_FX_RATE_MISSING", "USD:ILS", "--fx-rate")
+
+
+def test_fx_inverse_pair_is_never_inferred() -> None:
+    """Supplying ILS:USD does NOT license converting USD->ILS by inversion.
+
+    Silent inversion is a bug class ("which direction did they mean?"), so the
+    pair must match exactly.
+    """
+    rc, data, _ = run_script(
+        "market_sizing.py",
+        ["--stdin"],
+        stdin_data=_fx_stdin(industry_total_currency="USD", fx={"rates": {"ILS:USD": 0.27}}),
+    )
+    assert rc == 1
+    _assert_validation_errors(data, "E_FX_RATE_MISSING")
+
+
+@pytest.mark.parametrize("bad", [0, -3.72, "abc", True, None, [3.72]])
+def test_fx_rate_must_be_a_positive_finite_number(bad: object) -> None:
+    rc, data, _ = run_script(
+        "market_sizing.py",
+        ["--stdin"],
+        stdin_data=_fx_stdin(industry_total_currency="USD", fx={"rates": {"USD:ILS": bad}}),
+    )
+    assert rc == 1
+    _assert_validation_errors(data, "E_FX_RATE_INVALID")
+
+
+def test_fx_rate_infinity_is_rejected() -> None:
+    """`Infinity` parses through json.load and passes `> 0` — isfinite is required."""
+    payload = (
+        '{"approach":"top_down","industry_total":5.2e9,"segment_pct":12,"share_pct":3,'
+        '"currency":"ILS","industry_total_currency":"USD","fx":{"rates":{"USD:ILS":Infinity}}}'
+    )
+    rc, data, _ = run_script("market_sizing.py", ["--stdin"], stdin_data=payload)
+    assert rc == 1
+    _assert_validation_errors(data, "E_FX_RATE_INVALID")
+
+
+@pytest.mark.parametrize("bad", ["dollars", "US", "usd1", 12, ""])
+def test_fx_field_currency_must_be_an_iso_code(bad: object) -> None:
+    rc, data, _ = run_script("market_sizing.py", ["--stdin"], stdin_data=_fx_stdin(industry_total_currency=bad))
+    assert rc == 1
+    _assert_validation_errors(data, "E_FX_CURRENCY_INVALID")
+
+
+def test_fx_both_approach_converts_only_the_foreign_field() -> None:
+    """`both` with ONE foreign field must convert exactly that one.
+
+    An implementation that applies a single supplied rate to every money field
+    passes the all-foreign and no-foreign cases and fails only here.
+    """
+    payload = json.dumps(
+        {
+            "approach": "both",
+            "industry_total": 5_200_000_000,
+            "segment_pct": 12,
+            "share_pct": 3,
+            "customer_count": 1000,
+            "arpu": 100,
+            "arpu_currency": "USD",
+            "serviceable_pct": 35,
+            "target_pct": 5,
+            "currency": "ILS",
+            "fx": {"rates": {"USD:ILS": 3.72}, "as_of": "d", "source": "s"},
+        }
+    )
+    rc, data, err = run_script("market_sizing.py", ["--stdin"], stdin_data=payload)
+    assert rc == 0, err
+    assert data is not None
+    fields = [c["field"] for c in data["fx"]["conversions"]]
+    assert fields == ["arpu"], f"only arpu was foreign, but converted: {fields}"
+    assert data["top_down"]["tam"]["inputs"]["industry_total"] == 5_200_000_000
+    assert data["bottom_up"]["tam"]["inputs"]["arpu"] == 372.0
+
+
+def test_fx_unsourced_conversion_warns_but_stays_valid() -> None:
+    """A rate with no date/source is a disclosure gap, not a fabrication risk."""
+    rc, data, err = run_script(
+        "market_sizing.py",
+        ["--stdin"],
+        stdin_data=_fx_stdin(industry_total_currency="USD", fx={"rates": {"USD:ILS": 3.72}}),
+    )
+    assert rc == 0, err
+    assert data is not None
+    assert data["validation"]["status"] == "valid"
+    assert "FX_UNSOURCED" in [w["code"] for w in data["validation"]["warnings"]]
+
+
+def test_fx_flag_beats_stdin_rate() -> None:
+    """--fx-rate wins over a stdin rate, matching --currency/--sizing-basis precedence."""
+    rc, data, err = run_script(
+        "market_sizing.py",
+        ["--stdin", "--fx-rate", "USD:ILS=4.0", "--fx-as-of", "d", "--fx-source", "s"],
+        stdin_data=_fx_stdin(
+            industry_total_currency="USD", fx={"rates": {"USD:ILS": 3.72}, "as_of": "x", "source": "y"}
+        ),
+    )
+    assert rc == 0, err
+    assert data is not None
+    assert data["fx"]["conversions"][0]["rate"] == 4.0
+
+
+def test_fx_reachable_from_the_pure_cli_path() -> None:
+    """FX must work without --stdin, or the flags are decoration."""
+    rc, data, err = run_script(
+        "market_sizing.py",
+        [
+            "--approach",
+            "top-down",
+            "--industry-total",
+            "5200000000",
+            "--segment-pct",
+            "12",
+            "--share-pct",
+            "3",
+            "--currency",
+            "ILS",
+            "--industry-total-currency",
+            "USD",
+            "--fx-rate",
+            "USD:ILS=3.72",
+            "--fx-as-of",
+            "2026-08-01",
+            "--fx-source",
+            "https://example",
+        ],
+    )
+    assert rc == 0, err
+    assert data is not None
+    assert data["fx"]["conversions"][0]["converted_value"] == 19_344_000_000.0
+
+
+def test_fx_string_money_value_is_coerced_before_conversion() -> None:
+    """Conversion runs on COERCED numbers, never on raw stdin.
+
+    Converting before _validate_inputs would do `"5200000000" * 3.72` and raise
+    TypeError; the stdin harness legitimately sends numbers as strings.
+    """
+    rc, data, err = run_script(
+        "market_sizing.py",
+        ["--stdin"],
+        stdin_data=_fx_stdin(
+            industry_total="5200000000",
+            industry_total_currency="USD",
+            fx={"rates": {"USD:ILS": 3.72}, "as_of": "d", "source": "s"},
+        ),
+    )
+    assert rc == 0, err
+    assert data is not None
+    assert data["fx"]["conversions"][0]["converted_value"] == 19_344_000_000.0
+
+
+def test_fx_empty_currency_reports_the_real_error_not_a_missing_rate() -> None:
+    """An unusable analysis currency must not be masked by an FX complaint.
+
+    FX resolution runs before the currency is validated, so a naive version looks
+    up the pair "USD:" and reports E_FX_RATE_MISSING instead of the actual fault.
+    """
+    rc, data, _ = run_script(
+        "market_sizing.py",
+        ["--stdin", "--currency", " "],
+        stdin_data=_fx_stdin(industry_total_currency="USD"),
+    )
+    assert rc == 1
+    _assert_validation_errors(data, "currency must be a non-empty string")
+
+
+# --- compose-side: FX disclosure and the two comparison classes ---------------
+
+
+def _fx_dir(tmp_path: Path, *, converted: bool, **inputs_over: object) -> Path:
+    """A full sizing dir whose sizing.json is FX-converted (or not)."""
+    d = tmp_path / "market-sizing-testco"
+    d.mkdir()
+    _make_full_sizing_dir(d)
+    inputs = json.loads((d / "inputs.json").read_text())
+    inputs["currency"] = "ILS"
+    inputs.update(inputs_over)
+    (d / "inputs.json").write_text(json.dumps(inputs))
+    sizing = json.loads((d / "sizing.json").read_text())
+    sizing["currency"] = "ILS"
+    if converted:
+        used = _as_float(sizing["top_down"]["tam"]["inputs"]["industry_total"])
+        sizing["fx"] = {
+            "as_of": "2026-08-01",
+            "source": "https://example",
+            "conversions": [
+                {
+                    "field": "industry_total",
+                    "from": "USD",
+                    "to": "ILS",
+                    "rate": 3.72,
+                    "original_value": round(used / 3.72, 2),
+                    "converted_value": used,
+                }
+            ],
+        }
+    (d / "sizing.json").write_text(json.dumps(sizing))
+    return d
+
+
+def _as_float(v: object) -> float:
+    return float(v)  # type: ignore[arg-type]
+
+
+def _compose_codes(d: Path) -> list[str]:
+    rc, data, err = run_script("compose_report.py", ["--dir", str(d)])
+    assert data is not None, err
+    return [w["code"] for w in data.get("validation", {}).get("warnings", [])]
+
+
+def test_compose_discloses_the_rate_on_a_converted_run(tmp_path: Path) -> None:
+    """A converted run must state the rate, its date and its source in the report.
+
+    And must NOT keep claiming no FX happened — that sentence was unconditional.
+    """
+    d = _fx_dir(tmp_path, converted=True)
+    md = d / "report.md"
+    rc, _, err = run_script("compose_report.py", ["--dir", str(d), "--write-md", str(md)])
+    assert rc == 0, err
+    text = md.read_text()
+    assert "no FX conversion is applied anywhere" not in text
+    assert "1 USD = 3.72 ILS" in text
+    assert "2026-08-01" in text
+
+
+def test_compose_keeps_the_no_fx_notice_when_nothing_was_converted(tmp_path: Path) -> None:
+    """The unconverted path is unchanged — this is the regression pin for the edit."""
+    d = _fx_dir(tmp_path, converted=False)
+    md = d / "report.md"
+    rc, _, err = run_script("compose_report.py", ["--dir", str(d), "--write-md", str(md)])
+    assert rc == 0, err
+    assert "no FX conversion is applied anywhere" in md.read_text()
+
+
+def test_compose_cannot_compare_undeclared_founder_currency(tmp_path: Path) -> None:
+    """An undeclared comparand currency must yield an honest "cannot check".
+
+    Comparing a founder figure against a converted one diverges by exactly the FX
+    rate, so both FOUNDER_VALUE_OVERRIDDEN and DECK_CLAIM_MISMATCH would fire on a
+    perfectly correct analysis.
+    """
+    d = _fx_dir(tmp_path, converted=True, founder_stated_inputs={"industry_total": 5_200_000_000})
+    codes = _compose_codes(d)
+    assert "COMPARISON_CURRENCY_UNKNOWN" in codes
+    assert "FOUNDER_VALUE_OVERRIDDEN" not in codes
+
+
+def test_compose_compares_properly_when_founder_currency_is_declared(tmp_path: Path) -> None:
+    """Declaring the currency restores the real check — and it passes when faithful."""
+    d = _fx_dir(tmp_path, converted=True)
+    sizing = json.loads((d / "sizing.json").read_text())
+    original = sizing["fx"]["conversions"][0]["original_value"]
+    inputs = json.loads((d / "inputs.json").read_text())
+    inputs["founder_stated_inputs"] = {"industry_total": original}
+    inputs["founder_stated_inputs_currency"] = "USD"
+    (d / "inputs.json").write_text(json.dumps(inputs))
+    codes = _compose_codes(d)
+    assert "FOUNDER_VALUE_OVERRIDDEN" not in codes
+    assert "COMPARISON_CURRENCY_UNKNOWN" not in codes
+
+
+def test_compose_still_catches_a_genuine_override_across_a_conversion(tmp_path: Path) -> None:
+    """The suppression must not be blanket.
+
+    Without this, disabling the check entirely would pass every other case here.
+    """
+    d = _fx_dir(tmp_path, converted=True)
+    sizing = json.loads((d / "sizing.json").read_text())
+    original = sizing["fx"]["conversions"][0]["original_value"]
+    inputs = json.loads((d / "inputs.json").read_text())
+    inputs["founder_stated_inputs"] = {"industry_total": original * 0.5}
+    inputs["founder_stated_inputs_currency"] = "USD"
+    (d / "inputs.json").write_text(json.dumps(inputs))
+    assert "FOUNDER_VALUE_OVERRIDDEN" in _compose_codes(d)
+
+
+def test_compose_flags_a_figureless_sizing_artifact_at_high_severity(tmp_path: Path) -> None:
+    """A rejected sizing step must be loud downstream too.
+
+    market_sizing.py no longer writes this stub, so reaching compose means a stale
+    or hand-edited artifact — but the old silent path rendered an empty table with
+    no code naming the cause, so the detector stays.
+    """
+    d = tmp_path / "market-sizing-testco"
+    d.mkdir()
+    _make_full_sizing_dir(d)
+    (d / "sizing.json").write_text(
+        json.dumps({"validation": {"status": "invalid", "errors": ["industry_total must be positive"]}})
+    )
+    rc, data, err = run_script("compose_report.py", ["--dir", str(d)])
+    assert data is not None, err
+    hits = [w for w in data["validation"]["warnings"] if w["code"] == "SIZING_INVALID"]
+    assert hits, "a figure-less sizing.json must raise SIZING_INVALID"
+    assert hits[0]["severity"] == "high", "must not be acceptable-away"
+
+
+# --- regressions found by adversarial review of the FX implementation ----------
+
+
+def test_fx_conversion_result_must_be_a_usable_figure() -> None:
+    """The PRODUCT is re-validated, not just the rate.
+
+    validate_positive runs pre-conversion, so a legitimately positive input can
+    land on 0.0 after a small rate and 2dp rounding, or on Infinity after a huge
+    one, and still report status "valid" with real-looking zeros in the artifact.
+    """
+    payload = json.dumps(
+        {
+            "approach": "bottom_up",
+            "customer_count": 1000,
+            "arpu": 0.5,
+            "arpu_currency": "JPY",
+            "serviceable_pct": 35,
+            "target_pct": 5,
+            "currency": "USD",
+            "fx": {"rates": {"JPY:USD": 0.0067}, "as_of": "d", "source": "s"},
+        }
+    )
+    rc, data, _ = run_script("market_sizing.py", ["--stdin"], stdin_data=payload)
+    assert rc == 1
+    _assert_validation_errors(data, "E_FX_RESULT_INVALID")
+
+
+def test_fx_dispatch_templates_ask_for_the_currency_tag() -> None:
+    """The tag must be in the JSON SHAPE, not only in prose around it.
+
+    The sub-agent copies the shape. With the tag absent from it, a compliant run
+    emits no tag, so nothing converts AND nothing refuses — the pre-fix silent
+    mislabelling path stays live and the whole feature is unreachable.
+    """
+    skill = (Path(__file__).resolve().parents[1] / "skills" / "market-sizing" / "SKILL.md").read_text(encoding="utf-8")
+    agent = (Path(__file__).resolve().parents[1] / "agents" / "market-sizing.md").read_text(encoding="utf-8")
+    for name, text in (("SKILL.md", skill), ("agents/market-sizing.md", agent)):
+        assert "industry_total_currency" in text, f"{name}: TOP_DOWN shape must request the tag"
+        assert "arpu_currency" in text, f"{name}: BOTTOM_UP shape must request the tag"
+
+
+def test_compose_honours_a_declared_currency_for_an_unconverted_field(tmp_path: Path) -> None:
+    """A declared currency applies to every founder-stated money figure.
+
+    The declaration is object-level, but only SOME fields may have a conversion
+    record. Gating on "was this field converted" made a declared-USD arpu compare
+    against an ILS figure and reported the founder's own number as overridden.
+    """
+    d = tmp_path / "market-sizing-testco"
+    d.mkdir()
+    _make_full_sizing_dir(d)
+    sizing = json.loads((d / "sizing.json").read_text())
+    sizing["currency"] = "ILS"
+    arpu_ils = _as_float(sizing["bottom_up"]["tam"]["inputs"]["arpu"])
+    it_ils = _as_float(sizing["top_down"]["tam"]["inputs"]["industry_total"])
+    # industry_total was converted; arpu was sourced domestically (no record).
+    sizing["fx"] = {
+        "as_of": "2026-08-01",
+        "source": "s",
+        "conversions": [
+            {
+                "field": "industry_total",
+                "from": "USD",
+                "to": "ILS",
+                "rate": 3.72,
+                "original_value": round(it_ils / 3.72, 2),
+                "converted_value": it_ils,
+            }
+        ],
+    }
+    (d / "sizing.json").write_text(json.dumps(sizing))
+    inputs = json.loads((d / "inputs.json").read_text())
+    inputs["currency"] = "ILS"
+    inputs["founder_stated_inputs"] = {"arpu": round(arpu_ils / 3.72, 2)}
+    inputs["founder_stated_inputs_currency"] = "USD"
+    (d / "inputs.json").write_text(json.dumps(inputs))
+    codes = _compose_codes(d)
+    assert "FOUNDER_VALUE_OVERRIDDEN" not in codes, "a faithful USD-declared arpu must not read as overridden"
+
+
+def test_compose_matches_the_rate_by_currency_pair_not_by_first_record(tmp_path: Path) -> None:
+    """With two source currencies, a claim in the SECOND one is still comparable.
+
+    Picking `next(iter(conversions))` refused a check that was fully computable
+    and told the founder their currency was unrecognised.
+    """
+    d = tmp_path / "market-sizing-testco"
+    d.mkdir()
+    _make_full_sizing_dir(d)
+    sizing = json.loads((d / "sizing.json").read_text())
+    sizing["currency"] = "ILS"
+    tam = _as_float(sizing["top_down"]["tam"]["value"])
+    sizing["fx"] = {
+        "as_of": "2026-08-01",
+        "source": "s",
+        "conversions": [
+            {
+                "field": "industry_total",
+                "from": "USD",
+                "to": "ILS",
+                "rate": 3.72,
+                "original_value": 1.0,
+                "converted_value": 3.72,
+            },
+            {"field": "arpu", "from": "EUR", "to": "ILS", "rate": 4.0, "original_value": 1.0, "converted_value": 4.0},
+        ],
+    }
+    (d / "sizing.json").write_text(json.dumps(sizing))
+    inputs = json.loads((d / "inputs.json").read_text())
+    inputs["currency"] = "ILS"
+    # A EUR claim equal to the computed TAM once converted at the recorded EUR rate.
+    inputs["existing_claims"] = {"tam": round(tam / 4.0, 2)}
+    inputs["existing_claims_currency"] = "EUR"
+    (d / "inputs.json").write_text(json.dumps(inputs))
+    codes = _compose_codes(d)
+    assert "COMPARISON_CURRENCY_UNKNOWN" not in codes, "EUR is a recorded source currency here"
+    assert "DECK_CLAIM_MISMATCH" not in codes, "the converted claim matches the computed TAM"
+
+
+def test_compose_new_warnings_do_not_name_internal_fields(tmp_path: Path) -> None:
+    """The new founder-facing messages must not leak artifact or field names.
+
+    SIZING_INVALID named `sizing.json` and tripped the skill's own founder-text
+    detector; COMPARISON_CURRENCY_UNKNOWN named `inputs.founder_stated_inputs_currency`,
+    which slipped past it because the dotted form escapes the substitution guard.
+    """
+    d = tmp_path / "market-sizing-testco"
+    d.mkdir()
+    _make_full_sizing_dir(d)
+    (d / "sizing.json").write_text(json.dumps({"validation": {"status": "invalid", "errors": ["bad"]}}))
+    rc, data, err = run_script("compose_report.py", ["--dir", str(d)])
+    assert data is not None, err
+    # Scoped to the codes this change introduced. `APPROACH_MISMATCH` also names sizing.json —
+    # a PRE-EXISTING leak, out of scope here rather than silently folded in, and FOUNDER_TEXT_TOKEN
+    # must name the offending token to be actionable at all.
+    mine = {"SIZING_INVALID", "COMPARISON_CURRENCY_UNKNOWN"}
+    msgs = " ".join(w["message"] for w in data["validation"]["warnings"] if w["code"] in mine)
+    assert msgs, "expected at least one of the new warnings in this fixture"
+    for leaked in ("sizing.json", "founder_stated_inputs_currency", "existing_claims_currency"):
+        assert leaked not in msgs, f"founder-facing warning text names {leaked}"
+
+
+def test_sensitivity_invalid_input_exits_nonzero_and_writes_nothing(tmp_path: Path) -> None:
+    """`sensitivity.py` refuses loudly, like `market_sizing.py`.
+
+    It had the same defect: exit 0, an `{"ok":true}` receipt, and a figure-less stub written over
+    the canonical artifact — so the pipe never "failed next" and the prior good file was gone.
+    """
+    out = tmp_path / "sensitivity.json"
+    out.write_text('{"sentinel": true}')
+    rc, data, stderr = run_script(
+        "sensitivity.py",
+        ["-o", str(out)],
+        stdin_data=json.dumps({"approach": "bottom_up", "base": {"customer_count": "x"}, "ranges": {}}),
+    )
+    assert rc == 1
+    assert stderr.strip()
+    assert data is not None and data["validation"]["status"] == "invalid"
+    assert json.loads(out.read_text()) == {"sentinel": True}, "the canonical artifact was clobbered"
+
+
+def test_checklist_invalid_input_exits_nonzero_and_writes_nothing(tmp_path: Path) -> None:
+    """`checklist.py` refuses loudly — both of its invalid paths."""
+    out = tmp_path / "checklist.json"
+    out.write_text('{"sentinel": true}')
+    rc, data, stderr = run_script("checklist.py", ["-o", str(out)], stdin_data=json.dumps({"notitems": 1}))
+    assert rc == 1
+    assert stderr.strip()
+    assert data is not None and data["validation"]["status"] == "invalid"
+    assert json.loads(out.read_text()) == {"sentinel": True}
+
+    # Second path: well-formed `items`, rejected by validate_checklist.
+    rc2, data2, _ = run_script(
+        "checklist.py",
+        ["-o", str(out)],
+        stdin_data=json.dumps({"items": [{"id": "not_a_real_criterion", "status": "pass", "evidence": "x"}]}),
+    )
+    assert rc2 == 1
+    assert data2 is not None and data2["validation"]["status"] == "invalid"
+    assert json.loads(out.read_text()) == {"sentinel": True}
+
+
+def test_compose_flags_an_invalid_sensitivity_or_checklist_at_high_severity(tmp_path: Path) -> None:
+    """A rejected sensitivity/checklist step must not surface only as a medium symptom.
+
+    Before this, the sole signals were FEW_SENSITIVITY_PARAMS / CHECKLIST_INCOMPLETE — both
+    medium, so both acceptable-away via accepted_warnings, and both naming a symptom.
+    """
+    for name in ("sensitivity.json", "checklist.json"):
+        d = tmp_path / f"market-sizing-{name.split('.')[0]}"
+        d.mkdir()
+        _make_full_sizing_dir(d)
+        (d / name).write_text(json.dumps({"validation": {"status": "invalid", "errors": ["bad input"]}}))
+        rc, data, err = run_script("compose_report.py", ["--dir", str(d)])
+        assert data is not None, err
+        hits = [w for w in data["validation"]["warnings"] if w["code"] == "ARTIFACT_INVALID"]
+        assert hits, f"{name}: a rejected producer artifact must raise ARTIFACT_INVALID"
+        assert hits[0]["severity"] == "high", f"{name}: must not be acceptable-away"

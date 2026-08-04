@@ -31,9 +31,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
+import re
 import sys
-from typing import Any
+from typing import Any, NoReturn
 
 # Convention this analysis' headline figures follow — see
 # references/tam-sam-som-methodology.md §5. Optional and NOT defaulted here: an
@@ -62,9 +64,213 @@ def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any]
         sys.stdout.write(data)
 
 
+def _fail_invalid(result: dict[str, Any], output_path: str | None, indent: int | None) -> NoReturn:
+    """Emit a validation-error result and exit NON-ZERO, without touching `output_path`.
+
+    Both halves matter, and both were previously wrong.
+
+    The error JSON still goes to STDOUT so a caller (and the test harness) can read the
+    diagnostic; only the exit code and stderr are new. But it is deliberately NOT written to
+    `--output`: that path is the canonical `sizing.json`, and overwriting it with a figure-less
+    stub is worse than writing nothing. A stub there reads as truth to `compose_report.py`,
+    which then renders an empty sizing table, and the prior good artifact is gone.
+
+    Exit 1 is what makes the failure reachable by the caller at all. SKILL.md's producer-error
+    branch is written as "the pipe fails next" — with exit 0 and an `{"ok":true}` receipt, that
+    branch could never fire, so a rejected run looked exactly like a successful one.
+    """
+    payload = json.dumps(result, indent=indent) + "\n"
+    sys.stdout.write(payload)
+    errors = result.get("validation", {}).get("errors") or ["unspecified validation error"]
+    print(f"Error: input rejected, no output written: {'; '.join(str(e) for e in errors)}", file=sys.stderr)
+    if output_path:
+        print(f"Error: {os.path.abspath(output_path)} was left unchanged.", file=sys.stderr)
+    sys.exit(1)
+
+
 def fmt(value: float) -> float:
     """Round to 2 decimal places for currency values."""
     return round(value, 2)
+
+
+# The ONLY two monetary inputs in this producer: `industry_total` (top-down) and `arpu`
+# (bottom-up). Everything else is a count or a percentage. Both names appear here as literal
+# strings on purpose — `tests/test_dispatch_schema_drift.py` greps the scripts for literal
+# field names, so a `f"{name}_currency"` alone would make the dispatch template's
+# `industry_total_currency` read as a field nothing consumes.
+_MONEY_FIELDS: tuple[str, ...] = ("industry_total", "arpu")
+_MONEY_CURRENCY_KEYS: dict[str, str] = {
+    "industry_total": "industry_total_currency",
+    "arpu": "arpu_currency",
+}
+_ISO_CODE_LEN = 3
+
+
+def _valid_currency_code(value: Any) -> bool:
+    """ISO-4217 shape: exactly three alphabetic characters."""
+    return isinstance(value, str) and len(value) == _ISO_CODE_LEN and value.isalpha()
+
+
+def _resolve_fx(
+    data: dict[str, Any] | None,
+    args: argparse.Namespace,
+    target: str,
+) -> tuple[dict[str, float], str | None, str | None, dict[str, str], list[str]]:
+    """Resolve the FX rate map, its provenance, and each money field's source currency.
+
+    Returns (rates, as_of, source, field_currencies, errors). Flags beat stdin, matching how
+    `--currency` and `--sizing-basis` already resolve.
+
+    No network: a rate is only ever something the CALLER supplied. That is the whole point —
+    the sub-agent that produces these figures has no network tools and no rate, so if FX were
+    done upstream it could only come from the model's memory (unsourced, undated).
+
+    Deliberately does NOT report an error when `target` is unusable: the analysis currency is
+    validated in `_validate_inputs`, and failing here first would mask "currency must be a
+    non-empty string" behind a confusing missing-rate error for the pair `"USD:"`.
+    """
+    errors: list[str] = []
+    stdin_fx = data.get("fx") if isinstance(data, dict) else None
+    if stdin_fx is not None and not isinstance(stdin_fx, dict):
+        errors.append(f"'fx' must be an object (got {type(stdin_fx).__name__})")
+        stdin_fx = None
+    fx_obj: dict[str, Any] = stdin_fx or {}
+
+    rates: dict[str, float] = {}
+    raw_rates = fx_obj.get("rates", {})
+    if raw_rates and not isinstance(raw_rates, dict):
+        errors.append(f"'fx.rates' must be an object (got {type(raw_rates).__name__})")
+        raw_rates = {}
+    for pair, raw in (raw_rates or {}).items():
+        ok, rate, err = _parse_rate(str(pair), raw)
+        if ok:
+            rates[str(pair).upper()] = rate
+        else:
+            errors.append(err)
+
+    # --fx-rate SRC:TGT=RATE (repeatable) — wins over the same pair from stdin.
+    for spec in args.fx_rate or []:
+        if "=" not in spec:
+            errors.append(f"E_FX_RATE_INVALID: --fx-rate must be SRC:TGT=RATE (got '{spec}')")
+            continue
+        pair, _, raw = spec.partition("=")
+        ok, rate, err = _parse_rate(pair, raw)
+        if ok:
+            rates[pair.strip().upper()] = rate
+        else:
+            errors.append(err)
+
+    as_of = args.fx_as_of or (fx_obj.get("as_of") if isinstance(fx_obj.get("as_of"), str) else None)
+    source = args.fx_source or (fx_obj.get("source") if isinstance(fx_obj.get("source"), str) else None)
+
+    # Per-field source currency: flag wins, then stdin. Absent => already in `target`, which is
+    # why every pre-existing caller is unaffected by all of this.
+    field_currencies: dict[str, str] = {}
+    flag_for = {"industry_total": args.industry_total_currency, "arpu": args.arpu_currency}
+    for field in _MONEY_FIELDS:
+        raw_ccy = flag_for.get(field)
+        if raw_ccy is None and isinstance(data, dict):
+            raw_ccy = data.get(_MONEY_CURRENCY_KEYS[field])
+        if raw_ccy is None:
+            continue
+        if not _valid_currency_code(raw_ccy):
+            errors.append(
+                f"E_FX_CURRENCY_INVALID: {_MONEY_CURRENCY_KEYS[field]} must be a 3-letter ISO code (got {raw_ccy!r})"
+            )
+            continue
+        field_currencies[field] = str(raw_ccy).upper()
+
+    return rates, as_of, source, field_currencies, errors
+
+
+def _parse_rate(pair: str, raw: Any) -> tuple[bool, float, str]:
+    """Validate one `SRC:TGT` -> rate entry. Returns (ok, rate, error_message)."""
+    key = pair.strip().upper()
+    if not re.fullmatch(r"[A-Z]{3}:[A-Z]{3}", key):
+        return False, 0.0, f"E_FX_RATE_INVALID: rate key must be 'SRC:TGT' with ISO codes (got '{pair}')"
+    if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
+        return False, 0.0, f"E_FX_RATE_INVALID: rate for {key} must be a positive number (got {raw!r})"
+    try:
+        rate = float(raw)
+    except (TypeError, ValueError):
+        return False, 0.0, f"E_FX_RATE_INVALID: rate for {key} must be a positive number (got {raw!r})"
+    # isfinite, not just > 0: bare `Infinity` parses through json.load and `inf > 0` is True.
+    if not math.isfinite(rate) or rate <= 0:
+        return False, 0.0, f"E_FX_RATE_INVALID: rate for {key} must be a finite number > 0 (got {raw!r})"
+    return True, rate, ""
+
+
+def _apply_fx_in_place(
+    parsed: dict[str, Any],
+    approach: str,
+    target: str,
+    rates: dict[str, float],
+    field_currencies: dict[str, str],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Convert the money inputs in `parsed` into `target`. Returns (conversions, errors).
+
+    Runs AFTER `_validate_inputs`, on its coerced numeric tuples — never on raw stdin, where a
+    money value may still be the string `"15000"` (`test_market_sizing_stdin_string_coercion`
+    pins that shape) and `"15000" * 3.72` would raise TypeError.
+
+    A missing rate is an ERROR, never a guess. That refusal is the only non-prose guarantee in
+    this design: the main thread cannot know a rate is needed until the sub-agent tags a foreign
+    currency, so the producer stopping is what forces the fetch-and-re-pipe loop.
+
+    Only ever converts a field whose declared currency differs from `target`, so `both` with one
+    foreign and one domestic field converts exactly one of them.
+    """
+    conversions: list[dict[str, Any]] = []
+    errors: list[str] = []
+    slots = {"industry_total": ("td", 0), "arpu": ("bu", 1)}
+
+    for field in _MONEY_FIELDS:
+        src = field_currencies.get(field)
+        if src is None or src == target:
+            continue
+        slot, idx = slots[field]
+        if slot not in parsed:
+            continue  # field not in play for this approach
+        pair = f"{src}:{target}"
+        rate = rates.get(pair)
+        if rate is None:
+            errors.append(
+                f"E_FX_RATE_MISSING: {field} is in {src} but the analysis is denominated in {target}, "
+                f"and no {pair} rate was supplied. Fetch the rate, then re-run with "
+                f"--fx-rate {pair}=<rate> --fx-as-of <YYYY-MM-DD> --fx-source <url>. "
+                f"Rates are never inferred by inverting another pair."
+            )
+            continue
+        values = list(parsed[slot])
+        original = float(values[idx])
+        # fmt() once, and the SAME value goes into both the math and the record — so
+        # fx.conversions[].converted_value is exactly the number the sizing consumed.
+        converted = fmt(original * rate)
+        # Re-validate the PRODUCT. validate_positive ran on the pre-conversion figure, so without
+        # this a legitimately-positive input can land on 0.0 (a small value against a small rate,
+        # after rounding to 2dp) or on `Infinity` (a huge value against a large one) and still
+        # report status "valid" — with real-looking zeros or non-spec JSON in the artifact.
+        if not math.isfinite(converted) or converted <= 0:
+            errors.append(
+                f"E_FX_RESULT_INVALID: converting {field} ({original:,.10g} {src} at {rate}) yields "
+                f"{converted!r}, which is not a usable {target} figure. Check the rate's direction "
+                f"and magnitude."
+            )
+            continue
+        values[idx] = converted
+        parsed[slot] = tuple(values)
+        conversions.append(
+            {
+                "field": field,
+                "from": src,
+                "to": target,
+                "rate": rate,
+                "original_value": original,
+                "converted_value": converted,
+            }
+        )
+
+    return conversions, errors
 
 
 def validate_pct(name: str, value: float) -> str | None:
@@ -541,8 +747,10 @@ def parse_args() -> argparse.Namespace:
         "--currency",
         default=None,
         help=(
-            "ISO currency label for every money figure, e.g. EUR / ILS (default: USD). "
-            "No FX conversion is ever performed — this labels the figures you supply."
+            "ISO currency the analysis is denominated in, e.g. EUR / ILS (default: USD). This "
+            "labels the figures you supply; it converts nothing on its own. A money input in a "
+            "DIFFERENT currency is converted only when you declare it (--industry-total-currency "
+            "/ --arpu-currency) and supply the rate (--fx-rate)."
         ),
     )
     p.add_argument(
@@ -553,6 +761,27 @@ def parse_args() -> argparse.Namespace:
             "No default — an unset basis is omitted from the output and must render as "
             "'not declared' downstream, never silently as current_year."
         ),
+    )
+    # --- FX (opt-in; absent => no conversion, byte-identical to the pre-FX behaviour) ---
+    p.add_argument(
+        "--fx-rate",
+        action="append",
+        metavar="SRC:TGT=RATE",
+        help=(
+            "Exchange rate to use when a money input is denominated in SRC and the analysis is in "
+            "TGT, e.g. USD:ILS=3.72. Repeatable. Never inferred by inverting another pair, and "
+            "never fetched — a conversion with no supplied rate is a hard error, not a guess."
+        ),
+    )
+    p.add_argument("--fx-as-of", help="Date the supplied rate(s) were quoted (YYYY-MM-DD)")
+    p.add_argument("--fx-source", help="Where the supplied rate(s) came from (URL or citation)")
+    p.add_argument(
+        "--industry-total-currency",
+        help="ISO code --industry-total is actually in, when it differs from --currency",
+    )
+    p.add_argument(
+        "--arpu-currency",
+        help="ISO code --arpu is actually in, when it differs from --currency",
     )
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
@@ -583,7 +812,7 @@ def main() -> None:
             print("Error: JSON input must be an object", file=sys.stderr)
             sys.exit(1)
 
-        # --- Validation starts here (JSON error dict, exit 0) ---
+        # --- Validation starts here (JSON error dict on stdout, exit 1, no file written) ---
         raw_approach = data.get("approach", "both")
         if not isinstance(raw_approach, str):
             result: dict[str, Any] = {
@@ -592,8 +821,7 @@ def main() -> None:
                     "errors": [f"approach must be a string (got {type(raw_approach).__name__})"],
                 }
             }
-            _write_output(json.dumps(_stamp_run_id(result, args.run_id), indent=indent) + "\n", args.output)
-            return
+            _fail_invalid(_stamp_run_id(result, args.run_id), args.output, indent)
         approach = raw_approach.replace("_", "-")
     else:
         data = None
@@ -607,8 +835,7 @@ def main() -> None:
                 "errors": [f"approach must be one of {sorted(valid_approaches)} (got '{approach}')"],
             }
         }
-        _write_output(json.dumps(_stamp_run_id(result, args.run_id), indent=indent) + "\n", args.output)
-        return
+        _fail_invalid(_stamp_run_id(result, args.run_id), args.output, indent)
 
     # Resolve the currency label. An explicit --currency always wins; otherwise a
     # `currency` key in the piped JSON is honoured, so a sub-agent's hand-off (or a
@@ -632,14 +859,39 @@ def main() -> None:
     if isinstance(args.sizing_basis, str):
         args.sizing_basis = args.sizing_basis.strip().lower() or None
 
+    # FX inputs are resolved BEFORE validation (so shape errors join the same list) but the
+    # conversion itself happens AFTER it, on coerced numbers — see _apply_fx_in_place.
+    fx_rates, fx_as_of, fx_source, fx_field_currencies, fx_errors = _resolve_fx(data, args, args.currency)
+
     parsed, errors, input_warnings = _validate_inputs(data, args, approach)
+    errors = fx_errors + errors
+
+    conversions: list[dict[str, Any]] = []
+    if not errors:
+        conversions, conv_errors = _apply_fx_in_place(parsed, approach, args.currency, fx_rates, fx_field_currencies)
+        errors.extend(conv_errors)
+        if conversions and not (fx_as_of and fx_source):
+            missing = " and ".join(n for n, v in (("as_of", fx_as_of), ("source", fx_source)) if not v)
+            input_warnings.append(
+                {
+                    "code": "FX_UNSOURCED",
+                    "field": "fx",
+                    "message": (
+                        f"a currency conversion was applied but fx.{missing} was not supplied — the rate "
+                        f"is recorded and rendered, but its provenance is not"
+                    ),
+                }
+            )
 
     if errors:
         result = {"validation": {"status": "invalid", "errors": errors, "warnings": input_warnings}}
+        _fail_invalid(_stamp_run_id(result, args.run_id), args.output, indent)
     else:
         result = {"approach": approach, "currency": args.currency}
         if args.sizing_basis is not None:
             result["sizing_basis"] = args.sizing_basis
+        if conversions:
+            result["fx"] = {"as_of": fx_as_of, "source": fx_source, "conversions": conversions}
 
         if approach in ("top-down", "both"):
             it, sp, shp, gr, yr = parsed["td"]

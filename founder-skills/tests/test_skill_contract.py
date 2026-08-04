@@ -13,7 +13,10 @@ the body.
 
 from __future__ import annotations
 
+import json
 import re
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -448,7 +451,18 @@ SKILL_MD_CEILING: dict[str, int] = {
     # market-sizing: + the BOTTOM_UP dispatch's missing CURRENCY block. TOP_DOWN had one and BOTTOM_UP
     # did not, so a sub-agent could convert an ILS arpu to USD and the TAM would still be LABELLED ILS
     # — nothing in the pipeline performs FX, so nothing catches it.
-    "market-sizing": 83_010,
+    # market-sizing +2,021 B for producer-side FX. The dispatch prompts used to instruct a
+    # network-less sub-agent to convert currencies with no rate supplied — i.e. from memory,
+    # unsourced and undated — while the agent body said "Never convert". The prompts now ask for
+    # the figure as the source states it plus a currency tag; `market_sizing.py` converts with a
+    # rate the MAIN thread looks up (it has web access; the sub-agent does not) and refuses when
+    # no rate was supplied. The growth is the re-pipe loop and the founder-facing wording for it:
+    # a rejected pipe that the model cannot recover from is worse than the defect it replaced.
+    # A second pass added the currency tag to the two dispatch JSON SHAPES (it had been in the
+    # surrounding prose only — and the sub-agent copies the shape, so nothing ever emitted the
+    # tag, nothing converted, and nothing refused: the feature was unreachable), the
+    # not-a-repair-dispatch carve-out on the FX stop, and the both-mode re-pipe warning.
+    "market-sizing": 86_745,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -636,11 +650,14 @@ def test_cap_table_echoes_run_id_so_the_paste_remedy_is_satisfiable() -> None:
 # drop-with-warning, and NARR_03's missing band for a deck that names no competitor. Schema drift
 # that ships to a founder is the expensive kind; these rows are the cheap kind.
 REFERENCES_CEILING: dict[str, int] = {
-    "market-sizing": 40_174,
+    # market-sizing +813 B: artifact-schemas.md documents sizing.json's new `fx` block and
+    # retracts "currency is a label only — nothing in this skill performs FX conversion", which
+    # became false.
+    "market-sizing": 42_813,
     # fmr raised to document `graded_against` on the three producer outputs that stamp it — a new
     # artifact field is not discoverable from a schema doc that omits it, and the field exists to make
     # staleness detectable at all (run_id parity cannot see corrections applied within a run).
-    "financial-model-review": 72_650,
+    "financial-model-review": 72_961,
     "ic-sim": 54_359,
     "deck-review": 49_039,
     "competitive-positioning": 136_835,
@@ -1754,4 +1771,60 @@ def test_plugin_root_block_pipes_candidates_on_stdin_with_expected_version(skill
     assert "PROVISIONAL_ROOT" in block, (
         f"{skill}/SKILL.md must derive a provisional root before invoking the selector — the "
         f"selector lives under the root it is choosing"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Loud producer refusal — a fleet invariant, because the defect was a fleet defect.
+#
+# Six producers across four skills independently had the same shape: on a validation
+# error, write the error dict through `_write_output` (which honours `-o`) and return
+# 0. That is the worst of both worlds — the canonical artifact is replaced by an
+# analysis-free stub AND the caller gets an `{"ok":true}` receipt with exit 0, so every
+# SKILL.md's "the pipe fails next" error branch is unreachable.
+#
+# This test is BEHAVIOURAL on purpose. The obvious structural version — "a script that
+# can emit `status: invalid` must contain `_fail_invalid`, or a `sys.exit(1)`" — was
+# written first and measured VACUOUS: every one of these producers already contained
+# `sys.exit(1)` for malformed-JSON infrastructure errors, so the escape hatch admitted
+# all three of the real offenders. Only running them proves anything.
+#
+# The registry is explicit rather than discovered: a rejecting payload is per-producer
+# knowledge, and a generic one (`{}`) is accepted by some of these scripts.
+# ---------------------------------------------------------------------------
+
+# (skill, script, extra argv, a payload that script MUST reject)
+_REJECTING_PAYLOADS: list[tuple[str, str, list[str], str]] = [
+    ("market-sizing", "market_sizing.py", ["--stdin"], '{"approach":"top_down","industry_total":-5}'),
+    ("market-sizing", "sensitivity.py", [], '{"approach":"bottom_up","base":{},"ranges":{}}'),
+    ("market-sizing", "checklist.py", [], '{"notitems":1}'),
+    ("deck-review", "checklist.py", ["--run-id", "RID"], '{"items":[{"id":"bogus","status":"pass"}]}'),
+    ("financial-model-review", "checklist.py", [], '{"notitems":1}'),
+    ("financial-model-review", "unit_economics.py", [], '{"nocompany":1}'),
+    ("financial-model-review", "runway.py", [], '{"nocompany":1}'),
+    ("ic-sim", "score_dimensions.py", ["--run-id", "RID"], '{"items":[{"id":"bogus","status":"concern"}]}'),
+]
+
+
+@pytest.mark.parametrize(("skill", "script", "extra", "payload"), _REJECTING_PAYLOADS)
+def test_producer_rejects_loudly_without_clobbering(
+    skill: str, script: str, extra: list[str], payload: str, tmp_path: Path
+) -> None:
+    """A rejected input must exit non-zero AND leave the canonical artifact untouched."""
+    out = tmp_path / "artifact.json"
+    out.write_text('{"sentinel": true}', encoding="utf-8")
+    proc = subprocess.run(
+        [sys.executable, str(SKILLS_ROOT / skill / "scripts" / script), *extra, "-o", str(out)],
+        input=payload,
+        capture_output=True,
+        text=True,
+    )
+    where = f"{skill}/{script}"
+    assert proc.returncode != 0, (
+        f"{where} accepted an invalid input with exit 0. The caller cannot distinguish this from "
+        f"success, so every SKILL.md's producer-error branch is unreachable. stdout={proc.stdout[:200]}"
+    )
+    assert proc.stderr.strip(), f"{where} rejected the input silently — nothing on stderr"
+    assert json.loads(out.read_text(encoding="utf-8")) == {"sentinel": True}, (
+        f"{where} overwrote the canonical artifact with an analysis-free stub on a rejected run"
     )

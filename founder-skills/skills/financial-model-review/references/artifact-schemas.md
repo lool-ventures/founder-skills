@@ -278,7 +278,7 @@ Assembled report from all artifacts with cross-artifact validation.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `code` | string | yes | Warning code (e.g., `"MISSING_ARTIFACT"`, `"CHECKLIST_FAILURES"`) |
+| `code` | string | yes | Warning code (e.g., `"MISSING_ARTIFACT"`, `"CHECKLIST_FAILURES"`). `"ARTIFACT_INVALID"` (**high**) fires when `checklist.json`, `unit_economics.json` or `runway.json` carries `validation.status == "invalid"` — their producers now refuse and preserve rather than writing an analysis-free stub, so such an artifact is stale or hand-edited and the report must not be presented. |
 | `severity` | string | yes | One of: `"high"`, `"medium"`, `"low"` |
 | `message` | string | yes | Human-readable warning message |
 

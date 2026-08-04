@@ -36,6 +36,17 @@ WARNING_SEVERITY: dict[str, str] = {
     # test_compose_invariants.py is the gate; this is the runtime breadcrumb.
     "FOUNDER_TEXT_TOKEN": "low",
     # High severity — agent must fix before presenting report
+    #
+    # SIZING_INVALID is high because the failure it catches used to be INVISIBLE. market_sizing.py
+    # rejecting its input once meant an exit-0 `{"ok":true}` receipt plus a figure-less stub written
+    # over sizing.json; compose then rendered an empty sizing table with no code naming the cause.
+    # High keeps it out of ACCEPTIBLE_SEVERITIES, so it cannot be accepted away.
+    "SIZING_INVALID": "high",
+    # Same class, other producers. `sensitivity.py` / `checklist.py` had the identical
+    # exit-0-and-clobber behaviour, and a rejected step surfaced only as a MEDIUM
+    # FEW_SENSITIVITY_PARAMS / CHECKLIST_INCOMPLETE — acceptable-away, and naming a
+    # symptom rather than the cause.
+    "ARTIFACT_INVALID": "high",
     "CORRUPT_ARTIFACT": "high",
     "MISSING_ARTIFACT": "high",
     "STALE_ARTIFACT": "high",
@@ -57,6 +68,12 @@ WARNING_SEVERITY: dict[str, str] = {
     "REFUTED_MISSING_REASON": "medium",
     "EXISTING_CLAIMS_SHAPE": "medium",
     "CURRENCY_MISMATCH": "medium",
+    # An honest "cannot check" where the alternative is a confident wrong answer. When a money
+    # input was FX-converted, a founder-stated figure or deck claim carrying no declared currency
+    # cannot be compared against it: the divergence would be exactly the exchange rate, and which
+    # side is in which currency is not knowable from the data. Declaring
+    # founder_stated_inputs_currency / existing_claims_currency restores the real check.
+    "COMPARISON_CURRENCY_UNKNOWN": "medium",
     "FOUNDER_VALUE_OVERRIDDEN": "medium",
     # Low severity — informational; do not block under --strict
     "MISSING_OPTIONAL_ARTIFACT": "low",
@@ -348,6 +365,79 @@ def _md_safe(text: str) -> str:
     return text.replace("|", "\\|").replace("\n", " ")
 
 
+def _fx_conversions(sizing: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """Map money-field name -> its conversion record from `sizing.fx`. Empty when no FX ran."""
+    fx = _as_dict(_as_dict(sizing).get("fx"))
+    out: dict[str, dict[str, Any]] = {}
+    for entry in _as_list(fx.get("conversions")):
+        rec = _as_dict(entry)
+        field = rec.get("field")
+        if isinstance(field, str):
+            out[field] = rec
+    return out
+
+
+def _to_analysis_currency(
+    stated: float,
+    declared: Any,
+    target: Any,
+    conversions: list[dict[str, Any]],
+) -> tuple[float | None, str | None]:
+    """Express a founder-stated / deck-claimed figure in the analysis currency.
+
+    Returns (value, reason_it_cannot_be_compared). Exactly one is non-None.
+
+    Only meaningful once FX exists: before it, every figure on the page was in one currency by
+    construction and this returned the input unchanged. The undeclared-currency case is
+    genuinely undecidable — the founder of an ILS company may state ILS while the researched
+    source was USD, so guessing either way manufactures a false positive of the FX rate's
+    magnitude. Say so instead.
+    """
+    # A declared currency is honoured FIRST, before the was-this-field-converted question. The
+    # declaration is object-level (one code for all of founder_stated_inputs), so a run that
+    # converted `industry_total` but sourced `arpu` domestically has no conversion record for
+    # `arpu` — and short-circuiting on `conversion is None` here would compare a declared-USD
+    # figure against an ILS one and report the founder's own number as overridden.
+    dec = str(declared).upper() if _valid_ccy(declared) else None
+    tgt = str(target).upper() if _valid_ccy(target) else None
+
+    if dec is not None and tgt is not None and dec == tgt:
+        return stated, None  # already in the analysis currency, converted field or not
+
+    if not conversions:
+        # Nothing was converted anywhere: every figure is in one currency by construction, which
+        # is the pre-FX world and the overwhelmingly common case.
+        return stated, None
+
+    if dec is None:
+        _froms = sorted({str(c.get("from")) for c in conversions if c.get("from")})
+        return None, (
+            f"the calculation converted its input from {' and '.join(_froms) or 'another currency'} "
+            f"to {tgt or 'the analysis currency'}, and no currency was stated for the figure being "
+            f"compared"
+        )
+
+    # Match by CURRENCY PAIR, not by field. A run can convert two fields from two different
+    # source currencies, and the deck-claim check has no single field to key on — picking the
+    # first record would refuse a comparison that is fully computable from the second. Rates come
+    # from one pair-keyed map upstream, so every record sharing a pair shares its rate.
+    for rec in conversions:
+        if str(rec.get("from", "")).upper() == dec and (tgt is None or str(rec.get("to", "")).upper() == tgt):
+            try:
+                return float(stated) * float(rec["rate"]), None
+            except (TypeError, ValueError, KeyError):
+                return None, "the recorded conversion rate is unusable"
+
+    return None, (
+        f"the figure is in {dec}, and this run supplied no rate from {dec} to {tgt or 'the analysis currency'}"
+    )
+
+
+def _valid_ccy(value: Any) -> bool:
+    """ISO-4217 shape check, mirrored from market_sizing.py."""
+    return isinstance(value, str) and len(value) == 3 and value.isalpha()
+
+
 def _compute_delta(calculated: float, deck_claim: Any) -> float | None:
     """Returns signed percentage delta, or None if claim is invalid."""
     try:
@@ -511,6 +601,9 @@ def _check_founder_value_fidelity(
     if not stated:
         return warnings
     used = _collect_sizing_inputs(sizing)
+    all_conversions = list(_fx_conversions(sizing).values())
+    target_ccy = _as_dict(sizing).get("currency")
+    declared_ccy = _as_dict(inputs).get("founder_stated_inputs_currency")
     for name, stated_value in sorted(stated.items()):
         if name not in QUANTITATIVE_PARAMS:
             continue
@@ -518,18 +611,36 @@ def _check_founder_value_fidelity(
             continue
         if name not in used:
             continue
-        stated_f = float(stated_value)
+        # Bring the founder's figure into the analysis currency before comparing. Without this a
+        # converted money input diverges from the founder's own number by exactly the FX rate, so
+        # FOUNDER_VALUE_OVERRIDDEN would fire on every correctly-converted run.
+        comparable, blocked = _to_analysis_currency(float(stated_value), declared_ccy, target_ccy, all_conversions)
+        if blocked is not None:
+            warnings.append(
+                _warn(
+                    "COMPARISON_CURRENCY_UNKNOWN",
+                    f"Could not verify the figure you gave for {name} against the one the "
+                    f"calculation used: {blocked}. State which currency your figure is in and "
+                    f"this check can run.",
+                )
+            )
+            continue
+        assert comparable is not None  # _to_analysis_currency returns exactly one of the two
+        stated_f = float(comparable)
         used_f = used[name]
         denom = abs(stated_f) if stated_f else 1.0
         if abs(used_f - stated_f) / denom <= 0.005:
             continue
+        # Report what the founder actually said, not the currency-normalized comparand — the
+        # founder has to recognise their own number in this sentence for it to mean anything.
+        said_f = float(stated_value)
         warnings.append(
             _warn(
                 "FOUNDER_VALUE_OVERRIDDEN",
                 (
-                    f"The founder stated {name} = {stated_f:,.10g}, but the sizing was computed from "
+                    f"The founder stated {name} = {said_f:,.10g}, but the sizing was computed from "
                     f"{used_f:,.10g}. A researched figure may be presented as a cross-check; it must not "
-                    f"replace a founder-stated input. Either recompute from {stated_f:,.10g}, or — if the "
+                    f"replace a founder-stated input. Either recompute from {said_f:,.10g}, or — if the "
                     f"founder agreed to the revised figure — update inputs.founder_stated_inputs and record "
                     "the reason via accepted_warnings so the swap is disclosed rather than silent."
                 ),
@@ -548,6 +659,49 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     sizing = artifacts.get("sizing.json")
     sensitivity = artifacts.get("sensitivity.json")
     checklist = artifacts.get("checklist.json")
+
+    # SIZING_INVALID — sizing.json exists but carries no figures, because market_sizing.py
+    # rejected its input. Historically this was the quietest failure in the skill: the producer
+    # exited 0 with an `{"ok":true}` receipt and wrote a `{"validation": {"status": "invalid"}}`
+    # stub over the canonical artifact, so the only downstream signal was a MEDIUM
+    # APPROACH_MISMATCH whose wording ("methodology says top_down but sizing.json is missing
+    # top_down") pointed at the wrong cause. market_sizing.py now exits non-zero and refuses to
+    # write, so a stub here means an OLD artifact or a hand-edited one — either way the report
+    # must not be presented.
+    if _usable(sizing):
+        _sz_status = _as_dict(sizing.get("validation")).get("status")
+        _has_figures = any(sizing.get(k) is not None for k in ("top_down", "bottom_up"))
+        if _sz_status == "invalid" or not _has_figures:
+            _errs = "; ".join(str(e) for e in _as_list(_as_dict(sizing.get("validation")).get("errors")))
+            warnings.append(
+                _warn(
+                    "SIZING_INVALID",
+                    "The market-size calculation did not complete, so this report has no "
+                    "TAM/SAM/SOM figures"
+                    + (f" ({_errs})" if _errs else "")
+                    + ". Do not present it: correct the inputs and run the sizing step again.",
+                )
+            )
+
+    # ARTIFACT_INVALID — the same check for the other two producer artifacts. Their producers now
+    # refuse and preserve, so reaching here means a stale or hand-edited file.
+    for _name, _art, _label in (
+        ("sensitivity.json", artifacts.get("sensitivity.json"), "the sensitivity analysis"),
+        ("checklist.json", artifacts.get("checklist.json"), "the quality checklist"),
+    ):
+        if not _usable(_art):
+            continue
+        if _as_dict(_art.get("validation")).get("status") != "invalid":
+            continue
+        _errs = "; ".join(str(e) for e in _as_list(_as_dict(_art.get("validation")).get("errors")))
+        warnings.append(
+            _warn(
+                "ARTIFACT_INVALID",
+                f"{_label.capitalize()} did not complete, so this report is missing part of its "
+                f"analysis" + (f" ({_errs})" if _errs else "") + ". Do not present it: correct the "
+                "inputs and run that step again.",
+            )
+        )
 
     # CURRENCY_MISMATCH — inputs.json records the founder's currency at intake;
     # sizing.json records what the producer was actually told. If they disagree,
@@ -571,7 +725,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                         f"as {sz_cur.strip().upper()}. Money figures in this report are labelled "
                         f"{in_cur.strip().upper()}; if the sizing inputs were actually in "
                         f"{sz_cur.strip().upper()}, every TAM/SAM/SOM figure carries the wrong unit. "
-                        "No FX conversion is performed — re-run the sizing step with the correct "
+                        "Setting the currency does not convert anything — re-run the sizing step with the correct "
                         "--currency rather than converting the output by hand."
                     ),
                 )
@@ -804,9 +958,17 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 )
 
     # 15. DECK_CLAIM_MISMATCH — deck claim differs from calculated by >50%
+    #
+    # FX-aware: every tam/sam/som is derived from the money inputs, so if ANY of them was
+    # converted the calculated figures are in the analysis currency while the deck's claim is in
+    # whatever the deck used. Comparing across that gap yields a delta of the exchange rate's
+    # magnitude (~+272% at USD:ILS=3.72) on a perfectly correct analysis — so gate on a declared
+    # claim currency and say "cannot compare" when there isn't one.
     inputs_art = artifacts.get("inputs.json")
     if _usable(sizing) and _usable(inputs_art):
         existing_claims = _as_dict(inputs_art.get("existing_claims"))
+        _claim_convs = list(_fx_conversions(sizing).values())
+        _claim_ccy = inputs_art.get("existing_claims_currency")
         for approach_key in ("top_down", "bottom_up"):
             approach_data = sizing.get(approach_key)
             if approach_data is None:
@@ -815,6 +977,21 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 m = _as_dict(approach_data.get(metric))
                 val = m.get("value", 0)
                 claim = existing_claims.get(metric)
+                if claim is not None and isinstance(claim, (int, float)) and not isinstance(claim, bool):
+                    comparable, blocked = _to_analysis_currency(
+                        float(claim), _claim_ccy, sizing.get("currency"), _claim_convs
+                    )
+                    if blocked is not None:
+                        warnings.append(
+                            _warn(
+                                "COMPARISON_CURRENCY_UNKNOWN",
+                                f"Could not cross-check the {metric.upper()} you stated against the "
+                                f"calculated one: {blocked}. State which currency your figure is in "
+                                f"and this check can run.",
+                            )
+                        )
+                        continue
+                    claim = comparable
                 delta = _compute_delta(float(val), claim)
                 if delta is not None and abs(delta) > 50 and claim is not None:
                     # Code stays DECK_CLAIM_MISMATCH (stable API, asserted elsewhere);
@@ -1113,7 +1290,29 @@ def _section_sizing_table(
     # sufficient: an externally-sourced industry total is very often quoted in
     # USD, and nothing here converts it. Say so rather than let a mixed-unit
     # TAM pass as a single-unit one.
-    if _CURRENCY != "USD":
+    # Two mutually exclusive disclosures. The no-FX wording is unchanged for a run where nothing
+    # was converted (the overwhelmingly common case); a converted run gets the rate, its date and
+    # its source stated in the founder's own report, so the number is auditable rather than
+    # asserted. Never print both — the old text claimed "no FX conversion is applied anywhere",
+    # which becomes false the moment one is.
+    _fx_conv = _fx_conversions(sizing)
+    if _fx_conv:
+        _fx_meta = _as_dict(_as_dict(sizing).get("fx"))
+        _as_of = _fx_meta.get("as_of") or "date not stated"
+        _src = _fx_meta.get("source") or "source not stated"
+        _each = "; ".join(
+            f"{c.get('field')} {_fmt_usd(float(c.get('original_value', 0)), str(c.get('from')))} "
+            f"→ {_fmt_usd(float(c.get('converted_value', 0)), str(c.get('to')))} "
+            f"at 1 {c.get('from')} = {c.get('rate')} {c.get('to')}"
+            for c in _fx_conv.values()
+        )
+        lines.append(
+            f"> **Currency: {_CURRENCY}.** Some inputs were supplied in another currency and "
+            f"converted into {_CURRENCY}: {_each}. Rate as of {_as_of} ({_src}). Every figure below "
+            f"is in {_CURRENCY}; check the rate if you are comparing against a source in its "
+            f"original currency.\n"
+        )
+    elif _CURRENCY != "USD":
         lines.append(
             f"> **Currency: {_CURRENCY}.** All figures are stated in {_CURRENCY} as supplied — "
             f"**no FX conversion is applied anywhere in this analysis.** If any input came from an "
@@ -1558,7 +1757,8 @@ def _emit_coaching_payload(
     tam/sam/som/currency/market_size_approach are resolved via
     _resolve_headline_market_size — see that function for the nested-path
     resolution and the "both"-mode selection rule. currency is never converted
-    (no FX conversion happens anywhere in this pipeline); it is only a label on
+    (a conversion happens only when a money input declares a different source
+    currency AND a rate is supplied); otherwise it is only a label on
     the numbers already computed by market_sizing.py.
     """
     market_size, market_size_approach = _resolve_headline_market_size(sizing)
