@@ -97,9 +97,17 @@ assert:
   - no_delete_in_outputs: true
   # Dispatch contract: sub-agents declare no Bash (agents/*.md) — regression tripwire.
   - subagent_tool_absent: 'Bash'
-  # Scripted answers reached the model non-error whenever a gate fired (0.25.0: vacuous-passes
-  # when zero gates fire, so it's safe despite model-dependent gating — see README pin note).
+  # Scripted answers reached the model non-error whenever a gate fired.
   - gate_answers_delivered: true
+  # ...and a gate MUST fire. Step 3.6 is unconditional — SKILL.md:568 "This is a STOP point — do not
+  # proceed to Step 4 until the founder responds", asked via AskUserQuestion. The committed cassette
+  # recorded ZERO gates, so `gate_answers_delivered` was passing vacuously AND the scripted answer
+  # above matched nothing. An earlier comment here called that "safe despite model-dependent gating":
+  # it is safe only in the sense of not flaking — it cannot distinguish "the skill asked and we
+  # answered" from "the skill silently stopped asking", which is the regression worth catching.
+  # Frozen-scenario note: this takes effect at the next RECORD, not on replay (a plain replay
+  # evaluates the assertions frozen in the cassette, not this file).
+  - gate_answer_count_min: 1
   # Usability budget: gates asked before value (observed + headroom, from discovery).
   - questions_count_max: 8
   # Author-chosen dispatch budget (production has NO Task-fan-out cap; this is an

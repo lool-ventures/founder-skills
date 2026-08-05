@@ -307,10 +307,38 @@ Measured workarounds, current through **1.15.0**. Full detail in
   a proxy and still breaks the moment two versions run on one day.
 - **Never pipe `verify-cassettes` to `tail`** — deterministic `EAGAIN` crash (unbuffered `writeSync` to a
   non-draining pipe) that replaces the verdict line with a stack trace. Redirect to a file instead.
-- **`source cowork-tests/privacy-allowlist.sh` before the PII gate.** A bare
-  `verify-cassettes cowork-tests/cassettes` reports ~7,200 findings and exit 1; with CI's class-scoped
-  allowlist it is `✓ 16 cassette(s) clean`. Those are synthetic deal amounts and public citation domains,
-  not leaks.
+- **The PII gate needs the allowlist EXPANDED, not merely sourced — and every `--allow*` regex is
+  FULL-MATCH.** `privacy-allowlist.sh` defines a bash **array**, so `source` alone changes nothing;
+  the gate is `source cowork-tests/privacy-allowlist.sh && cowork-harness verify-cassettes
+  cowork-tests/cassettes "${ALLOW[@]}"`. Sourced-but-not-expanded reports ~7,200 findings and exit 1
+  (synthetic deal amounts and public citation domains, not leaks) — which reads exactly like the
+  allowlist breaking. Expanded it is **0 PII findings across 21 cassettes** (the count was 16 when this
+  line was written; re-derive it, don't trust it). Full-match matters when editing an entry:
+  `founder-skills:.*` clears the host-inventory class, the tighter-looking `^founder-skills:` clears
+  **zero**, because an explicit anchor lands inside the harness's own wrapping. An over-tight regex
+  fails safe (findings stay); an over-loose one disarms a whole class with no signal — so re-count
+  findings after any edit, and confirm `canary/email-canary.cassette.json` still flags `[email]`.
+- **`host-inventory` (harness 1.18.0) flags OUR OWN plugin's agents, and that is a false positive.**
+  The class catches a recording machine's MCP servers / account / agents frozen into a cassette by a
+  host-inheriting tier — which is our tier. Measured at adoption: **240 findings, all
+  `agents[] — founder-skills:<skill>`**, i.e. the six agents of the plugin under test. They are the
+  fixture: the class flags an `agents[]` entry outside the built-in roster, and a mounted plugin's own
+  agents are outside it by construction. The three predicates that would mean a **real** leak —
+  `mcp_servers[].name`, `account.email`/`.organization`/`.subscriptionType`, and a `mcp__<server>__…`
+  tool naming a foreign server — return **NONE** across all 21. `--allow-host-inventory
+  'founder-skills:.*'` is scoped deliberately; a bare `.*` would turn a privacy backstop into
+  decoration. Not covered by the class at all (upstream's `docs/cassette.md`): the command / skill /
+  plugin catalogs and command descriptions. A green is a backstop, not proof.
+- **`replay --mutate`'s count has a hidden denominator — do not read it as an assertion-failure rate.**
+  It reports e.g. `50/50 perturbation(s) CAUGHT BY NOTHING`, which parses as "50 of your 50 fields".
+  It is not: **50 is a per-cassette sample cap** (inferred — 20 cassettes report `50/50` and the one
+  with fewer values reports `35/35`; the cap is stated in neither `--help`, the changelog, nor
+  `docs/`). Aggregated blindly our corpus reads **1,020/1,020 caught by nothing**, which sounds like
+  our 42 `artifact_json` assertions do nothing. Checked directly on `cap-table-acquisition`: the
+  sampler perturbed `consideration_pct` in `coverage_result.json` and never touched either asserted
+  path. The honest reading is **coverage thinness (~2.3 asserted values per scenario), not assertion
+  failure**. It is reporting-only by design and is deliberately NOT a CI gate; most sampled values are
+  per-run `handoff/` internals that would be wrong to assert on.
 - **`--fidelity cowork`, as of harness 1.14.0.** The default is `container` — a *different* tier from
   what the cassettes record at, so an unqualified critique is not a production-parity grade. `cowork` was
   refused until 1.14.0 (the old advice here was `hostloop`, always); it is now accepted and is the better
@@ -444,6 +472,8 @@ Tag-push triggers `deck-review-e2e-smoke` in `.github/workflows/skill-quality.ym
 **Re-record trigger (beyond "a skill changed"):** re-record on every harness **major**, *and* on any release — including a minor — whose changelog reports a change to the **emulated tool surface, spawn env, or system prompt**. Those are the fidelity inputs with no automatic staleness tripwire, so nothing will tell you: the changelog is the authority. `1.10.0` was the first such minor (it added the discovery SDK-MCP servers) and **that debt is settled** — every committed cassette is at `1.12.0` or later, which necessarily carries them. The `1.14.0` trigger (`present_files` served at **hostloop**, the tier this fleet records at, where the harness previously served it only at `container`, so a recording froze a toolset one `alwaysLoad` tool short of production's) is **now discharged for 19 of 21** — see the measured note below. The two remaining `1.12.0` cassettes still carry the short toolset. (`1.15.0` adds no re-record debt: a CLI flag, a notice and docs, with `baselines/` and `schema/` byte-identical to 1.14.0.) Full analysis: `docs/internal/2026-07-31-cowork-harness-1.14.0-adoption-plan.md`.
 
 **`1.17.0` adds no re-record debt either — verified, not assumed.** `baselines/desktop-1.24012.9.json` DID change between `v1.16.0` and `v1.17.0`, so the byte-identical test that cleared 1.15.0 does not apply; the change had to be read. Diffing the parsed baseline field-by-field: `spawn.tools`, `spawn.allowedTools`, `spawn.env`, `spawn.promptTemplate`, `spawn.subagentPrompt`, `spawn.options` and `spawn.effortDefault` are **byte-identical**. The only additions are a `hooks` object and its `$comment_hooks`, which the harness itself labels "Recorded as a DRIFT TRIPWIRE, not an emulation source — `served` marks what this harness actually installs (`PreToolUse:Task` only)". So none of the three fidelity inputs (tool surface, spawn env, system prompt) moved. **When a future release touches `baselines/`, run that field-level diff rather than a file-level one — a changed baseline is not by itself a re-record trigger.**
+
+**`1.18.0` DOES add re-record debt, and the field-level diff is what sized it.** Default baseline moves to `desktop-1.25927.0` (the installed Desktop), and the proactive skill-suggest gate now models **ON** — a **server-side** rollout, so it reads ON on earlier Desktop versions too; `suggest_skills` therefore declares a proactive description plus an optional `trigger` param by default. That is a **tool-surface** change, hence a trigger. Diffing `desktop-1.24012.9` (what the committed cassettes recorded against) → `1.25927.0` field by field, the only moving fidelity inputs are the **agent ELF (2.1.219 → 2.1.221)** and **`spawn.env.MCP_TOOL_TIMEOUT` (60000 → 180000)**. Everything else holds: `spawn.tools`, `allowedTools`, `promptTemplate`, `subagentPrompt`, `options`, `effortDefault`, `settings`, `guest`, `platform` byte-identical; `network.allowDomains` differs in **order only** (added `[]`, removed `[]` — a naive first-element comparison reads as a change and is not one); the `mountLayout` `projects` row's `rw`→`r` correction is documented **in the baseline itself** as "consumed by nothing". Upstream reports its own cassettes replay clean across this move and were **re-stamped, not re-recorded**. Verdict: real debt, materially smaller than the 1.14.0 `present_files` trigger, and **folded into the existing re-record batch rather than treated as a new one** — every cassette is already `skillHash`-stale anyway. `rerecord.sh`'s floor is now `>=1.18.0`, because a 1.17.0 recording would freeze the pre-rollout tool surface and carry no gate-label fingerprint. Full analysis: `docs/internal/2026-08-06-cowork-harness-1.18.0-adoption-plan.md`.
 
 **The `1.14.0` `present_files` trigger is DISCHARGED and COMMITTED** (as of `cf0277a`). Measured at `HEAD` with `git show HEAD:<path>`: **21 tracked cassettes — 19 at `harnessVersion: 1.16.0`, 2 still at 1.12.0** (`ic-sim-smoke`, `market-sizing-smoke`). 1.16.0 is >= 1.14.0, so those 19 necessarily carry the hostloop `present_files` surface; the two stragglers do not, and are the remaining scope. This supersedes the older "committed cassettes are all 1.12.0 (verified across all 16)" line above — **that sentence is now wrong; re-derive rather than trusting either.**
 

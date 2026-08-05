@@ -31,7 +31,25 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# FLOOR: >=1.17.0 with no upper bound. Recording is the one operation where the harness version is
+# FLOOR: >=1.18.0 with no upper bound. Recording is the one operation where the harness version is
+#   * 1.18.0 default baseline is desktop-1.25927.0 (agent ELF 2.1.221), and the proactive
+#     skill-suggest gate now models ON — a SERVER-SIDE rollout, so it reads ON regardless of Desktop
+#     version. `suggest_skills` therefore declares its proactive description plus an optional
+#     `trigger` param by default: a TOOL-SURFACE change, which is a re-record trigger by this repo's
+#     own rule. A 1.17.0 recording freezes the pre-rollout surface. Field-level diff of
+#     desktop-1.24012.9 -> 1.25927.0 (what the committed cassettes recorded against -> the new
+#     default), so the debt is sized rather than assumed: the ONLY moving fidelity inputs are the
+#     agent ELF and `spawn.env.MCP_TOOL_TIMEOUT` (60000 -> 180000). `spawn.tools`, `allowedTools`,
+#     `promptTemplate`, `subagentPrompt`, `options`, `effortDefault`, `settings`, `guest` and
+#     `platform` are byte-identical; `network.allowDomains` differs in ORDER only (added [], removed
+#     []); the `mountLayout` `projects` row's rw->r correction is documented IN the baseline as
+#     "consumed by nothing". Upstream reports its own cassettes replay clean across this move and were
+#     re-stamped, not re-recorded.
+#     1.18.0 also makes a recording strictly more informative: `record` prints a delta vs the cassette
+#     it replaced (`gates 2 -> 0, tool calls 5 -> 4`), and gate option labels are fingerprinted against
+#     the skill's own prose — catching a catalog REORDER, which an existence check passes by
+#     construction. Neither is available on a 1.17.0 recording; both are exactly the drift this fleet
+#     has been bitten by.
 # baked into the artifact, so the floor is about RECORDING FIDELITY, not just API stability. Six
 # reasons, all permanent-if-missed:
 #   * 1.17.0 stops `undelivered_deliverables` firing on EVERY `lane: remote` run. On remote the
@@ -101,8 +119,8 @@ echo "cowork-harness $ver"
 # themselves are unchanged and still `::warning::`. Parse the JSON envelope instead.
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
 # `-gt 1` first so a future 2.x passes — a bare minor check would FATAL on 2.0.0.
-{ [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 17 ]; }; } \
-  || { echo "FATAL: need >=1.17.0 (have $ver) — see the floor note above"; exit 1; }
+{ [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 18 ]; }; } \
+  || { echo "FATAL: need >=1.18.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi
@@ -229,9 +247,20 @@ cp cassettes/*.cassette.json "$prev/" 2>/dev/null || true
 # Docker + API pressure, not correctness. Dir-batch mode (`record <dir> --concurrency`) is not used
 # because the subset-arg form (rerecord.sh <name>…) composes naturally with this loop.
 CONC="${COWORK_RERECORD_CONCURRENCY:-4}"
+# NEW-fixture override (harness >=1.18.0). `record` refuses, BEFORE spending, to write a
+# host-inheriting recording (protocol/hostloop, or cowork resolving to hostloop — ours) into a
+# repo-visible path, because such a recording can freeze the recording machine's own MCP servers /
+# account / agents into the cassette. cassettes/ IS committed, so that guard is armed for us and is a
+# real safety property for a public repo.
+# Re-recording an EXISTING committed fixture in place only WARNS, so the refresh batch needs nothing.
+# Authoring a NEW one refuses, and that is the only case this opts out of — per-invocation, so the
+# override never becomes reflexive. The `host-inventory` finding class still hard-gates the RESULT via
+# verify-cassettes (see privacy-allowlist.sh for why our own plugin's agents are allowed there).
 record_one() {
   local n="$1"
-  cowork-harness record "scenarios/$n.yaml" --out "cassettes/$n.cassette.json" \
+  local new_fixture=()
+  [ -f "cassettes/$n.cassette.json" ] || new_fixture=(--allow-host-inventory-fixture)
+  cowork-harness record "scenarios/$n.yaml" --out "cassettes/$n.cassette.json" "${new_fixture[@]}" \
     || { echo "RECORD FAILED: $n"; return 1; }
 }
 export -f record_one

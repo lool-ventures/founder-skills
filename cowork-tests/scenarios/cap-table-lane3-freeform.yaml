@@ -79,9 +79,15 @@ assert:
   - no_delete_in_outputs: true
   # Dispatch contract: sub-agents declare no Bash (agents/*.md) — regression tripwire.
   - subagent_tool_absent: 'Bash'
-  # Scripted answers reached the model non-error whenever a gate fired (0.25.0: vacuous-passes
-  # when zero gates fire, so it's safe despite model-dependent gating — see README pin note).
+  # Scripted answers reached the model non-error whenever a gate fired.
   - gate_answers_delivered: true
+  # ...and a gate MUST fire. Lane 3 rebuilds a cap base from a freeform sheet, so the S2 cap-base
+  # confirmation applies: SKILL.md:526 calls it "a correctness control — it confirms the skill's
+  # INTERPRETATION of the founder's numbers before any math binds to them", and says not to skip it
+  # even where AskUserQuestion is unavailable. The committed cassette recorded ZERO gates, so this
+  # assertion was passing vacuously over a run where that control never happened.
+  # Frozen-scenario note: this takes effect at the next RECORD, not on replay.
+  - gate_answer_count_min: 1
   # Usability budget: gates asked before value (observed + headroom, from discovery).
   - questions_count_max: 8
   # Author-chosen dispatch budget (production has NO Task-fan-out cap; this is an
