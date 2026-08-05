@@ -14,6 +14,13 @@ Fleet-wide:
 - Three skills told an analysis step to hand its whole result back in a message as well as writing it
   to disk. Restating a long analysis is where truncation and drift come from; each now returns only a
   confirmation that the file was written.
+- Finished documents were sent without being introduced, so a founder could receive a row of files
+  with nothing saying which was the report and which the interactive version. Every skill now names
+  each deliverable and links it individually.
+- **deck-review, market-sizing:** a company's geography could be recorded from a currency symbol or
+  from where the founders previously worked, rather than asked for. Geography selects which
+  regulatory and benchmark guidance the review is graded against. Both now ask when the materials do
+  not state it, and deriving some of the opening basics no longer skips the question for the rest.
 - Internal tokens reached founder-facing report text in every skill: private enums, field names and,
   in one case, a shell command the founder had no shell to run.
 - Some tokens were then kept verbatim by mistake — a field name reached through an `id` field
