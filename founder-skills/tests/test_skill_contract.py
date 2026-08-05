@@ -462,7 +462,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # surrounding prose only — and the sub-agent copies the shape, so nothing ever emitted the
     # tag, nothing converted, and nothing refused: the feature was unreachable), the
     # not-a-repair-dispatch carve-out on the FX stop, and the both-mode re-pipe warning.
-    "market-sizing": 86_745,
+    # market-sizing raised for the same rule on its CHECKLIST template, plus the coaching template's
+    # "no item ids or warning codes" rule — a live run shipped three criterion ids and a filename into
+    # the founder's report.
+    "market-sizing": 87_642,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -491,7 +494,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the script had corrected it to top-tercile, its docstring recording top-2 as WRONG (it excludes
     # 3rd of 11, the exact shape the trigger exists for). Replaced by a relay instruction: present a
     # `provisional` trigger as a soft signal. Also NARR_03, which changed a graded score.
-    "competitive-positioning": 115_975,
+    # cp raised for the CHECKLIST dispatch template's evidence-wording rule. A live run put artifact
+    # filenames in 13 items' evidence with the rule present only in the agent body; the dispatch
+    # template is the surface that measurably changed behaviour in the sibling skill.
+    "competitive-positioning": 116_592,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.

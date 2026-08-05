@@ -900,6 +900,15 @@ field cannot stand in for both.
 
 Assess all 22 items with status (pass/fail/not_applicable) and notes.
 
+`notes` prints VERBATIM in the founder's report, so name the source the way the
+founder knows it — never by our filename. They never saw `inputs.json` or
+`sizing.json`; they saw their deck and the figures they gave you.
+  Instead of: "sizing.json records formula strings for every figure"
+  Write:      "every figure shows the formula behind it"
+  Instead of: "inputs.json gtm_evidence_notes is null"
+  Write:      "the deck states no go-to-market plan"
+State what is true of the MARKET or the founder's own materials.
+
 Use your Write tool to write to OUTPUT_PATH the items array without a summary
 (the producer script computes the summary). Each item has this shape:
 {
@@ -1065,6 +1074,11 @@ Its shape (for reference — read the file, do not reconstruct it):
 
 Follow the POST_COMPOSE_COACHING procedure in your agent body exactly:
 1. Compose commentary from coaching_payload (failed_items only; warned_items is always [])
+   The commentary is appended to the founder's report, so write it in their
+   language: never a checklist item id (`figures_triangulated`), a warning code
+   (`UNVALIDATED_CLAIMS`) or one of our filenames. Say what the finding IS.
+     Instead of: "The `figures_triangulated` failure points to thin sourcing"
+     Write:      "Three key assumptions rest on a single source"
 2. Use your Write tool to write to OUTPUT_PATH exactly the coaching commentary
    as plain markdown — do NOT wrap it in JSON, do NOT escape anything (your
    Write tool handles newlines and quotes). WITHOUT a '## Coaching Commentary'

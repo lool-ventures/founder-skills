@@ -986,6 +986,16 @@ Evidence is MANDATORY for every item: every fail and warn MUST have a non-empty
 evidence string citing specific findings. Every pass MUST have evidence noting
 what was checked.
 
+Evidence prints VERBATIM in the founder's report, so name the source the way the
+founder knows it — never by our filename. They never saw `landscape.json` or
+`moat_scores.json`; they saw their deck and the competitors in it.
+  Instead of: "landscape.json reports input_mode: deck"
+  Write:      "the deck names three competitors and no others"
+  Instead of: "moat_scores.json shows switching_costs weak"
+  Write:      "switching costs are weak — customers can leave in a day"
+State what is true of the COMPANY or its competitive set. The delivery gate
+flags an internal filename in evidence, so this is checked.
+
 Use your Write tool to write to OUTPUT_PATH — the items array without a
 summary (the producer script computes the summary):
 {"items": [{"id": "COVER_01", "status": "pass", "evidence": "...", "notes": "..."}, ...all 25 items...]}
