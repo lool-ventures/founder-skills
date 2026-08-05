@@ -1082,7 +1082,8 @@ def test_every_fingerprinting_producer_is_covered_by_this_module() -> None:
         if not py.endswith(".py") or py.startswith("_"):
             continue
         with open(os.path.join(_SCRIPTS, py), encoding="utf-8") as f:
-            if "_fingerprint.stamp(" in f.read():
+            body = f.read()
+            if "_fingerprint.stamp(" in body or "_fingerprint.stamp_hashes(" in body:
                 stampers.add(py)
     assert stampers == {"runway.py", "unit_economics.py", "checklist.py"}, (
         f"the set of fingerprint-stamping producers changed: {sorted(stampers)}. Add the new one to the "
@@ -1153,3 +1154,63 @@ def test_checklist_fingerprint_resolves_when_inputs_are_passed() -> None:
     # while still stamping provenance, so the fingerprint stays observable on stdout.
     graded = json.loads(result.stdout).get("graded_against", {})
     assert graded.get("inputs.json") == _fingerprint_of(inputs)
+
+
+# ---------------------------------------------------------------------------
+# Producer stamp must equal the verifier's hash of the SAME document
+#
+# A compute step may mutate the document it was handed (`_compute_metrics` adds `unit_economics.ltv`),
+# and hashing afterwards fingerprints something that never existed on disk. The verifier hashes the
+# file, so the two can never agree — a staleness error on a perfectly current artifact.
+# ---------------------------------------------------------------------------
+
+
+def _inputs_that_trigger_the_mutation() -> dict[str, Any]:
+    """The standard fixture already carries `unit_economics.ltv`, so the compute step adds nothing and
+    the round-trip passes for the wrong reason. Removing it is what makes this test able to fail."""
+    inputs = _shared_inputs()
+    inputs["unit_economics"] = {k: v for k, v in inputs.get("unit_economics", {}).items() if k != "ltv"}
+    return inputs
+
+
+@pytest.mark.parametrize("producer", ["unit_economics.py", "runway.py"])
+def test_producer_stamp_round_trips_with_the_verifier(producer: str) -> None:
+    inputs = _inputs_that_trigger_the_mutation()
+    payload = json.dumps(inputs)
+    result = subprocess.run(
+        [sys.executable, os.path.join(_SCRIPTS, producer)],
+        input=payload,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    stamped = json.loads(result.stdout).get("graded_against", {}).get("inputs.json")
+    assert stamped == _fingerprint_of(inputs), (
+        f"{producer} stamped a fingerprint the verifier will not reproduce from the same document. "
+        f"Hash the inputs AS RECEIVED, before any compute step that may mutate them."
+    )
+
+
+def test_producers_capture_the_fingerprint_before_computing() -> None:
+    """Ordering is the invariant, and it is not observable from a passing round-trip.
+
+    `_compute_metrics` mutates the document it is handed (it synthesises `unit_economics.ltv` when the
+    drivers allow), so a fingerprint taken afterwards describes something that was never on disk. The
+    verifier hashes the file, so the two cannot agree — and the fixture used above does not happen to
+    trigger the synthesis, which is exactly why the round-trip alone is not enough.
+    """
+    for producer, compute in (("unit_economics.py", "_compute_metrics("), ("runway.py", "_compute_runway(")):
+        body = open(os.path.join(_SCRIPTS, producer), encoding="utf-8").read()
+        capture = body.find("_fp_inputs = _fingerprint.fingerprint(")
+        assert capture != -1, f"{producer} does not capture the inputs fingerprint at parse time"
+        first_compute = body.find(f"    result = {compute}")
+        if first_compute == -1:
+            first_compute = body.find(compute, body.find("def main("))
+        assert first_compute != -1, f"{producer}: could not locate its compute call"
+        assert capture < first_compute, (
+            f"{producer} fingerprints the inputs AFTER {compute} — if that compute mutates its "
+            f"argument, the stamp describes a document that never existed on disk"
+        )
+        assert "_fingerprint.stamp_hashes(" in body, (
+            f"{producer} must stamp the precomputed hash, not re-hash a possibly-mutated document"
+        )

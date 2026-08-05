@@ -1711,6 +1711,10 @@ def main() -> None:
         print("Error: JSON input must be an object", file=sys.stderr)
         sys.exit(1)
 
+    # Fingerprint the inputs AS RECEIVED. Taken here, not at stamp time, because the compute step
+    # below mutates `data` and the verifier hashes the file on disk.
+    _fp_inputs = _fingerprint.fingerprint(data)
+
     indent = 2 if args.pretty else None
 
     if "company" not in data:
@@ -1724,7 +1728,7 @@ def main() -> None:
         result.setdefault("metadata", {})["run_id"] = _input_metadata["run_id"]
     if getattr(args, "run_id", None):  # CLI run_id overrides stdin passthrough
         result.setdefault("metadata", {})["run_id"] = args.run_id
-    _fingerprint.stamp(result, {"inputs.json": data})
+    _fingerprint.stamp_hashes(result, {"inputs.json": _fp_inputs})
     out = json.dumps(result, indent=indent) + "\n"
     s = result["summary"]
     _write_output(

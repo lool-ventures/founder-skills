@@ -19,7 +19,13 @@ Fleet-wide:
 - Some tokens were then kept verbatim by mistake — a field name reached through an `id` field
   (`gross_margin`) stayed raw and suppressed its own warning. Identifier preservation is now scoped to
   cap-table, where ids are handles a founder matches against their own documents.
-- A founder's own uploaded filename was reported as an internal file reference.
+- A founder's own uploaded filename was reported as an internal file reference. Internal files are now
+  identified by extension (we emit `.json`/`.py`/`.html`/`.md`; founders send documents) rather than by
+  a list of names that was missing 53 of the fleet's 82 artifacts. A URL path segment in a source
+  citation is not treated as a file.
+- **financial-model-review:** unit economics and runway fingerprinted their inputs AFTER computing, and
+  the unit-economics computation modifies what it was given — so the recorded fingerprint described a
+  document that never existed on disk and the verifier reported staleness on a current artifact.
 - Sub-agent evidence cited our artifact filenames ("inputs.json reports actuals separated: false") and
   that text prints verbatim in the report. Evidence now states what is true of the company or model;
   financial-model-review and competitive-positioning check it at their delivery gate.

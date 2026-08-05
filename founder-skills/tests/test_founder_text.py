@@ -234,3 +234,27 @@ def test_a_founder_supplied_filename_is_not_reported() -> None:
 def test_our_own_artifact_filenames_are_still_reported() -> None:
     assert ft.scan("inputs.json reports actuals separated: false")["filenames"] == ["inputs.json"]
     assert ft.scan("run explore.py first")["filenames"] == ["explore.py"]
+
+
+def test_internal_file_detection_is_by_extension_not_a_name_list() -> None:
+    """A name list cannot be kept current: 53 of the fleet's 82 artifact stems were missing from one,
+    including `moat_scores.json`, which a live run cited and the scan waved through."""
+    for ours in ("moat_scores.json", "landscape_draft.json", "competitor_recall_output.json", "explore.py"):
+        assert ft.scan(f"see {ours}")["filenames"] == [ours], ours
+
+
+def test_founder_document_formats_are_never_reported() -> None:
+    for theirs in ("sample_model.xlsx", "my_model.csv", "deck.pdf", "terms.docx"):
+        assert ft.scan(f"the file {theirs} looks like a template")["filenames"] == [], theirs
+
+
+def test_a_url_path_segment_is_not_an_internal_file() -> None:
+    """Source citations legitimately end in `.html`. Flagging them blocked a correctly-cited report at
+    error severity in a live artifact."""
+    text = "See https://www.globenewswire.com/news/housecall-pro-appoints-chief-executive-officer.html"
+    assert ft.scan(text)["filenames"] == []
+
+
+def test_an_internal_file_beside_a_url_is_still_reported() -> None:
+    text = "inputs.json reports x; source https://example.com/a/page.html"
+    assert ft.scan(text)["filenames"] == ["inputs.json"]

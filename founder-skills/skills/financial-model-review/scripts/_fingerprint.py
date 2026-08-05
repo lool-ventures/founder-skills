@@ -59,3 +59,21 @@ def stamp(result: dict[str, Any], dependencies: dict[str, Any]) -> None:
     result.setdefault(GRADED_AGAINST, {})
     for name, doc in dependencies.items():
         result[GRADED_AGAINST][name] = fingerprint(doc) if doc is not None else None
+
+
+def stamp_hashes(result: dict[str, Any], hashes: dict[str, str | None]) -> None:
+    """Record fingerprints that were computed EARLIER, before the producer ran.
+
+    Prefer this over `stamp()` at the end of a producer. A compute step may MUTATE the document it was
+    handed — `unit_economics._compute_metrics` adds `unit_economics.ltv` to its input — and hashing
+    afterwards then fingerprints something that never existed on disk. The verifier hashes the file, so
+    the two can never agree, and the result is a staleness error on a perfectly current artifact.
+
+    That failure mode is worse than a missed detection: a false alarm on a gate with no documented
+    remedy invites clearing it by editing the artifact, which is exactly what one live run did.
+    """
+    if not hashes:
+        return
+    result.setdefault(GRADED_AGAINST, {})
+    for name, digest in hashes.items():
+        result[GRADED_AGAINST][name] = digest

@@ -216,50 +216,29 @@ _CANDIDATE_RE = re.compile(r"(?<![\w.])[a-z][a-z0-9]*(?:_[a-z][a-z0-9]*)+(?!\w)(
 
 # File-shaped tokens. Used to strip filenames before enum matching so `model_data.json` is not also
 # reported as the enum `model_data`.
-_FILENAME_RE = re.compile(r"\b[a-z][a-z0-9_]*\.(?:json|py|md|html|xlsx|csv)\b")
+_FILENAME_RE = re.compile(r"\b[a-z][a-z0-9_]*\.(?:json|py|md|html|xlsx|xls|csv|pdf|docx|pptx)\b")
 
-# OUR artifact and script filenames — the only file-shaped tokens a founder cannot act on. A founder's
-# OWN uploaded filename is legitimately founder-facing ("the file is named sample_model.xlsx, which
-# looks like a template") and must not be reported: flagging it trains the reader to ignore the warning.
-_INTERNAL_FILE_STEMS = frozenset(
-    {
-        "inputs",
-        "corrected_inputs",
-        "model_data",
-        "extraction_corrections",
-        "extraction_validation",
-        "checklist",
-        "unit_economics",
-        "runway",
-        "report",
-        "commentary",
-        "coaching_payload",
-        "landscape",
-        "positioning",
-        "positioning_scores",
-        "moats",
-        "competitor_verification",
-        "sizing",
-        "methodology",
-        "sensitivity",
-        "validation",
-        "cap_state",
-        "scenarios",
-        "instruments",
-        "rule_audit",
-        "sweep",
-        "startup_profile",
-        "fund_profile",
-        "score_dimensions",
-        "deck_inventory",
-        "slide_reviews",
-    }
-)
+# Which file-shaped tokens are OURS. Decided by EXTENSION, not by a list of names: we emit machine
+# artifacts and code (`.json`, `.py`, `.html`, `.md`), founders hand us documents (`.xlsx`, `.pdf`,
+# `.csv`, `.docx`, `.pptx`). Naming a founder's own upload back to them is useful — "the file is called
+# sample_model.xlsx, which looks like a template" — so those must never be reported.
+#
+# A name list was tried and is unwinnable: 53 of the fleet's 82 artifact stems were missing from it,
+# including `moat_scores.json`, which a live run cited in evidence and the scan waved through. The same
+# design note in `leak_scan.py` says the same thing about enumerated blocklists.
+_INTERNAL_FILE_EXTS = frozenset({"json", "py", "html", "md"})
+_FOUNDER_FILE_EXTS = frozenset({"xlsx", "xls", "csv", "pdf", "docx", "pptx"})
+
+
+# A URL path segment is not one of our files. Source citations legitimately end in `.html`
+# (`…/chief-executive-officer.html`), and flagging those blocks delivery of a correctly-cited report.
+_URL_RE = re.compile(r"https?://\S+|www\.\S+")
 
 
 def _is_internal_file(token: str) -> bool:
-    stem, _, ext = token.rpartition(".")
-    return stem in _INTERNAL_FILE_STEMS or ext == "py"
+    """True when a file-shaped token names something WE produced rather than something the founder sent."""
+    ext = token.rpartition(".")[2].lower()
+    return ext in _INTERNAL_FILE_EXTS and ext not in _FOUNDER_FILE_EXTS
 
 
 def scan(text: str, *, extra_keep: frozenset[str] | None = None) -> dict[str, list[str]]:
@@ -276,7 +255,9 @@ def scan(text: str, *, extra_keep: frozenset[str] | None = None) -> dict[str, li
     not survive the fleet's differing report dialects (`**Label**: value` and others).
     """
     keep = (extra_keep or frozenset()) | DIAGNOSTIC_CODES
-    filenames = sorted({m.group(0) for m in _FILENAME_RE.finditer(text) if _is_internal_file(m.group(0))})
+    # Strip URLs first: a citation's path segment is not an artifact of ours.
+    de_urled = _URL_RE.sub(" ", text)
+    filenames = sorted({m.group(0) for m in _FILENAME_RE.finditer(de_urled) if _is_internal_file(m.group(0))})
     # Strip filenames first so `model_data.json` is not also reported as the enum `model_data`.
     without_files = _FILENAME_RE.sub(" ", text)
     enums = sorted(

@@ -982,7 +982,11 @@ def main() -> None:
         except (OSError, json.JSONDecodeError) as _e:
             print(f"Warning: --inputs unreadable, fingerprint will be null: {_e}", file=sys.stderr)
             _fp_source = None
-    _fingerprint.stamp(result, {"inputs.json": _fp_source})
+    # Hash the document as READ, never a post-scoring view of it: the verifier hashes the file on disk,
+    # so anything a compute step did to this object must not reach the fingerprint.
+    _fingerprint.stamp_hashes(
+        result, {"inputs.json": _fingerprint.fingerprint(_fp_source) if _fp_source is not None else None}
+    )
 
     if _rejected:
         _fail_invalid(result, args.output, indent)
