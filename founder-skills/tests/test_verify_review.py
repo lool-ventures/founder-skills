@@ -1445,3 +1445,24 @@ def test_runway_recompute_is_skipped_without_a_balance_date() -> None:
     inputs_no_date.get("cash", {}).pop("balance_date", None)
     assert vr._recompute("runway.json", inputs_no_date) is None
     assert vr._recompute("unit_economics.json", inputs_no_date) is not None
+
+
+def test_the_checklist_pipe_passes_the_inputs_it_was_scored_against() -> None:
+    """Without `--inputs`, checklist.py has nothing to fingerprint: the CHECKLIST payload carries
+    `company`, not the whole document. The stamp silently becomes null, the verifier can only say
+    "cannot be shown current", and staleness for that artifact stops being detectable at all.
+
+    Structural, because the failure is silent: nothing else fails when the flag is dropped.
+    """
+    skill_md = os.path.join(os.path.dirname(__file__), "..", "skills", "financial-model-review", "SKILL.md")
+    with open(skill_md, encoding="utf-8") as f:
+        body = " ".join(f.read().split())
+    # Anchor on the producer INVOCATION, not on the hand-off filename — that name appears first in the
+    # dispatch template as OUTPUT_PATH, which is a different thing and matched the wrong text.
+    marker = 'checklist.py" --pretty'
+    assert marker in body, "the CHECKLIST producer pipe is no longer recognisable"
+    pipe = body[body.index(marker) : body.index(marker) + 220]
+    assert "--inputs" in pipe, (
+        "the CHECKLIST producer pipe no longer passes --inputs; checklist.json's fingerprint becomes "
+        "null and its staleness is undetectable"
+    )
