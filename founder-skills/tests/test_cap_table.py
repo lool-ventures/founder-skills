@@ -13484,3 +13484,39 @@ class TestIsraelBenchmarkIsStageScoped:
     def test_still_requires_an_israeli_structure(self) -> None:
         inputs = {"jurisdiction": {"structure": "delaware"}, "metadata": {"stage": "seed"}}
         assert self._matches(inputs) is False, "stage alone must not substitute for geography"
+
+
+# ---------------------------------------------------------------------------
+# Founder-facing labelling (from the 0.7.0-candidate Cowork UI validation)
+# ---------------------------------------------------------------------------
+
+
+def test_report_leads_with_the_investor_name_not_our_slug() -> None:
+    """A delivered report identified a SAFE only as `safe_foobar` while instruments.json carried
+    `investor_name: "Foobar Capital LLC"`. The id stays — it ties this row to the explorer and the
+    counsel packet — but behind the name."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_cr", os.path.join(SCRIPTS, "compose_report.py"))
+    assert spec and spec.loader
+    cr = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cr)
+    instruments = {"safes": [{"id": "safe_foobar", "investor_name": "Foobar Capital LLC"}]}
+    assert cr._instrument_label(instruments, "safe_foobar") == "Foobar Capital LLC (`safe_foobar`)"
+    # No name recorded (or an unknown id) must still render something usable, never a bare word.
+    assert cr._instrument_label(instruments, "safe_unknown") == "`safe_unknown`"
+    assert cr._instrument_label({"safes": [{"id": "safe_x"}]}, "safe_x") == "`safe_x`"
+
+
+def test_counsel_packet_summary_humanizes_the_domain_like_its_heading() -> None:
+    """The heading humanized and the summary did not, which put `delaware_cross_border` into a
+    delivered packet. Both now use one helper so they cannot drift apart again."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_cp", os.path.join(SCRIPTS, "counsel_packet.py"))
+    assert spec and spec.loader
+    cp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cp)
+    assert cp._domain_label("delaware_cross_border") == "Delaware Cross Border"
+    # Rule ids and source ids are NOT routed through this — counsel cites them verbatim.
+    assert "_" not in cp._domain_label("safe_terms")

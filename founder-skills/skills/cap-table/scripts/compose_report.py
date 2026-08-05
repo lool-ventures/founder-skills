@@ -933,6 +933,26 @@ def build_reconciliation_provenance_warnings(
     ]
 
 
+def _instrument_label(instruments: dict[str, Any], iid: str) -> str:
+    """Founder-facing label for an instrument: the investor's name, with our id in small print.
+
+    A delivered report identified a SAFE only as `safe_foobar` while `instruments.json` carried
+    `investor_name: "Foobar Capital LLC"`. The id is NOT dropped — it is what ties this row to the same
+    instrument in the explorer and the counsel packet — but it belongs in small print behind the name,
+    which is this skill's existing convention for enums (_labels.md_term).
+
+    The name reaches the REPORT only. `coaching_payload` bars investor names by contract
+    (agents/cap-table.md "Privacy boundary"), and nothing here writes to it.
+    """
+    for key in ("safes", "convertible_notes", "warrants"):
+        for row in instruments.get(key, []) or []:
+            if isinstance(row, dict) and row.get("id") == iid:
+                name = str(row.get("investor_name") or "").strip()
+                if name:
+                    return f"{name} (`{iid}`)"
+    return f"`{iid}`"
+
+
 def render_report_markdown(
     *,
     artifacts: dict[str, dict[str, Any]],
@@ -941,6 +961,7 @@ def render_report_markdown(
     extraction_audit_path: str | None = None,
 ) -> str:
     inputs = artifacts["inputs.json"]
+    instruments = artifacts.get("instruments.json") or {}
     cap_state = artifacts["cap_state.json"]
     scenarios_doc = artifacts["scenarios.json"]
     rule_audit = artifacts["rule_audit.json"]
@@ -1309,8 +1330,9 @@ def render_report_markdown(
                 for sid, r in ps.items():
                     if "cap_implied_ownership" in r:
                         lines.append(
-                            f"- {sid}: {_percent(r['cap_implied_ownership'])} cap-implied "
-                            f"(safe_price ${r['safe_price']:.4f}, {int(r['cap_implied_shares']):,} shares)"
+                            f"- {_instrument_label(instruments, sid)}: "
+                            f"{_percent(r['cap_implied_ownership'])} cap-implied "
+                            f"(SAFE price ${r['safe_price']:.4f}, {int(r['cap_implied_shares']):,} shares)"
                         )
                 lines.append("")
         if completeness == "repay_only" and co.get("aggregate_cash_repayment"):
@@ -1397,7 +1419,7 @@ def render_report_markdown(
                     pct_of_cap = purchase / cap
                     deriv = f"{_money(purchase)} ÷ {_money(cap)} = {pct_of_cap * 100:.2f}%"
                 lines.append(
-                    f"| `{sid}` | `{branch}` | {deriv} | "
+                    f"| {_instrument_label(instruments, sid)} | `{branch}` | {deriv} | "
                     f"{('$' + format(cp, '.4f')) if cp is not None else '—'} | "
                     f"{(f'{int(shares):,}') if shares is not None else '—'} |"
                 )

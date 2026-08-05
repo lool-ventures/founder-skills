@@ -50,6 +50,9 @@ Fleet-wide:
   claimed the extraction step produces the cap-state snapshot; it does not.
 - Field names printed as raw tokens (`safe_price`).
 - The explorer embedded three values its script never read.
+- The report identified a SAFE only by our internal id (`safe_foobar`) when the investor's name was
+  available; it now leads with the name and keeps the id in small print.
+- The counsel packet's summary line printed a raw rule-domain token and an `item(s)` placeholder.
 
 **competitive-positioning:**
 

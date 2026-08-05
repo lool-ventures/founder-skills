@@ -28,6 +28,17 @@ _SCHEMA_DIR = os.path.join(
 )
 
 
+def _domain_label(domain: str) -> str:
+    """Founder/counsel-facing name for a rule domain.
+
+    Shared by the summary sentence and the section heading so the two cannot drift: the heading
+    humanized and the summary did not, which put the raw `delaware_cross_border` into a delivered
+    packet. Rule IDs and source IDs are NOT routed through this — they stay verbatim because counsel
+    cites them.
+    """
+    return domain.replace("_", " ").title()
+
+
 def build_packet(
     *,
     company_name: str,
@@ -50,11 +61,12 @@ def build_packet(
         d = it.get("domain", "other")
         domain_counts[d] = domain_counts.get(d, 0) + 1
     for d, c in sorted(domain_counts.items()):
-        summary_parts.append(f"{c} {d}")
+        summary_parts.append(f"{c} {_domain_label(d)}")
 
+    noun = "item" if len(items) == 1 else "items"
     engagement_summary = (
         f"Counsel-handoff packet for {company_name}. "
-        f"{len(items)} item(s) flagged across: {', '.join(summary_parts) or 'no domains'}."
+        f"{len(items)} {noun} flagged across: {', '.join(summary_parts) or 'no domains'}."
     )
 
     return {
@@ -82,7 +94,7 @@ def render_markdown(packet: dict[str, Any]) -> str:
         by_domain.setdefault(it.get("domain", "other"), []).append(it)
 
     for domain in sorted(by_domain.keys()):
-        lines.append(f"## {domain.replace('_', ' ').title()}")
+        lines.append(f"## {_domain_label(domain)}")
         lines.append("")
         for it in by_domain[domain]:
             lines.append(f"### {it['title']}")
