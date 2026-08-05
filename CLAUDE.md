@@ -276,9 +276,14 @@ Measured workarounds, current through **1.15.0**. Full detail in
   `status` at 1.17.0. Two consequences. First, a wrapper that captures only stdout gets an empty
   log — which is where the older "no progress output" note came from. Second, and this one bites:
   the obvious poll `until ! cowork-harness status "$D" | grep -q '● running'` **exits immediately
-  and silently** (grep sees nothing on stdout, returns 1, `!` inverts it). Add `2>&1`. A long run
-  DOES self-report — `… still running (450s · 52 tools)` — so the run's own output is now a
-  reasonable progress source alongside `status`. Do NOT poll the outputs dir for artifacts (the advice that used to live here): use
+  and silently** (grep sees nothing on stdout, returns 1, `!` inverts it). **Do not "fix" it with
+  `2>&1` — that is the worst of the three options.** Two stdout forms already exist and are the right
+  answer: **`status <dir> --follow`** (the harness owns the poll loop and exits at a terminal state —
+  prefer this) and **`status <dir> --output-format json`** (one envelope on stdout carrying `state`
+  and `stale`). A long run also self-reports on stderr — `… still running (450s · 52 tools)` —
+  documented in `run --help` under "Long runs", with `COWORK_HARNESS_NO_HEARTBEAT` /
+  `_HEARTBEAT_MS` to disable or tune. That heartbeat is NOT new in 1.17.0; the older note here was
+  wrong when written, and reading `run --help` would have caught it. Do NOT poll the outputs dir for artifacts (the advice that used to live here): use
   **`cowork-harness status <dir> [--follow]`**, which reads the `status.json` the harness maintains
   throughout the lifecycle. It reports `state` / `elapsedMs` / live `toolCounts`, and detects both a
   thrown error and a `SIGKILL`/OOM staleness — so `"running"` is never permanently trusted, which
