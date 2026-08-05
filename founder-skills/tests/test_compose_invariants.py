@@ -357,6 +357,80 @@ def test_cp_checklist_stale_silent_when_either_side_absent(tmp_path: Path) -> No
 # ---------------------------------------------------------------------------
 
 
+# Founder-facing markdown deliverables BEYOND report.md, and how to produce each.
+#
+# report.md is not the only thing a founder reads. cap-table also hands over a counsel packet, and it
+# shipped `delaware_cross_border` and an `item(s)` placeholder to a real founder while the fleet scan
+# was looking only at report.md. A deliverable nothing scans is a deliverable that can say anything.
+#
+# Add a row when a skill gains another delivered document; the scan is otherwise silently narrower
+# than it appears.
+_EXTRA_DELIVERABLES: dict[str, list[tuple[str, list[str]]]] = {
+    "cap-table": [
+        (
+            "counsel_packet.md",
+            [
+                "counsel_packet.py",
+                "--rule-audit",
+                "{dir}/rule_audit.json",
+                "--inputs",
+                "{dir}/inputs.json",
+                "--scenarios",
+                "{dir}/scenarios.json",
+                "--run-id",
+                "ratchet",
+                "-o",
+                "{dir}/counsel_packet.json",
+                "--write-md",
+                "{dir}/counsel_packet.md",
+            ],
+        )
+    ],
+}
+
+
+# A flagged counsel item, shaped from a real run. The cap-table FIXTURE flags nothing, so the packet
+# it produces reads "0 items flagged across: no domains" — 315 bytes of boilerplate with no domain
+# name in it. Scanning that is vacuous: it passed with the `delaware_cross_border` leak reverted.
+# Seeded into the temp work dir rather than into the fixture, so no other test's expectations move.
+_SEED_COUNSEL_ITEM = {
+    "rule_id": "delaware_cross_border.qsbs_date_sensitive",
+    "domain": "delaware_cross_border",
+    "title": "QSBS rules are date-sensitive",
+    "applies_when": "Use when US C corporation shares may be QSBS.",
+    "founder_question": "Do not conclude QSBS eligibility from cap-table data alone.",
+    "counsel_question": "US QSBS eligibility is date-sensitive; flag issue date for tax counsel.",
+    "documents_needed": [],
+    "source_ids": ["TAXADVISER-QSBS-OBBBA"],
+}
+
+
+def _produce_extra_deliverables(skill: str, work_dir: Path) -> list[Path]:
+    """Run each non-compose producer and return the markdown it delivered."""
+    import json as _json
+    import subprocess
+    import sys as _sys
+
+    if skill == "cap-table":
+        audit_path = work_dir / "rule_audit.json"
+        if audit_path.exists():
+            audit = _json.loads(audit_path.read_text(encoding="utf-8"))
+            if not audit.get("counsel_review_items"):
+                audit["counsel_review_items"] = [dict(_SEED_COUNSEL_ITEM)]
+                audit_path.write_text(_json.dumps(audit), encoding="utf-8")
+
+    produced: list[Path] = []
+    for name, argv in _EXTRA_DELIVERABLES.get(skill, []):
+        script = SKILLS_DIR / skill / "scripts" / argv[0]
+        args = [a.format(dir=str(work_dir)) for a in argv[1:]]
+        result = subprocess.run([_sys.executable, str(script), *args], capture_output=True, text=True)
+        assert result.returncode == 0, f"{skill}/{argv[0]} failed: {result.stderr[-300:]}"
+        out = work_dir / name
+        assert out.exists(), f"{skill}/{argv[0]} produced no {name}"
+        produced.append(out)
+    return produced
+
+
 def _founder_text_module():  # type: ignore[no-untyped-def]
     import importlib.util
 
@@ -410,6 +484,19 @@ def test_composed_report_carries_no_internal_tokens(skill: str, tmp_path: Path) 
     assert len(text) > 500, f"{skill} report.md is only {len(text)}B — too small to be a real report"
 
     keep = _cap_table_keep() if skill == "cap-table" else None
+    for extra in _produce_extra_deliverables(skill, work_dir):
+        extra_text = extra.read_text(encoding="utf-8")
+        # Floor set above the empty-packet boilerplate (315B), so a packet with no flagged items
+        # cannot satisfy this scan.
+        assert len(extra_text) > 500, (
+            f"{skill}/{extra.name} is only {len(extra_text)}B — too thin to have exercised anything"
+        )
+        extra_found = ft.scan(extra_text, extra_keep=keep)
+        assert extra_found == {"enums": [], "filenames": []}, (
+            f"{skill} delivers {extra.name} carrying internal tokens: enums={extra_found['enums']} "
+            f"files={extra_found['filenames']} — report.md is not the only thing the founder reads"
+        )
+
     found = ft.scan(text, extra_keep=keep)
     assert found == {"enums": [], "filenames": []}, (
         f"{skill} report.md leaks internal tokens: enums={found['enums']} files={found['filenames']}"
