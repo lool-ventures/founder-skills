@@ -55,7 +55,9 @@ assert:
   # --- fleet contract asserts (adopted at the 0.24.0 pin; budgets tightened from discovery actuals) ---
   # The pipeline entered through the Skill tool (prefix-tolerant; id shape confirmed at discovery).
   - skill_triggered: '(founder-skills:)?cap-table$'
-  # Every computer:// deliverable link shared with the founder must resolve (zero links pass).
+  # Every computer:// deliverable link must resolve, and at least one must be present. The strict
+  # form is deliberate: the delivery step requires naming and linking each deliverable, so a run
+  # with no link handed the founder unlabelled cards.
   - computer_links_resolve: true
   # NOTE: no_delete_in_outputs is deliberately OMITTED here (kept on the other 15 scenarios). With a
   # read-only connected folder, the agent probes outputs/ writability by creating and rm-ing a

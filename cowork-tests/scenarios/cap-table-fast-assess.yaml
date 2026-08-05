@@ -45,7 +45,6 @@ assert:
   # --- fleet contract asserts (adopted at the 0.24.0 pin; budgets tightened from discovery actuals) ---
   # The pipeline entered through the Skill tool (prefix-tolerant; id shape confirmed at discovery).
   - skill_triggered: '(founder-skills:)?cap-table$'
-  # Every computer:// deliverable link shared with the founder must resolve (zero links pass).
   # fast-assess is the lightweight concise path (skips visualize/explore), so it delivers a markdown
   # assessment without a computer:// deliverable link. Assert link *resolution* only if one is present
   # (0.27.0 made the bare form fail on zero links); the deliverable itself is covered by file_exists.

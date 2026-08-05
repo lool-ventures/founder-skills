@@ -75,7 +75,6 @@ assert:
   # --- fleet contract asserts (adopted at the 0.24.0 pin; budgets tightened from discovery actuals) ---
   # The pipeline entered through the Skill tool (prefix-tolerant; id shape confirmed at discovery).
   - skill_triggered: '(founder-skills:)?cap-table$'
-  # Every computer:// deliverable link shared with the founder must resolve (zero links pass).
   # This flow is question-terminal (allow_stall above): it surfaces extraction challenges and stalls
   # on a gate before emitting a deliverable link, so a computer:// link may be absent. Assert link
   # *resolution* only if one is present (0.27.0 made the bare form fail on zero links).

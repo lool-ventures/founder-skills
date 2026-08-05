@@ -428,6 +428,13 @@ LEGACY_REFERENCES_CAP = 8 * 1024  # historical; references now ship whole
 # a deck naming no competitor; deferred recall candidates; cohort constituents; and a per-view
 # Gate-3 trade-off trigger. It also LOST the invented "Differentiation strength" band scale, which
 # described a field existing in no script or artifact.
+# deck-review +645 B and market-sizing +137 B for the geography guard. A live run derived company,
+# stage and sector from the deck, found NO geography signal anywhere in it, and recorded "US"
+# rather than asking — inferred from `$` and from two founders' ex-employers. Geography selects the
+# regulatory and benchmark guidance the whole review is graded against. deck-review already said to
+# ask when the deck yields no signal; what was missing is that deriving THREE of the four does not
+# license skipping the ask for the fourth. market-sizing's carve-out went further and named
+# currency as a geography signal outright, which is unsound: `$` is also CAD, AUD and SGD.
 # All six raised ~800 B for the deliverable hand-over rule. The delivery step told the model to SEND
 # the files and stopped there, so how they were introduced was left to chance: measured across two
 # otherwise-identical deck-review runs, one wrote "[the written report](computer://…)" per document and
@@ -473,7 +480,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # market-sizing raised for the same rule on its CHECKLIST template, plus the coaching template's
     # "no item ids or warning codes" rule — a live run shipped three criterion ids and a filename into
     # the founder's report.
-    "market-sizing": 88_767,
+    "market-sizing": 88_904,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -492,7 +499,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # mid-engagement. Added its own fact-plus-remedy sentence instead: re-deriving the pure path vars is
     # safe, but RUN_ID is re-established from setup_run.py's printed run_id, never from re-running the
     # mint line.
-    "deck-review": 70_436,
+    "deck-review": 71_081,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
