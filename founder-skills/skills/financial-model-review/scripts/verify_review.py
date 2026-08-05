@@ -418,6 +418,55 @@ _DEFECTIVE_GATE = (
 )
 
 
+# Artifacts whose producer is a PURE function of inputs.json, so the verifier can rebuild them and ask
+# the question that matters — "would this artifact be different if rebuilt?" — instead of the question
+# the fingerprint answers, "were the inputs byte-identical?". This is recomputation, not a second
+# implementation: the producer's own function is imported and called, so there is no math to drift.
+#
+# Used ONLY to suppress a false staleness alarm, never as a standalone fabrication check. Comparing
+# content unconditionally would require every artifact to be byte-identical to a fresh producer run,
+# which is true of production artifacts but not of the deliberately artificial fixtures that exercise
+# this verifier's other checks. Forged-stamp resistance comes from the value-level net_cash comparison
+# in _check_cross_consistency, which is evidence independent of both the stamp and the producer.
+#
+# checklist.json is absent by necessity, not oversight — its content is 46 LLM-judged statuses with
+# prose evidence, and nothing in inputs.json determines them. No recompute can reach it.
+_RECOMPUTABLE = {
+    "unit_economics.json": ("unit_economics", "_compute_metrics"),
+    "runway.json": ("runway", "_compute_runway"),
+}
+
+
+def _recompute(name: str, inputs_data: dict[str, Any]) -> dict[str, Any] | None:
+    """Rebuild an artifact's content from current inputs. None when it cannot be done safely.
+
+    `runway._compute_runway` falls back to `datetime.now()` for a missing `cash.balance_date`
+    (runway.py:731), which would make the comparison drift across a month boundary. Recompute is
+    skipped in that case rather than producing a check that fails on the calendar.
+    """
+    spec = _RECOMPUTABLE.get(name)
+    if spec is None:
+        return None
+    if name == "runway.json" and not _deep_get(inputs_data, "cash", "balance_date"):
+        return None
+    module_name, func_name = spec
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        module = __import__(module_name)
+        func = getattr(module, func_name)
+        return dict(func(json.loads(json.dumps(inputs_data))))  # deep copy: the producer mutates
+    except Exception:
+        # A producer that cannot run on these inputs tells us nothing about staleness; fall back to
+        # the fingerprint comparison rather than inventing a verdict.
+        return None
+
+
+def _content_differs(stored: dict[str, Any], fresh: dict[str, Any]) -> bool:
+    """Compare an artifact's CONTENT, ignoring the bookkeeping the producer adds around it."""
+    core = {k: v for k, v in stored.items() if k not in ("metadata", _fingerprint.GRADED_AGAINST)}
+    return json.dumps(core, sort_keys=True) != json.dumps(fresh, sort_keys=True)
+
+
 def _check_inputs_drift(
     artifacts: dict[str, dict[str, Any]],
     inputs_data: dict[str, Any],
@@ -463,6 +512,14 @@ def _check_inputs_drift(
                 )
             )
         elif recorded != current:
+            # The fingerprint answers "were the inputs byte-identical?". What matters is "would this
+            # artifact be different if rebuilt?" — and for a pure producer we can just ask. Measured:
+            # correcting `cash.current_balance` by 8% moves NO unit-economics metric, so the hash alone
+            # raises a false alarm on an artifact that is current in every way a founder can see. A
+            # false alarm with no remedy is what produced the artifact-patching incident.
+            fresh = _recompute(name, inputs_data)
+            if fresh is not None and not _content_differs(data, fresh):
+                continue
             checks.append(
                 _issue(
                     "error",

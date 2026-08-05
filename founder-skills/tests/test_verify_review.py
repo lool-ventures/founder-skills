@@ -1332,3 +1332,116 @@ def test_the_exact_arm_does_not_fire_on_the_degenerate_runway_branch() -> None:
     arts["runway.json"]["baseline"] = {"net_cash": 1_000_000, "monthly_burn": None, "monthly_revenue": None}
     _rc, out, _err = _run(arts)
     assert "does not equal inputs net cash" not in json.dumps(out)
+
+
+# ---------------------------------------------------------------------------
+# Recomputation: ask "would this artifact be different if rebuilt?" not "were the bytes identical?"
+# ---------------------------------------------------------------------------
+
+
+def _producer_output(module_name: str, func_name: str, inputs: dict[str, Any]) -> dict[str, Any]:
+    """Build an artifact the way the producer would, for tests about recomputation.
+
+    The hand-authored fixtures carry values no producer emits — deliberately, to exercise the
+    verifier's other checks. A test about "would this rebuild identically?" cannot use one.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(module_name, os.path.join(_SCRIPTS, f"{module_name}.py"))
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return dict(getattr(mod, func_name)(json.loads(json.dumps(inputs))))
+
+
+def _bump(doc: dict[str, Any], path: tuple[str, ...], factor: float = 1.08) -> dict[str, Any]:
+    doc = json.loads(json.dumps(doc))
+    node = doc
+    for key in path[:-1]:
+        node = node[key]
+    node[path[-1]] = round(node[path[-1]] * factor, 2)
+    return doc
+
+
+def test_an_input_change_that_moves_no_metric_is_not_reported_stale() -> None:
+    """The false-alarm class that produced the artifact-patching incident.
+
+    Correcting cash moves no unit-economics metric, so that artifact is current in every way a founder
+    can see. Reporting it stale — with no remedy that clears it — is what invites editing the artifact.
+    """
+    arts = _full_artifacts()
+    # Genuine producer output: the suppression asks "would this rebuild identically?", which only has
+    # meaning for an artifact the producer actually emitted.
+    arts["unit_economics.json"] = _producer_output("unit_economics", "_compute_metrics", arts["inputs.json"])
+    stale_stamp = {"inputs.json": _fingerprint_of(arts["inputs.json"])}  # BEFORE the correction
+    arts["inputs.json"] = _bump(arts["inputs.json"], ("cash", "current_balance"))
+    for name in ("unit_economics.json", "runway.json"):
+        arts[name]["graded_against"] = dict(stale_stamp)
+    _rc, out, _err = _run(arts)
+    flagged = [e for e in out["summary"]["errors"] if e.startswith("unit_economics.json")]
+    assert not flagged, f"unit_economics reported stale though no metric changed: {flagged}"
+    # Non-vacuity: the hash DID move, so the suppression is what cleared it — runway, which cash does
+    # affect, is still reported.
+    assert [e for e in out["summary"]["errors"] if e.startswith("runway.json")]
+
+
+def test_an_input_change_that_does_move_a_metric_is_reported() -> None:
+    """Non-vacuity for the test above: the suppression must not be blanket."""
+    arts = _full_artifacts()
+    arts["unit_economics.json"] = _producer_output("unit_economics", "_compute_metrics", arts["inputs.json"])
+    stale_stamp = {"inputs.json": _fingerprint_of(arts["inputs.json"])}
+    arts["inputs.json"] = _bump(arts["inputs.json"], ("revenue", "mrr", "value"))
+    arts["unit_economics.json"]["graded_against"] = dict(stale_stamp)
+    _rc, out, _err = _run(arts)
+    assert [e for e in out["summary"]["errors"] if e.startswith("unit_economics.json")]
+
+
+def test_recomputation_is_not_used_as_a_standalone_fabrication_check() -> None:
+    """Scope pin. Comparing content on every run would demand every artifact be byte-identical to a
+    fresh producer run — true in production, false of the deliberately artificial fixtures that
+    exercise this verifier's other checks. Forged-stamp resistance comes from the net_cash comparison
+    instead, which is independent of both the stamp and the producer."""
+    arts = _full_artifacts()  # hand-authored values a producer would not emit
+    _rc, out, _err = _run(arts)
+    assert out["status"] == "pass", "an artificial-but-consistent fixture must not be reported stale"
+
+
+def test_checklist_is_recorded_as_uncoverable_by_recomputation() -> None:
+    """Not an oversight: 46 LLM-judged statuses that nothing in inputs.json determines. If this ever
+    becomes recomputable the residual note in the module and plan must change with it."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_vr", _SCRIPT)
+    assert spec and spec.loader
+    vr = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vr)
+    assert "checklist.json" not in vr._RECOMPUTABLE
+    assert set(vr._RECOMPUTABLE) == {"unit_economics.json", "runway.json"}
+
+
+def test_the_recomputed_producers_expose_the_functions_the_verifier_calls() -> None:
+    """Contract pin. The verifier imports private producer functions; renaming one would silently
+    disable recomputation and leave only the fingerprint, with no test failing."""
+    import importlib.util
+
+    for module_name, func_name in (("unit_economics", "_compute_metrics"), ("runway", "_compute_runway")):
+        spec = importlib.util.spec_from_file_location(module_name, os.path.join(_SCRIPTS, f"{module_name}.py"))
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        assert callable(getattr(mod, func_name, None)), f"{module_name}.{func_name} is gone"
+
+
+def test_runway_recompute_is_skipped_without_a_balance_date() -> None:
+    """runway.py falls back to datetime.now() for a missing balance_date, so recomputing would make the
+    check depend on the calendar. It must fall back to the fingerprint, not invent a verdict."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_vr", _SCRIPT)
+    assert spec and spec.loader
+    vr = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vr)
+    inputs_no_date = json.loads(json.dumps(_INPUTS))
+    inputs_no_date.get("cash", {}).pop("balance_date", None)
+    assert vr._recompute("runway.json", inputs_no_date) is None
+    assert vr._recompute("unit_economics.json", inputs_no_date) is not None

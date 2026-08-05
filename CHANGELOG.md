@@ -30,6 +30,10 @@ Fleet-wide:
   cheaper than forging it, and silent. An absent record is now an error, its remedy is stated per
   artifact (the checklist must be re-judged, not re-piped), and it names the report re-run that a stale
   producer artifact also invalidates.
+- **financial-model-review:** correcting a figure marked artifacts stale even when none of their numbers
+  would change — a false alarm with no remedy, which is what led one run to edit an artifact rather than
+  re-run it. The check now rebuilds the artifact from the current inputs and reports it only if the
+  result actually differs.
 - Sub-agent evidence cited our artifact filenames ("inputs.json reports actuals separated: false") and
   that text prints verbatim in the report. Evidence now states what is true of the company or model;
   financial-model-review and competitive-positioning check it at their delivery gate.
