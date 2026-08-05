@@ -388,6 +388,36 @@ _QUALITY_CHECKS: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 
+# Per-artifact remedies. NOT one generic "re-run the producer": that instruction is WRONG for
+# checklist.json. Its pipeline is sub-agent judgement -> `cat handoff/checklist_output.json |
+# checklist.py --inputs inputs.json`, so re-piping the OLD hand-off against NEW inputs stamps a current
+# fingerprint over judgements made from stale inputs — manufacturing exactly the false "graded against
+# current inputs" claim this gate exists to prevent.
+_REMEDY = {
+    "unit_economics.json": (
+        "re-run it: `cat <dir>/inputs.json | python3 <scripts>/unit_economics.py -o <dir>/unit_economics.json`."
+    ),
+    "runway.json": "re-run it: `cat <dir>/inputs.json | python3 <scripts>/runway.py -o <dir>/runway.json`.",
+    "checklist.json": (
+        "re-dispatch the CHECKLIST sub-agent — do NOT re-pipe the existing hand-off file, which would "
+        "stamp a current fingerprint over judgements made from the old inputs."
+    ),
+}
+
+# This gate runs AFTER compose, so a stale producer artifact was already composed into the report.
+# Re-running the producer alone clears the gate and leaves the delivered report carrying stale figures,
+# which turns a detected staleness into an undetected one.
+_CASCADE = "Then re-run compose_report.py, and any visualize/explore/coaching steps already run."
+
+# The branch that the incident needed and no instruction covered. A live run ran the re-run remedy,
+# watched the mismatch persist (the stamp itself was buggy), concluded re-running was futile, and
+# patched the artifact to match. Re-running is only the remedy when the INPUTS moved.
+_DEFECTIVE_GATE = (
+    "If the mismatch survives a clean re-run, the stamp itself is wrong, not the artifact: stop and "
+    "report the gate as defective. Never edit graded_against to make this pass."
+)
+
+
 def _check_inputs_drift(
     artifacts: dict[str, dict[str, Any]],
     inputs_data: dict[str, Any],
@@ -412,7 +442,17 @@ def _check_inputs_drift(
             continue
         graded = data.get(_fingerprint.GRADED_AGAINST)
         if not isinstance(graded, dict) or "inputs.json" not in graded:
-            # Produced before fingerprints were recorded; nothing to compare.
+            # NOT a silent skip. All three producers stamp this key unconditionally, so its absence in
+            # an artifact from this run means it was removed after the fact — which is the CHEAPEST way
+            # to clear this gate: `del d["graded_against"]` beats forging a 64-char hash. Measured
+            # before this branch existed: a wrong hash failed the gate, a deleted stamp passed it clean.
+            checks.append(
+                _issue(
+                    "error",
+                    f"{name} carries no record of the inputs it was computed from. Every producer writes "
+                    f"one, so it was removed after the fact — {_REMEDY[name]}",
+                )
+            )
             continue
         recorded = graded.get("inputs.json")
         if recorded is None:
@@ -427,7 +467,8 @@ def _check_inputs_drift(
                 _issue(
                     "error",
                     f"{name} was computed from a different version of the inputs than the one on disk "
-                    f"now — re-run it, or its figures describe a model that no longer exists",
+                    f"now, so its figures describe a model that no longer exists. {_REMEDY[name]} "
+                    f"{_CASCADE} {_DEFECTIVE_GATE}",
                 )
             )
     return checks
@@ -481,6 +522,33 @@ def _check_cross_consistency(
                 _issue(
                     "warning",
                     f"runway baseline.net_cash ({runway_cash}) diverges >20% from inputs net cash ({inputs_cash})",
+                )
+            )
+        elif (
+            isinstance(runway_cash, (int, float))
+            and _deep_get(runway_data, "baseline", "monthly_burn") is not None
+            and abs(runway_cash - inputs_cash) > 0.5
+        ):
+            # EXACT arm, not a second tolerance. `net_cash` is a plain subtraction of two inputs
+            # fields, so any real difference means this artifact was computed from different inputs —
+            # a fact independent of `graded_against`, and therefore still true when that field has been
+            # hand-edited to make the hash check pass. The 20% arm above stays: it catches gross
+            # divergence, this catches the sub-tolerance staleness a corrected figure produces.
+            #
+            # Gated on `monthly_burn is not None` because runway.py has a degenerate branch
+            # (runway.py:675) that reports `net_cash: current_balance` WITHOUT subtracting debt. On that
+            # path the values legitimately differ, and an exact check would fire on a correct artifact.
+            #
+            # PARTIAL COVERAGE, deliberately recorded: this is one field of one artifact.
+            # unit_economics.json would need the producer's metric math re-implemented here, and
+            # checklist.json is uncoverable in principle — its content is LLM-judged statuses that no
+            # value in inputs.json determines. Do not read a clean run here as "the stamps are honest".
+            checks.append(
+                _issue(
+                    "error",
+                    f"runway baseline.net_cash ({runway_cash}) does not equal inputs net cash "
+                    f"({inputs_cash}) — this artifact was computed from different inputs, whatever its "
+                    f"recorded fingerprint says. {_REMEDY['runway.json']} {_CASCADE}",
                 )
             )
 

@@ -957,6 +957,10 @@ def main() -> None:
 
     company = data.get("company")
     inputs_data = data.get("inputs")
+    # Hash the payload's inputs BEFORE validate_checklist sees them: it may consume or annotate the
+    # object, and the verifier hashes the file on disk. This is the same ordering trap that made
+    # unit_economics stamp a document that never existed on disk. Only used when --inputs is absent.
+    _fp_payload = _fingerprint.fingerprint(inputs_data) if inputs_data is not None else None
     result, errors = validate_checklist(data["items"], company, inputs=inputs_data)
 
     _rejected = bool(errors)
@@ -974,19 +978,17 @@ def main() -> None:
     # Prefer --inputs (the file the main thread pipes from) over the payload's partial `inputs`, since
     # the payload carries `company` but not the whole document. Absent both, None records "cannot
     # compare" rather than a false match.
-    _fp_source = inputs_data
+    # Prefer --inputs (the file the verifier will hash) over the payload's partial `inputs`; fall back
+    # to the pre-validation hash captured above. Absent both, None records "cannot compare".
+    _fp_digest = _fp_payload
     if getattr(args, "inputs", None):
         try:
             with open(args.inputs, encoding="utf-8") as _f:
-                _fp_source = json.load(_f)
+                _fp_digest = _fingerprint.fingerprint(json.load(_f))
         except (OSError, json.JSONDecodeError) as _e:
             print(f"Warning: --inputs unreadable, fingerprint will be null: {_e}", file=sys.stderr)
-            _fp_source = None
-    # Hash the document as READ, never a post-scoring view of it: the verifier hashes the file on disk,
-    # so anything a compute step did to this object must not reach the fingerprint.
-    _fingerprint.stamp_hashes(
-        result, {"inputs.json": _fingerprint.fingerprint(_fp_source) if _fp_source is not None else None}
-    )
+            _fp_digest = None
+    _fingerprint.stamp_hashes(result, {"inputs.json": _fp_digest})
 
     if _rejected:
         _fail_invalid(result, args.output, indent)

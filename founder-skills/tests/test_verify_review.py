@@ -28,6 +28,22 @@ def _run(artifacts: dict[str, Any], extra_args: list[str] | None = None) -> tupl
 
     Values can be dicts (written as JSON) or strings (written raw, for corrupt JSON tests).
     """
+    # Producers stamp `graded_against` unconditionally, and the verifier now treats an ABSENT stamp as
+    # removed-after-the-fact. So a test writing producer outputs without one describes an artifact no
+    # run can emit. Stamp here, from the inputs THIS call writes — many tests mutate inputs to exercise
+    # an unrelated check, and a stamp frozen at fixture-build time would read as drift. A test that sets
+    # `graded_against` itself keeps its value: that is how the drift tests below express staleness.
+    artifacts = dict(artifacts)
+    inputs_doc = artifacts.get("inputs.json")
+    if isinstance(inputs_doc, dict):
+        digest = _fingerprint_of(inputs_doc)
+        for name in ("checklist.json", "unit_economics.json", "runway.json"):
+            art = artifacts.get(name)
+            if isinstance(art, dict) and "graded_against" not in art:
+                art = dict(art)
+                art["graded_against"] = {"inputs.json": digest}
+                artifacts[name] = art
+
     with tempfile.TemporaryDirectory() as tmpdir:
         for name, data in artifacts.items():
             path = os.path.join(tmpdir, name)
@@ -209,8 +225,21 @@ def _make_commentary() -> dict[str, Any]:
     }
 
 
+def _stamped_artifacts() -> dict[str, Any]:
+    """`_full_artifacts()` with `graded_against` applied, for tests that stage files themselves
+    instead of going through `_run` (which stamps at write time)."""
+    arts = _full_artifacts()
+    digest = _fingerprint_of(arts["inputs.json"])
+    for name in ("checklist.json", "unit_economics.json", "runway.json"):
+        arts[name]["graded_against"] = {"inputs.json": digest}
+    return arts
+
+
 def _full_artifacts() -> dict[str, Any]:
-    """Return a complete set of valid artifacts (quantitative spreadsheet review)."""
+    """Return a complete set of valid artifacts (quantitative spreadsheet review).
+
+    `graded_against` is applied at WRITE time by `_run`, not here — see the note there.
+    """
     return {
         "inputs.json": _INPUTS,
         "checklist.json": _make_checklist(),
@@ -850,7 +879,7 @@ class TestEdgeCases:
         """The -o flag writes output to a file and emits a JSON receipt on
         stdout (per the shared script convention)."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            for name, data in _full_artifacts().items():
+            for name, data in _stamped_artifacts().items():
                 with open(os.path.join(tmpdir, name), "w") as f:
                     json.dump(data, f)
             out_path = os.path.join(tmpdir, "verification.json")
@@ -1200,7 +1229,8 @@ def test_producers_capture_the_fingerprint_before_computing() -> None:
     trigger the synthesis, which is exactly why the round-trip alone is not enough.
     """
     for producer, compute in (("unit_economics.py", "_compute_metrics("), ("runway.py", "_compute_runway(")):
-        body = open(os.path.join(_SCRIPTS, producer), encoding="utf-8").read()
+        with open(os.path.join(_SCRIPTS, producer), encoding="utf-8") as fh:
+            body = fh.read()
         capture = body.find("_fp_inputs = _fingerprint.fingerprint(")
         assert capture != -1, f"{producer} does not capture the inputs fingerprint at parse time"
         first_compute = body.find(f"    result = {compute}")
@@ -1214,3 +1244,91 @@ def test_producers_capture_the_fingerprint_before_computing() -> None:
         assert "_fingerprint.stamp_hashes(" in body, (
             f"{producer} must stamp the precomputed hash, not re-hash a possibly-mutated document"
         )
+
+
+# ---------------------------------------------------------------------------
+# Fabrication resistance
+#
+# A live run cleared this gate by editing the artifact it protects. These pin the three responses:
+# deleting the stamp is an error, the remedy is per-artifact and cascade-aware, and one value-level
+# fact survives a forged stamp.
+# ---------------------------------------------------------------------------
+
+
+def test_deleting_the_stamp_is_an_error_not_a_silent_skip() -> None:
+    """Removing `graded_against` was the CHEAPEST way to clear this gate — cheaper than forging a
+    64-char hash. Measured before this branch existed: wrong hash failed, deleted stamp passed clean."""
+    arts = _full_artifacts()
+    arts["unit_economics.json"]["graded_against"] = {}  # present but empty: the key was removed
+    rc, out, _err = _run(arts)
+    text = json.dumps(out)
+    assert "carries no record of the inputs" in text
+    assert out["status"] == "fail"
+    assert rc == 1
+
+
+@pytest.mark.parametrize(
+    ("artifact", "must_contain", "must_not_contain"),
+    [
+        ("unit_economics.json", "unit_economics.py", "re-dispatch"),
+        ("runway.json", "runway.py", "re-dispatch"),
+        # Re-piping the old hand-off with new inputs would stamp a CURRENT fingerprint over
+        # judgements made from the OLD inputs — manufacturing the false claim this gate prevents.
+        ("checklist.json", "re-dispatch the CHECKLIST sub-agent", "cat <dir>/inputs.json"),
+    ],
+)
+def test_the_remedy_is_per_artifact(artifact: str, must_contain: str, must_not_contain: str) -> None:
+    arts = _full_artifacts()
+    arts[artifact]["graded_against"] = {"inputs.json": "0" * 64}
+    _rc, out, _err = _run(arts)
+    msg = next(e for e in out["summary"]["errors"] if e.startswith(artifact))
+    assert must_contain in msg
+    assert must_not_contain not in msg
+
+
+def test_the_remedy_names_the_downstream_recompose() -> None:
+    """This gate runs AFTER compose, so re-running only the producer leaves a stale report shipped."""
+    arts = _full_artifacts()
+    arts["runway.json"]["graded_against"] = {"inputs.json": "0" * 64}
+    _rc, out, _err = _run(arts)
+    assert "compose_report.py" in json.dumps(out)
+
+
+def test_the_remedy_covers_the_survives_a_rerun_case() -> None:
+    """The branch the incident actually needed: the agent ran the remedy, watched it fail, and patched."""
+    arts = _full_artifacts()
+    arts["runway.json"]["graded_against"] = {"inputs.json": "0" * 64}
+    _rc, out, _err = _run(arts)
+    text = json.dumps(out)
+    assert "stop and report the gate as defective" in text
+    assert "Never edit graded_against" in text
+
+
+def test_a_forged_stamp_does_not_hide_a_stale_runway() -> None:
+    """The value-level arm is independent of the stamp, so patching the hash leaves it standing.
+
+    PARTIAL by design: unit_economics would need the producer's math re-implemented here, and
+    checklist.json is uncoverable — its content is LLM-judged, not derivable from inputs.
+    """
+    arts = _full_artifacts()
+    arts["inputs.json"] = json.loads(json.dumps(arts["inputs.json"]))
+    # An 8% correction: inside the 20% tolerance, so only the exact arm can see it.
+    arts["inputs.json"]["cash"]["current_balance"] = 1_080_000
+    forged = _fingerprint_of(arts["inputs.json"])
+    for name in ("checklist.json", "unit_economics.json", "runway.json"):
+        arts[name]["graded_against"] = {"inputs.json": forged}
+    _rc, out, _err = _run(arts)
+    errors = " ".join(out["summary"]["errors"])
+    assert "does not equal inputs net cash" in errors, "a forged stamp hid a stale artifact"
+    assert "runway.json" not in errors or "different version of the inputs" not in errors
+
+
+def test_the_exact_arm_does_not_fire_on_the_degenerate_runway_branch() -> None:
+    """runway.py's insufficient-data branch reports net_cash WITHOUT subtracting debt (runway.py:675),
+    so exact equality legitimately fails there. Gating on monthly_burn keeps it off that path."""
+    arts = _full_artifacts()
+    arts["inputs.json"] = json.loads(json.dumps(arts["inputs.json"]))
+    arts["inputs.json"]["cash"]["debt"] = 50_000
+    arts["runway.json"]["baseline"] = {"net_cash": 1_000_000, "monthly_burn": None, "monthly_revenue": None}
+    _rc, out, _err = _run(arts)
+    assert "does not equal inputs net cash" not in json.dumps(out)

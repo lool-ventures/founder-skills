@@ -26,6 +26,10 @@ Fleet-wide:
 - **financial-model-review:** unit economics and runway fingerprinted their inputs AFTER computing, and
   the unit-economics computation modifies what it was given — so the recorded fingerprint described a
   document that never existed on disk and the verifier reported staleness on a current artifact.
+- **financial-model-review:** the staleness check could be cleared by deleting the record it compares —
+  cheaper than forging it, and silent. An absent record is now an error, its remedy is stated per
+  artifact (the checklist must be re-judged, not re-piped), and it names the report re-run that a stale
+  producer artifact also invalidates.
 - Sub-agent evidence cited our artifact filenames ("inputs.json reports actuals separated: false") and
   that text prints verbatim in the report. Evidence now states what is true of the company or model;
   financial-model-review and competitive-positioning check it at their delivery gate.
