@@ -68,6 +68,8 @@ Fleet-wide:
 - Recall candidates declined at the first gate were dropped instead of re-offered at the later gate.
 - Re-scoring the map without re-running the checklist left the review describing a map that no longer
   existed. The checklist records which map it graded and compose flags a mismatch.
+- The delivery gate checked only the rendered report for internal filenames, so evidence citing them
+  passed unnoticed — this skill renders checklist evidence nowhere. The gate now checks the artifact.
 
 **deck-review:**
 

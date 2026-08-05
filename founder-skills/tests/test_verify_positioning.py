@@ -335,3 +335,23 @@ def test_gate_does_not_flag_a_founder_supplied_filename(tmp_path: Path) -> None:
     (tmp_path / "report.md").write_text(md + "\n- the deck you sent, acme_pitch.xlsx, names no competitor\n")
     _rc, out, _err = _run(tmp_path)
     assert "names the internal file" not in json.dumps(out)
+
+
+def test_gate_flags_a_filename_in_checklist_evidence_even_when_unrendered(tmp_path: Path) -> None:
+    """Artifact level, not just the rendered report.
+
+    A live run produced 11 items citing artifact filenames in evidence while report.md scanned clean —
+    this skill renders checklist evidence nowhere. Checking only the report reports a compliance that
+    does not exist.
+    """
+    _publishable(tmp_path)
+    checklist = json.loads((tmp_path / "checklist.json").read_text())
+    # The publishable fixture carries no items; add one so the scan has something to look at.
+    checklist["items"] = [{"id": "COVER_02", "status": "fail", "evidence": "landscape.json reports input_mode: deck"}]
+    (tmp_path / "checklist.json").write_text(json.dumps(checklist))
+    rc, out, _err = _run(tmp_path)
+    msgs = json.dumps(out)
+    assert "cites the internal file 'landscape.json'" in msgs
+    assert rc == 0, "unrendered evidence is not founder-facing yet, so it must not block hand-over"
+    assert out is not None and out["summary"]["error_count"] == 0
+    assert out["summary"]["warning_count"] >= 1

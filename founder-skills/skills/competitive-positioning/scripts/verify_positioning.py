@@ -352,6 +352,29 @@ def _check_cross(artifacts: dict[str, dict[str, Any]]) -> list[dict[str, str]]:
     checklist = _as_dict(artifacts.get("checklist.json", {}).get("_data"))
     verification = artifacts.get("competitor_verification.json", {}).get("_data")
 
+    # Checklist EVIDENCE, at the artifact level — not only what compose happened to render.
+    #
+    # A live run produced 11 items citing `landscape.json` / `positioning.json` in evidence while
+    # report.md scanned clean, because this skill renders checklist evidence nowhere. Checking only
+    # the rendered report therefore reports a compliance that does not exist, and it ships the moment
+    # an item's evidence does get rendered or reaches the founder through the coaching payload.
+    #
+    # Warning, not error: not founder-facing today, so it must not block a hand-over. The report.md
+    # check stays at error severity, where it IS founder-facing.
+    for _item in _as_list(checklist.get("items")):
+        _item = _as_dict(_item)
+        _ev = _item.get("evidence")
+        if not isinstance(_ev, str):
+            continue
+        for _name in _internal_files_in(_ev):
+            issues.append(
+                _issue(
+                    "warning",
+                    f"checklist item {_item.get('id', '?')} cites the internal file '{_name}' in its "
+                    f"evidence — the founder never saw it; say what is true of the company instead",
+                )
+            )
+
     slugs = {
         str(c.get("slug"))
         for c in _as_list(landscape.get("competitors"))
