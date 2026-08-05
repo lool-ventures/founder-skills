@@ -1712,7 +1712,10 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     _ft = _founder_text_policy()
     if _ft is not None:
         report_markdown = _ft.substitute(report_markdown)
-        found = _ft.scan(report_markdown)
+        # Our own warning codes are kept: compose renders them in small print beside a humanized
+        # label (the md_term convention), which is deliberate. A code leaking anywhere else is
+        # caught by the skill's own gate, not by widening this scan into a false positive.
+        found = _ft.scan(report_markdown, extra_keep=frozenset(WARNING_SEVERITY))
         for token in found["enums"]:
             warnings.append(
                 _warn(

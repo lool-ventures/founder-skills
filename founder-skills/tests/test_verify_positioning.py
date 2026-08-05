@@ -135,13 +135,24 @@ def test_criterion_id_in_coaching_commentary_is_a_gap(tmp_path: Path) -> None:
     assert "NARR_03" in stderr
 
 
-def test_criterion_id_outside_the_commentary_is_not_a_gap(tmp_path: Path) -> None:
-    """The checklist section legitimately names criterion IDs — only the founder-facing
-    commentary is held to the narration rule."""
+def test_criterion_id_anywhere_founder_facing_is_a_gap(tmp_path: Path) -> None:
+    """Inverted from "only the commentary is held to the rule".
+
+    That exemption assumed a checklist section that legitimately named criterion IDs. The current
+    report has no such section — its headings are Executive Summary, Competitor Landscape, What's
+    Changed Recently, Competitor Set Verification, Positioning Analysis, Moat Assessment,
+    Differentiation Stress-Test, Key Findings, Warnings, Coaching Commentary. So there is no legitimate
+    source of a bare ID in the body, while delivered reports from 2026-08-01 carried COVER_02/03/04 and
+    NARR_01 outside the commentary, where this check never looked.
+
+    The founder-text scan cannot cover this: its candidate rule is lowercase-only, so ALLCAPS ids are
+    invisible to it. Hence the dedicated regex.
+    """
     _publishable(tmp_path)
     _write(tmp_path, "report.md", (tmp_path / "report.md").read_text() + "\n| NARR_03 | warn |\n")
-    rc, _, stderr = _run(tmp_path)
-    assert rc == 0, stderr
+    rc, out, stderr = _run(tmp_path)
+    assert rc == 1, stderr
+    assert "criterion ID 'NARR_03'" in json.dumps(out)
 
 
 def test_unrendered_verification_verdicts_are_a_gap(tmp_path: Path) -> None:

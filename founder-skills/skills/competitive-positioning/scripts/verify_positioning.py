@@ -253,7 +253,21 @@ def _check_rendered(artifacts: dict[str, dict[str, Any]], gate: int) -> list[dic
             )
         )
 
-    # --- 4. no criterion IDs in the coaching commentary ----------------------------------
+    # --- 4. no criterion IDs ANYWHERE founder-facing --------------------------------------
+    # Scoped to the coaching section originally, which measured delivered reports show was too narrow:
+    # NARR_01 / COVER_03 / POS_04 appeared elsewhere in the report and this check never looked. The
+    # founder-text scan cannot cover it either — its lowercase rule is blind to ALLCAPS, which is why
+    # this dedicated regex exists.
+    body = report_md.split("## Coaching Commentary", 1)[0]
+    for m in sorted(set(_CRITERION_ID_RE.findall(body))):
+        issues.append(
+            _issue(
+                "error",
+                f"report.md cites the criterion ID '{m}' — a founder cannot act on it; state the "
+                f"finding, or render the criterion's label",
+            )
+        )
+
     if "## Coaching Commentary" in report_md:
         commentary = report_md.split("## Coaching Commentary", 1)[1]
         for m in sorted(set(_CRITERION_ID_RE.findall(commentary))):

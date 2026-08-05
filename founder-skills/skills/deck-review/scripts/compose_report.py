@@ -172,6 +172,17 @@ WARNING_LABELS: dict[str, str] = {
 }
 
 
+def _humanize_importance(value: str) -> str:
+    """Founder-facing rendering of the importance enum, via the shared policy where available."""
+    try:
+        ft = _founder_text_policy()
+        if ft is not None:
+            return str(ft.humanize_token(value))
+    except Exception:
+        pass
+    return value.replace("_", " ").capitalize()
+
+
 def _humanize_warning(code: str) -> str:
     """Convert a warning code to human-readable label."""
     return WARNING_LABELS.get(code, code.replace("_", " ").title())
@@ -767,7 +778,10 @@ def _section_slide_feedback(reviews: dict[str, Any] | None, inventory: dict[str,
             imp = str(m.get("importance", "important"))
             expected = m.get("expected_type", "unknown")
             rec = m.get("recommendation", "")
-            lines.append(f"- **[{imp.upper()}]** {expected}: {rec}")
+            # NOT imp.upper(): that MANUFACTURES an ALLCAPS internal token into founder prose
+            # ("[NICE_TO_HAVE]"), in a form the founder-text scan is blind to and substitute() cannot
+            # reach. Measured in a delivered report. humanize_token gives "Nice to have".
+            lines.append(f"- **[{_humanize_importance(imp)}]** {expected}: {rec}")
         lines.append("")
 
     # Overall narrative
@@ -948,7 +962,19 @@ def _emit_coaching_payload(
         },
         "failed_items": summary.get("failed_items", []),
         "warned_items": summary.get("warned_items", []),
-        "high_severity_warnings": [w["code"] for w in validation_warnings if w.get("severity") == "high"],
+        # {code, label, message}, matching competitive-positioning — NOT a bare code list. The
+        # coaching sub-agent reads this payload and echoes it into commentary the founder reads;
+        # handing it only `UNVALIDATED_CLAIMS` is how raw warning codes reached delivered reports.
+        # The label gives it something founder-facing to write instead.
+        "high_severity_warnings": [
+            {
+                "code": w["code"],
+                "label": _humanize_warning(w["code"]),
+                "message": w.get("message", ""),
+            }
+            for w in validation_warnings
+            if w.get("severity") == "high"
+        ],
         "stage": stage_profile.get("detected_stage") or inventory.get("claimed_stage"),
         "ai_company_status": inventory.get("ai_company_status"),
         "company_name": inventory.get("company_name"),
@@ -1070,7 +1096,10 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         # "ARPU $500 x gross_margin 0.75" in a delivered report AND suppressed the warning, since the
         # scan honours the same keep-set.
         report_markdown = _ft.substitute(report_markdown)
-        _found = _ft.scan(report_markdown)
+        # Our own warning codes are kept: compose renders them in small print beside a humanized
+        # label (the md_term convention), which is deliberate. A code leaking anywhere else is
+        # caught by the skill's own gate, not by widening this scan into a false positive.
+        _found = _ft.scan(report_markdown, extra_keep=frozenset(WARNING_SEVERITY))
         for _tok in _found["enums"]:
             warnings.append(
                 _warn(

@@ -193,7 +193,11 @@ def humanize_token(token: str, *, capitalize: bool = True) -> str:
     if token in _OVERRIDES:
         out = _OVERRIDES[token]
         return out if capitalize else out[0].lower() + out[1:]
-    parts = [_PART_REWRITES.get(p, p.upper() if p in _ACRONYMS else p) for p in token.split("_")]
+    parts = [
+        _PART_REWRITES.get(p.lower(), p if p.lower() in _ACRONYMS and p.isupper() else p.lower())
+        for p in token.split("_")
+    ]
+    parts = [p.upper() if p.lower() in _ACRONYMS else p for p in parts]
     text = " ".join(parts)
     return text[0].upper() + text[1:] if capitalize and text else text
 
@@ -241,6 +245,31 @@ def _is_internal_file(token: str) -> bool:
     return ext in _INTERNAL_FILE_EXTS and ext not in _FOUNDER_FILE_EXTS
 
 
+# ALLCAPS internal tokens — a class the lowercase rule above is blind to by construction.
+#
+# `_CANDIDATE_RE` is lowercase-only so it does not flag every English word. That deliberate choice made
+# every SHOUTING token invisible to both scan() and substitute(), fleet-wide: measured in delivered
+# reports, `NICE_TO_HAVE` (deck-review), `FUND_PROFILE` / `CONFLICT_CHECK` (ic-sim route labels),
+# `NARR_01` / `COVER_03` (competitive-positioning criterion ids) and `UNVALIDATED_CLAIMS` /
+# `TAM_DISCREPANCY` (market-sizing warning codes) all reached founders while every detector reported
+# clean.
+#
+# Requires an underscore for the same reason the lowercase rule does: a bare ALLCAPS word is usually an
+# acronym a founder knows (TAM, ARPU, QSBS). A token whose parts are ALL acronyms is left alone, so
+# `TAM_SAM` passes while `TAM_DISCREPANCY` does not.
+_SHOUTING_RE = re.compile(r"(?<![\w.])[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+(?!\w)(?!\.\w)")
+
+# `NARR_01` shape: an id, not a phrase. Humanizing it yields "NARR 01", which is no better for a
+# founder — the fix belongs at the source (render the criterion's label). Reported, never rewritten.
+_SHOUTING_ID_RE = re.compile(r"^[A-Z]+_\d+$")
+
+
+def _is_shouting_token(token: str) -> bool:
+    """True when an ALLCAPS_UNDERSCORE token is OUR vocabulary rather than a founder-known acronym."""
+    parts = token.split("_")
+    return not all(p.lower() in _ACRONYMS for p in parts)
+
+
 def scan(text: str, *, extra_keep: frozenset[str] | None = None) -> dict[str, list[str]]:
     """Find founder-facing text that violates the policy.
 
@@ -266,6 +295,11 @@ def scan(text: str, *, extra_keep: frozenset[str] | None = None) -> dict[str, li
             for m in _CANDIDATE_RE.finditer(without_files)
             if not is_verbatim_token(m.group(0)) and m.group(0) not in keep
         }
+        | {
+            m.group(0)
+            for m in _SHOUTING_RE.finditer(without_files)
+            if _is_shouting_token(m.group(0)) and m.group(0) not in keep
+        }
     )
     return {"enums": enums, "filenames": filenames}
 
@@ -279,7 +313,13 @@ def substitute(text: str, *, extra_keep: frozenset[str] | None = None) -> str:
     Longest token first, so a token that is a prefix of another is not partially replaced.
     """
     keep = (extra_keep or frozenset()) | DIAGNOSTIC_CODES
-    found = {m.group(0) for m in _CANDIDATE_RE.finditer(_FILENAME_RE.sub(" ", text))}
+    stripped = _FILENAME_RE.sub(" ", text)
+    found = {m.group(0) for m in _CANDIDATE_RE.finditer(stripped)}
+    # ALLCAPS tokens are DETECT-ONLY. They are one of three things and rewriting is wrong for two:
+    # an id (`NARR_01` -> "NARR 01" helps nobody), a code deliberately shown in small print beside its
+    # own humanized label (`**Burn Multiple Suspect** (`BURN_MULTIPLE_SUSPECT`)` — the md_term
+    # convention), or a genuine leak, which belongs fixed at its source. scan() reports all three; the
+    # caller keeps the legitimate ones via extra_keep.
     for token in sorted(found, key=len, reverse=True):
         if is_verbatim_token(token) or token in keep:
             continue

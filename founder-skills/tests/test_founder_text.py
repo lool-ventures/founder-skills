@@ -258,3 +258,40 @@ def test_a_url_path_segment_is_not_an_internal_file() -> None:
 def test_an_internal_file_beside_a_url_is_still_reported() -> None:
     text = "inputs.json reports x; source https://example.com/a/page.html"
     assert ft.scan(text)["filenames"] == ["inputs.json"]
+
+
+# ---------------------------------------------------------------------------
+# ALLCAPS — the class the lowercase rule is blind to by construction
+# ---------------------------------------------------------------------------
+
+
+def test_shouting_internal_tokens_are_detected() -> None:
+    """Measured in delivered reports while every detector reported clean."""
+    for token in ("NICE_TO_HAVE", "FUND_PROFILE", "CONFLICT_CHECK", "NARR_01", "UNVALIDATED_CLAIMS"):
+        assert ft.scan(f"see {token} here")["enums"] == [token], token
+
+
+def test_founder_known_acronyms_are_not_flagged() -> None:
+    """A bare acronym is something the founder knows; TAM_SAM is two of them."""
+    for token in ("TAM", "SAM", "SOM", "ARPU", "QSBS", "USD", "TAM_SAM"):
+        assert ft.scan(f"the {token} figure")["enums"] == [], token
+
+
+def test_a_partly_acronym_token_is_still_flagged() -> None:
+    assert ft.scan("TAM_DISCREPANCY fired")["enums"] == ["TAM_DISCREPANCY"]
+
+
+def test_shouting_tokens_are_detect_only_never_rewritten() -> None:
+    """Rewriting is wrong for two of the three things an ALLCAPS token can be: an id (`NARR_01` ->
+    "NARR 01" helps nobody) and a code shown beside its own humanized label (the md_term convention,
+    e.g. `**Burn Multiple Suspect** (`BURN_MULTIPLE_SUSPECT`)`). Leaks are fixed at the source."""
+    for token in ("NARR_01", "BURN_MULTIPLE_SUSPECT", "NICE_TO_HAVE"):
+        assert ft.substitute(token) == token, token
+
+
+def test_a_kept_code_is_not_reported() -> None:
+    """Each compose passes its own WARNING_SEVERITY keys, which it renders beside a label on purpose."""
+    keep = frozenset({"BURN_MULTIPLE_SUSPECT"})
+    text = "- **Burn Multiple Suspect** (`BURN_MULTIPLE_SUSPECT`): acknowledged"
+    assert ft.scan(text, extra_keep=keep)["enums"] == []
+    assert ft.scan(text)["enums"] == ["BURN_MULTIPLE_SUSPECT"]

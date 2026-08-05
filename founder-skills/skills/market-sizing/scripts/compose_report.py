@@ -1805,7 +1805,19 @@ def _emit_coaching_payload(
         },
         "failed_items": summary.get("failed_items", []),
         "warned_items": [],  # market-sizing has no warn status; explicit empty for schema parity
-        "high_severity_warnings": [w["code"] for w in validation_warnings if w.get("severity") == "high"],
+        # {code, label, message}, matching competitive-positioning — NOT a bare code list. The
+        # coaching sub-agent reads this payload and echoes it into commentary the founder reads;
+        # handing it only `UNVALIDATED_CLAIMS` is how raw warning codes reached delivered reports.
+        # The label gives it something founder-facing to write instead.
+        "high_severity_warnings": [
+            {
+                "code": w["code"],
+                "label": _humanize_warning(w["code"]),
+                "message": w.get("message", ""),
+            }
+            for w in validation_warnings
+            if w.get("severity") == "high"
+        ],
         "company_name": inputs.get("company_name"),
         "methodology": methodology.get("approach_chosen"),
         "confidence": confidence,  # derived from checklist score_pct; null if unavailable
@@ -1959,7 +1971,10 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         # "ARPU $500 x gross_margin 0.75" in a delivered report AND suppressed the warning, since the
         # scan honours the same keep-set.
         report_markdown = _ft.substitute(report_markdown)
-        _found = _ft.scan(report_markdown)
+        # Our own warning codes are kept: compose renders them in small print beside a humanized
+        # label (the md_term convention), which is deliberate. A code leaking anywhere else is
+        # caught by the skill's own gate, not by widening this scan into a false positive.
+        _found = _ft.scan(report_markdown, extra_keep=frozenset(WARNING_SEVERITY))
         for _tok in _found["enums"]:
             warnings.append(
                 _warn(

@@ -19,7 +19,12 @@ Fleet-wide:
 - Some tokens were then kept verbatim by mistake — a field name reached through an `id` field
   (`gross_margin`) stayed raw and suppressed its own warning. Identifier preservation is now scoped to
   cap-table, where ids are handles a founder matches against their own documents.
-- A founder's own uploaded filename was reported as an internal file reference. Internal files are now
+- A founder's own uploaded filename was reported as an internal file reference.
+- Internal tokens written in capitals — checklist item ids, dispatch labels, warning codes, an
+  importance flag — reached founders in every skill's reports and were invisible to the check meant to
+  catch them, which only looked at lowercase. deck-review no longer prints `[NICE_TO_HAVE]`, the
+  coaching hand-off now carries readable warning names rather than codes, and
+  competitive-positioning's gate checks the whole report rather than only the coaching section. Internal files are now
   identified by extension (we emit `.json`/`.py`/`.html`/`.md`; founders send documents) rather than by
   a list of names that was missing 53 of the fleet's 82 artifacts. A URL path segment in a source
   citation is not treated as a file.
