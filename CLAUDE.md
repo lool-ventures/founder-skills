@@ -272,8 +272,13 @@ Measured workarounds, current through **1.15.0**. Full detail in
   row and inflate `passRate` — but as of 1.14.0 a label-filtered **cost** total is no longer short: `stats`
   re-admits the dropped rows by shared `runId`, counting them toward cost only, never toward
   `runs`/`passRate`/percentiles.
-- **There is no progress output on stdout** — logs stay at 0 bytes for the whole run, then emit the
-  full report. Do NOT poll the outputs dir for artifacts (the advice that used to live here): use
+- **Everything the harness prints goes to STDERR; stdout is empty.** Verified on `run`, `replay` and
+  `status` at 1.17.0. Two consequences. First, a wrapper that captures only stdout gets an empty
+  log — which is where the older "no progress output" note came from. Second, and this one bites:
+  the obvious poll `until ! cowork-harness status "$D" | grep -q '● running'` **exits immediately
+  and silently** (grep sees nothing on stdout, returns 1, `!` inverts it). Add `2>&1`. A long run
+  DOES self-report — `… still running (450s · 52 tools)` — so the run's own output is now a
+  reasonable progress source alongside `status`. Do NOT poll the outputs dir for artifacts (the advice that used to live here): use
   **`cowork-harness status <dir> [--follow]`**, which reads the `status.json` the harness maintains
   throughout the lifecycle. It reports `state` / `elapsedMs` / live `toolCounts`, and detects both a
   thrown error and a `SIGKILL`/OOM staleness — so `"running"` is never permanently trusted, which
