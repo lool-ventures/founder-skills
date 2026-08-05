@@ -724,6 +724,13 @@ The script computes the pre-financing `as_converted_totals` (Gotcha #1 enforced 
 
 **Scan `cap_state.json.warnings[]`.** A `W_ANTI_DILUTION_NONCANONICAL` / `W_ANTI_DILUTION_UNRECOGNIZED` warning means a founder's anti-dilution intent was written under a non-canonical key (e.g. `anti_dilution` / `bbwa`) and was recovered (or flagged) rather than silently dropped — the report renderers now surface it, but you MUST also confirm the recovered term with the founder before relying on the down-round math (it changes the conversion).
 
+**A warning code you do not recognise is still real.** Treat it by what it is, never
+by silence: fix it and re-run if the run itself is broken, otherwise say what it means
+for the founder in plain language. A `FOUNDER_TEXT_TOKEN` naming an internal FILE is
+the one to watch — that text is still in the report and must be removed before you hand
+anything over.
+
+
 **Closing action — detect coverage before the pre-math audit.** Instruments are committed by Step 3, so run `detect_structure.py` → `coverage_result.json` here (it reads `inputs.json` + `instruments.json`, not `cap_state.json`), and populate `scenario_requests.json` from `route.scenario_requests` when `covered: true`. See `## Coverage & Disclosure` above for the full contract and the hand-rolled-figure ban — never let a deal reach Step 4.5 without this check.
 
 ### Step 4.5: Pre-Math Rule Audit → `rule_audit.json` (gating block)
@@ -1008,6 +1015,12 @@ Follow your agent body's Context B procedure (POST_COMPOSE_COACHING):
    ownership_range_across_scenarios, top_dilution_drivers,
    counsel_review_summary, date_sensitive_summary, flip_specifics).
    Do NOT Read the full report.md. Do NOT edit report.md or any canonical artifact.
+   The commentary is appended to the founder's report, so write it in their language.
+   `_labels.py` is the authority for this skill's vocabulary — use its founder-facing
+   wording, not the raw enum: "Structure only — no priced round yet", not
+   `structural_only`; "Convertible note", not `note_conversion`. Instrument and scenario
+   IDs (`safe_001`, `safe_conv`) DO stay verbatim — the founder matches them against
+   their own documents — but lead with the investor's name where there is one.
 2. Use your Write tool to write to OUTPUT_PATH exactly the coaching commentary
    as plain markdown — do NOT wrap it in JSON, do NOT escape anything (your
    Write tool handles newlines and quotes). WITHOUT a '## Coaching Commentary'

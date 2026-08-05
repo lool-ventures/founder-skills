@@ -977,6 +977,13 @@ python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --pretty \
 
 Fix high-severity warnings and re-run. Use `--strict` to enforce a clean report.
 
+**A warning code you do not recognise is still real.** Treat it by what it is, never
+by silence: fix it and re-run if the run itself is broken, otherwise say what it means
+for the founder in plain language. A `FOUNDER_TEXT_TOKEN` naming an internal FILE is
+the one to watch — that text is still in the report and must be removed before you hand
+anything over.
+
+
 **Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. If compose exits non-zero, stop and report the exact stderr — do not proceed to Step 8.
 
 ### Step 8: Post-Compose Coaching Commentary (Context B dispatch, POST_COMPOSE_COACHING)

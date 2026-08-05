@@ -1033,6 +1033,13 @@ python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --pretty \
 
 Inspect the warnings in the output. Fix any high-severity warnings (missing artifacts, stale run_id, corrupt JSON, artifacts not written by their producer script) and re-run Pass 1.
 
+**A warning code you do not recognise is still real.** Treat it by what it is, never
+by silence: fix it and re-run if the run itself is broken, otherwise say what it means
+for the founder in plain language. A `FOUNDER_TEXT_TOKEN` naming an internal FILE is
+the one to watch — that text is still in the report and must be removed before you hand
+anything over.
+
+
 **Pass 2 (with acceptances):** If any medium-severity warnings should be accepted, add `accepted_warnings` to `positioning.json` with the warning code, match pattern, and reason. Then re-run with `--strict`:
 
 ```bash

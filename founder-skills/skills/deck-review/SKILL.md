@@ -642,6 +642,14 @@ When you cite deck figures in evidence, quote them verbatim from the deck
 content — do not paraphrase or round numbers, percentages, dates, or named
 metrics.
 
+Evidence prints VERBATIM in the founder's report, so name the source the way the
+founder knows it — never by our filename or a dispatch label. They saw their deck,
+not `deck_inventory.json` or `deck-best-practices.md`.
+  Instead of: "slide_reviews.json shows no competition slide"
+  Write:      "the deck has no competition slide"
+State what is true of the DECK.
+
+
 Use your Write tool to write to OUTPUT_PATH the items array without a summary
 (the producer script computes the summary):
 {"items": [{"id": "purpose_clear", "status": "pass", "evidence": "...", "notes": "..."}, ...all 35 items...]}
@@ -677,6 +685,13 @@ High-severity warnings split into two kinds — treat them differently:
 
 - **Pipeline-integrity** warnings (`CORRUPT_ARTIFACT`, `MISSING_ARTIFACT`, `STALE_ARTIFACT`, `SCHEMA_VIOLATION`, `MISSING_METADATA`, `AI_CRITERIA_MISSING`, `UNSUPPORTED_CHECKLIST_CRITIQUE`, `CHECKLIST_VALIDATION_FAILED`) mean the run itself is broken. Fix the underlying pipeline issue and re-run compose.
 - **Content findings** (`CHECKLIST_FAILURES_CRITICAL`, and medium codes like `SLIDE_COUNT_EXTREME`, `STAGE_MISMATCH`) are the review's honest verdict about the deck. Report them to the founder as-is — never re-score, re-dispatch, or otherwise make them disappear.
+
+**A warning code not named above is still real.** Treat it by what it is, never by
+silence: fix it and re-run if the run itself is broken, otherwise say what it means
+for the founder in plain language. A `FOUNDER_TEXT_TOKEN` naming an internal FILE is
+the one to watch — that text is still in `report.md` and must be removed before you
+hand anything over.
+
 
 `--strict` counts content findings too, so use it as a pipeline gate only when the checklist outcome is already known-clean.
 
@@ -739,6 +754,11 @@ Follow your agent body's Context B procedure (POST_COMPOSE_COACHING):
 1. Compose commentary from the STAGED coaching_payload (failed_items,
    warned_items, summary, high_severity_warnings, stage, ai_company_status).
    Do NOT Read the full report.md. Do NOT edit report.md or any canonical artifact.
+   The commentary is appended to the founder's report, so write it in their language:
+   never a checklist item id (`STRUCT_03`), a status enum (`major_revision`), a warning
+   code, or one of our filenames. Say what the finding IS.
+     Instead of: "The `major_revision` verdict reflects STRUCT_03 failing"
+     Write:      "The deck needs substantial work before it is ready to send"
 2. Use your Write tool to write to OUTPUT_PATH exactly the coaching commentary
    as plain markdown — do NOT wrap it in JSON, do NOT escape anything (your
    Write tool handles newlines and quotes). WITHOUT a '## Coaching Commentary'

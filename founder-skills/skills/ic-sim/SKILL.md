@@ -355,6 +355,13 @@ FUND_EOF
 
 **Accepted warnings:** Add `accepted_warnings` array with `code`, `match` (case-insensitive), and `reason`. Compose downgrades matching warnings to `"acknowledged"`.
 
+**A warning code you do not recognise is still real.** Treat it by what it is, never
+by silence: fix it and re-run if the run itself is broken, otherwise say what it means
+for the founder in plain language. A `FOUNDER_TEXT_TOKEN` naming an internal FILE is
+the one to watch — that text is still in the report and must be removed before you hand
+anything over.
+
+
 ### Context A hand-off protocol (file transport + gate)
 
 Every Context A dispatch prompt carries an `OUTPUT_PATH:` line built from `$HANDOFF_AGENT`. The
@@ -851,6 +858,14 @@ FUND_PROFILE's actual thesis_areas, stage_focus, check_size_range, and
 archetypes — never invent a hypothetical fund thesis; FUND_PROFILE is the
 real profile Step 4 built for this run, in both generic and fund-specific mode.
 
+Evidence prints VERBATIM in the founder's report, so name the source the way the
+founder knows it — never by our filename or a dispatch label. They saw their own
+materials, not `FUND_PROFILE` or `CONFLICT_CHECK`.
+  Instead of: "FUND_PROFILE's thesis areas explicitly include 'Vertical SaaS'"
+  Write:      "the fund's thesis explicitly covers vertical SaaS"
+State what is true of the COMPANY or the fund.
+
+
 Use your Write tool to write to OUTPUT_PATH the items array without summary
 (producer script computes summary). Each item has this shape:
 {
@@ -1051,6 +1066,13 @@ Follow your agent body's Context B procedure (POST_COMPOSE_COACHING):
 1. Compose commentary from the STAGED coaching_payload (dealbreakers,
    concerns, summary, high_severity_warnings, company_name).
    Do NOT Read the full report.md. Do NOT edit report.md or any canonical artifact.
+   The commentary is appended to the founder's report, so write it in their language:
+   never a dimension id, a dispatch label (`FUND_PROFILE`, `CONFLICT_CHECK`), or a
+   warning code. This EXTENDS the verdict-wording rule already in this skill — that one
+   governs `pass`/`hard_pass`/`invest`/`more_diligence`; this one covers every other
+   internal token.
+     Instead of: "CONFLICT_CHECK reports portfolio size 0"
+     Write:      "the fund holds nothing that conflicts with this deal"
 2. Use your Write tool to write to OUTPUT_PATH exactly the coaching commentary
    as plain markdown — do NOT wrap it in JSON, do NOT escape anything (your
    Write tool handles newlines and quotes). WITHOUT a '## Coaching Commentary'

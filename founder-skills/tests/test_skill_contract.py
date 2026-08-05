@@ -465,18 +465,18 @@ SKILL_MD_CEILING: dict[str, int] = {
     # market-sizing raised for the same rule on its CHECKLIST template, plus the coaching template's
     # "no item ids or warning codes" rule — a live run shipped three criterion ids and a filename into
     # the founder's report.
-    "market-sizing": 87_642,
+    "market-sizing": 88_006,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
     # --inputs so the scoring records a fingerprint of what it graded — without it that fingerprint is
     # null and staleness cannot be detected for this artifact at all.
-    "financial-model-review": 78_092,
+    "financial-model-review": 78_518,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
     # reference into context. The Available References entry now says it is background, not a read.
-    "ic-sim": 87_355,
+    "ic-sim": 88_622,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -484,7 +484,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # mid-engagement. Added its own fact-plus-remedy sentence instead: re-deriving the pure path vars is
     # safe, but RUN_ID is re-established from setup_run.py's printed run_id, never from re-running the
     # mint line.
-    "deck-review": 68_562,
+    "deck-review": 69_675,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -497,7 +497,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # cp raised for the CHECKLIST dispatch template's evidence-wording rule. A live run put artifact
     # filenames in 13 items' evidence with the rule present only in the agent body; the dispatch
     # template is the surface that measurably changed behaviour in the sibling skill.
-    "competitive-positioning": 116_592,
+    "competitive-positioning": 116_956,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -519,7 +519,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # cap-table +96 B: the script catalog claimed extract_cap_table.py emits cap_state.json. It does
     # not — that is cap_state.py's output at Step 4 — and the same file said so correctly two lines
     # earlier, so a model reading the catalog was told to expect an artifact that never appears.
-    "cap-table": 143_840,
+    "cap-table": 144_711,
 }
 
 

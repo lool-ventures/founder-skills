@@ -590,3 +590,28 @@ def test_report_does_not_show_an_id_where_a_name_exists(skill: str, tmp_path: Pa
         f"them ({ {i: pairs[i] for i in orphans} }). Lead with the name; keep the id in small print if "
         f"it is needed to tie the row to another artifact."
     )
+
+
+@pytest.mark.parametrize("skill", ["deck-review", "ic-sim", "market-sizing", "competitive-positioning"])
+def test_a_filename_in_evidence_is_surfaced_to_the_agent(skill: str, tmp_path: Path) -> None:
+    """P1 depends on the agent SEEING an uncleared leak. This tests that half — the mechanism.
+
+    Deliberately not a test of agent compliance: that cannot be asserted in-process, and a live run
+    cannot verify it either, because P2's success suppresses the trigger (if evidence stops naming
+    files, the warning never fires). The compliance half is verified by reading delivered artifacts.
+    """
+    ft = _founder_text_module()
+    fixture_dir = REPO_ROOT / "founder-skills" / "tests" / "fixtures" / skill
+    if not fixture_dir.exists():
+        pytest.skip(f"No fixtures at {fixture_dir.relative_to(REPO_ROOT)}")
+    work_dir = tmp_path / skill
+    work_dir.mkdir(parents=True)
+    drive_compose(skill, fixture_dir, work_dir)
+
+    report = (work_dir / "report.md").read_text(encoding="utf-8")
+    # The leak the fleet actually shipped: an artifact filename inside founder-facing prose.
+    found = ft.scan(report + "\n\nConfirmed via slide_reviews.json missing slides.\n")
+    assert "slide_reviews.json" in found["filenames"], (
+        f"{skill}: the scan no longer detects an artifact filename in report text, so the warning P1 "
+        f"tells the agent to act on would never fire"
+    )

@@ -173,6 +173,14 @@ Every conviction point and key concern must be grounded in specific evidence
 from the startup materials. Generic praise or criticism ("strong team",
 "market is competitive") is not acceptable.
 
+Evidence prints VERBATIM in the founder's report, so name the source the way the
+founder knows it — never by our filename or a dispatch label. They saw their own
+materials, not `FUND_PROFILE` or `CONFLICT_CHECK`.
+  Instead of: "FUND_PROFILE's thesis areas explicitly include 'Vertical SaaS'"
+  Write:      "the fund's thesis explicitly covers vertical SaaS"
+State what is true of the COMPANY or the fund.
+
+
 Write to OUTPUT_PATH — the partner assessment object (no metadata block):
 ```json
 {

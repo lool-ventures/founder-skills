@@ -820,6 +820,12 @@ Follow your agent body's Context B procedure (POST_COMPOSE_COACHING):
    warned_items, summary, high_severity_warnings, company_name).
    If truncated:true, acknowledge that not all failures are shown.
    Do NOT Read the full report.md. Do NOT edit report.md or any canonical artifact.
+   The commentary is appended to the founder's report, so write it in their language:
+   never a checklist item id, a status enum (`not_applicable`), a warning code, or one of
+   our filenames. `high_severity_warnings` now carries a readable `label` beside each
+   `code` — use the label.
+     Instead of: "UNVALIDATED_CLAIMS on the runway figure"
+     Write:      "the runway figure is not backed by anything in the model"
 2. Use your Write tool to write to OUTPUT_PATH exactly the coaching commentary
    as plain markdown — do NOT wrap it in JSON, do NOT escape anything (your
    Write tool handles newlines and quotes). WITHOUT a '## Coaching Commentary'

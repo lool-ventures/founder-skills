@@ -24,7 +24,11 @@ Fleet-wide:
   importance flag — reached founders in every skill's reports and were invisible to the check meant to
   catch them, which only looked at lowercase. deck-review no longer prints `[NICE_TO_HAVE]`, the
   coaching hand-off now carries readable warning names rather than codes, and
-  competitive-positioning's gate checks the whole report rather than only the coaching section. Internal files are now
+  competitive-positioning's gate checks the whole report rather than only the coaching section.
+- Sub-agents are now told, on the surface that measurably changes their behaviour, not to name our
+  files or internal labels in the evidence a founder reads, and not to write item ids, status values or
+  warning codes into coaching commentary. Every skill also states what to do with a warning it does not
+  recognise, rather than leaving it undefined. Internal files are now
   identified by extension (we emit `.json`/`.py`/`.html`/`.md`; founders send documents) rather than by
   a list of names that was missing 53 of the fleet's 82 artifacts. A URL path segment in a source
   citation is not treated as a file.

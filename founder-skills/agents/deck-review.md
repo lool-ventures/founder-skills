@@ -87,6 +87,14 @@ OUTPUT_PATH the JSON matching `checklist.schema.json`'s input format
 (`{"items": [...]}` — without `summary`; main thread's `checklist.py`
 computes the summary).
 
+Evidence prints VERBATIM in the founder's report, so name the source the way the
+founder knows it — never by our filename or a dispatch label. They saw their deck,
+not `deck_inventory.json` or `deck-best-practices.md`.
+  Instead of: "slide_reviews.json shows no competition slide"
+  Write:      "the deck has no competition slide"
+State what is true of the DECK.
+
+
 **Hard rules in this context:**
 
 - Write your output JSON ONLY to the exact `OUTPUT_PATH` from your prompt
