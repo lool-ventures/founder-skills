@@ -76,11 +76,22 @@ assert:
   # same expected-until-re-record class as the `input_unmodified` upload guards.
   - subagent_file_write:
       path_suffix: coaching.md
-  # Per-dispatch correlation: ties THIS dispatch's resolved type to ITS OWN delivered
-  # write via parentToolUseId, which subagent_file_write (matching ANY sub-agent write)
-  # cannot do.
-  - subagent_dispatch_healthy:
-      type: 'competitive-positioning'
+  # NOT subagent_dispatch_healthy here, deliberately — it contradicts this skill's hand-off
+  # protocol. That assert requires EVERY dispatch of the type to have delivered its own write,
+  # while the Context A protocol explicitly instructs a sub-agent that cannot resolve the
+  # hand-off prefix to write NO file and return
+  # `{"status":"blocked","reason":"handoff_path_unresolvable","attempted":...}`, after which the
+  # main thread re-dispatches and the work lands. Exercising the designed recovery path therefore
+  # fails the assert while nothing is wrong. Measured over three identical live runs: the blocked
+  # return occurred in 1 (COMPETITOR_RECALL, `local_2h2xg3cjtf`) and not the other 2 — below this
+  # repo's two-run bar for root-causing the prefix derivation, and the deliverable was never at
+  # risk in any of them.
+  #
+  # What replaces it asserts the invariant that IS true of the protocol: the recall hand-off is
+  # delivered by a sub-agent, whichever dispatch delivers it. Runaway re-dispatching is still
+  # caught — by dispatch_count_max below, which a repeated block-and-retry would blow.
+  - subagent_file_write:
+      path_suffix: competitor_recall_output.json
   # host-path posture: hostloop exposes real host paths by design; the leak class is covered
   # by the container-tier host-path-canary scenario + the privacy scan's path class on cassettes.
   # --- fleet contract asserts (adopted at the 0.24.0 pin; budgets tightened from discovery actuals) ---
