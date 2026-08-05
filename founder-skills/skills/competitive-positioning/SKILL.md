@@ -1246,6 +1246,15 @@ reason for sending files; it is not something to tell the founder — see the no
 every finished document you produced for them, and frame them as results you generated rather than
 something they asked to look at.
 
+**Then hand them over by name — one link per document.** Sending the files and handing them over are
+different acts: a founder looking at a row of cards cannot tell which document is which. Write each
+deliverable into your message as its own named link — in Cowork, `computer://` followed by the
+absolute path you just copied it to — labelled by what the document IS, in the founder's words:
+*"Here's your finished analysis: [the written report](…) — everything scored, with the evidence
+behind it; [the interactive version](…) has the charts."* "The files are above" is not a hand-over.
+This does not conflict with the never-name-a-file rule: the founder reads your label, never the path.
+Never paste a report's body into the message — link it.
+
 **Then offer the working data — once, in one sentence.** For example: *"If you want to keep the working
 data behind this — to pick it up later, or feed it into another analysis — say so and I'll send it as a
 single archive."* Make **no claim about whether anything persists**, in either direction: that depends on

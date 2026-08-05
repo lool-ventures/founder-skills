@@ -428,6 +428,14 @@ LEGACY_REFERENCES_CAP = 8 * 1024  # historical; references now ship whole
 # a deck naming no competitor; deferred recall candidates; cohort constituents; and a per-view
 # Gate-3 trade-off trigger. It also LOST the invented "Differentiation strength" band scale, which
 # described a field existing in no script or artifact.
+# All six raised ~800 B for the deliverable hand-over rule. The delivery step told the model to SEND
+# the files and stopped there, so how they were introduced was left to chance: measured across two
+# otherwise-identical deck-review runs, one wrote "[the written report](computer://…)" per document and
+# the other wrote "the files are above". Both called present_files, so the founder got the same cards —
+# but in the second, unlabelled. Which is also why the delivery assertion is a coin-flip rather than a
+# check of anything: it asserts a link the skill never asked for. The rule names each deliverable by
+# what it IS and links it, and states that this does not license naming internal files (the founder
+# reads the label, never the path) so it cannot be read as loosening the founder-text rules.
 SKILL_MD_CEILING: dict[str, int] = {
     # market-sizing raised to pin subagent_type on both fenced Task( calls: the prose above them already
     # instructed it, and the pseudocode four lines below omitted it on both — a type-less dispatch resolves
@@ -465,18 +473,18 @@ SKILL_MD_CEILING: dict[str, int] = {
     # market-sizing raised for the same rule on its CHECKLIST template, plus the coaching template's
     # "no item ids or warning codes" rule — a live run shipped three criterion ids and a filename into
     # the founder's report.
-    "market-sizing": 88_006,
+    "market-sizing": 88_767,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
     # --inputs so the scoring records a fingerprint of what it graded — without it that fingerprint is
     # null and staleness cannot be detected for this artifact at all.
-    "financial-model-review": 78_518,
+    "financial-model-review": 79_279,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
     # reference into context. The Available References entry now says it is background, not a read.
-    "ic-sim": 88_622,
+    "ic-sim": 89_383,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -484,7 +492,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # mid-engagement. Added its own fact-plus-remedy sentence instead: re-deriving the pure path vars is
     # safe, but RUN_ID is re-established from setup_run.py's printed run_id, never from re-running the
     # mint line.
-    "deck-review": 69_675,
+    "deck-review": 70_436,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -497,7 +505,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # cp raised for the CHECKLIST dispatch template's evidence-wording rule. A live run put artifact
     # filenames in 13 items' evidence with the rule present only in the agent body; the dispatch
     # template is the surface that measurably changed behaviour in the sibling skill.
-    "competitive-positioning": 116_956,
+    "competitive-positioning": 117_717,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -519,7 +527,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # cap-table +96 B: the script catalog claimed extract_cap_table.py emits cap_state.json. It does
     # not — that is cap_state.py's output at Step 4 — and the same file said so correctly two lines
     # earlier, so a model reading the catalog was told to expect an artifact that never appears.
-    "cap-table": 144_711,
+    "cap-table": 145_472,
 }
 
 
