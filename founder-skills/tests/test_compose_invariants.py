@@ -11,6 +11,7 @@ emits the contract-required keys.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -527,3 +528,65 @@ def test_cap_table_still_uses_the_keep_set_it_needs() -> None:
     assert "_ft.identifier_values( artifacts, include_map_keys=True" in collapsed or (
         "_ft.identifier_values(artifacts, include_map_keys=True" in collapsed
     ), "cap-table must opt into map-key harvesting — per_safe is keyed by instrument id (safe_conv)"
+
+
+# ---------------------------------------------------------------------------
+# An internal id must not stand in for a name the artifacts already carry
+# ---------------------------------------------------------------------------
+
+_NAME_KEYS = ("name", "investor_name", "label", "title", "company_name", "display_name")
+_ID_KEYS = ("id", "slug", "safe_id", "note_id", "view_id", "competitor_slug", "criterion_id")
+
+
+def _id_name_pairs(node: object, out: dict[str, str]) -> None:
+    """Collect {id: name} for every record carrying both."""
+    if isinstance(node, dict):
+        ident = next((str(node[k]) for k in _ID_KEYS if isinstance(node.get(k), str)), None)
+        name = next((str(node[k]) for k in _NAME_KEYS if isinstance(node.get(k), str)), None)
+        if ident and name and ident != name:
+            out.setdefault(ident, name)
+        for value in node.values():
+            _id_name_pairs(value, out)
+    elif isinstance(node, list):
+        for item in node:
+            _id_name_pairs(item, out)
+
+
+@pytest.mark.parametrize("skill", COACHING_SKILLS)
+def test_report_does_not_show_an_id_where_a_name_exists(skill: str, tmp_path: Path) -> None:
+    """A delivered cap-table report identified a SAFE as `safe_foobar` while instruments.json carried
+    `investor_name: "Foobar Capital LLC"`.
+
+    The founder-text scan structurally CANNOT catch this: the id is not a leaked token — cap-table
+    keeps instrument ids deliberately, for cross-artifact traceability — the defect is that a better
+    label existed and went unused. No scanner detects an absent improvement, so this asserts the
+    relationship instead.
+
+    Showing the id as WELL as the name is fine and is the intended fix; only the id ALONE is a defect.
+    """
+    fixture_dir = REPO_ROOT / "founder-skills" / "tests" / "fixtures" / skill
+    if not fixture_dir.exists():
+        pytest.skip(f"No fixtures at {fixture_dir.relative_to(REPO_ROOT)}")
+    work_dir = tmp_path / skill
+    work_dir.mkdir(parents=True)
+    drive_compose(skill, fixture_dir, work_dir)
+
+    pairs: dict[str, str] = {}
+    for artifact in work_dir.glob("*.json"):
+        try:
+            _id_name_pairs(json.loads(artifact.read_text(encoding="utf-8")), pairs)
+        except json.JSONDecodeError:
+            continue
+    assert pairs, f"{skill}: no id/name pairs in its artifacts — this scan would be vacuous"
+
+    report = (work_dir / "report.md").read_text(encoding="utf-8")
+    orphans = sorted(
+        ident
+        for ident, name in pairs.items()
+        if re.search(rf"(?<![\w.]){re.escape(ident)}(?![\w])", report) and name not in report
+    )
+    assert not orphans, (
+        f"{skill} report.md shows internal id(s) {orphans} without the name the artifacts carry for "
+        f"them ({ {i: pairs[i] for i in orphans} }). Lead with the name; keep the id in small print if "
+        f"it is needed to tie the row to another artifact."
+    )

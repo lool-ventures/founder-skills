@@ -9,6 +9,14 @@ SCOPE, stated so a green is not over-read:
   * Only TEXT NODES are scanned. Attribute values and script/style bodies are excluded — an
     `<option value="moat_count">` whose label reads "Moat Count" is not a leak, and JS identifiers are
     not founder-facing prose.
+  * THE EXPLORERS ARE BARELY COVERED, and pretending otherwise would be worse than not scanning them.
+    Measured text-node share of each page: visualize 1.4-4.4%, explore 0.1-0.2% (255-793 B of static
+    text in a 300 KB page). Their founder-visible content is rendered by JavaScript from the embedded
+    payload at runtime and never exists as a static text node, so this scan cannot see it. A
+    display-string scan of the payload was tried and abandoned: it cannot distinguish a display field
+    from a provenance map keyed by field name (`evidence_source.description == "agent_estimate"` is
+    not a label), and produced a false positive on the first page it examined. What covers that
+    surface today is the Cowork UI gate, i.e. a human reading the rendered page.
   * Unlike `report.md`, HTML output is not run through `substitute()`. This asserts that our PRODUCERS
     emit no internal token; it cannot rewrite one a sub-agent authors into free text.
 """
@@ -40,7 +48,14 @@ GENERATORS = [
     ("ic-sim", "visualize.py"),
     ("market-sizing", "visualize.py"),
     ("deck-review", "visualize.py"),
+    # The extracted-values review page — a page the founder opens and reads, and the 10th HTML
+    # generator in the fleet. It was missing from this list while every other one was covered.
+    ("financial-model-review", "review_inputs.py"),
 ]
+
+# Static-text floor per generator. NOT one number: a 300 KB explorer legitimately yields ~250 B of
+# text nodes, so a single floor either passes vacuously for explorers or fails honestly-thin pages.
+_TEXT_FLOOR = {"visualize.py": 700, "explore.py": 200, "review_inputs.py": 200}
 
 
 def _founder_text():  # type: ignore[no-untyped-def]
@@ -79,18 +94,25 @@ def test_generated_html_carries_no_internal_tokens(skill: str, generator: str) -
         work = Path(td)
         drive_compose(skill, FIXTURES / skill, work)
         out = work / "page.html"
-        result = subprocess.run(
-            [sys.executable, str(script), "--dir", str(work), "-o", str(out)],
-            capture_output=True,
-            text=True,
-        )
+        if generator == "review_inputs.py":
+            # Different CLI: positional inputs path, and --static is the Cowork branch (the
+            # --workspace branch backgrounds an HTTP server that never exits). --static takes the
+            # OUTPUT path, it is not a bare flag.
+            argv = [str(script), str(work / "inputs.json"), "--static", str(out)]
+        else:
+            argv = [str(script), "--dir", str(work), "-o", str(out)]
+        result = subprocess.run([sys.executable, *argv], capture_output=True, text=True)
         assert result.returncode == 0, f"{skill}/{generator} failed: {result.stderr[-400:]}"
         html = out.read_text(encoding="utf-8")
 
     # Non-vacuity: a trivially small page would pass without proving anything.
     assert len(html) > 2000, f"{skill}/{generator} produced only {len(html)}B"
     text = _text_nodes(html)
-    assert len(text) > 200, f"{skill}/{generator} yielded almost no text nodes — the stripper broke"
+    floor = _TEXT_FLOOR[generator]
+    assert len(text) > floor, (
+        f"{skill}/{generator} yielded {len(text)}B of text nodes, below its {floor}B floor — either the "
+        f"stripper broke or the page stopped rendering static text"
+    )
 
     keep = _cap_table_keep() if skill == "cap-table" else None
     found = ft.scan(text, extra_keep=keep)

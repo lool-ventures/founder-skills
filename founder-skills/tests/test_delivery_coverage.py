@@ -13,7 +13,13 @@ WHERE EACH IS COVERED
 
   B  fleet-wide, every embedder            test_dead_payload.py
   C  fleet-wide, report.md                 each compose's founder-text scan + test_compose_invariants
-  C  fleet-wide, generated HTML            test_html_founder_text.py
+  C  fleet-wide, generated HTML            test_html_founder_text.py — STATIC TEXT ONLY. Measured
+                                          text-node share: visualize 1.4-4.4%, explore 0.1-0.2%.
+                                          Explorer content is JS-rendered from the payload at runtime
+                                          and is NOT covered; the Cowork UI gate is what covers it.
+  C  id-shown-instead-of-name              test_compose_invariants.py — the class no token scan can
+                                          see, because the id is kept deliberately and the defect is
+                                          an absent improvement
   C  coaching commentary                   insert_coaching.py reports findings on insert
   A  upstream half, fleet-wide             test_dispatch_schema_drift.py (a field nobody consumes)
   A  downstream half, TWO SKILLS ONLY      verify_positioning.py, verify_review.py
