@@ -25,9 +25,16 @@ import pytest
 
 _SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 _AGENTS_DIR = Path(__file__).resolve().parent.parent / "agents"
+_SHARED_REFS_DIR = Path(__file__).resolve().parent.parent / "references"
 
 SKILLS = sorted(p.name for p in _SKILLS_DIR.iterdir() if (p / "SKILL.md").is_file())
 AGENTS = sorted(p.name for p in _AGENTS_DIR.glob("*.md"))
+
+# Documents that must never INSTRUCT a sub-agent to return the old JSON commentary envelope.
+# Deliberately excludes every SKILL.md: they describe the envelope the MAIN THREAD builds, with the
+# literal token, and correctly so — see financial-model-review/SKILL.md's md_to_commentary.py
+# paragraph. Forbidding it there would be wrong.
+COMMENTARY_ENVELOPE_GUARDED = sorted(_AGENTS_DIR.glob("*.md")) + [_SHARED_REFS_DIR / "skill-execution-model.md"]
 
 
 def _skill(name: str) -> str:
@@ -53,6 +60,47 @@ def test_all_six_skills_present() -> None:
     """Guard the parametrization itself — a renamed dir must not silently shrink coverage."""
     assert len(SKILLS) == 6, SKILLS
     assert len(AGENTS) == 6, AGENTS
+    # Same guard, same reason: an empty glob turns a parametrized test into `1 skipped` and
+    # exit 0 — measured. A guard that can silently delete itself is the vacuity class this
+    # whole file exists to prevent.
+    assert len(COMMENTARY_ENVELOPE_GUARDED) == 7, COMMENTARY_ENVELOPE_GUARDED
+    for doc in COMMENTARY_ENVELOPE_GUARDED:
+        assert doc.is_file(), f"guarded document is missing: {doc}"
+
+
+@pytest.mark.parametrize("doc", COMMENTARY_ENVELOPE_GUARDED, ids=lambda p: p.stem)
+def test_context_b_never_asks_for_the_json_commentary_envelope(doc: Path) -> None:
+    """No agent body or shared reference may ask the Context B sub-agent to return
+    `{"commentary_markdown": ...}`.
+
+    The sub-agent writes PLAIN MARKDOWN to OUTPUT_PATH; the main thread wraps it via
+    `md_to_commentary.py`. The old JSON form makes the model re-emit multi-KB of commentary into
+    its final message — the double-emission hazard the file hand-off exists to prevent, which
+    truncates. It reds nothing; it surfaces as a mangled report.
+
+    WHY WHOLE-FILE, AND WHY THIS FILE SET. Six per-skill tests used to assert this over a fixed
+    1000-char window (cap-table 2000) anchored in the Context B section. Measured, every one of
+    them had a blind zone of 42-73% of the section: inserting the token before the section's
+    closing heading left all six GREEN. A negative assertion bounded by a character count stops
+    checking once its target moves past the offset. Whole-file has no boundary to rename and no
+    fence to unterminate.
+
+    The file set is where the drift actually happens, not where it was previously guarded:
+    `git log --all -S 'commentary_markdown' -- founder-skills/agents/` is EMPTY — the token has
+    never been in an agent body. It drifted in `references/skill-execution-model.md`, which had
+    no guard at all until this test.
+
+    LIMITS, so nobody mistakes this for more than it is. It is lexical: it forbids the quoted
+    `"commentary_markdown"`, so prose naming the field in backticks still passes. And all six
+    agent bodies already carry the sentence one clarification away from tripping it ("A
+    main-thread script (not you) wraps the raw markdown in the JSON transport envelope") — if
+    someone names the key there, this fails loudly and the fix is to reword, not to widen.
+    """
+    assert '"commentary_markdown"' not in doc.read_text(encoding="utf-8"), (
+        f"{doc.name} names the OLD Context B transport. The sub-agent writes plain markdown to "
+        "OUTPUT_PATH and returns only a receipt; the main thread builds the JSON envelope via "
+        "md_to_commentary.py. Asking for the envelope back reinstates the double-emission hazard."
+    )
 
 
 # ---------------------------------------------------------------------------

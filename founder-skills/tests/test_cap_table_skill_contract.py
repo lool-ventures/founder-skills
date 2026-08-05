@@ -765,34 +765,42 @@ def test_spreadsheet_structure_detection_return_shape() -> None:
 
 
 def test_context_b_commentary_payload_keys() -> None:
-    """R2 coaching-transport fix: the Context B return payload defined in the
-    agent body is now just the receipt (status + output_path) — the
-    sub-agent WRITES raw markdown (not a commentary_markdown JSON key) to the
-    OUTPUT_PATH hand-off file and returns the {status, output_path} receipt;
-    the commentary_markdown envelope is built deterministically by the
-    main-thread md_to_commentary.py adapter, not the sub-agent. The headline
-    outcome fields SKILL.md's Main-Thread Return section presents are sourced
-    from coaching_payload + the insert_coaching.py receipt, not the
-    sub-agent."""
-    required_return_keys = {
-        "status",
-        "output_path",
-    }
+    """The Context B receipt is EXACTLY {status, output_path} — parsed, not substring-matched.
 
+    The commentary itself is written to OUTPUT_PATH as raw markdown; the JSON envelope is built by
+    the main thread's md_to_commentary.py adapter. That "no envelope here" half is now a fleet-wide
+    whole-file guard — see
+    test_handoff_contract_ratchet.py::test_context_b_never_asks_for_the_json_commentary_envelope.
+    It moved because the old form asserted it over a fixed 1000-char window (cap-table 2000) with a
+    measured 42-73% blind zone: inserting the token past the offset left every one of the six green.
+
+    What stays here is the per-skill SHAPE, and it PARSES the receipt rather than slicing it.
+    Slicing is what kept failing — an unguarded `find` used as a slice bound is the same vacuity
+    class as a fixed window. Measured on the old form: delete the receipt fence's closing backticks
+    and the extracted block silently grew 71 -> 155 chars with both keys still present, GREEN.
+    json.loads() cannot widen (a run-on block does not parse), and set equality catches a missing
+    key AND an extra one — including commentary_markdown re-entering the receipt itself.
+    """
     agent_text = AGENT_MD.read_text(encoding="utf-8")
     anchor = "#### 2. Write the commentary to OUTPUT_PATH, then return a receipt"
     start = agent_text.find(anchor)
     assert start != -1, f"{AGENT_MD.name} has no '{anchor}' section"
-    section = agent_text[start : start + 2000]
+    # Every find() below is checked before use as an index. `find` returns -1 on a miss, and -1 as
+    # a slice bound silently WIDENS the window rather than failing — measured 3109 -> 6364 chars.
+    end = agent_text.find("\n## ", start + len(anchor))
+    assert end != -1, f"{AGENT_MD.name}: the Context B section has no terminating heading"
+    section = agent_text[start:end]
 
-    for key in required_return_keys:
-        assert f'"{key}"' in section, (
-            f"{AGENT_MD.name} Context B commentary payload is missing key '{key}' "
-            f"(SKILL.md Step 11 stages it for insert_coaching.py)"
-        )
-    # commentary_markdown must NOT appear here anymore -- the sub-agent writes
-    # plain markdown, not a JSON envelope; the key belongs to the adapter now.
-    assert '"commentary_markdown"' not in section
+    fence = section.find("```json")
+    assert fence != -1, f"{AGENT_MD.name}: the Context B section has no ```json receipt fence"
+    close = section.find("```", fence + len("```json"))
+    assert close != -1, f"{AGENT_MD.name}: the ```json receipt fence is never closed"
+
+    receipt = json.loads(section[fence + len("```json") : close])
+    assert set(receipt) == {"status", "output_path"}, (
+        f"{AGENT_MD.name} Context B receipt keys are {sorted(receipt)}, expected "
+        "['output_path', 'status'] — the receipt is the ONLY thing the sub-agent returns"
+    )
 
     # SKILL.md Main-Thread Return section must still present the headline keys
     # (sourced from coaching_payload / the insert_coaching.py receipt)
