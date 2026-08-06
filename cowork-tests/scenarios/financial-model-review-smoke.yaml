@@ -23,8 +23,7 @@ prompt: |
   model: validate the inputs, check unit economics, stress-test runway, and produce the report.
 
   For the inputs the model doesn't state explicitly: current cash on hand is $1,500,000, monthly net
-  burn is about $120,000, and we want runway measured from 2026-06-01. When you show me the extracted
-  values for review, they look right — go ahead and proceed.
+  burn is about $120,000, and we want runway measured from 2026-06-01.
 
 answers:
   # Step-3.6 extracted-values STOP — proceed (the values look right; nothing to upload headlessly).
@@ -99,14 +98,16 @@ assert:
   - subagent_tool_absent: 'Bash'
   # Scripted answers reached the model non-error whenever a gate fired.
   - gate_answers_delivered: true
-  # ...and a gate MUST fire. Step 3.6 is unconditional — SKILL.md:568 "This is a STOP point — do not
-  # proceed to Step 4 until the founder responds", asked via AskUserQuestion. The committed cassette
-  # recorded ZERO gates, so `gate_answers_delivered` was passing vacuously AND the scripted answer
-  # above matched nothing. An earlier comment here called that "safe despite model-dependent gating":
-  # it is safe only in the sense of not flaking — it cannot distinguish "the skill asked and we
-  # answered" from "the skill silently stopped asking", which is the regression worth catching.
-  # Frozen-scenario note: this takes effect at the next RECORD, not on replay (a plain replay
-  # evaluates the assertions frozen in the cassette, not this file).
+  # ...and a gate MUST fire. Step 3.6 is a STOP point (SKILL.md:568, "do not proceed to Step 4 until
+  # the founder responds"), and this scenario's header declares TWO expected gates — so zero is a real
+  # signal here, unlike cap-table-lane3-freeform, which is gate-clean by design.
+  # MEASURED: a live run produced ZERO gates because the prompt used to end "When you show me the
+  # extracted values for review, they look right — go ahead and proceed." The skill read that as a
+  # standing pre-authorisation and skipped the round trip — defensible behaviour, but it made the
+  # scenario unable to exercise its own STOP point. That sentence is now removed; the numeric inputs
+  # stay (they answer gate 1), and the scripted answer below plus `on_unanswered: first` still make
+  # the run completable headlessly.
+  # Frozen-scenario note: takes effect at the next RECORD, not on replay.
   - gate_answer_count_min: 1
   # Usability budget: gates asked before value (observed + headroom, from discovery).
   - questions_count_max: 8
