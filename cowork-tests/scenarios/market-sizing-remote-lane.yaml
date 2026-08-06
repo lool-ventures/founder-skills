@@ -36,9 +36,10 @@ skills: [market-sizing]      # scope the staleness hash to this skill + shared r
 # other delivery contract. Read it as a committed REGRESSION GATE on the delivery model, not as a
 # discovery experiment.
 #
-# EXPECTED OUTCOME — REVISED AT HARNESS 1.17.0. The original prediction below was written against
-# 1.16.0 and is no longer correct; it is kept as a correction record because the cassette on disk was
-# recorded at 1.16.0 and still carries the old behaviour.
+# EXPECTED OUTCOME — REVISED AT HARNESS 1.17.0, and the cassette now matches it. The original
+# prediction was written against 1.16.0; the committed cassette has since been re-recorded at
+# `harnessVersion: 1.17.0` (format v11), so it no longer carries the pre-fix behaviour. Read the list
+# below as the current expectation, not as a correction record for a stale recording.
 #
 #   * `delivery_unobservable` (warn) FIRES — this is the signal to read. NEW IN 1.17.0.
 #   * `undelivered_deliverables` (warn) does NOT fire. It used to fire on every remote run, and that
@@ -57,9 +58,19 @@ skills: [market-sizing]      # scope the staleness hash to this skill + shared r
 # FORCED this key into every remote scenario; 1.17.0 removes that pressure. Leave it unset — setting it
 # now would suppress nothing this run produces, and would mask a real regression if the predicate broke.
 #
-# RE-RECORD NOTE: the committed cassette is `harnessVersion: 1.16.0`, so it froze a run whose warn set
-# asserts something false about delivery. Re-record this scenario on >=1.17.0 (rerecord.sh now floors
-# there) before treating its warn set as evidence.
+# RE-RECORD NOTE — THE 1.17.0 DEBT IS DISCHARGED. The committed cassette is `harnessVersion: 1.17.0`
+# (measured 2026-08-06); the spurious-warn reason to re-record is spent, so do not pay for it again.
+# Two corrections to how that note was framed, so they are not re-derived:
+#   * A cassette does NOT freeze a warn set. Measured across all 21 committed cassettes: no warn key
+#     appears in any of them. A recording freezes EVENTS; the verdict/warn set is recomputed at replay
+#     time by whichever harness runs it. What a stale recording freezes is the agent BEHAVIOUR.
+#   * `replay` does not evaluate the delivery signals at all — it reports "skipped ...
+#     filesystem/egress/expect_denied assertions (live-only)". The `delivery_unobservable` expectation
+#     above is therefore a LIVE-run claim that replay can neither confirm nor refute.
+# ORDINARY STALENESS REMAINS, and it is not cosmetic: at harness 1.19.0 `replay --assert-from` on this
+# cassette HARD-FAILS on skill-source drift (both the shared root and skills/market-sizing changed
+# since record), alongside a baseline move 1.24012.9 -> 1.25927.0. That is the fleet-wide skillHash
+# debt, cleared only by the next full re-record pass — not by anything specific to this lane.
 #
 # THREE ASSERTION KEYS CANNOT APPEAR ON THIS LANE — `user_visible_artifact`, `present_files_called`,
 # and `no_scratchpad_leak` are rejected at scenario-LOAD time (and flagged by `lint` as
