@@ -5,7 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.7.0] - 2026-08-06 — Everything it found, in your words
+
+### Highlights
+
+Three themes.
+
+**The reports are written in your language.** Across all six skills, the internal names our own code
+uses — status values, field names, checklist item ids, warning codes — no longer appear in what you
+read. They are rendered as English, from one shared policy, in the report, the visual report and the
+coaching commentary alike. The exceptions are deliberate: an identifier you can match against your own
+paperwork, like a SAFE's id or a scenario's name, is left exactly as it is.
+
+**Analysis you already paid for now reaches the page.** A recurring fault across competitive
+positioning, financial model review and cap-table was work that was computed, carried as far as the
+interactive explorer, and then rendered nowhere — positioning-map axis rationales, claim verdicts,
+competitor-set verdicts, investor talking points, the review's own score. Those now appear. Competitive
+positioning also gained a check that runs before hand-over: if the report does not show what the
+analysis found, the run does not hand over.
+
+**Fewer silent guesses.** Geography is asked for when your materials do not state it, instead of being
+read off a currency symbol or off where the founders used to work — it decides which regulatory and
+benchmark guidance the whole review is graded against. A market figure in another currency now needs an
+exchange rate you supply, recorded with its date and source, or the run stops rather than converting
+from memory. And a step that rejects its input says so and stops, instead of overwriting its own
+finished work with a blank and reporting success.
+
+Finished documents are also handed over properly now: each one named for what it is and linked
+individually, rather than arriving as an unlabelled row of files.
+
+### Added
+
+- **competitive-positioning:** the positioning reality-check triggers are now evaluated from the
+  scored map itself rather than worked out afresh each run, and "not evaluated" (too few competitors
+  for a quartile to mean anything) is reported distinctly from "did not fire".
+- **competitive-positioning:** a pre-delivery check that the report actually shows what the analysis
+  found — axis rationales, claim verdicts, the competitor-set verdicts, the explorer's scored layer —
+  that nothing internal reached you, and that the artifacts agree with each other. A run with gaps
+  does not hand over.
+
+### Changed
+
+- All six skills render internal enum and field names as English ("switching costs evidence source"
+  rather than `switching_costs evidence_source`), from one shared policy. Stable identifiers a founder
+  can cross-reference against their own documents — a SAFE's id, a scenario's name — and diagnostic
+  codes are deliberately left unchanged. cap-table's own label map remains the authority for its
+  vocabulary.
+- Reports are checked for internal tokens as they are composed, and the coaching commentary is checked
+  as it is inserted; findings are reported without blocking a run.
+- **competitive-positioning:** warning text now names competitors by display name rather than internal
+  slug.
+- **competitive-positioning:** the trade-off trigger for the positioning reality check now fires on a
+  strong-on-one-axis position (top third) rather than only a top-2 one, so it catches the shape it was
+  added for.
+- All six skills locate their own installation once per run, deterministically, instead of searching
+  for it again at every step — so a machine carrying more than one copy can no longer mix versions
+  mid-run. Duplicates are named when found.
 
 ### Fixed
 
@@ -35,10 +90,9 @@ Fleet-wide:
 - Sub-agents are now told, on the surface that measurably changes their behaviour, not to name our
   files or internal labels in the evidence a founder reads, and not to write item ids, status values or
   warning codes into coaching commentary. Every skill also states what to do with a warning it does not
-  recognise, rather than leaving it undefined. Internal files are now
-  identified by extension (we emit `.json`/`.py`/`.html`/`.md`; founders send documents) rather than by
-  a list of names that was missing 53 of the fleet's 82 artifacts. A URL path segment in a source
-  citation is not treated as a file.
+  recognise, rather than leaving it undefined. Our own working files are now recognised by kind rather
+  than by a hand-kept list that had fallen well behind, and a web address in a citation is no longer
+  mistaken for one.
 - **financial-model-review:** unit economics and runway fingerprinted their inputs AFTER computing, and
   the unit-economics computation modifies what it was given — so the recorded fingerprint described a
   document that never existed on disk and the verifier reported staleness on a current artifact.
@@ -46,18 +100,17 @@ Fleet-wide:
   cheaper than forging it, and silent. An absent record is now an error, its remedy is stated per
   artifact (the checklist must be re-judged, not re-piped), and it names the report re-run that a stale
   producer artifact also invalidates.
-- **financial-model-review:** correcting a figure marked artifacts stale even when none of their numbers
-  would change — a false alarm with no remedy, which is what led one run to edit an artifact rather than
-  re-run it. The check now rebuilds the artifact from the current inputs and reports it only if the
-  result actually differs.
+- **financial-model-review:** correcting a figure marked the review stale even when none of its numbers
+  would change — a false alarm with no remedy. The check now rebuilds from your corrected inputs and
+  reports it only if the result actually differs.
 - Sub-agent evidence cited our artifact filenames ("inputs.json reports actuals separated: false") and
   that text prints verbatim in the report. Evidence now states what is true of the company or model;
   financial-model-review and competitive-positioning check it at their delivery gate.
-- A step that rejected its input said so nowhere. It overwrote its own finished work with an empty
-  placeholder and still reported success, so the report rendered an empty section and the only
-  warning pointed at a symptom rather than the cause. Six steps across four skills behaved this way.
-  Each now leaves existing work untouched, reports the problem, and stops; the report refuses to
-  present an analysis one of its steps never produced.
+- A step that rejected its input said so nowhere: it overwrote its own finished work with an empty
+  placeholder and still reported success, so a section of the report came back blank and the only
+  warning pointed at a symptom rather than the cause. Across four skills, each such step now leaves
+  existing work untouched, reports the problem and stops — and the report refuses to present an
+  analysis one of its steps never produced.
 
 **cap-table:**
 
@@ -91,8 +144,6 @@ Fleet-wide:
   wording in the moat section.
 - Differentiation verdicts and moat statuses printed as raw enum tokens; competitors were named by
   internal slug.
-- A deck with no competition slide had nothing to grade. It is now recorded explicitly, graded `warn`,
-  and kept in the score.
 - A competitor development older than the 18-month window failed the whole landscape step.
   Out-of-window moves are retained and reported instead; the checks against invented events are
   unchanged and still stop the run.
@@ -121,8 +172,8 @@ Fleet-wide:
 - A skipped checklist item explained itself by naming the internal gate field
   (`Auto-gated: geography_gate '[...]'`); it now states the reason.
 - An output computed before the founder's corrections were applied could not be distinguished from one
-  computed after. Each output now records a fingerprint of the inputs it used, and `verify_review.py`
-  compares it against the inputs as they stand.
+  computed after. Each output now records a fingerprint of the inputs it used, and the completeness
+  check compares it against the inputs as they stand.
 - Checklist scoring recorded no fingerprint of the inputs it graded, so staleness was undetectable for
   it; the producer pipe now passes the inputs it was scored against.
 
@@ -151,33 +202,6 @@ Fleet-wide:
   (`partially_supported`, `agent_estimate`, `customer_count`); the checklist listed internal filenames.
 - Each source's quality tier and segment match, and each assumption's source attribution, were
   collected and never shown — leaving no way to weigh a figure being defended.
-
-### Added
-
-- **competitive-positioning:** `gate3_triggers.py` evaluates the positioning reality-check triggers
-  from the scored map instead of the model working the arithmetic out per run, and distinguishes "not
-  evaluated" (too few competitors for a quartile to mean anything) from "did not fire".
-- **competitive-positioning:** `verify_positioning.py`, a pre-delivery gate. It checks that the report
-  shows what the artifacts contain — axis rationales, claim verdicts, the competitor-set verdicts, the
-  explorer's scored layer — and that no internal token reached the founder, plus cross-artifact
-  consistency. A run with gaps does not hand over.
-
-### Changed
-
-- All six skills render internal enum and field names as English ("switching costs evidence source"
-  rather than `switching_costs evidence_source`), from one shared policy. Stable identifiers a founder
-  can cross-reference against their own documents — a SAFE's id, a scenario's name — and diagnostic
-  codes are deliberately left unchanged. cap-table's own label map remains the authority for its
-  vocabulary.
-- Reports are checked for internal tokens as they are composed, and the coaching commentary is checked
-  as it is inserted; findings are reported without blocking a run.
-- **competitive-positioning:** warning text now names competitors by display name rather than internal
-  slug.
-- **competitive-positioning:** the trade-off trigger for the positioning reality check now fires on a
-  strong-on-one-axis position (top third) rather than only a top-2 one, so it catches the shape it was
-  added for.
-- All six skills resolve their plugin root once per run via `select_plugin_root.py`, deterministically,
-  instead of re-running a filesystem search in each shell. Duplicate installations are named on stderr.
 
 ## [0.6.0] - 2026-08-02 — Fits more companies, reports more honestly
 
