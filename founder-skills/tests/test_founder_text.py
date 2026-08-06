@@ -15,7 +15,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "founder-skills" / "scripts"))
 
-import _founder_text as ft  # noqa: E402
+import _founder_text as ft  # type: ignore[import-not-found]  # noqa: E402  # sys.path-injected above
 
 # --- type 1: private enums -> humanize ---------------------------------------
 

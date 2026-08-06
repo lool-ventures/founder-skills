@@ -181,7 +181,8 @@ def _cp_compose(tmp_path: Path, mutate: object = None) -> str:
 
 
 def _read(d: Path, name: str) -> dict:
-    return json.loads((d / name).read_text(encoding="utf-8"))
+    loaded: dict = json.loads((d / name).read_text(encoding="utf-8"))
+    return loaded
 
 
 def _write(d: Path, name: str, obj: dict) -> None:

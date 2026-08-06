@@ -1493,6 +1493,7 @@ def test_visualize_survives_a_malformed_fx_block() -> None:
     The HTML is the deliverable; failing to render it over a cosmetic disclosure would
     trade a missing sentence for a missing report.
     """
+    bad: dict
     for bad in ({"conversions": []}, {"conversions": "nope"}, {"conversions": [None, 42]}, {}):
         arts = _all_artifacts()
         sizing = _sizing_with_fx()

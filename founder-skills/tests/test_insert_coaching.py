@@ -20,6 +20,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -495,9 +496,11 @@ def test_receipt_reports_internal_tokens_in_commentary(tmp_path: Path) -> None:
     )
     rc, receipt, err = run_insert(["--report", str(report), "--marker", marker, "--commentary-file", str(payload)])
     assert rc == 0, err
+    assert receipt is not None
     assert receipt["status"] == "inserted"
-    assert receipt["founder_text_findings"]["enums"] == ["moat_count"]
-    assert receipt["founder_text_findings"]["filenames"] == ["model_data.json"]
+    findings = cast(dict[str, object], receipt["founder_text_findings"])
+    assert findings["enums"] == ["moat_count"]
+    assert findings["filenames"] == ["model_data.json"]
 
 
 def test_commentary_is_inserted_verbatim_despite_the_scan(tmp_path: Path) -> None:
