@@ -31,7 +31,16 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# FLOOR: >=1.18.0 with no upper bound. Recording is the one operation where the harness version is
+# FLOOR: >=1.19.0 with no upper bound. Recording is the one operation where the harness version is
+#   * 1.19.0 is required NOT for the recording itself (1.19.0 moves no baseline, no spawn env, no
+#     prompt — `git diff v1.18.0..v1.19.0 -- baselines/` is empty and `src/` touches only scan /
+#     mutate / cassette / chat-result / execute / types, none on a spawn path). It is required for
+#     THIS SCRIPT'S OWN privacy step below, which expands `${ALLOW[@]}`. That array no longer carries
+#     `--allow-host-inventory`: 1.19.0 exempts a mounted plugin's own agents/skills automatically, so
+#     the regex was deleted. On a 1.18.0 CLI the exemption does not exist and the same array reds on
+#     240 non-findings (MEASURED via `npx cowork-harness@1.18.0`: exactly 240, exit 1). A stale global
+#     CLI therefore clears an older guard and then fails loudly and WRONGLY — which is why the guard
+#     moved rather than the allowlist keeping a redundant entry.
 #   * 1.18.0 default baseline is desktop-1.25927.0 (agent ELF 2.1.221), and the proactive
 #     skill-suggest gate now models ON — a SERVER-SIDE rollout, so it reads ON regardless of Desktop
 #     version. `suggest_skills` therefore declares its proactive description plus an optional
@@ -119,8 +128,8 @@ echo "cowork-harness $ver"
 # themselves are unchanged and still `::warning::`. Parse the JSON envelope instead.
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
 # `-gt 1` first so a future 2.x passes — a bare minor check would FATAL on 2.0.0.
-{ [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 18 ]; }; } \
-  || { echo "FATAL: need >=1.18.0 (have $ver) — see the floor note above"; exit 1; }
+{ [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 19 ]; }; } \
+  || { echo "FATAL: need >=1.19.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi
@@ -259,6 +268,11 @@ CONC="${COWORK_RERECORD_CONCURRENCY:-4}"
 record_one() {
   local n="$1"
   local new_fixture=()
+  # NOTE: `--allow-host-inventory-fixture` (here) and `--allow-host-inventory <regex>` (a
+  # verify-cassettes finding suppressor) are DIFFERENT flags — see the harness skill's Gotcha 25.
+  # This one is record-time consent to write a host-inheriting recording into a repo-visible path.
+  # The verify-time one was DELETED from ALLOW at 1.19.0 (see the floor note above); do NOT read that
+  # deletion as a reason to drop this. Passing either where the other belongs fails as unknown-flag.
   [ -f "cassettes/$n.cassette.json" ] || new_fixture=(--allow-host-inventory-fixture)
   cowork-harness record "scenarios/$n.yaml" --out "cassettes/$n.cassette.json" "${new_fixture[@]}" \
     || { echo "RECORD FAILED: $n"; return 1; }

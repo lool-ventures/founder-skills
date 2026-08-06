@@ -2,14 +2,32 @@
 
 Token-free **replay** PR gate (`.github/workflows/cowork-replay.yml`) over committed cassettes that
 exercise the founder-skills skills under Claude Cowork's runtime via
-[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (**floor `1.17.0`, tracking forward
-within `1.x`**; see the note). Recording is **live** (needs the staged agent + Docker);
-replay/verify are **token/agent-free** (stock CI).
+[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (**floor `1.19.0` on the `replay`
+job, tracking forward within `1.x`**; see the note). Recording is **live** (needs the staged agent +
+Docker); replay/verify are **token/agent-free** (stock CI).
 
-> **Current: cowork-harness `1.17.0` (FLOOR, not pin).** A floor is applied **per CLI site**, only where
-> a step depends on a version. **Every step in the `replay` job now carries `version: "^1.17.0"`**, and
-> the standalone install is `npm i -g cowork-harness@^1.17.0` — a floor that **fails loud** below 1.17.0
-> and cannot cross a future `2.0`. Node **22+** as of 1.14.0 (20 is EOL; `doctor` fails on it).
+> **Current: cowork-harness `1.19.0` (FLOOR, not pin).** A floor is applied **per CLI site**, only where
+> a step depends on a version — the sites are NOT uniform and must not be bumped as a block:
+>
+> - **The four `version:` inputs in the `replay` job carry `^1.19.0`.** They are LINT, PRIVACY,
+>   STALENESS and REPLAY — enumerate with `grep -n 'version: "' ../.github/workflows/cowork-replay.yml`
+>   rather than from prose. The **email canary is not among them**: it is a bare `run:` step with no
+>   `version:` input, riding the CLI the preceding Action step installed.
+> - **The `skill-static-analysis` job's standalone install stays `npm i -g cowork-harness@^1.17.0`.**
+>   It runs `record --dry-run` + `lint`, expands no `${ALLOW[@]}`, and uses no flag newer than 1.17.0.
+>   A floor should express a requirement; that step has none. (It resolves to the newest 1.x anyway.)
+>
+> `^` **fails loud** below the floor and cannot cross a future `2.0`. Node **22+** as of 1.14.0 (20 is
+> EOL; `doctor` fails on it).
+>
+> **Why 1.19.0 on the `replay` job.** The privacy gate's floor is load-bearing, not cosmetic. The
+> allowlist no longer passes `--allow-host-inventory`: 1.19.0 exempts a mounted plugin's own
+> `agents[]`/`skills[]` automatically (derived from the cassette's own `plugins[]`, so it applies to
+> recordings made before the release — no re-record). On a 1.18.0 CLI that exemption does not exist and
+> the same allowlist reds on **240 non-findings** — measured, `npx cowork-harness@1.18.0` → exactly
+> 240, exit 1. Unlike previous bumps, a resolved-older CLI here does not degrade quietly; it fails
+> loudly and wrongly. 1.19.0 also adds the `mutation` JSON envelope that the `--mutate` coverage
+> diagnostic reads.
 >
 > **Why 1.17.0 and not 1.16.0.** Two independent reasons, one of which only bites the remote lane:
 > `undelivered_deliverables` fired on **every** `lane: remote` run before 1.17.0 — the `presentedFiles`

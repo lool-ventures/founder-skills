@@ -44,7 +44,7 @@
 - `founder-skills/tests/cowork_async_subagent_filter.py` — Cowork sub-agent tool-name compatibility helper (skill-quality CI; v0.4.0-regression detector)
 - `cowork-tests/leak_scan.py` — Shared detector for founder-facing "internal plumbing" leaks in assistant narration. Ten classes: nine syntactic (script names, `*.py`, `--flags`, `$vars`, exit codes, `W_`/`E_` codes, JSON, step/route labels, ALLCAPS-with-underscore) plus `plumbing_verb`, which is semantic. Reads a cassette or a run dir's `events.jsonl` — point it at the FILE, since a directory glob finds only `*.json` and reports a silent false-clean.
 - `founder-skills/tests/test_founder_facing_leaks.py` — Ratchet over `leak_scan.py` across the committed cassettes. **Gates "no NEW leaks beyond `BASELINE`", not zero** — the cassettes predate the narration rule. Ratchet the constant DOWN after a re-record; never raise it.
-  - **Scope warning — a green here still does not mean the narration is clean, but the gap is now narrower than this note used to claim.** Nine of the ten classes match on FORM (backticks, `--flags`, `$vars`, `*.py`, exit codes, `W_`/`E_` codes, JSON, a literal route-label list, ALLCAPS-with-underscore). The tenth, `plumbing_verb`, is SEMANTIC: it targets the verb+object construction that only appears when narrating internals, so "gating the hand-off", "piping it through the producer" and "dispatching the sub-agent" ARE caught (measured: 3 such leaks, and zero syntactic ones, in one live run's `events.jsonl`). **What still passes clean is internal vocabulary with no plumbing verb** — "canonical artifacts", "schema-drift warning", "gap-detection pass", bare `STOP`/`BLOCKED` (no underscore), and "Gate 1 passes". That residue is the live-run/hand-read surface; it is smaller than "every plain-English mention". Do not fix it by enumerating more words — `leak_scan.py`'s own design note says an enumerated blocklist is unwinnable, which is why the classes are class-based. **Superseded advice, recorded so it is not re-derived:** this note used to say never to extend the existing classes because doing so "raises the measured count on the committed cassettes and reds the suite". That was tried and is false — the ten-class total over the committed cassettes is **61 against `BASELINE = 144`**, green, because the nine-class count had already fallen far below its own baseline.
+  - **Scope warning — a green here still does not mean the narration is clean, but the gap is now narrower than this note used to claim.** Nine of the ten classes match on FORM (backticks, `--flags`, `$vars`, `*.py`, exit codes, `W_`/`E_` codes, JSON, a literal route-label list, ALLCAPS-with-underscore). The tenth, `plumbing_verb`, is SEMANTIC: it targets the verb+object construction that only appears when narrating internals, so "gating the hand-off", "piping it through the producer" and "dispatching the sub-agent" ARE caught (measured: 3 such leaks, and zero syntactic ones, in one live run's `events.jsonl`). **What still passes clean is internal vocabulary with no plumbing verb** — "canonical artifacts", "schema-drift warning", "gap-detection pass", bare `STOP`/`BLOCKED` (no underscore), and "Gate 1 passes". That residue is the live-run/hand-read surface; it is smaller than "every plain-English mention". Do not fix it by enumerating more words — `leak_scan.py`'s own design note says an enumerated blocklist is unwinnable, which is why the classes are class-based. **Superseded advice, recorded so it is not re-derived:** this note used to say never to extend the existing classes because doing so "raises the measured count on the committed cassettes and reds the suite". That was tried and is false — the ten-class total over the committed cassettes is **61 against the then-current `BASELINE = 144`**, green, because the nine-class count had already fallen far below its own baseline. (`BASELINE` is now **64** — ratcheted 2026-08-04. Read the constant from `test_founder_facing_leaks.py:40`, never from this line.)
 - `founder-skills/tests/compose_invocations.py` — Per-skill compose-script invocation registry (skill-quality CI)
 - `founder-skills/tests/test_cowork_async_subagent_filter.py` — Helper unit tests
 - `founder-skills/tests/test_cowork_invariants.py` — Per-agent persistence + dangerous-tool declaration invariants
@@ -212,6 +212,13 @@ Measured workarounds, current through **1.15.0**. Full detail in
 `docs/internal/2026-07-27-cowork-harness-issues.md`, plus the per-release adoption plans
 (`docs/internal/2026-07-31-cowork-harness-1.14.0-adoption-plan.md` and `…-1.15.0-…`).
 
+- **`critique`'s tier prerequisites were misstated upstream until 1.19.0 backfilled the correction.**
+  `critique --help` and `docs/critique.md` said the `container` and `hostloop` tiers need an
+  authenticated `claude` CLI on PATH. They do not: they need a **token in the environment or `.env`**
+  (`CLAUDE_CODE_OAUTH_TOKEN`, or `ANTHROPIC_API_KEY` as a CI fallback), because the graded turns run the
+  staged agent binary, not the host CLI. It is the **evaluator passes** that require `claude` on PATH,
+  overridable with `COWORK_HARNESS_CLAUDE_BIN`. (Our token lives in `cowork-tests/.env`, discovered from
+  CWD only.)
 - **Evidence budgets — FIXED UPSTREAM, and the old advice is now backwards.** `critique` used to cap
   evidence at 64 KiB per SKILL.md and **8 KiB total** across all `references/`, silently, which cost LOST
   findings (`not-adjudicable`, never a false positive). It now ships skill-authored content **whole** —
@@ -318,27 +325,68 @@ Measured workarounds, current through **1.15.0**. Full detail in
   **zero**, because an explicit anchor lands inside the harness's own wrapping. An over-tight regex
   fails safe (findings stay); an over-loose one disarms a whole class with no signal — so re-count
   findings after any edit, and confirm `canary/email-canary.cassette.json` still flags `[email]`.
-- **`host-inventory` (harness 1.18.0) flags OUR OWN plugin's agents, and that is a false positive.**
-  The class catches a recording machine's MCP servers / account / agents frozen into a cassette by a
-  host-inheriting tier — which is our tier. Measured at adoption: **240 findings, all
-  `agents[] — founder-skills:<skill>`**, i.e. the six agents of the plugin under test. They are the
-  fixture: the class flags an `agents[]` entry outside the built-in roster, and a mounted plugin's own
-  agents are outside it by construction. The three predicates that would mean a **real** leak —
-  `mcp_servers[].name`, `account.email`/`.organization`/`.subscriptionType`, and a `mcp__<server>__…`
-  tool naming a foreign server — return **NONE** across all 21. `--allow-host-inventory
-  'founder-skills:.*'` is scoped deliberately; a bare `.*` would turn a privacy backstop into
-  decoration. Not covered by the class at all (upstream's `docs/cassette.md`): the command / skill /
-  plugin catalogs and command descriptions. A green is a backstop, not proof.
-- **`replay --mutate`'s count has a hidden denominator — do not read it as an assertion-failure rate.**
-  It reports e.g. `50/50 perturbation(s) CAUGHT BY NOTHING`, which parses as "50 of your 50 fields".
-  It is not: **50 is a per-cassette sample cap** (inferred — 20 cassettes report `50/50` and the one
-  with fewer values reports `35/35`; the cap is stated in neither `--help`, the changelog, nor
-  `docs/`). Aggregated blindly our corpus reads **1,020/1,020 caught by nothing**, which sounds like
-  our 42 `artifact_json` assertions do nothing. Checked directly on `cap-table-acquisition`: the
-  sampler perturbed `consideration_pct` in `coverage_result.json` and never touched either asserted
-  path. The honest reading is **coverage thinness (~2.3 asserted values per scenario), not assertion
-  failure**. It is reporting-only by design and is deliberately NOT a CI gate; most sampled values are
-  per-run `handoff/` internals that would be wrong to assert on.
+- **`host-inventory`: 1.18.0 flagged our own plugin's agents; 1.19.0 fixed it, and the allow entry is
+  GONE.** The class catches a recording machine's MCP servers / account / agents / skills frozen into a
+  cassette by a host-inheriting tier — our tier. At 1.18.0 it reported **240 findings, all
+  `agents[] — founder-skills:<skill>`**: the six agents of the plugin under test, i.e. the fixture. We
+  suppressed them with `--allow-host-inventory 'founder-skills:.*'`. **1.19.0 exempts them
+  automatically** — an `agents[]`/`skills[]` entry namespaced `<plugin>:<name>` whose plugin the same
+  recording declares in `plugins[]` is not host inventory. The exemption is derived from the cassette,
+  so it applied to every existing recording with **no re-record**: measured 240 → 0, with
+  `verify-cassettes` output byte-identical to the run that still carried the allow. The entry was
+  **deleted**, not kept: a suppression that suppresses nothing invites misreading the gate.
+  **This makes the CLI floor load-bearing** — on 1.18.0 the current allowlist reds on 240 non-findings
+  (measured, `npx cowork-harness@1.18.0`: exactly 240, exit 1). Floor every consumer of
+  `privacy-allowlist.sh` at `>=1.19.0`. **Standing risk:** the green now depends on `plugins[]` carrying
+  `founder-skills` in every future recording — strip `plugins[]` from one cassette and it alone yields
+  18 findings. If a re-record ever reds this gate en masse on our own namespace, the cause is a missing
+  `plugins[]` declaration, not a leak; do not re-add an allow.
+  **New axis (1.19.0): `skills[]`**, same two exemptions (the agent's built-ins — currently just
+  `deep-research` — plus a declared plugin's own). All 21 cassettes carry a populated `skills[]`; 7
+  names, 0 flagged. **That zero is structural, not earned**: the axis targets the `protocol` tier, where
+  the harness keeps the operator's real `CLAUDE_CONFIG_DIR`; we record at hostloop, which does not. A
+  population count does NOT prove the axis works — every name we carry is exempt by construction, so a
+  no-op would produce the same zero. Non-vacuity was confirmed by **probe**: inject a foreign skill name
+  into a cassette copy and it fires. Note the scan is tier-gated, so `skills[]` is *present* in 21/21 but
+  *read* in 20/21 (`host-path-canary` records at `container`).
+  The three predicates that would mean a **real** leak — `mcp_servers[].name`,
+  `account.email`/`.organization`/`.subscriptionType`, and a `mcp__<server>__…` tool naming a foreign
+  server — return **NONE** across all 21. Not covered by the class (upstream's `docs/cassette.md`): the
+  **command and plugin** catalogs and command descriptions. (The *skill* catalog used to be on that list
+  and no longer is — see the new axis above. `plugins[].name` is deliberately not an axis: it is the
+  harness's own declaration channel.) A green is a backstop, not proof.
+- **`verify-cassettes` opens with a per-class rollup (1.19.0) — and it counts INFORMATIONAL classes
+  too.** e.g. `findings by class: unscanned 54`. Our current corpus reads exactly that and still
+  **exits 1** — from staleness + scenario-drift, not privacy. A non-empty header is not a privacy
+  failure; a header showing only `unscanned` means the PII gate is clean (the CI privacy step skips
+  both non-PII classes and exits 0). The rollup is additive — every per-file row still prints. JSON
+  consumers already had `findings[].cls`.
+- **`replay --mutate` SAMPLES — never read its ratio as an assertion-failure rate.** It reports e.g.
+  `50/50 perturbation(s) CAUGHT BY NOTHING`, which parses as "50 of your 50 fields". It is not.
+  **There are TWO caps, not one: 10 per file and 50 in total, and the PER-FILE cap is applied first.**
+  (The single-cap reading is what produced a wrong "`--mutate-max-total 25000` perturbs everything"
+  claim — measured, it yields 2,567 of 21,478, because per-file still binds.) On our corpus **19**
+  cassettes report `50/50` and **two** (`cap-table-fast-assess`, `host-path-canary`) report `35/35`;
+  1,020 = 19×50 + 2×35. As of 1.19.0 the caps are documented in `--help`, the changelog **and**
+  `docs/`, and the report appends the eligible total and names the binding cap:
+  `(sampled 35 of 55 eligible value(s); per-file cap 10 reached on 2 file(s))`. **`55` is the eligible
+  total, NOT the ratio's denominator** — reading the new parenthetical back into the ratio is the same
+  conflation in a new costume. JSON carries it as `mutation` = `{sampled, eligible, truncatedBy, caps,
+  uncaught}`; aggregate over that, not over stderr text.
+  Measured fleet-wide: **1,020 sampled of 21,478 eligible = 4.75% coverage**, all uncaught. That is
+  **coverage thinness, not assertion failure**. Of the uncaught, **31%** sit under `handoff/` — the
+  older note here said "most", which was generalized from one cassette and is false (range 0 to 31 of
+  50). Scoped to the delivered report (`--mutate-include '**/report.json' --mutate-max-per-file 500`)
+  the pass is **exhaustive**, not sampled: **1,221 of 1,221 values across 16 scenarios guarded by no
+  *value* assertion** (some scenarios do carry `exists: true` asserts, which are structurally
+  insensitive to a perturbation). Reporting-only by design and deliberately NOT a CI gate — a count
+  ratchet over `report.json` would red on every legitimate re-record.
+  Two glob traps: the matcher is **anchored and case-sensitive**, so `--mutate-exclude 'handoff/**'`
+  (the form upstream's own `--help` and `docs/` print) matches **nothing** against our `outputs/…`-
+  prefixed paths — use `'**/handoff/**'` (measured 1,236 → 1,141 on `cap-table-acquisition`); and
+  `'**/report.json'` cannot match a root-level `report.json`. Also: `report.json` is committed
+  **body-less** on `deck-review-smoke` and `ic-sim-contested`, so it is neither mutatable nor
+  `artifact_json`-assertable there.
 - **`--fidelity cowork`, as of harness 1.14.0.** The default is `container` — a *different* tier from
   what the cassettes record at, so an unqualified critique is not a production-parity grade. `cowork` was
   refused until 1.14.0 (the old advice here was `hostloop`, always); it is now accepted and is the better

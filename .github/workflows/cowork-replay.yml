@@ -25,17 +25,25 @@ name: cowork-replay
 #     an older, unrelated reason: it passes
 #     `--min-severity`, which needs >=1.11.0. Without that floor a
 #     `latest` that resolved older would not degrade — it hard-fails, exit 2, "unrecognized arguments".
-#     ALL FOUR now carry `^1.18.0`, and each for its own reason — this is not a blanket bump:
-#       - Privacy gate: the allowlist passes `--allow-host-inventory` (1.18.0). An older CLI exits 2.
-#       - Email canary: reuses the same `${ALLOW[@]}` against the CLI the Action just installed, so it
-#         inherits that requirement. It greps for an `[email]` finding and errors loudly if absent, so
-#         a floor refusal reads as a BROKEN tripwire rather than a pass — but the floor keeps it green.
+#     ALL FOUR now carry `^1.19.0`, and each for its own reason — this is not a blanket bump. NOTE the
+#     four sites are LINT / PRIVACY / STALENESS / REPLAY. The email canary is NOT one of them: it is a
+#     bare `run:` step with no `version:` input, riding whatever CLI the preceding Action step
+#     installed. Enumerate with `grep -n 'version: "' ` before editing this list — a plan-stage draft
+#     listed the canary and omitted the staleness gate.
+#       - Privacy gate: LOAD-BEARING at 1.19.0. The allowlist no longer passes `--allow-host-inventory`
+#         at all — 1.19.0 exempts a mounted plugin's own agents/skills automatically, so the regex was
+#         deleted. On a 1.18.0 CLI that exemption does not exist and the same allowlist reds on 240
+#         non-findings (MEASURED via `npx cowork-harness@1.18.0`: exactly 240, exit 1). This is the
+#         inverse of the usual "an old CLI just lacks a flag" case — it fails loudly and WRONGLY.
+#       - Staleness gate: reads the cassettes, same v11-refusal reasoning as the privacy gate.
 #       - Lint: the `vacuous-gate-assert` rule is 1.18.0. On an older CLI the rule silently does not
 #         run, which is itself a vacuous gate — CI would report clean without having checked.
-#       - Replay: gate option-label fingerprinting rides the existing `skill` drift class (1.18.0).
-#     `^1.17.0` happened to RESOLVE to 1.18.0 (npm picks the highest 1.x), so this is not a live
+#       - Replay: gate option-label fingerprinting rides the existing `skill` drift class (1.18.0);
+#         1.19.0 adds the `mutation` JSON envelope and the corrected `--mutate` sample reporting.
+#     `^1.17.0` happened to RESOLVE to 1.18.0 (npm picks the highest 1.x), so that bump was not a live
 #     breakage — but it did not EXPRESS the requirement, and would have fallen back silently if
-#     1.18.0 were ever yanked.
+#     1.18.0 were ever yanked. The 1.19.0 bump is NOT in that category: with the allow deleted, a
+#     resolved-older CLI produces 240 false findings rather than degrading quietly.
 #     (A RANGE in that input is DOCUMENTED as of harness 1.12.0 — `action.yml` now states `version`
 #     accepts an npm range, not only an exact pin. It was already mechanically sound: the value is
 #     interpolated as `cowork-harness@$v` into `npm install --global`.)
@@ -142,7 +150,7 @@ jobs:
         with:
           command: lint
           path: cowork-tests/scenarios/
-          version: "^1.18.0"
+          version: "^1.19.0"
           extra-args: "--min-severity WARN"
 
       # The PII guard that actually matters here is **synthetic-only recording**: every cassette's
@@ -164,7 +172,7 @@ jobs:
         with:
           command: verify-cassettes
           path: cowork-tests/cassettes/
-          version: "^1.18.0"
+          version: "^1.19.0"
           extra-args: "--skip-staleness --skip-scenario-drift ${{ steps.allow.outputs.args }}"
 
       # Email canary: the SAME allowlist must still FLAG a non-synthetic email. The check asserts an
@@ -192,7 +200,7 @@ jobs:
         with:
           command: verify-cassettes
           path: cowork-tests/cassettes/
-          version: "^1.18.0"
+          version: "^1.19.0"
           extra-args: "--skip-privacy"
 
       # Floored, and NOT for a missing flag. An unknown top-level scenario key inside a frozen
@@ -205,7 +213,7 @@ jobs:
         with:
           command: replay
           path: cowork-tests/cassettes/
-          version: "^1.18.0"
+          version: "^1.19.0"
 
       # `cowork-tests/gate_prefix_check.py` and `delivery_check.py` are implemented and
       # unit-tested (`founder-skills/tests/test_gate_prefix_check.py` /

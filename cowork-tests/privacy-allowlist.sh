@@ -19,24 +19,52 @@
 # `--allow-path`/`--allow-machine-inventory` — a local path or machine detail in a cassette is always a
 # leak (record-time redaction via .cowork-redact.json is the source-side counterpart).
 #
-# NOTE (1.18.0+): host-inventory. The class flags a recording machine's own MCP servers / account /
-# agents frozen into a cassette by a host-inheriting tier — which is our tier, since `fidelity: cowork`
-# resolves to hostloop. Measured on the committed corpus at adoption: 240 findings, ALL of them
-# `agents[] — founder-skills:<skill>`, i.e. the six agents of the plugin UNDER TEST. Those are the
-# fixture, not the host: the class flags an `agents[]` entry outside the built-in roster, and a mounted
-# plugin's own agents are outside it by construction. The three predicates that would indicate a REAL
-# leak — `mcp_servers[].name`, `account.email`/`.organization`/`.subscriptionType`, and a
-# `mcp__<server>__…` tool naming a foreign server — return NONE across all 21 cassettes.
-# The allow is scoped to our own plugin namespace ON PURPOSE. A bare `.*` would disarm the class and
-# turn a privacy backstop into decoration; enumerating the six agents would red CI the day a seventh
-# lands, for a non-finding. Anything genuinely foreign still fires.
-# What this does NOT cover (upstream's own docs/cassette.md): the command / skill / plugin catalogs and
+# NOTE (1.19.0+): host-inventory — NO allow entry, deliberately.
+# The class flags a recording machine's own MCP servers / account / agents / skills frozen into a
+# cassette by a host-inheriting tier — which is our tier, since `fidelity: cowork` resolves to hostloop.
+# At 1.18.0 it reported 240 findings on this corpus, ALL of them `agents[] — founder-skills:<skill>`,
+# i.e. the six agents of the plugin UNDER TEST, and we suppressed them with
+# `--allow-host-inventory 'founder-skills:.*'`.
+#
+# 1.19.0 REMOVED THE NEED FOR THAT ENTRY. An agent or skill namespaced `<plugin>:<name>` whose plugin
+# the same recording declares in `plugins[]` is now exempt automatically. The exemption is derived from
+# the cassette, so it applies to recordings made before the release — no re-record. Measured on this
+# corpus: 240 -> 0, and `verify-cassettes` output is BYTE-IDENTICAL with and without the old entry.
+# The entry was deleted because a suppression that suppresses nothing is a standing invitation to
+# misread the gate; a bare `.*` would have turned the backstop into decoration either way.
+#
+# THIS MAKES THE CLI FLOOR LOAD-BEARING. On a 1.18.0 CLI the exemption does not exist and this array
+# reds on 240 non-findings (measured: `npx cowork-harness@1.18.0` -> exactly 240, exit 1). Every
+# consumer of this file must floor at >=1.19.0. Unlike a missing flag, an older CLI here does not
+# degrade quietly — it fails loudly and WRONGLY.
+#
+# STANDING RISK, and the reason this note is long. With no allow, the gate's green now depends on
+# `plugins[]` carrying `founder-skills` in EVERY future recording. Measured failure mode: strip
+# `plugins[]` from a single cassette and it alone yields 18 findings; corpus-wide the equivalent is
+# 240+. Nothing tests that invariant. So if a future re-record ever reds this gate en masse with
+# `agents[]` / `skills[]` findings on our OWN namespace, the cause is a missing `plugins[]`
+# declaration, not a leak — do not "fix" it by re-adding an allow.
+#
+# NEW AXIS (1.19.0): `skills[]` is now read the same way `agents[]` is, with the same two exemptions
+# (the agent's own built-ins, currently just `deep-research`; and a `<plugin>:<skill>` whose plugin the
+# recording declares). Measured: all 21 cassettes carry a populated `skills[]` — 7 names, 0 flagged.
+# That zero is STRUCTURAL, not earned: the axis is aimed at the `protocol` tier, where the harness
+# keeps the operator's real CLAUDE_CONFIG_DIR. We record at hostloop, which does not. Non-vacuity was
+# confirmed by probe, not by the population count: injecting a foreign skill name into a copy of a
+# cassette fires `[host-inventory] skills[] — <name>`.
+#
+# The three predicates that would indicate a REAL leak — `mcp_servers[].name`,
+# `account.email`/`.organization`/`.subscriptionType`, and a `mcp__<server>__...` tool naming a foreign
+# server — return NONE across all 21 cassettes.
+# What this does NOT cover (upstream's own docs/cassette.md): the command and plugin catalogs and
 # command descriptions are ungated — no clean predicate exists for them, only an arbitrary threshold.
+# (The SKILL catalog used to be on that list and no longer is; see NEW AXIS above.)
 # Treat a green as a backstop against a known failure, not as proof a cassette is clean.
 #
-# EVERY --allow* regex here is FULL-MATCH, not substring. Measured on the host-inventory class:
-# `founder-skills:.*` clears all 240; the tighter-looking `^founder-skills:` clears ZERO, because an
-# explicit anchor lands inside the harness's own wrapping and can never match. Write the pattern to
+# EVERY --allow* regex here is FULL-MATCH, not substring. Keep this lesson even though the entry that
+# produced it is gone: measured on the host-inventory class back when it had one, `founder-skills:.*`
+# cleared all 240 while the tighter-looking `^founder-skills:` cleared ZERO, because an explicit anchor
+# lands inside the harness's own wrapping and can never match. Write the pattern to
 # cover the whole value, and re-count findings after editing one — an over-tight regex fails silently
 # in the safe direction (findings stay) but an over-loose one disarms a class with no signal at all.
 #
@@ -47,5 +75,4 @@ ALLOW=(
   --allow '\$\s*\d[\d.,]*\s*(?:[MmKkBb]|million|thousand|billion)?'
   --allow-domain '[A-Za-z0-9][A-Za-z0-9.\-]*\.[A-Za-z]{2,}'
   --allow-email '[A-Za-z0-9._%+\-]+@(?:acmecorp|example)\.com'
-  --allow-host-inventory 'founder-skills:.*'
 )
