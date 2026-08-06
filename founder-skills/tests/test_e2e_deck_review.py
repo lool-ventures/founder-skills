@@ -240,6 +240,36 @@ def test_deck_review_smoke(tmp_path: Path) -> None:
         env={
             **os.environ,
             "CLAUDE_PLUGIN_ROOT": str(plugin_path),
+            # Byte-stream idle watchdog, raised from its default to 10 minutes.
+            #
+            # The CLI the SDK spawns runs TWO idle timeouts. The message-level one
+            # (`CLAUDE_STREAM_IDLE_TIMEOUT_MS`) is floored at 5 min. The byte-level one
+            # is separate, is NOT floored, and for first-party auth resolves to its own
+            # constant that a remote config gate can also lower. That is the one that
+            # fires here, and an explicit value for this variable beats both the default
+            # and the gate. The CLI clamps it to [1 ms, 30 min].
+            #
+            # Measured on this test, n=1 each way: at the default it aborted after 61
+            # messages with `API Error: Stream idle timeout - partial response received`,
+            # while composing the SLIDE_REVIEWS dispatch — this skill's largest tool_use
+            # block, since it inlines the whole deck plus the instruction body. With this
+            # value set, the same test ran to completion in 189 messages. One failure and
+            # one pass is consistent with the threshold being the cause but does NOT
+            # establish it; a transient upstream stall that happened to clear on the retry
+            # fits the same evidence. Treat the value as cheap insurance, not a proven fix,
+            # and do not weaken it on the strength of one green run.
+            #
+            # Without this, the failure surfaces through the SDK as
+            # `Exception: Claude Code returned an error result: success` — a
+            # contradiction that says nothing about the cause and costs ~8 minutes to
+            # reach. The value is set here rather than left to the caller's environment
+            # because CI cannot run this test, so every run is a human running it once
+            # and having no reason to know any of the above.
+            #
+            # `**os.environ` above is spread FIRST, so a bare literal here would silently
+            # override a caller who set this deliberately. Read through instead: this is a
+            # default, not a pin.
+            "CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS": os.environ.get("CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS", "600000"),
         },
     )
 
