@@ -25,17 +25,22 @@ prompt: |
   For the inputs the model doesn't state explicitly: current cash on hand is $1,500,000, monthly net
   burn is about $120,000, and we want runway measured from 2026-06-01.
 
-answers:
-  # Step-3.6 extracted-values STOP — proceed (the values look right; nothing to upload headlessly).
-  # Prefix-anchored to the proceed option, whose label is `I reviewed the page — the values look right,
-  # proceed` (financial-model-review/SKILL.md:547). Anchors are LEADING substrings, so the previous
-  # anchor "They look right" matched nothing after that label was specified — it fell through to
-  # `on_unanswered: first`, which happened to be this same option, so the lane passed by accident while
-  # claiming a scripted answer it did not have. Anchor on the label's opening words, not on a phrase
-  # from its middle. Robust to option re-ordering (unlike positional `first`); this choice drives run
-  # completion vs the dead-end "correct values" branch, so it warrants a real anchor.
-  - when_question: 'review|extracted|values|proceed|looks right'
-    choose: "I reviewed the page"
+# NO scripted anchor for the Step-3.6 extracted-values STOP, deliberately — `on_unanswered: first`
+# answers it, and that is the ROBUST choice here rather than the lazy one.
+#
+# Step 3.6 offers TWO DIFFERENT option sets depending on how the model arrived (SKILL.md): Path A,
+# the uploaded-workbook branch, offers `I reviewed the page — the values look right, proceed`;
+# Path B, the conversational branch, offers `Looks right, proceed`. Anchors are LEADING substrings,
+# so no single anchor covers both, and a scripted `choose:` that matches NO offered option is a hard
+# failure — it is not absorbed by `on_unanswered`.
+#
+# MEASURED: this scenario uploads an Excel workbook (Path A), yet the live run offered Path B's
+# labels — "Looks right — proceed with the full review" / "I need to correct something" — attached to
+# Path A's question ("Does the review page look right?"). The skill mixed the two branches. Until
+# that is settled, an anchor for either path is a coin flip that costs a paid record to discover.
+# `first` is correct under BOTH: option 0 is the proceed option in each, so the run completes and
+# never takes the dead-end corrections branch (which is unreachable headlessly anyway — there is no
+# corrections file to upload).
 
 assert:
   - result: success
