@@ -37,7 +37,7 @@ sys.path.insert(0, str(_REPO_ROOT / "cowork-tests"))
 #
 # Ratcheting down locks the precision win in, per this file's own rule. If a future re-record raises
 # the number, that is a real regression in the recorded narration, not a reason to raise this back.
-BASELINE = 64
+BASELINE = 55
 
 
 pytestmark = pytest.mark.skipif(
