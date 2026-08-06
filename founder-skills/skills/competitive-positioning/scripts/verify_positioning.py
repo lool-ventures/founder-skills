@@ -282,8 +282,8 @@ def _check_rendered(artifacts: dict[str, dict[str, Any]], gate: int) -> list[dic
     # --- 5. competitor slugs where a name exists ------------------------------------------
     for comp in _as_list(_as_dict(landscape).get("competitors")):
         comp = _as_dict(comp)
-        slug, name = comp.get("slug"), comp.get("name")
-        if not (isinstance(slug, str) and slug and isinstance(name, str) and name.strip()):
+        comp_slug, comp_name = comp.get("slug"), comp.get("name")
+        if not (isinstance(comp_slug, str) and comp_slug and isinstance(comp_name, str) and comp_name.strip()):
             continue
         # When the slug and the display name are the same string, the founder is already seeing the
         # name and there is nothing to substitute. Measured as a false positive on a live run: a
@@ -292,17 +292,18 @@ def _check_rendered(artifacts: dict[str, dict[str, Any]], gate: int) -> list[dic
         # wrong: "acme-co" and "Acme Co" both reduce to "acmeco", which would have silenced a genuine
         # leak. A test caught it. The rule is literal — if the slug string IS the displayed name there
         # is nothing to substitute; a hyphen where the founder should see a space is still a leak.
-        if slug.strip().lower() == name.strip().lower():
+        if comp_slug.strip().lower() == comp_name.strip().lower():
             continue
         # A slug is only a leak when it appears OUTSIDE a code span; the evidence tables
         # legitimately key on slug. Restrict to the prose-bearing "leader:" construction and
         # the warnings list, which is where it was measured.
         for line in report_md.splitlines():
-            if slug in line and ("leader:" in line or line.lstrip().startswith("- [")):
+            if comp_slug in line and ("leader:" in line or line.lstrip().startswith("- [")):
                 issues.append(
                     _issue(
                         "error",
-                        f"report.md shows the slug '{slug}' where the name '{name}' belongs: {line.strip()[:90]}",
+                        f"report.md shows the slug '{comp_slug}' where the name "
+                        f"'{comp_name}' belongs: {line.strip()[:90]}",
                     )
                 )
                 break
