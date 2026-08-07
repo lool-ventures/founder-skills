@@ -78,10 +78,12 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 > settled** — every committed cassette is at `1.12.0` or later, which necessarily carries it.
 > The `1.14.0` trigger — it serves `present_files` at **hostloop**, the tier this fleet records at
 > (previously `container` only), so an older recording froze a toolset one `alwaysLoad` tool short of
-> production's — is **now discharged for 19 of 21 committed cassettes**. Measured at `HEAD` on
-> 2026-08-01 (`cf0277a`): 19 at `1.16.0`, 2 still at `1.12.0` (`ic-sim-smoke`, `market-sizing-smoke`),
-> which are the remaining scope. **Re-derive this count after every re-record — it has been wrong
-> twice.** `1.15.0` adds no re-record debt (CLI flag + notice + docs; `baselines/` and `schema/`
+> production's — is **now discharged for 20 of 21 committed cassettes**. Re-measured 2026-08-06 by
+> reading `environment.harnessVersion` out of every file in `cassettes/`: 3 at `1.19.0`, 3 at `1.17.0`,
+> 14 at `1.16.0`, and **one** still at `1.12.0` (`market-sizing-smoke`), which is the entire remaining
+> scope. The prior count here — "19 at 1.16.0, 2 still at 1.12.0 (`ic-sim-smoke`, `market-sizing-smoke`)"
+> — was stale: `ic-sim-smoke` was re-recorded at `1.19.0`. **Re-derive this count after every re-record
+> — it has now been wrong three times, and the instruction to re-derive it did not prevent the third.** `1.15.0` adds no re-record debt (CLI flag + notice + docs; `baselines/` and `schema/`
 > byte-identical to 1.14.0), and neither does `1.17.0` (see the field-level baseline diff above).
 >
 > **What 1.10.0 changed for this fleet (one-liner; full story in git history).** The **sandbox tool
