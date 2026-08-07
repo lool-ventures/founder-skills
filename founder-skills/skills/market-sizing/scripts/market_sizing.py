@@ -310,12 +310,36 @@ def validate_positive(name: str, value: float) -> str | None:
     return None
 
 
-def coerce_float(name: str, value: Any) -> tuple[float, str | None]:
-    """Coerce a JSON value to float. Returns (value, error_or_None)."""
+def _coerce_numeric(name: str, value: Any) -> tuple[float, str | None]:
+    """Shared numeric gate for coerce_float / coerce_int.
+
+    Three rejections `float()` alone does not make, each of which reached the report as a
+    founder-visible number before this guard existed:
+
+    * `bool` — `float(True)` is 1.0, so `share_pct: true` silently computed a 1% share.
+      bool is an int subclass, so it must be tested BEFORE the isinstance(int) check.
+    * NaN — `float("nan")` raises nothing, and every downstream comparison against it is
+      False, so `validate_positive`'s `value <= 0` cannot stop it.
+    * Infinity — same, and `inf > 0` is True.
+
+    NaN and Infinity are also not legal JSON: Python emits them bare, so an artifact
+    carrying one is rejected by a strict parser while `validation.status` still reads
+    "valid". Same reasoning as `_parse_rate` above, which has always guarded this.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return 0.0, f"{name} must be numeric (got {value!r})"
     try:
-        return float(value), None
+        f = float(value)
     except (TypeError, ValueError):
         return 0.0, f"{name} must be numeric (got {value!r})"
+    if not math.isfinite(f):
+        return 0.0, f"{name} must be a finite number (got {value!r})"
+    return f, None
+
+
+def coerce_float(name: str, value: Any) -> tuple[float, str | None]:
+    """Coerce a JSON value to float. Returns (value, error_or_None)."""
+    return _coerce_numeric(name, value)
 
 
 def coerce_int(name: str, value: Any) -> tuple[int, str | None]:
@@ -323,10 +347,9 @@ def coerce_int(name: str, value: Any) -> tuple[int, str | None]:
 
     Rejects non-integer floats like 3.9 to avoid silent truncation.
     """
-    try:
-        f = float(value)
-    except (TypeError, ValueError):
-        return 0, f"{name} must be numeric (got {value!r})"
+    f, err = _coerce_numeric(name, value)
+    if err is not None:
+        return 0, err
     if f != int(f):
         return 0, f"{name} must be a whole number (got {value!r})"
     return int(f), None

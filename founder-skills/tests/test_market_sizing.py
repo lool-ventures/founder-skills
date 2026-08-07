@@ -5499,3 +5499,75 @@ def test_compose_flags_an_invalid_sensitivity_or_checklist_at_high_severity(tmp_
         hits = [w for w in data["validation"]["warnings"] if w["code"] == "ARTIFACT_INVALID"]
         assert hits, f"{name}: a rejected producer artifact must raise ARTIFACT_INVALID"
         assert hits[0]["severity"] == "high", f"{name}: must not be acceptable-away"
+
+
+# --- P0.8: non-finite and boolean numeric inputs -------------------------------------------
+#
+# `coerce_float`/`coerce_int` caught only (TypeError, ValueError), which `float()` does not
+# raise for bool, "nan" or "inf". All three reached a delivered artifact: bool as a silently
+# wrong number, NaN/Infinity as bare non-JSON literals beside `"status": "valid"`.
+#
+# Reproduced before the fix, on the shipped script:
+#   industry_total=true   -> exit 0, status "valid"
+#   industry_total="nan"  -> exit 0, status "valid", body contains bare NaN
+#   industry_total="inf"  -> exit 0, status "valid", body contains bare Infinity
+#
+# Containers were ALWAYS rejected (float({}) raises TypeError) — the guard that was missing
+# is scalar, not structural, so the container cases below are pinned as controls.
+
+
+@pytest.mark.parametrize(
+    ("value", "expect_fragment"),
+    [
+        ("true", "must be numeric"),
+        ("false", "must be numeric"),
+        ('"nan"', "must be a finite number"),
+        ('"NaN"', "must be a finite number"),
+        ('"inf"', "must be a finite number"),
+        ('"-inf"', "must be a finite number"),
+        ('"Infinity"', "must be a finite number"),
+    ],
+)
+def test_non_finite_and_boolean_numerics_are_rejected(value: str, expect_fragment: str) -> None:
+    """Each must fail loudly, not compute a number from it."""
+    payload = f'{{"approach":"top-down","industry_total":{value},"segment_pct":50,"share_pct":5}}'
+    rc, data, _ = run_script("market_sizing.py", ["--stdin"], stdin_data=payload)
+    assert rc != 0, f"industry_total={value} was accepted (exit 0)"
+    assert data is not None and data["validation"]["status"] == "invalid"
+    assert any(expect_fragment in e for e in data["validation"]["errors"]), data["validation"]["errors"]
+
+
+@pytest.mark.parametrize("field", ["segment_pct", "share_pct"])
+def test_boolean_percentages_are_rejected(field: str) -> None:
+    """`float(True)` is 1.0, so a bool here silently computed a 1% figure."""
+    fields = {"industry_total": "1000", "segment_pct": "50", "share_pct": "5"}
+    fields[field] = "true"
+    payload = '{"approach":"top-down",' + ",".join(f'"{k}":{v}' for k, v in fields.items()) + "}"
+    rc, data, _ = run_script("market_sizing.py", ["--stdin"], stdin_data=payload)
+    assert rc != 0, f"{field}=true was accepted (exit 0)"
+    assert data is not None and data["validation"]["status"] == "invalid"
+
+
+def test_rejected_numerics_never_emit_non_standard_json_literals() -> None:
+    """NaN/Infinity are not legal JSON; Python emits them bare.
+
+    A body carrying one is unparseable by a strict reader while `validation.status` reads
+    "valid" — so this asserts the raw text, which `json.loads` would silently accept.
+    """
+    payload = '{"approach":"top-down","industry_total":"nan","segment_pct":50,"share_pct":5}'
+    rc, out, _ = run_script_raw("market_sizing.py", ["--stdin"], stdin_data=payload)
+    assert rc != 0
+    assert "NaN" not in out and "Infinity" not in out, "non-standard JSON literal reached stdout"
+
+
+def test_valid_and_container_inputs_are_unaffected() -> None:
+    """Control: the fix must not narrow what already worked, nor widen what already failed."""
+    ok = '{"approach":"top-down","industry_total":1000,"segment_pct":50,"share_pct":5}'
+    rc, data, err = run_script("market_sizing.py", ["--stdin"], stdin_data=ok)
+    assert rc == 0, err
+    assert data is not None and data["validation"]["status"] == "valid"
+
+    for container in ('{"value":1000}', "[1000]"):
+        payload = f'{{"approach":"top-down","industry_total":{container},"segment_pct":50,"share_pct":5}}'
+        rc, data, _ = run_script("market_sizing.py", ["--stdin"], stdin_data=payload)
+        assert rc != 0, f"container {container} must still be rejected"

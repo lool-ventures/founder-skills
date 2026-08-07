@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.1] - 2026-08-07 — Two ways a report could be wrong without saying so
+
+### Highlights
+
+A small corrective release. Two faults that produced a finished-looking report from work that had
+not actually been done.
+
+**A value that is not a number no longer becomes one.** Market sizing accepted a few inputs that look
+numeric but are not — a true/false answer where an amount belonged, or the words "nan" and "infinity"
+— and computed a market size from them anyway. A true/false value was read as 1, so a 1% capture rate
+could appear where you had given nothing meaningful, and the resulting figure was labelled valid.
+Those inputs are now refused, and the run stops and names the field it could not read.
+
+**A deck review now tells you which slides it did not review.** If a slide was missing from the
+slide-by-slide analysis, the review still scored and read as complete — you could receive a review of
+twelve slides for a fifteen-slide deck with nothing to indicate the gap. The report now names the
+slides that were not covered and flags it prominently. A slide analysed twice is flagged too, since it
+overstates how much of your deck was actually looked at.
+
+### Fixed
+
+- **market-sizing:** true/false values, and the words "nan" and "infinity", were accepted where an
+  amount was expected and silently produced a figure that the report then described as valid. They are
+  now refused with a message naming the field. Such a report could also contain values that some tools
+  cannot open at all; that can no longer happen.
+- **deck-review:** slides absent from the slide-by-slide analysis are now flagged prominently, with the
+  slide numbers named, rather than producing a review that reads as complete. Slides analysed more than
+  once are flagged separately.
+
 ## [0.7.0] - 2026-08-06 — Everything it found, in your words
 
 ### Highlights

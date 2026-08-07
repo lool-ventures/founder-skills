@@ -1174,6 +1174,8 @@ def test_compose_severity_map_complete() -> None:
         "MARKER_COLLISION",
         "UNSUBSTANTIATED_AI_CLAIM",
         "DUPLICATE_SLIDE_NUMBER",
+        "SLIDE_REVIEW_MISSING",
+        "SLIDE_REVIEW_DUPLICATE",
     ]
     assert len(sev_map) == len(expected), f"expected {len(expected)} codes, got {len(sev_map)}"
     for code in expected:
@@ -2203,7 +2205,12 @@ def _make_full_review_dir(review_dir: Path) -> None:
         json.dumps(
             {
                 "metadata": {"run_id": "r1"},
-                "reviews": [],
+                # One review for the one inventory slide. Previously `[]`, which made this
+                # baseline helper self-inconsistent: a 1-slide deck with zero slides
+                # reviewed. Harmless while nothing cross-checked the two artifacts; now it
+                # would trip SLIDE_REVIEW_MISSING in every test built on this helper and
+                # mask the signal that warning exists to carry.
+                "reviews": [{"slide_number": 1, "strengths": [], "weaknesses": []}],
                 "missing_slides": [],
                 "overall_narrative_assessment": "x",
             }
@@ -3277,3 +3284,78 @@ def test_deck_inventory_clean_slides_no_warnings(tmp_path: Path) -> None:
     rc, receipt, _ = _run_deck_inventory(tmp_path, slides)
     assert rc == 0
     assert "warnings" not in receipt
+
+
+# --- P0.9: inventory <-> review coverage ---------------------------------------------------
+#
+# Before this, compose loaded deck_inventory.json and slide_reviews.json and rendered
+# whichever reviews existed. A sub-agent returning 12 reviews for a 15-slide deck produced a
+# clean report covering 12, with a score computed as if the review were complete.
+#
+# `missing_slides` in the reviews artifact does NOT cover this: it is the model's own list of
+# slides it thinks the DECK should add — a content recommendation, not a coverage record.
+
+
+def _compose_with(review_dir: Path, slides: list[dict], reviews: list[dict]) -> dict:
+    """Build a full review dir, override the two artifacts under test, compose."""
+    _make_full_review_dir(review_dir)
+    inv = json.loads((review_dir / "deck_inventory.json").read_text())
+    inv["slides"] = slides
+    inv["total_slides"] = len(slides)
+    (review_dir / "deck_inventory.json").write_text(json.dumps(inv))
+    rv = json.loads((review_dir / "slide_reviews.json").read_text())
+    rv["reviews"] = reviews
+    (review_dir / "slide_reviews.json").write_text(json.dumps(rv))
+    rc, data, err = run_script("compose_report.py", ["--dir", str(review_dir)])
+    assert data is not None, err
+    return data
+
+
+def _codes(data: dict) -> list[str]:
+    return [w["code"] for w in data["validation"]["warnings"]]
+
+
+def test_complete_slide_coverage_raises_no_coverage_warning(tmp_path: Path) -> None:
+    """Control fixture: every inventory slide reviewed exactly once."""
+    d = tmp_path / "deck-review-acme"
+    d.mkdir()
+    slides = [{"number": n, "headline": "h", "content_summary": "s"} for n in (1, 2, 3)]
+    reviews = [{"slide_number": n, "strengths": [], "weaknesses": []} for n in (1, 2, 3)]
+    codes = _codes(_compose_with(d, slides, reviews))
+    assert "SLIDE_REVIEW_MISSING" not in codes
+    assert "SLIDE_REVIEW_DUPLICATE" not in codes
+
+
+def test_unreviewed_slides_raise_a_high_severity_warning_naming_them(tmp_path: Path) -> None:
+    """Missing fixture: 3 slides, 1 reviewed. Must name the two that were not."""
+    d = tmp_path / "deck-review-acme"
+    d.mkdir()
+    slides = [{"number": n, "headline": "h", "content_summary": "s"} for n in (1, 2, 3)]
+    reviews = [{"slide_number": 1, "strengths": [], "weaknesses": []}]
+    data = _compose_with(d, slides, reviews)
+    hits = [w for w in data["validation"]["warnings"] if w["code"] == "SLIDE_REVIEW_MISSING"]
+    assert hits, f"unreviewed slides did not warn: {_codes(data)}"
+    assert hits[0]["severity"] == "high", "an incomplete review must not be acceptable-away silently"
+    assert "2, 3" in hits[0]["message"], hits[0]["message"]
+
+
+def test_duplicate_review_entries_raise_a_warning(tmp_path: Path) -> None:
+    """Duplicate fixture: slide 2 reviewed twice inflates apparent coverage."""
+    d = tmp_path / "deck-review-acme"
+    d.mkdir()
+    slides = [{"number": n, "headline": "h", "content_summary": "s"} for n in (1, 2)]
+    reviews = [{"slide_number": n, "strengths": [], "weaknesses": []} for n in (1, 2, 2)]
+    data = _compose_with(d, slides, reviews)
+    hits = [w for w in data["validation"]["warnings"] if w["code"] == "SLIDE_REVIEW_DUPLICATE"]
+    assert hits, f"duplicate review entries did not warn: {_codes(data)}"
+    assert "2" in hits[0]["message"]
+    # A duplicate must not also register as missing — set arithmetic, not list arithmetic.
+    assert "SLIDE_REVIEW_MISSING" not in _codes(data)
+
+
+def test_slideless_inventory_does_not_warn(tmp_path: Path) -> None:
+    """A text-format deck can carry total_slides with no per-slide rows — nothing to check."""
+    d = tmp_path / "deck-review-acme"
+    d.mkdir()
+    codes = _codes(_compose_with(d, [], []))
+    assert "SLIDE_REVIEW_MISSING" not in codes

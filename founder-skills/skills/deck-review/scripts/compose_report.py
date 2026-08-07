@@ -143,6 +143,11 @@ WARNING_SEVERITY: dict[str, str] = {
     # content-accuracy issue), not high (structural integrity) or low
     # (MARKER_COLLISION-style, provably harmless).
     "DUPLICATE_SLIDE_NUMBER": "medium",
+    # "high", alongside AI_CRITERIA_MISSING: both mean work the founder paid for was not
+    # done and nothing said so. A review missing slides is a materially incomplete
+    # deliverable, not a presentation nit.
+    "SLIDE_REVIEW_MISSING": "high",
+    "SLIDE_REVIEW_DUPLICATE": "medium",
 }
 
 ACCEPTIBLE_SEVERITIES = {"medium"}
@@ -169,6 +174,8 @@ WARNING_LABELS: dict[str, str] = {
     "MARKER_COLLISION": "Marker Collision",
     "UNSUBSTANTIATED_AI_CLAIM": "Unsubstantiated AI Claim",
     "DUPLICATE_SLIDE_NUMBER": "Duplicate Slide Number",
+    "SLIDE_REVIEW_MISSING": "Slides Not Reviewed",
+    "SLIDE_REVIEW_DUPLICATE": "Slide Reviewed More Than Once",
 }
 
 
@@ -601,6 +608,56 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                     "DUPLICATE_SLIDE_NUMBER",
                     f"Inventory has duplicate slide number(s): {nums_str} — the quoted "
                     f"headline for that slide reflects only the first occurrence.",
+                )
+            )
+
+    # 13. SLIDE_REVIEW_MISSING / SLIDE_REVIEW_DUPLICATE — the inventory and the reviews
+    # disagree about which slides were actually reviewed.
+    #
+    # Nothing checked this before: compose loaded both artifacts and rendered whatever
+    # reviews existed, so a deck whose sub-agent returned 12 reviews for 15 slides produced
+    # a clean-looking report covering 12. `missing_slides` in the reviews artifact does NOT
+    # cover this — that field is the model's own list of slides it thinks the DECK should
+    # add, which is a content recommendation, not a coverage record.
+    #
+    # Duplicates are separate from DUPLICATE_SLIDE_NUMBER above: that one is two inventory
+    # rows sharing a number; this one is the same slide reviewed twice, which inflates
+    # apparent coverage and double-counts its findings.
+    if _usable(inventory) and _usable(reviews):
+        inventory_numbers: list[int] = [
+            slide["number"]
+            for slide in _as_list(inventory.get("slides"))
+            if isinstance(slide, dict) and isinstance(slide.get("number"), int)
+        ]
+        reviewed_numbers: list[int] = [
+            review["slide_number"]
+            for review in _as_list(reviews.get("reviews"))
+            if isinstance(review, dict) and isinstance(review.get("slide_number"), int)
+        ]
+
+        # Only meaningful when the inventory actually enumerated slides. A text-format deck
+        # can legitimately carry total_slides with no per-slide rows.
+        if inventory_numbers:
+            unreviewed = sorted(set(inventory_numbers) - set(reviewed_numbers))
+            if unreviewed:
+                nums_str = ", ".join(str(n) for n in unreviewed)
+                warnings.append(
+                    _warn(
+                        "SLIDE_REVIEW_MISSING",
+                        f"{len(unreviewed)} of {len(set(inventory_numbers))} slides were not "
+                        f"reviewed: {nums_str}. This review is incomplete — re-run the slide "
+                        f"review for those slides before treating the score as final.",
+                    )
+                )
+
+        repeated = sorted({n for n in reviewed_numbers if reviewed_numbers.count(n) > 1})
+        if repeated:
+            nums_str = ", ".join(str(n) for n in repeated)
+            warnings.append(
+                _warn(
+                    "SLIDE_REVIEW_DUPLICATE",
+                    f"Slide(s) {nums_str} were reviewed more than once — their findings are "
+                    f"counted twice and apparent coverage is overstated.",
                 )
             )
 
