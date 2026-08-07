@@ -7,16 +7,23 @@ token, so cassette health becomes visible in the same `uv run pytest` devs alrea
 without joining the default suite (the packaged GitHub Action already replays in CI, and
 machines without the harness must stay green).
 
-Two tests:
-  1. Parametrized replay over every cassette → the replay verdict is success. Redundant
-     with CI replay by design; the point is local-workflow visibility.
-  2. One fine-grained invariant the scenario YAML cannot express: a Python-level cross-field
-     check over the re-driven ``cap_state.json`` body. On the replay lane the run's work dir
-     is not materialized and ``Result.artifacts`` is empty (verified against the 0.24.0
-     helper), so the body is read from the cassette's ``artifacts[].body`` — which IS the
-     output the replay re-drives.
+The tests, in file order:
+  1. ``test_cassette_replays_green`` — parametrized replay over every cassette → the replay
+     verdict is success. Redundant with CI replay by design; the point is local-workflow
+     visibility. This is the only one that drives the harness CLI.
+  2. ``test_every_scenario_has_a_cassette_or_is_allowlisted`` — scenario↔cassette parity
+     against ``_NO_CASSETTE_ALLOWLIST``. Pure file reads.
+  3. ``test_cap_state_fully_diluted_covers_founder_shares`` — one fine-grained invariant the
+     scenario YAML cannot express: a Python-level cross-field check over the re-driven
+     ``cap_state.json`` body. On the replay lane the run's work dir is not materialized and
+     ``Result.artifacts`` is empty (verified against the 0.24.0 helper), so the body is read
+     from the cassette's ``artifacts[].body`` — which IS the output the replay re-drives.
 
-Only the first of those needs the harness. The other two read committed files, so they
+Name them rather than counting them: this header said "Two tests" against a module holding
+three, and omitted the parity test entirely — introduced by the same commit that un-inerted
+it. A restated count drifts; an enumeration that names its members is checkable by reading.
+
+Only the first needs the harness. The other two read committed files, so they
 carry no `cowork` marker, take no `cowork` fixture, and run everywhere — including CI.
 That split is deliberate and was previously absent: a module-level `pytest.skip` gated the
 whole file on the CLI, so on any machine without it (every CI run) all three reported as a
