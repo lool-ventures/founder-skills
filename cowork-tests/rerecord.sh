@@ -93,7 +93,9 @@ echo "cowork-harness $ver"
 #     record that does not pass `--no-redact`, which this script deliberately does not.
 #   * 1.11.0 stamps `environment.harnessVersion` — the recording CLI's own version — into every
 #     cassette it writes. It is never backfilled, so a record on an older CLI is provenance-less
-#     forever. (Our 16 committed cassettes carry no `environment` block at all.)
+#     forever. (Measured 2026-08-06: all 21 committed cassettes DO carry `environment.harnessVersion`
+#     — 14 at 1.16.0, 3 at 1.17.0, 3 at 1.19.0, and one at 1.12.0, `market-sizing-smoke`. This line
+#     used to claim they carry no `environment` block at all, which was the exact inverse.)
 #   * 1.10.0 is the first release whose sandbox declares the skill/plugin discovery SDK-MCP servers
 #     (`mcp__skills__list_skills`/`suggest_skills`, `mcp__plugins__list_plugins`/`search_plugins`/
 #     `suggest_plugin_install`, all alwaysLoad on container/hostloop/cowork — matching real Cowork). A
@@ -103,9 +105,10 @@ echo "cowork-harness $ver"
 # Standing facts this floor does NOT change, all still load-bearing here:
 #   * Cassette versions, as of 1.16.0 — the write version is now CONDITIONAL, not a single number:
 #     read floor v9; `lane: remote` scenarios write **v11**; everything else still writes **v10**.
-#     Our 16 committed cassettes are **v10** (verified: `rehash <dir> --dry-run` reports "already at
-#     v10" for all 16, exit 0 — the conditional stamp does not sweep a lane-free corpus upward), as is
-#     the hand-authored email canary envelope. That leaves one v-step of headroom above the read floor,
+#     Of our 21 committed cassettes, 20 are **v10** and one is **v11** — `market-sizing-remote-lane`,
+#     under the `lane: remote` rule above; the corpus is no longer lane-free, so the older blanket
+#     "all are v10" no longer holds. The hand-authored email canary envelope is v10 too. The v10 rows
+#     leave one v-step of headroom above the read floor,
 #     not zero. What still holds: a future READ-floor raise refuses every cassette below it at load
 #     time, turning a WARN-only staleness advisory into a hard stop across the whole lane, and `rehash`
 #     cannot rescue a corpus across such a boundary — only recording can. Bump the canary's
