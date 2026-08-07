@@ -16,10 +16,18 @@ Two tests:
      helper), so the body is read from the cassette's ``artifacts[].body`` — which IS the
      output the replay re-drives.
 
+Only the first of those needs the harness. The other two read committed files, so they
+carry no `cowork` marker, take no `cowork` fixture, and run everywhere — including CI.
+That split is deliberate and was previously absent: a module-level `pytest.skip` gated the
+whole file on the CLI, so on any machine without it (every CI run) all three reported as a
+single `1 skipped` line and the two file-reading guards were inert without anything saying
+so. The skip now lives in the `cowork` fixture. Do not hoist it back to module level.
+
 The `sys.path` bootstrap that makes `cowork_harness` importable is the sanctioned pattern
 from the harness `python/README.md` (the helper module is not pip-installed); it must run
-before the import, so the bootstrap and the guarded import stay together at the top of the
-module rather than with the other top-level imports.
+before the import, so both live inside the fixture. The module-level `Cowork` name is a
+`TYPE_CHECKING`-only import: `from __future__ import annotations` defers annotations at
+runtime but ruff (F821) and mypy (name-defined) still resolve them statically.
 """
 
 from __future__ import annotations
@@ -30,9 +38,16 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
+
+if TYPE_CHECKING:
+    # Annotation-only. The runtime import lives in the `cowork` fixture, after the sys.path
+    # bootstrap that makes it resolvable. `from __future__ import annotations` defers the
+    # annotation at RUNTIME but NOT for ruff (F821) or mypy (name-defined) — both still
+    # resolve it statically, so this guard is load-bearing, not decorative.
+    from cowork_harness import Cowork  # type: ignore[import-not-found]
 
 CASSETTE_DIR = Path(__file__).resolve().parents[2] / "cowork-tests" / "cassettes"
 SCENARIOS_DIR = Path(__file__).resolve().parents[2] / "cowork-tests" / "scenarios"
@@ -127,32 +142,33 @@ def _resolve_cli() -> str | None:
     return str(cli) if cli.exists() else None
 
 
-_CLI = _resolve_cli()
-if _CLI is None:
-    pytest.skip(
-        "cowork-harness not installed (npm i -g cowork-harness@^1.17.0)",
-        allow_module_level=True,
-    )
+def _require_harness() -> str:
+    """Resolve the harness CLI or skip. FIXTURE-scoped by design — never module-level.
 
-_VERSION = _installed_version(_CLI)
-if _VERSION is None or _VERSION < _MIN_HARNESS:
-    _floor = ".".join(str(n) for n in _MIN_HARNESS)
-    _found = ".".join(str(n) for n in _VERSION) if _VERSION else "unreadable"
-    pytest.skip(
-        f"cowork-harness {_found} is below the {_floor} replay floor — skipping rather than "
-        f"replaying, because a cassette carrying a scenario key this CLI does not know is "
-        f"replayed as if the key were absent and can return the opposite verdict silently. "
-        f"Upgrade: npm i -g cowork-harness@^{_floor}",
-        allow_module_level=True,
-    )
+    This used to be a pair of `pytest.skip(..., allow_module_level=True)` calls, which made
+    EVERY test in this file inert wherever the harness is absent — i.e. every CI run, since
+    `ci.yml` installs pytest but never the harness. Two tests below read committed files and
+    need no harness at all, so they were silently not running in CI. Worse, a module-level
+    skip collapses the whole module into a single `1 skipped` line, so nothing indicated the
+    coverage was missing. Skipping per-fixture keeps that failure from recurring: only the
+    tests that actually drive the CLI can skip.
+    """
+    cli = _resolve_cli()
+    if cli is None:
+        floor = ".".join(str(n) for n in _MIN_HARNESS)
+        pytest.skip(f"cowork-harness not installed (npm i -g cowork-harness@^{floor})")
 
-# Bootstrap the helper module onto sys.path (dist/cli.js → package root → python/), per the
-# harness python/README.md. Kept adjacent to its import, which must follow it.
-_PYTHON_DIR = Path(_CLI).resolve().parents[1] / "python"
-if str(_PYTHON_DIR) not in sys.path:
-    sys.path.insert(0, str(_PYTHON_DIR))
-
-from cowork_harness import Cowork  # type: ignore[import-not-found]  # noqa: E402  (runtime sys.path bootstrap above)
+    version = _installed_version(cli)
+    if version is None or version < _MIN_HARNESS:
+        floor = ".".join(str(n) for n in _MIN_HARNESS)
+        found = ".".join(str(n) for n in version) if version else "unreadable"
+        pytest.skip(
+            f"cowork-harness {found} is below the {floor} replay floor — skipping rather than "
+            f"replaying, because a cassette carrying a scenario key this CLI does not know is "
+            f"replayed as if the key were absent and can return the opposite verdict silently. "
+            f"Upgrade: npm i -g cowork-harness@^{floor}"
+        )
+    return cli
 
 
 def _cassettes() -> list[Path]:
@@ -161,7 +177,16 @@ def _cassettes() -> list[Path]:
 
 @pytest.fixture(scope="module")
 def cowork() -> Cowork:
-    return Cowork(cli=_CLI)
+    cli = _require_harness()
+    # Bootstrap the helper module onto sys.path (dist/cli.js → package root → python/), per
+    # the harness python/README.md. It must run before the import, so the two stay together.
+    python_dir = Path(cli).resolve().parents[1] / "python"
+    if str(python_dir) not in sys.path:
+        sys.path.insert(0, str(python_dir))
+
+    from cowork_harness import Cowork as _Cowork  # type: ignore[import-not-found]
+
+    return _Cowork(cli=cli)
 
 
 @pytest.mark.cowork
@@ -172,14 +197,20 @@ def test_cassette_replays_green(cowork: Cowork, cassette: Path) -> None:
     result.assert_success()
 
 
-@pytest.mark.cowork
 def test_every_scenario_has_a_cassette_or_is_allowlisted() -> None:
     """Every `cowork-tests/scenarios/*.yaml` must have a matching committed
     `cowork-tests/cassettes/<name>.cassette.json`, unless the gap is named in
     `_NO_CASSETTE_ALLOWLIST` with a reason. A new scenario landing with neither
-    must fail loudly here rather than silently drifting — this is the parity
-    gap the fleet has carried without a regression test (last measured: 22
-    scenarios / 21 cassettes, the single gap now allowlisted above)."""
+    must fail loudly here rather than silently drifting.
+
+    Deliberately carries NO scenario/cassette counts: this docstring used to state
+    a "last measured" pair, and it drifted (it said 22/21 with one allowlist entry
+    while the tree held 24/21 with three). A count restated in prose beside the
+    code that derives it is the exact defect this test exists to catch. The
+    assertions below are the current count; run them.
+
+    No harness required — pure file reads — so this must NOT carry the `cowork`
+    marker or depend on the `cowork` fixture, or it goes inert in CI."""
     scenario_names = {p.stem for p in SCENARIOS_DIR.glob("*.yaml")}
     cassette_names = {p.name[: -len(".cassette.json")] for p in CASSETTE_DIR.glob("*.cassette.json")}
 
@@ -203,13 +234,15 @@ def test_every_scenario_has_a_cassette_or_is_allowlisted() -> None:
     )
 
 
-@pytest.mark.cowork
 def test_cap_state_fully_diluted_covers_founder_shares() -> None:
     """A cross-field invariant on the re-driven cap_state that YAML `artifact_json` can't state.
 
     ``as_converted_totals.fully_diluted_shares`` must be at least the sum of the founders'
     common shares — a structural sanity check spanning two artifact regions. Read from the
     cassette body (the replay lane does not materialize the work dir).
+
+    Reads a committed file and drives no CLI, so — like the parity test above — it carries
+    no `cowork` marker and takes no `cowork` fixture, and therefore runs in CI.
     """
     cassette = CASSETTE_DIR / "cap-table-safe-full.cassette.json"
     doc = json.loads(cassette.read_text())

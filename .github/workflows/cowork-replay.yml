@@ -70,8 +70,9 @@ name: cowork-replay
 # silently mis-score such a cassette (the 1.14.0/1.15.0 hazard) — it REFUSES that file and the
 # invocation exits non-zero. So from the moment `market-sizing-remote-lane` is recorded, every step that
 # READS `cowork-tests/cassettes/` genuinely requires >=1.16.0. The conditional stamp is value-aware:
-# `lane: local` / omitted still stamps v10, so the other 16 cassettes are unaffected (verified: `rehash
-# --dry-run` reports "already at v10" for all 16).
+# `lane: local` / omitted still stamps v10, so every other cassette is unaffected (measured 2026-08-06:
+# 20 of 21 at v10, `market-sizing-remote-lane` the sole v11 — this line previously said "the other 16",
+# a count that had drifted; derive it from the cassettes rather than inheriting it here).
 # Earlier floors, kept as history: 1.14.0 served `present_files` at hostloop (the tier our cassettes
 # record at) and added `lane:`, which an older LOADER rejects outright — that is what the "Scenario load
 # check" step depends on. 1.12.0 fixed a bug that made an UPLOAD-BEARING scenario impossible to record

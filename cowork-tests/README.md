@@ -55,8 +55,10 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 > the **exit code** is invocation-wide.) So from the moment `market-sizing-remote-lane` is recorded,
 > every step that READS `cowork-tests/cassettes/` genuinely requires >=1.16.0 — `replay` and both
 > `verify-cassettes` steps, which is why they no longer ride the Action's default `latest`. The stamp is
-> **conditional and value-aware**: `lane: local`/omitted still writes v10, so the other 16 cassettes are
-> untouched (verified: `rehash --dry-run` reports "already at v10" for all 16).
+> **conditional and value-aware**: `lane: local`/omitted still writes v10, so every other cassette was
+> untouched (verified at the time against the then-16-cassette set: `rehash --dry-run` reported "already
+> at v10" for all of them). That still holds at the current size — 2026-08-06: 20 of 21 at v10, with
+> `market-sizing-remote-lane` the sole v11.
 >
 > Two floors that bite for their own reasons: the **`Scenario load check`** step (`record <dir>
 > --dry-run`) needs >=1.14.0 now that a `lane:` scenario exists, because an older **loader** exits 2 on
@@ -97,9 +99,10 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 > **What 1.11.0 changed for this fleet.** No format bump (read floor stays v9), no baseline move, no new
 > assertion keys, `SPEC.md` byte-identical — replay stays 16/16. Four things matter here:
 > 1. **`environment.harnessVersion`** — cassettes now record the CLI that wrote them. Never backfilled,
->    so our 16 stay provenance-less until re-recorded (they carry **no `environment` block at all** —
->    that field shipped in 0.28.0). `rerecord.sh`'s floor is what guarantees every future cassette here
->    is self-describing.
+>    so the 16 cassettes committed **at that time** carried no `environment` block at all (that field
+>    shipped in 0.28.0) and stayed provenance-less until re-recorded. They since were: as of 2026-08-06
+>    all 21 committed cassettes carry `environment.harnessVersion`. `rerecord.sh`'s floor is what
+>    guarantees every future cassette here is self-describing.
 > 2. **The `[note] discovery-surface` lines are EXPECTED, not a regression** — one per cassette,
 >    reporting that its recorded `system/init` inventory predates the 1.10.0 discovery servers
 >    (container cassettes say 19 tools, hostloop 17). Where they appear: on stderr of the HARD replay step
@@ -185,7 +188,8 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 >   keep it that way on lane-bearing scenarios until the floor is 1.16.0.
 >
 > **`--reassert` failures are EXPECTED right now, and CI is unaffected.** Plain `replay` (what CI runs)
-> evaluates the assertions **frozen in each cassette** and is 16/16 green. `replay --reassert` re-checks the
+> evaluates the assertions **frozen in each cassette** and is green across the committed set (21 as of
+> 2026-08-06; re-derive rather than inheriting that number). `replay --reassert` re-checks the
 > **on-disk** `assert:` blocks instead, and those deliberately describe the behaviour the skills have TODAY,
 > which the 2026-07-07 cassettes predate. The current set, all of one class — assert-now, record-later:
 >
@@ -214,8 +218,11 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 > would freeze our runs against a future production gate flip. Set one only to test a specific gate
 > state on purpose.
 >
-> **`scenarios/` (18) and `cassettes/` (16) are not 1:1.** `competitive-positioning-false-positive` and
-> `competitive-positioning-genuine-control` have no cassette yet (pending a live record). `rerecord.sh`
+> **`scenarios/` and `cassettes/` are not 1:1.** As of 2026-08-06: 24 scenarios, 21 cassettes, 3
+> deliberately un-cassetted. Do not inherit those numbers — the authoritative, always-current list is
+> `_NO_CASSETTE_ALLOWLIST` in `founder-skills/tests/test_cowork_cassette_replay.py`, whose parity test
+> fails if a scenario lands with neither a cassette nor a written reason. (This line previously said
+> "(18)" and "(16)" and named two scenarios as un-cassetted that have since been recorded.) `rerecord.sh`
 > bare refreshes only scenarios that already have one and prints what it skipped — deliberately, since
 > its `xargs -P` loop aborts the whole batch if any child fails and the documented revert would discard
 > every good re-record with it. Author a new cassette by name, after the live-decider flow settles its

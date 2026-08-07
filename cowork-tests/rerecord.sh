@@ -348,3 +348,9 @@ echo "DONE. Review the normalized diffs above (primary) + 'git diff -- cowork-te
 # --- cross-run health + disk hygiene (informational tail; never fails a successful record) ---
 echo "=== stats (last 20 runs/scenario) ==="; cowork-harness stats --last 20 || true
 echo "=== prune kept runs (keep last 5) ===";  cowork-harness prune --keep-last 5 || true
+# Corpus inventory LAST, because a re-record is exactly when the cassette counts and version
+# spread change — and those are the facts that have repeatedly gone stale in prose. Print them
+# here so the person who just changed them sees the new truth, rather than trusting a number
+# written into a README months ago.
+echo "=== cassette inventory (post-record truth; update any prose you copy it into) ==="
+python3 "$(dirname "$0")/cassette_inventory.py" || true
