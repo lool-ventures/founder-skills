@@ -444,6 +444,31 @@ def _founder_text_module():  # type: ignore[no-untyped-def]
     return mod
 
 
+_COACHING_MARKER_RE = re.compile(r"<!--\s*COACHING_INSERTION_POINT_[0-9a-f]+\s*-->")
+
+
+def _strip_coaching_marker(text: str) -> str:
+    """Drop the per-run coaching insertion marker before the founder-facing scan.
+
+    `drive_compose` runs compose ONLY -- never `insert_coaching.py` -- so the marker is an expected
+    intermediate artifact here, not a leak. It also sits inside an HTML comment, which renders to
+    nothing; the fleet already draws founder-facing text that way (`test_html_founder_text.py` scans
+    text nodes only).
+
+    Removing it fixes a REAL flake, not a cosmetic one. The marker is
+    `COACHING_INSERTION_POINT_{uuid4().hex[:8]}`, and `_founder_text._SHOUTING_RE` requires every
+    segment to be `[A-Z0-9]+` -- so it matches only when those 8 hex chars happen to contain no
+    a-f, i.e. (10/16)**8 = 2.3% per skill, ~13% across this parametrization. Measured before the fix:
+    4 failures in 25 local runs. A test that reds one run in seven on a random uuid teaches people to
+    re-run CI until it is green, which is how a real finding gets waved through.
+
+    This removes no coverage: a marker surviving to a DELIVERED report is caught by
+    `check_handoff.py:219` (MARKER_PREFIX would double-insert) and by `test_insert_coaching.py`'s
+    idempotency matrix -- both deterministic, neither dependent on the uuid's digits.
+    """
+    return _COACHING_MARKER_RE.sub("", text)
+
+
 def _cap_table_keep() -> frozenset[str]:
     """cap-table's `_labels.py` vocabulary — the one skill that keeps its own glossed enums."""
     import importlib.util
@@ -487,7 +512,7 @@ def test_composed_report_carries_no_internal_tokens(skill: str, tmp_path: Path) 
 
     keep = _cap_table_keep() if skill == "cap-table" else None
     for extra in _produce_extra_deliverables(skill, work_dir):
-        extra_text = extra.read_text(encoding="utf-8")
+        extra_text = _strip_coaching_marker(extra.read_text(encoding="utf-8"))
         # Floor set above the empty-packet boilerplate (315B), so a packet with no flagged items
         # cannot satisfy this scan.
         assert len(extra_text) > 500, (
@@ -499,7 +524,7 @@ def test_composed_report_carries_no_internal_tokens(skill: str, tmp_path: Path) 
             f"files={extra_found['filenames']} — report.md is not the only thing the founder reads"
         )
 
-    found = ft.scan(text, extra_keep=keep)
+    found = ft.scan(_strip_coaching_marker(text), extra_keep=keep)
     assert found == {"enums": [], "filenames": []}, (
         f"{skill} report.md leaks internal tokens: enums={found['enums']} files={found['filenames']}"
     )
