@@ -31,7 +31,18 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# FLOOR: >=1.19.0 with no upper bound. Recording is the one operation where the harness version is
+# FLOOR: >=1.20.0 with no upper bound. Recording is the one operation where the harness version is
+#   * 1.20.0 is required for the RECORDING ITSELF, unlike the 1.19.0 bump below. Its baseline
+#     (desktop-1.26832.0) pins agent ELF 2.1.222 — the only ELF installed on this machine. On a
+#     1.19.0 CLI (baseline desktop-1.25927.0, pinned 2.1.221) `doctor --tier hostloop` reports the
+#     staged binary as `sha256 ✗ vs baseline` and `parity mount: patch-tolerated (pinned 2.1.221,
+#     using 2.1.222)` — it records, but freezes a tolerated ELF mismatch into every cassette. At
+#     1.20.0 the same check reads `sha256 ✓`. Nothing else in the 1.19.0 → 1.20.0 move is recording-
+#     sensitive: an exhaustive recursive diff of the two baselines leaves spawn.tools /
+#     spawn.allowedTools / spawn.env / spawn.promptTemplate / spawn.subagentAppend{,HostLoop} /
+#     spawn.hooks byte-identical, and network.allowDomains differs in ORDER ONLY (set-difference is
+#     empty both ways — a positional comparison misreads it as a change). See
+#     docs/internal/2026-08-07-cowork-harness-1.20.0-adoption-plan.md §2 for the full diff.
 #   * 1.19.0 is required NOT for the recording itself (1.19.0 moves no baseline, no spawn env, no
 #     prompt — `git diff v1.18.0..v1.19.0 -- baselines/` is empty and `src/` touches only scan /
 #     mutate / cassette / chat-result / execute / types, none on a spawn path). It is required for
@@ -131,8 +142,8 @@ echo "cowork-harness $ver"
 # themselves are unchanged and still `::warning::`. Parse the JSON envelope instead.
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
 # `-gt 1` first so a future 2.x passes — a bare minor check would FATAL on 2.0.0.
-{ [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 19 ]; }; } \
-  || { echo "FATAL: need >=1.19.0 (have $ver) — see the floor note above"; exit 1; }
+{ [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 20 ]; }; } \
+  || { echo "FATAL: need >=1.20.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi

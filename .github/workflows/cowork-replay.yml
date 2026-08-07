@@ -25,7 +25,7 @@ name: cowork-replay
 #     an older, unrelated reason: it passes
 #     `--min-severity`, which needs >=1.11.0. Without that floor a
 #     `latest` that resolved older would not degrade — it hard-fails, exit 2, "unrecognized arguments".
-#     ALL FOUR now carry `^1.19.0`, and each for its own reason — this is not a blanket bump. NOTE the
+#     ALL FOUR now carry `^1.20.0`, and each for its own reason — this is not a blanket bump. NOTE the
 #     four sites are LINT / PRIVACY / STALENESS / REPLAY. The email canary is NOT one of them: it is a
 #     bare `run:` step with no `version:` input, riding whatever CLI the preceding Action step
 #     installed. Enumerate with `grep -n 'version: "' ` before editing this list — a plan-stage draft
@@ -36,8 +36,14 @@ name: cowork-replay
 #         non-findings (MEASURED via `npx cowork-harness@1.18.0`: exactly 240, exit 1). This is the
 #         inverse of the usual "an old CLI just lacks a flag" case — it fails loudly and WRONGLY.
 #       - Staleness gate: reads the cassettes, same v11-refusal reasoning as the privacy gate.
-#       - Lint: the `vacuous-gate-assert` rule is 1.18.0. On an older CLI the rule silently does not
-#         run, which is itself a vacuous gate — CI would report clean without having checked.
+#       - Lint: LOAD-BEARING at 1.20.0, and this step also gained `strict: true` there. The
+#         `vacuous-gate-assert` rule arrived in 1.18.0 (on an older CLI it silently does not run —
+#         itself a vacuous gate), but 1.20.0 fixed it FOUR ways, two of them silent false-greens:
+#         `gate_answer_count_min: 0` was accepted as a presence companion though `delivered >= 0`
+#         always holds, and a wrong-case `tool_called` glob silenced the rule. It also stopped firing
+#         on `gate_answers_delivered: false` (inverted premise) and on valid globs. Separately 1.20.0
+#         adds `assert-contradiction` (ERROR) for pairings no run can satisfy. Without `strict: true`
+#         the WARN-class half of that is ungated — see the step's own comment.
 #       - Replay: gate option-label fingerprinting rides the existing `skill` drift class (1.18.0);
 #         1.19.0 adds the `mutation` JSON envelope and the corrected `--mutate` sample reporting.
 #     `^1.17.0` happened to RESOLVE to 1.18.0 (npm picks the highest 1.x), so that bump was not a live
@@ -47,12 +53,24 @@ name: cowork-replay
 #     (A RANGE in that input is DOCUMENTED as of harness 1.12.0 — `action.yml` now states `version`
 #     accepts an npm range, not only an exact pin. It was already mechanically sound: the value is
 #     interpolated as `cowork-harness@$v` into `npm install --global`.)
-#   * the `skill-static-analysis` job's standalone `npm i -g cowork-harness@^1.17.0` — a floor with a
+#   * the `skill-static-analysis` job's standalone `npm i -g cowork-harness@^1.20.0` — a floor with a
 #     1.x ceiling. `^` (not a bare `>=`) because it FAILS LOUD if nothing >=1.16.0 is published
 #     (upstream SKILL.md: `@latest` can silently fetch an older CLI, and the new commands then fail as
 #     "unknown command"), AND because it cannot cross a future 2.0 the way `@latest` would. `^` is also
 #     shell-safe unquoted, where a bare `@>=1.16.0` would redirect stdout into a file named `=1.16.0`.
-# THE FLOOR IS 1.17.0. Two separate reasons, and they raise the floor for different steps:
+# THE FLOOR IS 1.20.0. Three separate reasons, and they raise the floor for different steps:
+#   (0) 1.20.0 — RECORDING FIDELITY, and the reason `rerecord.sh` floors here too. Its baseline
+#       (desktop-1.26832.0) pins agent ELF 2.1.222, the only ELF installed on the recording machine. A
+#       1.19.0 CLI (baseline desktop-1.25927.0, pinned 2.1.221) still records, but `doctor --tier
+#       hostloop` reports `sha256 ✗ vs baseline` / `patch-tolerated`, freezing an ELF mismatch into
+#       every cassette; at 1.20.0 the same check reads `sha256 ✓`. NOT a re-record trigger by itself:
+#       an exhaustive recursive diff of the two baselines leaves spawn.tools/allowedTools/env/
+#       promptTemplate/subagentAppend{,HostLoop}/hooks byte-identical, and network.allowDomains differs
+#       in ORDER ONLY (set-difference empty both ways — a positional compare misreads it). 1.20.0 also
+#       makes `record --dry-run` refuse what the real record refuses (the "Scenario load check" step
+#       below now catches `assert-contradiction` and `on_unanswered: prompt` in a DIRECTORY batch, both
+#       previously green there) and report the batch cost estimate on stderr without bisecting
+#       `--max-budget-usd`. See docs/internal/2026-08-07-cowork-harness-1.20.0-adoption-plan.md.
 #   (a) 1.17.0 — RECORDING correctness on the remote lane. Before it, `undelivered_deliverables` fired on
 #       EVERY `lane: remote` run: the `presentedFiles` arm can never match there (no remote delivery tool
 #       is served, so the array is structurally empty), so a run that wrote a file still warned "never
@@ -151,7 +169,17 @@ jobs:
         with:
           command: lint
           path: cowork-tests/scenarios/
-          version: "^1.19.0"
+          version: "^1.20.0"
+          # `strict: true` is the Action's first-class input (action.yml `inputs.strict` -> `--strict`),
+          # not `extra-args`. WITHOUT it this step CANNOT fail on a WARN-class rule — measured: a WARN
+          # finding exits 0 bare and 1 under --strict, while an ERROR (`assert-contradiction`) exits 1
+          # either way. So `vacuous-gate-assert` — the rule 1.20.0 fixed four ways — was ungated here.
+          # This is the invocation upstream's own references/ci-recipe.md teaches; we had adopted half
+          # of it. --strict changes the EXIT computation, not the severity floor, so the deliberate
+          # INFO-wall muting below is unaffected (the filter runs before the exit computation).
+          # Do NOT copy `strict: true` onto the replay steps: there it also fails on any cassette
+          # STALENESS finding, which is WARN-only by design here (CI cannot re-record).
+          strict: true
           extra-args: "--min-severity WARN"
 
       # The PII guard that actually matters here is **synthetic-only recording**: every cassette's
@@ -173,7 +201,7 @@ jobs:
         with:
           command: verify-cassettes
           path: cowork-tests/cassettes/
-          version: "^1.19.0"
+          version: "^1.20.0"
           extra-args: "--skip-staleness --skip-scenario-drift ${{ steps.allow.outputs.args }}"
 
       # Email canary: the SAME allowlist must still FLAG a non-synthetic email. The check asserts an
@@ -201,7 +229,7 @@ jobs:
         with:
           command: verify-cassettes
           path: cowork-tests/cassettes/
-          version: "^1.19.0"
+          version: "^1.20.0"
           extra-args: "--skip-privacy"
 
       # Floored, and NOT for a missing flag. An unknown top-level scenario key inside a frozen
@@ -214,7 +242,7 @@ jobs:
         with:
           command: replay
           path: cowork-tests/cassettes/
-          version: "^1.19.0"
+          version: "^1.20.0"
 
       # `cowork-tests/gate_prefix_check.py` and `delivery_check.py` are implemented and
       # unit-tested (`founder-skills/tests/test_gate_prefix_check.py` /
@@ -318,8 +346,8 @@ jobs:
       - uses: actions/setup-python@v5   # lint-skill bundles scenario.py (needs python3)
         with:
           python-version: '3.12'
-      - name: Install cowork-harness (floor ^1.17.0 — see header version policy)
-        run: npm i -g cowork-harness@^1.17.0
+      - name: Install cowork-harness (floor ^1.20.0 — see header version policy)
+        run: npm i -g cowork-harness@^1.20.0
       # The LOADER is the strict surface, and nothing else in CI reaches it:
       #   * `lint` WARNS on an unknown/too-new top-level key and exits 0 (lenient by design);
       #   * `replay` evaluates the scenario FROZEN in each cassette and never reads the on-disk YAML;

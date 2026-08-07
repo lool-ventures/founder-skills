@@ -34,9 +34,12 @@
 # misread the gate; a bare `.*` would have turned the backstop into decoration either way.
 #
 # THIS MAKES THE CLI FLOOR LOAD-BEARING. On a 1.18.0 CLI the exemption does not exist and this array
-# reds on 240 non-findings (measured: `npx cowork-harness@1.18.0` -> exactly 240, exit 1). Every
-# consumer of this file must floor at >=1.19.0. Unlike a missing flag, an older CLI here does not
-# degrade quietly — it fails loudly and WRONGLY.
+# reds on 240 non-findings (measured: `npx cowork-harness@1.18.0` -> exactly 240, exit 1). Unlike a
+# missing flag, an older CLI here does not degrade quietly — it fails loudly and WRONGLY.
+#
+# THIS FILE'S OWN requirement is >=1.19.0 (the exemption above). The REPO-WIDE floor is now >=1.20.0,
+# raised for an unrelated recording-fidelity reason (agent ELF 2.1.222; see rerecord.sh's floor note).
+# Keep both numbers: if the repo floor is ever lowered, 1.19.0 is the level this file still needs.
 #
 # STANDING RISK, and the reason this note is long. With no allow, the gate's green now depends on
 # `plugins[]` carrying `founder-skills` in EVERY future recording. Measured failure mode: strip
