@@ -584,6 +584,27 @@ Tag-push triggers `deck-review-e2e-smoke` in `.github/workflows/skill-quality.ym
    - Tag failure: `git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z`, fix, retag — no user impact yet (sync hasn't happened)
    - LLM-variance flake: re-run the job from the Actions UI (free retry, same SHA)
 7. **Only after green:** `./scripts/sync-test-repo.sh`
+8. **Create the GitHub Release** — `git push --tags` does NOT do this, and forgetting it is invisible from the terminal:
+
+   ```bash
+   # notes = that version's CHANGELOG section; title = the section's own "— <title>" text
+   gh release create vX.Y.Z --verify-tag --latest \
+     --title "vX.Y.Z — <changelog title>" -F <(<extract the section>)
+   ```
+
+   A **tag** and a **Release** are different objects: a Release is created only by `gh release create`
+   or the web UI. Because this step was never written down, **four tags shipped with no Release**
+   (v0.3.1, v0.6.0, v0.7.0, v0.7.1) and the repo's "Latest" badge sat on **v0.4.7 for two months** while
+   the project kept shipping — a public repo advertising itself as stale on the day it released.
+   Backfilled 2026-08-07; v0.3.1 deliberately left alone. Nothing was broken by the omission (users
+   install from the marketplace clone tracking `main`, so `plugin.json#version` there is what they get)
+   — the cost is entirely perception, which is why nothing failed and it drifted for four releases.
+
+   Two mechanics worth knowing: `--verify-tag` aborts if the tag isn't on the remote (catches a
+   forgotten `git push --tags`), and **"Latest" is computed, not chronological** — when backfilling
+   several, create them oldest-first with `--latest=false` and pass `--latest` only on the newest, or
+   the badge lands on whichever GitHub decides. Reversible: a Release can be deleted without touching
+   the tag.
 
 `sync-test-repo.sh` is a local, untracked TESTING step — it pushes the working tree to the private test repo (`yaniv-golan/founderskills-test`) so the release can be exercised in Cowork before users see it. It is NOT the user-facing distribution event: users install from the marketplace clone that tracks `main`, so `plugin.json#version` on `main` is what they actually pick up (see VERSIONING.md). Run the test sync only after the release gate is green — syncing a broken build means the test pass exercises a build you'd never ship.
 
