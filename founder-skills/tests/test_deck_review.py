@@ -3320,7 +3320,7 @@ def test_complete_slide_coverage_raises_no_coverage_warning(tmp_path: Path) -> N
     d = tmp_path / "deck-review-acme"
     d.mkdir()
     slides = [{"number": n, "headline": "h", "content_summary": "s"} for n in (1, 2, 3)]
-    reviews = [{"slide_number": n, "strengths": [], "weaknesses": []} for n in (1, 2, 3)]
+    reviews: list[dict] = [{"slide_number": n, "strengths": [], "weaknesses": []} for n in (1, 2, 3)]
     codes = _codes(_compose_with(d, slides, reviews))
     assert "SLIDE_REVIEW_MISSING" not in codes
     assert "SLIDE_REVIEW_DUPLICATE" not in codes
@@ -3344,7 +3344,7 @@ def test_duplicate_review_entries_raise_a_warning(tmp_path: Path) -> None:
     d = tmp_path / "deck-review-acme"
     d.mkdir()
     slides = [{"number": n, "headline": "h", "content_summary": "s"} for n in (1, 2)]
-    reviews = [{"slide_number": n, "strengths": [], "weaknesses": []} for n in (1, 2, 2)]
+    reviews: list[dict] = [{"slide_number": n, "strengths": [], "weaknesses": []} for n in (1, 2, 2)]
     data = _compose_with(d, slides, reviews)
     hits = [w for w in data["validation"]["warnings"] if w["code"] == "SLIDE_REVIEW_DUPLICATE"]
     assert hits, f"duplicate review entries did not warn: {_codes(data)}"

@@ -10,7 +10,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["ruff", "mypy", "pytest", "pyyaml", "types-openpyxl", "types-PyYAML", "claude-agent-sdk==0.1.80"]
+# mypy is PINNED, and must stay pinned. `uv.lock` is not committed, so CI's `uv sync --extra dev`
+# resolves dev tools fresh on every run while a developer's venv keeps whatever it installed months
+# ago. Unpinned, that let CI run mypy 2.3.0 against a local 1.19.1 — a MAJOR version apart — so
+# `scripts/pre-tag.sh` reported "safe to tag" and the tag then failed CI on two `var-annotated`
+# errors 1.19.1 does not emit. A preflight that cannot see what CI sees is not a gate. Bump this
+# deliberately (and re-run the 7 mypy dirs) rather than letting it float.
+dev = ["ruff", "mypy==2.3.0", "pytest", "pyyaml", "types-openpyxl", "types-PyYAML", "claude-agent-sdk==0.1.80"]
 
 [tool.ruff]
 target-version = "py310"
