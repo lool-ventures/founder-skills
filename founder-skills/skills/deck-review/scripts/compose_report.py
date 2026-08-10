@@ -55,6 +55,7 @@ _URL_EMAIL_RE = re.compile(r"\S+@\S+|https?://\S+|www\.\S+|\b[A-Za-z0-9-]+(?:\.[
 
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _notes  # noqa: E402
 from _artifact_writer import load_schema  # noqa: E402
 from _schema_validator import validate as _schema_validate  # noqa: E402
 
@@ -121,6 +122,10 @@ WARNING_SEVERITY: dict[str, str] = {
     "STAGE_MISMATCH": "medium",
     "SLIDE_COUNT_EXTREME": "medium",
     "UNCITED_CRITIQUE": "medium",
+    # Medium, not high: the item is suppressed from the fixes list rather than rendered,
+    # so nothing wrong reaches the founder -- but a checklist item that produced no
+    # usable fix is a sub-agent contract miss worth surfacing.
+    "NOTES_NOT_ACTIONABLE": "medium",
     "AI_CRITERIA_MISSING": "high",
     "AI_CRITERIA_SKIPPED": "medium",
     "AI_CRITERIA_ON_NON_AI": "medium",
@@ -164,6 +169,7 @@ WARNING_LABELS: dict[str, str] = {
     "STAGE_MISMATCH": "Stage Mismatch",
     "SLIDE_COUNT_EXTREME": "Slide Count",
     "UNCITED_CRITIQUE": "Uncited Critique",
+    "NOTES_NOT_ACTIONABLE": "Fix Text Not Actionable",
     "AI_CRITERIA_MISSING": "AI Criteria Missing",
     "AI_CRITERIA_SKIPPED": "AI Criteria Skipped",
     "AI_CRITERIA_ON_NON_AI": "AI Criteria Applied to Non-AI Company",
@@ -437,6 +443,31 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                         f"Slide {review.get('slide_number', '?')} has critiques without best-practice citations",
                     )
                 )
+
+    # 7b. NOTES_NOT_ACTIONABLE — a fail/warn item's `notes` describes what was CHECKED
+    # rather than what to change, so the fixes section suppressed it (see _notes.py).
+    # Layer 1 (a missing `notes`) is fatal in checklist.py; this is the shape tripwire,
+    # which stays advisory because it is a heuristic and can false-positive.
+    if _usable(checklist):
+        _summary = _as_dict(checklist.get("summary"))
+        _unusable = [
+            str(_as_dict(raw).get("id", "?"))
+            for key in ("failed_items", "warned_items")
+            for raw in _as_list(_summary.get(key))
+            if _notes.usable_fix(_as_dict(raw).get("notes")) is None
+        ]
+        if _unusable:
+            warnings.append(
+                _warn(
+                    "NOTES_NOT_ACTIONABLE",
+                    f"{len(_unusable)} checklist item(s) describe what was checked instead of what to "
+                    f"change, so they were left out of the fixes list: {', '.join(_unusable[:5])}",
+                    founder_message=(
+                        f"{len(_unusable)} checklist item(s) had no actionable fix text and were left "
+                        "out of the fixes list. The full findings are still in the checklist below."
+                    ),
+                )
+            )
 
     # 8. AI_CRITERIA_SKIPPED — AI company detected but AI criteria all not_applicable
     # Read ai_company_status from deck_inventory.json (the authoritative source).
@@ -876,7 +907,11 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
         lines.append("### Areas That Need Attention\n")
         for raw_f in failed:
             f = _as_dict(raw_f)
-            notes = f.get("notes", "")
+            # Same predicate as the fixes section. Suppression has to hold at EVERY site
+            # that renders `notes`, or it is not suppression — it just moves the bad text
+            # to a different heading. Evidence still prints, so the item keeps its
+            # diagnosis; only the non-actionable "fix" is dropped.
+            notes = _notes.usable_fix(f.get("notes")) or ""
             evidence = f.get("evidence", "")
             lines.append(f"- **{f.get('label', f.get('id', '?'))}** ({f.get('category', '?')})")
             if notes:
@@ -891,7 +926,7 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
         lines.append("### Items Needing Attention\n")
         for raw_w in warned:
             w = _as_dict(raw_w)
-            notes = w.get("notes", "")
+            notes = _notes.usable_fix(w.get("notes")) or ""
             evidence = w.get("evidence", "")
             lines.append(f"- **{w.get('label', w.get('id', '?'))}** ({w.get('category', '?')})")
             if notes:
@@ -903,43 +938,80 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _sanitize_items_for_coaching(items: Any) -> list[dict[str, Any]]:
+    """Drop unusable `notes` before the coaching sub-agent sees them.
+
+    Copies rather than mutating: `summary` is also rendered by the report sections, and
+    an in-place edit here would make the payload and the report silently co-dependent.
+    """
+    out: list[dict[str, Any]] = []
+    for raw in _as_list(items):
+        item = dict(_as_dict(raw))
+        if "notes" in item and _notes.usable_fix(item.get("notes")) is None:
+            item.pop("notes")
+        out.append(item)
+    return out
+
+
 def _section_priority_fixes(
     checklist: dict[str, Any] | None,
     reviews: dict[str, Any] | None,
 ) -> str:
-    """Top 5 priority fixes — the highest-leverage changes the founder can make."""
-    lines = ["## Top 5 Priority Fixes\n"]
-    lines.append("These are the changes that will have the biggest impact on investor response:\n")
+    """Up to five founder-facing fixes, drawn from `notes` (the contracted fix field).
+
+    Two rules that are easy to "simplify" back into the bug this replaced:
+
+    1. NEVER fall back to the criterion label or to `evidence`. A label is a criterion
+       name and `evidence` is a diagnosis; neither is a change to make. A candidate with
+       no usable `notes` is SKIPPED and the next one backfills its slot, so the list can
+       hold fewer than five. That is why the heading says "Up to".
+    2. The section is NOT ranked. A critical missing slide is placed first because it
+       genuinely outranks a failed criterion, and the preamble discloses exactly that;
+       the remaining order is `failed_items` order, i.e. criteria-file order, which is
+       arbitrary. Do not present it as a ranking — `checklist.py` deliberately refuses to
+       weight criteria, so no severity signal exists to sort by.
+    """
+    lines = ["## Up to 5 Fixes to Make\n"]
+    lines.append(
+        "Drawn from the criteria this deck missed and from slides it is missing entirely. "
+        "A missing critical slide is listed first; the rest are in no particular order — "
+        "for where to start, see the coaching commentary.\n"
+    )
 
     fixes: list[str] = []
 
-    # Draw from failed checklist items (highest priority)
-    if checklist is not None and not _is_stub(checklist):
-        for raw_f in _as_list(_as_dict(checklist.get("summary")).get("failed_items")):
-            f = _as_dict(raw_f)
-            label = f.get("label", f.get("id", "?"))
-            notes = f.get("notes", "")
-            fix = f"{label}: {notes}" if notes else label
-            fixes.append(fix)
-
-    # Draw from missing slides
+    # A critical missing slide outranks a failed criterion, so it leads. `missing_slides`
+    # carries no intrinsic order (the schema imposes none), so "first" among several is
+    # arbitrary and deliberately so.
     if reviews is not None and not _is_stub(reviews):
         for raw_m in _as_list(reviews.get("missing_slides")):
             m = _as_dict(raw_m)
             if m.get("importance") == "critical":
-                fixes.append(f"Add missing {m.get('expected_type', 'slide')}: {m.get('recommendation', '')}")
+                rec = str(m.get("recommendation", "")).strip()
+                # Raw, like the "Slides to Add" section: substitute() de-tokenizes the whole
+                # body before the founder-text scan, turning "why_now" into "why now".
+                expected = str(m.get("expected_type", "slide"))
+                if rec:
+                    fixes.append(f"Add a {expected} slide: {rec}")
+                    break
 
-    # Draw from warned items
+    # Failures, then warnings. Skip any candidate without a usable fix.
     if checklist is not None and not _is_stub(checklist):
-        for raw_w in _as_list(_as_dict(checklist.get("summary")).get("warned_items")):
-            w = _as_dict(raw_w)
-            label = w.get("label", w.get("id", "?"))
-            notes = w.get("notes", "")
-            fix = f"{label}: {notes}" if notes else label
-            fixes.append(fix)
+        summary = _as_dict(checklist.get("summary"))
+        for key in ("failed_items", "warned_items"):
+            for raw in _as_list(summary.get(key)):
+                item = _as_dict(raw)
+                fix = _notes.usable_fix(item.get("notes"))
+                if fix is None:
+                    continue
+                label = item.get("label", item.get("id", "?"))
+                fixes.append(f"{label}: {fix}")
 
     if not fixes:
-        lines.append("No critical fixes identified.\n")
+        # Reachable with failures present, once every candidate is suppressed — so it must
+        # not claim the deck is clean. The accompanying NOTES_NOT_ACTIONABLE warning says
+        # the same thing in the Warnings section.
+        lines.append("No specific fixes could be listed here — see the checklist below.\n")
     else:
         for i, fix in enumerate(fixes[:5], 1):
             lines.append(f"{i}. {fix}")
@@ -1017,8 +1089,11 @@ def _emit_coaching_payload(
             "warn": summary.get("warn"),
             "not_applicable": summary.get("not_applicable"),
         },
-        "failed_items": summary.get("failed_items", []),
-        "warned_items": summary.get("warned_items", []),
+        # Sanitised, NOT passed by reference. The coaching sub-agent reads these and echoes
+        # them into commentary inserted back into report.md — a fourth path to the founder.
+        # Handing it a note the three renderers just suppressed would route around all of them.
+        "failed_items": _sanitize_items_for_coaching(summary.get("failed_items", [])),
+        "warned_items": _sanitize_items_for_coaching(summary.get("warned_items", [])),
         # {code, label, message}, matching competitive-positioning — NOT a bare code list. The
         # coaching sub-agent reads this payload and echoes it into commentary the founder reads;
         # handing it only `UNVALIDATED_CLAIMS` is how raw warning codes reached delivered reports.

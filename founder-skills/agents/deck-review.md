@@ -79,10 +79,16 @@ Readability criterion too, even when `deck_inventory.json`'s `input_format` is `
 file) — `checklist.py` applies deterministic Design-criteria gating from
 `input_format` after you return, the same way it gates AI criteria from
 `ai_company_status`; you do not self-gate either category. Every
-`fail`/`warn` MUST cite a specific best-practice principle. Before
-asserting a visual or design element is absent (photos, charts, diagrams,
-logos), check the `visuals` field of the relevant slides in
-`deck_inventory.json` and cite the slide number(s) you checked. Write to
+`fail`/`warn` `evidence` MUST include BOTH what the deck actually does
+(quote or describe the specific slide content) AND the best-practice
+principle it falls short of — the deck observation is not optional.
+`notes` is the specific change the founder should make: imperative,
+concrete, particular to this deck, never a restatement of the criterion
+or a record of what you checked. Required on fail/warn; omit it entirely
+on pass/not_applicable. Before asserting a visual or design element is
+absent (photos, charts, diagrams, logos), check the `visuals` field of
+the relevant slides in `deck_inventory.json` and cite the slide
+number(s) you checked. Write to
 OUTPUT_PATH the JSON matching `checklist.schema.json`'s input format
 (`{"items": [...]}` — without `summary`; main thread's `checklist.py`
 computes the summary).
@@ -113,9 +119,9 @@ State what is true of the DECK.
 - Do not call `Bash` or invoke producer scripts. Read/Write/Glob/Grep +
   your own analytical capability are sufficient.
 - If you encounter ambiguity (deck format unclear, criterion meaning
-  unclear), include the ambiguity in the relevant evidence/notes field
-  rather than asking back. The main thread doesn't expect mid-step
-  questions in this context.
+  unclear), include the ambiguity in `evidence` rather than asking back —
+  never in `notes`, which must stay a clean imperative fix. The main
+  thread doesn't expect mid-step questions in this context.
 
 ### Context B — Post-compose coaching dispatch (POST_COMPOSE_COACHING)
 

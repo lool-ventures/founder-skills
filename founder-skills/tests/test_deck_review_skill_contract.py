@@ -721,7 +721,13 @@ def test_context_a_templates_require_json_escaped_strings() -> None:
     for anchor in ("CONTEXT: SLIDE_REVIEWS", "CONTEXT: CHECKLIST"):
         start = skill_text.find(anchor)
         assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
-        section = skill_text[start : start + 3500]
+        # Bound on the template's own closing fence, not a fixed character count. A
+        # character window silently fails when the template grows -- the escaping rule is
+        # still present, just past the cutoff -- and widening the constant only defers the
+        # next break. Measured: an additive edit to the CHECKLIST evidence rules pushed
+        # this over a 3500-char window.
+        end = skill_text.find("\n```", start)
+        section = skill_text[start:end] if end != -1 else skill_text[start:]
         assert "\\n" in section, f"{SKILL_MD.name} {anchor} must require escaping newlines as \\n"
 
 
@@ -1388,3 +1394,42 @@ def test_agent_coaching_writes_raw_markdown_no_json_escaping() -> None:
     assert "escaped as `\\n`" not in agent_body
     assert 'escaped as `\\"`' not in agent_body
     assert "no pretty-print" not in agent_body.lower()
+
+
+def test_checklist_dispatch_specifies_notes_as_the_fix() -> None:
+    """The CHECKLIST dispatch must define `notes` as the founder-facing fix.
+
+    `notes` is what the report's fixes section renders. It was previously defined
+    NOWHERE — SKILL.md specified `evidence` and never mentioned `notes` — so its content
+    was run-dependent: sometimes a recommendation, sometimes "Checked slides 1 and 2...".
+    That is the whole of finding F2.
+
+    Bounded on the template's closing fence, NOT a character window. An unsliced
+    whole-file assertion would be vacuous here (`notes` appears throughout SKILL.md), and
+    a fixed window silently stops covering the tail as the template grows — measured:
+    an additive edit to these same evidence rules broke a 3500-char window.
+    """
+    skill_text = SKILL_MD.read_text(encoding="utf-8")
+    anchor = "CONTEXT: CHECKLIST"
+    start = skill_text.find(anchor)
+    assert start != -1, f"{SKILL_MD.name} has no '{anchor}' section"
+    fence = skill_text.find("\n```", start)
+    assert fence != -1, f"{SKILL_MD.name} {anchor} template has no closing fence"
+    section = skill_text[start:fence]
+
+    assert "`notes`" in section, (
+        f"{SKILL_MD.name} {anchor} must define `notes`. Undefined, its content is "
+        "run-dependent and the fixes section renders whatever the model happened to write."
+    )
+    low = section.lower()
+    assert "required on fail and warn" in low, (
+        f"{SKILL_MD.name} {anchor} must state that `notes` is required on fail/warn — "
+        "checklist.py rejects a fail/warn item without it."
+    )
+    # The agent body carries the same contract; the two dispatch surfaces must not drift.
+    agent_text = AGENT_MD.read_text(encoding="utf-8")
+    assert "`notes`" in agent_text, f"{AGENT_MD.name} must carry the same `notes` contract"
+    assert "never in `notes`" in agent_text, (
+        f"{AGENT_MD.name} must keep ambiguity out of `notes` — an ambiguity note there is "
+        "exactly the non-actionable content F2 was about."
+    )

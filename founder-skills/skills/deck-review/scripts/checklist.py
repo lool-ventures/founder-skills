@@ -424,6 +424,17 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
                 msg = f"{item['id']} has status '{item['status']}' but no evidence"
                 print(f"Warning: {msg}", file=sys.stderr)
                 evidence_errors.append(msg)
+            # `notes` carries the founder-facing FIX and is contracted as required on
+            # fail/warn. Fatal, symmetric with evidence above, because every run is
+            # fresh: a missing fix is this run's sub-agent ignoring the contract, not a
+            # legacy artifact to tolerate — and the corrective-dispatch budget exists at
+            # exactly this step. Rendering the criterion label instead is what made the
+            # fixes section contain no fixes.
+            nt = item.get("notes")
+            if not nt or (isinstance(nt, str) and not nt.strip()):
+                msg = f"{item['id']} has status '{item['status']}' but no notes (the founder-facing fix)"
+                print(f"Warning: {msg}", file=sys.stderr)
+                evidence_errors.append(msg)
         elif item["status"] == "pass":
             ev = item.get("evidence")
             if not ev or (isinstance(ev, str) and not ev.strip()):

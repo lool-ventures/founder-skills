@@ -597,6 +597,113 @@ def test_visualize_agent_framing() -> None:
     assert "agent-generated" in stdout
 
 
+# ---------------------------------------------------------------------------
+# _key_findings regression tests: warn-only actions, reserved slot, suppression parity
+# ---------------------------------------------------------------------------
+
+
+def test_key_findings_actions_list_populated_for_warn_only() -> None:
+    """Regression: _key_findings used to be fail-only, so a checklist with zero fails
+    and only warns produced an empty actions list even though warn items carry usable
+    notes -- a real deck can be all-warn with no fails."""
+    arts = _all_artifacts()
+    checklist: dict[str, Any] = json.loads(json.dumps(_VALID_CHECKLIST))
+    warned = {
+        "purpose_clear": {
+            "id": "purpose_clear",
+            "category": "Narrative Flow",
+            "label": "Company purpose is clear and specific",
+            "status": "warn",
+            "evidence": "The purpose statement buries the customer outcome.",
+            "notes": "Lead with the customer outcome in the first sentence.",
+        },
+        "problem_quantified": {
+            "id": "problem_quantified",
+            "category": "Slide Content",
+            "label": "Problem slide quantifies pain",
+            "status": "warn",
+            "evidence": "No dollar figure given for the cost of the problem.",
+            "notes": "Add a dollar figure quantifying the cost of the problem today.",
+        },
+    }
+    checklist["items"] = [warned.get(item["id"], item) for item in checklist["items"]]
+    checklist["summary"]["warn"] = 2
+    checklist["summary"]["pass"] = 33
+    checklist["summary"]["warned_items"] = list(warned.values())
+    arts["checklist.json"] = checklist
+    d = _make_artifact_dir(arts)
+    rc, stdout, _ = _run_viz(d)
+    assert rc == 0
+    assert "Top actions" in stdout
+    assert "Lead with the customer outcome in the first sentence." in stdout
+
+
+def test_key_findings_reserves_slot_for_critical_missing_slide() -> None:
+    """A critical missing slide's action text must survive the 3-item render truncation
+    even with 4 failed criteria also competing for the actions list."""
+    arts = _all_artifacts()
+    checklist: dict[str, Any] = json.loads(json.dumps(_VALID_CHECKLIST))
+    failed_ids = ["purpose_clear", "headlines_carry_story", "narrative_arc_present", "strongest_proof_early"]
+    failed = {
+        cid: {
+            "id": cid,
+            "category": "Narrative Flow",
+            "label": cid,
+            "status": "fail",
+            "evidence": f"evidence for {cid}",
+            "notes": f"Fix {cid} by making a concrete change.",
+        }
+        for cid in failed_ids
+    }
+    checklist["items"] = [failed.get(item["id"], item) for item in checklist["items"]]
+    checklist["summary"]["fail"] = len(failed_ids)
+    checklist["summary"]["pass"] = 35 - len(failed_ids)
+    checklist["summary"]["failed_items"] = list(failed.values())
+    arts["checklist.json"] = checklist
+    reviews = dict(_VALID_REVIEWS)
+    reviews["missing_slides"] = [
+        {
+            "expected_type": "why_now",
+            "importance": "critical",
+            "recommendation": "Add a Why Now slide citing the recent regulatory shift.",
+        }
+    ]
+    arts["slide_reviews.json"] = reviews
+    d = _make_artifact_dir(arts)
+    rc, stdout, _ = _run_viz(d)
+    assert rc == 0
+    assert "Add a Why Now slide citing the recent regulatory shift." in stdout
+
+
+def test_key_findings_suppresses_methodology_shaped_notes() -> None:
+    """A failed item whose notes read as methodology, not a fix, must never surface that
+    text in the rendered HTML actions -- suppression must match compose_report.py's."""
+    arts = _all_artifacts()
+    checklist: dict[str, Any] = json.loads(json.dumps(_VALID_CHECKLIST))
+    methodology_notes = "Checked slides 1 and 2, the only two slides with purpose-defining language."
+    failed_item = {
+        "id": "purpose_clear",
+        "category": "Narrative Flow",
+        "label": "Company purpose is clear and specific",
+        "status": "fail",
+        # DELIBERATELY EMPTY. With evidence populated the pre-change code
+        # (`evidence or notes`) never rendered `notes` either, so this test passed
+        # against the unfixed renderer -- verified by revert. Empty evidence is the only
+        # input that discriminates: old code falls through to `notes` and leaks it.
+        "evidence": "",
+        "notes": methodology_notes,
+    }
+    checklist["items"] = [failed_item if item["id"] == "purpose_clear" else item for item in checklist["items"]]
+    checklist["summary"]["fail"] = 1
+    checklist["summary"]["pass"] = 34
+    checklist["summary"]["failed_items"] = [failed_item]
+    arts["checklist.json"] = checklist
+    d = _make_artifact_dir(arts)
+    rc, stdout, _ = _run_viz(d)
+    assert rc == 0
+    assert methodology_notes not in stdout
+
+
 # ===========================================================================
 # Key-coverage tests: producer output keys ⊆ renderer known sets
 # ===========================================================================

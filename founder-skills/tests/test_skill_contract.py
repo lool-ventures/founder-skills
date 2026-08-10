@@ -499,7 +499,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # mid-engagement. Added its own fact-plus-remedy sentence instead: re-deriving the pure path vars is
     # safe, but RUN_ID is re-established from setup_run.py's printed run_id, never from re-running the
     # mint line.
-    "deck-review": 71_081,
+    # 71_081 -> 71_498 (R1): the CHECKLIST dispatch now specifies `notes` as the
+    # founder-facing fix. `notes` was previously defined nowhere, so its content was
+    # run-dependent and the "priority fixes" section rendered methodology as advice.
+    "deck-review": 71_498,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -699,7 +702,9 @@ REFERENCES_CEILING: dict[str, int] = {
     # scoring formula, which excluded only not_applicable. Following it changed the conviction
     # score, since score_dimensions.py excludes both. The >6 coverage cap was undocumented too.
     "ic-sim": 55_805,
-    "deck-review": 49_039,
+    # 49_039 -> 50_080 (R1): artifact-schemas.md now documents the evidence/notes
+    # contract and its JSON example demonstrates a fail item carrying both.
+    "deck-review": 50_080,
     "competitive-positioning": 136_835,
     # cap-table +422 B: inputs-skeleton.md promised "no warning, and downstream artifacts that look
     # right but contain zeros" — the PRE-FIX world. cap_state.py hard-errors E_NO_EQUITY_BASE now,

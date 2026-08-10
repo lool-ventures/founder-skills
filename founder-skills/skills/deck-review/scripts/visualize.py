@@ -22,6 +22,12 @@ import os
 import sys
 from typing import Any, TypeGuard
 
+# Shared with compose_report.py so both renderers suppress the same bad `notes`.
+# Same-dir import, matching the guarded pattern used for _theme below.
+if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _notes  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Artifact loading infrastructure
 # ---------------------------------------------------------------------------
@@ -392,28 +398,63 @@ def _key_findings(
             if total > 0 and p / total >= 0.8:
                 strong.append(f"{cat}: {int(p)}/{int(total)} criteria pass")
 
-        # Failed items
-        for item in items:
-            if isinstance(item, dict) and item.get("status") == "fail":
+        # Failed items, then warned ones. Warnings are included because the markdown
+        # report lists them once failures run out — omitting them here produced a deck
+        # with markdown actions and an empty HTML actions list.
+        for wanted in ("fail", "warn"):
+            for item in items:
+                if not isinstance(item, dict) or item.get("status") != wanted:
+                    continue
                 label = str(item.get("label", item.get("id", "")))
-                evidence = str(item.get("evidence") or item.get("notes") or "")
-                text = f"{label}: {evidence}" if evidence else label
-                attention.append(text)
-                actions.append(f"Address: {label}")
+                # The FINDING is the diagnosis (evidence); the ACTION is the fix (notes).
+                # Deliberately not `notes or evidence` in both — that printed the same
+                # string twice in adjacent sections.
+                evidence = str(item.get("evidence") or "")
+                attention.append(f"{label}: {evidence}" if evidence else label)
+                # Shared predicate, not a local copy: compose_report.py suppresses the
+                # same strings, and a duplicated check drifts invisibly — one delivered
+                # artifact would hide a bad note while the other rendered it.
+                fix = _notes.usable_fix(item.get("notes"))
+                if fix is not None:
+                    actions.append(f"{label}: {fix}")
 
-    # Slide review findings
+    # Slide review findings. INSERTED AT THE FRONT, not appended: the lists are
+    # truncated to 3 at render time and failures are already in them, so on a real deck
+    # (12-18 failures measured) an appended missing slide was dead code — never rendered.
+    # A critical missing slide also genuinely outranks a failed criterion.
     if _usable(reviews):
         missing = _as_list(reviews.get("missing_slides"))
+        ms_attention: list[str] = []
+        ms_actions: list[str] = []
+        critical: list[int] = []
         for ms in missing[:3]:
             if isinstance(ms, dict):
                 expected = str(ms.get("expected_type", ""))
                 label = _humanize_framework(expected) if expected else "Unknown"
                 importance = str(ms.get("importance", ""))
-                text = f"Missing: {label}"
-                if importance:
-                    text += f" ({importance})"
-                attention.append(text)
-                actions.append(f"Add a {label} slide")
+                # Match the markdown section: only a CRITICAL slide with a real
+                # recommendation earns a slot. Without both filters the two artifacts
+                # disagree — HTML showed an `important` slide markdown omitted, and
+                # emitted a bare "Add a <X> slide" (the finding restated) when the
+                # recommendation was empty.
+                rec = str(ms.get("recommendation", "")).strip()
+                if importance != "critical" or not rec:
+                    continue
+                ms_attention.append(f"Missing: {label} ({importance})")
+                ms_actions.append(f"Add a {label} slide: {rec}")
+                # Index into the PARALLEL list, recorded while building it. Enumerating
+                # `missing` instead desyncs the moment an entry is skipped, and the
+                # isinstance guard above then only looks like it protects this.
+                critical.append(len(ms_attention) - 1)
+        if critical:
+            # Reserve the lead slot for one critical omission; the rest queue behind.
+            k = critical[0]
+            attention.insert(0, ms_attention[k])
+            actions.insert(0, ms_actions[k])
+            ms_attention.pop(k)
+            ms_actions.pop(k)
+        attention.extend(ms_attention)
+        actions.extend(ms_actions)
 
     if not strong and not attention and not actions:
         return ""

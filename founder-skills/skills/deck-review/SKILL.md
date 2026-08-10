@@ -585,9 +585,10 @@ Design-criteria gating from its `input_format` (forcing Design & Readability to
 file) after you return — assess every criterion regardless of format.
 
 Evidence quality rules:
-- Every fail and warn MUST cite a specific best-practice principle or benchmark.
-- Every pass MUST note what was checked.
+- Every fail and warn `evidence` MUST include BOTH what this deck actually does (quote or describe the specific slide content) AND the best-practice principle or benchmark it falls short of — the deck observation is not optional.
+- Every pass MUST record in `evidence` what was checked.
 - not_applicable items MUST include a reason.
+- `notes` is the specific change the founder should make — imperative, concrete, particular to this deck, never a restatement of the criterion or a record of what you checked. Required on fail and warn; omit it entirely on pass and not_applicable.
 - Before asserting a visual or design element is absent (photos, charts,
   diagrams, logos), check the `visuals` field of every relevant slide in
   `deck_inventory.json` and cite the slide number(s) you checked in the evidence.

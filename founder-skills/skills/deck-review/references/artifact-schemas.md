@@ -192,8 +192,13 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
     {
       "id": "purpose_clear",
       "status": "pass",
-      "evidence": "Sequoia: define company in single declarative sentence",
-      "notes": "Clear one-liner: 'Cloud accounting for SMBs that cuts bookkeeping time by 80%'"
+      "evidence": "Checked slide 1's headline and sub-line against the Sequoia standard (define the company in a single declarative sentence); 'Cloud accounting for SMBs that cuts bookkeeping time by 80%' satisfies it."
+    },
+    {
+      "id": "competition_honest",
+      "status": "fail",
+      "evidence": "Slide 9 ('Why We Win') lists only two small regional players and omits Ramp and Brex, both named elsewhere in the deck's own customer-switching stats. DocSend data shows decks that name and honestly position all real competitors get funded at a higher rate than decks that omit obvious ones.",
+      "notes": "Add Ramp and Brex to the competitive grid on slide 9 and state the specific axis (e.g. SMB-focused onboarding speed) where Acme Corp wins."
     }
   ]
 }
@@ -214,8 +219,8 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
 | `category` | string | Category name |
 | `label` | string | Human-readable label |
 | `status` | string | `"pass"`, `"fail"`, `"warn"`, or `"not_applicable"` |
-| `evidence` | string \| null | Best-practice principle cited |
-| `notes` | string \| null | Agent's assessment notes |
+| `evidence` | string \| null | Why this verdict. For fail/warn: both the deck's actual content (quote/describe the specific slide) AND the best-practice principle or benchmark it falls short of — the deck observation is not optional. For pass: what was checked and what satisfied it. For not_applicable: the reason. |
+| `notes` | string \| null | The specific change the founder should make — imperative, concrete, particular to this deck (not a restatement of the criterion, not a record of what was checked). Required on fail/warn; omitted on pass/not_applicable. |
 
 ### summary
 

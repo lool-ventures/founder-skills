@@ -114,6 +114,78 @@ def _make_checklist_items(
     return items
 
 
+# -- _notes shared predicate tests --
+#
+# _notes.usable_fix / looks_like_methodology are the single source of truth both
+# renderers (compose_report.py and visualize.py) defer to for whether a checklist
+# item's `notes` can be shown to a founder as a fix. Test the predicate directly
+# here; the renderer tests further down only need to confirm each renderer
+# actually calls through to it.
+
+
+def _load_notes_module() -> Any:
+    """Load _notes.py by path (it's a standalone shared predicate module, not a package)."""
+    import importlib.util
+
+    if DECK_REVIEW_DIR not in sys.path:
+        sys.path.insert(0, DECK_REVIEW_DIR)
+    path = os.path.join(DECK_REVIEW_DIR, "_notes.py")
+    spec = importlib.util.spec_from_file_location("deck_review_notes_module", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["deck_review_notes_module"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_notes_usable_fix_none_for_empty_or_non_string() -> None:
+    """usable_fix must reject empty/whitespace/None/non-str notes -- never render them as a fix."""
+    notes_mod = _load_notes_module()
+    assert notes_mod.usable_fix("") is None
+    assert notes_mod.usable_fix("   ") is None
+    assert notes_mod.usable_fix(None) is None
+    assert notes_mod.usable_fix(42) is None
+    assert notes_mod.usable_fix(["not", "a", "string"]) is None
+
+
+def test_notes_usable_fix_none_for_methodology_shaped_note() -> None:
+    """A past-tense reporting opener reads as bookkeeping, not a fix -- must be suppressed."""
+    notes_mod = _load_notes_module()
+    text = "Checked slides 1 and 2, the only two slides with purpose-defining language."
+    assert notes_mod.looks_like_methodology(text) is True
+    assert notes_mod.usable_fix(text) is None
+
+
+def test_notes_looks_like_methodology_covers_multiple_openers() -> None:
+    """At least three of the documented methodology-opener verbs must trip the heuristic."""
+    notes_mod = _load_notes_module()
+    for verb, rest in [
+        ("Checked", "slides 3 through 5 for internal consistency."),
+        ("Reviewed", "the team slide against the founder-market-fit rubric."),
+        ("Verified", "the claimed ARR figure against the appendix."),
+    ]:
+        text = f"{verb} {rest}"
+        assert notes_mod.looks_like_methodology(text) is True, text
+        assert notes_mod.usable_fix(text) is None, text
+
+
+def test_notes_methodology_word_mid_sentence_is_not_flagged() -> None:
+    """The heuristic checks the OPENING verb only -- a fix that merely contains one of
+    the methodology words mid-sentence must still be treated as usable."""
+    notes_mod = _load_notes_module()
+    text = "Add a slide that shows the reviewed pipeline."
+    assert notes_mod.looks_like_methodology(text) is False
+    assert notes_mod.usable_fix(text) == text
+
+
+def test_notes_usable_fix_returns_real_imperative_fix() -> None:
+    """A genuine imperative fix passes through unchanged."""
+    notes_mod = _load_notes_module()
+    text = "Add a slide quantifying the market with a bottom-up build, not a top-down guess."
+    assert notes_mod.looks_like_methodology(text) is False
+    assert notes_mod.usable_fix(text) == text
+
+
 # -- Checklist tests --
 
 
@@ -381,6 +453,24 @@ def _load_stage_profile_module() -> Any:
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules["deck_review_stage_profile_module"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _load_compose_report_module() -> Any:
+    """Load compose_report.py by path for direct function calls (e.g. _section_priority_fixes),
+    bypassing subprocess so Python dicts can be passed straight to the renderer. Its sibling
+    imports (_notes, _artifact_writer, _schema_validator) need DECK_REVIEW_DIR on sys.path
+    first, same as _load_stage_profile_module above."""
+    import importlib.util
+
+    if DECK_REVIEW_DIR not in sys.path:
+        sys.path.insert(0, DECK_REVIEW_DIR)
+    path = os.path.join(DECK_REVIEW_DIR, "compose_report.py")
+    spec = importlib.util.spec_from_file_location("deck_review_compose_report_module", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["deck_review_compose_report_module"] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -1164,6 +1254,7 @@ def test_compose_severity_map_complete() -> None:
         "STAGE_MISMATCH",
         "SLIDE_COUNT_EXTREME",
         "UNCITED_CRITIQUE",
+        "NOTES_NOT_ACTIONABLE",
         "AI_CRITERIA_SKIPPED",
         "STAGE_OUT_OF_SCOPE",
         "UNSUPPORTED_CHECKLIST_CRITIQUE",
@@ -1432,8 +1523,136 @@ def test_compose_report_sections() -> None:
     assert "## Stage Context" in report
     assert "## Slide-by-Slide Feedback" in report
     assert "## Checklist Results" in report
-    assert "## Top 5 Priority Fixes" in report
+    # Renamed in R1: the old title claimed a ranking nothing computed, and the section
+    # can now hold fewer than five items (a candidate with no usable fix is skipped
+    # rather than padded with its criterion label).
+    assert "## Up to 5 Fixes to Make" in report
     assert "## Appendix: Full Checklist" in report
+
+
+# -- _section_priority_fixes: skip/backfill/reserved-slot regression tests --
+#
+# Call the renderer directly rather than through compose(), so a checklist dict can be
+# built by hand without satisfying the full 4-artifact contract.
+
+
+def test_priority_fixes_skips_methodology_shaped_note_and_backfills() -> None:
+    """A failed item whose notes read as methodology, not a fix, is skipped entirely --
+    never rendered under its criterion label -- and the next candidate backfills the slot."""
+    mod = _load_compose_report_module()
+    methodology_notes = "Checked slides 1 and 2, the only two slides with purpose-defining language."
+    checklist = {
+        "summary": {
+            "failed_items": [
+                {
+                    "id": "purpose_clear",
+                    "label": "Company purpose is clear and specific",
+                    "evidence": "Purpose statement buries the outcome.",
+                    "notes": methodology_notes,
+                },
+                {
+                    "id": "problem_quantified",
+                    "label": "Problem slide quantifies pain",
+                    "evidence": "No dollar figure given.",
+                    "notes": "Add a dollar figure quantifying the cost of the problem today.",
+                },
+            ],
+            "warned_items": [],
+        }
+    }
+    section = mod._section_priority_fixes(checklist, None)
+    assert methodology_notes not in section
+    assert "Company purpose is clear and specific:" not in section
+    assert "Add a dollar figure quantifying the cost of the problem today." in section
+
+
+def test_priority_fixes_never_falls_back_to_evidence() -> None:
+    """A failed item with usable notes must render the notes text, never the evidence
+    (the diagnosis) -- evidence is not a change to make."""
+    mod = _load_compose_report_module()
+    distinctive_evidence = "Slide 3 headline reads 'Our Product' with no outcome stated."
+    checklist = {
+        "summary": {
+            "failed_items": [
+                {
+                    "id": "headlines_carry_story",
+                    "label": "Slide headlines are conclusions, not topics",
+                    "evidence": distinctive_evidence,
+                    "notes": "Rewrite the slide 3 headline as a conclusion, e.g. 'Cuts onboarding time by 40%.'",
+                },
+            ],
+            "warned_items": [],
+        }
+    }
+    section = mod._section_priority_fixes(checklist, None)
+    assert distinctive_evidence not in section
+    assert "Rewrite the slide 3 headline as a conclusion" in section
+
+
+def test_priority_fixes_reserves_first_slot_for_critical_missing_slide() -> None:
+    """A critical missing slide leads the list even when 17 failed criteria compete for
+    the five slots."""
+    mod = _load_compose_report_module()
+    failed_items = [
+        {
+            "id": f"crit_{i}",
+            "label": f"Criterion {i}",
+            "evidence": f"evidence {i}",
+            "notes": f"Fix criterion {i} by making a concrete change.",
+        }
+        for i in range(17)
+    ]
+    checklist = {"summary": {"failed_items": failed_items, "warned_items": []}}
+    reviews = {
+        "missing_slides": [
+            {
+                "importance": "critical",
+                "expected_type": "why_now",
+                "recommendation": "Add a Why Now slide citing the recent regulatory change.",
+            },
+        ],
+    }
+    section = mod._section_priority_fixes(checklist, reviews)
+    assert "Add a Why Now slide citing the recent regulatory change." in section
+    numbered_lines = [line for line in section.splitlines() if re.match(r"^\d+\.", line.strip())]
+    assert numbered_lines, "expected at least one numbered fix line"
+    assert "Add a Why Now slide citing the recent regulatory change." in numbered_lines[0]
+
+
+def test_priority_fixes_never_exceeds_five_numbered_items() -> None:
+    """17 usable failed-item candidates must still cap at 5 numbered lines."""
+    mod = _load_compose_report_module()
+    failed_items = [
+        {
+            "id": f"crit_{i}",
+            "label": f"Criterion {i}",
+            "evidence": f"evidence {i}",
+            "notes": f"Fix criterion {i} by making a concrete change.",
+        }
+        for i in range(17)
+    ]
+    checklist = {"summary": {"failed_items": failed_items, "warned_items": []}}
+    section = mod._section_priority_fixes(checklist, None)
+    numbered_lines = [line for line in section.splitlines() if re.match(r"^\d+\.", line.strip())]
+    assert len(numbered_lines) == 5
+
+
+def test_priority_fixes_shortfall_not_padded_to_five() -> None:
+    """Only 2 usable candidates -> the section holds 2 items, not padded with labels
+    to reach 5."""
+    mod = _load_compose_report_module()
+    checklist = {
+        "summary": {
+            "failed_items": [
+                {"id": "a", "label": "Criterion A", "evidence": "e", "notes": "Do X to fix criterion A."},
+                {"id": "b", "label": "Criterion B", "evidence": "e", "notes": "Do Y to fix criterion B."},
+            ],
+            "warned_items": [],
+        }
+    }
+    section = mod._section_priority_fixes(checklist, None)
+    numbered_lines = [line for line in section.splitlines() if re.match(r"^\d+\.", line.strip())]
+    assert len(numbered_lines) == 2
 
 
 def test_compose_strict_mode_writes_output_file() -> None:
@@ -1679,6 +1898,22 @@ def test_checklist_fail_without_evidence_warned() -> None:
     assert rc == 0
     assert data is not None
     assert "evidence" in stderr.lower()
+
+
+def test_checklist_fail_without_notes_is_rejected() -> None:
+    """Fail item with evidence but empty notes -> the run is rejected (status invalid),
+    symmetric with the missing-evidence check above. notes is the contracted
+    founder-facing fix on fail/warn items; a producer that ships without one silently
+    starves the priority-fixes section of real candidates."""
+    overrides = {
+        "purpose_clear": {"status": "fail", "evidence": "The purpose statement is vague.", "notes": ""},
+    }
+    payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
+    rc, data, stderr = run_script("checklist.py", ["--pretty", "--run-id", "test-run"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    assert "notes" in stderr.lower()
+    assert data["validation"]["status"] == "invalid"
 
 
 def test_checklist_pass_without_evidence_warned() -> None:
@@ -3359,3 +3594,118 @@ def test_slideless_inventory_does_not_warn(tmp_path: Path) -> None:
     d.mkdir()
     codes = _codes(_compose_with(d, [], []))
     assert "SLIDE_REVIEW_MISSING" not in codes
+
+
+def test_compose_warns_when_notes_are_methodology_shaped() -> None:
+    """Suppressing a bad `notes` must also SIGNAL it, at a surface someone reads.
+
+    The renderer drops a methodology-shaped note from the fixes list (tested directly
+    elsewhere). That alone is silent: the founder sees a shorter list and nobody learns
+    the sub-agent ignored the contract. This asserts the compose-level warning exists —
+    which the renderer-level tests structurally cannot, since they never run compose.
+
+    Layer 1 (a MISSING `notes`) is fatal in checklist.py. This is layer 2, the shape
+    tripwire, which stays advisory because it is a heuristic and can false-positive.
+    """
+    snippet = (
+        f"import sys, os, json; sys.path.insert(0, '{DECK_REVIEW_DIR}'); "
+        "import compose_report as C; "
+        "ck={'metadata':{'run_id':'r'},'items':[],'validation':{'status':'valid'},"
+        "'summary':{'failed_items':["
+        "{'id':'purpose_clear','label':'Purpose','evidence':'ev',"
+        "'notes':'Checked slides 1 and 2, the only two with purpose language.'}],"
+        "'warned_items':[]}}; "
+        "print(json.dumps(C.validate_artifacts({'checklist.json': ck})))"
+    )
+    result = subprocess.run([sys.executable, "-c", snippet], capture_output=True, text=True)
+    warnings = json.loads(result.stdout)
+    hits = [w for w in warnings if w["code"] == "NOTES_NOT_ACTIONABLE"]
+    assert hits, f"expected NOTES_NOT_ACTIONABLE; got {[w['code'] for w in warnings]}"
+    assert "purpose_clear" in hits[0]["message"], "the warning must name the offending item"
+    assert hits[0].get("founder_message"), "a medium warning reaches the report; it needs founder wording"
+
+
+def test_checklist_section_also_suppresses_methodology_notes() -> None:
+    """Suppression must hold at EVERY site that renders `notes`, not just the fixes list.
+
+    `notes` is rendered in three places: the fixes section, the checklist detail section
+    (here), and visualize.py's HTML. Suppressing it in one is not suppression — it just
+    moves the non-actionable text under a different heading, where the founder reads it
+    anyway. This is the same divergence class that made the HTML renderer a separate bug.
+
+    Evidence must survive: the item keeps its diagnosis, it loses only the bad "fix".
+    """
+    snippet = (
+        f"import sys, json; sys.path.insert(0, '{DECK_REVIEW_DIR}'); "
+        "from compose_report import _section_checklist as S; "
+        "ck={'summary':{'by_category':{},'failed_items':["
+        "{'id':'p','label':'Purpose','category':'Narrative','evidence':'DISTINCT_EVIDENCE',"
+        "'notes':'Checked slides 1 and 2, the only two slides.'}],'warned_items':[]}}; "
+        "print(json.dumps(S(ck)))"
+    )
+    result = subprocess.run([sys.executable, "-c", snippet], capture_output=True, text=True)
+    out = json.loads(result.stdout)
+    assert "Checked slides 1 and 2" not in out, "methodology note leaked into the checklist section"
+    assert "DISTINCT_EVIDENCE" in out, "evidence must survive — only the unusable fix is dropped"
+
+
+def test_checklist_notes_gate_fires_on_warn_and_never_on_pass() -> None:
+    """The `notes` requirement must cover `warn`, and must NOT touch `pass`.
+
+    Only the `fail` direction was asserted. `warn` shares the requirement, and `pass`
+    carries no `notes` BY CONTRACT ("omitted entirely on pass") -- so a gate that fired
+    there would reject every conformant checklist. That is the silent-breakage direction
+    and it was untested.
+    """
+
+    def _run(overrides: dict[str, dict[str, Any]]) -> tuple[int, Any, str]:
+        payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
+        return run_script("checklist.py", ["--pretty", "--run-id", "test-run"], stdin_data=payload)
+
+    _, warn_bad, warn_err = _run(
+        {"headlines_carry_story": {"status": "warn", "evidence": "Two headlines are topic labels.", "notes": ""}}
+    )
+    assert warn_bad is not None and warn_bad["validation"]["status"] == "invalid", (
+        "warn must require notes, same as fail"
+    )
+    assert "notes" in warn_err.lower()
+
+    _, warn_ok, _ = _run(
+        {
+            "headlines_carry_story": {
+                "status": "warn",
+                "evidence": "Two headlines are topic labels.",
+                "notes": "Rewrite slides 3 and 7 headlines as conclusions.",
+            }
+        }
+    )
+    assert warn_ok is not None and warn_ok["validation"]["status"] == "valid"
+
+    # A conformant pass omits `notes` entirely. If the gate reached pass items, every
+    # correct checklist in existence would be rejected.
+    _, pass_default, _ = _run({})
+    assert pass_default is not None and pass_default["validation"]["status"] == "valid", (
+        "a pass carries no notes by contract -- gating it would reject every conformant checklist"
+    )
+
+
+def test_coaching_payload_strips_unusable_notes() -> None:
+    """The coaching sub-agent is a FOURTH path to the founder, and must be sanitised too.
+
+    `failed_items` used to be handed to the payload by reference, so a note the three
+    renderers suppressed still reached the coaching agent, which echoes payload content
+    into commentary that `insert_coaching.py` inserts into report.md. Suppressing in the
+    renderers alone routes the bad text around all of them.
+    """
+    snippet = (
+        f"import sys, json; sys.path.insert(0, '{DECK_REVIEW_DIR}'); "
+        "from compose_report import _sanitize_items_for_coaching as S; "
+        "items=[{'id':'p','label':'P','evidence':'ev','notes':'Checked slides 1 and 2.'},"
+        "{'id':'q','label':'Q','evidence':'ev','notes':'Add a Q slide.'}]; "
+        "print(json.dumps({'out': S(items), 'src_untouched': 'notes' in items[0]}))"
+    )
+    result = subprocess.run([sys.executable, "-c", snippet], capture_output=True, text=True)
+    data = json.loads(result.stdout)
+    assert "notes" not in data["out"][0], "unusable note reached the coaching payload"
+    assert data["out"][1]["notes"] == "Add a Q slide.", "a usable fix must survive"
+    assert data["src_untouched"], "must copy, not mutate — summary is rendered from the same objects"
