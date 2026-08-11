@@ -284,20 +284,32 @@ Do this FIRST, before reading anything. Substitute the uploaded deck's path for 
 
 ```bash
 DECK_SRC="<deck path>"
-DECK_READ="$DECK_SRC"
+DECK_READ="$DECK_SRC"; SOFFICE=""
 case "$DECK_SRC" in
   *.pptx|*.PPTX|*.ppt|*.PPT)
-    DECK_READ=""
+    DECK_READ="no-converter"
     for c in libreoffice soffice /Applications/LibreOffice.app/Contents/MacOS/soffice; do
-      command -v "$c" >/dev/null 2>&1 || continue
-      "$c" --headless --convert-to pdf --outdir "$STAGING_DIR" "$DECK_SRC" >/dev/null 2>&1
-      B="$(basename "$DECK_SRC")"
-      if [ -s "$STAGING_DIR/${B%.*}.pdf" ]; then DECK_READ="$STAGING_DIR/${B%.*}.pdf"; fi
-      break
+      command -v "$c" >/dev/null 2>&1 && { SOFFICE="$c"; break; }
     done
+    if [ -n "$SOFFICE" ]; then
+      # -env:UserInstallation is REQUIRED, not tidiness. LibreOffice builds a user
+      # profile under $HOME on first run; $HOME is read-only in the sandbox, so it
+      # dies with "User installation could not be completed" (exit 77) having
+      # converted nothing. Pointing the profile at writable scratch fixes it.
+      # Errors are NOT suppressed: a silent failure here is indistinguishable from
+      # having no converter at all, and reports the wrong reason to the founder.
+      "$SOFFICE" --headless -env:UserInstallation="file://$STAGING_DIR/.lo" \
+        --convert-to pdf --outdir "$STAGING_DIR" "$DECK_SRC" 2>&1 | tail -3
+      B="$(basename "$DECK_SRC")"
+      if [ -s "$STAGING_DIR/${B%.*}.pdf" ]; then
+        DECK_READ="$STAGING_DIR/${B%.*}.pdf"
+      else
+        DECK_READ="convert-failed"
+      fi
+    fi
     ;;
 esac
-echo "${DECK_READ:-no-converter}"
+echo "$DECK_READ"
 ```
 
 Then branch on what it printed:
@@ -305,7 +317,10 @@ Then branch on what it printed:
 - **A path** — read THAT file with the Read tool's `pages` parameter, exactly as for any PDF,
   and set `input_format` to `"pptx"`. The slides are now genuinely visible, so the Design &
   Readability criteria are scored normally.
-- **`no-converter`** — you cannot see the slides, so do not review them as if you could. Run
+- **`convert-failed`** — a converter exists and broke; its error printed just above. Report
+  that error verbatim when you tell the founder what happened, then take the same fallback
+  as `no-converter` below. Do not retry blindly.
+- **`no-converter`** (or `convert-failed`) — you cannot see the slides, so do not review them as if you could. Run
   `python3 "$SHARED_SCRIPTS/pptx_to_text.py" "$DECK_SRC" --pretty` and read the JSON straight
   from the command's output — do NOT write it to `$STAGING_DIR` and Read it back, because
   `$STAGING_DIR` is a `/tmp` path outside the session and the Read tool refuses it. Then
@@ -476,6 +491,22 @@ Then return — as your final assistant message — a JSON object the parent age
 `stage_profile.py` requires `--run-id` and `-o`, and reads the existing profile from stdin. Stage the current `stage_profile.json` to `$STAGING_DIR/sp.json` first and pipe *that* in — never `cat` and `-o` the same file in one command, which races and truncates it.
 
 ### Context A hand-off protocol (file transport + gate)
+
+**Say one of these to the founder, verbatim — nothing else, and nothing about the machinery
+in the rest of this section.** Measured across live runs, EVERY founder-facing leak happened
+at one of these transitions and none anywhere else: *"gating the hand-off and piping through
+the producer"*, *"staging the coaching payload"*, *"dispatching the coaching commentary
+sub-agent"*. The reason is mechanical rather than careless — this section is dense with
+*hand-off*, *gate*, *producer*, *payload*, so a model composing its next progress line reaches
+for the words in front of it. A general rule stated hundreds of lines earlier loses to that,
+which is why the line is supplied here instead of left to be written:
+
+| moment | say exactly |
+|---|---|
+| starting the slide reviews | "Reading your deck slide by slide — this takes a minute." |
+| starting the checklist | "Scoring it against the 35-criteria rubric." |
+| a gate passed, moving on | **say nothing** — the founder has no stake in it |
+| a gate failed, retrying | "Still working on that — one moment." |
 
 Every Context A dispatch prompt carries an `OUTPUT_PATH:` line built from `$HANDOFF_AGENT`. The
 sub-agent WRITES its output JSON to that path with its Write tool and returns only a small receipt:
@@ -749,6 +780,12 @@ hand anything over.
 **Post-write verification:** `compose_report.py` exits non-zero (code 2) if the declared output files don't exist or are empty after writing. If compose exits non-zero, stop and report the exact stderr — do not proceed to Step 7.
 
 ### Step 7: Post-Compose Coaching Commentary (Context B dispatch — POST_COMPOSE_COACHING)
+
+**Say exactly: "Adding the coaching notes."** Then say nothing further until the report is
+delivered. This step produced three of the leaks measured in live runs — *"staging the coaching
+payload"*, *"dispatching the coaching commentary sub-agent"*, *"gating the coaching hand-off"* —
+because the paragraphs below are the densest plumbing in the skill and a model narrating its
+next move mirrors them. One supplied sentence replaces the composition entirely.
 
 **Dispatch the deck-review sub-agent in Context B.** **Call the `Task` tool with `subagent_type: "founder-skills:deck-review"`** after `compose_report.py` has successfully written both `report.json` and `report.md`.
 

@@ -178,6 +178,31 @@ def _slugify(name: str) -> str:
     return slug
 
 
+def sector_type_unknown_message(sector: str) -> str:
+    """Why a free-form sector did not resolve, phrased so it does not invite a wrong fix.
+
+    `sector_type` is a REVENUE MODEL, not an industry. The distinction is invisible from the
+    field name and the old message hid it: told 'Consumer social / audio' was unresolvable and
+    handed a list reading saas / marketplace / usage-based, a reader reasonably concludes the
+    taxonomy is missing industries and starts adding them. It is not. An industry does not
+    determine a revenue model -- a consumer audio app may be subscription, marketplace or
+    ad-supported -- so refusing to guess is the correct behaviour here, not a gap.
+
+    Deliberately NOT offering an "ad-supported" value: no ad-supported benchmarks exist in
+    this repo, so the enum entry would gate checklist criteria against nothing and read as
+    supported when it is not.
+    """
+    valid = ", ".join(sorted(CANONICAL_SECTOR_TYPES))
+    return (
+        f"sector_type not set: '{sector}' names an industry, and sector_type is a revenue "
+        f"model (it selects unit-economics benchmarks). An industry does not imply one -- "
+        f"the same product can be subscription, marketplace or ad-supported. Leaving it unset "
+        f"is correct when the model is genuinely unknown; the only effect is that "
+        f"sector-specific checklist gating is skipped. Set it with --sector-type when you do "
+        f"know: {valid}."
+    )
+
+
 def _derive_sector_type(sector: str) -> str | None:
     """Derive canonical sector_type from free-form sector string.
 
@@ -201,13 +226,7 @@ def _derive_sector_type(sector: str) -> str | None:
             return canonical
 
     # 4. No match
-    valid_list = sorted(CANONICAL_SECTOR_TYPES)
-    print(
-        f"Warning: could not derive sector_type from '{sector}'; "
-        f"valid sector_type values: {valid_list}. "
-        f"Set explicitly with --sector-type.",
-        file=sys.stderr,
-    )
+    print(sector_type_unknown_message(sector), file=sys.stderr)
     return None
 
 
@@ -373,15 +392,10 @@ def cmd_init(args: argparse.Namespace) -> None:
         derived = _derive_sector_type(args.sector)
         context["sector_type"] = derived
         if derived is None:
-            valid_list = sorted(CANONICAL_SECTOR_TYPES)
             context.setdefault("warnings", []).append(
                 {
                     "code": "W_SECTOR_TYPE_UNKNOWN",
-                    "message": (
-                        f"could not derive sector_type from '{args.sector}'. "
-                        f"Valid sector_type values: {valid_list}. "
-                        f"Re-run with --sector-type to set explicitly."
-                    ),
+                    "message": sector_type_unknown_message(args.sector),
                 }
             )
 
@@ -569,7 +583,6 @@ def cmd_update_identity(args: argparse.Namespace) -> None:
             derived = _derive_sector_type(args.sector)
             context["sector_type"] = derived
             if derived is None:
-                valid_list = sorted(CANONICAL_SECTOR_TYPES)
                 # Replace any prior sector_type warning
                 context["warnings"] = [
                     w for w in context.get("warnings", []) if w.get("code") != "W_SECTOR_TYPE_UNKNOWN"
@@ -577,11 +590,7 @@ def cmd_update_identity(args: argparse.Namespace) -> None:
                 context["warnings"].append(
                     {
                         "code": "W_SECTOR_TYPE_UNKNOWN",
-                        "message": (
-                            f"could not derive sector_type from '{args.sector}'. "
-                            f"Valid sector_type values: {valid_list}. "
-                            f"Re-run with --sector-type to set explicitly."
-                        ),
+                        "message": sector_type_unknown_message(args.sector),
                     }
                 )
             else:

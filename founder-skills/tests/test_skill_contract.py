@@ -483,7 +483,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 88_904 -> 89_865 (PPTX): a .pptx deck is binary and Read refuses it, so market
     # figures inside a PowerPoint upload were invisible. Step now renders to PDF, or falls back
     # to text extraction and says what could not be read.
-    "market-sizing": 89_865,
+    "market-sizing": 90_323,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -512,7 +512,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # text-only with the design criteria gated when no converter exists.
     # 71_498 -> 71_567 (R2): `score_pct` now gives a warn half credit, so the formula
     # line and the What-If rule both had to stop saying "warn/fail earn no credit".
-    "deck-review": 74_553,
+    "deck-review": 77_002,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

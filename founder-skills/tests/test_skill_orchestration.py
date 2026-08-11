@@ -784,3 +784,46 @@ def test_extract_call_args_still_flags_an_unpinned_call_carrying_a_comment() -> 
     args = _extract_call_args(block, block.index("Task(") + 4)
     assert args is not None
     assert _PIN_KWARG.search(args) is None
+
+
+@pytest.mark.parametrize("skill_md", SKILL_MD_FILES, ids=lambda p: p.parent.name)
+def test_leak_prone_steps_supply_the_founder_line(skill_md: Path) -> None:
+    """The narration rule is stated once, far from where it is broken. Supply the line instead.
+
+    Measured across live runs of deck-review, every founder-facing plumbing leak occurred at a
+    Context A hand-off or the Context B coaching step -- "gating the hand-off and piping through
+    the producer", "staging the coaching payload", "dispatching the coaching commentary
+    sub-agent" -- and none anywhere else. The cause is priming, not carelessness: those sections
+    are the densest plumbing in the file, so a model composing its next progress line reaches for
+    the vocabulary in front of it, and a general prohibition hundreds of lines earlier loses.
+
+    The remedy attempted here is substitution rather than more prohibition: the exact sentence
+    sits next to the machinery.
+
+    MEASURED INEFFECTIVE, and recorded as such rather than quietly kept. A verification run
+    with these lines in place still emitted "Now gating and piping the hand-off through the
+    producer" -- the very phrase the table four lines above the machinery replaces. Per-block
+    leak rate went 15.8% / 7.1% / 6.7% before to 14.3% after: noise, not a fix. Three distinct
+    prose approaches have now failed (global ban, per-step ban, supplied line), so the next
+    attempt should not be a fourth phrasing -- the working hypothesis is that the model echoes
+    the vocabulary it is CURRENTLY reading, which points at moving the plumbing out of the main
+    thread's reading path.
+
+    The lines are kept because they cost nothing and carry their evidence; this test guards
+    them from silent deletion. It does NOT assert they work.
+    """
+    if skill_md.parent.name != "deck-review":
+        pytest.skip("measured on deck-review; extend per skill as each is verified live")
+    text = skill_md.read_text(encoding="utf-8")
+    for anchor, marker in (
+        ("### Context A hand-off protocol", "say exactly"),
+        ("### Step 7:", "Say exactly:"),
+    ):
+        start = text.find(anchor)
+        assert start != -1, f"anchor missing: {anchor}"
+        window = text[start : start + 1500]
+        assert marker.lower() in window.lower(), (
+            f"{anchor} no longer supplies a verbatim founder-facing line ({marker!r}). "
+            "Restate it rather than relying on the global narration rule — that rule is already "
+            "in the file and these are the sites where it measurably fails."
+        )

@@ -1156,3 +1156,42 @@ def test_init_retail_marketplace_prefers_marketplace() -> None:
         assert rc == 0
         assert data is not None
         assert data["sector_type"] == "marketplace"
+
+
+def test_sector_type_message_names_the_category_mismatch(tmp_path: pathlib.Path) -> None:
+    """An unresolved sector must not read as a taxonomy gap, because it usually isn't one.
+
+    A live run passed "Consumer social / audio" and got back "could not derive sector_type;
+    valid values: [saas, marketplace, usage-based, ...]" -- which invites exactly the wrong
+    repair: adding industries to a list of REVENUE MODELS. An industry does not determine a
+    revenue model (the same product can be subscription, marketplace or ad-supported), so
+    declining to guess is correct behaviour, and the message has to say so.
+    """
+    rc, data, stderr = run_context(
+        [
+            "init",
+            "--company-name",
+            "Testco",
+            "--stage",
+            "pre_seed",
+            "--sector",
+            "Consumer social / audio",
+            "--geography",
+            "US",
+        ],
+        artifacts_root=str(tmp_path),
+    )
+    assert rc == 0, stderr
+    assert data is not None and data.get("sector_type") is None, "an industry must not resolve"
+
+    warn = next((w for w in data.get("warnings", []) if w["code"] == "W_SECTOR_TYPE_UNKNOWN"), None)
+    assert warn is not None, "an unresolved sector_type must still be reported"
+    msg = warn["message"]
+    assert "revenue model" in msg.lower(), "must name what sector_type actually is"
+    assert "industry" in msg.lower(), "must name what the caller supplied instead"
+    assert "--sector-type" in msg, "must say how to set it when the model IS known"
+    # State the consequence, so a reader can judge whether to care at all.
+    assert "gating is skipped" in msg or "unset is correct" in msg
+    # "ad-supported" may appear as prose, but must never be offered as a settable value:
+    # no ad-supported benchmarks exist, so the enum entry would gate against nothing.
+    assert "ad-supported" not in msg.split("know: ")[-1]

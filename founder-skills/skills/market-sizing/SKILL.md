@@ -316,9 +316,15 @@ run, whatever the transcript says.
 ```bash
 for c in libreoffice soffice /Applications/LibreOffice.app/Contents/MacOS/soffice; do
   command -v "$c" >/dev/null 2>&1 || continue
-  "$c" --headless --convert-to pdf --outdir "$STAGING_DIR" "$DECK_SRC" >/dev/null 2>&1
+  # -env:UserInstallation is required: LibreOffice writes a first-run profile under
+  # $HOME, which is read-only in the sandbox, and otherwise exits 77 having converted
+  # nothing. Errors are shown, not suppressed — a silent failure looks exactly like
+  # having no converter and sends you down the wrong branch.
+  "$c" --headless -env:UserInstallation="file://$STAGING_DIR/.lo" \
+    --convert-to pdf --outdir "$STAGING_DIR" "$DECK_SRC" 2>&1 | tail -3
   break
 done
+ls -1 "$STAGING_DIR"/*.pdf 2>/dev/null || echo "no pdf — use the text fallback below"
 ```
 
 Read the resulting PDF from `$STAGING_DIR`. If no converter is available, fall back to
