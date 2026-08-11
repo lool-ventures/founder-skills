@@ -166,6 +166,11 @@ _AI_CRITERIA_IDS = frozenset(
 # The 5 Design & Readability IDs that are gated by input_format=="text" — a deck
 # described in conversation has no slides to score for visual design, so scoring
 # them fail/warn would penalize the founder for evidence that cannot exist.
+# Formats with no rendered page, so the 5 Design & Readability criteria cannot be
+# assessed. Derived from deck_inventory.schema.json's input_format enum
+# ["pdf","pptx","markdown","text"] — pdf and pptx render; these two do not.
+_UNRENDERED_FORMATS = frozenset({"text", "markdown"})
+
 _DESIGN_CRITERIA_IDS = frozenset(
     {
         "one_idea_per_slide",
@@ -295,18 +300,24 @@ def _apply_ai_gating(result: dict[str, Any], ai_company_status: str) -> dict[str
 def _apply_design_gating(result: dict[str, Any], input_format: str) -> dict[str, Any]:
     """Apply deterministic Design & Readability gating based on input_format.
 
-    When the founder described the deck in conversation (input_format=="text")
-    rather than uploading a file, there is no rendered slide to assess visual
-    design against — force the 5 Design & Readability criteria to
-    not_applicable rather than letting them score fail for lack of evidence
-    that structurally cannot exist. Any other input_format (or none) is a
-    no-op: the sub-agent's scored statuses pass through unchanged.
+    Force the 5 Design & Readability criteria to not_applicable when there is no
+    RENDERED SLIDE to assess visual design against, rather than letting them score
+    fail for evidence that structurally cannot exist.
+
+    That is true of two formats, not one:
+      * "text"     — the founder described the deck in conversation.
+      * "markdown" — a file, but a plain-text one. It has no fonts, no colours and no
+                     rendered page, so "24pt+ body text" and the phone test cannot be
+                     assessed any more than they can for "text". Only "text" was gated
+                     originally, so markdown decks were scored on all five.
+
+    "pdf" and "pptx" render, and pass through unchanged.
     """
-    if input_format != "text":
+    if input_format not in _UNRENDERED_FORMATS:
         return result
 
     items: list[dict[str, Any]] = result.get("items", [])
-    _force_not_applicable(items, _DESIGN_CRITERIA_IDS, "Auto-gated: not_applicable — input_format=text")
+    _force_not_applicable(items, _DESIGN_CRITERIA_IDS, f"Auto-gated: not_applicable — input_format={input_format}")
 
     if result.get("summary") is not None:
         result["summary"] = _recompute_summary(items)

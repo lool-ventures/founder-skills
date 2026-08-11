@@ -3850,3 +3850,40 @@ def test_not_applicable_still_leaves_the_denominator() -> None:
     # 1 pass, 34 N/A -> 1 applicable -> 100.0, not 1/35 = 2.9
     assert data["summary"]["not_applicable"] == 34
     assert data["summary"]["score_pct"] == 100.0
+
+
+def test_design_gating_covers_every_unrendered_format() -> None:
+    """Design criteria are gated by whether a slide RENDERS, not by one literal.
+
+    The gate originally read `input_format != "text"`, so a *markdown* deck -- a file,
+    but a plain-text one with no fonts, no colours and no rendered page -- was scored on
+    all five Design & Readability criteria, including "24pt+ body text" and the phone
+    test. Table-driven over the full schema enum so a new format cannot be added without
+    a decision about which side of the line it falls on.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("ck_gate", os.path.join(DECK_REVIEW_DIR, "checklist.py"))
+    assert spec and spec.loader
+    ck = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ck)
+
+    schema = json.loads(
+        Path(
+            os.path.join(os.path.dirname(DECK_REVIEW_DIR), "references", "schemas", "deck_inventory.schema.json")
+        ).read_text(encoding="utf-8")
+    )
+    enum = set(schema["properties"]["input_format"]["enum"])
+    assert enum == {"pdf", "pptx", "markdown", "text"}, (
+        f"input_format enum changed to {enum} -- decide whether each new format renders"
+    )
+
+    items = [{"id": i["id"], "status": "fail", "evidence": "e", "notes": "Fix it."} for i in ck.CHECKLIST_ITEMS]
+    for fmt, expect_gated in (("text", True), ("markdown", True), ("pdf", False), ("pptx", False)):
+        result, _, _ = ck.validate_checklist(json.loads(json.dumps(items)))
+        out = ck._apply_design_gating(result, fmt)
+        gated = {i["id"] for i in out["items"] if i["status"] == "not_applicable"}
+        if expect_gated:
+            assert gated >= ck._DESIGN_CRITERIA_IDS, f"{fmt}: has no rendered page, must gate all 5 design criteria"
+        else:
+            assert not (ck._DESIGN_CRITERIA_IDS & gated), f"{fmt}: renders, design criteria must be scored"
