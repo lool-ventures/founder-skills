@@ -45,7 +45,9 @@ Context A **receipts** don't need this protocol by hand — `check_handoff.py --
 
 ## Input Formats
 
-Accept any format: PDF, PowerPoint (PPTX), markdown, or text descriptions of slides.
+Accept any format: PDF, PowerPoint (PPTX/PPT), markdown, or text descriptions of slides.
+PowerPoint is converted to PDF at ingestion (Step 2) so the slides can actually be seen;
+without a converter the review degrades to text-only and says so.
 
 ## Available Scripts
 
@@ -265,6 +267,54 @@ run, whatever the transcript says.
 3. **Multi-file submissions:** Founder sends v1 + v2, or deck + appendix as separate files. Ask which is the primary deck before proceeding. Do not merge or review both simultaneously.
 4. **Partial decks:** Deck has fewer than 5 slides or is clearly a subset. Proceed but set `confidence: "low"` in stage_profile and note the limitation. Missing-slides detection still runs normally.
 5. **Wrong file type:** File named `.pdf` but is actually a Word doc or image. If Read fails, try alternate format before asking the founder for a re-upload.
+
+**Find the deck before anything else — do not assume it is missing.** An attached file is
+already on disk under the uploads mount; nothing tells you its name up front, so list it:
+`ls -la "$(dirname "$REVIEW_DIR")"/../uploads 2>/dev/null || ls -la ./mnt/uploads`. Measured:
+on one run the agent never looked, replied "I don't see a pitch deck attached", and stopped —
+with the deck sitting in the uploads mount the whole time. Only ask the founder to upload
+after that listing actually comes back empty. Set `DECK_SRC` to the file you find.
+
+**Convert a PowerPoint deck to PDF before reading it.** Design & Readability are scored from
+what a reader SEES, and only a rendered page gives you that. Today `.pptx`/`.ppt` are binary
+and Read refuses them outright, so without this the slides are invisible — but do not treat
+that as the reason: if some future Read does open PowerPoint, still convert unless it returns
+actual page images, because text and structure without layout cannot support a design score.
+Do this FIRST, before reading anything. Substitute the uploaded deck's path for `<deck path>`:
+
+```bash
+DECK_SRC="<deck path>"
+DECK_READ="$DECK_SRC"
+case "$DECK_SRC" in
+  *.pptx|*.PPTX|*.ppt|*.PPT)
+    DECK_READ=""
+    for c in libreoffice soffice /Applications/LibreOffice.app/Contents/MacOS/soffice; do
+      command -v "$c" >/dev/null 2>&1 || continue
+      "$c" --headless --convert-to pdf --outdir "$STAGING_DIR" "$DECK_SRC" >/dev/null 2>&1
+      B="$(basename "$DECK_SRC")"
+      if [ -s "$STAGING_DIR/${B%.*}.pdf" ]; then DECK_READ="$STAGING_DIR/${B%.*}.pdf"; fi
+      break
+    done
+    ;;
+esac
+echo "${DECK_READ:-no-converter}"
+```
+
+Then branch on what it printed:
+
+- **A path** — read THAT file with the Read tool's `pages` parameter, exactly as for any PDF,
+  and set `input_format` to `"pptx"`. The slides are now genuinely visible, so the Design &
+  Readability criteria are scored normally.
+- **`no-converter`** — you cannot see the slides, so do not review them as if you could. Run
+  `python3 "$SHARED_SCRIPTS/pptx_to_text.py" "$DECK_SRC" --pretty` and read the JSON straight
+  from the command's output — do NOT write it to `$STAGING_DIR` and Read it back, because
+  `$STAGING_DIR` is a `/tmp` path outside the session and the Read tool refuses it. Then
+  build the inventory from that (it carries speaker notes, which often hold the real
+  narrative), and set `input_format` to **`"text"`** — which gates the 5 Design & Readability
+  criteria to `not_applicable`. Scoring a deck's layout without having seen it is a confident
+  review of something you never looked at. Tell the founder you read the content but could
+  not see the design, mention `images_not_read` if non-zero, and that a PDF gets the full
+  review. If the script also fails, ask for a PDF re-export and do not proceed.
 
 Read the provided deck. For each slide, extract: headline, content summary, visuals description, word count estimate. Also determine `ai_company_status` using the two sub-questions below. Then write the inventory through the producer script:
 

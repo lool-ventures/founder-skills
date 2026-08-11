@@ -50,6 +50,15 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 explicit_package_bases = true
 
+# python-pptx is NOT a project dependency and deliberately so: it is needed only on the
+# degraded PowerPoint path, where a PDF converter is unavailable. The script declares it in
+# PEP 723 inline metadata for `uv run`, handles ImportError with an actionable message, and
+# the target runtime (Cowork) ships it. Forcing it into `dependencies` would make every
+# install carry a parser for a fallback most runs never take.
+[[tool.mypy.overrides]]
+module = ["pptx"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["founder-skills/tests"]
 python_files = "test_*.py"

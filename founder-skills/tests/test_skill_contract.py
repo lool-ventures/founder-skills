@@ -480,7 +480,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # market-sizing raised for the same rule on its CHECKLIST template, plus the coaching template's
     # "no item ids or warning codes" rule — a live run shipped three criterion ids and a filename into
     # the founder's report.
-    "market-sizing": 88_904,
+    # 88_904 -> 89_865 (PPTX): a .pptx deck is binary and Read refuses it, so market
+    # figures inside a PowerPoint upload were invisible. Step now renders to PDF, or falls back
+    # to text extraction and says what could not be read.
+    "market-sizing": 89_865,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -502,9 +505,14 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 71_081 -> 71_498 (R1): the CHECKLIST dispatch now specifies `notes` as the
     # founder-facing fix. `notes` was previously defined nowhere, so its content was
     # run-dependent and the "priority fixes" section rendered methodology as advice.
+    # 71_567 -> 73_826 (PPTX): the skill advertised PowerPoint in `when_to_use` and scored
+    # Design & Readability for `input_format: "pptx"`, but nothing converted or read a .pptx --
+    # Read refuses the binary. A founder uploading PowerPoint got a design score from a
+    # reviewer that never saw a slide. Step 2 now converts via LibreOffice, and falls back to
+    # text-only with the design criteria gated when no converter exists.
     # 71_498 -> 71_567 (R2): `score_pct` now gives a warn half credit, so the formula
     # line and the What-If rule both had to stop saying "warn/fail earn no credit".
-    "deck-review": 71_567,
+    "deck-review": 74_553,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -707,7 +715,10 @@ REFERENCES_CEILING: dict[str, int] = {
     # 49_039 -> 50_080 (R1): artifact-schemas.md now documents the evidence/notes
     # contract and its JSON example demonstrates a fail item carrying both.
     # 50_080 -> 50_124 (R2): artifact-schemas.md documents the half-credit formula.
-    "deck-review": 50_124,
+    # 50_124 -> 50_422 (design gate): checklist-criteria.md records that the gate covers
+    # FOUR criteria, not five — slide_count_appropriate is arithmetic, not a visual
+    # judgement, and stays scored whether or not anyone saw a rendered page.
+    "deck-review": 50_422,
     "competitive-positioning": 136_835,
     # cap-table +422 B: inputs-skeleton.md promised "no warning, and downstream artifacts that look
     # right but contain zeros" — the PRE-FIX world. cap_state.py hard-errors E_NO_EQUITY_BASE now,

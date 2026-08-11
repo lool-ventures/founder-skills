@@ -760,7 +760,45 @@ def _section_executive_summary(
             "35 deck-craft criteria, not investability.*"
         )
 
+    lines.extend(_unreviewed_design_note(checklist))
     return "\n".join(lines) + "\n"
+
+
+# The evidence string `checklist.py` stamps when it gates a criterion on the input format.
+# Keyed on what the gate ACTUALLY DID rather than re-deriving from `input_format`, so the
+# disclosure cannot drift out of agreement with the gate it is describing.
+_FORMAT_GATE_EVIDENCE = "Auto-gated: not_applicable — input_format="
+
+
+def _unreviewed_design_note(checklist: dict[str, Any] | None) -> list[str]:
+    """Tell the founder, in the summary, when the deck's design was never looked at.
+
+    A live run over a PowerPoint upload gated all five Design & Readability criteria
+    correctly and then never said so anywhere a founder would read: the report's only
+    disclosure was an "Auto-gated" annotation inside a 35-row table, and the closing
+    message reported "10 not-applicable" without explaining that five of them mean nobody
+    saw the slides. Leaving this to the model's prose did not work — hence a structural
+    note emitted from the artifact itself.
+
+    The distinction matters to a founder in a specific way: an unscored design criterion
+    is NOT a passed one, and it is not a criticism either. It is a gap in the review.
+    """
+    if checklist is None or _is_stub(checklist):
+        return []
+    gated = [
+        item
+        for item in _as_list(checklist.get("items"))
+        if isinstance(item, dict) and str(item.get("evidence", "")).startswith(_FORMAT_GATE_EVIDENCE)
+    ]
+    if not gated:
+        return []
+    return [
+        f"\n> **{len(gated)} design criteria could not be reviewed.** This deck reached the review "
+        "as text — its slides were never rendered, so nothing here judges how the deck *looks*: "
+        "layout, typography, whitespace, or how it reads on a phone. Those criteria are excluded "
+        "from the score rather than counted against you. Sending the deck as a PDF gets them "
+        "reviewed."
+    ]
 
 
 def _section_stage_context(profile: dict[str, Any] | None) -> str:

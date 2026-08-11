@@ -280,6 +280,7 @@ _RUN_ID_EXEMPT_SCRIPTS = (
     "extract_model.py",  # model_data.json — not a run_id-parity artifact
     "validate_extraction.py",  # extraction_validation.json — not parity-checked
     "validate_inputs.py",  # --fix -o corrects in place; preserves the input's metadata.run_id (not minted)
+    "pptx_to_text.py",  # ingestion reader for a PowerPoint upload; writes /tmp scratch, not an artifact
 )
 # All six skills now stamp metadata.run_id from --run-id on the producer CLI.
 # Two mechanisms exist (both satisfy the Context B run_id-parity check) and the

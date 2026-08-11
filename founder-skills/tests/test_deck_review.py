@@ -3163,13 +3163,19 @@ def test_checklist_gating_absent_inventory_no_gating(tmp_path: Path) -> None:
 # input_format="text" -> Design & Readability gating tests (TDD — new feature)
 # ---------------------------------------------------------------------------
 
+# The GATED four. `slide_count_appropriate` is deliberately absent — see
+# _UNGATED_DESIGN_ID below and checklist.py's constant for why.
 _DESIGN_CRITERIA_IDS = [
     "one_idea_per_slide",
     "minimal_text",
-    "slide_count_appropriate",
     "consistent_design",
     "mobile_readable",
 ]
+
+# Counting slides is arithmetic, not a visual judgement, so it stays scored in every
+# format. Pinned by name: a live run gated it and then made the criticism anyway in
+# prose ("the deck runs long at 25 slides"), reaching the founder outside the rubric.
+_UNGATED_DESIGN_ID = "slide_count_appropriate"
 
 
 def _make_all_evaluated_checklist_items_design_fail() -> list[dict]:
@@ -3232,7 +3238,10 @@ def test_checklist_gating_input_format_text_forces_design_not_applicable(tmp_pat
 
     # Summary must reflect 5 N/A and drop them from the applicable denominator.
     summary = data["summary"]
-    assert summary["not_applicable"] == 5, f"expected 5 N/A, got {summary['not_applicable']}"
+    assert summary["not_applicable"] == 4, f"expected 4 N/A, got {summary['not_applicable']}"
+    assert items_by_id[_UNGATED_DESIGN_ID]["status"] != "not_applicable", (
+        f"{_UNGATED_DESIGN_ID} is a slide COUNT and must stay scored with no rendered page"
+    )
 
 
 def test_checklist_gating_input_format_pdf_keeps_sub_agent_statuses(tmp_path: Path) -> None:
@@ -3312,7 +3321,7 @@ def test_checklist_gating_ai_and_design_gates_both_apply(tmp_path: Path) -> None
     for gated_id in (*_AI_CRITERIA_IDS, *_DESIGN_CRITERIA_IDS):
         assert items_by_id[gated_id]["status"] == "not_applicable", gated_id
     summary = data["summary"]
-    assert summary["not_applicable"] == 9, f"expected 9 N/A (4 AI + 5 Design), got {summary['not_applicable']}"
+    assert summary["not_applicable"] == 8, f"expected 8 N/A (4 AI + 4 gated Design), got {summary['not_applicable']}"
     # 35 total - 9 N/A = 26 applicable, all pass -> 100%.
     assert summary["score_pct"] == 100.0
 
@@ -3884,6 +3893,52 @@ def test_design_gating_covers_every_unrendered_format() -> None:
         out = ck._apply_design_gating(result, fmt)
         gated = {i["id"] for i in out["items"] if i["status"] == "not_applicable"}
         if expect_gated:
-            assert gated >= ck._DESIGN_CRITERIA_IDS, f"{fmt}: has no rendered page, must gate all 5 design criteria"
+            assert gated >= ck._DESIGN_CRITERIA_IDS, (
+                f"{fmt}: has no rendered page, must gate the 4 visual design criteria"
+            )
         else:
             assert not (ck._DESIGN_CRITERIA_IDS & gated), f"{fmt}: renders, design criteria must be scored"
+
+
+def test_unreviewed_design_note_fires_only_when_the_gate_fired() -> None:
+    """A founder must be told when the deck's design was never looked at.
+
+    A live PowerPoint run gated all five Design criteria correctly and then disclosed it
+    only as an "Auto-gated" annotation inside a 35-row table — the closing message said
+    "10 not-applicable" and never explained that five of those mean nobody saw the slides.
+    Prose guidance did not produce the disclosure, so the report emits it structurally.
+    """
+    mod = _load_compose_report_module()
+
+    gated = {
+        "items": [
+            {
+                "id": "mobile_readable",
+                "status": "not_applicable",
+                "evidence": "Auto-gated: not_applicable — input_format=text",
+            },
+            {"id": "problem_clear", "status": "pass", "evidence": "Stated on slide 2."},
+        ]
+    }
+    note = mod._unreviewed_design_note(gated)
+    assert note and "could not be reviewed" in note[0]
+    assert "PDF" in note[0], "the note must tell the founder how to get those criteria reviewed"
+
+    # A criterion that is not_applicable for a DIFFERENT reason is not a design gap, and
+    # must not trigger the disclosure — the note keys on the format gate's own evidence
+    # string, not on not_applicable in general.
+    other_na = {
+        "items": [
+            {
+                "id": "ai_defensibility",
+                "status": "not_applicable",
+                "evidence": "Auto-gated: not_applicable — ai_company_status=not_ai",
+            },
+        ]
+    }
+    assert mod._unreviewed_design_note(other_na) == []
+
+    # A fully-rendered deck says nothing at all.
+    rendered = {"items": [{"id": "mobile_readable", "status": "warn", "evidence": "Dense on mobile."}]}
+    assert mod._unreviewed_design_note(rendered) == []
+    assert mod._unreviewed_design_note(None) == []

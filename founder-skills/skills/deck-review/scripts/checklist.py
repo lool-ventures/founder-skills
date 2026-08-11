@@ -163,19 +163,28 @@ _AI_CRITERIA_IDS = frozenset(
     }
 )
 
-# The 5 Design & Readability IDs that are gated by input_format=="text" — a deck
-# described in conversation has no slides to score for visual design, so scoring
-# them fail/warn would penalize the founder for evidence that cannot exist.
-# Formats with no rendered page, so the 5 Design & Readability criteria cannot be
-# assessed. Derived from deck_inventory.schema.json's input_format enum
-# ["pdf","pptx","markdown","text"] — pdf and pptx render; these two do not.
+# Formats with no rendered page, so a visual criterion cannot be assessed. Derived from
+# deck_inventory.schema.json's input_format enum ["pdf","pptx","markdown","text"] — pdf and
+# pptx render; these two do not.
 _UNRENDERED_FORMATS = frozenset({"text", "markdown"})
 
+# The Design & Readability IDs gated when there is no rendered page: scoring them fail/warn
+# would penalize the founder for evidence that cannot exist.
+#
+# FOUR, not five. `slide_count_appropriate` is deliberately NOT here — counting slides is
+# arithmetic, not a visual judgement, and `total_slides` is already in the inventory. Gating
+# it discarded an answer we hold, and the model then made the criticism anyway: a live run
+# marked it not_applicable and still told the founder "the deck runs long at 25 slides
+# against a ~10-12 slide pre-seed norm" — reaching them outside the rubric, unscored and
+# without evidence. The choice was never whether to say it, only whether it counts.
+#
+# The other four stay gated. Word count is likewise knowable, which makes `minimal_text`
+# the tempting next one, but "big type, minimal paragraphs" is half a question about type
+# size — under-claiming is the safer error where a founder's score is concerned.
 _DESIGN_CRITERIA_IDS = frozenset(
     {
         "one_idea_per_slide",
         "minimal_text",
-        "slide_count_appropriate",
         "consistent_design",
         "mobile_readable",
     }

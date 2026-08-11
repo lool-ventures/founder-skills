@@ -136,11 +136,16 @@
 
 ## Category 4 — Design & Readability (5 items)
 
-Score all 5 normally for an uploaded file (PDF/PPTX/markdown). When the deck was
-described in conversation rather than uploaded (`input_format` is `"text"`), the
-producer script forces all 5 to `not_applicable` after you return — there is no
-rendered slide to assess visual design against. Do not self-gate: assess every
-item as usual and let the producer apply the gate.
+Score all 5 normally for an uploaded file (PDF/PPTX/markdown). When there is no
+rendered page (`input_format` is `"text"` or `"markdown"` — a deck described in
+conversation, or a PowerPoint that could not be converted), the producer script
+forces **four** of them to `not_applicable` after you return: there is no slide to
+assess visual design against. Do not self-gate: assess every item as usual and let
+the producer apply the gate.
+
+`slide_count_appropriate` is **not** gated, and is scored in every format. Counting
+slides is arithmetic rather than a visual judgement, and the slide count is already
+known — so it is answerable whether or not anyone saw the deck.
 
 ### `one_idea_per_slide`
 **Label:** One idea per slide

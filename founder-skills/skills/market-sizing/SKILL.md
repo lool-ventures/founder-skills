@@ -311,6 +311,19 @@ run, whatever the transcript says.
 
 **When files are provided (deck, model, market data),** read the provided file(s) directly and extract market-relevant data. Read `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/tam-sam-som-methodology.md` and `${CLAUDE_PLUGIN_ROOT}/skills/market-sizing/references/artifact-schemas.md`.
 
+**A `.pptx`/`.ppt` deck cannot be read directly** — it is binary and Read refuses it, so the market figures inside it are invisible unless you do one of these first. Prefer rendering, since TAM/SAM/SOM claims frequently live in a chart rather than in a sentence:
+
+```bash
+for c in libreoffice soffice /Applications/LibreOffice.app/Contents/MacOS/soffice; do
+  command -v "$c" >/dev/null 2>&1 || continue
+  "$c" --headless --convert-to pdf --outdir "$STAGING_DIR" "$DECK_SRC" >/dev/null 2>&1
+  break
+done
+```
+
+Read the resulting PDF from `$STAGING_DIR`. If no converter is available, fall back to
+`python3 "$SHARED_SCRIPTS/pptx_to_text.py" "$DECK_SRC" --pretty`, which recovers slide text, table cells and speaker notes — enough for stated market claims, though any figure that exists only inside a chart image is lost. Say so rather than treating the extraction as complete: a market claim you could not read is not a market claim the deck failed to make.
+
 Extract all market-relevant data. If the deck includes explicit TAM/SAM/SOM claims, record them in `inputs.json` under `existing_claims`.
 
 **Competitive landscape:** if the deck names competitors, describes a competitive positioning
