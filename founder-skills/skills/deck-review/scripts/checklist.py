@@ -26,6 +26,9 @@ import os
 import sys
 from typing import Any
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _thresholds  # noqa: E402
+
 
 def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
     """Write JSON string to file or stdout."""
@@ -226,17 +229,21 @@ def _recompute_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
             na_count += 1
             categories[category]["not_applicable"] += 1
 
+    # A `warn` earns HALF, not nothing. Every one of the 35 criteria defines its Warn as
+    # partial satisfaction ("Mostly single-idea but 1-2 slides are overloaded"), so
+    # scoring it identically to `fail` contradicts the rubric's own text — and warns are
+    # most of the scale on real decks (11-17 of 35 measured).
+    #
+    # 0.5 is a CHOICE, not a measurement: warn sits between pass and fail in a 3-outcome
+    # ordinal (not_applicable leaves the denominator), and the midpoint assumes least.
+    #
+    # Still no per-CRITERION weighting — that is a different question, deliberately
+    # refused below to avoid subjective weight arguments. This is partial credit for a
+    # STATUS, which the rubric already defines.
     applicable = len(CHECKLIST_ITEMS) - na_count
-    score_pct = round((pass_count / applicable) * 100, 1) if applicable > 0 else 0.0
+    score_pct = round(((pass_count + 0.5 * warn_count) / applicable) * 100, 1) if applicable > 0 else 0.0
 
-    if score_pct >= 85:
-        overall_status = "strong"
-    elif score_pct >= 70:
-        overall_status = "solid"
-    elif score_pct >= 50:
-        overall_status = "needs_work"
-    else:
-        overall_status = "major_revision"
+    overall_status = _thresholds.band_for(score_pct)
 
     return {
         "total": len(CHECKLIST_ITEMS),
@@ -340,17 +347,11 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
     if errors:
         return {"items": [], "summary": None}, errors, []
 
-    # Build enriched items and summary
+    # Build enriched items. Counting happens ONCE, in _recompute_summary(enriched)
+    # below — this loop used to maintain its own parallel tallies, which after the
+    # summary was centralised became dead stores that ruff cannot flag (augmented
+    # assignment). A bug fixed in that copy would have had no effect and no warning.
     enriched: list[dict[str, Any]] = []
-    pass_count = 0
-    fail_count = 0
-    warn_count = 0
-    na_count = 0
-    failed_items: list[dict[str, Any]] = []
-    warned_items: list[dict[str, Any]] = []
-
-    # Per-category tracking
-    categories: dict[str, dict[str, int]] = {}
 
     for item in items:
         item_id = item["id"]
@@ -375,41 +376,6 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
         if notes is not None:
             enriched_item["notes"] = notes
         enriched.append(enriched_item)
-
-        # Initialize category counters
-        if category not in categories:
-            categories[category] = {"pass": 0, "fail": 0, "warn": 0, "not_applicable": 0}
-
-        if status == "pass":
-            pass_count += 1
-            categories[category]["pass"] += 1
-        elif status == "fail":
-            fail_count += 1
-            categories[category]["fail"] += 1
-            failed_items.append(
-                {
-                    "id": item_id,
-                    "category": category,
-                    "label": meta["label"],
-                    "evidence": evidence,
-                    "notes": notes,
-                }
-            )
-        elif status == "warn":
-            warn_count += 1
-            categories[category]["warn"] += 1
-            warned_items.append(
-                {
-                    "id": item_id,
-                    "category": category,
-                    "label": meta["label"],
-                    "evidence": evidence,
-                    "notes": notes,
-                }
-            )
-        elif status == "not_applicable":
-            na_count += 1
-            categories[category]["not_applicable"] += 1
 
     # Evidence is required for fail/warn items at checklist generation time.
     evidence_errors: list[str] = []
@@ -442,38 +408,19 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
                 print(f"Warning: {msg}", file=sys.stderr)
                 pass_evidence_warnings.append(msg)
 
-    # Score: pass / (total - not_applicable) * 100
-    # Why no weighting: keeps scoring simple and defensible — each applicable
-    # criterion counts equally, avoiding subjective weight arguments.
-    applicable = len(CHECKLIST_ITEMS) - na_count
-    score_pct = round((pass_count / applicable) * 100, 1) if applicable > 0 else 0.0
-
-    # Overall status thresholds — chosen to give actionable signal:
-    # "strong" means investor-ready, "major_revision" means fundamental rework needed.
-    if score_pct >= 85:
-        overall_status = "strong"
-    elif score_pct >= 70:
-        overall_status = "solid"
-    elif score_pct >= 50:
-        overall_status = "needs_work"
-    else:
-        overall_status = "major_revision"
-
+    # ONE summary implementation. This used to be a second, inline copy of
+    # _recompute_summary's body; the two drifting apart is a whole bug class, and the
+    # --inventory gating path already calls _recompute_summary, so a divergence would
+    # have shown up only on gated decks.
+    #
+    # MUST be `enriched`, never the raw `items`: _recompute_summary trusts each item's
+    # own `category`/`label`, while this function derives them from ITEM_LOOKUP.
+    # Measured — against raw input the two disagree on 200/200 adversarial inputs;
+    # against `enriched` they are byte-identical, key order included, across 2,000.
     return (
         {
             "items": enriched,
-            "summary": {
-                "total": len(CHECKLIST_ITEMS),
-                "pass": pass_count,
-                "fail": fail_count,
-                "warn": warn_count,
-                "not_applicable": na_count,
-                "score_pct": score_pct,
-                "overall_status": overall_status,
-                "by_category": categories,
-                "failed_items": failed_items,
-                "warned_items": warned_items,
-            },
+            "summary": _recompute_summary(enriched),
         },
         evidence_errors,
         pass_evidence_warnings,

@@ -207,7 +207,11 @@ def test_checklist_all_pass() -> None:
 
 
 def test_checklist_score_thresholds() -> None:
-    """Test all four overall_status thresholds."""
+    """All four overall_status bands.
+
+    Every case here uses pass/fail/not_applicable only -- no warns -- which is why the
+    R2 half-credit change did not move any of these numbers.
+    """
     # Strong: >=85% -- with 4 AI N/A, 31 applicable, need 27 pass = 87.1%
     ai_na = {
         cid: {"status": "not_applicable", "evidence": "N/A", "notes": "Not AI"}
@@ -221,9 +225,9 @@ def test_checklist_score_thresholds() -> None:
     payload = json.dumps({"items": _make_checklist_items(overrides=ai_na)})
     rc, data, _ = run_script("checklist.py", ["--pretty", "--run-id", "test-run"], stdin_data=payload)
     assert rc == 0
-    if data:
-        assert data["summary"]["overall_status"] == "strong"
-        assert data["summary"]["score_pct"] == 100.0
+    assert data is not None, "checklist.py returned no JSON -- the assertions below would silently skip"
+    assert data["summary"]["overall_status"] == "strong"
+    assert data["summary"]["score_pct"] == 100.0
 
     # Needs work: 50-69% -- 15 pass out of 31 applicable = 48.4% -> major_revision
     # Let's do 16 pass = 51.6% -> needs_work
@@ -234,8 +238,20 @@ def test_checklist_score_thresholds() -> None:
     payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
     rc, data, _ = run_script("checklist.py", ["--pretty", "--run-id", "test-run"], stdin_data=payload)
     assert rc == 0
-    if data:
-        assert data["summary"]["overall_status"] == "needs_work"
+    assert data is not None, "checklist.py returned no JSON -- the assertions below would silently skip"
+    assert data["summary"]["overall_status"] == "needs_work"
+
+    # Solid: 70-84% -- the band this test claimed to cover in its docstring and never
+    # exercised. 8 fails of 31 applicable = 74.2%. Also the band pinned by the
+    # >10-failures invariant (see test_solid_unreachable_...), so it is worth a case.
+    overrides_solid = dict(ai_na)
+    for cid in _CHECKLIST_IDS[5:13]:  # 8 fails
+        overrides_solid[cid] = {"status": "fail", "evidence": "test", "notes": "test fail"}
+    payload = json.dumps({"items": _make_checklist_items(overrides=overrides_solid)})
+    rc, data, _ = run_script("checklist.py", ["--pretty", "--run-id", "test-run"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None, "checklist.py returned no JSON -- the assertions below would silently skip"
+    assert data["summary"]["overall_status"] == "solid"
 
     # Major revision: <50% -- 14 pass out of 31 = 45.2%
     fail_ids_more = _CHECKLIST_IDS[4:21]  # 17 items fail
@@ -245,8 +261,8 @@ def test_checklist_score_thresholds() -> None:
     payload = json.dumps({"items": _make_checklist_items(overrides=overrides2)})
     rc, data, _ = run_script("checklist.py", ["--pretty", "--run-id", "test-run"], stdin_data=payload)
     assert rc == 0
-    if data:
-        assert data["summary"]["overall_status"] == "major_revision"
+    assert data is not None, "checklist.py returned no JSON -- the assertions below would silently skip"
+    assert data["summary"]["overall_status"] == "major_revision"
 
 
 def test_checklist_warn_status() -> None:
@@ -2965,10 +2981,16 @@ def test_compose_exec_summary_scoring_footnote() -> None:
     assert rc == 0
     assert data is not None
     md = data["report_markdown"]
-    # Footnote must state the formula
-    assert "pass ÷ applicable" in md
-    # Score-if-all-fixed: (28+4+3)/35 = 100%
-    assert "100.0%" in md or "If all fixable items were resolved" in md
+    # Footnote must state the CURRENT formula, including half credit for a warn.
+    assert "half credit per warn" in md
+    # ...and must say what the number measures. It is deck-craft conformance and does
+    # not track investability; the old "Overall Score" label invited the opposite read.
+    assert "not investability" in md
+    assert "**Deck-craft score:**" in md
+    # The score-if-all-fixed line is GONE. It was 100.0% on every review ever produced —
+    # (pass+fail+warn)/(35-na) is identically 1 because all 35 ids are mandatory — so it
+    # carried no information. Assert its absence so it cannot come back.
+    assert "If all fixable items were resolved" not in md
 
 
 # ---------------------------------------------------------------------------
@@ -3709,3 +3731,122 @@ def test_coaching_payload_strips_unusable_notes() -> None:
     assert "notes" not in data["out"][0], "unusable note reached the coaching payload"
     assert data["out"][1]["notes"] == "Add a Q slide.", "a usable fix must survive"
     assert data["src_untouched"], "must copy, not mutate — summary is rendered from the same objects"
+
+
+# ---------------------------------------------------------------------------
+# R2: score formula, band thresholds, and the invariant that ties them together
+# ---------------------------------------------------------------------------
+
+
+def _checklist_item_ids() -> list[dict[str, Any]]:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("ck_ids", os.path.join(DECK_REVIEW_DIR, "checklist.py"))
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return list(mod.CHECKLIST_ITEMS)
+
+
+def _thresholds_mod() -> Any:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_thresholds", os.path.join(DECK_REVIEW_DIR, "_thresholds.py"))
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_warn_earns_half_credit() -> None:
+    """A warn is partial satisfaction, not a failure.
+
+    All 35 criteria define their Warn as partially met ("Mostly single-idea but 1-2
+    slides are overloaded"), so scoring it as 0 contradicts the rubric's own text. This
+    is the arithmetic, asserted directly rather than through a band.
+    """
+    overrides: dict[str, dict[str, Any]] = {}
+    ids = [i["id"] for i in _checklist_item_ids()]
+    overrides[ids[0]] = {"status": "pass", "evidence": "ev"}
+    overrides[ids[1]] = {"status": "warn", "evidence": "ev", "notes": "Tighten slide 4."}
+    overrides[ids[2]] = {"status": "fail", "evidence": "ev", "notes": "Add a why-now slide."}
+    for cid in ids[3:]:
+        overrides[cid] = {"status": "not_applicable", "evidence": "N/A"}
+    payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
+    rc, data, _ = run_script("checklist.py", ["--pretty", "--run-id", "t"], stdin_data=payload)
+    assert rc == 0 and data is not None
+    # 1 pass + 0.5 warn over 3 applicable = 50.0, NOT 33.3
+    assert data["summary"]["score_pct"] == 50.0
+
+
+def test_solid_unreachable_while_critical_failures_warning_fires() -> None:
+    """A deck must never be called "solid" while carrying a critical-failures warning.
+
+    CHECKLIST_FAILURES_CRITICAL fires at HIGH severity when fail > 10. With 11 failures
+    the maximum attainable score is 1 - 11/applicable, which peaks at 68.6% -- and the
+    maximum is attained at warn == 0, so partial credit cannot lift it. A proposed
+    `solid >= 42` would have broken this at every attainable applicable count, printing
+    "Solid -- good foundation" beside "12 failures (>10 -- critical threshold)".
+
+    Nothing guarded this before. It is the reason the top bands do not move.
+    """
+    T = _thresholds_mod()
+    for applicable in range(26, 36):  # 26 is the floor: AI (4) + design (5) gating
+        for fails in range(11, applicable + 1):
+            best = (applicable - fails) / applicable * 100
+            assert T.band_for(round(best, 1)) not in ("solid", "strong"), (
+                f"applicable={applicable} fail={fails}: max score {best:.1f}% reaches "
+                f"{T.band_for(round(best, 1))} despite >10 failures"
+            )
+
+
+def test_band_boundaries_are_attainable_on_the_score_grid() -> None:
+    """A threshold the score can never equal is a threshold nobody can reason about.
+
+    The grid step is 100/(2*applicable) once a warn earns half -- 1.4286 at 35
+    applicable. Non-trivially, 85.0 is NOT attainable there (84.3 / 85.7 straddle it),
+    while 50.0 and 70.0 are. This pins the constraint so a future recalibration cannot
+    quietly pick an off-grid number.
+    """
+    T = _thresholds_mod()
+    applicable = 35
+    grid = {round((p + 0.5 * w) / applicable * 100, 1) for p in range(36) for w in range(36 - p)}
+    assert T.NEEDS_WORK in grid, "needs_work boundary must be attainable at 35 applicable"
+    assert T.SOLID in grid, "solid boundary must be attainable at 35 applicable"
+    assert T.STRONG not in grid, (
+        "STRONG is documented as unattainable at 35 applicable; if that changed, the "
+        "docstring in _thresholds.py is now wrong"
+    )
+
+
+def test_gauge_zones_match_band_thresholds() -> None:
+    """The HTML gauge and the printed band must come from the same numbers.
+
+    They were independent literals. Had a threshold moved, the needle would have sat in
+    a coloured zone contradicting the caption printed beside it -- the failure mode this
+    test exists to make impossible.
+    """
+    T = _thresholds_mod()
+    viz = Path(os.path.join(DECK_REVIEW_DIR, "visualize.py")).read_text(encoding="utf-8")
+    assert "_thresholds.zone_edges()" in viz, "gauge zones must be derived, not re-typed"
+    assert "(0, 50, _COLOR_FAIL)" not in viz, "hardcoded zone literals are back"
+    assert T.zone_edges() == (0.0, T.NEEDS_WORK, T.SOLID, T.STRONG, 100.0)
+
+
+def test_not_applicable_still_leaves_the_denominator() -> None:
+    """N/A items are excluded from `applicable`, not scored as zero.
+
+    Unchanged behaviour, pinned while the formula around it moved: if a future edit made
+    N/A count in the denominator, every gated deck (non-AI, or text-described) would
+    silently score lower for criteria that were deliberately ruled out.
+    """
+    ids = [i["id"] for i in _checklist_item_ids()]
+    overrides: dict[str, dict[str, Any]] = {ids[0]: {"status": "pass", "evidence": "ev"}}
+    for cid in ids[1:]:
+        overrides[cid] = {"status": "not_applicable", "evidence": "N/A"}
+    payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
+    rc, data, _ = run_script("checklist.py", ["--pretty", "--run-id", "t"], stdin_data=payload)
+    assert rc == 0 and data is not None
+    # 1 pass, 34 N/A -> 1 applicable -> 100.0, not 1/35 = 2.9
+    assert data["summary"]["not_applicable"] == 34
+    assert data["summary"]["score_pct"] == 100.0

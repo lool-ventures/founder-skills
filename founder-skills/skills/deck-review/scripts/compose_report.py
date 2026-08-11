@@ -739,23 +739,26 @@ def _section_executive_summary(
         na_c = summary.get("not_applicable", 0)
 
         status_label = {
-            "strong": "Strong — your deck is investor-ready with minor polish",
-            "solid": "Solid — good foundation, a few targeted improvements will make this shine",
-            "needs_work": "Needs Work — the business may be strong but the deck has gaps to close before sending",
-            "major_revision": "Major Revision — worth reworking before it goes out; see priority fixes below",
+            # Craft language only. These used to promise investability ("investor-ready"),
+            # which this same block now disclaims one line below — and half credit for a
+            # warn widened that string's reach (25 pass / 10 warn moved Solid -> Strong).
+            # A deck can meet every craft criterion and still be uninvestable.
+            "strong": "Strong — meets nearly all 35 craft criteria; what is left is polish",
+            "solid": "Solid — a well-built deck with a few craft gaps to close",
+            "needs_work": "Needs Work — several craft gaps to close before sending",
+            "major_revision": "Major Revision — worth reworking before it goes out; see the fixes below",
         }.get(status, status)
 
-        lines.append(f"**Overall Score:** {score}% — {status_label}")
+        # "Deck-craft score", not "Overall Score": this measures conformance to 35
+        # deck-craft criteria and does NOT predict investability. Measured across four
+        # decks, it does not even rank with an experienced reader's verdict — the
+        # strongest company scored among the weakest decks.
+        lines.append(f"**Deck-craft score:** {score}% — {status_label}")
         lines.append(f"**Breakdown:** {pass_c} pass, {fail_c} fail, {warn_c} warn, {na_c} N/A")
-
-        # Scoring footnote: formula + score-if-all-fixed
-        applicable = summary.get("total", 0) - na_c
-        if applicable > 0:
-            score_if_fixed = round((pass_c + fail_c + warn_c) / applicable * 100, 1)
-            lines.append(
-                f"\n*Score = pass ÷ applicable (warn and fail earn no credit). "
-                f"If all fixable items were resolved: {score_if_fixed}%.*"
-            )
+        lines.append(
+            "\n*Score = (pass + half credit per warn) ÷ applicable. Measures conformance to "
+            "35 deck-craft criteria, not investability.*"
+        )
 
     return "\n".join(lines) + "\n"
 

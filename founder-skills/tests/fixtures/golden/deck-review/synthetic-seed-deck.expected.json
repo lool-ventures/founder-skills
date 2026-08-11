@@ -8,17 +8,32 @@
     "all_artifacts_have_run_id": true,
     "schema_validation_passes": true,
     "coaching_payload_present": true,
-    "score_pct_range": [5, 50],
-    "overall_status_in": ["needs_work", "major_revision"],
+    "score_pct_range": [
+      10,
+      65
+    ],
+    "overall_status_in": [
+      "needs_work",
+      "major_revision"
+    ],
     "expected_failed_categories_min_count": 3,
-    "no_high_severity_warnings_other_than": ["CHECKLIST_FAILURES_CRITICAL"]
+    "no_high_severity_warnings_other_than": [
+      "CHECKLIST_FAILURES_CRITICAL"
+    ]
   },
   "_calibration_notes": [
-    "First real run 2026-05-10: LLM scored 15.2%, status major_revision.",
-    "The deck is deliberately a 6-slide stub that only covers 5 of 35 checklist items;",
-    "the remaining ~30 items are missing or unsupported — most fail or are skipped.",
-    "5-50% range absorbs reasonable LLM variance on this stub. Below 5% suggests the",
-    "model misread the deck entirely; above 50% suggests our 'weak deck' isn't perceived",
-    "as weak (signal we care about: deck-review correctly identifies a weak deck)."
+    "First real run 2026-05-10: LLM scored 15.2%, status major_revision (pass-only formula).",
+    "RECALIBRATED 2026-08-11 (R2): a warn now earns HALF credit, so scores on this stub can",
+    "only rise. Note the OLD [5,50] range still contained every plausible new value -- this",
+    "fixture would have passed silently while its meaning shifted. A green fixture is not",
+    "coverage; the range was re-derived rather than left to drift.",
+    "The deck is deliberately a 6-slide stub covering 5 of 35 checklist items.",
+    "CEILING 50 -> 65: with 5 pass and w warns of 33 applicable, w=20 would reach 45.5%.",
+    "FLOOR left at 10, deliberately BELOW the 15.2% pass-only value: how many of the 28",
+    "non-pass items an LLM calls warn rather than fail on a contentless stub has never been",
+    "measured, and a floor above the pass-only score would red the paid e2e on that guess.",
+    "Tighten the floor once two post-R2 e2e runs have been observed, not before.",
+    "overall_status stays needs_work/major_revision: 65% is below solid (70), which is",
+    "itself pinned by the >10-failures invariant -- see scripts/_thresholds.py."
   ]
 }

@@ -231,7 +231,7 @@ JSON schemas for all artifacts deposited during the deck review workflow. Each a
 | `fail` | integer | Count of failing items |
 | `warn` | integer | Count of warning items |
 | `not_applicable` | integer | Count of N/A items |
-| `score_pct` | float | pass / (total - not_applicable) * 100 |
+| `score_pct` | float | (pass + 0.5 * warn) / (total - not_applicable) * 100 — a warn earns half credit |
 | `overall_status` | string | `"strong"` (>=85%), `"solid"` (>=70%), `"needs_work"` (>=50%), `"major_revision"` (<50%) |
 | `by_category` | object | Per-category counts (pass, fail, warn, not_applicable) |
 | `failed_items` | object[] | List of failed items |

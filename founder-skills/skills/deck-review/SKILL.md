@@ -889,12 +889,12 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 ## Scoring
 
 - Each of 35 items: pass / fail / warn / not_applicable
-- `score_pct` = pass / (total - not_applicable) x 100
+- `score_pct` = (pass + 0.5 x warn) / (total - not_applicable) x 100 — a warn is partial credit, not a fail
 - Overall: "strong" (>=85%), "solid" (>=70%), "needs_work" (>=50%), "major_revision" (<50%)
 
 ## What-If Recomputation Rule
 
-If the founder asks "what's my score if I fix X" or any score recomputation question: re-run `checklist.py` with the updated item statuses (or read the Appendix evidence from report.md) and present the script's output. Never compute a revised score by mental arithmetic in the chat — the formula is non-trivial (warn/fail earn no credit; N/A items are excluded from the denominator) and off-by-one errors cause real harm.
+If the founder asks "what's my score if I fix X" or any score recomputation question: re-run `checklist.py` with the updated item statuses (or read the Appendix evidence from report.md) and present the script's output. Never compute a revised score by mental arithmetic in the chat — the formula is non-trivial (a warn earns half credit, a fail none; N/A items are excluded from the denominator) and off-by-one errors cause real harm.
 
 ## Feedback
 

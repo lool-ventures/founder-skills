@@ -27,6 +27,7 @@ from typing import Any, TypeGuard
 if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _notes  # noqa: E402
+import _thresholds  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Artifact loading infrastructure
@@ -545,11 +546,15 @@ def _chart_score_gauge(checklist: dict[str, Any] | None) -> str:
     )
 
     # Zone arcs — exact ranges, clipPath handles baseline edges
+    # Derived from the band thresholds, never re-typed. These were literals, so a
+    # threshold change elsewhere would have painted the needle in a zone that
+    # contradicted the caption printed beside it.
+    _e = _thresholds.zone_edges()
     zones = [
-        (0, 50, _COLOR_FAIL),
-        (50, 70, _COLOR_WARN),
-        (70, 85, "#71B48D"),
-        (85, 100, _COLOR_PASS),
+        (_e[0], _e[1], _COLOR_FAIL),
+        (_e[1], _e[2], _COLOR_WARN),
+        (_e[2], _e[3], "#71B48D"),
+        (_e[3], _e[4], _COLOR_PASS),
     ]
     arcs = []
     for z_start, z_end, color in zones:
@@ -584,7 +589,7 @@ def _chart_score_gauge(checklist: dict[str, Any] | None) -> str:
     # Threshold labels
     labels = ""
     label_r = _num(outer_r + 12)
-    for pct, label in [(0, "0"), (50, "50"), (70, "70"), (85, "85"), (100, "100")]:
+    for pct, label in [(e, f"{e:g}") for e in _thresholds.zone_edges()]:
         a = _angle(pct)
         lx = _num(cx + label_r * math.cos(a))
         ly = _num(cy - label_r * math.sin(a))
@@ -1178,7 +1183,7 @@ def compose_html(dir_path: str) -> str:
     header = "<header>" + "".join(header_parts) + "</header>"
 
     # Build chart sections
-    gauge_section = f'<div class="chart-section"><h2>Overall Score</h2>{_chart_score_gauge(checklist)}</div>'
+    gauge_section = f'<div class="chart-section"><h2>Deck-craft score</h2>{_chart_score_gauge(checklist)}</div>'
 
     # Key Findings section
     findings_html = _key_findings(checklist, reviews)

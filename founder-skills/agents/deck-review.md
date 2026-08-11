@@ -167,7 +167,7 @@ Reason from the structured fields (`failed_items`, `warned_items`,
 - What's the single highest-leverage change they could make? (anchor on
   the highest-impact entry in `failed_items`).
 - If you were an investor, would you take the meeting? Why or why not?
-  (use `overall_status` and stage expectations).
+  (judge this on the deck's evidence and stage expectations — NOT on `overall_status`, which measures craft conformance and does not predict investability).
 - Any narrative or positioning suggestions not captured in the
   checklist.
 
