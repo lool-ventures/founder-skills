@@ -643,6 +643,70 @@ def _denominator_noun(den: Figure) -> str:
     return label if label else _UNIT_NOUNS.get(den.unit_kind, "unit")
 
 
+MAX_CONVENTION_WIDENING = GROWTH_CONVENTION_OFFSET / 4
+"""Ceiling on how far the growth-convention band may be widened. A SEMANTIC bound.
+
+The rule claims two figures "differ ONLY by the convention" -- that they sit 100 points
+apart and nowhere else. That claim is only meaningful while the band is small relative to
+100. The per-operand CAP alone does not deliver this: it bounds each operand at 5%, but the
+widening is `mid x sum(rel)`, so it grows with the multiple and reaches 100 at a 10x growth
+figure. At that width the rule stops testing the convention and starts suppressing anything
+in the neighbourhood -- and tells the founder the two numbers are the same fact, which they
+visibly are not.
+
+A quarter of the offset keeps the test recognisably about the convention. It is a choice,
+and it binds only in the coarse-operand regime: the case that motivated this whole band
+widens by 3.3, nowhere near it.
+"""
+
+
+def _convention_tolerance(exp: Figure, mid: float, operator: str, operands: list[Figure]) -> float:
+    """How close to the convention point counts as "only the convention differs".
+
+    A SUPPRESSION band, and deliberately not the same number as the contradiction test's.
+    The two sit on opposite sides of the governing asymmetry: asserting a false
+    contradiction is loud and damaging, so the disjointness test is kept tight; withdrawing
+    one is silent, so the suppressor should err toward withdrawing. Handing the suppressor
+    the assertion test's tolerance inverted that, and is what let a false finding through:
+
+        $493k / $94k = 5.24x  — but the deck states 425% (GP growth)
+
+    425% growth IS 5.25x. The offset was 0.532 percentage points against a band of 0.5 --
+    it missed by 0.032. The band was the STATED figure's precision alone, because
+    `operand_tolerance` contributes nothing for multiplicative operators (deliberately, and
+    correctly, for disjointness -- see its docstring). But the computed side is built from
+    rounded operands: $493k and $94k carry 0.101% and 0.532%, and a ratio's relative errors
+    add, so the honest excursion is +/-3.3 points. A fixed 0.5 band against a 3.3 spread
+    could only ever miss, and it misses MORE as multiples grow and operands coarsen.
+
+    THE CAP IS LOAD-BEARING, not tidiness. `figure_tolerance` is a `max()` of the
+    significant-figure floor and the relative rule, so the FLOOR ESCAPES `CAP`: "$1M"
+    carries 50% relative error, not 5%. Uncapped, this band reached ~300 points and
+    swallowed real disagreements of 80 and even 150 points -- while telling the founder the
+    two figures were "the same fact, 100 points apart by convention", which the numbers on
+    screen visibly contradict. Capping each operand's contribution at CAP keeps the live
+    case suppressed (band 3.8 vs offset 0.53) and returns every one of those to a
+    contradiction (band 50.5 vs offsets 80 and 150).
+
+    Built from `figure_tolerance(exp)` rather than the caller's `tol` so that a future
+    multiplicative branch in `operand_tolerance` cannot double-count into this band.
+
+    KNOWN HOLE, recorded rather than fixed: a DECLINE ("fell 40%") is stored as a positive
+    percent throughout the corpus, so `stated + 100` is the wrong convention point for it
+    and no band width helps. No committed relation trips it today.
+    """
+    band = figure_tolerance(exp)
+    # `ratio` is the only operator that yields a dimensionless computed side, which
+    # `_growth_convention` requires -- `product` and `increase_by` carry an operand's unit
+    # through and are rejected before tolerance is consulted. Restricted rather than
+    # written speculatively: the symmetric form below is WRONG for `increase_by`, whose
+    # percentage operand contributes over (100 + value), not over value.
+    if operator == "ratio":
+        widening = abs(mid) * sum(min(figure_tolerance(f) / abs(f.value), CAP) for f in operands if f.value)
+        band += min(widening, MAX_CONVENTION_WIDENING)
+    return band
+
+
 def _growth_convention(computed: float, exp: Figure, tol: float, computed_unit: str | None) -> bool:
     """Do these two differ ONLY by the growth-rate / multiple convention?
 
@@ -998,7 +1062,7 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         conv: str | None = None
         if disjoint:
             mid = (c_lo + c_hi) / 2.0
-            if _growth_convention(mid, exp, tol, r.computed_unit):
+            if _growth_convention(mid, exp, _convention_tolerance(exp, mid, r.operator, real), r.computed_unit):
                 conv = (
                     f"the deck reports growth ({exp.raw}) where this computes the multiple "
                     f"({mid:,.1f}%) — the same fact, 100 points apart by convention"

@@ -24,6 +24,7 @@ sys.path[:0] = [str(SCRIPTS)]
 
 from reconcile import (  # type: ignore[import-not-found]  # noqa: E402
     CAP,
+    GROWTH_CONVENTION_OFFSET,
     Figure,
     Relation,
     _is_exact_count,
@@ -457,3 +458,97 @@ def test_words_that_really_do_mark_rounding_still_widen() -> None:
 def test_one_sided_bounds_are_untouched_by_the_change() -> None:
     assert detect_bound("$200B+", "market size") == "at_least"
     assert detect_bound("2,000", "tall buildings (fewer than)") == "at_most"
+
+
+# ---------------------------------------------------------------------------
+# The growth-convention band. A SUPPRESSION tolerance, deliberately not the same
+# number as the contradiction test's — the two sit on opposite sides of the
+# governing asymmetry. Every case below is measured, not constructed.
+# ---------------------------------------------------------------------------
+
+
+def _ratio_case(num_raw: str, num: float, den_raw: str, den: float, stated: float, stated_raw: str) -> tuple:
+    """(offset from the convention point, the band the suppressor gets)."""
+    from reconcile import _convention_tolerance  # noqa: PLC0415
+
+    ops = [
+        Figure(id="n", value=num, raw=num_raw, unit_kind="money", label="", slide=1, quote=""),
+        Figure(id="d", value=den, raw=den_raw, unit_kind="money", label="", slide=1, quote=""),
+    ]
+    exp = Figure(id="e", value=stated, raw=stated_raw, unit_kind="percent", label="", slide=1, quote="")
+    mid = num / den * 100
+    return abs(mid - (stated + 100)), _convention_tolerance(exp, mid, "ratio", ops)
+
+
+def test_the_live_false_finding_is_suppressed() -> None:
+    """The defect this band was rebuilt for, from a real deck.
+
+    `$493k / $94k = 5.24x` against a stated `425%`. 425% growth IS 5.25x — the deck was
+    right and the tool asserted it wrong. Offset 0.532 against the old band of 0.5: it
+    missed by 0.032 of a percentage point.
+    """
+    offset, band = _ratio_case("$493k", 493_000, "$94k", 94_000, 425, "425%")
+    assert offset == pytest.approx(0.532, abs=0.01)
+    assert band > offset, "the live false finding is not suppressed"
+
+
+def test_a_coarse_operand_disagreement_still_contradicts() -> None:
+    """THE CASE THAT FAILS WITHOUT THE CAP, and the reason the cap exists.
+
+    `figure_tolerance` is a max() of the significant-figure floor and the relative rule, so
+    the floor ESCAPES `CAP`: "$1M" carries 50% relative error, not 5%. Uncapped, the band
+    reached ~300 points here and swallowed a real 80-point disagreement — while telling the
+    founder the two figures were "the same fact, 100 points apart by convention", which the
+    numbers on screen visibly contradict.
+    """
+    offset, band = _ratio_case("$5M", 5_000_000, "$1M", 1_000_000, 480, "480%")
+    assert offset == pytest.approx(80.0, abs=0.01)
+    assert band < offset, "a real 80-point disagreement was suppressed — the cap is not holding"
+
+
+def test_the_band_does_not_approach_the_convention_offset_itself() -> None:
+    """A band near 100 makes "differ ONLY by the convention" meaningless.
+
+    At that width the rule stops testing the convention and starts suppressing anything in
+    the neighbourhood. The cap bounds each operand at CAP, so two operands can widen by at
+    most 10% of the multiple.
+    """
+    _, band = _ratio_case("$5M", 5_000_000, "$1M", 1_000_000, 250, "250%")
+    assert band < GROWTH_CONVENTION_OFFSET / 2, f"band {band} is too close to the 100-point convention offset"
+
+
+def test_the_band_scales_down_with_operand_precision() -> None:
+    """Self-sizing is the whole point: precise operands must NOT buy a wide band.
+
+    This is what rules out the rejected fixed-relative alternative — a 4-sig-fig operand
+    resolves far below 1%, so a 1% gap there is real evidence, not rounding.
+    """
+    _, precise = _ratio_case("$527,340", 527_340, "$100,065", 100_065, 425, "425%")
+    _, coarse = _ratio_case("$5M", 5_000_000, "$1M", 1_000_000, 400, "400%")
+    assert precise < 1.0, f"precise operands bought a {precise} band"
+    assert coarse > precise * 10
+
+
+def test_a_precise_operand_disagreement_still_contradicts() -> None:
+    """The counter-test: with precise operands, a ~2-point gap must survive as a finding."""
+    offset, band = _ratio_case("$527,340", 527_340, "$100,065", 100_065, 425, "425%")
+    assert offset > 1.0
+    assert band < offset, "a real disagreement on precise operands was suppressed"
+
+
+def test_only_ratio_widens_the_band() -> None:
+    """`product` and `increase_by` never reach the rule — it requires a dimensionless
+    computed side and they carry an operand's unit through. Widening for them would be
+    speculative, and the symmetric formula is WRONG for `increase_by`, whose percentage
+    operand contributes over (100 + value), not over value.
+    """
+    from reconcile import _convention_tolerance  # noqa: PLC0415
+
+    ops = [
+        Figure(id="n", value=5_000_000, raw="$5M", unit_kind="money", label="", slide=1, quote=""),
+        Figure(id="d", value=1_000_000, raw="$1M", unit_kind="money", label="", slide=1, quote=""),
+    ]
+    exp = Figure(id="e", value=400, raw="400%", unit_kind="percent", label="", slide=1, quote="")
+    assert _convention_tolerance(exp, 500.0, "product", ops) == figure_tolerance(exp)
+    assert _convention_tolerance(exp, 500.0, "increase_by", ops) == figure_tolerance(exp)
+    assert _convention_tolerance(exp, 500.0, "ratio", ops) > figure_tolerance(exp)
