@@ -243,9 +243,24 @@ _LEAD_AT_MOST = re.compile(r"^\s*[<≤]")
 _LEAD_AT_LEAST = re.compile(r"^\s*[>≥]")
 _AT_MOST_WORDS = re.compile(r"\b(fewer than|less than|under|up to|at most|no more than|below)\b", re.I)
 _AT_LEAST_WORDS = re.compile(r"\b(at least|more than|over|exceeds|minimum|or more)\b", re.I)
-_APPROX_WORDS = re.compile(
-    r"(~|\bapprox\w*|\babout\b|\baround\b|\broughly\b|\best\b|\bestimated\b|\btarget\w*|\bprojected\b)", re.I
-)
+# These words mean the AUTHOR ROUNDED. They do not mean the author is unsure about the
+# future, and conflating the two is what `target` and `projected` did here.
+#
+# `target` was the clearer error of the two. "$6.5M seed round target" and "25% target
+# margin" are precise stated numbers -- a target is a specific figure, not a rounded one --
+# and `\btarget\w*` also collided with an unrelated word sense: "3 main TARGET MARKETS"
+# marked the 3 approximate. Measured on the corpus, `target|projected|est` alone accounted
+# for 57 of 81 approximations (70%), 24 of them load-bearing inside a computed relation.
+#
+# `projected` is the deliberate call, and it went the other way on purpose. A projection is
+# uncertain about the WORLD; the figure itself is still stated exactly, and a forecast that
+# does not add up is a finding. Widening tolerance there made the tool most forgiving
+# exactly where a founder's arithmetic most often fails. "Projected MRR $205,000" now gets
+# the tolerance its own significant figures earn and nothing more.
+#
+# A bound can only ever suppress a contradiction (see detect_bound), so every entry here
+# buys silence. Add one only for a word that genuinely marks rounding.
+_APPROX_WORDS = re.compile(r"(~|\bapprox\w*|\babout\b|\baround\b|\broughly\b|\best\b|\bestimated\b)", re.I)
 
 
 def detect_bound(raw: str, label: str) -> str | None:

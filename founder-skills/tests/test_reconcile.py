@@ -411,3 +411,49 @@ def test_a_material_percentage_gap_still_fires() -> None:
     e = fig("3.5%", 3.5, "percent", id="f3")
     assert not _immaterial_percent(3.0, e)
     assert _immaterial_percent(3.55, e)
+
+
+# ---------------------------------------------------------------------------
+# What "approximate" means: the author ROUNDED. Not that the author is unsure
+# about the future. A bound can only ever suppress a contradiction, so every
+# word admitted here buys silence.
+# ---------------------------------------------------------------------------
+
+
+def test_a_target_is_a_precise_number_not_an_approximation() -> None:
+    """ "$6.5M seed round target" states $6.5M exactly. A target is a specific figure."""
+    assert detect_bound("$6.5M", "seed round target") is None
+    assert detect_bound("25%", "Galil target margin as share of building cost") is None
+
+
+def test_target_markets_does_not_make_the_count_approximate() -> None:
+    """The word-sense collision that made this visible: "3 main target markets".
+
+    `target` there is part of a noun phrase naming a market segment; the 3 is exact.
+    """
+    assert detect_bound("3", "main target markets") is None
+
+
+def test_a_projection_is_stated_exactly_even_though_the_future_is_not() -> None:
+    """DELIBERATE, and the call went against widening.
+
+    A projection is uncertain about the WORLD; the number itself is still stated exactly,
+    and a forecast whose arithmetic does not add up is a finding. Widening here made the
+    tool most forgiving precisely where a founder's numbers most often fail.
+    """
+    assert detect_bound("$205,000", "projected MRR at June 2021") is None
+    assert detect_bound("13,000", "projected number of companies at June 2021") is None
+
+
+def test_words_that_really_do_mark_rounding_still_widen() -> None:
+    """The fix must not overshoot: these are genuine author-rounded markers."""
+    assert detect_bound("~3.5%", "R&D as share of revenue") == "approximate"
+    assert detect_bound("130", "200m+ buildings completed 2020 (est)") == "approximate"
+    assert detect_bound("55%", "about 55% gross margin") == "approximate"
+    assert detect_bound("40", "roughly 40 customers") == "approximate"
+    assert detect_bound("1,000", "estimated annual throughput") == "approximate"
+
+
+def test_one_sided_bounds_are_untouched_by_the_change() -> None:
+    assert detect_bound("$200B+", "market size") == "at_least"
+    assert detect_bound("2,000", "tall buildings (fewer than)") == "at_most"
