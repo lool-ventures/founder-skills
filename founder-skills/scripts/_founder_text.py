@@ -288,7 +288,11 @@ def scan(text: str, *, extra_keep: frozenset[str] | None = None) -> dict[str, li
     de_urled = _URL_RE.sub(" ", text)
     filenames = sorted({m.group(0) for m in _FILENAME_RE.finditer(de_urled) if _is_internal_file(m.group(0))})
     # Strip filenames first so `model_data.json` is not also reported as the enum `model_data`.
-    without_files = _FILENAME_RE.sub(" ", text)
+    # Derived from de_urled, not from raw text: a citation URL's path segment
+    # ("…/press_release/exclusive_partnership") is somebody else's slug, not a token of ours,
+    # and reporting it sends an author hunting for a leak that is not there. The filename pass
+    # above already worked this way; the enum pass did not.
+    without_files = _FILENAME_RE.sub(" ", de_urled)
     enums = sorted(
         {
             m.group(0)
@@ -313,19 +317,38 @@ def substitute(text: str, *, extra_keep: frozenset[str] | None = None) -> str:
     Longest token first, so a token that is a prefix of another is not partially replaced.
     """
     keep = (extra_keep or frozenset()) | DIAGNOSTIC_CODES
-    stripped = _FILENAME_RE.sub(" ", text)
-    found = {m.group(0) for m in _CANDIDATE_RE.finditer(stripped)}
+    # URLs are rewritten by NOBODY. A token that also appears inside a citation link must be
+    # humanized in the prose and left byte-exact in the link: substituting there silently turns
+    # "…/press_release/…" into "…/press release/…" and the founder is handed a dead citation
+    # for a claim the report is challenging. Worse, scan() runs AFTER substitute() at every call
+    # site, so the evidence is gone by the time anything looks -- the corruption reported clean.
+    # Fleet-wide: every skill that renders a source URL goes through this function.
+    spans = [(m.start(), m.end()) for m in _URL_RE.finditer(text)]
+    protected = _URL_RE.sub(" ", text)
+    found = {m.group(0) for m in _CANDIDATE_RE.finditer(_FILENAME_RE.sub(" ", protected))}
+
     # ALLCAPS tokens are DETECT-ONLY. They are one of three things and rewriting is wrong for two:
     # an id (`NARR_01` -> "NARR 01" helps nobody), a code deliberately shown in small print beside its
     # own humanized label (`**Burn Multiple Suspect** (`BURN_MULTIPLE_SUSPECT`)` — the md_term
     # convention), or a genuine leak, which belongs fixed at its source. scan() reports all three; the
     # caller keeps the legitimate ones via extra_keep.
+    def _outside_url(pos: int) -> bool:
+        return not any(s <= pos < e for s, e in spans)
+
     for token in sorted(found, key=len, reverse=True):
         if is_verbatim_token(token) or token in keep:
             continue
-        text = re.sub(
-            rf"(?<![\w.]){re.escape(token)}(?!\w)(?!\.\w)",
-            humanize_token(token, capitalize=token in _ENUM_VALUES),
-            text,
-        )
+        replacement = humanize_token(token, capitalize=token in _ENUM_VALUES)
+        # Re-derive spans each pass: a substitution shifts every offset after it.
+        out, last = [], 0
+        for m in re.finditer(rf"(?<![\w.]){re.escape(token)}(?!\w)(?!\.\w)", text):
+            if not _outside_url(m.start()):
+                continue
+            out.append(text[last : m.start()])
+            out.append(replacement)
+            last = m.end()
+        if out:
+            out.append(text[last:])
+            text = "".join(out)
+            spans = [(m.start(), m.end()) for m in _URL_RE.finditer(text)]
     return text

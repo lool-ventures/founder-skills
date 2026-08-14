@@ -295,3 +295,33 @@ def test_a_kept_code_is_not_reported() -> None:
     text = "- **Burn Multiple Suspect** (`BURN_MULTIPLE_SUSPECT`): acknowledged"
     assert ft.scan(text, extra_keep=keep)["enums"] == []
     assert ft.scan(text)["enums"] == ["BURN_MULTIPLE_SUSPECT"]
+
+
+def test_urls_are_never_rewritten_but_prose_around_them_is() -> None:
+    """A citation URL must reach the founder byte-exact.
+
+    `substitute()` used to rewrite tokens wherever they appeared, including inside links:
+    "…/press_release/exclusive_partnership" became "…/press release/exclusive partnership"
+    and the founder got a dead citation for a claim the report was challenging. It reported
+    CLEAN, because every call site runs scan() after substitute(), so the evidence was
+    already gone. Fleet-wide — every skill that renders a source URL goes through here.
+    """
+    import _founder_text as ft
+
+    url = "https://www.reuters.com/tech/press_release/exclusive_partnership-2024?utm_source=deck"
+    out = ft.substitute(f"See {url} for the ai_core claim")
+    assert url in out, "the URL must survive substitution unchanged"
+    assert "ai_core" not in out, "prose outside the URL must still be humanized"
+    assert "AI core" in out
+
+
+def test_scan_does_not_report_url_path_segments_as_internal_tokens() -> None:
+    """A slug in somebody else's URL is not a token of ours, and reporting it sends an
+    author hunting for a leak that does not exist. The filename pass already stripped URLs;
+    the enum pass read the raw text."""
+    import _founder_text as ft
+
+    found = ft.scan("Source: https://example.com/reports/model_data/ai_core_summary")
+    assert found["enums"] == [] and found["filenames"] == []
+    # and a real token in prose is still caught
+    assert ft.scan("the ai_core flag was set")["enums"]
