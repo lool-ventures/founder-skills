@@ -40,6 +40,19 @@
       ],
       "notes": "Agent writes {relations: [{kind, operator, operands, expected_id?}]} to OUTPUT_PATH. operator is one of ratio/product/sum/increase_by/difference; operands are ledger ids in order. The agent chooses WHICH figures relate \u2014 judgment \u2014 and computes nothing: reconcile.py does the arithmetic, enforces scale/currency/period, and assigns the verdict. expected_id names a figure the deck itself states, which is what makes a disagreement established rather than judged."
     },
+    "INTERPRETATION": {
+      "schema": null,
+      "validates_via": "producer",
+      "transport": "file_handoff",
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "downgrades"
+      ],
+      "notes": "Demote-only pass over surviving contradictions, same shape as cap-table's cross_checker.py. The agent may only WITHDRAW a contradiction, on one of exactly two grounds (partial_enumeration / approximate_stated_figure); reconcile.py --downgrades rejects any other class, any withdrawal with no reason, any that targets a non-contradiction, and any that matches no relation \u2014 an unmatched downgrade is an error rather than a no-op, because silently matching nothing is indistinguishable from working. A wrong withdrawal FAILS SILENT (it suppresses a finding, never manufactures one), which is what lets model judgment cross the boundary here. `relation_mis_specified` is deliberately NOT a class: the corpus's only two candidates were both graded real by the expert."
+    },
     "SLIDE_REVIEWS": {
       "schema": "slide_reviews.schema.json",
       "validates_via": "schema",

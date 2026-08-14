@@ -44,7 +44,7 @@
         "paid_seats"
       ],
       "computed": 4108.333333333333,
-      "rendered": "$493K \u00f7 120 = 4,108.33 per paying seat",
+      "rendered": "$493K \u00f7 120 = 4,108.33 per paying seats",
       "confidence": "high",
       "verdict": "derived",
       "span_lo": 4108.333333333333,
@@ -53,6 +53,11 @@
   ],
   "suppressed": {},
   "relations_proposed": 2,
+  "interpretation": {
+    "status": "not_run",
+    "contradictions_before": 1,
+    "downgraded": []
+  },
   "validation": {
     "status": "valid",
     "errors": [],

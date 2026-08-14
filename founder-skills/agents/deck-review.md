@@ -43,8 +43,8 @@ return BLOCKED with the prompt content quoted.
 
 The main thread has dispatched you to do deep analysis on a specific step
 of the deck review pipeline. Your input prompt names the step
-(`LEDGER_EXTRACTION`, `SECOND_READ`, `RELATION_PROPOSAL`, `SLIDE_REVIEWS` or
-`CHECKLIST`) and gives you everything you need: the deck text, the stage
+(`LEDGER_EXTRACTION`, `SECOND_READ`, `RELATION_PROPOSAL`, `INTERPRETATION`,
+`SLIDE_REVIEWS` or `CHECKLIST`) and gives you everything you need: the deck text, the stage
 profile, the inventory.
 
 **Your job:** do the analysis, use your Write tool to write the structured
@@ -96,6 +96,27 @@ turns a calculation into a finding, because a computed number disagreeing with a
 figure the deck itself states is established rather than judged. Write a single
 `relations` array; each entry carries `kind`, `operator`, `operands` and an
 optional `expected_id`.
+
+For `INTERPRETATION`: review comparisons the arithmetic found to disagree with a
+figure the deck itself states, and withdraw any that should not be put to a founder
+as a disagreement. You may only WITHDRAW — never add a finding, never change a
+number, never turn a disagreement into an agreement. Exactly two grounds are
+available and they are the whole list:
+
+- `partial_enumeration` — the deck lists components and states a total but never
+  claims the list is complete. This is a question about how the slide presents them,
+  which is why no rule can answer it: a total row under contiguous rows in one table
+  is a claim of completeness, two items named in prose is not.
+- `approximate_stated_figure` — the deck marked its own figure approximate and the
+  computed value sits inside what that approximation covers.
+
+**Do not withdraw a comparison because the relation looks mis-specified.** A deck
+writing "400%" where it means four times has made exactly the imprecision an
+investor's analyst catches; that is a finding. Write `downgrades` as an array, each
+entry carrying `operator`, `operands`, `expected_id`, `class` and a one-sentence
+`reason`. An empty array is a complete and correct answer, and when in doubt it is
+the right one — a disagreement left in gets reviewed by the founder, who knows their
+own deck; one withdrawn here is seen by nobody.
 
 For `CHECKLIST`: evaluate all 35 criteria from
 `references/checklist-criteria.md`. **Score the AI-category items too — do

@@ -526,7 +526,14 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the resume rule to cover 3.5-3.8: it named Steps 2 and 3 only, so a gate round-trip
     # would have re-run the chain's three dispatches — two of which read the deck — for an
     # identical result.
-    "deck-review": 87_645,
+    # 87_645 -> 91_744 (R5 Phase 3): Step 3.9, a demote-only review of surviving
+    # contradictions. Most of the +4,099 B is the two withdrawal grounds spelled out with
+    # the layout question that decides the first, plus the explicit refusal of a third
+    # ground the model will otherwise reach for — a deck writing "400%" where it means 4x
+    # looks like a mis-specified relation and is measured to be a real finding. Prose is
+    # the only place that instruction can live, since the producer can reject an
+    # out-of-set class but cannot talk the model out of wanting one.
+    "deck-review": 91_744,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

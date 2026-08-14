@@ -274,3 +274,153 @@ def test_rejects_a_relations_payload_that_is_not_an_array() -> None:
         )
     assert res.returncode != 0
     assert "must be an array" in res.stderr
+
+
+# ---------------------------------------------------------------------------
+# The interpretation pass (Phase 3). Demote-only, closed class set, and every
+# withdrawal recorded — because a suppression with no stated ground cannot be
+# audited after the fact.
+# ---------------------------------------------------------------------------
+
+
+def _downgrade(**over: object) -> dict:
+    base: dict[str, object] = {
+        "operator": "ratio",
+        "operands": ["net_revenue", "gross_volume"],
+        "expected_id": "stated_take_rate",
+        "class": "partial_enumeration",
+        "reason": "the deck never claimed the listed components were the whole of it",
+    }
+    base.update(over)
+    return base
+
+
+def _run_with(downgrades: list[dict]) -> tuple[int, dict, str]:
+    with tempfile.TemporaryDirectory() as d:
+        lp = os.path.join(d, "ledger.json")
+        sp = os.path.join(d, "second.json")
+        dp = os.path.join(d, "downgrades.json")
+        with open(lp, "w", encoding="utf-8") as f:
+            json.dump(_LEDGER, f)
+        with open(sp, "w", encoding="utf-8") as f:
+            json.dump({"transcript": _TRANSCRIPT, "slides_transcribed": [6]}, f)
+        with open(dp, "w", encoding="utf-8") as f:
+            json.dump({"downgrades": downgrades}, f)
+        res = subprocess.run(
+            [
+                sys.executable,
+                SCRIPT,
+                "--ledger",
+                lp,
+                "--second-read",
+                sp,
+                "--downgrades",
+                dp,
+                "--run-id",
+                "r1",
+            ],
+            input=json.dumps({"relations": [_TAKE_RATE_RELATION]}),
+            capture_output=True,
+            text=True,
+        )
+    try:
+        parsed = json.loads(res.stdout)
+    except json.JSONDecodeError:
+        parsed = {}
+    return res.returncode, parsed, res.stderr
+
+
+def test_a_withdrawn_contradiction_leaves_the_founder_view() -> None:
+    rc, out, err = _run_with([_downgrade()])
+    assert rc == 0, err
+    assert out["relations"] == []
+    assert out["interpretation"]["status"] == "applied"
+    assert out["interpretation"]["contradictions_before"] == 1
+
+
+def test_every_withdrawal_records_its_class_and_reason() -> None:
+    rc, out, err = _run_with([_downgrade()])
+    assert rc == 0, err
+    (record,) = out["interpretation"]["downgraded"]
+    assert record["class"] == "partial_enumeration"
+    assert record["reason"]
+    assert record["rendered"], "the withdrawn line must survive in the record, not just its id"
+
+
+def test_an_unrecognised_class_is_refused() -> None:
+    """The class set is closed. Free-text grounds are not auditable and not allowed."""
+    rc, _, err = _run_with([_downgrade(**{"class": "seems_fine_to_me"})])
+    assert rc != 0
+    assert "is not one of" in err
+
+
+def test_relation_mis_specified_is_not_an_available_class() -> None:
+    """The original spec's motivating class, deliberately absent.
+
+    Its example — `$26B increased by 400% = 130B` against a stated `$104B`, where the sibling
+    operator gives 26 x 4 = 104 EXACTLY — was graded **real** by the expert two days after the
+    spec was written. A deck writing "400%" where it means 4x has made exactly the imprecision
+    this skill exists to catch. The corpus holds zero positive evidence for the class and one
+    strong counterexample, so admitting it would invite withdrawing the findings the expert kept.
+    """
+    rc, _, err = _run_with([_downgrade(**{"class": "relation_mis_specified"})])
+    assert rc != 0
+    assert "is not one of" in err
+
+
+def test_a_withdrawal_with_no_reason_is_refused() -> None:
+    rc, _, err = _run_with([_downgrade(reason="   ")])
+    assert rc != 0
+    assert "no reason" in err
+
+
+def test_a_downgrade_matching_nothing_is_an_error_not_a_no_op() -> None:
+    """Silently matching nothing is indistinguishable from working.
+
+    The pass would report success while changing nothing, and nobody would find out.
+    """
+    rc, _, err = _run_with([_downgrade(operands=["net_revenue", "no_such_figure"])])
+    assert rc != 0
+    assert "names no relation" in err
+
+
+def test_only_a_contradiction_can_be_withdrawn() -> None:
+    """Demote-only: the pass cannot reach a derived reading, a confirmation, or anything else.
+
+    Targets a bare ratio with no stated counterpart — a `derived` relation, which is a reading
+    the report labels as judgement rather than a finding. Withdrawing one is out of scope, and
+    the refusal must say so rather than silently accepting.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        lp, sp, dp = (os.path.join(d, n) for n in ("ledger.json", "second.json", "dg.json"))
+        with open(lp, "w", encoding="utf-8") as f:
+            json.dump(_LEDGER, f)
+        with open(sp, "w", encoding="utf-8") as f:
+            json.dump({"transcript": _TRANSCRIPT, "slides_transcribed": [6]}, f)
+        with open(dp, "w", encoding="utf-8") as f:
+            json.dump({"downgrades": [_downgrade(expected_id=None)]}, f)
+        bare_ratio = {"kind": "derived_ratio", "operator": "ratio", "operands": ["net_revenue", "gross_volume"]}
+        res = subprocess.run(
+            [sys.executable, SCRIPT, "--ledger", lp, "--second-read", sp, "--downgrades", dp, "--run-id", "r1"],
+            input=json.dumps({"relations": [_TAKE_RATE_RELATION, bare_ratio]}),
+            capture_output=True,
+            text=True,
+        )
+    assert res.returncode != 0
+    assert "only a contradiction can be withdrawn" in res.stderr
+
+
+def test_status_distinguishes_not_run_from_not_needed() -> None:
+    """A deck with contradictions and no pass is NOT the same as a deck with nothing to review.
+
+    The first means the founder is seeing an un-reviewed set; the second means there was
+    nothing to review. Collapsing them would hide a skipped step.
+    """
+    rc, out, err = _run([_TAKE_RATE_RELATION])
+    assert rc == 0, err
+    assert out["interpretation"]["status"] == "not_run"
+    assert out["interpretation"]["contradictions_before"] == 1
+
+    rc, out, err = _run([], ledger={"figures": _LEDGER["figures"][:2]})
+    assert rc == 0, err
+    assert out["interpretation"]["status"] == "not_needed"

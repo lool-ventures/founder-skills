@@ -1080,6 +1080,40 @@ def select(relations: list[Relation], max_derived: int = 3) -> list[Relation]:
     return contradictions + derived[:max_derived]
 
 
+DOWNGRADE_CLASSES = {
+    "partial_enumeration": (
+        "A sum of listed components against a stated total, where the deck never claimed the "
+        "list was exhaustive. Whether a breakdown was PRESENTED as complete is a layout "
+        "question, not an arithmetic one, which is why no deterministic rule can answer it."
+    ),
+    "approximate_stated_figure": (
+        "The deck marked the stated side approximate and the gap is within what that "
+        "approximation covers. Distinct from the materiality floor, which is a fixed "
+        "percentage: this weighs how loose the author's own '~' was meant to be."
+    ),
+}
+"""The only reasons a surviving contradiction may be withdrawn. A CLOSED SET, and short.
+
+Each class is here because the corpus contains a finding the expert graded not-a-problem for
+exactly that reason, and because the convention-classes work established that no deterministic
+rule can catch it: partial enumeration needs to know whether a breakdown was presented as
+complete, and the approximate case sits at 14.3% relative, above any materiality floor that
+does not also swallow genuine 12% errors.
+
+WHAT IS DELIBERATELY ABSENT, and this is the important part. The original Phase 3 spec's
+motivating class was "the relation was mis-specified" -- the model picked `increase_by` where
+the deck meant a multiple -- with `$26B increased by 400% = 130B vs a stated $104B` as the
+example, since 26 x 4 = 104 EXACTLY under the sibling operator. That is a compelling mechanical
+tell and it is wrong: the expert graded BOTH deck-F items **real**, two days after the spec was
+written. A deck writing "400%" where it means 4x has made exactly the kind of imprecision an
+analyst catches, which is what this skill exists to surface.
+
+So the corpus contains zero positive evidence for a mis-specification class and one strong
+counterexample. Adding it would invite the model to withdraw precisely the findings the expert
+kept -- the same mistake the sign-convention rule nearly made before review caught it. If a
+future corpus produces a real mis-specified relation, add the class then, with the case attached.
+"""
+
 MIN_FIGURES = 2
 """Below this a deck states too few numbers for any relation to exist.
 
@@ -1128,6 +1162,80 @@ def _fail(message: str) -> int:
     return 1
 
 
+def _signature(operator: str, operands: list[str], expected_id: str | None) -> tuple[Any, ...]:
+    """How a downgrade names the relation it withdraws.
+
+    The same triple `select()` dedupes on, so a downgrade addresses exactly one relation and
+    cannot be written to match a family of them.
+    """
+    return (operator, tuple(sorted(operands)), expected_id or None)
+
+
+def apply_downgrades(
+    relations: list[Relation], downgrades: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Withdraw contradictions the interpretation pass judged not to be findings.
+
+    DEMOTE-ONLY, in the same shape as cap-table's `cross_checker.py`: this can move a relation
+    out of the founder's view and can do nothing else. It never upgrades, never converts a
+    contradiction into a confirmation, never edits a number, and never touches a relation that
+    is not currently a contradiction. The deterministic verdict is what it was; `downgraded`
+    records that a judgement was laid on top of it.
+
+    That makes a wrong downgrade FAIL SILENT — it suppresses a finding rather than manufacturing
+    one — which is the second half of the rule governing everything that crosses the code/model
+    boundary here. The first half is that the code can check the claim, and it can: the class
+    must come from a closed set, and the relation named must actually exist and actually be a
+    contradiction.
+
+    An unmatched downgrade is an ERROR, not a no-op. A downgrade that silently matches nothing
+    is indistinguishable from one that worked, and the whole pass would report success while
+    changing nothing.
+    """
+    errors: list[str] = []
+    applied: list[dict[str, Any]] = []
+    by_sig = {_signature(r.operator, r.operands, r.expected_id): r for r in relations if not r.dropped}
+
+    for index, entry in enumerate(downgrades):
+        where = f"downgrades[{index}]"
+        if not isinstance(entry, dict):
+            errors.append(f"{where} must be an object")
+            continue
+        klass = entry.get("class")
+        if klass not in DOWNGRADE_CLASSES:
+            errors.append(f"{where} class {klass!r} is not one of {sorted(DOWNGRADE_CLASSES)}")
+            continue
+        reason = entry.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            errors.append(f"{where} has no reason; a withdrawal with no stated ground is not auditable")
+            continue
+        operands = entry.get("operands")
+        if not isinstance(operands, list) or not all(isinstance(o, str) for o in operands):
+            errors.append(f"{where} operands must be an array of figure ids")
+            continue
+        sig = _signature(str(entry.get("operator", "")), operands, entry.get("expected_id"))
+        target = by_sig.get(sig)
+        if target is None:
+            errors.append(f"{where} names no relation in this reconciliation: {sig}")
+            continue
+        if target.verdict != "contradiction":
+            errors.append(f"{where} targets a {target.verdict!r} relation; only a contradiction can be withdrawn")
+            continue
+        target.verdict = "downgraded"
+        applied.append(
+            {
+                "operator": target.operator,
+                "operands": target.operands,
+                "expected_id": target.expected_id,
+                "class": klass,
+                "reason": reason.strip(),
+                "rendered": target.rendered,
+            }
+        )
+
+    return applied, errors
+
+
 def _coverage(figures: list[Figure], slides_transcribed: list[Any]) -> dict[str, Any]:
     """Which figure-bearing slides the second read actually covered.
 
@@ -1156,6 +1264,7 @@ def build(
     rel_specs: list[dict[str, Any]],
     inventory: dict[str, Any] | None = None,
     slides_transcribed: list[Any] | None = None,
+    downgrades: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Run the gate, compute every proposed relation, and select what a founder sees.
 
@@ -1182,6 +1291,23 @@ def build(
 
     by_id = {f.id: f for f in figures}
     computed = [compute(spec, by_id) for spec in rel_specs] if status == "checked" else []
+
+    # The interpretation pass runs AFTER the arithmetic and BEFORE selection, so `select()`
+    # stays the single place that decides what a founder sees. A downgrade is an input to
+    # that decision, never an edit to its output.
+    contradictions_before = sum(1 for r in computed if not r.dropped and r.verdict == "contradiction")
+    applied: list[dict[str, Any]] = []
+    if downgrades:
+        applied, downgrade_errors = apply_downgrades(computed, downgrades)
+        if downgrade_errors:
+            return None, "; ".join(downgrade_errors)
+    if contradictions_before == 0:
+        interpretation = "not_needed"
+    elif downgrades is None:
+        interpretation = "not_run"
+    else:
+        interpretation = "applied"
+
     selected = select(computed)
 
     # Counts, not contents. A suppressed relation must not be reachable from the
@@ -1230,6 +1356,15 @@ def build(
         ],
         "suppressed": suppressed,
         "relations_proposed": len(rel_specs),
+        # not_needed = nothing to interpret. not_run = contradictions survived and no
+        # interpretation pass was supplied, so the founder is seeing the un-reviewed set.
+        # applied = the pass ran; every withdrawal it made is recorded below by class and
+        # reason, because a suppression with no stated ground cannot be audited later.
+        "interpretation": {
+            "status": interpretation,
+            "contradictions_before": contradictions_before,
+            "downgraded": applied,
+        },
     }, None
 
 
@@ -1253,6 +1388,10 @@ def main() -> int:
     ap.add_argument("--ledger", required=True, help="ledger.json from LEDGER_EXTRACTION")
     ap.add_argument("--second-read", required=True, help="second_read.json — the independent transcription")
     ap.add_argument("--inventory", help="deck_inventory.json; enables the no_figures refusal")
+    ap.add_argument(
+        "--downgrades",
+        help="the INTERPRETATION pass's hand-off; withdraws contradictions it judged not to be findings",
+    )
     ap.add_argument("--run-id", required=True)
     ap.add_argument("-o", "--output")
     ap.add_argument("--pretty", action="store_true")
@@ -1290,8 +1429,18 @@ def main() -> int:
     if not isinstance(slides_transcribed, list):
         return _fail("second read's 'slides_transcribed' must be an array")
 
+    downgrades = None
+    if args.downgrades:
+        payload, err = _read_json(args.downgrades, "downgrades")
+        if err:
+            return _fail(err)
+        assert payload is not None
+        downgrades = payload.get("downgrades", [])
+        if not isinstance(downgrades, list):
+            return _fail("'downgrades' must be an array")
+
     assert ledger is not None
-    result, err = build(ledger, transcript, rel_specs, inventory, slides_transcribed)
+    result, err = build(ledger, transcript, rel_specs, inventory, slides_transcribed, downgrades)
     if err or result is None:
         return _fail(err or "reconciliation failed")
 

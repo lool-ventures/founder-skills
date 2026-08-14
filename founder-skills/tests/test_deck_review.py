@@ -750,7 +750,7 @@ def test_compose_complete_set() -> None:
 
 def _compose_markdown(reconciliation: dict | None) -> str:
     """Compose with a given reconciliation artifact and return report.md."""
-    artifacts = {
+    artifacts: dict[str, dict] = {
         "deck_inventory.json": _VALID_INVENTORY,
         "stage_profile.json": _VALID_PROFILE,
         "slide_reviews.json": _VALID_REVIEWS,
@@ -776,7 +776,7 @@ def _relation(verdict: str, kind: str = "derived_ratio", rendered: str = "x") ->
 
 
 def _recon(relations: list[dict]) -> dict:
-    return {
+    out: dict = {
         "metadata": {"run_id": "run-test"},
         "status": "checked",
         "figures_total": 2,
@@ -785,6 +785,7 @@ def _recon(relations: list[dict]) -> dict:
         "suppressed": {},
         "validation": {"status": "valid", "errors": [], "warnings": []},
     }
+    return out
 
 
 def test_a_contradiction_is_never_filed_under_readings_not_errors() -> None:
@@ -1389,6 +1390,7 @@ def test_compose_severity_map_complete() -> None:
         "DUPLICATE_SLIDE_NUMBER",
         "SLIDE_REVIEW_MISSING",
         "SLIDE_REVIEW_DUPLICATE",
+        "NUMBERS_NOT_REVIEWED",
     ]
     assert len(sev_map) == len(expected), f"expected {len(expected)} codes, got {len(sev_map)}"
     for code in expected:
@@ -4060,3 +4062,52 @@ def test_unreviewed_design_note_fires_only_when_the_gate_fired() -> None:
     rendered = {"items": [{"id": "mobile_readable", "status": "warn", "evidence": "Dense on mobile."}]}
     assert mod._unreviewed_design_note(rendered) == []
     assert mod._unreviewed_design_note(None) == []
+
+
+def test_a_skipped_review_pass_is_disclosed_to_the_founder() -> None:
+    """Skipping the review pass shows MORE findings, not fewer — the expensive direction.
+
+    A complete-looking report is exactly what a skipped judgement pass produces, so nothing
+    else notices. The disclosure has to be in words a founder can act on, not a step name.
+    """
+    recon = _recon([_relation("contradiction", rendered="$20k + $10k = 30,000 vs a stated $40k")])
+    recon["interpretation"] = {"status": "not_run", "contradictions_before": 1, "downgraded": []}
+    rc, data, err = _run_compose(
+        _make_artifact_dir(
+            {
+                "deck_inventory.json": _VALID_INVENTORY,
+                "stage_profile.json": _VALID_PROFILE,
+                "slide_reviews.json": _VALID_REVIEWS,
+                "checklist.json": _VALID_CHECKLIST,
+                "reconciliation.json": recon,
+            }
+        )
+    )
+    assert rc == 0, err
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "NUMBERS_NOT_REVIEWED" in codes
+    md = str(data["report_markdown"])
+    assert "first pass" in md
+    # The founder sees the consequence, never the mechanism.
+    assert "interpretation" not in md
+    assert "not_run" not in md
+
+
+def test_no_disclosure_when_the_review_pass_ran() -> None:
+    recon = _recon([_relation("contradiction")])
+    recon["interpretation"] = {"status": "applied", "contradictions_before": 2, "downgraded": []}
+    rc, data, err = _run_compose(
+        _make_artifact_dir(
+            {
+                "deck_inventory.json": _VALID_INVENTORY,
+                "stage_profile.json": _VALID_PROFILE,
+                "slide_reviews.json": _VALID_REVIEWS,
+                "checklist.json": _VALID_CHECKLIST,
+                "reconciliation.json": recon,
+            }
+        )
+    )
+    assert rc == 0, err
+    assert data is not None
+    assert "NUMBERS_NOT_REVIEWED" not in [w["code"] for w in data["validation"]["warnings"]]

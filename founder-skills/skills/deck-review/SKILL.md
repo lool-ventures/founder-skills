@@ -793,6 +793,89 @@ Do not report a contradiction to the founder from this step. Step 6 renders them
 from the artifact. What reaches the founder here is at most one plain sentence about
 whether their figures line up.
 
+### Step 3.9: Review the Disagreements Before Showing Them (Context A dispatch)
+
+**Run this only when `reconciliation.json` reports at least one `contradiction`.** With none,
+`interpretation.status` is already `not_needed` and there is nothing to review.
+
+Arithmetic can be right about a comparison that should never have been made. Two cases
+recur, both of which a founder would rightly reject: a sum of listed components against a
+stated total the deck never claimed the list exhausted, and a gap inside what the author's
+own "~" was meant to cover. Neither is decidable by a rule — the first is a question about
+how the slide was laid out, the second about how loose an approximation was meant to be.
+
+This pass may only **withdraw**. It cannot add a finding, change a number, or turn a
+disagreement into an agreement.
+
+**Dispatch prompt template:**
+
+```
+CONTEXT: INTERPRETATION
+OUTPUT_PATH: <HANDOFF_AGENT>/interpretation_output.json
+RUN_ID: <RUN_ID>
+
+You are the deck-review agent dispatched in Context A (INTERPRETATION). Below are
+comparisons the arithmetic found to disagree with a figure the deck itself states.
+Your job is to withdraw any that should not be put to the founder as a disagreement.
+
+Withdraw a comparison ONLY when one of these is true:
+
+  partial_enumeration      the deck lists some components and states a total, but never
+                           says the list is complete. A breakdown is not a claim of
+                           exhaustiveness. Look at how the slide presents them: a total
+                           row directly under contiguous rows in one table is a claim;
+                           two items named in prose is not.
+
+  approximate_stated_figure  the deck marked its own figure approximate ("~3.5%", "about
+                           40") and the computed value sits inside what that
+                           approximation plausibly covers.
+
+Withdraw NOTHING else. In particular, do NOT withdraw a comparison because you think
+the relation was set up wrongly — a deck that writes "400%" where it means four times
+has made exactly the kind of imprecision an investor's analyst catches, and that is a
+finding, not a mistake in the comparison.
+
+When in doubt, keep it. A disagreement left in is reviewed by the founder, who knows
+their own deck; one withdrawn here is never seen by anyone.
+
+CONTRADICTIONS:
+<for each: the rendered line, the operator, the operand ids, the expected_id, and the
+verbatim quote and slide number of every figure involved>
+
+Use your Write tool to write to OUTPUT_PATH:
+{
+  "downgrades": [
+    {"operator": "sum", "operands": ["f37", "f38"], "expected_id": "f39",
+     "class": "partial_enumeration",
+     "reason": "one sentence, in plain words, naming what the deck does not claim"}
+  ]
+}
+Address each comparison by its exact `operator`, `operands` and `expected_id` as given
+above — a downgrade that matches nothing is rejected, and the step fails. An empty
+`downgrades` array is a complete and correct answer.
+Then return ONLY the receipt JSON in your final assistant message:
+{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
+Do NOT write any file other than OUTPUT_PATH.
+```
+
+**After the sub-agent returns:** gate the hand-off, then re-run the same reconcile command
+with the withdrawals supplied. It is deterministic and rewriting the artifact for this run
+is intended — the withdrawal is an input to the decision about what a founder sees, never
+an edit to the decision's output.
+
+```bash
+cat "$HANDOFF_DIR/relations_output.json" | \
+  python3 "$SCRIPTS/reconcile.py" --ledger "$REVIEW_DIR/ledger.json" \
+    --second-read "$REVIEW_DIR/second_read.json" --inventory "$REVIEW_DIR/deck_inventory.json" \
+    --downgrades "$HANDOFF_DIR/interpretation_output.json" \
+    --run-id "$RUN_ID" -o "$REVIEW_DIR/reconciliation.json"
+```
+<!-- skill-quality-ci: bash-after-subagent-ok -->
+
+If it fails, a withdrawal named a comparison that does not exist or gave a reason outside
+the two above. The error names which. Re-dispatch with the correction; the previous
+artifact is untouched and still valid.
+
 ### Step 4: Review Each Slide -> `slide_reviews.json` (Context A dispatch)
 
 **Dispatch the deck-review sub-agent in Context A (SLIDE_REVIEWS).** Do not do the slide analysis yourself in the main thread — dispatch it. **Call the `Task` tool with `subagent_type: "founder-skills:deck-review"`** and the prompt below, so the analysis runs in the scoped agent (its `tools:` allowlist binds; a type-less dispatch falls back to the wildcard `general-purpose` agent).

@@ -119,6 +119,11 @@ WARNING_SEVERITY: dict[str, str] = {
     "MISSING_METADATA": "high",
     "CHECKLIST_FAILURES_CRITICAL": "high",
     # Medium — quality concerns worth surfacing
+    # Medium, and it carries a founder_message rather than the agent-facing text: when this
+    # fires the founder is looking at numeric findings that no judgement pass ever reviewed,
+    # and some of them are the kind a founder would rightly reject. The honest move is to
+    # tell them the checks below are a first pass, not to hide it or to name a step at them.
+    "NUMBERS_NOT_REVIEWED": "medium",
     "STAGE_MISMATCH": "medium",
     "SLIDE_COUNT_EXTREME": "medium",
     "UNCITED_CRITIQUE": "medium",
@@ -1316,6 +1321,27 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     slide_reviews = _render_safe(artifacts.get("slide_reviews.json"))
     checklist_data = _render_safe(artifacts.get("checklist.json"))
     reconciliation = _render_safe(artifacts.get("reconciliation.json"))
+
+    # Skipping the review pass shows MORE findings, including ones a founder would reject —
+    # which is the expensive direction, not the safe one. Nothing else notices, because a
+    # complete-looking report is exactly what a skipped judgement pass produces.
+    if reconciliation is not None:
+        interp = _as_dict(reconciliation.get("interpretation"))
+        if interp.get("status") == "not_run" and _as_list(reconciliation.get("relations")):
+            warnings.append(
+                _warn(
+                    "NUMBERS_NOT_REVIEWED",
+                    (
+                        "reconciliation.interpretation.status is 'not_run' with contradictions "
+                        "surfaced: the review of surviving disagreements did not run"
+                    ),
+                    founder_message=(
+                        "The number checks below are a first pass — nobody reviewed them for "
+                        "cases where the comparison itself does not hold, so read them as "
+                        "questions to check rather than as settled problems."
+                    ),
+                )
+            )
 
     # Render every section EXCEPT Warnings first, so we can pre-scan the body
     # for a marker collision and append MARKER_COLLISION before status and the

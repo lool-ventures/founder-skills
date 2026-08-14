@@ -71,6 +71,65 @@
       "description": "Counts by reason for every computed relation the founder does NOT see. Contents are deliberately absent.",
       "type": "object"
     },
+    "interpretation": {
+      "description": "The demote-only pass over surviving contradictions. `not_needed` = nothing to interpret. `not_run` = contradictions survived and no pass was supplied, so the founder sees the un-reviewed set. `applied` = the pass ran, and every withdrawal is recorded with its class and reason, because a suppression with no stated ground cannot be audited later.",
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "not_needed",
+            "not_run",
+            "applied"
+          ]
+        },
+        "contradictions_before": {
+          "type": "integer"
+        },
+        "downgraded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "operator",
+              "operands",
+              "class",
+              "reason"
+            ],
+            "properties": {
+              "operator": {
+                "type": "string"
+              },
+              "operands": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "expected_id": {
+                "type": "string"
+              },
+              "class": {
+                "type": "string",
+                "enum": [
+                  "partial_enumeration",
+                  "approximate_stated_figure"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "rendered": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
     "relations": {
       "type": "array",
       "items": {
@@ -123,7 +182,8 @@
               "derived",
               "confirmation",
               "restatement",
-              "convention_differs"
+              "convention_differs",
+              "downgraded"
             ]
           },
           "expected_id": {
