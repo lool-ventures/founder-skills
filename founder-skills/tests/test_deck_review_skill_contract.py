@@ -413,7 +413,13 @@ def test_ai_criteria_ids_in_skill_md_and_agent_match_checklist_py() -> None:
     agent_anchor = "For `CHECKLIST`"
     agent_start = agent_text.find(agent_anchor)
     assert agent_start != -1, f"{AGENT_MD.name} has no 'For `CHECKLIST`' section"
-    agent_section = agent_text[agent_start : agent_start + 1000]
+    # Bound on STRUCTURE, not a character count. A fixed window fails on content that is
+    # still present the moment anything is inserted above it -- which is exactly what
+    # happened when the verdict instruction was added to this section: the window ended
+    # before "plain markdown", and the test reported a missing contract that was three
+    # paragraphs further down. Slice to the next heading instead.
+    _next = agent_text.find("\n## ", agent_start + 1)
+    agent_section = agent_text[agent_start : _next if _next != -1 else len(agent_text)]
     agent_ai_candidates = set(re.findall(r"\b(ai_[a-z_]+)\b", agent_section))
     agent_ai_candidates = {t for t in agent_ai_candidates if not t.endswith((".json", ".md", ".py"))}
     agent_ai_candidates -= {"ai_company_status"}  # inventory field, not a scored criterion
@@ -707,7 +713,12 @@ def test_context_b_template_requires_raw_markdown_not_escaped_json() -> None:
     agent_anchor = "Write the commentary to OUTPUT_PATH"
     agent_start = agent_text.find(agent_anchor)
     assert agent_start != -1, f"{AGENT_MD.name} has no '{agent_anchor}' section"
-    agent_section = agent_text[agent_start : agent_start + 1000]
+    # Bound on STRUCTURE, not a character count: a fixed window fails on content that is
+    # still present the moment anything is inserted above it. Adding the verdict
+    # instruction to this section pushed "plain markdown" past +1000 and the test
+    # reported a missing contract that was three paragraphs further down.
+    _next = agent_text.find("\n## ", agent_start + 1)
+    agent_section = agent_text[agent_start : _next if _next != -1 else len(agent_text)]
     assert "plain markdown" in agent_section.lower()
     assert "escaped as `\\n`" not in agent_text
     assert "escape every line break" not in agent_text.lower()

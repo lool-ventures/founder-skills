@@ -168,6 +168,13 @@ _AI_CRITERIA_IDS = frozenset(
 # pptx render; these two do not.
 _UNRENDERED_FORMATS = frozenset({"text", "markdown"})
 
+# A format that renders is necessary but NOT sufficient: a PDF whose slides are images with
+# no text layer, or whose pages were never all read, cannot support a design judgement
+# either. Gating on `input_format` alone let a partially-read deck score design criteria as
+# if every slide had been seen -- the same defect as scoring a PowerPoint nobody converted,
+# one layer down.
+_UNRENDERED_QUALITY = frozenset({"image_only", "partial"})
+
 # The Design & Readability IDs gated when there is no rendered page: scoring them fail/warn
 # would penalize the founder for evidence that cannot exist.
 #
@@ -306,7 +313,7 @@ def _apply_ai_gating(result: dict[str, Any], ai_company_status: str) -> dict[str
     return result
 
 
-def _apply_design_gating(result: dict[str, Any], input_format: str) -> dict[str, Any]:
+def _apply_design_gating(result: dict[str, Any], input_format: str, input_quality: str = "") -> dict[str, Any]:
     """Apply deterministic Design & Readability gating based on input_format.
 
     Force the 5 Design & Readability criteria to not_applicable when there is no
@@ -322,11 +329,13 @@ def _apply_design_gating(result: dict[str, Any], input_format: str) -> dict[str,
 
     "pdf" and "pptx" render, and pass through unchanged.
     """
-    if input_format not in _UNRENDERED_FORMATS:
+    quality = str(input_quality or "").lower()
+    if input_format not in _UNRENDERED_FORMATS and quality not in _UNRENDERED_QUALITY:
         return result
+    reason = f"input_format={input_format}" if input_format in _UNRENDERED_FORMATS else f"input_quality={quality}"
 
     items: list[dict[str, Any]] = result.get("items", [])
-    _force_not_applicable(items, _DESIGN_CRITERIA_IDS, f"Auto-gated: not_applicable — input_format={input_format}")
+    _force_not_applicable(items, _DESIGN_CRITERIA_IDS, f"Auto-gated: not_applicable — {reason}")
 
     if result.get("summary") is not None:
         result["summary"] = _recompute_summary(items)
@@ -537,7 +546,11 @@ def main() -> None:
                     " is not a recognised value — gating skipped",
                     file=sys.stderr,
                 )
-            result = _apply_design_gating(result, inventory_data.get("input_format", ""))
+            result = _apply_design_gating(
+                result,
+                inventory_data.get("input_format", ""),
+                inventory_data.get("input_quality", ""),
+            )
 
     out = json.dumps(result, indent=indent) + "\n"
     s = result["summary"]

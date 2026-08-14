@@ -331,6 +331,23 @@ Then branch on what it printed:
   not see the design, mention `images_not_read` if non-zero, and that a PDF gets the full
   review. If the script also fails, ask for a PDF re-export and do not proceed.
 
+**Read EVERY page, and record whether you actually saw it.** `Read` takes at most 20 pages
+per call, so a deck longer than that needs several calls — read pages 1-20, then 21-40, and
+so on until the last page. A deck partially read is the failure this record exists to catch:
+design criteria are scored from what a reader SEES, and a slide nobody rendered cannot
+support that judgement any more than a PowerPoint nobody converted can.
+
+Two fields carry the record, and both are load-bearing rather than bookkeeping:
+
+- `input_quality` (**required**): `"good"` when every page rendered and was legible;
+  `"image_only"` when slides are pictures with no extractable text; `"partial"` when any
+  page went unread. It is required precisely because its absence used to be
+  indistinguishable from `"good"` — a review of a deck nobody could read looked identical to
+  a review of one that was read. `"image_only"` and `"partial"` gate the 5 Design &
+  Readability criteria to `not_applicable` automatically, the same way `"text"` does.
+- `visual_evidence_captured` (per slide): `true` when you rendered and saw that slide,
+  `false` when you have only its text.
+
 Read the provided deck. For each slide, extract: headline, content summary, visuals description, word count estimate. Also determine `ai_company_status` using the two sub-questions below. Then write the inventory through the producer script:
 
 **AI company classification (mandatory — field is required):** Answer two sub-questions:
@@ -352,13 +369,14 @@ cat <<'INVENTORY_EOF' | python3 "$SCRIPTS/deck_inventory.py" --run-id "$RUN_ID" 
   "company_name": "...",
   "review_date": "YYYY-MM-DD",
   "input_format": "pdf",
+  "input_quality": "good",
   "total_slides": 12,
   "claimed_stage": "seed",
   "claimed_raise": "...",
   "ai_company_status": "...",
   "ai_evidence": "...",
   "slides": [
-    {"number": 1, "headline": "...", "content_summary": "...", "visuals": "...", "word_count_estimate": 15}
+    {"number": 1, "headline": "...", "content_summary": "...", "visuals": "...", "word_count_estimate": 15, "visual_evidence_captured": true}
   ]
 }
 INVENTORY_EOF

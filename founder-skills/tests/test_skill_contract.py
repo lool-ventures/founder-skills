@@ -512,7 +512,9 @@ SKILL_MD_CEILING: dict[str, int] = {
     # text-only with the design criteria gated when no converter exists.
     # 71_498 -> 71_567 (R2): `score_pct` now gives a warn half credit, so the formula
     # line and the What-If rule both had to stop saying "warn/fail earn no credit".
-    "deck-review": 77_002,
+    # R3/R6: verdict-first coaching order, and the visual-pass record (input_quality now
+    # required, per-slide visual_evidence_captured, 20-page read batches).
+    "deck-review": 78_224,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

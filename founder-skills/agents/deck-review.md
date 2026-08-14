@@ -177,6 +177,21 @@ structured payload is sufficient.
 
 #### 2. Write the commentary to OUTPUT_PATH, then return a receipt
 
+**OPEN WITH A VERDICT, in one short paragraph, before anything else.** Would this deck
+get a first meeting, and what drives that call? Name the one thing that most helps and
+the one that most hurts.
+
+This is the judgement the report otherwise never makes. The percentage beside it measures
+conformance to 35 deck-craft criteria and does NOT predict investability — measured across
+four real decks it did not even rank with an experienced reader's ordering, and the
+strongest company scored among the weakest decks. A founder reading only a number learns
+how tidy their deck is, not whether it works. You have the whole picture; say what you
+think, and say what would change it.
+
+Write it as prose, not a label: "this would get a meeting on the strength of X, but Y will
+be the first question and the deck has no answer" beats a grade. Do not invent a score, a
+rating scale, or a percentage of your own — the report already has one number too many.
+
 Write the coaching commentary to `OUTPUT_PATH` (a `.md` file) as **plain markdown** —
 do NOT wrap it in JSON, do NOT escape anything. Your Write tool handles newlines
 and quotes; just write the commentary body text, WITHOUT a `## Coaching Commentary`

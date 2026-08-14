@@ -1,5 +1,7 @@
 {
-  "metadata": {"run_id": "fixture-deck-review-001"},
+  "metadata": {
+    "run_id": "fixture-deck-review-001"
+  },
   "company_name": "Acmecorp",
   "review_date": "2026-05-10",
   "input_format": "pdf",
