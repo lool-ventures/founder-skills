@@ -235,14 +235,31 @@ def test_checklist_id_enumeration_population_is_independent() -> None:
 
     Vacuity guard: at least 1 ID must be extracted. The CHECKLIST dispatch
     template in SKILL.md names at least ``purpose_clear`` as a sample item.
+
+    SCOPE, and why it is narrower than it looks. This used to read every
+    ``"id": "..."`` in both files, on the premise that the only thing in this skill
+    with an ``id`` was a checklist criterion. That premise expired: the numeric
+    ledger's figures carry ``id`` too, and a perfectly good example figure id was
+    reported as a phantom criterion. Scoping to the CHECKLIST dispatch block is the
+    fix, rather than contorting the ledger's example to dodge a regex — the next
+    author to write a natural figure id would trip it again, and the failure would
+    read as a criterion error when nothing about criteria had changed.
     """
     mod = _load_checklist_module()
     valid_ids: set[str] = set(mod.VALID_IDS)  # type: ignore[attr-defined]
 
-    # Build population independently: extract "id": "some_id" from dispatch
-    # prompt templates in SKILL.md and the agent body (JSON field form).
+    # Build population independently of VALID_IDS: extract "id": "some_id" from the
+    # CHECKLIST dispatch templates only. A fenced block declaring a different CONTEXT
+    # is a different vocabulary; prose outside any block still counts.
     combined = SKILL_MD.read_text(encoding="utf-8") + "\n" + AGENT_MD.read_text(encoding="utf-8")
-    candidates = set(re.findall(r'"id"\s*:\s*"([a-z][a-z0-9_]+)"', combined))
+    in_scope: list[str] = []
+    for i, chunk in enumerate(re.split(r"^```.*$", combined, flags=re.MULTILINE)):
+        is_fenced = i % 2 == 1
+        context = re.search(r"^CONTEXT:\s*(\S+)", chunk, flags=re.MULTILINE)
+        if is_fenced and context and context.group(1) != "CHECKLIST":
+            continue
+        in_scope.append(chunk)
+    candidates = set(re.findall(r'"id"\s*:\s*"([a-z][a-z0-9_]+)"', "\n".join(in_scope)))
 
     # Vacuity guard: extraction must find at least 1 ID.
     assert len(candidates) >= 1, (
@@ -1299,13 +1316,27 @@ def test_checklist_valid_ids_count() -> None:
 
 
 def test_compose_required_artifacts_count() -> None:
-    """compose_report.py's REQUIRED_ARTIFACTS must contain exactly 4 entries —
-    the 4 per-step producer artifacts. A silent deletion would let compose
+    """compose_report.py's REQUIRED_ARTIFACTS must contain exactly 5 entries —
+    the 5 per-step producer artifacts. A silent deletion would let compose
     succeed with missing data.
+
+    `reconciliation.json` is required rather than optional on purpose: its absence must
+    mean "the numeric chain did not run", which is a pipeline error, and must stay
+    distinguishable from `status: no_figures`, which is a legitimate outcome on a deck
+    that states nothing to reconcile. `ledger.json` and `second_read.json` are its inputs
+    and are deliberately NOT here — compose never reads them, and listing an artifact no
+    renderer consumes only teaches the next author that this list means something looser
+    than it does.
     """
     mod = _load_compose_report_module()
     required: list[str] = mod.REQUIRED_ARTIFACTS  # type: ignore[attr-defined]
-    expected = {"deck_inventory.json", "stage_profile.json", "slide_reviews.json", "checklist.json"}
+    expected = {
+        "deck_inventory.json",
+        "stage_profile.json",
+        "slide_reviews.json",
+        "checklist.json",
+        "reconciliation.json",
+    }
     assert set(required) == expected, (
         f"compose_report.py REQUIRED_ARTIFACTS mismatch:\n  expected: {sorted(expected)}\n  got: {sorted(required)}"
     )

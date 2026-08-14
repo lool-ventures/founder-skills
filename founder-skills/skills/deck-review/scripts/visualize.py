@@ -40,6 +40,10 @@ REQUIRED_ARTIFACTS = [
     "stage_profile.json",
     "slide_reviews.json",
     "checklist.json",
+    # visualize.py carries its OWN required list, independent of compose's. A finding
+    # rendered in report.md and absent from the report.html the founder actually opens
+    # is the delivery-defect class this fleet has shipped before.
+    "reconciliation.json",
 ]
 
 
@@ -1139,6 +1143,42 @@ def _chart_slide_map(
 # ---------------------------------------------------------------------------
 
 
+def _numbers_section(reconciliation: dict[str, Any] | None) -> str:
+    """The numeric-reconciliation findings, for the page the founder actually opens.
+
+    `report.md` and `report.html` are two renderers over one artifact set, and a finding
+    present in one and absent from the other is a delivery defect this fleet has shipped
+    before — which is why `visualize.py` carries its own required-artifact list rather
+    than inheriting compose's.
+
+    Reads `relations` and nothing else, for the same reason compose does: `select()` is
+    the only thing entitled to decide what a founder sees.
+    """
+    if not _usable(reconciliation):
+        return ""
+    relations = [_as_dict(r) for r in _as_list(reconciliation.get("relations"))]
+    # VERDICT, not `kind` — see the note in compose_report._section_numbers. The two
+    # renderers must agree, and `kind` is the model's proposal, not the engine's finding.
+    contradictions = [r for r in relations if r.get("verdict") == "contradiction"]
+    derived = [r for r in relations if r.get("verdict") == "derived"]
+    if not contradictions and not derived:
+        return ""
+
+    parts: list[str] = []
+    if contradictions:
+        rows = "".join(f'<li class="finding-fail">{_esc(r.get("rendered", ""))}</li>' for r in contradictions)
+        parts.append(f"<h3>Figures that disagree</h3><ul>{rows}</ul>")
+    if derived:
+        rows = "".join(f'<li class="finding-warn">{_esc(r.get("rendered", ""))}</li>' for r in derived)
+        parts.append(
+            "<h3>What the numbers imply</h3>"
+            "<p>Readings, not errors — the arithmetic is exact, the interpretation is a "
+            "judgement call, and an investor may well make it.</p>"
+            f"<ul>{rows}</ul>"
+        )
+    return '<div class="chart-section"><h2>What Your Numbers Say About Each Other</h2>' + "".join(parts) + "</div>"
+
+
 def compose_html(dir_path: str) -> str:
     """Load artifacts and compose complete HTML report."""
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1201,8 +1241,11 @@ def compose_html(dir_path: str) -> str:
     slide_map_chart = _chart_slide_map(reviews, inventory, stage_profile)
     slide_map_section = f'<div class="chart-section"><h2>Slide Map</h2>{slide_map_chart}</div>'
 
+    numbers_section = _numbers_section(artifacts.get("reconciliation.json"))
+
     main_content = (
-        f"<main>{gauge_section}{findings_section}{radar_section}{breakdown_section}{slide_map_section}</main>"
+        f"<main>{gauge_section}{findings_section}{numbers_section}"
+        f"{radar_section}{breakdown_section}{slide_map_section}</main>"
     )
 
     footer = (

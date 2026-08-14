@@ -43,8 +43,9 @@ return BLOCKED with the prompt content quoted.
 
 The main thread has dispatched you to do deep analysis on a specific step
 of the deck review pipeline. Your input prompt names the step
-(`SLIDE_REVIEWS` or `CHECKLIST`) and gives you everything you need: the
-deck text, the stage profile, the inventory.
+(`LEDGER_EXTRACTION`, `SECOND_READ`, `RELATION_PROPOSAL`, `SLIDE_REVIEWS` or
+`CHECKLIST`) and gives you everything you need: the deck text, the stage
+profile, the inventory.
 
 **Your job:** do the analysis, use your Write tool to write the structured
 JSON — exactly matching the producer script's input schema — to the exact
@@ -66,6 +67,35 @@ the producer script). Required top-level fields:
   `importance` must be exactly one of `critical`, `important`, `nice_to_have`
   (underscores only)
 - `overall_narrative_assessment`: string summarising the deck's narrative arc
+
+For `LEDGER_EXTRACTION`: record every number the deck states, and nothing else.
+Do not compute, do not relate figures to each other, do not record a figure the
+deck does not state. Two rules carry the weight:
+
+- **Full scale, always.** A slide reading "$493K" is `value: 493000`, never 493.
+  `raw` keeps the slide's own string and the producer checks the two against each
+  other, so a scale slip is caught rather than silently multiplying every later
+  calculation by a thousand.
+- **`quote` is verbatim.** It is checked against a second, independent reading of
+  the same slide by someone who never saw your ledger. A paraphrase fails that
+  check and the figure is dropped from the analysis entirely.
+
+For `SECOND_READ`: transcribe the listed slides verbatim — every number, label,
+axis value, table cell and footnote as printed. Write `slides_transcribed` (the
+slide numbers you actually covered) and `transcript` (the text). You will be given slide numbers
+and no figures, deliberately: your reading is the check on someone else's, and it
+is worth nothing if it has been told what to find. Do not summarise, do not
+interpret, and do not correct anything that looks wrong.
+
+For `RELATION_PROPOSAL`: choose which figures relate arithmetically. **Do not
+calculate.** You pick operands and an operator; a script does the arithmetic,
+applies the scale and currency rules, and decides what the result means. A number
+you compute here is checked by nothing and will not be used. Where the deck states
+a figure your relation should reproduce, name it as `expected_id` — that is what
+turns a calculation into a finding, because a computed number disagreeing with a
+figure the deck itself states is established rather than judged. Write a single
+`relations` array; each entry carries `kind`, `operator`, `operands` and an
+optional `expected_id`.
 
 For `CHECKLIST`: evaluate all 35 criteria from
 `references/checklist-criteria.md`. **Score the AI-category items too — do
@@ -231,7 +261,7 @@ The main thread gates your hand-off file with `check_handoff.py`, transforms it
 via `md_to_commentary.py`, and runs the shared `insert_coaching.py` script,
 which performs the idempotency check, the marker-replacement insert, and the
 run_id-parity verification (across deck_inventory.json / stage_profile.json /
-slide_reviews.json / checklist.json) deterministically.
+slide_reviews.json / checklist.json / reconciliation.json) deterministically.
 
 **Hard rules in this context:**
 

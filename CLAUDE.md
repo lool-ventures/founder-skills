@@ -24,6 +24,10 @@
 - `founder-skills/references/brand/` — Brand tokens + Sora variable webfont (OFL) for generated HTML artifacts; embedded base64-inline so artifacts stay self-contained
 - `founder-skills/tests/test_market_sizing.py` — Market sizing regression tests
 - `founder-skills/tests/test_deck_review.py` — Deck review regression tests
+- `founder-skills/tests/test_reconcile.py` — The numeric engine's 60 judgement calls, each pinned to a real corpus line
+- `founder-skills/tests/test_reconcile_producer.py` — The engine's producer layer: the gate, the three statuses, and that only `select()` decides founder-visible output
+- `founder-skills/tests/test_ledger.py` — Ledger validation, chiefly the `raw`-vs-`value` scale check
+- `founder-skills/tests/test_quote_match_sync.py` — deck-review's copy of cap-table's matcher must not drift
 - `founder-skills/tests/test_ic_sim.py` — IC simulation regression tests
 - `founder-skills/tests/test_visualize_market_sizing.py` — Market sizing HTML visualization tests
 - `founder-skills/tests/test_visualize_deck_review.py` — Deck review HTML visualization tests
@@ -105,6 +109,11 @@
 - **`checklist.py`** — Scores 35 criteria across 7 categories (pass/fail/warn/not_applicable) with overall score percentage
 - **`compose_report.py`** — Assembles deck review artifacts into final report with cross-artifact validation
 - **`visualize.py`** — Generates self-contained HTML with SVG charts; outputs HTML (not JSON)
+- **`ledger.py`** — Validates the extracted numeric ledger. Its load-bearing check is `raw` against `value`: they are two independent statements about the same figure, so their disagreement catches the scale-slip class ("$493K" recorded as 493) **without seeing the deck**. Tolerance comes from `raw`'s own significant figures, not a flat percentage — "$1.2M" legitimately covers 1.15M–1.25M and a flat 2% rejects a correct extraction.
+- **`reconcile.py`** — The arithmetic. Corroborates each figure against the independent second read, computes the model's proposed relations, applies the tolerance/materiality/convention rules, and **`select()` is the single place that decides what a founder sees**. `relations` in the artifact holds only the survivors; everything else is a count, so no renderer can reach past the decision. Two rules that have each already been violated once: split founder-facing output on **`verdict`** (what the engine computed), never on `kind` (what the model proposed) — they routinely differ, and the flagship finding is proposed `derived_ratio` and returns `contradiction`; and never render a `unit_kind` enum into prose ("per count" reached a rendered line).
+- **`_quote_match.py`** — Copy of cap-table's `quote_in_doc` + normalizers (skill scripts are standalone and cannot import across skills). `tests/test_quote_match_sync.py` compares the parsed function bodies. **`value_in_doc` is deliberately NOT copied**: on decks it false-passes 5.7% cross-deck and 37% on plausible round numbers, against `quote_in_doc`'s 0.8%, so the cap-table precedent is inverted here on purpose.
+
+**The numeric chain (Steps 3.5–3.8) is gated by `slide_reviews.py --reconciliation`, not by `MISSING_ARTIFACT`.** Measured: removing a required artifact leaves `compose_report.py` exiting **0** with a complete report, so a step whose only downstream consumer is a warning gets skipped in silence — which is exactly what happened to the removed claim-check step. The gate sits on the producer of the deliverable, and checks `run_id` parity rather than mere presence (a stale artifact from an earlier review of the same company otherwise satisfies an existence check, and in Cowork the cleanup delete is denied and tolerated).
 
 ## IC Simulation Scripts
 

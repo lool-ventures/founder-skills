@@ -1,0 +1,12 @@
+{
+  "figures": [
+    {"id": "gmv_2024", "value": 493000, "raw": "$493K", "unit_kind": "money", "label": "GMV 2024", "slide": 6, "quote": "GMV of $493K in 2024", "currency": "USD", "period": "year"},
+    {"id": "revenue_2024", "value": 9000, "raw": "$9K", "unit_kind": "money", "label": "net revenue 2024", "slide": 6, "quote": "net revenue of $9K", "currency": "USD", "period": "year"},
+    {"id": "take_rate", "value": 6.2, "raw": "6.2%", "unit_kind": "percent", "label": "take rate", "slide": 6, "quote": "our take rate is 6.2%"},
+    {"id": "paid_seats", "value": 120, "raw": "120", "unit_kind": "count", "label": "paying seats", "slide": 7, "quote": "120 paying seats today"},
+    {"id": "round_size", "value": 2000000, "raw": "$2M", "unit_kind": "money", "label": "raise", "slide": 11, "quote": "We are raising $2M", "currency": "USD"}
+  ],
+  "figures_total": 5,
+  "validation": {"status": "valid", "errors": [], "warnings": []},
+  "metadata": {"run_id": "fixture-deck-review-001"}
+}

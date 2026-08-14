@@ -57,7 +57,9 @@ All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/deck-review/scripts/`:
 - **`deck_inventory.py`** — Producer for `deck_inventory.json` (agent provides JSON via stdin; schema-validated)
 - **`stage_profile.py`** — Producer for `stage_profile.json`; `--rebuild-stage` + `--confidence {high,low}` for founder-corrected stages
 - **`gate_state.py`** — Producer (`emit`) + answer-writer (`answer`) for the stage-confirmation gate
-- **`slide_reviews.py`** — Producer for `slide_reviews.json` (agent provides JSON via stdin; schema-validated)
+- **`ledger.py`** — Producer for `ledger.json`; refuses a figure whose `value` disagrees with its own `raw` string
+- **`reconcile.py`** — Producer for `reconciliation.json`; corroborates each figure against the second read, computes the proposed relations, and decides which reach the founder
+- **`slide_reviews.py`** — Producer for `slide_reviews.json` (agent provides JSON via stdin; schema-validated). `--reconciliation` is required: the numeric chain must have run for this run_id
 - **`checklist.py`** — Scores 35 criteria across 7 categories (pass/fail/warn/not_applicable)
 - **`compose_report.py`** — Assembles artifacts into final report with cross-artifact validation; `--strict` exits 1 on high/medium warnings
 - **`visualize.py`** — Generates self-contained HTML with SVG charts (not JSON)
@@ -85,13 +87,16 @@ Every review deposits structured JSON artifacts into a working directory. The fi
 | 1 | founder context | `founder_context.py` read/init |
 | 2 | `deck_inventory.json` | `deck_inventory.py` (agent provides JSON via stdin) |
 | 3 | `stage_profile.json` | `stage_profile.py` (agent provides JSON via stdin) |
+| 3.5 | `ledger.json` | `ledger.py` (agent provides JSON via stdin) |
+| 3.6 | `second_read.json` | an independent transcription of the figure-bearing slides |
+| 3.8 | `reconciliation.json` | `reconcile.py` (agent proposes relations via stdin) |
 | 4 | `slide_reviews.json` | `slide_reviews.py` (agent provides JSON via stdin) |
 | 5 | `checklist.json` | `checklist.py` |
 | 6 | Report | `compose_report.py` (writes both `report.json` and `report.md`) |
 
 **Rules:**
 - Deposit each artifact before proceeding to the next step
-- For producer-script artifacts (Steps 2-4), the agent supplies JSON on stdin and the script schema-validates against `references/schemas/<artifact>.schema.json`. Never write artifacts directly via `Write` or `Edit` — always pipe through the producer script so `metadata.run_id` is injected and the schema is enforced.
+- For producer-script artifacts (Steps 2-4, including 3.5 and 3.8), the agent supplies JSON on stdin and the script schema-validates against `references/schemas/<artifact>.schema.json`. Never write artifacts directly via `Write` or `Edit` — always pipe through the producer script so `metadata.run_id` is injected and the schema is enforced.
 - If a step is not applicable, deposit a stub: `{"skipped": true, "reason": "..."}`
 
 Keep the founder informed with brief, plain-language updates at each step. **Narrate the founder-visible OUTCOME, never the internal step.** That is the test to apply, and it catches more than a word list can: the forbidden thing is not a syntax, it is talking about the machinery. Bad — "Gating and piping the extraction through the producer, then staging the coaching hand-off"; good — "I've checked your numbers and I'm writing up what stood out." Bad — "schema-drift warning on `coaching_payload`"; good — nothing, because the founder has no stake in it. **Never name an internal artifact, field, or token** (a payload key, a marker name, an artifact filename, a hand-off dir) even in plain prose with no backticks — a detector keyed on syntax cannot see "gated", "hand-off" or "canonical artifacts", but the founder still reads them and they still mean nothing to them. **The between-step progress lines are the primary leak vector, not the final summary.** They feel internal — you are narrating what you are about to do — but the founder reads every one of them, and this is where the leaks actually appear: *"Now gating the hand-off before piping through the checklist producer"*, *"Gate 1 passes"*, *"Running the final verification gate"*. Rewrite each pipeline transition as the founder-visible outcome: *"Checking your numbers against the 46-point review"*, *"Your inputs look consistent — moving on to unit economics"*, *"Finishing up and putting the report together"*. If a progress line would mean nothing to someone who has never seen this skill's internals, it does not belong in the channel. Also excluded, as before: file/script names, paths, `*.py`, `--flags`, `$vars`, exit codes ("Exit N", "not found"), `W_`/`E_` codes, JSON, and step/route labels ("Lane N", "Context A/B", "Phase N", "structure detection", "the grid", any `ALL_CAPS_TOKEN`). After each analytical step (4–5), share a one-sentence finding before moving on. **The task tracker is founder-visible too — the same rule governs its labels.** "Gate the inputs review handoff", "Validate inputs.json", "resolve agent namespace paths", "Initialize founder context" are leaks even though each names a real step, and even when the prose around them is clean. Label each task by the founder-visible outcome — "Check your inputs", "Score against the review", "Write up what I found" — never by a file, directory, script, or pipeline stage.
@@ -203,7 +208,7 @@ To resume across a gate round-trip, the caller's task prompt must supply the pri
 
 Pass `RUN_ID` to every producer script via `--run-id`. Producer scripts inject it into `metadata.run_id` automatically. `compose_report.py` enforces that all required artifacts share the same `run_id` and emits a `MISSING_METADATA` (high) warning for any artifact without one. Keeping `RUN_ID` stable across the gate is what prevents a `STALE_ARTIFACT` mismatch with the pre-gate artifacts.
 
-**On re-invocation (`$IS_RESUMING` is set):** `gate_state.json`, `deck_inventory.json`, and `stage_profile.json` all survive `--clean` (same-run artifacts are preserved on resume). Skip Steps 2 and 3 if both `deck_inventory.json` and `stage_profile.json` exist and their `metadata.run_id` matches `$RUN_ID`; otherwise re-run them with the same `RUN_ID`.
+**On re-invocation (`$IS_RESUMING` is set):** `gate_state.json`, `deck_inventory.json`, and `stage_profile.json` all survive `--clean` (same-run artifacts are preserved on resume). Skip Steps 2 and 3 if both `deck_inventory.json` and `stage_profile.json` exist and their `metadata.run_id` matches `$RUN_ID`; otherwise re-run them with the same `RUN_ID`. Apply the same rule to Steps 3.5-3.8: skip them when `reconciliation.json` exists with a matching `metadata.run_id`. It is the most expensive stretch of the pipeline — three dispatches, two of which read the deck — and re-running it on a gate round-trip spends that twice for an identical result.
 
 ### Step 1: Read or Create Founder Context
 
@@ -597,6 +602,197 @@ Ad-hoc scratch (NOT sub-agent hand-off) still goes to `$STAGING_DIR` in `/tmp` �
 the outputs mount (which includes `$REVIEW_DIR`), and never delete anything under it — see the
 append-only rule in Step 0.
 
+### Step 3.5: Extract the Deck's Numbers -> `ledger.json` (Context A dispatch)
+
+The deck states numbers. Steps 3.5-3.8 record them, corroborate them against a second
+independent reading, and do the arithmetic the deck implies but never shows. Every figure
+a founder sees in the numbers section of the report comes from here.
+
+**Dispatch the deck-review sub-agent in Context A (LEDGER_EXTRACTION).** **Call the `Task`
+tool with `subagent_type: "founder-skills:deck-review"`.** Substitute `<HANDOFF_AGENT>` /
+`<REVIEW_DIR_AGENT>` with the agent-namespace values and `<RUN_ID>` with `$RUN_ID`; inline
+the deck's full text under `DECK:` (same idiom as SLIDE_REVIEWS).
+
+**Dispatch prompt template:**
+
+```
+CONTEXT: LEDGER_EXTRACTION
+OUTPUT_PATH: <HANDOFF_AGENT>/ledger_output.json
+RUN_ID: <RUN_ID>
+
+You are the deck-review agent dispatched in Context A (LEDGER_EXTRACTION). Record
+every number the deck states. Do not compute anything, do not relate figures to
+each other, and do not record a number the deck does not state.
+
+DECK:
+<inline the deck's full extracted text here — verbatim, all slides>
+
+
+Record each figure at FULL SCALE. A slide reading "$493K" is 493000, never 493 —
+this single error is the one that makes every later calculation wrong by a factor
+of a thousand, and `raw` is what it is checked against.
+
+`quote` must be the VERBATIM sentence or table row the figure was read from. It is
+checked against a second, independent reading of the same slide, so a paraphrase
+fails the check and the figure is dropped.
+
+Use your Write tool to write to OUTPUT_PATH exactly the shape expected by
+ledger.py (no metadata block; the producer script adds it):
+{
+  "figures": [
+    {"id": "gmv_2024", "value": 493000, "raw": "$493K", "unit_kind": "money",
+     "label": "GMV 2024", "slide": 6, "quote": "GMV of $493K in 2024",
+     "currency": "USD", "period": "year"}
+  ]
+}
+`unit_kind` must be exactly one of `money`, `count`, `percent`, `multiple`,
+`duration`, `date`. `id` must be unique and descriptive; pick a word that is not
+ordinary English prose. `currency` is required for money. `period` is required for
+any rate ("month", "year") — a monthly figure compared against an annual one is
+refused rather than guessed at.
+All string values must be JSON-escaped; the file must parse with a strict JSON parser.
+Then return ONLY the receipt JSON in your final assistant message:
+{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
+Do NOT write any file other than OUTPUT_PATH.
+```
+
+**After the sub-agent returns:** gate the hand-off per the Context A hand-off protocol, then pipe:
+
+```bash
+cat "$HANDOFF_DIR/ledger_output.json" | \
+  python3 "$SCRIPTS/ledger.py" --run-id "$RUN_ID" --inventory "$REVIEW_DIR/deck_inventory.json" \
+    -o "$REVIEW_DIR/ledger.json" --pretty
+```
+<!-- skill-quality-ci: bash-after-subagent-ok -->
+
+If the pipe fails, the ledger disagreed with itself — most often a figure recorded at the
+wrong scale. The error names the figure. Re-dispatch with the correction; do not hand-edit
+the file.
+
+### Step 3.6: Read Those Slides Again, Independently -> `second_read.json` (Context A dispatch)
+
+A figure is trusted when two readings that never saw each other agree on it. Checking the
+extraction against the text it was handed would be checking it against itself.
+
+**Dispatch a FRESH sub-agent in Context A (SECOND_READ).** Give it the slide numbers and
+nothing else. **It must not receive the ledger, any figure from it, or any summary of it** —
+the independence is the whole value, and it is a property of this prompt.
+
+Read `$REVIEW_DIR/ledger.json` and collect the distinct `slide` values. Only those slides
+are transcribed; a full re-read of every slide costs the founder time and money for pages
+that carry no figures.
+
+**Dispatch prompt template:**
+
+```
+CONTEXT: SECOND_READ
+OUTPUT_PATH: <HANDOFF_AGENT>/second_read_output.json
+RUN_ID: <RUN_ID>
+
+You are the deck-review agent dispatched in Context A (SECOND_READ). Transcribe the
+slides listed below from the deck, verbatim. Include every number, label, axis
+value, table cell and footnote exactly as printed.
+
+SLIDES TO TRANSCRIBE: <comma-separated slide numbers>
+
+DECK:
+<inline the deck's full extracted text here — verbatim, all slides>
+
+
+Do not summarise, do not interpret, do not correct anything that looks wrong, and do
+not omit a figure because it seems minor or duplicated.
+
+Use your Write tool to write to OUTPUT_PATH:
+{
+  "slides_transcribed": [6, 7, 11],
+  "transcript": "Slide 6: ... Slide 7: ... Slide 11: ..."
+}
+Then return ONLY the receipt JSON in your final assistant message:
+{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
+Do NOT write any file other than OUTPUT_PATH.
+```
+
+**After the sub-agent returns:** gate the hand-off, then copy it into place:
+
+```bash
+cat "$HANDOFF_DIR/second_read_output.json" | \
+  python3 -c 'import json,sys; d=json.load(sys.stdin); d.setdefault("metadata",{})["run_id"]=sys.argv[1]; json.dump(d,open(sys.argv[2],"w"),indent=2)' \
+    "$RUN_ID" "$REVIEW_DIR/second_read.json"
+```
+<!-- skill-quality-ci: bash-after-subagent-ok -->
+
+### Step 3.7: Propose Which Figures Relate (Context A dispatch)
+
+**Dispatch the deck-review sub-agent in Context A (RELATION_PROPOSAL).** Choosing which
+figures belong together is judgment and stays with the model; the arithmetic is not, and
+does not.
+
+**Dispatch prompt template:**
+
+```
+CONTEXT: RELATION_PROPOSAL
+OUTPUT_PATH: <HANDOFF_AGENT>/relations_output.json
+RUN_ID: <RUN_ID>
+
+You are the deck-review agent dispatched in Context A (RELATION_PROPOSAL). Read the
+figures at <REVIEW_DIR_AGENT>/ledger.json and propose which of them relate to each
+other arithmetically.
+
+DO NOT CALCULATE ANYTHING. You choose the operands and the operator; a script does
+the arithmetic, applies scale and currency rules, and decides what it means. A number
+you compute here is not checked by anything and will not be used.
+
+Propose a relation whenever the deck implies one an investor would run:
+  - a rate the deck states AND states the parts of (revenue over volume vs a stated
+    take rate; spend over customers vs a stated CAC)
+  - a total the deck states AND lists the components of
+  - a runway, a multiple, or a per-unit figure the deck states and the inputs to
+  - a characterisation the numbers support that the deck never states at all
+
+Where the deck states a figure your relation should reproduce, name it as
+`expected_id`. That is what turns a calculation into a finding: a computed number
+that disagrees with a figure the deck itself states is established, not judged.
+
+Use your Write tool to write to OUTPUT_PATH:
+{
+  "relations": [
+    {"kind": "derived_ratio", "operator": "ratio",
+     "operands": ["revenue_2024", "gmv_2024"], "expected_id": "take_rate"}
+  ]
+}
+`operator` must be one of `ratio`, `product`, `sum`, `increase_by`, `difference`.
+`operands` are `id` values from the ledger, in order — for `ratio`, numerator first.
+`expected_id` is optional and omitted when the deck states no counterpart.
+Then return ONLY the receipt JSON in your final assistant message:
+{"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
+Do NOT write any file other than OUTPUT_PATH.
+```
+
+### Step 3.8: Reconcile -> `reconciliation.json`
+
+Gate the Step 3.7 hand-off, then run the arithmetic:
+
+```bash
+cat "$HANDOFF_DIR/relations_output.json" | \
+  python3 "$SCRIPTS/reconcile.py" --ledger "$REVIEW_DIR/ledger.json" \
+    --second-read "$REVIEW_DIR/second_read.json" --inventory "$REVIEW_DIR/deck_inventory.json" \
+    --run-id "$RUN_ID" -o "$REVIEW_DIR/reconciliation.json"
+```
+<!-- skill-quality-ci: bash-after-subagent-ok -->
+
+`status` records what happened, and all three outcomes are legitimate:
+
+- **`checked`** — figures were corroborated and relations computed.
+- **`no_figures`** — the deck states too few numbers to relate anything. Refused if the
+  deck's own text is full of numerals, because an empty ledger is the cheapest way to skip
+  this work and must not be indistinguishable from a wordless deck.
+- **`gate_failed`** — too little of the ledger survived the second read. The review
+  continues; the numbers section does not appear.
+
+Do not report a contradiction to the founder from this step. Step 6 renders them, once,
+from the artifact. What reaches the founder here is at most one plain sentence about
+whether their figures line up.
+
 ### Step 4: Review Each Slide -> `slide_reviews.json` (Context A dispatch)
 
 **Dispatch the deck-review sub-agent in Context A (SLIDE_REVIEWS).** Do not do the slide analysis yourself in the main thread — dispatch it. **Call the `Task` tool with `subagent_type: "founder-skills:deck-review"`** and the prompt below, so the analysis runs in the scoped agent (its `tools:` allowlist binds; a type-less dispatch falls back to the wildcard `general-purpose` agent).
@@ -655,7 +851,8 @@ run_id stamping.
 
 ```bash
 cat "$HANDOFF_DIR/slide_reviews_output.json" | \
-  python3 "$SCRIPTS/slide_reviews.py" --run-id "$RUN_ID" -o "$REVIEW_DIR/slide_reviews.json" --pretty
+  python3 "$SCRIPTS/slide_reviews.py" --run-id "$RUN_ID" -o "$REVIEW_DIR/slide_reviews.json" \
+    --reconciliation "$REVIEW_DIR/reconciliation.json" --pretty
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
 
@@ -904,7 +1101,8 @@ python3 "$SHARED_SCRIPTS/md_to_commentary.py" "$HANDOFF_DIR/coaching.md" | \
     --verify-artifact "$REVIEW_DIR/deck_inventory.json" \
     --verify-artifact "$REVIEW_DIR/stage_profile.json" \
     --verify-artifact "$REVIEW_DIR/slide_reviews.json" \
-    --verify-artifact "$REVIEW_DIR/checklist.json"
+    --verify-artifact "$REVIEW_DIR/checklist.json" \
+    --verify-artifact "$REVIEW_DIR/reconciliation.json"
 ```
 
 The gate (`check_handoff.py --format=markdown`) verifies the sub-agent's hand-off file exists, is non-empty, matches the receipt's echoed path, and passes the content-shape gate (not receipt-shaped, no marker collision); `md_to_commentary.py` wraps the raw markdown in the `{"commentary_markdown": ...}` envelope (escaping by construction via `json.dumps`); `insert_coaching.py` then performs the 6-state idempotency check, replaces the marker with `## Coaching Commentary` + the commentary in a single in-place write, and verifies `run_id` parity across all 4 producer artifacts. Branch on the exit code (complete state machine — do not improvise):

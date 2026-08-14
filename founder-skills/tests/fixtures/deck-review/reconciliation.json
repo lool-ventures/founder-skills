@@ -1,0 +1,64 @@
+{
+  "status": "checked",
+  "figures_total": 5,
+  "figures_verified": 5,
+  "second_read_coverage": {
+    "slides_named": [
+      6,
+      7,
+      11
+    ],
+    "slides_transcribed": [
+      6,
+      7,
+      11
+    ],
+    "slides_missing": []
+  },
+  "attribution": {
+    "quote_carries_label": 4,
+    "layout_attributed": 1
+  },
+  "relations": [
+    {
+      "kind": "derived_ratio",
+      "operator": "ratio",
+      "operands": [
+        "revenue_2024",
+        "gmv_2024"
+      ],
+      "computed": 0.018255578093306288,
+      "rendered": "$9K \u00f7 $493K = 1.8%  \u2014 but the deck states 6.2% (take rate)",
+      "confidence": "high",
+      "verdict": "contradiction",
+      "expected_id": "take_rate",
+      "expected_value": 6.2,
+      "span_lo": 0.018255578093306288,
+      "span_hi": 0.018255578093306288
+    },
+    {
+      "kind": "derived_ratio",
+      "operator": "ratio",
+      "operands": [
+        "gmv_2024",
+        "paid_seats"
+      ],
+      "computed": 4108.333333333333,
+      "rendered": "$493K \u00f7 120 = 4,108.33 per paying seat",
+      "confidence": "high",
+      "verdict": "derived",
+      "span_lo": 4108.333333333333,
+      "span_hi": 4108.333333333333
+    }
+  ],
+  "suppressed": {},
+  "relations_proposed": 2,
+  "validation": {
+    "status": "valid",
+    "errors": [],
+    "warnings": []
+  },
+  "metadata": {
+    "run_id": "fixture-deck-review-001"
+  }
+}

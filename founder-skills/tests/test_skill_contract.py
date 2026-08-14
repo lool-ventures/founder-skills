@@ -514,7 +514,19 @@ SKILL_MD_CEILING: dict[str, int] = {
     # line and the What-If rule both had to stop saying "warn/fail earn no credit".
     # R3/R6: verdict-first coaching order, and the visual-pass record (input_quality now
     # required, per-slide visual_evidence_captured, 20-page read batches).
-    "deck-review": 78_224,
+    # 78_224 -> 87_344 (R5): the numeric chain — four new steps (3.5 ledger extraction,
+    # 3.6 independent second read, 3.7 relation proposal, 3.8 reconcile). This is the
+    # largest single increase this file has taken and it buys a capability the skill has
+    # claimed for its whole life without having: `numbers_consistent` is one of the 35
+    # criteria and was scored entirely on the reviewer's say-so, with no arithmetic
+    # anywhere in the skill. Three of the four steps are dispatch templates, which is
+    # where the bytes are; the templates are prescriptive rather than descriptive because
+    # the full-scale rule and the second read's blindness are both properties of the
+    # prompt, and a paraphrase of either silently disarms a gate. The last +301 B extends
+    # the resume rule to cover 3.5-3.8: it named Steps 2 and 3 only, so a gate round-trip
+    # would have re-run the chain's three dispatches — two of which read the deck — for an
+    # identical result.
+    "deck-review": 87_645,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -1868,6 +1880,22 @@ _REJECTING_PAYLOADS: list[tuple[str, str, list[str], str]] = [
     ("financial-model-review", "unit_economics.py", [], '{"nocompany":1}'),
     ("financial-model-review", "runway.py", [], '{"nocompany":1}'),
     ("ic-sim", "score_dimensions.py", ["--run-id", "RID"], '{"items":[{"id":"bogus","status":"concern"}]}'),
+    # A figure recorded at 1/1000 of what its own `raw` string says. This is THE ledger
+    # failure mode: the arithmetic downstream is then flawless and wrong by a thousand.
+    (
+        "deck-review",
+        "ledger.py",
+        ["--run-id", "RID"],
+        '{"figures":[{"id":"f1","value":493,"raw":"$493K","unit_kind":"money","label":"GMV",'
+        '"quote":"GMV of $493K","currency":"USD"}]}',
+    ),
+    # reconcile.py rejects before it can reach the ledger it was pointed at.
+    (
+        "deck-review",
+        "reconcile.py",
+        ["--run-id", "RID", "--ledger", "/nonexistent/ledger.json", "--second-read", "/nonexistent/second.json"],
+        '{"relations":[]}',
+    ),
 ]
 
 

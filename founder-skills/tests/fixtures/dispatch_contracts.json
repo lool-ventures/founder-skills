@@ -1,34 +1,92 @@
 {
   "deck-review": {
+    "LEDGER_EXTRACTION": {
+      "schema": "ledger.schema.json",
+      "validates_via": "schema",
+      "transport": "file_handoff",
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "figures"
+      ],
+      "notes": "Agent writes {figures: [...]} to OUTPUT_PATH; each figure requires id, value, raw, unit_kind, label, quote. ledger.py validates and injects metadata.run_id. Two checks are the point of the producer and neither is expressible in the schema: `value` must agree with what `raw` parses to within 2% (the scale-slip class, where \"$493K\" is recorded as 493 and every later calculation is wrong by a thousand), and `slide` must be within the deck's slide count from --inventory. The agent never computes anything here and never relates figures to each other."
+    },
+    "SECOND_READ": {
+      "schema": null,
+      "validates_via": "check_handoff",
+      "transport": "file_handoff",
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "slides_transcribed",
+        "transcript"
+      ],
+      "notes": "A FRESH sub-agent transcribes only the slides the ledger names, and is given slide numbers with NO figures \u2014 the independence is the entire value of the step and is a property of the dispatch prompt, not of any script. reconcile.py checks each ledger quote against this transcript; a figure that fails is dropped, and any relation resting on it is dropped with it. Checking the ledger against the text the extracting agent was handed would be checking the model against itself."
+    },
+    "RELATION_PROPOSAL": {
+      "schema": null,
+      "validates_via": "producer",
+      "transport": "file_handoff",
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "relations"
+      ],
+      "notes": "Agent writes {relations: [{kind, operator, operands, expected_id?}]} to OUTPUT_PATH. operator is one of ratio/product/sum/increase_by/difference; operands are ledger ids in order. The agent chooses WHICH figures relate \u2014 judgment \u2014 and computes nothing: reconcile.py does the arithmetic, enforces scale/currency/period, and assigns the verdict. expected_id names a figure the deck itself states, which is what makes a disagreement established rather than judged."
+    },
     "SLIDE_REVIEWS": {
       "schema": "slide_reviews.schema.json",
       "validates_via": "schema",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["reviews", "missing_slides", "overall_narrative_assessment"],
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "reviews",
+        "missing_slides",
+        "overall_narrative_assessment"
+      ],
       "notes": "deck-review has _schema_validator.py + JSON Schema files; producer script (slide_reviews.py) loads schema, validates input, injects metadata.run_id. Each reviews[] item requires slide_number, maps_to, strengths, weaknesses, recommendations, best_practice_refs. Agent writes the payload to OUTPUT_PATH (handoff dir) and returns the receipt; main thread gates via check_handoff.py."
     },
     "CHECKLIST": {
       "schema": "checklist.schema.json",
       "validates_via": "schema",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["items"],
-      "notes": "Agent writes {items: [...]} to OUTPUT_PATH where each item requires id, category, label, status. Producer script (checklist.py) computes summary (total/pass/fail/warn/not_applicable/score_pct/overall_status) and injects metadata.run_id — summary is NOT part of the agent's required input."
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "items"
+      ],
+      "notes": "Agent writes {items: [...]} to OUTPUT_PATH where each item requires id, category, label, status. Producer script (checklist.py) computes summary (total/pass/fail/warn/not_applicable/score_pct/overall_status) and injects metadata.run_id \u2014 summary is NOT part of the agent's required input."
     },
     "POST_COMPOSE_COACHING": {
       "schema_version": "v0.4.2-deck-review",
       "validates_via": "test_deck_review_context_b_contract_documented",
       "transport": "file_handoff",
-      "required_input_keys": ["coaching_payload"],
+      "required_input_keys": [
+        "coaching_payload"
+      ],
       "required_actions": [
         "compose_commentary_from_payload"
       ],
-      "forbidden_actions": ["read_full_report_md", "edit_report_md"],
-      "return_payload_keys": [
-        "status", "output_path"
+      "forbidden_actions": [
+        "read_full_report_md",
+        "edit_report_md"
       ],
-      "notes": "Context B; reads coaching_payload from dispatch prompt; composes commentary and WRITES {commentary_markdown} to OUTPUT_PATH (handoff dir), returning only the receipt. The main thread gates via check_handoff.py then inserts via the shared insert_coaching.py script (idempotency matrix, uuid-marker replacement, run_id parity — all script-side)."
+      "return_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "notes": "Context B; reads coaching_payload from dispatch prompt; composes commentary and WRITES {commentary_markdown} to OUTPUT_PATH (handoff dir), returning only the receipt. The main thread gates via check_handoff.py then inserts via the shared insert_coaching.py script (idempotency matrix, uuid-marker replacement, run_id parity \u2014 all script-side)."
     }
   },
   "competitive-positioning": {
@@ -36,63 +94,98 @@
       "schema": "",
       "validates_via": "inline_dict_check",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["competitors"],
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "competitors"
+      ],
       "notes": "validate_landscape.py reads stdin JSON and requires 'competitors' (non-empty array). Each competitor must have name, slug (kebab-case), category (direct|adjacent|do_nothing|emerging|custom), description, key_differentiators (non-empty array). Min 3, max 10 competitors. Optional passthrough fields: input_mode, assessment_mode, data_confidence."
     },
     "COMPETITOR_VERIFICATION": {
       "schema": "",
       "validates_via": "inline_dict_check",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["startup_characterization", "verdicts"],
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "startup_characterization",
+        "verdicts"
+      ],
       "notes": "verify_competitors.py reads stdin JSON and requires 'startup_characterization' (buyer + job_to_be_done) and 'verdicts' (non-empty array, one per landscape_draft slug). Each verdict requires slug, verdict (genuine|adjacent|not_a_competitor), independent_characterization (with evidence_source researched|agent_estimate|founder_provided), recommended_action (keep|reclassify_adjacent|challenge_removal). Show-your-work gate: any non-genuine verdict requires non-empty reasoning + independent_characterization.buyer + .job_to_be_done. Optional --landscape cross-checks that every landscape_draft slug has exactly one verdict. Runs before Gate 1 as an independent (fresh-context) precision challenge; validator, not detector."
     },
     "COMPETITOR_RECALL": {
       "schema": "",
       "validates_via": "inline_dict_check",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
       "required_fields_minus_metadata": [],
-      "notes": "verify_competitors.py's diff_recall_gaps() reads 'candidates' (a list) and diffs it against the drafted landscape via --blind-set. Deliberately LENIENT at the top level — missing/non-list/empty candidates is NOT an error (a blind agent that legitimately finds nothing must not red the run), so no field is unconditionally required and required_fields_minus_metadata is empty by design, not by omission. Each candidate needs name, why_considered, and a non-empty sources list to survive; one missing any of those is DROPPED (recorded in the output's 'dropped' array, not fatal) rather than laundered into a 'the draft missed this' gap. The dispatched agent is deliberately blind: it receives ONLY a redacted product summary staged into the hand-off dir, never landscape_draft.json or ANALYSIS_DIR, so its set is independently derived rather than anchored on the draft it is diffed against. Slugs on both sides are normalized via normalize_competitor_slug before comparing. A surviving unmatched candidate that is actually the SAME competitor as a draft entry is demoted into 'probable_duplicates' ({slug, name, matched_draft_slug, rule}) rather than reported as a gap: rule 'slug_variant' (maximum-bipartite token matching between the two normalized slugs, guarded so a bare brand-prefix pair like square/squarespace never matches on its own) or rule 'constituent' (the candidate's normalized name/slug exactly equals a member of a draft cohort entry's 'constituents' list, e.g. pcm-tes-entrants's ['Rondo','Antora','Sunamp']). A candidate that merely turns up as a word in a draft entry's name/description/key_differentiators prose is NEVER demoted for that reason alone — it stays in 'unmatched' and only gains a 'possible_overlap_with' annotation (the draft's slug), because a text-substring heuristic was measured to falsely disappear real gaps. Output merges into competitor_verification.json as 'recall_gaps' (blind_set_size, matched, unmatched, probable_duplicates, draft_only, dropped, note) — not a separate artifact."
+      "notes": "verify_competitors.py's diff_recall_gaps() reads 'candidates' (a list) and diffs it against the drafted landscape via --blind-set. Deliberately LENIENT at the top level \u2014 missing/non-list/empty candidates is NOT an error (a blind agent that legitimately finds nothing must not red the run), so no field is unconditionally required and required_fields_minus_metadata is empty by design, not by omission. Each candidate needs name, why_considered, and a non-empty sources list to survive; one missing any of those is DROPPED (recorded in the output's 'dropped' array, not fatal) rather than laundered into a 'the draft missed this' gap. The dispatched agent is deliberately blind: it receives ONLY a redacted product summary staged into the hand-off dir, never landscape_draft.json or ANALYSIS_DIR, so its set is independently derived rather than anchored on the draft it is diffed against. Slugs on both sides are normalized via normalize_competitor_slug before comparing. A surviving unmatched candidate that is actually the SAME competitor as a draft entry is demoted into 'probable_duplicates' ({slug, name, matched_draft_slug, rule}) rather than reported as a gap: rule 'slug_variant' (maximum-bipartite token matching between the two normalized slugs, guarded so a bare brand-prefix pair like square/squarespace never matches on its own) or rule 'constituent' (the candidate's normalized name/slug exactly equals a member of a draft cohort entry's 'constituents' list, e.g. pcm-tes-entrants's ['Rondo','Antora','Sunamp']). A candidate that merely turns up as a word in a draft entry's name/description/key_differentiators prose is NEVER demoted for that reason alone \u2014 it stays in 'unmatched' and only gains a 'possible_overlap_with' annotation (the draft's slug), because a text-substring heuristic was measured to falsely disappear real gaps. Output merges into competitor_verification.json as 'recall_gaps' (blind_set_size, matched, unmatched, probable_duplicates, draft_only, dropped, note) \u2014 not a separate artifact."
     },
     "MOAT_SCORING": {
       "schema": "",
       "validates_via": "inline_dict_check",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["moat_assessments"],
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "moat_assessments"
+      ],
       "notes": "score_moats.py requires 'moat_assessments' keyed by company slug (including '_startup'). Also accepts array-of-objects form [{slug, moats:[...]}] and normalizes to dict. Each company entry requires moats array; each moat entry requires id (canonical or custom_*), status (strong|moderate|weak|absent|not_applicable), trajectory (building|stable|eroding), evidence_source (researched|agent_estimate|founder_override), evidence (string)."
     },
     "POSITIONING_SCORING": {
       "schema": "",
       "validates_via": "inline_dict_check",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["views"],
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "views"
+      ],
       "notes": "score_positioning.py requires 'views' (non-empty array). Each view requires id, x_axis (object with name), y_axis (object with name), points (array). Each point requires competitor (string, '_startup' must be present), x (0-100), y (0-100). Script normalizes string axes to {name: str} and slug->competitor field name. Optional passthrough: differentiation_claims, data_confidence."
     },
     "CHECKLIST": {
       "schema": "",
       "validates_via": "inline_dict_check",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["items"],
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "items"
+      ],
       "notes": "competitive-positioning/checklist.py requires 'items' (array of all 25 canonical IDs: COVER_01..05, POS_01..05, MOAT_01..04, EVID_01..04, NARR_01..04, MISS_01..03). Each item requires id, status (pass|fail|warn|not_applicable), evidence (non-empty string). Optional: input_mode (deck|conversation|document, default conversation) controls mode-based gating; data_confidence."
     },
     "POST_COMPOSE_COACHING": {
       "schema_version": "v0.4.2-competitive-positioning",
       "validates_via": "test_competitive_positioning_context_b_contract_documented",
       "transport": "file_handoff",
-      "required_input_keys": ["coaching_payload"],
+      "required_input_keys": [
+        "coaching_payload"
+      ],
       "required_actions": [
         "compose_commentary_from_payload"
       ],
-      "forbidden_actions": ["read_full_report_md", "edit_report_md"],
-      "return_payload_keys": [
-        "status", "output_path"
+      "forbidden_actions": [
+        "read_full_report_md",
+        "edit_report_md"
       ],
-      "notes": "Context B; reads coaching_payload from dispatch prompt; composes commentary and WRITES {commentary_markdown} to OUTPUT_PATH (handoff dir), returning only the receipt. The main thread gates via check_handoff.py then inserts via the shared insert_coaching.py script (idempotency matrix, uuid-marker replacement, run_id parity — all script-side)."
+      "return_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "notes": "Context B; reads coaching_payload from dispatch prompt; composes commentary and WRITES {commentary_markdown} to OUTPUT_PATH (handoff dir), returning only the receipt. The main thread gates via check_handoff.py then inserts via the shared insert_coaching.py script (idempotency matrix, uuid-marker replacement, run_id parity \u2014 all script-side)."
     }
   },
   "financial-model-review": {
@@ -100,31 +193,48 @@
       "schema": "",
       "validates_via": "argparse",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["corrected", "corrections"],
-      "notes": "Agent writes {corrected: <full inputs object>, corrections: [{path, old, new, reason}]} to OUTPUT_PATH. apply_corrections.py takes the hand-off file as its file argument and writes corrected_inputs.json (from 'corrected') and extraction_corrections.json (from 'corrections'). No 'changes' or 'base_hash' keys — the patch protocol with sha256 belongs to the founder browser round-trip only."
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "corrected",
+        "corrections"
+      ],
+      "notes": "Agent writes {corrected: <full inputs object>, corrections: [{path, old, new, reason}]} to OUTPUT_PATH. apply_corrections.py takes the hand-off file as its file argument and writes corrected_inputs.json (from 'corrected') and extraction_corrections.json (from 'corrections'). No 'changes' or 'base_hash' keys \u2014 the patch protocol with sha256 belongs to the founder browser round-trip only."
     },
     "CHECKLIST": {
       "schema": "",
       "validates_via": "inline_dict_check",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["items"],
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "items"
+      ],
       "notes": "financial-model-review/checklist.py requires 'items' (array of all 46 canonical IDs: STRUCT_01..09, UNIT_10..19, CASH_20..32, METRIC_33..35, BRIDGE_36..38, SECTOR_39..44, OVERALL_45..46). Each item requires id, status (pass|fail|warn|not_applicable). Optional: company (for profile-based auto-gating by stage/geography/sector/model_format), inputs (for SECTOR_40 AI-cost detection), metadata."
     },
     "POST_COMPOSE_COACHING": {
       "schema_version": "v0.4.2-financial-model-review",
       "validates_via": "test_financial_model_review_context_b_contract_documented",
       "transport": "file_handoff",
-      "required_input_keys": ["coaching_payload"],
+      "required_input_keys": [
+        "coaching_payload"
+      ],
       "required_actions": [
         "compose_commentary_from_payload"
       ],
-      "forbidden_actions": ["read_full_report_md", "edit_report_md"],
-      "return_payload_keys": [
-        "status", "output_path"
+      "forbidden_actions": [
+        "read_full_report_md",
+        "edit_report_md"
       ],
-      "notes": "Context B; reads coaching_payload from dispatch prompt (includes truncated/truncated_count flags); composes commentary and WRITES {commentary_markdown} to OUTPUT_PATH (handoff dir), returning only the receipt. The main thread gates via check_handoff.py then inserts via the shared insert_coaching.py script (idempotency matrix, uuid-marker replacement, run_id parity — all script-side)."
+      "return_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "notes": "Context B; reads coaching_payload from dispatch prompt (includes truncated/truncated_count flags); composes commentary and WRITES {commentary_markdown} to OUTPUT_PATH (handoff dir), returning only the receipt. The main thread gates via check_handoff.py then inserts via the shared insert_coaching.py script (idempotency matrix, uuid-marker replacement, run_id parity \u2014 all script-side)."
     }
   },
   "ic-sim": {
@@ -132,13 +242,19 @@
       "schema_version": "v0.4.2-ic-sim",
       "validates_via": "test_ic_sim_context_b_contract_documented",
       "transport": "file_handoff",
-      "required_input_keys": ["coaching_payload"],
+      "required_input_keys": [
+        "coaching_payload"
+      ],
       "required_actions": [
         "compose_commentary_from_payload"
       ],
-      "forbidden_actions": ["read_full_report_md", "edit_report_md"],
+      "forbidden_actions": [
+        "read_full_report_md",
+        "edit_report_md"
+      ],
       "return_payload_keys": [
-        "status", "output_path"
+        "status",
+        "output_path"
       ],
       "notes": "Context B; reads coaching_payload from dispatch prompt; dimension-based schema (dealbreakers with severity, concerns with description, summary with verdict/conviction_score/conviction counts). Composes commentary and WRITES {commentary_markdown} to OUTPUT_PATH (handoff dir), returning only the receipt. The main thread gates via check_handoff.py then inserts via the shared insert_coaching.py script."
     },
@@ -146,32 +262,64 @@
       "schema": "",
       "validates_via": "argparse",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["partner", "verdict", "rationale", "conviction_points", "key_concerns", "questions_for_founders", "diligence_requirements"],
-      "notes": "SYNTHETIC CONTRACT — no dedicated producer script. Three sub-agents (visionary/operator/analyst) each write partner_analysis_{role}_output.json to their own OUTPUT_PATH independently. Fields per artifact-schemas.md: partner (visionary|operator|analyst), verdict (invest|more_diligence|pass|hard_pass), rationale (string), conviction_points (string[]), key_concerns (string[]), questions_for_founders (string[]), diligence_requirements (string[]). Main thread combines three gated hand-off files into discussion.json for score_dimensions.py."
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "partner",
+        "verdict",
+        "rationale",
+        "conviction_points",
+        "key_concerns",
+        "questions_for_founders",
+        "diligence_requirements"
+      ],
+      "notes": "SYNTHETIC CONTRACT \u2014 no dedicated producer script. Three sub-agents (visionary/operator/analyst) each write partner_analysis_{role}_output.json to their own OUTPUT_PATH independently. Fields per artifact-schemas.md: partner (visionary|operator|analyst), verdict (invest|more_diligence|pass|hard_pass), rationale (string), conviction_points (string[]), key_concerns (string[]), questions_for_founders (string[]), diligence_requirements (string[]). Main thread combines three gated hand-off files into discussion.json for score_dimensions.py."
     },
     "PARTNER_REBUTTAL": {
       "schema": "",
       "validates_via": "inline_dict_check",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["partner", "revised_verdict", "verdict_changed", "responses", "dealbreakers", "diligence_requirements"],
-      "notes": "Round 2 of the debate — three parallel dispatches, one per archetype, each having read the other two's round-1 assessments. compose_discussion.py consumes all three partner_rebuttal_{archetype}.json hand-offs alongside the three round-1 partner_assessment_{archetype}.json and is the SOLE writer of discussion.json. SCOPE OF required_fields_minus_metadata (fleet convention): it is the DOCUMENTED SHAPE the agent is told to produce, matching the dispatch prompt at skills/ic-sim/SKILL.md, NOT the set the producer rejects on — the consuming test only asserts each name appears in agents/ic-sim.md. Measured, the producer REJECTS (exit 1, nothing written) on only: a missing/duplicate archetype; revised_verdict outside {invest, more_diligence, pass, hard_pass}; verdict_changed true with an empty changed_because; a dealbreaker with no evidence; a dealbreaker whose dimension is not one of score_dimensions.py's 28 canonical ids. Everything else degrades silently — verified by composing successfully from rebuttals carrying ONLY partner and revised_verdict (exit 0, debate_sections []). So responses/dealbreakers/diligence_requirements absent is NOT an error, malformed responses entries are skipped rather than rejected, dealbreakers[].reason is never required, and there is no enforced 2-response minimum: those are prompt-level instructions, not producer guarantees. changed_because is conditional (required only when verdict_changed is true) and so is deliberately absent from the list above. Derived debated_dealbreakers (deduped by dimension id) is what compose_report.py diffs against score_dimensions.json to disclose a scored dealbreaker no partner actually debated."
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "partner",
+        "revised_verdict",
+        "verdict_changed",
+        "responses",
+        "dealbreakers",
+        "diligence_requirements"
+      ],
+      "notes": "Round 2 of the debate \u2014 three parallel dispatches, one per archetype, each having read the other two's round-1 assessments. compose_discussion.py consumes all three partner_rebuttal_{archetype}.json hand-offs alongside the three round-1 partner_assessment_{archetype}.json and is the SOLE writer of discussion.json. SCOPE OF required_fields_minus_metadata (fleet convention): it is the DOCUMENTED SHAPE the agent is told to produce, matching the dispatch prompt at skills/ic-sim/SKILL.md, NOT the set the producer rejects on \u2014 the consuming test only asserts each name appears in agents/ic-sim.md. Measured, the producer REJECTS (exit 1, nothing written) on only: a missing/duplicate archetype; revised_verdict outside {invest, more_diligence, pass, hard_pass}; verdict_changed true with an empty changed_because; a dealbreaker with no evidence; a dealbreaker whose dimension is not one of score_dimensions.py's 28 canonical ids. Everything else degrades silently \u2014 verified by composing successfully from rebuttals carrying ONLY partner and revised_verdict (exit 0, debate_sections []). So responses/dealbreakers/diligence_requirements absent is NOT an error, malformed responses entries are skipped rather than rejected, dealbreakers[].reason is never required, and there is no enforced 2-response minimum: those are prompt-level instructions, not producer guarantees. changed_because is conditional (required only when verdict_changed is true) and so is deliberately absent from the list above. Derived debated_dealbreakers (deduped by dimension id) is what compose_report.py diffs against score_dimensions.json to disclose a scored dealbreaker no partner actually debated."
     },
     "SCORE_DIMENSIONS": {
       "schema": "",
       "validates_via": "inline_dict_check",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["items"],
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "items"
+      ],
       "notes": "score_dimensions.py requires 'items' (array of all 28 canonical dimension IDs across 7 categories: team_*, market_*, product_*, biz_*, fin_*, risk_*, fit_*). Each item requires id and status (strong_conviction|moderate_conviction|concern|dealbreaker|not_applicable). Optional per item: evidence, notes. Script produces verdict (invest|more_diligence|pass|hard_pass) based on conviction_score and dealbreaker presence."
     },
     "DETECT_CONFLICTS": {
       "schema": "",
       "validates_via": "inline_dict_check",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["portfolio_size", "conflicts"],
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "portfolio_size",
+        "conflicts"
+      ],
       "notes": "detect_conflicts.py requires 'portfolio_size' (non-negative integer) and 'conflicts' (array, may be empty). Each conflict entry requires company (string), type (direct|adjacent|customer_overlap), severity (blocking|manageable), rationale (string). Script deduplicates by normalized (company, type), computes summary (total_checked, conflict_count, has_blocking_conflict, overall_severity), adds validation.status."
     }
   },
@@ -180,37 +328,64 @@
       "schema": "",
       "validates_via": "extract_instrument.py",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["instrument_type", "fields", "confidence", "ambiguities"],
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "instrument_type",
+        "fields",
+        "confidence",
+        "ambiguities"
+      ],
       "notes": "Lane 1 (PDF/DOCX instrument docs). Agent writes {instrument_type, fields, confidence, ambiguities} to OUTPUT_PATH; every field needs a confidence entry with level + evidence_quote + document_location. Main thread gates via check_handoff.py, then pipes the file through extract_instrument.py (anti-hallucination validator: evidence verification, invariants, cross-check, Gotcha #3 discount_multiplier normalization)."
     },
     "SPREADSHEET_STRUCTURE_DETECTION": {
       "schema": "",
       "validates_via": "extract_cap_table.py",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["blocks"],
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "blocks"
+      ],
       "notes": "Lane 3 (freeform Excel). Agent writes {blocks: [...]} to OUTPUT_PATH; each block requires block_type, sheet, cell_range, column_role_map, confidence, evidence, ambiguities. Main thread gates via check_handoff.py, then validates with extract_cap_table.py; --mode=freeform-emit maps validated blocks to inputs.json/instruments.json via the closed freeform-role-map contract."
     },
     "ARTICLES_OF_ASSOCIATION_EXTRACTION": {
       "schema": "",
       "validates_via": "extract_instrument.py",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["extraction_type", "fields", "confidence", "ambiguities"],
-      "notes": "Lane 1 AoA sub-context. Agent writes {extraction_type: 'articles_of_association', fields (incl. preferred_series[]), confidence, ambiguities} to OUTPUT_PATH. Main thread gates via check_handoff.py, then pipes through extract_instrument.py. AoAs define preferred-series TERMS, not instruments — never routed through INSTRUMENT_EXTRACTION."
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "extraction_type",
+        "fields",
+        "confidence",
+        "ambiguities"
+      ],
+      "notes": "Lane 1 AoA sub-context. Agent writes {extraction_type: 'articles_of_association', fields (incl. preferred_series[]), confidence, ambiguities} to OUTPUT_PATH. Main thread gates via check_handoff.py, then pipes through extract_instrument.py. AoAs define preferred-series TERMS, not instruments \u2014 never routed through INSTRUMENT_EXTRACTION."
     },
     "POST_COMPOSE_COACHING": {
       "schema_version": "v0.5.0-cap-table",
       "validates_via": "test_cap_table_context_b_contract_documented",
       "transport": "file_handoff",
-      "required_input_keys": ["coaching_payload"],
+      "required_input_keys": [
+        "coaching_payload"
+      ],
       "required_actions": [
         "compose_commentary_from_payload"
       ],
-      "forbidden_actions": ["read_full_report_md", "edit_report_md"],
+      "forbidden_actions": [
+        "read_full_report_md",
+        "edit_report_md"
+      ],
       "return_payload_keys": [
-        "status", "output_path"
+        "status",
+        "output_path"
       ],
       "notes": "Context B; reads coaching_payload from dispatch prompt (scenario_digest, ownership_range_across_scenarios, top_dilution_drivers, counsel_review_summary, date_sensitive_summary, flip_specifics); composes commentary and WRITES {commentary_markdown} to OUTPUT_PATH (handoff dir), returning only the {status, output_path} receipt. The main thread gates the hand-off file via check_handoff.py then inserts via the shared insert_coaching.py script. Inline alternative permitted: the main thread may compose the commentary itself, staging to $REVIEW_DIR/coaching_commentary.json, but insertion still goes through insert_coaching.py (single insertion path). Privacy boundary enforced compose-side by _assert_coaching_payload_privacy_clean(). No legal/tax conclusions in commentary (counsel-review reliance boundary)."
     }
@@ -220,13 +395,19 @@
       "schema_version": "v0.4.2-market-sizing",
       "validates_via": "test_market_sizing_context_b_contract_documented",
       "transport": "file_handoff",
-      "required_input_keys": ["coaching_payload"],
+      "required_input_keys": [
+        "coaching_payload"
+      ],
       "required_actions": [
         "compose_commentary_from_payload"
       ],
-      "forbidden_actions": ["read_full_report_md", "edit_report_md"],
+      "forbidden_actions": [
+        "read_full_report_md",
+        "edit_report_md"
+      ],
       "return_payload_keys": [
-        "status", "output_path"
+        "status",
+        "output_path"
       ],
       "notes": "Context B; reads coaching_payload from dispatch prompt; market-sizing checklist has no warn status so warned_items is always []; agent reasons from failed_items only. Composes commentary and WRITES {commentary_markdown} to OUTPUT_PATH (handoff dir), returning only the receipt. The main thread gates via check_handoff.py then inserts via the shared insert_coaching.py script."
     },
@@ -234,32 +415,61 @@
       "schema": "",
       "validates_via": "argparse",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["approach", "industry_total", "segment_pct", "share_pct"],
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "approach",
+        "industry_total",
+        "segment_pct",
+        "share_pct"
+      ],
       "notes": "market_sizing.py --stdin reads JSON from stdin (the gated hand-off file, or merge_json.py output in 'both' mode). For top-down: requires industry_total (float > 0), segment_pct (0-100), share_pct (0-100). 'approach' must be 'top_down' (or 'top-down'). Optional: growth_rate, years (int, default 0), currency (default USD). Output: {approach, currency, top_down: {tam, sam, som, ...}}."
     },
     "BOTTOM_UP_METHODOLOGY": {
       "schema": "",
       "validates_via": "argparse",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["approach", "customer_count", "arpu", "serviceable_pct", "target_pct"],
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "approach",
+        "customer_count",
+        "arpu",
+        "serviceable_pct",
+        "target_pct"
+      ],
       "notes": "market_sizing.py --stdin reads JSON from stdin (the gated hand-off file, or merge_json.py output in 'both' mode). For bottom-up: requires customer_count (positive integer), arpu (float > 0), serviceable_pct (0-100), target_pct (0-100). 'approach' must be 'bottom_up' (or 'bottom-up'). Optional: growth_rate, years (int, default 0), currency (default USD). Output: {approach, currency, bottom_up: {tam, sam, som, ...}}."
     },
     "SENSITIVITY_TEST": {
       "schema": "",
       "validates_via": "inline_dict_check",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["approach", "base", "ranges"],
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "approach",
+        "base",
+        "ranges"
+      ],
       "notes": "sensitivity.py reads stdin JSON. Requires 'approach' (top_down|bottom_up|both), 'base' (object with required params for the approach: top_down needs industry_total/segment_pct/share_pct; bottom_up needs customer_count/arpu/serviceable_pct/target_pct), 'ranges' (object with at least one param key, each having low_pct and high_pct). Optional per-param: confidence (sourced|derived|agent_estimate) triggers auto-widening of ranges."
     },
     "CHECKLIST": {
       "schema": "",
       "validates_via": "inline_dict_check",
       "transport": "file_handoff",
-      "receipt_payload_keys": ["status", "output_path"],
-      "required_fields_minus_metadata": ["items"],
+      "receipt_payload_keys": [
+        "status",
+        "output_path"
+      ],
+      "required_fields_minus_metadata": [
+        "items"
+      ],
       "notes": "market-sizing/checklist.py requires 'items' (array of all 22 canonical IDs: structural_tam_gt_sam_gt_som, structural_definitions_correct, tam_matches_product_scope, source_segments_match, som_share_defensible, som_backed_by_gtm, som_consistent_with_projections, data_current, sources_reputable, figures_triangulated, unsupported_figures_flagged, validated_used_precisely, assumptions_categorized, both_approaches_used, approaches_reconciled, growth_dynamics_considered, market_properly_segmented, competitive_landscape_acknowledged, sam_expansion_path_noted, assumptions_explicit, formulas_shown, sources_cited). Each item requires id, status (pass|fail|not_applicable). Optional: notes (string). No evidence field required (unlike other skills)."
     }
   }

@@ -1,0 +1,183 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "reconciliation.json",
+  "description": "What the deck's own numbers say about each other. Produced by reconcile.py from the ledger, the independent second read, and the model's proposed relations. `relations` holds ONLY what a founder sees \u2014 select() decides that, and suppressed relations are reported as counts so nothing downstream can reach past it.",
+  "type": "object",
+  "required": [
+    "status",
+    "figures_total",
+    "figures_verified",
+    "relations",
+    "validation",
+    "metadata"
+  ],
+  "properties": {
+    "status": {
+      "description": "checked = relations were computed. no_figures = the deck states too few numbers to relate; refused when the deck's own text is full of numerals. gate_failed = the independent read could not corroborate enough of the ledger to trust it. Absence of this artifact means the step did not run, which is a pipeline error and is deliberately distinguishable from all three.",
+      "type": "string",
+      "enum": [
+        "checked",
+        "no_figures",
+        "gate_failed"
+      ]
+    },
+    "figures_total": {
+      "type": "integer"
+    },
+    "figures_verified": {
+      "description": "Figures whose verbatim quote was found in the independent second read.",
+      "type": "integer"
+    },
+    "second_read_coverage": {
+      "description": "Which figure-bearing slides the independent read actually covered. A figure whose slide is in slides_missing failed the gate because nobody looked, not because the ledger is untrustworthy \u2014 two failures the gate alone cannot tell apart, and only one of them is the deck's problem.",
+      "type": "object",
+      "properties": {
+        "slides_named": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "slides_transcribed": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "slides_missing": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "attribution": {
+      "description": "Not a gate \u2014 a field. quote_carries_label means the label's words appear in the quote; layout_attributed means they do not, and the figure's meaning rests on where it sat on the slide. The weaker of the two bounds a relation's confidence.",
+      "type": "object",
+      "properties": {
+        "quote_carries_label": {
+          "type": "integer"
+        },
+        "layout_attributed": {
+          "type": "integer"
+        }
+      }
+    },
+    "relations_proposed": {
+      "type": "integer"
+    },
+    "suppressed": {
+      "description": "Counts by reason for every computed relation the founder does NOT see. Contents are deliberately absent.",
+      "type": "object"
+    },
+    "relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "operator",
+          "operands",
+          "rendered",
+          "confidence",
+          "verdict"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "contradiction",
+              "derived_ratio"
+            ]
+          },
+          "operator": {
+            "type": "string"
+          },
+          "operands": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "computed": {
+            "type": "number"
+          },
+          "rendered": {
+            "description": "The founder-facing line, with both sides printed in the same number space.",
+            "type": "string"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "verdict": {
+            "description": "contradiction and derived are the only two that reach a founder. convention_differs, confirmation and restatement are suppressed by select() and appear only in the counts above.",
+            "type": "string",
+            "enum": [
+              "contradiction",
+              "derived",
+              "confirmation",
+              "restatement",
+              "convention_differs"
+            ]
+          },
+          "expected_id": {
+            "type": "string"
+          },
+          "expected_value": {
+            "type": "number"
+          },
+          "span_lo": {
+            "type": "number"
+          },
+          "span_hi": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "valid",
+            "invalid"
+          ]
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "run_id"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

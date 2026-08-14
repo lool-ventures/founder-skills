@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ledger.json",
+  "description": "Every figure the deck states, recorded once, at full scale, with the verbatim string it was read from. `raw` and `value` are two independent statements about the same number and ledger.py refuses the ledger when they disagree — that disagreement is the whole scale-error class, caught without seeing the deck.",
+  "type": "object",
+  "required": ["figures", "validation", "metadata"],
+  "properties": {
+    "figures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "value", "raw", "unit_kind", "label", "quote"],
+        "properties": {
+          "id": {
+            "description": "Stable within the ledger; relations address figures by it.",
+            "type": "string"
+          },
+          "value": {
+            "description": "The number at FULL scale. A slide reading \"$493K\" is 493000 here, never 493.",
+            "type": "number"
+          },
+          "raw": {
+            "description": "The slide's own string, verbatim: \"$493K\", \"~55%\", \"18-24 months\". Scale, approximation markers and ranges are all read back off this.",
+            "type": "string"
+          },
+          "unit_kind": {
+            "type": "string",
+            "enum": ["money", "count", "percent", "multiple", "duration", "date"]
+          },
+          "label": {
+            "description": "What the figure is, in the deck's own words where possible.",
+            "type": "string"
+          },
+          "quote": {
+            "description": "The verbatim sentence or table row the figure was read from. This is what the independent second read is checked against, so a paraphrase defeats the gate.",
+            "type": "string"
+          },
+          "slide": { "type": "integer" },
+          "currency": {
+            "description": "ISO code. Required in practice for money: a relation across two currencies is refused, not converted.",
+            "type": "string"
+          },
+          "period": {
+            "description": "The time basis a rate is quoted over — \"month\", \"year\". A monthly figure summed against an annual one is refused.",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "figures_total": { "type": "integer" },
+    "validation": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["valid", "invalid"] },
+        "errors": { "type": "array", "items": { "type": "string" } },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["run_id"],
+      "properties": { "run_id": { "type": "string" } }
+    }
+  }
+}

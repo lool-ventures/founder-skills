@@ -206,6 +206,7 @@ REQUIRED_ARTIFACTS = [
     "stage_profile.json",
     "slide_reviews.json",
     "checklist.json",
+    "reconciliation.json",
 ]
 OPTIONAL_ARTIFACTS: list[str] = []  # No optional artifacts for deck review
 
@@ -1019,6 +1020,86 @@ def _sanitize_items_for_coaching(items: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _section_numbers(
+    reconciliation: dict[str, Any] | None,
+    checklist: dict[str, Any] | None,
+) -> str:
+    """What the deck's own numbers say about each other.
+
+    Renders NOTHING unless there is something to act on. A deck whose figures all agree
+    produces no section at all — a list of confirmations is volume, and volume is the
+    enemy of the few findings that count.
+
+    This renderer never decides what is shown. `select()` in reconcile.py is the single
+    place that decides, and it has already dropped confirmations, restatements, relations
+    resting on a figure the independent read could not corroborate, and every
+    `convention_differs` pair. Reaching past `relations` here — into the suppressed
+    counts, or back into the engine — would put a second decider in the pipeline and
+    silently widen what a founder sees.
+    """
+    if not reconciliation:
+        return ""
+    relations = _as_list(reconciliation.get("relations"))
+    if not relations:
+        return ""
+
+    # Split on VERDICT, not `kind`. `kind` is what the model PROPOSED the relation was;
+    # `verdict` is what the engine computed it to be, and they routinely differ — the
+    # flagship finding is proposed as a `derived_ratio` and comes back a `contradiction`
+    # because it disagreed with a figure the deck itself states. Keying the founder-facing
+    # split on `kind` filed every contradiction under "readings, not errors", telling a
+    # founder their deck disagreeing with itself was a matter of interpretation.
+    parsed = [_as_dict(x) for x in relations]
+    contradictions = [r for r in parsed if r.get("verdict") == "contradiction"]
+    derived = [r for r in parsed if r.get("verdict") == "derived"]
+    if not contradictions and not derived:
+        return ""
+
+    lines = ["## What Your Numbers Say About Each Other\n"]
+    lines.append(
+        "Every figure below was read off your deck, checked against a second independent "
+        "reading of the same slides, and then related by arithmetic rather than by eye. "
+        "Figures that could not be corroborated twice were dropped rather than guessed at.\n"
+    )
+
+    if contradictions:
+        lines.append("### Figures that disagree\n")
+        for rel in contradictions:
+            rendered = str(rel.get("rendered", "")).strip()
+            if rendered:
+                lines.append(f"- {rendered}")
+        lines.append("")
+
+    if derived:
+        lines.append("### What the numbers imply\n")
+        lines.append(
+            "These are readings, not errors — the arithmetic is exact, the interpretation "
+            "is a judgement call, and an investor may well make it.\n"
+        )
+        for rel in derived:
+            rendered = str(rel.get("rendered", "")).strip()
+            if rendered:
+                lines.append(f"- {rendered}")
+        lines.append("")
+
+    # The checklist scores internal numeric consistency on the reviewer's reading; this
+    # section computes it. When they disagree the report says so rather than quietly
+    # preferring one — there is no adjudication rule yet, and inventing one here would
+    # bury the more interesting fact that two methods reached different answers.
+    if contradictions and checklist is not None and not _is_stub(checklist):
+        for raw_item in _as_list(checklist.get("items")):
+            item = _as_dict(raw_item)
+            if item.get("id") == "numbers_consistent" and item.get("status") == "pass":
+                lines.append(
+                    "> Note: the criteria review marked your figures internally consistent, "
+                    "while the arithmetic above found a disagreement. The two looked at the "
+                    "deck differently and reached different answers; both are shown.\n"
+                )
+                break
+
+    return "\n".join(lines)
+
+
 def _section_priority_fixes(
     checklist: dict[str, Any] | None,
     reviews: dict[str, Any] | None,
@@ -1234,6 +1315,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     stage_profile = _render_safe(artifacts.get("stage_profile.json"))
     slide_reviews = _render_safe(artifacts.get("slide_reviews.json"))
     checklist_data = _render_safe(artifacts.get("checklist.json"))
+    reconciliation = _render_safe(artifacts.get("reconciliation.json"))
 
     # Render every section EXCEPT Warnings first, so we can pre-scan the body
     # for a marker collision and append MARKER_COLLISION before status and the
@@ -1252,6 +1334,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         marker,
         _section_stage_context(stage_profile),
         _section_slide_feedback(slide_reviews, inventory),
+        _section_numbers(reconciliation, checklist_data),
         _section_checklist(checklist_data),
         _section_priority_fixes(checklist_data, slide_reviews),
     ]

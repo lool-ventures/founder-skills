@@ -694,6 +694,31 @@ _VALID_CHECKLIST = {
 }
 
 
+_VALID_RECONCILIATION = {
+    "metadata": {"run_id": "run-test"},
+    "status": "checked",
+    "figures_total": 2,
+    "figures_verified": 2,
+    "attribution": {"quote_carries_label": 2, "layout_attributed": 0},
+    "relations_proposed": 1,
+    "suppressed": {},
+    "relations": [
+        {
+            "kind": "contradiction",
+            "operator": "ratio",
+            "operands": ["net_revenue", "gross_volume"],
+            "computed": 0.018,
+            "rendered": "$9K \u00f7 $493K = 1.8%  \u2014 but the deck states 6.2% (take rate)",
+            "confidence": "high",
+            "verdict": "contradiction",
+            "expected_id": "take_rate",
+            "expected_value": 6.2,
+        }
+    ],
+    "validation": {"status": "valid", "errors": [], "warnings": []},
+}
+
+
 def _run_compose(artifact_dir: str, extra_args: list[str] | None = None) -> tuple[int, dict | None, str]:
     """Run compose_report.py with given artifact dir."""
     args = ["--dir", artifact_dir, "--pretty"]
@@ -703,13 +728,14 @@ def _run_compose(artifact_dir: str, extra_args: list[str] | None = None) -> tupl
 
 
 def test_compose_complete_set() -> None:
-    """All 4 artifacts valid -> no missing artifacts, report non-empty."""
+    """All 5 artifacts valid -> no missing artifacts, report non-empty."""
     d = _make_artifact_dir(
         {
             "deck_inventory.json": _VALID_INVENTORY,
             "stage_profile.json": _VALID_PROFILE,
             "slide_reviews.json": _VALID_REVIEWS,
             "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": _VALID_RECONCILIATION,
         }
     )
     rc, data, _ = _run_compose(d)
@@ -720,6 +746,85 @@ def test_compose_complete_set() -> None:
     assert len(data["report_markdown"]) > 100
     codes = [w["code"] for w in v["warnings"]]
     assert "MISSING_ARTIFACT" not in codes
+
+
+def _compose_markdown(reconciliation: dict | None) -> str:
+    """Compose with a given reconciliation artifact and return report.md."""
+    artifacts = {
+        "deck_inventory.json": _VALID_INVENTORY,
+        "stage_profile.json": _VALID_PROFILE,
+        "slide_reviews.json": _VALID_REVIEWS,
+        "checklist.json": _VALID_CHECKLIST,
+    }
+    if reconciliation is not None:
+        artifacts["reconciliation.json"] = reconciliation
+    rc, data, err = _run_compose(_make_artifact_dir(artifacts))
+    assert rc == 0, err
+    assert data is not None
+    return str(data["report_markdown"])
+
+
+def _relation(verdict: str, kind: str = "derived_ratio", rendered: str = "x") -> dict:
+    return {
+        "kind": kind,
+        "operator": "ratio",
+        "operands": ["a", "b"],
+        "rendered": rendered,
+        "confidence": "high",
+        "verdict": verdict,
+    }
+
+
+def _recon(relations: list[dict]) -> dict:
+    return {
+        "metadata": {"run_id": "run-test"},
+        "status": "checked",
+        "figures_total": 2,
+        "figures_verified": 2,
+        "relations": relations,
+        "suppressed": {},
+        "validation": {"status": "valid", "errors": [], "warnings": []},
+    }
+
+
+def test_a_contradiction_is_never_filed_under_readings_not_errors() -> None:
+    """The founder-facing split is on VERDICT, not the proposal's `kind`.
+
+    The flagship finding is PROPOSED as a `derived_ratio` and comes back a
+    `contradiction`, because it disagreed with a figure the deck itself states. Splitting
+    on `kind` put every contradiction under "readings, not errors — the interpretation is
+    a judgement call", which tells a founder that their deck disagreeing with itself is a
+    matter of opinion. The whole point of a contradiction is that it is not.
+    """
+    md = _compose_markdown(_recon([_relation("contradiction", rendered="$9K over $493K = 1.8% vs a stated 6.2%")]))
+    assert "Figures that disagree" in md
+    disagree = md.index("Figures that disagree")
+    implies = md.index("What the numbers imply") if "What the numbers imply" in md else len(md)
+    assert disagree < implies
+    assert "$9K over $493K" in md[disagree:implies], "the contradiction rendered under the wrong heading"
+
+
+def test_a_derived_reading_is_labelled_as_a_judgement() -> None:
+    md = _compose_markdown(_recon([_relation("derived", rendered="$493K over 120 = 4,108.33 per paying seat")]))
+    assert "What the numbers imply" in md
+    assert "Figures that disagree" not in md
+    assert "judgement call" in md
+
+
+def test_nothing_renders_when_every_relation_agrees() -> None:
+    """A list of confirmations is volume, and volume buries the findings that count."""
+    md = _compose_markdown(_recon([]))
+    assert "What Your Numbers Say" not in md
+
+
+def test_the_checklist_conflict_is_disclosed_rather_than_reconciled() -> None:
+    """The 35-criteria review scores numeric consistency by eye; this section computes it.
+
+    When they disagree there is no adjudication rule, so the report says both rather than
+    quietly preferring one.
+    """
+    md = _compose_markdown(_recon([_relation("contradiction")]))
+    assert "reached different answers" in md
 
 
 def test_compose_missing_required() -> None:
