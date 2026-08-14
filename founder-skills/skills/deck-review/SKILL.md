@@ -760,6 +760,9 @@ Use your Write tool to write to OUTPUT_PATH:
      "operands": ["revenue_2024", "gmv_2024"], "expected_id": "take_rate"}
   ]
 }
+`kind` must be exactly `contradiction` or `derived_ratio` — nothing else. A sum of
+components is `derived_ratio`; the name refers to how the comparison is framed, not to
+the operator, and a value invented to fit the operator is rejected.
 `operator` must be one of `ratio`, `product`, `sum`, `increase_by`, `difference`.
 `operands` are `id` values from the ledger, in order — for `ratio`, numerator first.
 `expected_id` is optional and omitted when the deck states no counterpart.

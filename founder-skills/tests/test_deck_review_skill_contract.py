@@ -1475,3 +1475,23 @@ def test_checklist_dispatch_specifies_notes_as_the_fix() -> None:
         f"{AGENT_MD.name} must keep ambiguity out of `notes` — an ambiguity note there is "
         "exactly the non-actionable content F2 was about."
     )
+
+
+def test_relation_proposal_template_closes_the_kind_enum() -> None:
+    """The RELATION_PROPOSAL template must name `kind`'s allowed values.
+
+    Measured in a live run: the template documented the `operator` enum and said nothing
+    about `kind`, so the sub-agent generalised from the single example and emitted
+    `kind: "component_sum"` for a sum of cost lines. The producer rejected it loudly and
+    the model recovered on a retry — the fail-loudly contract working — but the recovery
+    cost an extra dispatch, and a weaker model could loop on it.
+
+    An enum a template shows once by example, without saying it is closed, reads as a
+    suggestion.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    start = text.index("CONTEXT: RELATION_PROPOSAL")
+    block = text[start : text.index("```", start)]
+    assert "`kind` must be exactly" in block, "the RELATION_PROPOSAL template does not close the `kind` enum"
+    for value in ("contradiction", "derived_ratio"):
+        assert value in block, f"the template does not name the allowed kind {value!r}"

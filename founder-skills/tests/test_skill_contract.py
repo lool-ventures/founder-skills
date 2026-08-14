@@ -533,7 +533,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # looks like a mis-specified relation and is measured to be a real finding. Prose is
     # the only place that instruction can live, since the producer can reject an
     # out-of-set class but cannot talk the model out of wanting one.
-    "deck-review": 91_744,
+    # +240 B: the RELATION_PROPOSAL template now closes the `kind` enum. Measured in the
+    # live run — it documented `operator`'s values and said nothing about `kind`'s, so the
+    # sub-agent generalised from the one example and emitted `component_sum` for a sum of
+    # cost lines. Rejected loudly and recovered on a retry, but an enum shown once by
+    # example reads as a suggestion.
+    "deck-review": 91_984,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

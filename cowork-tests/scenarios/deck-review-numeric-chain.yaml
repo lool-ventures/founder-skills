@@ -1,0 +1,89 @@
+name: deck-review-numeric-chain
+session: ../sessions/default.yaml
+fidelity: cowork
+on_unanswered: first   # the stage gate is immaterial to these asserts; option-1 is paraphrase-proof
+skills: [deck-review]
+
+# Behavioural verification of the numeric chain (Steps 3.5-3.9) and the Phase 3 review pass.
+# Everything about those steps was measured OFFLINE, on ledgers produced by a bare `claude -p`
+# harness rather than by a sub-agent under the shipped dispatch templates. This is the run that
+# says whether the templates work.
+#
+# The deck is synthetic and carries three numeric cases whose correct handling was confirmed
+# deterministically against the engine before this scenario was written:
+#
+#   1. $2.4M x 8% = 192,000 against a stated $144K   -> a REAL contradiction. Must SURVIVE.
+#   2. $40K + $25K = 65,000 against a stated $85K    -> partial enumeration. Must be WITHDRAWN:
+#      the deck names two cost lines and never claims they are the whole burn.
+#   3. 510 / 4,100 = 12.4% against a stated ~15%     -> approximate figure. Must be WITHDRAWN.
+#
+# So the pass condition is not "the section renders" — it is that the review pass told the
+# difference between a founder's arithmetic being wrong and a comparison that should not have
+# been made. Case 1 is the guard against a pass that simply withdraws everything.
+prompt: |
+  I'm the founder of Foobar Systems, a seed-stage startup. Please use the deck-review skill to
+  review my pitch deck. Here is the full slide text (treat this as the deck — it's a seed raise):
+
+  SLIDE 1: TITLE
+  Foobar Systems — payments infrastructure for equipment rental marketplaces
+
+  SLIDE 2: PROBLEM
+  Rental marketplaces lose 3 weeks per payout cycle reconciling deposits, damage claims and
+  partial refunds by hand.
+
+  SLIDE 3: SOLUTION
+  Foobar sits between the marketplace and its payment processor and settles every leg
+  automatically.
+
+  SLIDE 4: TRACTION
+  We process $2.4M in annual booking volume across our marketplaces, and we keep 8% as our
+  take rate, giving us $144K in revenue for 2025.
+
+  SLIDE 5: FUNNEL
+  We had 4,100 signups last quarter and 510 paid conversions. Roughly ~15% of the operators
+  who try Foobar convert to a paid plan.
+
+  SLIDE 6: TEAM
+  Three founders. Two came from payment operations at a large rental platform; one built
+  settlement systems at a payments processor.
+
+  SLIDE 7: FINANCIALS
+  Our monthly burn is $85K. Engineering costs $40K/month and sales costs $25K/month.
+
+  SLIDE 8: ASK
+  Raising $2M seed at $10M post to reach $1M ARR in 18 months.
+
+  Give me the full review with the scored checklist and the written report.
+
+assert:
+  - result: success
+  - all_tasks_completed: true
+
+  # --- the chain ran at all -------------------------------------------------
+  - file_exists: outputs/artifacts/deck-review-foobar-systems/ledger.json
+  - file_exists: outputs/artifacts/deck-review-foobar-systems/second_read.json
+  - file_exists: outputs/artifacts/deck-review-foobar-systems/reconciliation.json
+
+  # A coherent status, not a stub. `no_figures` on a deck this numeric would itself be a
+  # failure, and the producer refuses it against the inventory.
+  - artifact_json:
+      artifact: outputs/artifacts/deck-review-foobar-systems/reconciliation.json
+      path: status
+      equals: checked
+
+  # --- the review pass ran, rather than being skipped -----------------------
+  # `not_run` here means the founder is looking at findings nothing reviewed, which is the
+  # expensive direction: skipping shows MORE findings, not fewer.
+  - artifact_json:
+      artifact: outputs/artifacts/deck-review-foobar-systems/reconciliation.json
+      path: interpretation.status
+      equals: applied
+
+  # --- all three dispatches happened ----------------------------------------
+  - subagent_dispatched: 'deck-review'
+  - subagent_file_write:
+      path_suffix: ledger_output.json
+  - subagent_file_write:
+      path_suffix: second_read_output.json
+  - subagent_file_write:
+      path_suffix: interpretation_output.json

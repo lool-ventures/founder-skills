@@ -65,6 +65,15 @@ SCENARIOS_DIR = Path(__file__).resolve().parents[2] / "cowork-tests" / "scenario
 # quietly matching nothing (a directory glob finding zero new scenarios is not evidence
 # anything is fine — see leak_scan.py's own docstring on that exact failure mode).
 _NO_CASSETTE_ALLOWLIST: dict[str, str] = {
+    "deck-review-numeric-chain": (
+        "deliberately un-cassetted: the LIVE verification lane for the numeric chain (Steps 3.5-3.9). "
+        "Most of what it verifies is PROSE — three dispatch templates asking a sub-agent to extract a "
+        "ledger at full scale, to transcribe blind, and to withdraw a contradiction on one of exactly "
+        "two grounds. A cassette freezes one past agent's behaviour and re-asserts it, which is the "
+        "opposite of what this lane is for; it already found one defect (an invented `kind` value) that "
+        "a frozen recording would have preserved rather than surfaced. Recording it costs a paid run "
+        "(~$4.7 / 21 min measured 2026-08-14) and pins the behaviour it currently measures."
+    ),
     "competitive-positioning-deck-no-slide": (
         "deliberately un-cassetted: this is the LIVE verification lane for the 2026-08 remediation, "
         "whose whole purpose is to exercise prose fixes against a real agent. A cassette freezes the "
