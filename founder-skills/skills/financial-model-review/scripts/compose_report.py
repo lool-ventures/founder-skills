@@ -770,11 +770,18 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
     # Criteria excluded during assessment that the company profile says apply. Rendered next to
     # the score because that is what they qualify: the percentage is computed over fewer criteria
     # than the company warrants, and a reader cannot see that from the percentage alone.
-    self_gated = [str(i) for i in _as_list(summary.get("self_gated_items"))]
+    # Criterion ids are internal tokens a founder cannot act on, so these lines name the criteria
+    # by their labels. The label map comes from the items list, which carries both.
+    labels = {str(i.get("id")): str(i.get("label") or i.get("id")) for i in _as_list(checklist.get("items"))}
+
+    def _named(ids: list[Any]) -> str:
+        return ", ".join(labels.get(str(i), str(i)) for i in ids)
+
+    self_gated = _as_list(summary.get("self_gated_items"))
     if self_gated:
         lines.append(
-            f"**Not assessed:** {len(self_gated)} criteria that apply to your company were marked "
-            f"not applicable and are missing from the score above: {', '.join(self_gated)}\n"
+            f"**Not assessed:** {len(self_gated)} checks that apply to your company were marked "
+            f"not applicable and are missing from the score above: {_named(self_gated)}\n"
         )
 
     # Same harm, different cause: these were dropped by the gates because a profile field did not
@@ -782,12 +789,12 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
     # "we could not tell whether it applied to you".
     unresolved = _as_dict(summary.get("unresolved_profile_exclusions"))
     for field, ids in sorted(unresolved.items()):
-        dropped = [str(i) for i in _as_list(ids)]
+        dropped = _as_list(ids)
         if dropped:
             lines.append(
                 f"**Not matched:** your {field} could not be matched to a known value, so "
-                f"{len(dropped)} criteria that may apply were excluded from the score above: "
-                f"{', '.join(dropped)}\n"
+                f"{len(dropped)} checks that may apply were excluded from the score above: "
+                f"{_named(dropped)}\n"
             )
 
     # Failed items

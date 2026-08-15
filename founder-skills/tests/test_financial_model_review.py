@@ -2748,6 +2748,14 @@ def test_compose_flags_unresolved_profile_exclusions(tmp_path: Any) -> None:
     checklist_unresolved["summary"]["unresolved_profile_exclusions"] = {
         "geography": ["CASH_29", "CASH_30", "CASH_31", "CASH_32"]
     }
+    # A real checklist.json carries a label on every item (checklist.py stamps it); the inline
+    # fixture is thin, so supply the ones this renders by name.
+    checklist_unresolved["items"] = list(checklist_unresolved.get("items") or []) + [
+        {"id": "CASH_29", "label": "Entity-level cash solvent", "status": "not_applicable"},
+        {"id": "CASH_30", "label": "Israel statutory costs itemized", "status": "not_applicable"},
+        {"id": "CASH_31", "label": "Government grants modeled", "status": "not_applicable"},
+        {"id": "CASH_32", "label": "VAT/indirect tax cash timing", "status": "not_applicable"},
+    ]
     d = _make_fmr_artifact_dir(
         {
             "inputs.json": _VALID_INPUTS,
@@ -2769,7 +2777,10 @@ def test_compose_flags_unresolved_profile_exclusions(tmp_path: Any) -> None:
     # The founder-facing surface, not just the machine one.
     with open(md_path, encoding="utf-8") as fh:
         md = fh.read()
-    assert "Not matched:" in md and "CASH_30" in md
+    # Named by label, not by criterion id: ids are internal tokens the founder-text policy flags.
+    assert "Not matched:" in md
+    assert "Entity-level cash solvent" in md
+    assert "CASH_30" not in md.split("## Checklist Results")[1].split("##")[0]
 
 
 def test_compose_silent_when_nothing_self_gated() -> None:
