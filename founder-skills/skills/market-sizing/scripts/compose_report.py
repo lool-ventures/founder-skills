@@ -344,12 +344,17 @@ def _fmt_usd(value: float | int, currency_code: str | None = None) -> str:
     to "USD" and rendering a bare "$" prefix. Any other ISO code is tagged as a
     suffix instead (e.g. "1.5M ILS") — a bare "$" would misrepresent a
     non-USD-denominated analysis.
+
+    Passing "" means NO currency marker at all, for the one case where the currency is
+    genuinely unknown: a founder-stated figure whose currency was never declared. Falling
+    back to USD there stamps "$" on a figure we are simultaneously saying we cannot place,
+    and stamping the analysis currency asserts the very thing the comparison was refused for.
     """
-    code = _CURRENCY if currency_code is None else (currency_code or "USD")
+    code = _CURRENCY if currency_code is None else currency_code
     if value < 0:
         return "-" + _fmt_usd(-value, code)
     prefix = "$" if code == "USD" else ""
-    suffix = "" if code == "USD" else f" {code}"
+    suffix = "" if code in ("USD", "") else f" {code}"
     if value >= 1_000_000_000:
         return f"{prefix}{value / 1_000_000_000:,.1f}B{suffix}"
     if value >= 1_000_000:
@@ -1564,10 +1569,12 @@ def _section_sizing_table(
                 # disappears, taking the founder's own stated figure out of the report. A refused
                 # comparison is worth showing: here is what you said, here is what we got, and we
                 # could not put them side by side.
-                # NUMERIC, not merely non-None: `existing_claims: {tam: "big"}` is a legitimate
-                # input shape that produces no comparison at all, and gating on `is not None`
-                # sends a string into `float()`.
-                if isinstance(deck_claim, (int, float)) and not isinstance(deck_claim, bool):
+                # NUMERIC AND POSITIVE, not merely non-None. `existing_claims: {tam: "big"}` is a
+                # legitimate input shape that produces no comparison at all and would send a
+                # string into `float()`; a zero or negative claim is one `_compute_delta` refuses
+                # (division), so it has no delta either -- and gating the row on "no delta" alone
+                # rendered `$0.00` beside an em-dash on runs with no currency conversion anywhere.
+                if isinstance(deck_claim, (int, float)) and not isinstance(deck_claim, bool) and deck_claim > 0:
                     approach_data = sizing.get(approach_key, {})
                     m = _as_dict(approach_data.get(metric))
                     val = m.get("value", 0)
@@ -1584,14 +1591,27 @@ def _section_sizing_table(
                     # `is not None`, not `or`: a legitimate comparable of 0.0 is falsy and would
                     # silently fall back to the raw claim.
                     _comparable = prov.get("deck_claim_comparable")
+                    _blocked = bool(prov.get("comparison_blocked"))
                     _shown_claim = deck_claim if _comparable is None else _comparable
+                    # On the BLOCKED branch the whole point is that we do not know what currency
+                    # this figure is in -- and `_fmt_usd` suffixes the ANALYSIS currency, so
+                    # printing it here labelled the founder's figure "ILS" one line above the
+                    # sentence saying its currency is unknown. Same mislabel this commit fixed on
+                    # the converting branch; it must not survive on the branch beside it.
+                    _claim_cell = (
+                        f"{_fmt_usd(float(_shown_claim), '')} (currency not stated)"
+                        if _blocked
+                        else _fmt_usd(float(_shown_claim))
+                    )
                     _delta_cell = f"{delta_pct:+.1f}%{marker}" if delta_pct is not None else "—"
                     comparison_rows.append(
-                        f"| {metric.upper()} ({method}) | "
-                        f"{_fmt_usd(float(_shown_claim))} "
+                        f"| {metric.upper()} ({method}) | {_claim_cell} "
                         f"| {_fmt_usd(val)} | {_delta_cell} | {classification} |"
                     )
-                    if delta_pct is None:
+                    # Keyed on the REFUSAL, not on "there is no delta". A delta can be absent for
+                    # reasons that have nothing to do with currency, and the note below asserts a
+                    # currency problem.
+                    if _blocked:
                         blocked_rows = True
         if comparison_rows:
             lines.append("\n### Deck Claims vs. Our Estimates\n")
@@ -1602,9 +1622,14 @@ def _section_sizing_table(
                 # A dash with no explanation reads as missing data rather than a refused
                 # comparison, and the founder cannot act on it without knowing the cause.
                 lines.append(
-                    "\nA delta of — means we could not compare the two figures: your figure and "
-                    "this calculation are in different currencies, and no stated currency was "
-                    "attached to yours. Say which currency your figure is in and this check runs."
+                    # NOT "they are in different currencies" -- we do not know that, and the same
+                    # sentence saying no currency was stated cannot also assert which one it is.
+                    # If the figure happened to be in the analysis currency the comparison would
+                    # have been valid; the honest claim is that we could not tell.
+                    "\nA delta of — means we could not compare the two figures: no currency was "
+                    "stated for yours, and this calculation converted its own inputs, so we could "
+                    "not tell whether the two are on the same footing. Say which currency your "
+                    "figure is in and this check runs."
                 )
             if close_agreement:
                 lines.append(
@@ -1971,7 +1996,10 @@ def _blocked_comparisons(inputs: dict[str, Any] | None, sizing: dict[str, Any] |
         "metrics": blocked,
         "any": bool(blocked),
         "reason": (
-            "the figures are in a different currency from the analysis and none was stated for them" if blocked else ""
+            "no currency was stated for those figures, so we could not tell whether they are "
+            "comparable with the converted analysis"
+            if blocked
+            else ""
         ),
     }
 

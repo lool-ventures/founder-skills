@@ -6017,8 +6017,14 @@ def test_blocked_comparison_keeps_the_row_and_prints_no_delta(tmp_path: Path) ->
     tam_row = next(ln for ln in md.splitlines() if ln.startswith("| TAM (Top-down)"))
     assert "+11.1%" not in tam_row, f"delta computed across a refused comparison: {tam_row}"
     assert "|" in tam_row and "—" in tam_row, f"blocked row has no em-dash delta cell: {tam_row}"
-    assert "90.0B ILS" in tam_row, "the founder's own stated figure vanished from the row"
+    assert "90.0B" in tam_row, "the founder's own stated figure vanished from the row"
+    # And it must NOT be stamped with the analysis currency: this row exists because we do not
+    # know what currency the figure is in, so labelling it ILS contradicts the line below it.
+    assert "90.0B ILS" not in tam_row, f"blocked row asserts a currency we just said is unknown: {tam_row}"
+    assert "currency not stated" in tam_row, f"blocked row does not say the currency is unknown: {tam_row}"
     assert "could not compare the two figures" in md, "the em-dash is unexplained"
+    # We cannot know the currencies DIFFER -- only that one was never stated.
+    assert "are in different currencies" not in md, "asserts a currency fact the pipeline refuses to assert"
     assert "COMPARISON_CURRENCY_UNKNOWN" in _compose_codes(d)
 
 
@@ -6053,3 +6059,24 @@ def test_methodology_never_claims_the_two_builds_validate_each_other(tmp_path: P
     md = _compose_md_text(d)
     assert "cross-validation" not in md.lower(), "report.md still claims the two approaches cross-validate each other"
     assert "## Methodology" in md
+
+
+def test_a_non_positive_deck_claim_renders_no_row_and_no_currency_note(tmp_path: Path) -> None:
+    """A zero claim has no delta for arithmetic reasons, not currency ones.
+
+    Regression: the row gate moved off `delta_pct is not None` so a refused comparison would
+    keep its row — but `_compute_delta` also returns None for a claim of zero, so a plain
+    single-currency run rendered `$0.00 | —` under a note explaining that the two figures were
+    in different currencies. There was no conversion anywhere in that run.
+    """
+    d = tmp_path / "ms-zero-claim"
+    d.mkdir()
+    _make_full_sizing_dir(d)
+    inputs = json.loads((d / "inputs.json").read_text())
+    inputs["existing_claims"] = {"tam": 0}
+    (d / "inputs.json").write_text(json.dumps(inputs))
+    md = _compose_md_text(d)
+    assert "$0.00" not in md, "a zero deck claim rendered as a comparison row"
+    assert "could not compare the two figures" not in md, (
+        "a currency explanation on a run with no currency conversion in it"
+    )

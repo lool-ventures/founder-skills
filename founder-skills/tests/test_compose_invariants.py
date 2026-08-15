@@ -41,6 +41,15 @@ COACHING_SKILLS = [
 ]
 
 
+# Keys that tell the coaching sub-agent how much of the review actually ran. A skill with no
+# entry has no such qualification to carry; add a row when one gains it.
+_COACHING_COVERAGE_KEYS: dict[str, tuple[str, ...]] = {
+    "deck-review": ("design_gate",),
+    "market-sizing": ("comparison_blocked",),
+    "financial-model-review": ("score_coverage",),
+}
+
+
 @pytest.mark.parametrize("skill", COACHING_SKILLS)
 def test_compose_emits_coaching_payload(tmp_path: Path, skill: str) -> None:
     """Each compose script's report.json must include a coaching_payload block.
@@ -68,6 +77,16 @@ def test_compose_emits_coaching_payload(tmp_path: Path, skill: str) -> None:
     # founder-skills/skills/deck-review/scripts/compose_report.py:723-748.
     for required in ["schema_version", "summary"]:
         assert required in payload, f"{skill} coaching_payload missing required key: {required}"
+    # Per-skill keys that carry a QUALIFICATION on the headline: how much of the review
+    # actually ran. Pinned at the EMISSION site because the skill-contract tests only read
+    # SKILL.md and the agent body — measured, deleting all three emission lines left the whole
+    # suite green, so the prompts documented a key the producer no longer sent. Each of these
+    # is deliberately TOP-LEVEL; asserting them here is what makes that argument enforceable.
+    for required in _COACHING_COVERAGE_KEYS.get(skill, ()):
+        assert required in payload, (
+            f"{skill} coaching_payload no longer emits '{required}' — the agent body still tells "
+            f"the coach to reason from it, so the commentary silently loses the qualification"
+        )
     # The schema_version suffix MUST identify this skill — guards against
     # accidental cross-skill coaching dispatch.
     sv = payload["schema_version"]

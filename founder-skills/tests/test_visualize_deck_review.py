@@ -914,7 +914,20 @@ def test_gated_category_is_not_drawn_as_a_perfect_score() -> None:
     assert spec and spec.loader
     ck = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(ck)
-    items = [{"id": i["id"], "status": "pass", "evidence": "e"} for i in ck.CHECKLIST_ITEMS]
+    # The first three categories FAIL deliberately. "What's strong" truncates to three entries
+    # and Design & Readability is fourth in canonical order, so on an all-pass fixture the
+    # assertion below passes against the UNFIXED code — it never reaches the list. Failing the
+    # categories ahead of it is what makes the assertion able to fail.
+    _sink = {"Narrative Flow", "Slide Content", "Stage Fit"}
+    items = [
+        {
+            "id": i["id"],
+            "status": "fail" if i.get("category") in _sink else "pass",
+            "evidence": "e",
+            **({"notes": "Fix it."} if i.get("category") in _sink else {}),
+        }
+        for i in ck.CHECKLIST_ITEMS
+    ]
     result, errors, _ = ck.validate_checklist(json.loads(json.dumps(items)))
     assert not errors, errors
     gated = ck._apply_design_gating(result, "pdf", "image_only")

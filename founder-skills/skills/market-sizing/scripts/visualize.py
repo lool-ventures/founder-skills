@@ -1504,7 +1504,8 @@ def _chart_key_findings(
                 if delta is None and prov.get("comparison_blocked") and prov.get("deck_claim") is not None:
                     attention.append(
                         f"{metric.upper()} ({method}): could not be checked against your own "
-                        f"figure — it is in a different currency and none was stated for it"
+                        f"figure — no currency was stated for it, so we could not tell whether the "
+                        f"two are comparable"
                     )
                 if delta is not None:
                     if abs(delta) <= CLOSE_AGREEMENT_PCT:

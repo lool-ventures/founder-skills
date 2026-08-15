@@ -483,11 +483,15 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 88_904 -> 89_865 (PPTX): a .pptx deck is binary and Read refuses it, so market
     # figures inside a PowerPoint upload were invisible. Step now renders to PDF, or falls back
     # to text extraction and says what could not be read.
+    # All three raised again (+15/+22/+18 B) to add the coverage key to each skill's MAIN-THREAD
+    # RETURN. The fixes routed the new signal to report.md and to the coaching sub-agent and
+    # left the chat message the founder reads FIRST still sourcing only the headline fields --
+    # the same fourth-surface miss, in all three skills at once.
     # market-sizing raised 90,323 -> 90,525 (+202 B) for the Context B `comparison_blocked` field.
     # A refused cross-check is invisible in every other payload key -- the figure is present and
     # `deck_coverage` still reports it as stated -- so a coach not handed this writes as though the
     # founder's own number had been verified against ours. Deliberate.
-    "market-sizing": 90_525,
+    "market-sizing": 90_547,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -498,7 +502,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # dispatch is a field it never reads: without this the coach keeps writing "strong" over a
     # score whose denominator silently lost the criteria an unmatched profile field dropped.
     # Deliberate, per this test's own remedy, and the wording was tightened first.
-    "financial-model-review": 79_649,
+    "financial-model-review": 79_667,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -557,7 +561,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # that wrote "strong" over design criteria nobody could assess. The prose edits are net-neutral
     # digit swaps plus one clause naming `slide_count_appropriate` as deliberately still scored --
     # the gate forces 4 of the category's 5, and five sites said 5. Deliberate.
-    "deck-review": 92_668,
+    "deck-review": 92_683,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

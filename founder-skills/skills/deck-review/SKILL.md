@@ -1277,7 +1277,7 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 - **In Claude Code:** the path to `$REVIEW_DIR/report.md` — there the path *is* the deliverable, because
   `./artifacts/` is durable. **In Cowork:** the delivered files are the deliverable; a path
   names a workspace that may not outlive the task.
-- The headline outcome fields, sourced from the `coaching_payload` staged in Step 7 (`summary.score_pct`, `summary.overall_status`, `high_severity_warnings`) plus the `insert_coaching.py` receipt (`status`, `report_path`, `run_id`). The Context B sub-agent no longer echoes these — do not source them from its return.
+- The headline outcome fields, sourced from the `coaching_payload` staged in Step 7 (`summary.score_pct`, `summary.overall_status`, `high_severity_warnings`, `design_gate`) plus the `insert_coaching.py` receipt (`status`, `report_path`, `run_id`). The Context B sub-agent no longer echoes these — do not source them from its return.
 
   **Nesting matters here, and it is mixed — read the path, not the pattern:** `score_pct` and `overall_status` sit under `coaching_payload.summary`; reading `coaching_payload.score_pct` returns null while the real number sits one level down, and a live run did exactly that. But `high_severity_warnings` is **top level** — reaching under `summary` for it returns null too, in the opposite direction.
 - Optionally: the HTML report path from Step 8.

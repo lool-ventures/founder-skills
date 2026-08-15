@@ -2780,7 +2780,10 @@ def test_compose_flags_unresolved_profile_exclusions(tmp_path: Any) -> None:
     # Named by label, not by criterion id: ids are internal tokens the founder-text policy flags.
     assert "Not matched:" in md
     assert "Entity-level cash solvent" in md
-    assert "CASH_30" not in md.split("## Checklist Results")[1].split("##")[0]
+    # WHOLE document, not just the checklist section. Scoping this to "## Checklist Results"
+    # is what let the same ids ship inside "## Validation Warnings" as a raw Python list repr:
+    # the section carve-out passed while the delivered report still carried CASH_30.
+    assert "CASH_" not in md, "criterion ids reached the founder-facing report"
 
 
 def test_compose_silent_when_nothing_self_gated() -> None:
@@ -8867,3 +8870,50 @@ def test_compose_flags_an_invalid_fmr_artifact_at_high_severity() -> None:
         hits = [w for w in data["validation"]["warnings"] if w["code"] == "ARTIFACT_INVALID"]
         assert hits, f"{name}: a rejected producer artifact must raise ARTIFACT_INVALID"
         assert hits[0]["severity"] == "high", f"{name}: must not be acceptable-away"
+
+
+def test_an_unresolved_profile_field_is_not_reported_as_a_fact_about_the_company() -> None:
+    """The headline defect of the profile fix, asserted per-item on the id set.
+
+    A criterion dropped because a profile field never RESOLVED used to carry the same evidence
+    as one that genuinely does not apply: "Not applicable — applies to a different geography",
+    on a company that is in that geography. Measured, the score moved 81.6 "solid" -> 91.2
+    "strong" on the spelling of the geography alone.
+
+    Asserted per-item, not as a whole-document grep: `CASH_28` and `OVERALL_46` are keyed to
+    TRAITS rather than to the geography vocabulary, so `_gate_depends_on_unresolved` correctly
+    leaves them saying "applies to a different geography". A document-wide search for that
+    phrase reads as "the fix did not work" and would have to be neutered to pass.
+    """
+    ck = _load_fmr_checklist_module()
+    items = [{"id": m["id"], "status": "pass", "evidence": "e"} for m in ck.CHECKLIST_ITEMS]
+    result, errors = ck.validate_checklist(
+        json.loads(json.dumps(items)),
+        {"stage": "seed", "geography": "Israel/US", "revenue_model_type": "B2B SaaS", "traits": []},
+    )
+    assert not errors, errors
+    by_id = {i["id"]: i for i in result["items"]}
+    unresolved = result["summary"]["unresolved_profile_exclusions"]
+    assert unresolved.get("geography"), "fixture did not exercise an unresolved geography"
+
+    for item_id in unresolved["geography"]:
+        evidence = str(by_id[item_id].get("evidence", ""))
+        assert evidence.startswith("Not assessed — "), f"{item_id}: {evidence!r}"
+        assert "applies to a different geography" not in evidence, (
+            f"{item_id} states the company is somewhere else; it states nothing of the kind — "
+            f"the field simply did not resolve: {evidence!r}"
+        )
+        assert "Israel/US" in evidence, f"{item_id} does not quote back what the founder wrote"
+
+    # The trait-keyed gates are a real answer about the company and must NOT be reworded.
+    for item_id in ("CASH_28", "OVERALL_46"):
+        if item_id in by_id and by_id[item_id]["status"] == "not_applicable":
+            evidence = str(by_id[item_id].get("evidence", ""))
+            if item_id not in unresolved.get("geography", []):
+                assert evidence.startswith("Not applicable — "), (
+                    f"{item_id} is excluded by a trait, which IS an answer: {evidence!r}"
+                )
+
+    # The sector branch must not leak `revenue_model_type` — HTML is not run through substitute().
+    for item_id in unresolved.get("sector", []):
+        assert "revenue_model_type" not in str(by_id[item_id].get("evidence", ""))

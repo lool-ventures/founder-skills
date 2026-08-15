@@ -1225,7 +1225,7 @@ This skill runs inline in the main thread (not as a sub-agent). The final outcom
 - **In Claude Code:** the path to `$ANALYSIS_DIR/report.md` — there the path *is* the deliverable,
   because `./artifacts/` is durable. **In Cowork:** the delivered files are the deliverable; a path
   names a workspace that may not outlive the task.
-- The headline outcome fields, sourced from the `coaching_payload` staged in Step 8 (`tam`, `sam`, `som`, `methodology`, `confidence`, `high_severity_warnings`) plus the `insert_coaching.py` receipt (`status`, `report_path`, `run_id`). The Context B sub-agent no longer echoes these — do not source them from its return.
+- The headline outcome fields, sourced from the `coaching_payload` staged in Step 8 (`tam`, `sam`, `som`, `methodology`, `confidence`, `high_severity_warnings`, `comparison_blocked`) plus the `insert_coaching.py` receipt (`status`, `report_path`, `run_id`). The Context B sub-agent no longer echoes these — do not source them from its return.
 - Optionally: the HTML report path from Step 9.
 
 **Do NOT inline `report_markdown` in the assistant message.** The founder reads the file via the path. Inlining round-trips ~25 KB of markdown through the parent context unnecessarily.

@@ -184,14 +184,22 @@ _GATE_EVIDENCE = "Auto-gated: not_applicable — input_"
 
 
 def _gated_categories(checklist: dict[str, Any] | None) -> set[str]:
-    """Categories whose criteria were auto-gated for want of a slide anyone could see.
+    """Categories with nothing left to measure, so no percentage can honestly describe them.
 
     Every category percentage on this page divides by `pass + fail + warn`, which EXCLUDES
-    `not_applicable`. So a category with four gated criteria and one survivor scored 1/1 =
-    100% -- drawn on the radar's outer ring and printed as a strength, on a deck nobody could
-    look at. The honest denominator is not the point: there is no percentage that means
-    "we could not assess this", so the category is left out of both surfaces and the
-    disclosure carries it instead.
+    `not_applicable`. Two failure modes come out of that, and BOTH are excluded here:
+
+      * a partially gated category -- four design criteria auto-gated for want of a slide
+        anyone could see, one survivor -- scored 1/1 = 100%, drawn on the radar's outer ring
+        and printed as a strength, on a deck nobody could look at;
+      * a FULLY not-applicable category -- the four AI criteria on any company that is not an
+        AI company -- has an empty denominator and fell to the `else` branch as 0.0, drawn at
+        the centre and labelled "0%". That is the common case, not an edge case, and reads as
+        total failure rather than "does not apply", which is worse than the 100%.
+
+    So the rule is denominator-based rather than gate-based: a category nothing measured
+    leaves the percentage surfaces entirely. The stacked breakdown still shows it, over a
+    total that includes `not_applicable`, which is where "does not apply" belongs.
     """
     gated: set[str] = set()
     if not isinstance(checklist, dict):
@@ -201,7 +209,41 @@ def _gated_categories(checklist: dict[str, Any] | None) -> set[str]:
             category = str(item.get("category", "") or "")
             if category:
                 gated.add(category)
+    for cat, counts in _as_dict(_as_dict(checklist.get("summary")).get("by_category")).items():
+        c = _as_dict(counts)
+        if _num(c.get("pass"), 0) + _num(c.get("fail"), 0) + _num(c.get("warn"), 0) == 0:
+            gated.add(str(cat))
     return gated
+
+
+def _design_gate_note(checklist: dict[str, Any] | None) -> str:
+    """Say, on the page the founder shares, that the design criteria were never assessed.
+
+    Removing the false 100% from the charts is only half the fix: without this the founder
+    opens a clean "Strong / 100%" with six categories and nothing anywhere saying four
+    criteria went unassessed. `report.md` has carried this note for a while; the shareable
+    HTML carried the number and not the caveat.
+    """
+    gated = [
+        item
+        for item in _as_list(_as_dict(checklist).get("items"))
+        if isinstance(item, dict) and str(item.get("evidence", "")).startswith(_GATE_EVIDENCE)
+    ]
+    if not gated:
+        return ""
+    reason = str(gated[0].get("evidence", ""))[len(_GATE_EVIDENCE) :]
+    if reason.startswith("quality=image_only"):
+        why = "its slides are images with no readable text layer"
+    elif reason.startswith("quality=partial"):
+        why = "not every page could be read"
+    else:
+        why = "it reached the review as text rather than as a rendered file"
+    return (
+        f'<p class="note"><strong>{len(gated)} design criteria could not be reviewed</strong> — '
+        f"{_esc(why)}, so nothing here judges how the deck looks. They are excluded from the "
+        f"score rather than counted against it, and the Design &amp; Readability category is left "
+        f"out of the charts above rather than scored on whichever criterion survived.</p>"
+    )
 
 
 def _ordered_categories(by_category: dict[str, Any]) -> list[str]:
@@ -1273,7 +1315,8 @@ def compose_html(dir_path: str) -> str:
     radar_section = f'<div class="chart-section"><h2>Category Radar</h2>{_chart_radar(checklist)}</div>'
 
     breakdown_section = (
-        f'<div class="chart-section"><h2>Category Breakdown</h2>{_chart_category_breakdown(checklist)}</div>'
+        f'<div class="chart-section"><h2>Category Breakdown</h2>{_chart_category_breakdown(checklist)}'
+        f"{_design_gate_note(checklist)}</div>"
     )
 
     stage_profile = artifacts.get("stage_profile.json")

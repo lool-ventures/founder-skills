@@ -565,10 +565,10 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
             warnings.append(
                 _warn(
                     "CHECKLIST_PROFILE_UNRESOLVED",
-                    f"company {field} could not be matched to a known value, so {len(dropped)} "
+                    f"company {_profile_field_name(field)} could not be matched to a known value, so {len(dropped)} "
                     f"criteria keyed to it were excluded without being assessed: {dropped}",
                     founder_message=(
-                        f"We could not match your {field} to a known value, so {len(dropped)} "
+                        f"We could not match your {_profile_field_name(field)} to a known value, so {len(dropped)} "
                         f"checks that may apply to you were excluded from the score without being "
                         f"assessed: {_checklist_labels(checklist, dropped)}."
                     ),
@@ -759,6 +759,18 @@ def _section_executive_summary(
     return "\n".join(lines) + "\n"
 
 
+def _profile_field_name(field: str) -> str:
+    """Founder-facing name for an unresolved profile field.
+
+    The exclusion is keyed by GATE name (`sector`), but the value that failed to resolve is
+    `revenue_model_type` and the report also prints a `Sector:` header from a different,
+    resolvable field. Naming it "sector" told a founder their sector could not be matched two
+    lines under a header stating their sector, while report.html said "revenue model" about the
+    same criteria. One field, three names. Mirrors `checklist.py`'s `_UNRESOLVED_GATE_FIELDS`.
+    """
+    return {"sector": "revenue model"}.get(field, field)
+
+
 def _checklist_labels(checklist: dict[str, Any] | None, ids: list[Any]) -> str:
     """Render criterion ids as founder-facing labels.
 
@@ -825,7 +837,7 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
         dropped = _as_list(ids)
         if dropped:
             lines.append(
-                f"**Not matched:** your {field} could not be matched to a known value, so "
+                f"**Not matched:** your {_profile_field_name(field)} could not be matched to a known value, so "
                 f"{len(dropped)} checks that may apply were excluded from the score above: "
                 f"{_named(dropped)}\n"
             )
