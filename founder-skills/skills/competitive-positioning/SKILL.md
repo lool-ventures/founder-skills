@@ -915,6 +915,11 @@ evidence fields verbatim, changing nothing else in `positioning.json`. This is a
 merge (see the carve-out above) — you are relocating the sub-agent's own output, not authoring new
 scores or evidence.
 
+**Also copy each view's axis `polarity` across in this same pass** — the sub-agent sets it and
+`positioning.json` is what the founder-override path re-pipes. Lose it there and the re-scored
+ranks silently revert to higher-is-better on a cost axis, on exactly the runs where the founder
+engaged with the map. Same failure mode as `scoring_basis` below, same one-line fix.
+
 **Also copy `scoring_basis` into `positioning.json` in this same pass.** The hand-off file's
 top-level `scoring_basis` (echoed from `SCORING_BASIS` in the dispatch) needs to land in
 `positioning.json` too, not just in `positioning_scores.json` — the founder coordinate-override flow

@@ -573,7 +573,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # moat-definitions.md and was accepted by score_moats.py, but the dispatch never mentioned it —
     # measured 0 custom moats on 4 of 4 runs, while one of those runs scored a channel reaching ~80%
     # of its target market as `network_effects: absent`. Correct reasoning, lost finding.
-    "competitive-positioning": 119_767,
+    # competitive-positioning +374 B: the merge-back step now carries axis `polarity` across into
+    # positioning.json alongside scoring_basis. The founder-coordinate-override path re-pipes
+    # positioning.json through score_positioning.py, so a dropped polarity silently reverts a cost
+    # axis to higher-is-better — re-inverting the rank on exactly the runs where the founder engaged
+    # with the map. scoring_basis already had this carve-out for the identical reason; polarity did not.
+    "competitive-positioning": 120_141,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.

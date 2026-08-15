@@ -306,8 +306,8 @@ Write to OUTPUT_PATH the JSON matching `score_positioning.py`'s input schema:
   "views": [
     {
       "id": "...",
-      "x_axis": {"name": "...", "rationale": "..."},
-      "y_axis": {"name": "...", "rationale": "..."},
+      "x_axis": {"name": "...", "rationale": "...", "polarity": "higher_is_better|lower_is_better"},
+      "y_axis": {"name": "...", "rationale": "...", "polarity": "higher_is_better|lower_is_better"},
       "points": [
         {
           "competitor": "...", "x": 50, "y": 75,

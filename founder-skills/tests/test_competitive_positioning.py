@@ -1583,6 +1583,27 @@ class TestScorePositioning:
         # Y is untouched and higher-is-better: startup at 85 beats every competitor.
         assert v["startup_y_rank"] == 1, f"Y-axis rank changed unexpectedly: {v['startup_y_rank']}"
 
+    def test_score_positioning_rejects_an_unrecognised_polarity(self) -> None:
+        """An unrecognised polarity silently resolved to higher-is-better — the WRONG answer, unsignalled.
+
+        Measured against the resolver: `"lower is better"`, `"lower"`, `"Lower Is Better"`,
+        `"low_is_better"` and `"banana"` all resolved to `higher_is_better`. The first four are
+        plausible emissions from a model trying to say the opposite. A price axis so labelled gets
+        exactly the defect `polarity` was added to prevent — the founder told they rank last while
+        second-cheapest — with no warning anywhere, because a silent default is indistinguishable from
+        a deliberate one.
+
+        `scoring_basis` in this same validator rejects an unrecognised value rather than defaulting
+        (`_VALID_SCORING_BASIS`). Polarity gets the same treatment: a wrong founder-facing rank is worse
+        than a failed batch, and a failed batch is repairable.
+        """
+        for bad in ("lower is better", "Lower Is Better", "low_is_better", "banana", 123):
+            payload = _make_valid_positioning_input()
+            payload["views"][0]["x_axis"]["polarity"] = bad
+            rc, _, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+            assert rc == 1, f"polarity {bad!r} was accepted and silently defaulted; expected rejection"
+            assert "polarity" in stderr.lower(), f"the error does not name the offending field: {stderr}"
+
     def test_score_positioning_polarity_defaults_to_higher_is_better(self) -> None:
         """An artifact written before `polarity` existed must score exactly as it did before.
 

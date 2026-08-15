@@ -106,7 +106,12 @@ def _axis_polarity(view: dict[str, Any], axis: str) -> str:
     raw = axis_obj.get("polarity") if isinstance(axis_obj, dict) else None
     if not raw:
         raw = view.get(f"{axis}_axis_polarity")
-    return _LOWER_IS_BETTER if str(raw or "").strip().lower() == _LOWER_IS_BETTER else _HIGHER_IS_BETTER
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return _HIGHER_IS_BETTER
+    # Anything present but unrecognised is REJECTED upstream by _validate_input rather than
+    # coerced here. Coercing sent "lower is better" — a plausible way for a model to say the
+    # opposite — to higher_is_better, silently, which is the exact defect polarity exists to prevent.
+    return _LOWER_IS_BETTER if str(raw).strip().lower() == _LOWER_IS_BETTER else _HIGHER_IS_BETTER
 
 
 def _compute_rank(startup_val: float, competitor_vals: list[float], lower_is_better: bool = False) -> int:
@@ -359,6 +364,7 @@ def _normalize_positioning_input(data: dict[str, Any]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 _VALID_SCORING_BASIS = ("shipped", "roadmap_12mo", "mixed")
+_VALID_POLARITY = (_HIGHER_IS_BETTER, _LOWER_IS_BETTER)
 
 
 def _validate_input(data: dict[str, Any]) -> list[str]:
@@ -373,6 +379,28 @@ def _validate_input(data: dict[str, Any]) -> list[str]:
     if "views" not in data or not isinstance(data.get("views"), list):
         errors.append("'views' must be a non-empty array")
         return errors
+
+    # Polarity decides what rank 1 MEANS, so an unrecognised value must not fall through to the
+    # default. Measured: "lower is better", "Lower Is Better", "low_is_better" and "banana" all
+    # resolved to higher_is_better — the first three being plausible attempts to say the opposite,
+    # and the result being the founder told they rank last while second-cheapest. Rejected here for
+    # the same reason `scoring_basis` above is: a wrong rank ships, a failed batch is repaired.
+    for _vi, _view in enumerate(data["views"]):
+        if not isinstance(_view, dict):
+            continue
+        for _ax in ("x", "y"):
+            _obj = _view.get(f"{_ax}_axis")
+            _raw = _obj.get("polarity") if isinstance(_obj, dict) else None
+            if _raw is None:
+                _raw = _view.get(f"{_ax}_axis_polarity")
+            if _raw is None or (isinstance(_raw, str) and not _raw.strip()):
+                continue  # absent is legal and means higher_is_better
+            if not isinstance(_raw, str) or _raw.strip().lower() not in _VALID_POLARITY:
+                errors.append(
+                    f"view {_vi} {_ax}_axis 'polarity' must be one of: "
+                    + ", ".join(_VALID_POLARITY)
+                    + f" (got {_raw!r}) — omit it for {_HIGHER_IS_BETTER}"
+                )
 
     if len(data["views"]) == 0:
         errors.append("At least one view is required")
