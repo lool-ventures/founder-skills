@@ -220,6 +220,9 @@ def _try_float(value: Any) -> float | None:
 # compose_report.py uses the same constant; keep them in step.
 CLOSE_AGREEMENT_PCT = 25.0
 
+# Mirrors compose_report.DECK_MISMATCH_PCT. Both surfaces must speak at the same threshold.
+DECK_MISMATCH_PCT = 50.0
+
 
 def _compute_delta(calculated: float, deck_claim: Any) -> float | None:
     """Returns signed percentage delta, or None if claim is invalid."""
@@ -1500,7 +1503,14 @@ def _chart_key_findings(
                             f"{metric.upper()} ({method}) is within {abs(delta):.1f}% of your own "
                             f"figure — agreement is not independent confirmation"
                         )
-                    elif abs(delta) > CLOSE_AGREEMENT_PCT:
+                    elif abs(delta) > DECK_MISMATCH_PCT:
+                        # Same threshold compose_report.py uses for DECK_CLAIM_MISMATCH. Until
+                        # today this arm read `> CLOSE_AGREEMENT_PCT`, so report.html flagged a
+                        # divergence at >25% while report.md warned only above >50% -- two
+                        # thresholds for one relationship across two surfaces the founder reads
+                        # side by side. (The condition was also tautological after the `<=` arm.)
+                        # The (25, 50] band is a known gap, documented at DECK_MISMATCH_PCT; it is
+                        # closed in both surfaces at once or in neither.
                         attention.append(f"{metric.upper()} ({method}): {delta:+.1f}% vs deck claim")
 
     if not strong and not attention and not actions:
