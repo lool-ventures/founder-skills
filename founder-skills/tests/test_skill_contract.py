@@ -753,7 +753,13 @@ REFERENCES_CEILING: dict[str, int] = {
     # fmr +667 B: the coaching_payload table was missing static_runway_months and base_runway_note —
     # two fields compose EMITS and SKILL.md instructs the model to read. It also now states that a
     # null runway_months is a RESULT (default-alive), not a gap.
-    "financial-model-review": 73_628,
+    # fmr +123 B (73_628 -> 73_751): CASH_24's bands did not partition their own axis. Pass read
+    # "Seed/A 24-36mo" and warn read "12-18 months", leaving 18-24mo at seed in NO band; a delivered
+    # run graded a 22-month runway `pass` on evidence that said "Within seed 24-36mo target band but
+    # slightly short". A rubric hole does not read as a hole to the grader — it reads as a judgement
+    # call, and the nearest band wins. The rewrite closes 18-24 and >36, and states that hedged
+    # evidence is a warn.
+    "financial-model-review": 73_751,
     # ic-sim +1446 B: evaluation-criteria.md omitted `to_confirm` from the status table AND from the
     # scoring formula, which excluded only not_applicable. Following it changed the conviction
     # score, since score_dimensions.py excludes both. The >6 coverage cap was undocumented too.

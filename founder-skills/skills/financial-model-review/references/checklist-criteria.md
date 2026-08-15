@@ -203,8 +203,8 @@ Thresholds: **strong** >= 85%, **solid** >= 70%, **needs_work** >= 50%, **major_
 ### `CASH_24`
 **Label:** Runway length adequate
 **Stage:** all | **Geography:** all | **Sector:** all | **Model format:** spreadsheet only
-**Pass:** Pre-seed >=18mo; Seed/A 24-36mo.
-**Warn:** 12-18 months with strong rationale.
+**Pass:** Pre-seed >=18mo; Seed/A >=24mo (24-36mo typical).
+**Warn:** >=12mo but under the stage bar (Pre-seed 12-18; Seed/A 18-24), with rationale. Evidence that hedges ("slightly short") is a warn, not a pass.
 **Fail:** <12 months with no plan.
 
 ### `CASH_25`
