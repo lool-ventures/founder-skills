@@ -1495,7 +1495,11 @@ def _section_sizing_table(
     if comparison:
         delta = comparison.get("tam_delta_pct", 0)
         note = comparison.get("warning") or comparison.get("note", "")
-        lines.append(f"\n**Cross-validation:** TAM delta = {delta}%. {note}")
+        # NOT "Cross-validation" -- that label asserts the comparison validates something. The
+        # pipeline does not track where each input came from, so it cannot tell whether the two
+        # builds are independent, and a small delta is therefore not confirmation. Measured: this
+        # label rendered on 13/13 real runs, i.e. wider reach than the note it introduces.
+        lines.append(f"\n**Top-down vs bottom-up:** TAM delta = {delta}%. {note}")
 
     # Deck Claims comparison table
     if provenance:
@@ -1514,6 +1518,7 @@ def _section_sizing_table(
                     m = _as_dict(approach_data.get(metric))
                     val = m.get("value", 0)
                     method = "Top-down" if approach_key == "top_down" else "Bottom-up"
+                    classification = _md_safe(classification)
                     marker = ""
                     if abs(float(delta_pct)) <= CLOSE_AGREEMENT_PCT and not prov.get("comparison_blocked"):
                         marker = " *"
@@ -1521,7 +1526,7 @@ def _section_sizing_table(
                     comparison_rows.append(
                         f"| {metric.upper()} ({method}) | "
                         f"{_fmt_usd(float(prov.get('deck_claim_comparable') or deck_claim))} "
-                        f"| {_fmt_usd(val)} | {delta_pct:+.1f}%{marker} | {_md_safe(classification)} |"
+                        f"| {_fmt_usd(val)} | {delta_pct:+.1f}%{marker} | {classification} |"
                     )
         if comparison_rows:
             lines.append("\n### Deck Claims vs. Our Estimates\n")

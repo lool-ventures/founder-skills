@@ -516,10 +516,15 @@ def compare(td: dict[str, Any], bu: dict[str, Any]) -> dict[str, Any]:
         elif delta_pct > 15:
             result["note"] = (
                 f"TAM estimates differ by {result['tam_delta_pct']}%. "
-                "Moderate discrepancy — worth investigating but not alarming."
+                + "Closeness is not confirmation: the pipeline cannot tell whether the two builds "
+                "rest on the same underlying figures. Check whether they do."
             )
         else:
-            result["note"] = f"TAM estimates differ by only {result['tam_delta_pct']}%. Good convergence."
+            result["note"] = (
+                f"TAM estimates differ by {result['tam_delta_pct']}%. "
+                + "Closeness is not confirmation: the pipeline cannot tell whether the two builds "
+                "rest on the same underlying figures. Check whether they do."
+            )
 
     for metric in ("sam", "som"):
         td_metric = td.get(metric)
@@ -549,11 +554,14 @@ def compare(td: dict[str, Any], bu: dict[str, Any]) -> dict[str, Any]:
         elif m_delta_pct > 15:
             result[f"{metric}_note"] = (
                 f"{metric.upper()} estimates differ by {result[f'{metric}_delta_pct']}%. "
-                "Moderate discrepancy — worth investigating but not alarming."
+                + "Closeness is not confirmation: the pipeline cannot tell whether the two builds "
+                "rest on the same underlying figures. Check whether they do."
             )
         else:
             result[f"{metric}_note"] = (
-                f"{metric.upper()} estimates differ by only {result[f'{metric}_delta_pct']}%. Good convergence."
+                f"{metric.upper()} estimates differ by {result[f'{metric}_delta_pct']}%. "
+                + "Closeness is not confirmation: the pipeline cannot tell whether the two builds "
+                "rest on the same underlying figures. Check whether they do."
             )
 
     return result

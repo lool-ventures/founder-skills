@@ -726,7 +726,10 @@ REFERENCES_CEILING: dict[str, int] = {
     # market-sizing +813 B: artifact-schemas.md documents sizing.json's new `fx` block and
     # retracts "currency is a label only — nothing in this skill performs FX conversion", which
     # became false.
-    "market-sizing": 42_813,
+    # +370 B (42_813 -> 43_183): the `approaches_reconciled` rubric was rewritten so that the
+    # two approaches agreeing is no longer a pass on its own -- the pipeline cannot tell whether
+    # both builds rest on the same underlying figures, so closeness is not confirmation.
+    "market-sizing": 43_183,
     # fmr raised to document `graded_against` on the three producer outputs that stamp it — a new
     # artifact field is not discoverable from a schema doc that omits it, and the field exists to make
     # staleness detectable at all (run_id parity cannot see corrections applied within a run).

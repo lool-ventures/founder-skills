@@ -464,8 +464,10 @@ def test_single_approach_funnel() -> None:
     assert "Top-Down" in stdout
     # Should not contain bottom-up funnel label
     assert "Bottom-Up" not in stdout
-    # Cross-validation should show placeholder since only one approach
-    assert "Cross-validation requires both approaches" in stdout
+    # The comparison shows a placeholder since only one approach ran.
+    # NOT "cross-validation" -- the word asserts the comparison validates something,
+    # and report.md was changed for the same reason. Both surfaces ship together.
+    assert "Comparing the two approaches requires both" in stdout
 
 
 def test_malformed_list_elements() -> None:
@@ -1027,11 +1029,11 @@ def test_cross_validation_per_metric_scaling() -> None:
     # Bars should have non-trivial heights — extract cross-validation
     # section precisely using the h2 heading and section boundary
     cv_match = re.search(
-        r"<h2[^>]*>Cross-Validation Comparison</h2>(.*?)</section>",
+        r"<h2[^>]*>Top-down vs Bottom-up</h2>(.*?)</section>",
         stdout,
         re.DOTALL,
     )
-    assert cv_match, "Cross-Validation section not found"
+    assert cv_match, "Top-down vs Bottom-up section not found"
     cv_html = cv_match.group(1)
     # Extract only bar rects (have rx="3" attribute, distinguishing them from
     # scale ceiling lines which are <line> elements)

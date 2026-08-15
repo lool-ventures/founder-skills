@@ -5790,3 +5790,82 @@ def test_fx_footnote_suppressed_when_claim_currency_undeclared(tmp_path: Path) -
     md = _compose_md_text(d)
     assert "COMPARISON_CURRENCY_UNKNOWN" in _compose_codes(d)
     assert "Agreement on a number is not independent confirmation" not in md
+
+
+# ---------------------------------------------------------------------------
+# Convergence is not evidence: the producer note, the report label, and the
+# checklist criterion all used to reward the two builds agreeing.
+#
+# Measured on 13 real runs: >=4 coaching sections presented that agreement as
+# corroboration, one telling the founder to "say so directly in the room";
+# exactly 1 got it right. The pipeline does not track where each input came
+# from, so it cannot tell whether the builds are independent.
+# ---------------------------------------------------------------------------
+
+
+def _comparison_note(customer_count: int, arpu: int) -> dict[str, Any]:
+    """Real producer output — not a hand-written note string.
+
+    Existing fixtures hard-code `"Moderate discrepancy"`, so a test built on them would pass
+    against the old text forever.
+    """
+    payload = {
+        "approach": "both",
+        "currency": "USD",
+        "industry_total": 100e9,
+        "segment_pct": 10,
+        "share_pct": 5,
+        "customer_count": customer_count,
+        "arpu": arpu,
+        "serviceable_pct": 60,
+        "target_pct": 2,
+    }
+    rc, data, err = run_script("market_sizing.py", ["--stdin"], stdin_data=json.dumps(payload))
+    assert rc == 0, err
+    assert data is not None
+    comp = data.get("comparison")
+    return comp if isinstance(comp, dict) else {}
+
+
+@pytest.mark.parametrize("cc,ar,band", [(5_000_000, 20_000, "converging"), (5_000_000, 24_000, "moderate")])
+def test_convergence_note_does_not_claim_evidence(cc: int, ar: int, band: str) -> None:
+    note = str(_comparison_note(cc, ar).get("note") or "")
+    assert note, f"{band} band produced no note"
+    # positive first — the note must say what it cannot conclude
+    assert "Closeness is not confirmation" in note, note
+    assert "rest on the same underlying figures" in note, note
+    # then the retired reassurances
+    assert "Good convergence" not in note
+    assert "not alarming" not in note
+
+
+def test_large_delta_branch_still_warns(cc: int = 50_000, ar: int = 18_000) -> None:
+    """The >30% branch is a real warning and must survive untouched."""
+    comp = _comparison_note(cc, ar)
+    assert "Review assumptions" in str(comp.get("warning") or "")
+
+
+def test_report_does_not_label_the_comparison_a_validation(tmp_path: Path) -> None:
+    """`**Cross-validation:**` asserted the comparison validates something. Rendered 13/13."""
+    d = tmp_path / "ms-xval"
+    d.mkdir()
+    _make_full_sizing_dir(d)
+    md = _compose_md_text(d)
+    assert "Top-down vs bottom-up:" in md  # positive first
+    assert "Cross-validation:" not in md
+
+
+def test_checklist_criterion_rewards_explanation_not_agreement() -> None:
+    """Item 15 awarded a point for the two builds being close."""
+    # Read the criterion from source rather than a CLI flag -- a skipped test is a vacuous test.
+    src = (Path(__file__).resolve().parents[1] / "skills" / "market-sizing" / "scripts" / "checklist.py").read_text()
+    line = next(ln for ln in src.splitlines() if '"approaches_reconciled"' in ln)
+    assert "explained" in line.lower(), line
+    assert "reconciled" not in line.split('"label"')[1].lower(), line
+
+    rubric = (
+        Path(__file__).resolve().parents[1] / "skills" / "market-sizing" / "references" / "pitfalls-checklist.md"
+    ).read_text()
+    section = rubric.split("### `approaches_reconciled`")[1].split("###")[0]
+    assert "Agreement is **not** a pass on its own" in section, section
+    assert "within 30%" not in section, section

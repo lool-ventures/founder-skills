@@ -1109,7 +1109,10 @@ def _chart_tornado(sensitivity: dict[str, Any] | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Chart 3: Cross-validation Comparison (grouped bars)
+# Chart 3: Top-down vs bottom-up comparison (grouped bars).
+# NOT "cross-validation" -- that word asserts the comparison validates something. The pipeline
+# cannot tell whether the two builds rest on the same underlying figures, so closeness is not
+# confirmation. compose_report.py carries the same wording; the two surfaces ship together.
 # ---------------------------------------------------------------------------
 
 
@@ -1127,7 +1130,7 @@ def _chart_cross_validation(sizing: dict[str, Any] | None) -> str:
     bu = sizing.get("bottom_up")
 
     if not isinstance(td, dict) or not isinstance(bu, dict):
-        return '<div class="placeholder">Cross-validation requires both approaches</div>'
+        return '<div class="placeholder">Comparing the two approaches requires both</div>'
 
     metrics = ["tam", "sam", "som"]
     td_vals = [_num(_as_dict(td.get(m)).get("value", 0)) for m in metrics]
@@ -1657,7 +1660,7 @@ def compose_html(dir_path: str) -> str:
             {tornado_html}
         </section>
         <section>
-            <h2>Cross-Validation Comparison</h2>
+            <h2>Top-down vs Bottom-up</h2>
             {cross_val_html}
         </section>
         <section>

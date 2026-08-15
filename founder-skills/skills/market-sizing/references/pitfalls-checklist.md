@@ -92,9 +92,14 @@ is about customer acquisition, this is about hiring/capacity/burn; one field can
 **Fail:** Only one approach is used. Top-down alone is coarse; bottom-up alone may miss the big picture.
 
 ### `approaches_reconciled`
-**Label:** Top-down and bottom-up reconciled
-**Pass:** Both methods produce similar TAM figures (within 30%).
-**Fail:** >30% discrepancy between approaches signals faulty assumptions that need investigation.
+**Label:** Gap between the two approaches is explained
+**Pass:** Whatever the gap, the analysis says what drives it — which inputs differ and why.
+**Fail:** The gap is unexplained, or agreement is presented as confirmation.
+
+Agreement is **not** a pass on its own. The pipeline does not track where each input came from, so it
+cannot tell whether the two builds are independent; a small delta may simply mean both rest on the
+same underlying figures. Awarding a point for closeness rewards exactly that. What earns the point is
+an explanation of the gap, in either direction.
 
 ### `growth_dynamics_considered`
 **Label:** Market growth dynamics considered

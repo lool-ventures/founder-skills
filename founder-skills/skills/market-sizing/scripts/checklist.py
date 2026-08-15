@@ -93,7 +93,7 @@ CHECKLIST_ITEMS: list[dict[str, str]] = [
     {"id": "assumptions_categorized", "category": "Data Quality", "label": "Assumptions categorized"},
     # Methodology
     {"id": "both_approaches_used", "category": "Methodology", "label": "Both approaches used"},
-    {"id": "approaches_reconciled", "category": "Methodology", "label": "Top-down and bottom-up reconciled"},
+    {"id": "approaches_reconciled", "category": "Methodology", "label": "Gap between the two approaches is explained"},
     {"id": "growth_dynamics_considered", "category": "Methodology", "label": "Market growth dynamics considered"},
     # Market Understanding
     {"id": "market_properly_segmented", "category": "Market Understanding", "label": "Market properly segmented"},
