@@ -906,9 +906,10 @@ def test_script_gated_items_are_not_recorded_as_self_gated() -> None:
 
 
 _FREEFORM_GEOGRAPHY = "Israel-founded, US target market (UK + EU secondary)"
-# Every criterion whose geography gate names a real geography rather than a trait. CASH_29's
-# gate is ["israel", "multi-entity"], so an unresolved geography drops it too — read these off
-# checklist.py's gates, not off the criteria doc, which records CASH_29 as geography "all".
+# Every criterion whose geography gate names a real geography rather than a trait. CASH_29 is
+# easy to miss: it reads as an entity-structure criterion, but its gate is
+# ["israel", "multi-entity"], so an unresolved geography drops it alongside the three explicitly
+# Israel-specific ones. Derive this list from the gates, not from the criterion labels.
 _ISRAEL_CRITERIA = ["CASH_29", "CASH_30", "CASH_31", "CASH_32"]
 
 
