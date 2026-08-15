@@ -917,8 +917,13 @@ def _section_runway(runway: dict[str, Any] | None) -> str:
             # hide the same flat-burn assumption the base-case fix above addresses.
             static_months = s.get("static_runway_months")
             static_str = f"{static_months:g} months" if isinstance(static_months, (int, float)) else "—"
-            cash_out = s.get("cash_out_date", "?")
-            decision = s.get("decision_point", "?")
+            # `.get(k, default)` substitutes only when the key is ABSENT. A default-alive scenario
+            # carries these keys with an explicit null — it never runs out of cash, so there is no
+            # cash-out date and no decision point — and `None` rendered straight into the table as the
+            # literal "None". `or` catches the null too, and the em-dash matches `static_str` above,
+            # which already renders not-applicable that way in the adjacent column.
+            cash_out = s.get("cash_out_date") or "—"
+            decision = s.get("decision_point") or "—"
             alive = s.get("default_alive", None)
             alive_str = "Yes" if alive else "No" if alive is not None else "?"
             # Build assumptions string from scenario parameters

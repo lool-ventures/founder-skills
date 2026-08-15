@@ -677,6 +677,60 @@ _URL_RE = re.compile(r"https?://[^\s)\]<>\"']+")
 _URL_RENDERING_SKILLS = frozenset({"market-sizing", "competitive-positioning"})
 
 
+# A producer sentinel rendered as if it were a quantity. THREE FAMILIES, not an enumerated list of
+# strings — the fleet's own experience is that enumerated blocklists are unwinnable, so these match on
+# the SHAPE of an impossible value reaching a founder.
+#
+# Calibrated before use, per the discipline that a detector and the hypothesis it serves must not share
+# an author unchecked: run against all six skills' committed fixtures, it returned ZERO false positives
+# and ONE true positive — financial-model-review's runway table rendering `| None | None |` for a
+# default-alive scenario, fixed in the same commit that added this.
+_IMPOSSIBLE_VALUE_PATTERNS: dict[str, re.Pattern[str]] = {
+    # A negative rank/count/total. `score_moats.py` stamps rank -1 for "not rankable"; rendering it
+    # verbatim gave founders "Rank -1 of 0 ranked".
+    "negative_count": re.compile(r"(?i)\b(?:rank|position|count|total|score|of)\s*:?\s*-\d+\b"),
+    # A zero denominator. "of 0 ranked" is not a comparison, it is a sentinel that escaped.
+    "zero_denominator": re.compile(r"(?i)\bof\s+0\b(?!\.\d)"),
+    # A Python repr. `.get(k, default)` substitutes only for an ABSENT key, so an explicit null passes
+    # straight through to str() — the single most common way this class reaches a deliverable.
+    "python_repr": re.compile(r"(?<![A-Za-z])(?:None|NaN|nan|null)(?![A-Za-z])"),
+}
+
+
+@pytest.mark.parametrize("skill", COACHING_SKILLS)
+def test_composed_report_carries_no_producer_sentinels(skill: str, tmp_path: Path) -> None:
+    """A value that is correct in the artifact and meaningless when rendered.
+
+    Per-site guards close instances; this closes the class. `Rank -1 of 0 ranked` rendered from a
+    COMMITTED fixture and passed every founder-facing scan the fleet had — test_compose_invariants,
+    test_html_founder_text, leak_scan.py and verify_positioning's rendered checks — because each of
+    those looks for internal *vocabulary*, and a sentinel is internal *arithmetic*. Nothing was looking
+    for a negative rank or a zero denominator.
+
+    Scope, stated so a green is not over-read: this scans delivered markdown for values that cannot be
+    true of the thing they describe. It cannot see a sentinel that renders as a plausible number (a
+    producer stamping 0 for "unknown" is invisible here), and it does not scan HTML.
+    """
+    fixture_dir = REPO_ROOT / "founder-skills" / "tests" / "fixtures" / skill
+    if not fixture_dir.exists():
+        pytest.skip(f"No fixtures at {fixture_dir.relative_to(REPO_ROOT)}")
+    work_dir = tmp_path / skill
+    work_dir.mkdir(parents=True)
+    drive_compose(skill, fixture_dir, work_dir)
+
+    report_md = work_dir / "report.md"
+    assert report_md.exists(), f"{skill} composed no report.md"
+    text = report_md.read_text(encoding="utf-8")
+    assert len(text) > 500, f"{skill} report.md is only {len(text)}B — too small to have exercised anything"
+
+    found = {name: pat.findall(text) for name, pat in _IMPOSSIBLE_VALUE_PATTERNS.items()}
+    hits = {k: v for k, v in found.items() if v}
+    assert not hits, (
+        f"{skill} report.md renders a producer sentinel to the founder: {hits}. A value that is correct "
+        f"in the artifact ('-1 means not rankable') is nonsense in prose — render what it MEANS."
+    )
+
+
 @pytest.mark.parametrize("skill", COACHING_SKILLS)
 def test_composed_report_urls_survive_founder_text_substitution(skill: str, tmp_path: Path) -> None:
     """A founder-visible string can be malformed rather than internal, and nothing scanned for that.
