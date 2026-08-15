@@ -3,8 +3,13 @@
 #  1. Mount the WHOLE founder-skills plugin (`../../founder-skills` resolves to the plugin root, NOT a
 #     single skills/<skill>/ dir), so the skillHash covers rules + references/ + scripts/ — a content
 #     edit then trips `verify-cassettes --staleness`. Narrowing this mount reintroduces a false-green.
-#     (Caveat: because the WHOLE plugin is hashed, ANY skill edit re-stales EVERY cassette — see the
-#     F8 staleness posture in docs/internal/2026-06-18-phase1-2-fleet-cowork-plan.md §8.)
+#     (Caveat, NARROWED by the per-scenario `skills:` key — every scenario now declares one, which
+#     scopes the staleness hash to that skill plus the shared roots. So the blast radius is:
+#       skill-local edit under skills/<skill>/    -> only that skill's cassettes stale
+#       shared scripts/ | references/ | agents/   -> the whole fleet stales
+#     The mount stays whole-plugin regardless — narrowing it is what reintroduces the false-green.
+#     This comment previously read "ANY skill edit re-stales EVERY cassette", which predates the
+#     `skills:` key and over-stated the cost of a single-skill change by the whole fleet.)
 #  2. Repo-relative path (resolves from this session file's dir), so the committed session + cassettes
 #     resolve in CI with no absolute /Users/... leak.
 model: claude-sonnet-4-6        # parity with prior cowork runs
