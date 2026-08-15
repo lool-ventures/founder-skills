@@ -70,6 +70,13 @@ WARNING_SEVERITY: dict[str, str] = {
     # A scored view ended up with an empty axis rationale. Emitted by score_positioning.py so a
     # blank rationale can never again pass the checklist's POS_05 unnoticed.
     "RATIONALE_MISSING": "medium",
+    # A checklist item's echoed label does not match the item it was recorded under, so the
+    # evidence behind that grade may belong to a different criterion. Medium, matching the
+    # producer: checklist.py records the signal as new and uncalibrated (two known true
+    # positives, no measured false-positive rate) and says to ratchet to an error only after
+    # it has run clean on real runs. Raising it here alone would escalate an unmeasured signal
+    # into a --strict blocker and split the judgement across two files — change both together.
+    "CRITERION_MISMATCH": "medium",
     # Low
     "FOUNDER_OVERRIDE_COUNT": "low",
     # v0.4.2 Mitigation 2 — informational only (uuid is per-run, won't collide)
@@ -92,6 +99,7 @@ WARNING_LABELS: dict[str, str] = {
     "MISSING_CHECKLIST": "Missing Checklist",
     "CORRUPT_ARTIFACT": "Corrupt Artifact",
     "STALE_ARTIFACT": "Stale Artifact",
+    "CRITERION_MISMATCH": "Quality Check Recorded Against the Wrong Item",
     "SHALLOW_COMPETITOR_PROFILE": "Shallow Competitor Profile",
     "VANITY_AXIS_WARNING": "Vanity Axis Warning",
     "MOAT_WITHOUT_EVIDENCE": "Moat Without Evidence",
@@ -809,6 +817,25 @@ def validate_artifacts(
             code = w.get("code", "")
             if code in WARNING_SEVERITY:
                 warnings.append(_warn(code, w.get("message", f"Forwarded from landscape: {code}")))
+
+    # Forward from checklist. This loop was missing: checklist.py emitted CRITERION_MISMATCH
+    # into checklist.json and nothing downstream ever read it, so the newest integrity check in
+    # this skill produced a warning no founder or agent saw. Note it forwards `founder_message`
+    # explicitly — the agent-facing `message` names a criterion ID, and report.md may not carry
+    # one (verify_positioning.py fails the delivery gate on it), so registering the severity
+    # without this argument would have traded a silent warning for an unpublishable report.
+    if _usable(checklist_art):
+        for w in _as_list(checklist_art.get("warnings")):
+            w = _as_dict(w)
+            code = w.get("code", "")
+            if code in WARNING_SEVERITY:
+                warnings.append(
+                    _warn(
+                        code,
+                        w.get("message", f"Forwarded from checklist: {code}"),
+                        w.get("founder_message"),
+                    )
+                )
 
     # Forward from positioning_scores (skip VANITY_AXIS_WARNING — compose generates it
     # directly from vanity flags with more detail)

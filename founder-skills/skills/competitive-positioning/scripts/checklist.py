@@ -248,6 +248,20 @@ def validate_and_score(
                         f"'{item_def['label']}'. The evidence recorded here may belong to a "
                         f"different criterion, which makes this grading unauditable."
                     ),
+                    # Founder-facing twin of `message`, rendered by compose in report.md while
+                    # `message` stays agent-facing in report.json. Two things are deliberately
+                    # absent. The criterion ID, because it is meaningless to a founder AND
+                    # because verify_positioning.py fails any report.md matching
+                    # COVER|POS|MOAT|EVID|NARR|MISS_\d\d — so forwarding `message` verbatim
+                    # would render every affected review unpublishable. And the echoed label,
+                    # because it is model-supplied text that can itself contain a criterion ID;
+                    # quoting it here would reintroduce the same failure through the back door.
+                    # `item_def["label"]` is ours and is safe.
+                    "founder_message": (
+                        f'The quality check "{item_def["label"]}" was graded against a '
+                        f"different check's description, so the evidence behind that grade may "
+                        f"not belong to it. Treat that one result as unverified."
+                    ),
                 }
             )
 

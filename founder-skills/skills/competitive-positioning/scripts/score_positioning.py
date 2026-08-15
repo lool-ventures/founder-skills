@@ -182,8 +182,10 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
         )
 
     # Rank-based differentiation with distance weighting
-    x_lower_better = _axis_polarity(view, "x") == _LOWER_IS_BETTER
-    y_lower_better = _axis_polarity(view, "y") == _LOWER_IS_BETTER
+    x_polarity = _axis_polarity(view, "x")
+    y_polarity = _axis_polarity(view, "y")
+    x_lower_better = x_polarity == _LOWER_IS_BETTER
+    y_lower_better = y_polarity == _LOWER_IS_BETTER
     rank_x = _compute_rank(startup_x, comp_x_vals, x_lower_better)
     rank_y = _compute_rank(startup_y, comp_y_vals, y_lower_better)
 
@@ -249,6 +251,14 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
         "y_axis_name": view.get("y_axis", {}).get("name", "Y"),
         "x_axis_rationale": x_rationale,
         "y_axis_rationale": y_rationale,
+        # RESOLVED polarity, always emitted, never absent. Two jobs. Downstream consumers stop
+        # re-deriving "which end is good" from an input view they may not be holding; and
+        # `views_fingerprint` reads it back through `_axis_polarity`'s sibling branch, so the
+        # hash covers scoring semantics and not just coordinates. Before this, flipping an axis
+        # changed rank and differentiation_score while the fingerprint stayed byte-identical,
+        # which let a checklist graded against the OLD orientation still read fresh.
+        "x_axis_polarity": x_polarity,
+        "y_axis_polarity": y_polarity,
         "x_axis_vanity_flag": x_vanity,
         "y_axis_vanity_flag": y_vanity,
         "differentiation_score": diff_score,
@@ -280,7 +290,21 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
 def views_fingerprint(views: list[dict]) -> str:
     """Stable hash of the scored map's identity. Excludes ALL prose (evidence, rationale,
     provenance) so a reworded evidence string is not a moved map. Order-insensitive over
-    views and over points."""
+    views and over points.
+
+    Includes resolved axis POLARITY, which is not prose: it decides which end of an axis is
+    good, and therefore rank and `differentiation_score`. Omitting it made the hash blind to
+    a real change in meaning — same points, same axis names, opposite scoring — so a
+    `checklist.json` graded before the flip still compared equal and read fresh.
+
+    Polarity is encoded ONLY when it is not the default, and resolved through `_axis_polarity`
+    so every accepted input shape lands on the same value. That keeps two properties at once:
+    a flip to lower-is-better moves the hash (the defect this closes), while an artifact
+    written before the field existed — and one that states `higher_is_better` explicitly —
+    hash identically, because their scoring semantics ARE identical. Without that, adding the
+    key would have re-stamped every fingerprint in flight and reported a map as moved when
+    nothing about it changed.
+    """
     payload = []
     for v in sorted(views, key=lambda d: str(d.get("view_id", d.get("id", "")))):
         pts = sorted(
@@ -290,14 +314,16 @@ def views_fingerprint(views: list[dict]) -> str:
                 if isinstance(p, dict)
             ]
         )
-        payload.append(
-            {
-                "view_id": str(v.get("view_id", v.get("id", ""))),
-                "x_axis_name": str(v.get("x_axis_name", "")),
-                "y_axis_name": str(v.get("y_axis_name", "")),
-                "points": pts,
-            }
-        )
+        entry = {
+            "view_id": str(v.get("view_id", v.get("id", ""))),
+            "x_axis_name": str(v.get("x_axis_name", "")),
+            "y_axis_name": str(v.get("y_axis_name", "")),
+            "points": pts,
+        }
+        for axis in ("x", "y"):
+            if _axis_polarity(v, axis) == _LOWER_IS_BETTER:
+                entry[f"{axis}_axis_polarity"] = _LOWER_IS_BETTER
+        payload.append(entry)
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 

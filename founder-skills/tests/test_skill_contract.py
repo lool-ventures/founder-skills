@@ -794,7 +794,19 @@ REFERENCES_CEILING: dict[str, int] = {
     # five existing custom types had no entry for channel/distribution — the nearest were ecosystem
     # lock-in and geographic monopoly, neither of which fits "a named partner reaches 80% of our
     # buyers". A documented path with no example for the case that actually arises is a path nobody takes.
-    "competitive-positioning": 138_512,
+    # competitive-positioning +1,890 B, in one change closing two defects that were invisible in
+    # the schema doc. (a) positioning_scores views now carry resolved x/y polarity, and
+    # views_fingerprint includes it: polarity decides which end of an axis is good, so flipping it
+    # moved rank and differentiation_score under a byte-identical hash and a checklist graded on
+    # the old orientation still read FRESH — defeating CHECKLIST_STALE_VS_POSITIONING, the only
+    # detector for that class. The note records that only the non-default value is encoded, which
+    # is what keeps pre-existing fingerprints stable. (b) CRITERION_MISMATCH joins the warning
+    # table with the rule that it MUST carry a founder_message: its agent-facing message names a
+    # criterion ID, and verify_positioning.py fails any report.md containing one, so the obvious
+    # fix — register the severity and forward the message — ships an unpublishable review. A
+    # contract whose violation is a delivery-gate failure has to be written down where the next
+    # producer author looks.
+    "competitive-positioning": 140_402,
     # cap-table +422 B: inputs-skeleton.md promised "no warning, and downstream artifacts that look
     # right but contain zeros" — the PRE-FIX world. cap_state.py hard-errors E_NO_EQUITY_BASE now,
     # and prose telling a model that a missing base yields plausible zeros invites it to invent one.

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -3069,6 +3070,108 @@ class TestCompose:
             warn3 = next(w for w in data3["warnings"] if w["code"] == "RESEARCHED_WITHOUT_SOURCE")
             assert warn3.get("acknowledged") is True
 
+    # 10a. CRITERION_MISMATCH forwarded from CHECKLIST warnings, and rendered founder-safely.
+    #
+    # Two independent failures are pinned here, because fixing only the first ships the second:
+    #   (1) checklist.json's warnings were not forwarded at all — compose read moat, landscape
+    #       and positioning_scores only — so this signal reached nothing.
+    #   (2) the agent-facing message names a criterion ID, and verify_positioning.py FAILS any
+    #       report.md matching COVER|POS|MOAT|EVID|NARR|MISS_\d\d. Registering the severity and
+    #       forwarding `message` verbatim turns a silent warning into an unpublishable report.
+    def test_compose_criterion_mismatch_forwarded_and_founder_safe(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            checklist_warns = [
+                {
+                    "code": "CRITERION_MISMATCH",
+                    "severity": "medium",
+                    "message": (
+                        "POS_05: graded as 'competitor set is complete' but POS_05 is "
+                        "'axis rationale explains differentiation value'."
+                    ),
+                    "founder_message": (
+                        'The quality check "axis rationale explains differentiation value" was '
+                        "graded against a different check's description, so the evidence behind "
+                        "that grade may not belong to it. Treat that one result as unverified."
+                    ),
+                }
+            ]
+            _make_artifact_dir(tmp, checklist_overrides={"warnings": checklist_warns})
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+            assert data is not None
+
+            codes = [w["code"] for w in data["warnings"]]
+            assert "CRITERION_MISMATCH" in codes, (
+                "checklist warnings must be forwarded — without this loop the skill's newest "
+                "integrity check writes to an artifact nothing reads"
+            )
+
+            report_md = data["report_markdown"]
+            body = report_md.split("## Coaching Commentary", 1)[0]
+            assert not re.search(r"\b(?:COVER|POS|MOAT|EVID|NARR|MISS)_\d{2}\b", body), (
+                "report.md must not carry a criterion ID — verify_positioning.py fails the "
+                "delivery gate on exactly this pattern"
+            )
+            assert "may not belong to it" in body, (
+                "the founder-facing consequence must actually reach report.md, not just report.json"
+            )
+
+            # report.json keeps the agent-facing message, ID and all — it is not founder-facing.
+            forwarded = next(w for w in data["warnings"] if w["code"] == "CRITERION_MISMATCH")
+            assert "POS_05" in forwarded["message"]
+
+            # And the real gate agrees: no criterion-ID finding of any severity. Run it against
+            # the markdown compose actually produced, not a hand-written stand-in — the whole
+            # point is that these two scripts disagreed about what may appear in a report.
+            with open(os.path.join(tmp, "report.md"), "w", encoding="utf-8") as f:
+                f.write(report_md)
+            proc = subprocess.run(
+                [sys.executable, os.path.join(CP_SCRIPTS_DIR, "verify_positioning.py"), "--dir", tmp],
+                capture_output=True,
+                text=True,
+            )
+            assert "cites the criterion ID" not in proc.stdout + proc.stderr, (
+                f"delivery gate reported a criterion-ID leak:\n{proc.stdout}\n{proc.stderr}"
+            )
+
+    # 10b. The founder_message is LOAD-BEARING, not cosmetic. Pinned separately because the
+    # test above passes for two different reasons and only one of them is the fix: drop the
+    # founder_message and compose falls back to the agent-facing `message`, which puts a
+    # criterion ID into report.md and fails the delivery gate. Measured: without it,
+    # verify_positioning exits 1 with "report.md cites the criterion ID 'POS_05'".
+    def test_criterion_mismatch_without_founder_message_would_fail_the_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            checklist_warns = [
+                {
+                    "code": "CRITERION_MISMATCH",
+                    "severity": "medium",
+                    "message": "POS_05: graded as 'x' but POS_05 is 'axis rationale explains value'.",
+                }
+            ]
+            _make_artifact_dir(tmp, checklist_overrides={"warnings": checklist_warns})
+            rc, data, stderr = run_script("compose_report.py", args=["--dir", tmp, "--pretty"])
+            assert rc == 0, stderr
+            assert data is not None
+
+            body = data["report_markdown"].split("## Coaching Commentary", 1)[0]
+            assert re.search(r"\bPOS_05\b", body), (
+                "guard is vacuous if the bare message no longer reaches report.md — if this "
+                "assertion starts failing, compose changed how it renders warnings and the "
+                "founder_message contract above needs re-checking, not this test deleting"
+            )
+
+            with open(os.path.join(tmp, "report.md"), "w", encoding="utf-8") as f:
+                f.write(data["report_markdown"])
+            proc = subprocess.run(
+                [sys.executable, os.path.join(CP_SCRIPTS_DIR, "verify_positioning.py"), "--dir", tmp],
+                capture_output=True,
+                text=True,
+            )
+            assert "cites the criterion ID" in proc.stdout + proc.stderr, (
+                "the delivery gate must reject a criterion ID in report.md — that rejection is "
+                "the reason producers must supply a founder_message for this code"
+            )
+
     # 10. MISSING_DO_NOTHING forwarded from landscape warnings
     def test_compose_missing_do_nothing_warns(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -5539,6 +5642,82 @@ class TestScorePositioningViewsFingerprint:
         assert data2 is not None
 
         assert data1["views_fingerprint"] != data2["views_fingerprint"]
+
+    def test_fingerprint_changes_when_polarity_flips(self) -> None:
+        """Coordinates fixed, polarity flipped: rank and score move, so the fingerprint must.
+
+        This is the regression. Polarity decides which end of an axis is good, and therefore
+        rank and `differentiation_score`. It was absent from the hash, so a flip produced a
+        genuinely different scored map under a byte-identical fingerprint — and a
+        `checklist.json` graded against the old orientation still compared equal and read
+        FRESH, defeating CHECKLIST_STALE_VS_POSITIONING (high severity, and the only detector
+        for this class since a re-score leaves run_id unchanged).
+        """
+        higher = _make_valid_positioning_input()
+        higher["views"][0]["x_axis"]["polarity"] = "higher_is_better"
+        rc1, data1, stderr1 = run_script("score_positioning.py", stdin_data=json.dumps(higher))
+        assert rc1 == 0, stderr1
+        assert data1 is not None
+
+        lower = _make_valid_positioning_input()
+        lower["views"][0]["x_axis"]["polarity"] = "lower_is_better"
+        rc2, data2, stderr2 = run_script("score_positioning.py", stdin_data=json.dumps(lower))
+        assert rc2 == 0, stderr2
+        assert data2 is not None
+
+        v1, v2 = data1["views"][0], data2["views"][0]
+        assert [p["x"] for p in v1["points"]] == [p["x"] for p in v2["points"]], (
+            "precondition: coordinates must be identical, or this tests the wrong thing"
+        )
+        assert (v1["startup_x_rank"], v1["differentiation_score"]) != (
+            v2["startup_x_rank"],
+            v2["differentiation_score"],
+        ), "precondition: the flip must actually change scoring for this fixture"
+
+        assert data1["views_fingerprint"] != data2["views_fingerprint"], (
+            "polarity changes the scored map's meaning, so it must change its identity hash"
+        )
+
+    def test_fingerprint_polarity_encoding_is_backward_compatible(self) -> None:
+        """An omitted polarity and an explicit `higher_is_better` hash IDENTICALLY.
+
+        Only the non-default value is encoded. Two reasons this matters: artifacts written
+        before the field existed keep their fingerprint, so closing the defect above does not
+        re-stamp every map in flight and report it as moved; and the two inputs genuinely DO
+        score the same, since `_axis_polarity` defaults to higher-is-better.
+        """
+        absent = _make_valid_positioning_input()
+        absent["views"][0]["x_axis"].pop("polarity", None)
+        rc1, data1, stderr1 = run_script("score_positioning.py", stdin_data=json.dumps(absent))
+        assert rc1 == 0, stderr1
+        assert data1 is not None
+
+        explicit = _make_valid_positioning_input()
+        explicit["views"][0]["x_axis"]["polarity"] = "higher_is_better"
+        rc2, data2, stderr2 = run_script("score_positioning.py", stdin_data=json.dumps(explicit))
+        assert rc2 == 0, stderr2
+        assert data2 is not None
+
+        assert data1["views_fingerprint"] == data2["views_fingerprint"], (
+            "absent polarity and explicit higher_is_better score identically, so they are "
+            "the same map and must hash the same"
+        )
+
+    def test_scored_view_emits_resolved_polarity(self) -> None:
+        """Resolved polarity is always emitted, so consumers stop re-deriving it."""
+        payload = _make_valid_positioning_input()
+        payload["views"][0]["x_axis"]["polarity"] = "lower_is_better"
+        payload["views"][0]["y_axis"].pop("polarity", None)
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, stderr
+        assert data is not None
+
+        view = data["views"][0]
+        assert view["x_axis_polarity"] == "lower_is_better"
+        assert view["y_axis_polarity"] == "higher_is_better", (
+            "an absent polarity must be emitted as the resolved default, not omitted — a "
+            "consumer reading this field should never have to re-apply the default itself"
+        )
 
     def test_fingerprint_ignores_view_order(self) -> None:
         view_a = _make_valid_positioning_input()["views"][0]
