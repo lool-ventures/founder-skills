@@ -4121,3 +4121,18 @@ def test_no_disclosure_when_the_review_pass_ran() -> None:
     assert rc == 0, err
     assert data is not None
     assert "NUMBERS_NOT_REVIEWED" not in [w["code"] for w in data["validation"]["warnings"]]
+
+
+def test_the_coverage_line_says_a_careful_reader_would_find_more() -> None:
+    """Measured, not modesty: 4 of 16 expert-real findings reproduced across seven decks.
+
+    A short list is therefore weak evidence of clean numbers, and the section has to say so
+    or its silence does the lying. Deliberately qualitative — the 4-of-16 is measured against
+    a reproducibility target, so a percentage would state a precision the evidence lacks.
+    """
+    md = _compose_markdown(_recon([]))
+    assert "a careful reader would find nothing more" in md
+    assert "first pass over your arithmetic" in md
+    assert "clean bill of health" in md
+    # No fabricated hit rate.
+    assert "quarter" not in md and "%" not in md.split("first pass")[0].split("That is what was checked")[-1]

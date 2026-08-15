@@ -1041,6 +1041,18 @@ def _coverage_line(reconciliation: dict[str, Any]) -> str:
     Deliberately counts rather than characterises. "12 could not be confirmed" is a fact
     the founder can act on -- they know which of their slides are hard to read. A
     percentage or a grade would be a judgement this has no basis for.
+
+    THE CLOSING CLAUSE SAYS A CAREFUL READER WOULD FIND MORE, and that is measured, not
+    modesty. Across seven real decks this pipeline reproduced 4 of 16 findings an expert
+    had graded real on the same decks. So a short list is weak evidence of clean numbers,
+    and the section has to say so or its silence does the lying.
+
+    What it deliberately does NOT do is quantify that. The 4-of-16 is measured against a
+    REPRODUCIBILITY target -- verdicts on what one frozen bench draw surfaced -- not
+    against everything an expert would find, so "roughly a quarter" would state a
+    precision the evidence does not support, and it would go stale the moment recall
+    moves. Qualitative here is the honest register; the counts above carry what is
+    actually known.
     """
     if reconciliation.get("status") != "checked":
         return ""
@@ -1060,8 +1072,10 @@ def _coverage_line(reconciliation: dict[str, Any]) -> str:
     if isinstance(computed, int) and computed:
         bits.append(f"and I ran **{computed}** comparisons across them")
     return ", ".join(bits) + (
-        ". That is what was checked — a short list here means these particular comparisons "
-        "held, not that every number in the deck has been verified against every other.\n"
+        ". That is what was checked. A short list here means these particular comparisons "
+        "held — not that every number in the deck has been verified against every other, and "
+        "not that a careful reader would find nothing more. Treat this as a first pass over "
+        "your arithmetic, not a clean bill of health.\n"
     )
 
 
