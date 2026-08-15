@@ -38,17 +38,28 @@ from reconcile import _NUM_RE, MONEY, _precision, _raw_scale  # type: ignore[imp
 
 UNIT_KINDS = {"money", "count", "percent", "multiple", "duration", "date"}
 
-SCALE_FLOOR = 0.02
-"""Minimum relative slack, for a raw string whose own precision claims almost none.
+SIGFIG_ONLY = True
+"""`value` must agree with `raw` to within RAW'S OWN precision. No relative floor.
 
-The tolerance is normally derived from `raw`'s significant figures — "$1.2M" claims two
-and legitimately covers 1,150,000 to 1,250,000, so a value of 1,238,400 is a correct
-extraction of a rounded slide figure and must not be refused. A flat percentage cannot
-express that: 2% rejects it, and anything loose enough to accept it stops discriminating.
+There used to be a 2% floor here, applied as a `max()` over the significant-figure
+tolerance, and it was the reason a real defect shipped. A live deck recorded
+`raw: "16661.2"` with `value: 16661` — extraction silently dropped a decimal — and the
+0.0012% discrepancy vanished inside a 2% floor. Downstream that truncation moved a sum
+0.54 off its stated total against a tolerance of 0.555, and a founder was told their
+revenue disagreed with itself by 1 part in 17,772.
 
-This floor only catches the case where sig-figs claim implausibly tight precision. It is
-never the binding constraint on the failure this check exists for, because a factor of a
-thousand does not fit inside any tolerance expressible here.
+Significant figures alone discriminate correctly on every case the floor was meant to
+cover, which is why the floor is gone rather than tuned. Measured:
+
+    raw          value      sigfig tol      gap      verdict
+    16661.2      16661        0.0003%   0.0012%     reject   <- the precision loss
+    $1.2M      1238400        4.1667%   3.2000%     accept   <- a genuinely rounded figure
+    $493K            493      0.1014%  99.9000%     reject   <- the 1000x scale slip
+    100               97     50.0000%   3.0000%     accept   <- one sig fig, loose by design
+
+The floor was introduced when this check used a FLAT percentage, which genuinely could not
+express "$1.2M legitimately covers 1.15M-1.25M". Switching to significant figures solved
+that; keeping the floor afterwards was leftover scaffolding that only ever loosened.
 """
 
 
@@ -128,8 +139,10 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
                 # Tolerance from the raw string's OWN significant figures, floored.
                 # "$1.2M" claims two figures and covers 1.15M-1.25M; "$1,238,400" claims
                 # seven and covers almost nothing. One constant cannot serve both.
+                # `raw`'s own precision, and nothing looser. A figure printed to six
+                # significant figures is a claim to six significant figures.
                 precision = _precision(raw)
-                relative = max(precision[0] / precision[1], SCALE_FLOOR) if precision and precision[1] else SCALE_FLOOR
+                relative = (precision[0] / precision[1]) if precision and precision[1] else 0.0
                 if observed == 0 or abs(observed - parsed) / parsed > relative:
                     ratio = observed / parsed if parsed else 0
                     errors.append(

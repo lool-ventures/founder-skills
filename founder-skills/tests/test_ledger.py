@@ -132,3 +132,40 @@ def test_warns_but_accepts_money_with_no_currency() -> None:
     rc, out, err = _run({"figures": [fig]})
     assert rc == 0, err
     assert any("currency" in w for w in json.loads(out)["validation"]["warnings"])
+
+
+def test_rejects_a_value_that_drops_precision_the_raw_string_carries() -> None:
+    """The deck-H defect: `raw: "16661.2"` recorded as `value: 16661`.
+
+    A 0.0012% discrepancy, invisible to any relative floor — and it does real damage
+    downstream. That lost 0.2 moved a sum 0.54 off its stated total against a tolerance of
+    0.555, and a founder was told their revenue disagreed with itself by 1 part in 17,772.
+
+    A figure printed to six significant figures is a claim to six significant figures, so
+    `value` must match `raw` to `raw`'s own precision and no looser.
+    """
+    rc, _, err = _run(
+        {"figures": [_fig(id="rev_mix", value=16661, raw="16661.2", quote="Subscription revenue 16661.2")]}
+    )
+    assert rc != 0
+    assert "disagrees with raw" in err
+
+
+def test_an_exact_match_on_a_precise_raw_is_accepted() -> None:
+    """The counter-test: the rule must be satisfiable, not merely strict."""
+    rc, _, err = _run(
+        {"figures": [_fig(id="rev_mix", value=16661.2, raw="16661.2", quote="Subscription revenue 16661.2")]}
+    )
+    assert rc == 0, err
+
+
+def test_a_coarse_raw_still_tolerates_the_rounding_it_implies() -> None:
+    """Removing the floor must not make a genuinely rounded slide figure a failure.
+
+    "$1.2M" claims two significant figures and legitimately covers 1.15M-1.25M — the
+    significant-figure band already expresses that, which is why no floor is needed.
+    """
+    rc, _, err = _run({"figures": [_fig(value=1_238_400, raw="$1.2M", quote="$1.2M in bookings")]})
+    assert rc == 0, err
+    rc, _, err = _run({"figures": [_fig(id="c", value=97, raw="100", unit_kind="count", quote="about 100 users")]})
+    assert rc == 0, err
