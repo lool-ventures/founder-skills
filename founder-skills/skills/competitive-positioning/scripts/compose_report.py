@@ -517,6 +517,37 @@ _POINT_MERGE_TOLERANCE = 0.01
 # references/artifact-schemas.md — a consumer that does not know the convention renders `Rank -1 of 0`.
 _NOT_RANKABLE_RANK = -1
 
+# ONE banding contract for `overall_differentiation`, because there were three.
+#
+# The headline label used these four tiers; Key Findings used three (no 25 boundary); and the summary
+# paragraph gated its top tier on defensibility as well, directly beneath a comment asserting that the
+# label and the paragraph never disagree. A report could call one score "Strong — clearly
+# differentiated" and "moderate differentiation" two lines apart.
+#
+# The 25 boundary is KEPT rather than dropped: `gate3_triggers._LOW_DIFFERENTIATION_PCT` is 25.0 and
+# drives the founder-facing Gate 3 prose, with a test pinning it. Dropping it here would desynchronise
+# the delivered report from the gate the founder just answered.
+_DIFFERENTIATION_BANDS: tuple[tuple[float, str], ...] = (
+    (75.0, "strong"),
+    (50.0, "moderate"),
+    (25.0, "weak"),
+    (float("-inf"), "undifferentiated"),
+)
+
+
+def _differentiation_band(score: Any) -> str | None:
+    """The single source of truth for which differentiation tier a score falls in.
+
+    Returns None for a non-numeric score so callers keep their existing "say nothing" behaviour rather
+    than inventing a tier.
+    """
+    if not isinstance(score, (int, float)) or isinstance(score, bool):
+        return None
+    for floor, name in _DIFFERENTIATION_BANDS:
+        if score >= floor:
+            return name
+    return None
+
 
 def _points_by_slug(points: list[Any]) -> dict[str, tuple[float, float]]:
     """Map competitor slug -> (x, y) from a view's points list.
@@ -933,14 +964,12 @@ def _section_executive_summary(
         diff_score = positioning_scores.get("overall_differentiation")
         if diff_score is not None:
             # Add context: rank + gap = score
-            if diff_score >= 75:
-                diff_label = "Strong — clearly differentiated from the competitive set"
-            elif diff_score >= 50:
-                diff_label = "Moderate — differentiated but the lead is narrow"
-            elif diff_score >= 25:
-                diff_label = "Weak — positioned close to competitors on key axes"
-            else:
-                diff_label = "Undifferentiated — clustered with competitors"
+            diff_label = {
+                "strong": "Strong — clearly differentiated from the competitive set",
+                "moderate": "Moderate — differentiated but the lead is narrow",
+                "weak": "Weak — positioned close to competitors on key axes",
+                "undifferentiated": "Undifferentiated — clustered with competitors",
+            }.get(_differentiation_band(diff_score) or "", "Undifferentiated — clustered with competitors")
             lines.append(f"**Overall Differentiation Score:** {diff_score}% ({diff_label})")
 
     defensibility = None
@@ -961,16 +990,19 @@ def _section_executive_summary(
     # Summary paragraph
     lines.append("")
     if diff_score is not None and defensibility is not None:
-        # Use the same 'strong' threshold (>=75) as the score label above so the
-        # label and the prose paragraph never disagree (a score of 70-74.9 is
-        # labelled Moderate, so it must not be described as 'strong' here).
-        if diff_score >= 75 and defensibility in ("high", "moderate"):
+        # Banded from `_differentiation_band` so this paragraph cannot disagree with the label above.
+        # The previous version added `and defensibility in ("high","moderate")` to its top arm — under a
+        # comment claiming the two never disagree — so a 90% score with low defensibility was labelled
+        # "Strong" and then described as "moderate differentiation" two lines below. Defensibility is
+        # STATED in the sentence rather than used to demote the differentiation tier: they are two
+        # different findings, and collapsing one into the other is what produced the contradiction.
+        if _differentiation_band(diff_score) == "strong":
             lines.append(
                 "The startup shows strong competitive differentiation with "
                 f"{defensibility} defensibility. The positioning analysis "
                 "suggests a clear value proposition relative to the competitive set."
             )
-        elif diff_score >= 50:
+        elif _differentiation_band(diff_score) == "moderate":
             lines.append(
                 "The startup demonstrates moderate differentiation in the market. "
                 "Key areas for strengthening competitive position are identified below."
@@ -1413,15 +1445,22 @@ def _section_key_findings(
     # From positioning scores
     if positioning_scores is not None and not _is_stub(positioning_scores):
         overall = positioning_scores.get("overall_differentiation")
-        if isinstance(overall, (int, float)):
-            if overall >= 75:
+        band = _differentiation_band(overall)
+        if band is not None:
+            # Same banding as the headline label. This chain previously had only three tiers — no 25
+            # boundary — so a score of 24 and a score of 26 changed the headline and not this line.
+            if band == "strong":
                 findings.append(
                     f"Strong differentiation ({overall}%) — the startup occupies "
                     "a distinct position in the competitive landscape."
                 )
-            elif overall >= 50:
+            elif band == "moderate":
                 findings.append(
                     f"Moderate differentiation ({overall}%) — some positioning overlap exists with competitors."
+                )
+            elif band == "weak":
+                findings.append(
+                    f"Weak differentiation ({overall}%) — the startup sits close to competitors on key axes."
                 )
             else:
                 findings.append(
@@ -1469,14 +1508,23 @@ def _section_key_findings(
         cl_summary = _as_dict(checklist.get("summary"))
         score = cl_summary.get("score_pct") if cl_summary else checklist.get("score_pct")
         if isinstance(score, (int, float)):
-            if score >= 80:
-                findings.append(f"Analysis quality score of {score}% indicates a thorough competitive analysis.")
-            elif score >= 60:
-                findings.append(f"Analysis quality score of {score}% — some gaps remain in the competitive analysis.")
-            else:
-                findings.append(
-                    f"Analysis quality score of {score}% — significant gaps in the competitive analysis need attention."
-                )
+            # READ the status checklist.py already computed; do not re-derive it from the number.
+            # This chain used to band at 80/60 while checklist.py bands at 85/70/50 — the canon
+            # documented at SKILL.md's Scoring section and shared with deck-review for cross-skill
+            # parity. At 82% the checklist called a run "solid" and this line called it "thorough".
+            # Two thresholds for one number is a bug that recurs every time both sides are edited;
+            # one side owning the banding is the only version that stays fixed.
+            status = str(cl_summary.get("overall_status", "") or "").lower()
+            phrasing = {
+                "strong": "indicates a thorough competitive analysis.",
+                "solid": "is solid — a few gaps remain in the competitive analysis.",
+                "needs_work": "— some gaps remain in the competitive analysis.",
+                "major_revision": "— significant gaps in the competitive analysis need attention.",
+            }
+            # Absent/unknown status falls back to the most cautious phrasing rather than the most
+            # flattering: an unreadable checklist is not evidence of a thorough analysis.
+            tail = phrasing.get(status, "— significant gaps in the competitive analysis need attention.")
+            findings.append(f"Analysis quality score of {score}% {tail}")
 
     if not findings:
         lines.append("No key findings generated.\n")

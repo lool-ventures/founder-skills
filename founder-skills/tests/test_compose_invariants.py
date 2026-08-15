@@ -232,6 +232,73 @@ def test_cp_moat_leader_renders_name_not_slug(tmp_path: Path) -> None:
                 assert "-" not in leader or " " in leader, f"leader looks like a slug: {leader!r}"
 
 
+@pytest.mark.parametrize("score", [90.0, 60.0, 30.0, 10.0])
+def test_cp_one_differentiation_score_gets_one_verdict(tmp_path: Path, score: float) -> None:
+    """`overall_differentiation` was banded three times with two different structures.
+
+    The headline label used four bands (a `>=25` boundary); Key Findings used three; and the summary
+    paragraph added `and defensibility in ("high","moderate")` to its top arm — directly under a comment
+    stating "the label and the prose paragraph never disagree". At 90% with low defensibility the report
+    said "Strong — clearly differentiated" and then "moderate differentiation" two lines below.
+
+    Parametrised across every band so the disagreement cannot hide in the one range a fixture happens to
+    sit in — 3 of the 4 eval runs scored below 25.
+    """
+
+    def mutate(d: Path) -> None:
+        ps = _read(d, "positioning_scores.json")
+        ps["overall_differentiation"] = score
+        _write(d, "positioning_scores.json", ps)
+        # Force LOW defensibility: the old top arm was gated on it, so this is the case that split
+        # the label from the prose.
+        ms = _read(d, "moat_scores.json")
+        ms["companies"]["_startup"]["overall_defensibility"] = "low"
+        _write(d, "moat_scores.json", ms)
+
+    md = _cp_compose(tmp_path, mutate)
+    headline = [ln for ln in md.splitlines() if "Overall Differentiation Score" in ln]
+    assert headline, "the headline differentiation label is gone"
+    assert "Startup Defensibility:** Low" in md, "the low-defensibility mutation did not take effect"
+    strong_headline = "Strong —" in headline[0]
+
+    # Each prose surface is checked SEPARATELY against the headline. An `or` across them hides the
+    # defect: Key Findings said "Strong differentiation" while the summary paragraph said "moderate",
+    # so a combined check is satisfied by whichever one happens to agree.
+    strong_paragraph = "shows strong competitive differentiation" in md
+    strong_key_finding = "Strong differentiation" in md
+
+    assert strong_headline == strong_paragraph, (
+        f"at {score}% with low defensibility the headline says strong={strong_headline} but the summary "
+        f"paragraph says strong={strong_paragraph} — one score, two verdicts:\n{headline[0]}"
+    )
+    assert strong_headline == strong_key_finding, (
+        f"at {score}% the headline says strong={strong_headline} but Key Findings says "
+        f"strong={strong_key_finding} — the two chains band the same number differently"
+    )
+
+
+def test_cp_quality_score_verdict_matches_the_checklist_canon(tmp_path: Path) -> None:
+    """`score_pct` was banded at 85/70/50 in checklist.py — matching SKILL.md's documented canon and
+    deck-review for cross-skill parity — and at 80/60 here for the founder-facing prose.
+
+    At 82% the checklist calls the run `solid`; the report called it "thorough". Read the status the
+    checklist already computed instead of re-deriving it from the number with different thresholds.
+    """
+
+    def mutate(d: Path) -> None:
+        cl = _read(d, "checklist.json")
+        cl["summary"]["score_pct"] = 82.0
+        cl["summary"]["overall_status"] = "solid"  # what checklist.py's 85/70/50 canon yields
+        _write(d, "checklist.json", cl)
+
+    md = _cp_compose(tmp_path, mutate)
+    assert "82.0%" in md, "the quality score no longer reaches the report"
+    assert "thorough competitive analysis" not in md, (
+        "82% is 'solid' under the documented 85/70/50 canon, but the report calls it thorough — the "
+        "report is re-banding the number instead of reading the computed status"
+    )
+
+
 def test_cp_competitor_table_shows_funding(tmp_path: Path) -> None:
     """Relative capital is researched for every competitor and reached the founder nowhere reliable.
 
