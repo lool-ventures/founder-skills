@@ -401,7 +401,7 @@ The required action for this dispatch is:
 ## Core Principles (apply in both contexts)
 
 1. **Transparency** — State every assumption explicitly. Show formulas. Cite every source. Founders should be able to defend every number.
-2. **Independent cross-validation** — When using both approaches, parameters must be set independently. A >30% delta is a finding to explain, not a problem to fix by tuning.
+2. **Comparing the two approaches** — When using both, parameters must be set independently. **Any** delta is a finding to explain, in either direction, and closeness is not confirmation: the pipeline has no record of where each input came from, so it cannot tell whether the two builds rest on the same underlying figures. Never tune one approach toward the other.
 3. **Full-scope TAM for platforms** — Multi-vertical companies: TAM covers commercial + R&D verticals; SAM = traction verticals; SOM = beachhead. Never artificially narrow TAM to one vertical when the technology is a platform.
 4. **Founder-first framing** — When figures don't hold up, explain *why* investors will push back and *how* to present credibly. Distinguish "bad market" from "bad framing."
 5. **Stage awareness** — Seed-stage founders don't need the same validation depth as Series A. Calibrate confidence language accordingly.
