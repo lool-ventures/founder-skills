@@ -524,6 +524,10 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 _warn(
                     "CHECKLIST_FAILURES",
                     f"Checklist has {len(failed)} failures: {failed_ids}",
+                    founder_message=(
+                        f"{len(failed)} checks did not pass: {_checklist_labels(checklist, failed_ids)}. "
+                        f"They are listed in full, with what was found, under Failed Items."
+                    ),
                 )
             )
 
@@ -630,6 +634,12 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                     "RUNWAY_INCONSISTENCY",
                     f"Checklist items {fail_ids} failed (cash/burn issues) but runway "
                     f"base scenario shows default_alive: true — review inputs for consistency",
+                    founder_message=(
+                        f"{len(fail_ids)} cash and burn checks did not pass "
+                        f"({_checklist_labels(checklist, fail_ids)}), yet the base runway scenario "
+                        f"says the company never runs out of cash. One of the two is wrong — worth "
+                        f"reconciling before this goes to an investor."
+                    ),
                 )
             )
         # Also flag cash direction warnings from runway scenarios

@@ -8956,3 +8956,64 @@ def test_failed_and_warned_items_name_checks_not_criterion_ids(tmp_path: Any) ->
     assert "Monthly granularity appropriate to stage" in md
     assert "CASH_30" not in md, "a criterion id reached the founder-facing report"
     assert "STRUCT_07" not in md
+
+
+def test_no_warning_puts_a_criterion_id_in_the_founder_facing_report(tmp_path: Any) -> None:
+    """Class guard. Three separate sites shipped this defect, found one run at a time.
+
+    Each fix so far patched the site a failing run pointed at: the two profile warnings,
+    then the failed/warned item lists, then CHECKLIST_FAILURES and RUNWAY_INCONSISTENCY.
+    Patching per-site cannot converge — the next warning to interpolate an id list is a
+    new defect that no existing test sees.
+
+    So this triggers EVERY id-bearing warning at once and scans the whole delivered
+    markdown for the id shape, rather than for any particular token. A new warning that
+    renders ids reds this without anyone remembering to add a case.
+    """
+    checklist = json.loads(json.dumps(_VALID_CHECKLIST))
+    s = checklist["summary"]
+    s["overall_status"] = "major_revision"
+    s["failed_items"] = [
+        {"id": "CASH_24", "label": "Runway length adequate", "evidence": "18mo"},
+        {"id": "CASH_30", "label": "Israel statutory costs itemized", "evidence": "absent"},
+        {"id": "STRUCT_03", "label": "Actuals vs projections separated", "evidence": "merged"},
+    ]
+    s["warned_items"] = [{"id": "UNIT_18", "label": "Sales capacity constrains revenue", "evidence": "no quota"}]
+    s["self_gated_items"] = ["METRIC_33"]
+    s["unresolved_profile_exclusions"] = {"geography": ["CASH_31", "CASH_32"]}
+    checklist["items"] = list(checklist.get("items") or []) + [
+        {"id": i, "label": f"Check {n}", "status": "fail"}
+        for n, i in enumerate(["CASH_24", "CASH_30", "CASH_31", "CASH_32", "STRUCT_03", "UNIT_18", "METRIC_33"])
+    ]
+    runway = json.loads(json.dumps(_VALID_RUNWAY))
+    for sc in runway.get("scenarios", []):
+        if sc.get("name") == "base":
+            sc["default_alive"] = True
+
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": checklist,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": runway,
+        }
+    )
+    md_path = os.path.join(d, "report.md")
+    json_path = os.path.join(d, "report.json")
+    rc, _receipt, _err = run_script("compose_report.py", ["-d", d, "-o", json_path, "--write-md", md_path])
+    assert rc == 0
+    with open(md_path, encoding="utf-8") as fh:
+        md = fh.read()
+
+    # Non-vacuity: the fixture must actually have driven those warnings.
+    with open(json_path, encoding="utf-8") as fh:
+        codes = {w["code"] for w in json.load(fh)["validation"]["warnings"]}
+    for expected in ("CHECKLIST_FAILURES", "CHECKLIST_SELF_GATED", "CHECKLIST_PROFILE_UNRESOLVED"):
+        assert expected in codes, f"fixture did not trigger {expected}; this test would prove nothing"
+
+    leaked = re.findall(r"\b(?:CASH|UNIT|STRUCT|METRIC|BRIDGE|SECTOR|OVERALL)_\d+\b", md)
+    assert not leaked, f"criterion ids reached the founder-facing report: {sorted(set(leaked))}"
+    # The machine surface KEEPS them — the ids are what makes a warning actionable to us,
+    # and stripping them there would trade one defect for another.
+    with open(json_path, encoding="utf-8") as fh:
+        assert "CASH_24" in fh.read(), "report.json lost the ids too; they belong on the machine surface"
