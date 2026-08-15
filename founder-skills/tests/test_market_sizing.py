@@ -1005,7 +1005,7 @@ def test_compose_severity_map_complete() -> None:
         # A rejected sensitivity/checklist step, same class as SIZING_INVALID.
         "ARTIFACT_INVALID",
     ]
-    assert len(sev_map) == 29, f"expected 29 codes, got {len(sev_map)}"
+    assert len(sev_map) == 30, f"expected 30 codes, got {len(sev_map)}"
     for code in expected_codes:
         assert code in sev_map, f"{code} missing from severity map"
     # All values are "high", "medium", or "low"
@@ -5571,3 +5571,222 @@ def test_valid_and_container_inputs_are_unaffected() -> None:
         payload = f'{{"approach":"top-down","industry_total":{container},"segment_pct":50,"share_pct":5}}'
         rc, data, _ = run_script("market_sizing.py", ["--stdin"], stdin_data=payload)
         assert rc != 0, f"container {container} must still be rejected"
+
+
+# ---------------------------------------------------------------------------
+# Close-agreement footnote, degenerate narrowing, and widest-stressed tie.
+#
+# Every numeric fixture below is a REAL value measured from the 3-deck A/B corpus
+# (see docs/internal/2026-08-10-market-sizing-circularity-findings.md). They are
+# not invented shapes: a previous fix plan shipped tests built from hand-made
+# fixtures that encoded the fix's own premise, and they passed while the fix was
+# inert on every real run.
+# ---------------------------------------------------------------------------
+
+# deck-01: top-down TAM reproduced the founder's own $22B exactly (delta 0.0%).
+# deck-02: +22.8%. deck-03: -8.6%. All three were rendered with no caveat, and in
+# report.html the deck-01 row was the ONLY item under "What's strong".
+_MEASURED_CLOSE_DELTAS = (0.0, 22.8, -8.6)
+# Every |delta| the same corpus produced outside the band.
+_MEASURED_DISTANT_DELTAS = (-43.2, -73.0, -76.3, -88.8, -95.9, -98.5, -99.4, -100.0)
+
+
+def _claim_dir_for_delta(tmp_path: Path, delta_pct: float, name: str) -> Path:
+    """Artifact dir whose top-down TAM sits `delta_pct` away from the deck's claim."""
+    d = tmp_path / name
+    d.mkdir()
+    _make_full_sizing_dir(d)
+    sizing = json.loads((d / "sizing.json").read_text())
+    tam = _as_float(sizing["top_down"]["tam"]["value"])
+    inputs = json.loads((d / "inputs.json").read_text())
+    # claim such that (tam - claim)/claim == delta_pct/100.
+    # -100.0 is unreachable exactly (it needs an infinite claim); in the corpus it is a rounded
+    # -99.96%, so reproduce it as a claim three orders larger rather than skipping the case.
+    factor = 1.0 + delta_pct / 100.0
+    claim = tam * 1000.0 if abs(factor) < 1e-9 else tam / factor
+    inputs["existing_claims"] = {"tam": round(claim, 2)}
+    (d / "inputs.json").write_text(json.dumps(inputs))
+    return d
+
+
+def _compose_md_text(d: Path) -> str:
+    md = d / "report.md"
+    rc, _, err = run_script("compose_report.py", ["--dir", str(d), "-o", str(d / "report.json"), "--write-md", str(md)])
+    assert rc == 0, err
+    return md.read_text()
+
+
+@pytest.mark.parametrize("delta", _MEASURED_CLOSE_DELTAS)
+def test_close_agreement_row_is_footnoted(tmp_path: Path, delta: float) -> None:
+    """Each delta measured as a silent close agreement now carries a caveat."""
+    d = _claim_dir_for_delta(tmp_path, delta, f"ms-close-{abs(delta)}")
+    md = _compose_md_text(d)
+    assert "Agreement on a number is not independent confirmation" in md
+    # the marker must be on the TAM row itself, not just floating in the section
+    tam_rows = [ln for ln in md.splitlines() if ln.startswith("| TAM (Top-down)")]
+    assert tam_rows and "*" in tam_rows[0], tam_rows
+
+
+@pytest.mark.parametrize("delta", _MEASURED_DISTANT_DELTAS)
+def test_distant_row_is_not_footnoted(tmp_path: Path, delta: float) -> None:
+    """Deltas outside the band get no caveat — that is DECK_CLAIM_MISMATCH's job."""
+    d = _claim_dir_for_delta(tmp_path, delta, f"ms-far-{abs(delta)}")
+    md = _compose_md_text(d)
+    assert "Agreement on a number is not independent confirmation" not in md
+
+
+def test_footnote_suppressed_when_fx_comparison_is_refused(tmp_path: Path) -> None:
+    """A converted run with no declared claim currency must not assert closeness.
+
+    compose already refuses this comparison (COMPARISON_CURRENCY_UNKNOWN) because the raw delta
+    carries the exchange rate's magnitude on a perfectly correct analysis. The footnote must not
+    contradict that refusal. Built as its own fixture: the pre-existing FX tests use inputs with
+    no `existing_claims` at all, so no comparison row renders and any assertion about the
+    footnote would pass vacuously.
+    """
+    d = _fx_dir(tmp_path, converted=True)
+    sizing = json.loads((d / "sizing.json").read_text())
+    tam = _as_float(sizing["top_down"]["tam"]["value"])
+    inputs = json.loads((d / "inputs.json").read_text())
+    inputs["existing_claims"] = {"tam": tam}  # numerically identical => raw delta 0.0%
+    inputs.pop("existing_claims_currency", None)  # ...but undeclared, so not comparable
+    (d / "inputs.json").write_text(json.dumps(inputs))
+    md = _compose_md_text(d)
+    assert "COMPARISON_CURRENCY_UNKNOWN" in _compose_codes(d)
+    assert "Agreement on a number is not independent confirmation" not in md
+
+
+def test_degenerate_narrowing_fires_when_sam_equals_tam(tmp_path: Path) -> None:
+    """deck-01's real shape: bottom-up TAM == SAM == $900M, serviceable_pct 100.
+
+    The 22-item self-check has an item for this and the agent returned `pass` on that very run,
+    with evidence text describing the failure. There is no code check anywhere; this is it.
+    """
+    d = tmp_path / "ms-degenerate"
+    d.mkdir()
+    _make_full_sizing_dir(d)
+    sizing = json.loads((d / "sizing.json").read_text())
+    sizing["bottom_up"]["sam"]["value"] = sizing["bottom_up"]["tam"]["value"]
+    (d / "sizing.json").write_text(json.dumps(sizing))
+    assert "DEGENERATE_NARROWING" in _compose_codes(d)
+
+
+def test_degenerate_narrowing_tolerates_float_noise(tmp_path: Path) -> None:
+    """These artifacts really do carry values like 12670000000.000002."""
+    d = tmp_path / "ms-degenerate-noise"
+    d.mkdir()
+    _make_full_sizing_dir(d)
+    sizing = json.loads((d / "sizing.json").read_text())
+    tam = _as_float(sizing["bottom_up"]["tam"]["value"])
+    sizing["bottom_up"]["sam"]["value"] = tam * (1 + 1e-12)
+    (d / "sizing.json").write_text(json.dumps(sizing))
+    assert "DEGENERATE_NARROWING" in _compose_codes(d)
+
+
+def test_degenerate_narrowing_silent_when_sam_narrows(tmp_path: Path) -> None:
+    """deck-02 ($7T -> $560B) and deck-03 ($181B -> $12.67B) both narrow properly."""
+    d = tmp_path / "ms-narrowing-ok"
+    d.mkdir()
+    _make_full_sizing_dir(d)
+    assert "DEGENERATE_NARROWING" not in _compose_codes(d)
+
+
+def test_widest_stressed_tie_is_disclosed(tmp_path: Path) -> None:
+    """Measured 3-, 4- and 3-way ties at identical swing on the three decks.
+
+    `most_sensitive` is ranking[0], so the winner was decided by sub-agent authoring order. The
+    report must not present one arbitrary member of a tie as *the* answer.
+    """
+    d = tmp_path / "ms-tie"
+    d.mkdir()
+    _make_full_sizing_dir(d)
+    sens = json.loads((d / "sensitivity.json").read_text())
+    ranking = sens.get("sensitivity_ranking") or []
+    if len(ranking) < 2:
+        # A skipped test is a vacuous test. Build the measured shape instead: deck-02 had four
+        # parameters tied at exactly 100.0, the winner decided by list order.
+        ranking = [
+            {"parameter": "segment_pct", "som_swing_pct": 100.0},
+            {"parameter": "share_pct", "som_swing_pct": 100.0},
+            {"parameter": "serviceable_pct", "som_swing_pct": 100.0},
+            {"parameter": "target_pct", "som_swing_pct": 100.0},
+        ]
+    for r in ranking[:2]:
+        r["som_swing_pct"] = 100.0
+    sens["sensitivity_ranking"] = ranking
+    sens["most_sensitive"] = ranking[0].get("parameter")
+    (d / "sensitivity.json").write_text(json.dumps(sens))
+    md = _compose_md_text(d)
+    assert "Widest-Stressed Parameters (tied)" in md
+    assert "Widest-stressed parameters:" in md
+
+
+def test_report_does_not_claim_leverage(tmp_path: Path) -> None:
+    """Positive assertion first, then absence — scoped to the sensitivity wording.
+
+    Ranges are assigned by confidence class, not leverage, so 'most sensitive' cannot mean 'what
+    the answer most depends on'. Asserting only the absence of phrases would pass on a no-op.
+    """
+    d = tmp_path / "ms-leverage"
+    d.mkdir()
+    _make_full_sizing_dir(d)
+    md = _compose_md_text(d)
+    assert "Widest-stressed parameter" in md or "Widest-Stressed Parameter" in md
+    assert "Most sensitive parameter:" not in md
+    assert "Most Sensitive Parameter |" not in md
+
+
+def _fx_claim_dir(tmp_path: Path, *, declared: bool, name: str) -> Path:
+    """A converted run whose deck claim sits close to the TAM *before* conversion.
+
+    Reproduces the shape that shipped a self-contradicting report: raw delta +11.1% (inside the
+    footnote band) against a converted delta of -72.2% (a mismatch warning) for one figure.
+    """
+    d = tmp_path / name
+    d.mkdir()
+    _make_full_sizing_dir(d)
+    sizing = json.loads((d / "sizing.json").read_text())
+    tam = _as_float(sizing["top_down"]["tam"]["value"])
+    sizing["currency"] = "ILS"
+    sizing["fx"] = {
+        "as_of": "2026-08-01",
+        "source": "s",
+        "conversions": [
+            {"field": "arpu", "from": "EUR", "to": "ILS", "rate": 4.0, "original_value": 1.0, "converted_value": 4.0}
+        ],
+    }
+    (d / "sizing.json").write_text(json.dumps(sizing))
+    inputs = json.loads((d / "inputs.json").read_text())
+    inputs["currency"] = "ILS"
+    inputs["existing_claims"] = {"tam": round(tam * 0.9, 2)}
+    if declared:
+        inputs["existing_claims_currency"] = "EUR"
+    else:
+        inputs.pop("existing_claims_currency", None)
+    (d / "inputs.json").write_text(json.dumps(inputs))
+    return d
+
+
+def test_fx_table_delta_matches_the_warning_delta(tmp_path: Path) -> None:
+    """The comparison table and the mismatch warning must not disagree about one figure.
+
+    Regression for a shipped defect: the table computed its delta from the RAW claim while the
+    warning block computed it from the CONVERTED one, so a single report read "+11.1% *" in the
+    table and "-72.2%" in the warnings. The footnote must not fire either.
+    """
+    d = _fx_claim_dir(tmp_path, declared=True, name="ms-fx-declared")
+    md = _compose_md_text(d)
+    tam_row = next(ln for ln in md.splitlines() if ln.startswith("| TAM (Top-down)"))
+    assert "-72.2%" in tam_row, tam_row
+    assert "+11.1%" not in tam_row, "table still using the unconverted claim"
+    warn = next(ln for ln in md.splitlines() if "differs from deck claim" in ln)
+    assert "-72.2%" in warn, warn
+    assert "Agreement on a number is not independent confirmation" not in md
+
+
+def test_fx_footnote_suppressed_when_claim_currency_undeclared(tmp_path: Path) -> None:
+    """Undeclared claim currency: the pipeline refuses the comparison, so assert nothing."""
+    d = _fx_claim_dir(tmp_path, declared=False, name="ms-fx-undeclared")
+    md = _compose_md_text(d)
+    assert "COMPARISON_CURRENCY_UNKNOWN" in _compose_codes(d)
+    assert "Agreement on a number is not independent confirmation" not in md

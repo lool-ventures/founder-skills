@@ -1502,3 +1502,48 @@ def test_visualize_survives_a_malformed_fx_block() -> None:
         rc, stdout, stderr = _run_visualize(_make_artifact_dir(arts))
         assert rc == 0, f"fx={bad!r} broke the render: {stderr}"
         assert stdout.startswith("<!DOCTYPE html>"), f"fx={bad!r} produced no document"
+
+
+def test_html_close_agreement_is_not_presented_as_a_strength() -> None:
+    """Landing on the founder's own number must never be filed under "What's strong".
+
+    Regression for the worst defect the 3-deck A/B found: `report.html` listed
+    "TAM (Top-down) within 20% of deck claim" as a strength -- on one real deck it was the ONLY
+    strength in the report, for a row where the tool had reproduced the founder's own $22B exactly.
+    It survived a whole pilot because every check read report.md and nobody opened the HTML.
+    """
+    arts = _all_artifacts()
+    arts["inputs.json"] = dict(_VALID_INPUTS)
+    # claim identical to the fixture's top-down TAM => delta 0.0%, the deck-01 shape
+    arts["inputs.json"]["existing_claims"] = {"tam": 100000000000}
+    d = _make_artifact_dir(arts)
+    rc, stdout, _stderr = _run_visualize(d)
+    assert rc == 0
+    assert "within 20% of deck claim" not in stdout
+    assert "finding-strong" not in stdout or "of deck claim" not in stdout
+
+
+def test_html_close_agreement_row_carries_the_caveat() -> None:
+    """Positive assertion: the HTML comparison table footnotes the close row.
+
+    Paired deliberately with the absence check above -- an absence-only test passes against a
+    reverted file, which is how the markdown-only test set left this fix uncovered.
+    """
+    arts = _all_artifacts()
+    arts["inputs.json"] = dict(_VALID_INPUTS)
+    arts["inputs.json"]["existing_claims"] = {"tam": 100000000000}
+    d = _make_artifact_dir(arts)
+    rc, stdout, _stderr = _run_visualize(d)
+    assert rc == 0
+    assert "Agreement on a number is not independent confirmation" in stdout
+
+
+def test_html_distant_row_carries_no_caveat() -> None:
+    """A far-off claim gets no closeness footnote."""
+    arts = _all_artifacts()
+    arts["inputs.json"] = dict(_VALID_INPUTS)
+    arts["inputs.json"]["existing_claims"] = {"tam": 5000000000}  # -95% vs the fixture TAM
+    d = _make_artifact_dir(arts)
+    rc, stdout, _stderr = _run_visualize(d)
+    assert rc == 0
+    assert "Agreement on a number is not independent confirmation" not in stdout

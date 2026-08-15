@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import uuid
@@ -64,6 +65,7 @@ WARNING_SEVERITY: dict[str, str] = {
     "FEW_SENSITIVITY_PARAMS": "medium",
     "NARROW_AGENT_ESTIMATE_RANGE": "medium",
     "LOW_CHECKLIST_COVERAGE": "medium",
+    "DEGENERATE_NARROWING": "medium",
     "REFUTED_CLAIMS": "medium",
     "REFUTED_MISSING_REASON": "medium",
     "EXISTING_CLAIMS_SHAPE": "medium",
@@ -438,6 +440,26 @@ def _valid_ccy(value: Any) -> bool:
     return isinstance(value, str) and len(value) == 3 and value.isalpha()
 
 
+# Below this |delta| vs a founder-stated figure, agreement carries no evidentiary weight: it can
+# mean both analyses read the same source, or that our input came from their materials. Measured
+# across a 3-deck corpus every close agreement was the top-down TAM and none was flagged.
+# Above it, DECK_CLAIM_MISMATCH fires -- but NOT immediately above: see DECK_MISMATCH_PCT for the
+# (25, 50] band where neither speaks. visualize.py carries the same constant.
+CLOSE_AGREEMENT_PCT = 25.0
+
+# DECK_CLAIM_MISMATCH's threshold. Deliberately NOT lowered to meet CLOSE_AGREEMENT_PCT, which would
+# have closed the (25, 50] band where neither the footnote nor a warning speaks. Measured: lowering
+# it also fires on a bottom-up figure against a claim the deck only stated for its top-down TAM
+# (-32.5% on the shared fixture). That was originally read as noise; it is not. `existing_claims` is
+# keyed by METRIC with no approach dimension, so comparing one claim against both approaches is
+# established, deliberate behaviour -- it already fires today (deck-01 bottom-up TAM at -95.9%, one
+# of the pilot's best catches) and the note renderer below has purpose-built per-approach wording for
+# it. The only real gap is that this block's message omits the approach label that renderer already
+# carries. So the band is a KNOWN GAP, not a design: a deck-01 SOM sits at -43.2% with no warning.
+# Closing it = add the approach label here, then lower this to CLOSE_AGREEMENT_PCT.
+DECK_MISMATCH_PCT = 50.0
+
+
 def _compute_delta(calculated: float, deck_claim: Any) -> float | None:
     """Returns signed percentage delta, or None if claim is invalid."""
     try:
@@ -447,6 +469,30 @@ def _compute_delta(calculated: float, deck_claim: Any) -> float | None:
     if claim <= 0:
         return None
     return round((calculated - claim) / claim * 100, 1)
+
+
+def _comparable_claim(claim: Any, sizing: dict[str, Any], inputs: dict[str, Any] | None) -> tuple[float | None, bool]:
+    """Express a deck claim in the analysis currency. Returns (value, blocked).
+
+    Delegates to _to_analysis_currency -- the SAME function the DECK_CLAIM_MISMATCH block uses --
+    rather than re-implementing a subset of it. An earlier version of this checked only for an
+    UNDECLARED claim currency, which missed three of that function's refusal conditions and, worse,
+    left the declared-and-convertible case comparing a RAW claim here against a CONVERTED one in the
+    warning. Measured, that shipped a single report saying "+11.1% *" in the table and
+    "differs from deck claim by -72.2%" in the warnings, about one figure.
+
+    Non-FX runs are unaffected: with no conversions recorded, _to_analysis_currency returns the
+    claim unchanged and never blocks.
+    """
+    if not isinstance(claim, (int, float)) or isinstance(claim, bool):
+        return None, False
+    value, reason = _to_analysis_currency(
+        float(claim),
+        (inputs or {}).get("existing_claims_currency"),
+        sizing.get("currency"),
+        list(_fx_conversions(sizing).values()),
+    )
+    return value, reason is not None
 
 
 def _compute_provenance(
@@ -517,13 +563,19 @@ def _compute_provenance(
             # Deck claim and delta
             deck_claim = existing_claims.get(metric)
             value = m.get("value", 0)
-            delta = _compute_delta(float(value), deck_claim) if deck_claim is not None else None
+            # Compare like with like: when the claim converts, the delta (and the figure the table
+            # prints) must be the CONVERTED claim, matching the warning block.
+            comparable, blocked = _comparable_claim(deck_claim, sizing, inputs)
+            claim_for_delta = deck_claim if comparable is None else comparable
+            delta = _compute_delta(float(value), claim_for_delta) if deck_claim is not None else None
 
             approach_prov[metric] = {
                 "classification": classification,
                 "confidence_breakdown": breakdown,
                 "deck_claim": deck_claim,
                 "delta_vs_deck_pct": delta,
+                "deck_claim_comparable": comparable,
+                "comparison_blocked": blocked,
                 "input_provenances": input_provenances,
             }
         provenance[approach_key] = approach_prov
@@ -860,6 +912,34 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # between top-down and bottom-up could be presented as equally defensible).
     if _usable(sizing):
         comparison = _as_dict(sizing.get("comparison"))
+    # DEGENERATE_NARROWING — SAM that does not narrow TAM.
+    #
+    # Deliberately deterministic rather than agent-judged. The 22-item self-check has an item for
+    # exactly this ("TAM > SAM > SOM"), but it is scored by the sub-agent and there is NO code check
+    # anywhere; measured, a run returned `pass` while its own evidence text read "SAM equals TAM
+    # exactly ... the bottom-up SAM isn't doing independent work as a constraint".
+    #
+    # Only the sam == tam limb is implemented. `som == sam` has zero confirmed instances across the
+    # corpus, and building a symmetric guess for an unobserved case is how a previous plan shipped a
+    # detector for a class that never occurs.
+    if _usable(sizing):
+        for _approach in ("top_down", "bottom_up"):
+            _block = _as_dict(sizing.get(_approach))
+            _tam = _as_dict(_block.get("tam")).get("value")
+            _sam = _as_dict(_block.get("sam")).get("value")
+            if not isinstance(_tam, (int, float)) or not isinstance(_sam, (int, float)):
+                continue
+            if _tam and math.isclose(float(_tam), float(_sam), rel_tol=1e-9):
+                _label = "Top-down" if _approach == "top_down" else "Bottom-up"
+                warnings.append(
+                    _warn(
+                        "DEGENERATE_NARROWING",
+                        f"{_label} SAM equals TAM ({_fmt_usd(float(_sam))}) — the serviceable "
+                        "market applies no narrowing, so it carries no filtering work. State which "
+                        "customers are excluded and why, or drop the distinction.",
+                    )
+                )
+
         if comparison.get("tam_delta_pct", 0) > 30:
             warnings.append(
                 _warn(
@@ -993,7 +1073,7 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                         continue
                     claim = comparable
                 delta = _compute_delta(float(val), claim)
-                if delta is not None and abs(delta) > 50 and claim is not None:
+                if delta is not None and abs(delta) > DECK_MISMATCH_PCT and claim is not None:
                     # Code stays DECK_CLAIM_MISMATCH (stable API, asserted elsewhere);
                     # only the human-readable wording follows where the claim came from.
                     _src = (
@@ -1117,6 +1197,27 @@ def _section_title_provenance(
     return "\n".join(lines)
 
 
+def _widest_stressed(sensitivity: dict[str, Any] | None) -> list[str]:
+    """Every parameter tied at the top of sensitivity_ranking.
+
+    `most_sensitive` is `sensitivity_ranking[0]`, and the ranking sorts by `som_swing_pct` -- which,
+    for these pure-product models, is just the assigned stress band width. Ranges are assigned by
+    CONFIDENCE CLASS, not by leverage, so a well-sourced parameter can never top the ranking however
+    much the answer depends on it. Measured across three decks the top swing was a 3-, 4- and 3-way
+    TIE at exactly 100.0, broken by whatever order the sub-agent listed parameters.
+
+    Derived from the artifact rather than stored as a new field: both render sites already read
+    `sensitivity_ranking`, so a stored field would buy a schema row and a ceiling bump for nothing.
+    """
+    ranking = _as_list((sensitivity or {}).get("sensitivity_ranking"))
+    if not ranking:
+        return []
+    top = ranking[0].get("som_swing_pct")
+    if top is None:
+        return [str(ranking[0].get("parameter", "?"))]
+    return [str(r.get("parameter", "?")) for r in ranking if r.get("som_swing_pct") == top]
+
+
 def _section_executive_summary(
     sizing: dict[str, Any] | None,
     sensitivity: dict[str, Any] | None,
@@ -1141,9 +1242,13 @@ def _section_executive_summary(
             lines.append(f"| {metric.upper()} | {_fmt_usd(val)} | {method} |")
 
     if sensitivity is not None and not _is_stub(sensitivity):
+        tied = _widest_stressed(sensitivity)
         most = sensitivity.get("most_sensitive")
-        if most:
-            lines.append(f"| Most Sensitive Parameter | {_humanize_param(most)} | — |")
+        if len(tied) > 1:
+            names = ", ".join(_humanize_param(t) for t in tied)
+            lines.append(f"| Widest-Stressed Parameters (tied) | {names} | — |")
+        elif most:
+            lines.append(f"| Widest-Stressed Parameter | {_humanize_param(most)} | — |")
 
     # Flag significant deck claim deltas
     if provenance:
@@ -1157,7 +1262,7 @@ def _section_executive_summary(
                 prov = provenance[approach_key].get(metric, {})
                 delta = prov.get("delta_vs_deck_pct")
                 deck_claim = prov.get("deck_claim")
-                if delta is not None and abs(delta) > 50 and deck_claim is not None:
+                if delta is not None and abs(delta) > DECK_MISMATCH_PCT and deck_claim is not None:
                     approach_data = _as_dict(sizing.get(approach_key)) if sizing else {}
                     m_data = _as_dict(approach_data.get(metric))
                     val = m_data.get("value", 0)
@@ -1388,6 +1493,7 @@ def _section_sizing_table(
     # Deck Claims comparison table
     if provenance:
         comparison_rows: list[str] = []
+        close_agreement = False
         for approach_key in ("top_down", "bottom_up"):
             if approach_key not in provenance:
                 continue
@@ -1401,15 +1507,28 @@ def _section_sizing_table(
                     m = _as_dict(approach_data.get(metric))
                     val = m.get("value", 0)
                     method = "Top-down" if approach_key == "top_down" else "Bottom-up"
+                    marker = ""
+                    if abs(float(delta_pct)) <= CLOSE_AGREEMENT_PCT and not prov.get("comparison_blocked"):
+                        marker = " *"
+                        close_agreement = True
                     comparison_rows.append(
-                        f"| {metric.upper()} ({method}) | {_fmt_usd(float(deck_claim))} "
-                        f"| {_fmt_usd(val)} | {delta_pct:+.1f}% | {_md_safe(classification)} |"
+                        f"| {metric.upper()} ({method}) | "
+                        f"{_fmt_usd(float(prov.get('deck_claim_comparable') or deck_claim))} "
+                        f"| {_fmt_usd(val)} | {delta_pct:+.1f}%{marker} | {_md_safe(classification)} |"
                     )
         if comparison_rows:
             lines.append("\n### Deck Claims vs. Our Estimates\n")
             lines.append("| Metric | Deck Claim | Our Estimate | Delta | Classification |")
             lines.append("|--------|-----------|--------------|-------|----------------|")
             lines.extend(comparison_rows)
+            if close_agreement:
+                lines.append(
+                    f"\n\\* Our figure lands within {CLOSE_AGREEMENT_PCT:.0f}% of the figure in "
+                    "your materials. Agreement on a number is not independent confirmation — it can "
+                    "mean both analyses drew on the same source, or that our input came from your "
+                    "materials. To get a real check, size it again from an independently chosen "
+                    "value."
+                )
 
     return "\n".join(lines) + "\n"
 
@@ -1612,8 +1731,17 @@ def _section_sensitivity(sensitivity: dict[str, Any] | None) -> str:
 
     ranking = _as_list(sensitivity.get("sensitivity_ranking"))
     if ranking:
-        most = _humanize_param(ranking[0].get("parameter", "?"))
-        lines.append(f"\n**Most sensitive parameter:** {most}")
+        tied = _widest_stressed(sensitivity)
+        if len(tied) > 1:
+            names = ", ".join(_humanize_param(t) for t in tied)
+            lines.append(
+                f"\n**Widest-stressed parameters:** {names} — these are tied at the same stress "
+                "width, which follows from how confident we are in each input, not from how much "
+                "the answer depends on it."
+            )
+        else:
+            most = _humanize_param(ranking[0].get("parameter", "?"))
+            lines.append(f"\n**Widest-stressed parameter:** {most}")
 
     return "\n".join(lines) + "\n"
 

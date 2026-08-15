@@ -215,6 +215,12 @@ def _try_float(value: Any) -> float | None:
         return None
 
 
+# Below this |delta| vs a founder-stated figure, agreement carries no evidentiary weight:
+# it can mean both analyses read the same source, or that our input came from their materials.
+# compose_report.py uses the same constant; keep them in step.
+CLOSE_AGREEMENT_PCT = 25.0
+
+
 def _compute_delta(calculated: float, deck_claim: Any) -> float | None:
     """Returns signed percentage delta, or None if claim is invalid."""
     try:
@@ -224,6 +230,44 @@ def _compute_delta(calculated: float, deck_claim: Any) -> float | None:
     if claim <= 0:
         return None
     return round((calculated - claim) / claim * 100, 1)
+
+
+def _comparable_claim(
+    claim: Any, sizing: dict[str, Any] | None, inputs: dict[str, Any] | None
+) -> tuple[float | None, bool]:
+    """Express a deck claim in the analysis currency. Returns (value, blocked).
+
+    Mirrors compose_report._comparable_claim. An earlier version tested only for an UNDECLARED
+    claim currency, which left the declared-and-convertible case comparing a RAW claim in the table
+    against a CONVERTED one in the warnings -- measured at 83 percentage points apart on one figure.
+    A declared currency with no matching recorded pair is blocked too: converting it would need a
+    rate nobody supplied, and inverting another pair is exactly what this skill refuses to do.
+    """
+    if not isinstance(claim, (int, float)) or isinstance(claim, bool):
+        return None, False
+    fx = sizing.get("fx") if isinstance(sizing, dict) else None
+    conversions = fx.get("conversions") if isinstance(fx, dict) else None
+    if not (isinstance(conversions, list) and conversions):
+        return float(claim), False
+    declared = (inputs or {}).get("existing_claims_currency")
+    if not (isinstance(declared, str) and declared.strip()):
+        return None, True
+    target = (sizing or {}).get("currency")
+    if declared.strip().upper() == str(target).strip().upper():
+        return float(claim), False
+    for c in conversions:
+        if not isinstance(c, dict):
+            continue
+        rate = c.get("rate")
+        if (
+            str(c.get("from", "")).upper() == declared.strip().upper()
+            and str(c.get("to", "")).upper() == str(target).upper()
+            and isinstance(rate, (int, float))
+            and not isinstance(rate, bool)
+            and rate > 0
+        ):
+            return float(claim) * float(rate), False
+    return None, True
 
 
 def _compute_provenance(
@@ -279,13 +323,22 @@ def _compute_provenance(
 
             deck_claim = existing_claims.get(metric)
             value_num = _try_float(m.get("value", 0))
-            delta = _compute_delta(value_num, deck_claim) if value_num is not None and deck_claim is not None else None
+            comparable, blocked = _comparable_claim(deck_claim, sizing, inputs)
+            claim_for_delta = deck_claim if comparable is None else comparable
+            delta = (
+                _compute_delta(value_num, claim_for_delta) if value_num is not None and deck_claim is not None else None
+            )
 
+            # A converted money input with no declared claim currency makes the delta carry the
+            # exchange rate's magnitude on a perfectly correct analysis. compose_report.py refuses
+            # the comparison in that case; the renderers must not assert closeness there either.
             approach_prov[metric] = {
                 "classification": classification,
                 "confidence_breakdown": breakdown,
                 "deck_claim": deck_claim,
                 "delta_vs_deck_pct": delta,
+                "deck_claim_comparable": comparable,
+                "comparison_blocked": blocked,
                 "input_provenances": input_provenances,
             }
         provenance[approach_key] = approach_prov
@@ -1293,6 +1346,7 @@ def _chart_provenance_summary(
         return ""
 
     rows: list[str] = []
+    close_agreement = False
     for approach_key in ("top_down", "bottom_up"):
         if approach_key not in provenance:
             continue
@@ -1323,6 +1377,9 @@ def _chart_provenance_summary(
             deck_claim_num = _try_float(deck_claim) if deck_claim is not None else None
             deck_str = _esc(_fmt_usd(deck_claim_num)) if deck_claim_num is not None else "\u2014"
             delta_str = _esc(f"{delta:+.1f}%") if delta is not None else "\u2014"
+            if delta is not None and abs(delta) <= CLOSE_AGREEMENT_PCT and not prov.get("comparison_blocked"):
+                delta_str += " *"
+                close_agreement = True
 
             # Look up the agent's calculated estimate from sizing data
             estimate_str = "\u2014"  # em dash fallback
@@ -1351,10 +1408,19 @@ def _chart_provenance_summary(
         f'<th style="{th_style}">{label}</th>'
         for label in ("Metric", "Classification", "Our Estimate", "Deck Claim", "Delta")
     )
+    footnote = ""
+    if close_agreement:
+        footnote = (
+            '<p style="color:var(--lool-mute);font-size:0.8rem;margin-top:0.5rem;">'
+            f"* Within {CLOSE_AGREEMENT_PCT:.0f}% of the figure in your materials. "
+            "Agreement on a number is not independent confirmation &mdash; it can mean both "
+            "analyses drew on the same source, or that our input came from your materials. "
+            "To get a real check, size it again from an independently chosen value.</p>"
+        )
     return (
         '<div style="margin-top:1rem;font-size:0.85rem;">'
         '<table style="width:100%;border-collapse:collapse;">'
-        "<tr>" + headers + "</tr>" + "".join(rows) + "</table></div>"
+        "<tr>" + headers + "</tr>" + "".join(rows) + "</table>" + footnote + "</div>"
     )
 
 
@@ -1418,9 +1484,23 @@ def _chart_key_findings(
                 prov = _as_dict(provenance[approach_key].get(metric))
                 delta = prov.get("delta_vs_deck_pct")
                 if delta is not None:
-                    if abs(delta) <= 20:
-                        strong.append(f"{metric.upper()} ({method}) within 20% of deck claim")
-                    elif abs(delta) > 50:
+                    if prov.get("comparison_blocked") and abs(delta) <= CLOSE_AGREEMENT_PCT:
+                        # Do not assert closeness across a comparison the pipeline refuses. The
+                        # distant arm is deliberately left speaking: suppressing it would remove an
+                        # attention item with nothing to replace it (compose emits
+                        # COMPARISON_CURRENCY_UNKNOWN; this surface has no equivalent).
+                        pass
+                    elif abs(delta) <= CLOSE_AGREEMENT_PCT:
+                        # NOT a strength. Landing on the founder's own number is the cheapest
+                        # possible outcome — it happens when both analyses read the same source,
+                        # or when our input came from their materials. Measured across a 3-deck
+                        # corpus, every close agreement was the top-down TAM, and on one deck this
+                        # line was the ONLY "what's strong" item in the report.
+                        attention.append(
+                            f"{metric.upper()} ({method}) is within {abs(delta):.1f}% of your own "
+                            f"figure — agreement is not independent confirmation"
+                        )
+                    elif abs(delta) > CLOSE_AGREEMENT_PCT:
                         attention.append(f"{metric.upper()} ({method}): {delta:+.1f}% vs deck claim")
 
     if not strong and not attention and not actions:
@@ -1561,9 +1641,9 @@ def compose_html(dir_path: str) -> str:
         <section>
             <h2>Sensitivity Analysis</h2>
             <p style="color:var(--lool-mute);font-size:0.85rem;margin-bottom:1rem;">
-            Wider bars = higher sensitivity. Parameters are ranked by
-            impact on SOM. Focus on sourcing or validating the top
-            parameters first.</p>
+            Wider bars = a wider stress range, which follows from how confident
+            we are in each input &mdash; not from how much the answer depends on it.
+            Focus on sourcing or validating the widest-stressed parameters first.</p>
             {tornado_html}
         </section>
         <section>
