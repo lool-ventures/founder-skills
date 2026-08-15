@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — Checking the arithmetic, and saying what was not checked
+## [0.8.0] - 2026-08-15 — Checking the arithmetic, and saying what was not checked
 
 ### Highlights
 
