@@ -1,0 +1,26 @@
+Foobar Systems — Seed Financial Model (synthetic; not a real company)
+Section,Line item,Jan-2026,Feb-2026,Mar-2026,Apr-2026,May-2026,Jun-2026
+Revenue,New MRR added,9000,10200,11400,12900,14200,15800
+Revenue,Churned MRR,-1800,-2000,-2300,-2600,-2900,-3300
+Revenue,Ending MRR,52000,60200,69300,79600,90900,103400
+Revenue,ARR,624000,722400,831600,955200,1090800,1240800
+Revenue,Paying customers,104,118,134,152,172,194
+Revenue,Average revenue per account,500,510,517,524,528,533
+Costs,Engineering payroll,64000,64000,72000,72000,80000,80000
+Costs,Sales and marketing,31000,33000,36000,39000,42000,45000
+Costs,G&A,12000,12000,13000,13000,14000,14000
+Costs,Hosting and inference,7800,8600,9500,10600,11800,13100
+Costs,Total operating costs,114800,117600,130500,134600,147800,152100
+Cash,Gross margin percent,0.78,0.78,0.77,0.77,0.76,0.76
+Cash,Monthly net burn,74240,70644,77139,73308,78716,73516
+Cash,Cash balance end of month,1725760,1655116,1577977,1504669,1425953,1352437
+Unit economics,Blended CAC,4100,4150,4200,4250,4300,4350
+Unit economics,Lifetime value,14600,14800,15000,15200,15400,15600
+Unit economics,CAC payback months,10.5,10.6,10.7,10.8,10.9,11.0
+Unit economics,Monthly logo churn,0.034,0.033,0.033,0.032,0.032,0.031
+Assumptions,Starting cash,1800000,,,,,
+Assumptions,Headcount end of period,14,14,16,16,18,18
+Assumptions,Stage,seed,,,,,
+Assumptions,Geography,Israel,,,,,
+Assumptions,Revenue model,saas-sales-led,,,,,
+Assumptions,Currency,USD,,,,,

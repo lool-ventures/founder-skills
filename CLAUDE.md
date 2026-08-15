@@ -65,7 +65,12 @@
 - `founder-skills/tests/test_compose_invariants.py` also scans **every delivered markdown, not just `report.md`** — `_EXTRA_DELIVERABLES` names the non-compose producers (cap-table's counsel packet today). A deliverable nothing scans can say anything: `counsel_packet.md` shipped a raw rule-domain token to a founder while the fleet scan looked only at `report.md`. The cap-table fixture flags **zero** counsel items, so the scan seeds one — without it the packet is 315 B of boilerplate and passes with the leak present.
 - `founder-skills/tests/test_delivery_coverage.py` — The fleet's delivery-defect coverage map, asserted rather than described. Records the known gap: the downstream half of "computed, not rendered" is gated only in competitive-positioning and financial-model-review.
 - `founder-skills/tests/test_theme_sync.py` — Brand-theme invariants: per-skill `_theme.py` copies identical, brand font present, font embeds in CSS
-- `founder-skills/tests/test_e2e_deck_review.py` — End-to-end smoke; LLM-driven; carries `e2e` marker
+- `founder-skills/tests/test_e2e_deck_review.py`, `test_e2e_financial_model_review.py`,
+  `test_e2e_market_sizing.py` — the three paid end-to-end lanes; LLM-driven; carry the `e2e` marker.
+  Shared plumbing in `tests/_e2e_harness.py` — deck-review deliberately does NOT use it (it is the
+  lane the release tag gates on; fold it in when a failure costs a re-run rather than a re-tag).
+  **One lane per changed coaching-payload builder is the rule**: contract tests pin that a payload
+  key is emitted and named on both prompts, and structurally cannot show a sub-agent reading it.
 - `founder-skills/tests/fixtures/` — Synthetic test inputs (deck-review compose-invariant fixtures + synthetic deck for e2e + golden expected file)
 - `.github/workflows/skill-quality.yml` — Skill-quality CI (contract tests per-PR, e2e smoke on internal PRs only)
 - `artifacts/` — Persistent working directory for skill run artifacts (gitignored, created at runtime)
@@ -474,7 +479,7 @@ GitHub Action already replays in the `cowork-replay` workflow); it auto-skips wh
 `cowork-harness` CLI is absent, so the default `uv run pytest` stays green on machines
 without it.
 
-The deck-review e2e smoke (`tests/test_e2e_deck_review.py`) drives the SDK against a synthetic fixture. Auth options (any one):
+The three e2e smokes drive the SDK against synthetic fixtures. Auth options (any one):
 
 - `ANTHROPIC_API_KEY` env var (per-token API; ~$5-15/run)
 - `CLAUDE_CODE_OAUTH_TOKEN` env var (subscription, long-lived token from `claude setup-token`)
@@ -666,7 +671,7 @@ Per-PR e2e is off by default. Manually dispatch (`gh workflow run skill-quality.
 - `founder-skills/scripts/session-setup.sh` (mutates `CLAUDE_ENV_FILE`; downstream skills depend on it)
 - `founder-skills/skills/*/scripts/compose_report.py`, **but only when the change reaches the payload builder** — `_emit_coaching_payload` in five skills, `build_coaching_payload` in cap-table (which also runs `_assert_coaching_payload_privacy_clean` over the result; grep for the name rather than assuming, this differs per skill). That function IS the `coaching_payload` contract. `test_compose_invariants.py` checks its *shape* against synthetic fixtures; only e2e exercises the thing that shape exists for, namely a sub-agent reading the payload and writing usable commentary from it. **The check:** does the diff touch the payload builder or anything in its call graph? If yes, dispatch. If the change only alters how a section renders into `report.md`/`report.json`, the contract tests are sufficient and e2e buys nothing.
   This bullet used to name the whole file, which over-triggered: a rendering-only fix would read as needing a $10 paid run it cannot possibly exercise. Two such commits landed under the narrowed reading — a `-1` rank sentinel reaching founders, and a moat-radar caption — both rendering-only, both covered by contract tests, neither dispatched. **Watch the shared-helper case**: `report.md` prose and the payload can call the same helper, and a change there does reach the contract even though the diff looks like rendering. That is exactly why the trigger is the call graph and not the file.
-- `founder-skills/tests/test_e2e_deck_review.py` (the SDK invocation itself)
+- any of the three `founder-skills/tests/test_e2e_*.py` lanes, or `tests/_e2e_harness.py` (the SDK invocation itself)
 - `founder-skills/tests/cowork_async_subagent_filter.py` and `compose_invocations.py` (CI-helper meta — if these break, contract tests pass vacuously)
 - `pyproject.toml` `dependencies` list or `[project.optional-dependencies]` block (any runtime dep can shift SDK behavior)
 

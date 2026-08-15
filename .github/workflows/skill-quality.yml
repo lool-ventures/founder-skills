@@ -3,7 +3,7 @@ name: Skill Quality
 # Triggers:
 # - pull_request: contract-tests only (free, fast). e2e is excluded by the
 #   per-job `if:` to avoid unbounded $5-15/push cost while iterating on a PR.
-# - push: tags ['v*']: every release tag runs deck-review-e2e-smoke.
+# - push: tags ['v*']: every release tag runs the three end-to-end smokes.
 #   Tag failure = delete tag, fix, retag (no user impact yet, since
 #   sync-test-repo.sh is the actual distribution event — see CLAUDE.md
 #   "Release Process" for the required ordering).
@@ -51,7 +51,9 @@ jobs:
             -v -m "not e2e"
 
   deck-review-e2e-smoke:
-    name: deck-review end-to-end smoke (real LLM)
+    # Job id kept as `deck-review-e2e-smoke` deliberately: it is the required status
+    # check on the release tag, and renaming it would silently stop gating anything.
+    name: end-to-end smoke, 3 skills (real LLM)
     runs-on: ubuntu-latest
     # Run on tag push and manual dispatch only. Per-PR is the wrong cadence
     # for a $5-15 / 12-15min job — opt in via `workflow_dispatch` from the
@@ -114,8 +116,17 @@ jobs:
       # Generate the OAuth token locally with `claude setup-token`, then
       # store the value as a repo secret.
       - run: |
+          # All three paid lanes. deck-review alone left two of the three coaching
+          # payload builders covered by contract tests only -- and a payload key the
+          # sub-agent never reads is exactly what those lanes exist to catch, so the
+          # contract tests cannot stand in for them. Cost scales with the count:
+          # roughly $15-45 and 15-60 min for the three, against $5-15 for one.
+          # They run sequentially; -x is deliberately NOT set, so one flaky lane
+          # still reports the other two.
           uv run pytest \
             founder-skills/tests/test_e2e_deck_review.py \
+            founder-skills/tests/test_e2e_financial_model_review.py \
+            founder-skills/tests/test_e2e_market_sizing.py \
             -v -m e2e --tb=short
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY_CI }}
