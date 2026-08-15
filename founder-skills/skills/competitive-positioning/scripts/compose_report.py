@@ -1120,6 +1120,7 @@ def _overlap_summary(overlap: Any) -> str:
 def _section_competitor_verification(
     competitor_verification: dict[str, Any] | None,
     name_by_slug: dict[str, str] | None = None,
+    landscape: dict[str, Any] | None = None,
 ) -> str:
     """Adversarial competitor-set verification: the per-competitor verdicts and the blind-recall gaps.
 
@@ -1170,6 +1171,32 @@ def _section_competitor_verification(
             lines.append(
                 f"**Retained despite the challenge:** {names}. This entry is scored and ranked "
                 f"alongside the rest, so read its position with the verdict above in mind."
+            )
+            lines.append("")
+
+        # Competitors in the final set with NO verdict. The verification pass runs BEFORE the founder
+        # confirms the competitor set, so anything approved at a gate is never challenged — measured
+        # live at 6 verdicts against 9 competitors, the three absent being exactly the three added at a
+        # gate. On another run the unverified set included the competitor the skill itself flagged as
+        # directly rebutting the deck's central claim. Saying so does not verify them; it stops the
+        # section implying they were, which is what a table of verdicts with no mention of the
+        # remainder does.
+        verified_slugs = {str(v.get("slug")) for v in verdicts}
+        unverified = [
+            c
+            for c in (_as_dict(x) for x in _as_list(_as_dict(landscape).get("competitors")))
+            if str(c.get("slug")) and str(c.get("slug")) not in verified_slugs
+        ]
+        if unverified:
+            names = ", ".join(
+                _display_name(str(c.get("slug", "?")), name_by_slug) or str(c.get("name", "?")) for c in unverified
+            )
+            lines.append(
+                f"**Not independently challenged:** {names}. "
+                f"{'This competitor was' if len(unverified) == 1 else 'These competitors were'} added after "
+                f"the verification pass had run, so {'it has' if len(unverified) == 1 else 'they have'} not "
+                f"been through it. {'It is' if len(unverified) == 1 else 'They are'} scored and ranked "
+                f"alongside the rest."
             )
             lines.append("")
 
@@ -1737,7 +1764,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         _section_executive_summary(product_profile, positioning_scores, moat_scores, checklist),
         _section_competitor_landscape(landscape),
         _section_recent_developments(landscape),
-        _section_competitor_verification(competitor_verification, name_by_slug),
+        _section_competitor_verification(competitor_verification, name_by_slug, landscape),
         _section_positioning(positioning_scores, positioning_safe),
         _section_moat_assessment(moat_scores, name_by_slug),
         _section_stress_test(positioning_scores),

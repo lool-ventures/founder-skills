@@ -426,6 +426,71 @@ def test_cp_verification_verdicts_reach_the_report(tmp_path: Path) -> None:
     assert "High" in md, "verdict confidence was not rendered"
 
 
+def test_cp_gate_added_competitors_are_disclosed_as_unverified(tmp_path: Path) -> None:
+    """Step 3.5 runs BEFORE Gate 1, so a competitor the founder approves at a gate is never put through
+    adversarial verification — and the report presented it identically to one that was.
+
+    Confirmed live by a prediction registered before the artifacts existed: 6 verdicts against 9
+    competitors, and the three absent were exactly the three added at Gate 2. On another run the
+    unverified set included the competitor the skill itself described as "directly rebuts your
+    white-space claim" — the most decision-relevant company in the analysis was the one verification
+    never saw.
+
+    The section is where a founder learns what was challenged, so it is where the gap belongs. This
+    does not verify them — it stops the report implying they were.
+    """
+
+    def mutate(d: Path) -> None:
+        land = _read(d, "landscape.json")
+        # Verification covers the drafted set only — that IS the defect's shape, so it is what the
+        # fixture must model. competitor_verification.json is optional and absent by default.
+        _write(
+            d,
+            "competitor_verification.json",
+            {
+                "startup_characterization": {"buyer": "b", "job_to_be_done": "j"},
+                "verdicts": [
+                    {
+                        "slug": c["slug"],
+                        "verdict": "genuine",
+                        "reasoning": "Same buyer, same job.",
+                        "overlap": {"buyer": True, "job_to_be_done": True, "category": True},
+                        "confidence": "high",
+                    }
+                    for c in land["competitors"]
+                ],
+                "summary": {"total": len(land["competitors"]), "genuine": len(land["competitors"]), "flagged": 0},
+                "recall_gaps": {"unmatched": [], "probable_duplicates": []},
+                "metadata": {"run_id": "20260319T143045Z"},
+            },
+        )
+        # Add two competitors with no verdict, exactly as a Gate 1/2 approval does.
+        for slug, name in (("late-add-one", "Late Add One"), ("late-add-two", "Late Add Two")):
+            land["competitors"].append(
+                {
+                    "name": name,
+                    "slug": slug,
+                    "category": "direct",
+                    "description": "Added by the founder at a gate, after the verification pass ran.",
+                    "key_differentiators": ["approved at a gate"],
+                    "research_depth": "full",
+                    "evidence_source": {"description": "researched"},
+                    "sourced_fields_count": 3,
+                }
+            )
+        _write(d, "landscape.json", land)
+
+    md = _cp_compose(tmp_path, mutate)
+    assert "## Competitor Set Verification" in md, "the verification section vanished"
+    section = md.split("## Competitor Set Verification")[1].split("\n## ")[0]
+    assert "Late Add One" in section and "Late Add Two" in section, (
+        f"competitors that never went through verification are not disclosed as such:\n{section[-700:]}"
+    )
+    assert re.search(r"(?i)not (?:been )?(?:independently )?(?:challenged|verified)", section), (
+        f"no wording tells the founder these were never challenged:\n{section[-700:]}"
+    )
+
+
 def test_cp_verification_section_absent_when_artifact_absent(tmp_path: Path) -> None:
     """The artifact is optional — a run that skipped verification must not gain an empty section."""
     md = _cp_compose(tmp_path)
