@@ -771,6 +771,20 @@ def _profile_field_name(field: str) -> str:
     return {"sector": "revenue model"}.get(field, field)
 
 
+def _item_heading(item: dict[str, Any]) -> str:
+    """Name a checklist item the way a founder can act on it.
+
+    These lines rendered `**CASH_30** (Israel statutory costs itemized): ...` -- the label
+    was already right there, with an internal token bolted to the front of it. A live run
+    put 30 such ids into one delivered report, and this is the ONLY place they still came
+    from after the warnings were fixed; it was deferred once as "a larger call" and is not
+    one, because the label is present at the render site. Falls back to a generic phrase
+    rather than to the id: falling back to the id is how these reach a founder.
+    """
+    label = str(item.get("label") or "").strip()
+    return label or "Unnamed check"
+
+
 def _checklist_labels(checklist: dict[str, Any] | None, ids: list[Any]) -> str:
     """Render criterion ids as founder-facing labels.
 
@@ -847,10 +861,8 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
     if failed_items:
         lines.append("### Failed Items\n")
         for item in failed_items:
-            item_id = item.get("id", "?")
-            label = item.get("label", item_id)
             evidence = item.get("evidence", "")
-            lines.append(f"- **{item_id}** ({label}): {_md_safe(evidence)}")
+            lines.append(f"- **{_item_heading(item)}**: {_md_safe(evidence)}")
         lines.append("")
 
     # Warned items
@@ -858,10 +870,8 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
     if warned_items:
         lines.append("### Warned Items\n")
         for item in warned_items:
-            item_id = item.get("id", "?")
-            label = item.get("label", item_id)
             evidence = item.get("evidence", "")
-            lines.append(f"- **{item_id}** ({label}): {_md_safe(evidence)}")
+            lines.append(f"- **{_item_heading(item)}**: {_md_safe(evidence)}")
         lines.append("")
 
     # By category summary

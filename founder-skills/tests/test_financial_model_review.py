@@ -8917,3 +8917,42 @@ def test_an_unresolved_profile_field_is_not_reported_as_a_fact_about_the_company
     # The sector branch must not leak `revenue_model_type` — HTML is not run through substitute().
     for item_id in unresolved.get("sector", []):
         assert "revenue_model_type" not in str(by_id[item_id].get("evidence", ""))
+
+
+def test_failed_and_warned_items_name_checks_not_criterion_ids(tmp_path: Any) -> None:
+    """The last place criterion ids reached a founder, found by a live run.
+
+    The warnings and the not-assessed lines were fixed to render labels; the failed and
+    warned ITEM lists were left rendering `**CASH_30** (Israel statutory costs itemized)`
+    — the label already present, with an internal token bolted to the front. Deferred once
+    as "a larger call"; it is one line, because the label is at the render site.
+
+    Asserted on the whole document. Every earlier version of this check was scoped to a
+    section, and the ids simply shipped from a different one.
+    """
+    checklist = json.loads(json.dumps(_VALID_CHECKLIST))
+    checklist["summary"]["failed_items"] = [
+        {"id": "CASH_30", "label": "Israel statutory costs itemized", "evidence": "no itemization"}
+    ]
+    checklist["summary"]["warned_items"] = [
+        {"id": "STRUCT_07", "label": "Monthly granularity appropriate to stage", "evidence": "6 months only"}
+    ]
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": checklist,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    md_path = os.path.join(d, "report.md")
+    rc, _receipt, _err = run_script(
+        "compose_report.py", ["-d", d, "-o", os.path.join(d, "report.json"), "--write-md", md_path]
+    )
+    assert rc == 0
+    with open(md_path, encoding="utf-8") as fh:
+        md = fh.read()
+    assert "Israel statutory costs itemized" in md, "the founder-facing label is gone too"
+    assert "Monthly granularity appropriate to stage" in md
+    assert "CASH_30" not in md, "a criterion id reached the founder-facing report"
+    assert "STRUCT_07" not in md

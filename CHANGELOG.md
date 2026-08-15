@@ -48,7 +48,11 @@ images needs exporting from the original rather than scanning, and a deck read o
 re-sending in full. The same gate now covers markdown decks, and decks that arrived unreadable or
 only partly readable. Where the design criteria were excluded, the charts leave the category out
 altogether instead of scoring it over whichever criterion survived — it was being drawn at 100%
-and listed among your strengths.
+and listed among your strengths — and the visual report now carries the same explanation the
+written one does, rather than simply dropping the number. The category charts also stop showing a
+category that does not apply to you at all as **0%**: the four AI-company criteria on a company
+that is not an AI company had an empty denominator and were plotted at the centre, which reads as
+total failure rather than "not applicable".
 
 **Scores and sections say what they mean.** A deck-review `warn` earns half credit — every one of
 the 35 criteria defines warn as partial satisfaction, and it used to count for nothing. The score
@@ -168,8 +172,10 @@ deck is not a strength.
   company warrants. The written report had named the missing checks for a while; the visual report
   and the explorer showed the percentage alone, so a partial review looked like a complete one. The
   coaching commentary is told as well, and told not to lead with the headline status when it is.
-- **financial-model-review:** the two warnings about dropped checks name them in words rather than
-  by internal identifiers.
+- **financial-model-review:** every list in the report names checks in words rather than by
+  internal identifiers. The failed and warned items led with the identifier and put the readable
+  name in brackets after it — a delivered review carried thirty of them — and the two warnings
+  about dropped checks did the same.
 - **financial-model-review:** the runway criterion's pass and warn bands did not cover their own
   axis for seed and Series A — 18-24 months fell in neither. A 22-month runway was graded a pass on
   evidence that described a warn.
