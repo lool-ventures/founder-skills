@@ -123,6 +123,40 @@ def test_moat_radar_svg() -> None:
         assert stdout.count("<polygon") >= 2
 
 
+def test_moat_radar_discloses_non_applicable_dimensions() -> None:
+    """The radar plots `not_applicable` and `absent` at the same vertex, so it must say which.
+
+    `_STATUS_SCORE` maps both to 0.0 (visualize.py), which is defensible for the geometry — a radar
+    has to plot something, and no value on a 0-1 STRENGTH axis can honestly mean "does not apply".
+    What is not defensible is leaving the two indistinguishable: "we could not assess this" and "there
+    is no moat here" are different claims to make to a founder, and the founder is looking at a chart
+    that renders them identically.
+
+    Fixed by disclosure rather than geometry — a caption naming the non-applicable dimensions. The
+    fixture's `_startup` is `not_applicable` on network_effects and regulatory_barriers, so this test
+    fails against the chart as shipped before the caption existed.
+
+    report.md already states this in prose after the rank-sentinel fix; the radar was the last surface
+    where the two collapsed.
+
+    THE ASSERTION THAT MATTERS is the negative one. In this fixture `_startup` is `not_applicable` on
+    network_effects and `absent` on regulatory_barriers — both plot at the same vertex. A caption that
+    named both would re-create the confusion it exists to remove: `absent` is a real, assessed zero and
+    must NOT be disclaimed. Naming exactly one of two identically-plotted vertices is the whole point.
+    """
+    with _make_artifact_dir(_all_artifacts()) as d:
+        rc, stdout, stderr = _run_visualize(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        radar = stdout.split("Moat Radar")[1].split("</div>\n</div>")[0]
+        note = radar.split("</svg>")[-1]  # caption/legend area, past the axis labels
+        assert "not apply" in note.lower(), f"no disclosure of non-applicability:\n{note}"
+        assert "Network Effects" in note, f"the non-applicable dimension is not named:\n{note}"
+        assert "Regulatory Barriers" not in note, (
+            "an `absent` dimension was disclaimed as not-applicable — absent is an assessed zero, and "
+            f"conflating the two is the defect this caption exists to fix:\n{note}"
+        )
+
+
 def test_competitor_table() -> None:
     """HTML contains <table> with competitor names."""
     with _make_artifact_dir(_all_artifacts()) as d:

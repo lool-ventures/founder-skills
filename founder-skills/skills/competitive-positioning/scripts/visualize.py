@@ -360,7 +360,7 @@ def _css(brand_css: str) -> str:
             color: var(--lool-warning); font-size: 0.75rem; font-style: italic;
             margin-top: 0.25rem;
         }
-        .axis-rationale, .scoring-basis {
+        .axis-rationale, .scoring-basis, .chart-note {
             font-size: 0.75rem; color: var(--lool-mute); background: var(--lool-paper);
             border: 1px solid var(--lool-line-2);
             padding: 0.75rem; margin-top: 0.5rem; line-height: 1.5;
@@ -855,7 +855,32 @@ def _chart_moat_radar(moat_scores: dict[str, Any] | None) -> str:
         )
     legend_parts.append("</div>")
 
-    return f'<div class="chart-box"><h2>Moat Radar</h2>{"".join(svg)}{"".join(legend_parts)}</div>'
+    # `_STATUS_SCORE` maps `not_applicable` and `absent` to the same 0.0, so those vertices are drawn
+    # identically. That is right for the geometry — a radar must plot something, and no value on a 0-1
+    # STRENGTH axis honestly means "does not apply" — but it leaves two different claims looking the
+    # same: "we could not assess this" versus "we assessed it and there is nothing here". Disclose the
+    # difference in words rather than encoding it in the shape. `absent` is deliberately NOT listed: it
+    # is an assessed zero and disclaiming it would re-create the confusion this removes.
+    na_dims = [
+        _humanize(str(m.get("id", "")))
+        for m in startup_moats
+        if isinstance(m, dict) and str(m.get("status", "")).lower() == "not_applicable"
+    ]
+    na_note = ""
+    if na_dims:
+        if len(na_dims) == 1:
+            joined = _esc(na_dims[0])
+        elif len(na_dims) == 2:
+            joined = _esc(" and ".join(na_dims))
+        else:
+            joined = _esc(", ".join(na_dims[:-1]) + ", and " + na_dims[-1])
+        verb = "does" if len(na_dims) == 1 else "do"
+        na_note = (
+            f'<div class="chart-note">{joined} {verb} not apply to this business model. '
+            f"Plotted at zero so the shape stays comparable — not scored as a weakness.</div>"
+        )
+
+    return f'<div class="chart-box"><h2>Moat Radar</h2>{"".join(svg)}{"".join(legend_parts)}{na_note}</div>'
 
 
 # ---------------------------------------------------------------------------
