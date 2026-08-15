@@ -241,6 +241,12 @@ def parse_range(raw: str) -> tuple[float, float] | None:
 _PLUS_RE = re.compile(r"\d\s*[kKmMbBtT%]?\s*\+")
 _LEAD_AT_MOST = re.compile(r"^\s*[<≤]")
 _LEAD_AT_LEAST = re.compile(r"^\s*[>≥]")
+# A bound word LEADING the raw string qualifies the figure itself: "Over 30%", "at least
+# $2M". Anchored deliberately -- an unanchored word match reads "1103% over 6 mths" as a
+# floor on 1103%, where "over" is a time preposition. The label path stays word-based and
+# unanchored because a label is prose about the figure; the raw string is the figure.
+_LEAD_AT_LEAST_WORDS = re.compile(r"^\s*(over|above|at least|more than|minimum of|no less than)\s+\$?\d", re.I)
+_LEAD_AT_MOST_WORDS = re.compile(r"^\s*(under|below|fewer than|less than|at most|up to|no more than)\s+\$?\d", re.I)
 _AT_MOST_WORDS = re.compile(r"\b(fewer than|less than|under|up to|at most|no more than|below)\b", re.I)
 _AT_LEAST_WORDS = re.compile(r"\b(at least|more than|over|exceeds|minimum|or more)\b", re.I)
 # These words mean the AUTHOR ROUNDED. They do not mean the author is unsure about the
@@ -287,6 +293,10 @@ def detect_bound(raw: str, label: str) -> str | None:
         votes.add("at_most")
     if _LEAD_AT_LEAST.search(raw):
         votes.add("at_least")
+    if _LEAD_AT_LEAST_WORDS.search(raw):
+        votes.add("at_least")
+    if _LEAD_AT_MOST_WORDS.search(raw):
+        votes.add("at_most")
     if _AT_MOST_WORDS.search(label):
         votes.add("at_most")
     if _AT_LEAST_WORDS.search(label):
@@ -660,7 +670,7 @@ widens by 3.3, nowhere near it.
 """
 
 
-def _is_self_ratio(r: Relation, operands: list[Figure]) -> bool:
+def _is_self_comparison(r: Relation, operands: list[Figure]) -> bool:
     """Is this a cross-slide consistency check that came back clean?
 
     Two operands holding the SAME quantity — same value within tolerance, same unit — with
@@ -669,15 +679,26 @@ def _is_self_ratio(r: Relation, operands: list[Figure]) -> bool:
     with itself. A DISAGREEMENT there surfaces on its own merits and must not be caught
     here, which is why the equality test is the gate.
 
-    Scoped tightly on purpose. It requires `ratio`, exactly two operands, no `expected_id`,
-    matching `unit_kind`, and equality within the operands' own tolerance. A ratio of two
-    genuinely different quantities that happens to land on 100% — breakeven, say — keeps
-    its `derived` verdict, because the operands are not the same quantity.
+    COVERS `ratio` AND `difference`, and the second was a gap I created. This started as
+    `ratio`-only, on the argument that a ratio of two genuinely different quantities
+    landing on 100% — breakeven, say — might be worth reading. That argument does not
+    transfer, and scoping to it let a real deck ship
+
+        $12.5 trillion − $12.5 trillion = 0
+
+    to a founder: the same global market size stated on slides 12 and 24, subtracted from
+    itself. `X − X = 0` is meaningless whatever the quantities are, so `difference` needs
+    no equivalent escape hatch. The `ratio` carve-out stays, and is pinned by a test.
+
+    Requires exactly two operands, no `expected_id`, matching `unit_kind`, and equality
+    within the operands' own tolerance.
     """
-    if r.operator != "ratio" or r.expected_id or len(operands) != 2:
+    if r.operator not in ("ratio", "difference") or r.expected_id or len(operands) != 2:
         return False
     a, b = operands
-    if a.unit_kind != b.unit_kind or b.value == 0:
+    if a.unit_kind != b.unit_kind:
+        return False
+    if r.operator == "ratio" and b.value == 0:
         return False
     return abs(a.value - b.value) <= max(figure_tolerance(a), figure_tolerance(b))
 
@@ -996,6 +1017,19 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         # that agrees with itself as contradicting itself. The guard was added to `sum`
         # when this was first found and `difference` was missed -- the same bug, one
         # branch over.
+        # A BOUNDED OPERAND MAKES THE DIFFERENCE BOUNDED, not exact. A real deck stated
+        # "Over 30%" against a "50%" and this rendered "50% - Over 30% = 20", which is
+        # wrong in a way a founder cannot see: subtracting a floor gives a CEILING, so the
+        # honest answer is "at most 20". Refusing is the safe direction and costs almost
+        # nothing -- a difference against an open-ended figure is rarely the finding, and
+        # asserting a precise number from an imprecise input is how this module does harm.
+        bounded = [f for f in (a, b) if f.bound in ("at_least", "at_most")]
+        if bounded:
+            r.dropped, r.reasons = (
+                True,
+                [f"cannot subtract an open-ended figure ({bounded[0].raw}) and call the result exact"],
+            )
+            return r
         both_pct = a.unit_kind == PERCENT and b.unit_kind == PERCENT
         r.computed = (a.value - b.value) if both_pct else (as_fraction(a) - as_fraction(b))
         r.computed_unit = a.unit_kind + (f":{a.period}" if a.period else "")
@@ -1158,7 +1192,7 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
     elif r.operator == "sum" and len(real) == 2 and r.kind != "contradiction":
         # "52 + 3 = 55 customers" restates the deck rather than testing it.
         r.verdict = "restatement"
-    elif _is_self_ratio(r, real):
+    elif _is_self_comparison(r, real):
         # A CROSS-SLIDE CONSISTENCY CHECK THAT PASSED. The model pairs the same quantity
         # stated on two slides -- "150+ accounts" on slide 2 against "150+ accounts" on
         # slide 9 -- to see whether the deck contradicts itself. That is a good check, and

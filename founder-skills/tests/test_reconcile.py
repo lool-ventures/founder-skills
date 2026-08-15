@@ -628,3 +628,49 @@ def test_a_corroborated_stated_side_still_produces_findings() -> None:
     b = fig("4", 4, "count", "customers", id="b")
     e = fig("$50k", 50_000, "money", "ACV", id="e")
     assert _cmp("ratio", ["a", "b"], "e", {"a": a, "b": b, "e": e}).verdict == "contradiction"
+
+
+def test_a_figure_subtracted_from_itself_is_not_a_reading() -> None:
+    """`$12.5 trillion − $12.5 trillion = 0` reached a real founder report.
+
+    Same global market size stated on two slides — the cross-slide consistency check again,
+    which I had guarded for `ratio` only. The carve-out that justified scoping to `ratio`
+    (a ratio of different quantities landing on 100% might be worth reading) does not
+    transfer: X − X = 0 is meaningless whatever the quantities are.
+    """
+    a = fig("$12.5 trillion", 12_500_000_000_000, "money", "market size (slide 12)", id="m12")
+    b = fig("$12.5 trillion", 12_500_000_000_000, "money", "market size (slide 24)", id="m24")
+    assert _cmp("difference", ["m12", "m24"], None, {"m12": a, "m24": b}).verdict == "restatement"
+
+
+def test_a_real_difference_across_slides_still_surfaces() -> None:
+    """The counter-test: only EQUAL operands are silenced, never a genuine disagreement."""
+    a = fig("$12.5 trillion", 12_500_000_000_000, "money", "market size (slide 12)", id="m12")
+    b = fig("$9 trillion", 9_000_000_000_000, "money", "market size (slide 24)", id="m24")
+    assert _cmp("difference", ["m12", "m24"], None, {"m12": a, "m24": b}).verdict != "restatement"
+
+
+def test_subtracting_an_open_ended_figure_is_refused() -> None:
+    """`50% − Over 30% = 20` was rendered as exact. It is not.
+
+    Subtracting a floor yields a CEILING — the honest answer is "at most 20" — and a
+    founder cannot see that the number is wrong. Refusing costs almost nothing: a
+    difference against an open-ended figure is rarely the finding.
+    """
+    a = fig("50%", 50, "percent", "time-to-market reduction", id="a")
+    b = fig("Over 30%", 30, "percent", "time to market reduction", id="b")
+    r = _cmp("difference", ["a", "b"], None, {"a": a, "b": b})
+    assert r.dropped
+    assert any("open-ended" in x for x in r.reasons)
+
+
+def test_a_leading_bound_word_in_the_raw_string_is_read() -> None:
+    """ "Over 30%" puts the bound in the figure's own text, where nothing was looking.
+
+    `detect_bound` read symbols from `raw` and words from `label`, so a raw carrying the
+    word fell through both. Anchored to the start deliberately — an unanchored match reads
+    "1103% over 6 mths" as a floor, where "over" is a time preposition.
+    """
+    assert detect_bound("Over 30%", "time to market") == "at_least"
+    assert detect_bound("Less than 2,000", "tall buildings") == "at_most"
+    assert detect_bound("30%", "turnover 30%") is None
