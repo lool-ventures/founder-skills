@@ -511,6 +511,12 @@ def _count_moat_founder_overrides(
 # it far more than this.
 _POINT_MERGE_TOLERANCE = 0.01
 
+# Mirrors the sentinel `score_moats.py` stamps into `comparison.startup_rank[dim]` when the startup is
+# `not_applicable` on a dimension: {"rank": -1, "total": 0}. Named here so the renderer's guard says
+# what it is guarding rather than testing a bare -1. Both sides are documented in
+# references/artifact-schemas.md — a consumer that does not know the convention renders `Rank -1 of 0`.
+_NOT_RANKABLE_RANK = -1
+
 
 def _points_by_slug(points: list[Any]) -> dict[str, tuple[float, float]]:
     """Map competitor slug -> (x, y) from a view's points list.
@@ -1291,6 +1297,16 @@ def _section_moat_assessment(
             ri = _as_dict(rank_info)
             rank_val = ri.get("rank", "?")
             total_val = ri.get("total", "?")
+            # `score_moats.py` stamps {"rank": -1, "total": 0} when the STARTUP is `not_applicable`
+            # on this dimension — a producer sentinel meaning "not rankable", correct in the artifact
+            # and documented in references/artifact-schemas.md. Rendered verbatim it produced
+            # `Rank -1 of 0 ranked` in delivered reports. Say the thing the sentinel means instead of
+            # dropping the line: `not_applicable` asserts the moat type does not structurally apply
+            # to this business model (references/moat-definitions.md), which is worth telling a
+            # founder. No leader is offered, because there is no comparison to lead.
+            if rank_val == _NOT_RANKABLE_RANK or total_val == 0:
+                lines.append(f"- **{_humanize(dim)}:** Not applicable to this business model")
+                continue
             # Identify the leader: competitor with the strongest status in this dimension
             leader_name: str | None = None
             leader_status: str | None = None
@@ -1302,7 +1318,9 @@ def _section_moat_assessment(
                     leader_name = slug
                     leader_status = s
             leader_note = ""
-            if leader_name and leader_status and rank_val != 1:
+            # `not_applicable` sorts last, so it wins only when EVERY competitor is unassessed on this
+            # dimension — "leader: X (N/A)" is not leadership, it is nobody being assessed.
+            if leader_name and leader_status and leader_status != "not_applicable" and rank_val != 1:
                 # Render the competitor's display name, never its slug — a slug in the
                 # deliverable is an internal token the founder has no use for.
                 leader_note = f" — leader: {_display_name(leader_name, name_by_slug)} ({_humanize(leader_status)})"

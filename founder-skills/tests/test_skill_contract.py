@@ -745,7 +745,13 @@ REFERENCES_CEILING: dict[str, int] = {
     # FOUR criteria, not five — slide_count_appropriate is arithmetic, not a visual
     # judgement, and stays scored whether or not anyone saw a rendered page.
     "deck-review": 50_422,
-    "competitive-positioning": 136_835,
+    # competitive-positioning +474 B: artifact-schemas.md documented the `startup_rank` RENDERING
+    # convention but not its SENTINEL. `score_moats.py` stamps {"rank": -1, "total": 0} when the
+    # startup is not_applicable on a dimension, and compose_report.py rendered it verbatim —
+    # `Rank -1 of 0 ranked — leader: X (N/A)` reached founders, and reproduces from the committed
+    # fixture. A convention documented without its sentinel is what let a consumer get it wrong; the
+    # per-site guard alone would leave the identical trap for the next reader.
+    "competitive-positioning": 137_309,
     # cap-table +422 B: inputs-skeleton.md promised "no warning, and downstream artifacts that look
     # right but contain zeros" — the PRE-FIX world. cap_state.py hard-errors E_NO_EQUITY_BASE now,
     # and prose telling a model that a missing base yields plausible zeros invites it to invent one.

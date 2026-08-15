@@ -232,6 +232,49 @@ def test_cp_moat_leader_renders_name_not_slug(tmp_path: Path) -> None:
                 assert "-" not in leader or " " in leader, f"leader looks like a slug: {leader!r}"
 
 
+def test_cp_not_rankable_sentinel_never_reaches_the_founder(tmp_path: Path) -> None:
+    """`score_moats.py` stamps `{"rank": -1, "total": 0}` when the STARTUP is `not_applicable` on a
+    dimension — a producer sentinel meaning "not rankable", correct in the artifact. `compose_report`
+    rendered it verbatim: `- **Network Effects:** Rank -1 of 0 ranked`.
+
+    NO MUTATION NEEDED — the committed fixture already carries `rank: -1` on two dimensions, so this
+    reproduces the delivered defect exactly as a founder would have received it. That is also why this
+    test is non-vacuous: it fails against the code as shipped before this fix.
+
+    `not_applicable` means the moat type does not structurally apply to this business model
+    (`references/moat-definitions.md`), which is a real statement worth making — so the line is
+    replaced, not dropped.
+    """
+    md = _cp_compose(tmp_path)
+    assert "Startup Ranking by Moat Dimension" in md, "fixture no longer exercises the ranking block"
+    block = md.split("Startup Ranking by Moat Dimension")[1].split("###")[0]
+
+    assert "Rank -1" not in block, f"the not-rankable sentinel reached the founder:\n{block}"
+    assert "of 0 ranked" not in block, f"a zero denominator reached the founder:\n{block}"
+    # Non-vacuity: the fixture must still contain the case this test exists for.
+    assert "Not applicable to this business model" in block, (
+        f"expected the two `not_applicable` dimensions to render as prose; got:\n{block}"
+    )
+    # Real ranks must be untouched.
+    assert "Rank 4 of 5 ranked" in block, f"a valid rank line changed:\n{block}"
+
+
+def test_cp_no_leader_attributed_on_a_dimension_that_does_not_apply(tmp_path: Path) -> None:
+    """`:1305` gated the leader note on `rank_val != 1`, which is TRUE at the -1 sentinel — so an
+    unrankable dimension still got `— leader: QuickBooks Online (Moderate)` appended, offering the
+    founder a comparison on a dimension where no comparison was possible.
+
+    Second-order: the fixture also produced `— leader: QuickBooks Online (N/A)` — a "leader" whose own
+    status is `not_applicable`. Leading on a dimension nobody is assessed on is not leadership.
+    """
+    md = _cp_compose(tmp_path)
+    block = md.split("Startup Ranking by Moat Dimension")[1].split("###")[0]
+    for line in block.splitlines():
+        if "Not applicable to this business model" in line:
+            assert "leader:" not in line, f"leader attributed on a non-applicable dimension: {line!r}"
+        assert "(N/A)" not in line, f"a competitor with no assessment is rendered as the leader: {line!r}"
+
+
 def test_cp_view_label_preferred_over_title_cased_id(tmp_path: Path) -> None:
     """Descriptive slug ids get title-cased into headings like
     '### Firmness-X-Integration-Burden View'. An explicit label wins when present."""
