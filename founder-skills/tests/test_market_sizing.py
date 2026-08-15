@@ -978,6 +978,46 @@ def test_fx_unsourced_message_names_which_half_is_missing() -> None:
         assert "fx.as_of" not in msg and "fx.source" not in msg
 
 
+def test_blank_fx_provenance_is_absent_not_supplied() -> None:
+    """Whitespace-only `--fx-as-of` / `--fx-source` must count as ABSENT.
+
+    The warning gates on `not (as_of and source)`, and a blank string is truthy. So
+    `--fx-as-of "   "` suppressed the warning AND rendered the callout as
+    `Rate as of     (  ).` — a converted figure that looks sourced, warns nobody, and
+    prints a blank where the date belongs. It is the state an agent reaches by filling in
+    flags SKILL.md presents as a set when it has a rate but no citation, which makes it
+    likelier than the honestly-omitted case the warning was written for.
+    """
+    rc, sizing, err = run_script(
+        "market_sizing.py",
+        ["--stdin", "--fx-as-of", "   ", "--fx-source", "  "],
+        stdin_data=_fx_stdin(industry_total_currency="USD", fx={"rates": {"USD:ILS": 3.72}}),
+    )
+    assert rc == 0, err
+    assert sizing is not None
+    assert sizing["fx"]["as_of"] is None, f"blank as_of must normalise to None, got {sizing['fx']['as_of']!r}"
+    assert sizing["fx"]["source"] is None, f"blank source must normalise to None, got {sizing['fx']['source']!r}"
+    codes = [w["code"] for w in sizing["validation"]["warnings"]]
+    assert "FX_UNSOURCED" in codes, "blank provenance is unsourced provenance"
+
+    d = _make_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "methodology.json": _VALID_METHODOLOGY,
+            "validation.json": _VALID_VALIDATION,
+            "sizing.json": sizing,
+            "sensitivity.json": _VALID_SENSITIVITY,
+            "checklist.json": _VALID_CHECKLIST,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    callout = next(line for line in data["report_markdown"].splitlines() if "Currency:" in line)
+    assert "date not stated" in callout, f"blank date must render as unstated, got: {callout}"
+    assert "Rate as of  " not in callout, f"blank rendered into the callout: {callout}"
+
+
 def test_compose_does_not_forward_a_code_it_owns_itself() -> None:
     """A producer artifact must not be able to assert a compose-owned code.
 

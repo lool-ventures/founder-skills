@@ -160,8 +160,19 @@ def _resolve_fx(
         else:
             errors.append(err)
 
-    as_of = args.fx_as_of or (fx_obj.get("as_of") if isinstance(fx_obj.get("as_of"), str) else None)
-    source = args.fx_source or (fx_obj.get("source") if isinstance(fx_obj.get("source"), str) else None)
+    # Blank-but-present provenance normalises to ABSENT. Without the strip, `--fx-as-of "   "`
+    # is truthy: it suppresses FX_UNSOURCED and renders the callout as "Rate as of     (  )."
+    # — a converted figure that looks sourced, warns nobody, and shows a blank where the date
+    # should be. That is the worst of the three states, and it is the one an agent reaches by
+    # filling in the flags SKILL.md presents as a set when it has a rate but no citation.
+    def _provenance(*candidates: Any) -> str | None:
+        for c in candidates:
+            if isinstance(c, str) and c.strip():
+                return c.strip()
+        return None
+
+    as_of = _provenance(args.fx_as_of, fx_obj.get("as_of"))
+    source = _provenance(args.fx_source, fx_obj.get("source"))
 
     # Per-field source currency: flag wins, then stdin. Absent => already in `target`, which is
     # why every pre-existing caller is unaffected by all of this.

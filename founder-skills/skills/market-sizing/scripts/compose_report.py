@@ -2037,7 +2037,16 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
                     }
                 )
             elif code in WARNING_SEVERITY:
-                print(f"Warning: cannot accept high-severity code '{code}' — ignored", file=sys.stderr)
+                # Name the actual severity. This branch is the catch-all for every non-medium
+                # code, so it called a low one "high-severity" — reachable now that a producer
+                # code (FX_UNSOURCED, low) forwards through here, and actively misleading:
+                # only medium is acceptable, and a low warning has nothing to clear.
+                _sev = WARNING_SEVERITY[code]
+                print(
+                    f"Warning: cannot accept {_sev}-severity code '{code}' — "
+                    f"only medium-severity warnings can be accepted; ignored",
+                    file=sys.stderr,
+                )
         for w in warnings:
             for acc in acceptances:
                 if w["code"] == acc["code"] and acc["match"].lower() in w.get("message", "").lower():
