@@ -68,6 +68,14 @@ assert:
   # key is already green. Nothing at any tier catches it here. The net for that class is
   # `delivery_check.py` in the post-batch sweep, which reconciles tool_use against tool_result by id
   # and reports an errored call separately. Do not treat this key as covering it.
+  #
+  # AND KNOW THAT IT IS NOT RUNNING. This key postdates the committed 1.12.0 cassette, and `replay`
+  # evaluates the scenario FROZEN in the cassette, never this file -- the frozen block carries 16
+  # asserts and this is not one of them. So CI's replay of this lane is green without ever checking
+  # delivery; only `replay --assert-from` reads the block you are looking at, and there it FAILS
+  # ("no file was delivered via present_files"). Everything the comment above says is true of what
+  # this key WILL catch once the lane is re-recorded, and true of nothing today. Do not read the
+  # green as coverage, and do not tighten the wording here expecting CI to notice.
   - present_files_called: true
   # Dispatch contract: sub-agents declare no Bash (agents/*.md) — regression tripwire.
   - subagent_tool_absent: 'Bash'
