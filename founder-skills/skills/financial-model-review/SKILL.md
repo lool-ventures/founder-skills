@@ -817,8 +817,13 @@ re-issue the dispatch. Reporting it is the correct outcome.
 Follow your agent body's Context B procedure (POST_COMPOSE_COACHING):
 
 1. Compose commentary from the STAGED coaching_payload (failed_items,
-   warned_items, summary, high_severity_warnings, company_name).
+   warned_items, summary, score_coverage, high_severity_warnings, company_name).
    If truncated:true, acknowledge that not all failures are shown.
+   If `score_coverage.complete` is false, the score was computed over fewer criteria
+   than this company warrants (`not_assessed_count` of `total_criteria`, because
+   `unmatched_profile_fields` could not be matched). Say so; never present
+   `overall_status` as a clean headline. That is a gap in the review — not a
+   strength, and not a criticism.
    Do NOT Read the full report.md. Do NOT edit report.md or any canonical artifact.
    The commentary is appended to the founder's report, so write it in their language:
    never a checklist item id, a status enum (`not_applicable`), a warning code, or one of

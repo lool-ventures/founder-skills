@@ -197,6 +197,12 @@ keys (do not refetch from disk):
 - `schema_version`
 - `summary` (score_pct, overall_status, total, pass, fail, warn,
   not_applicable)
+- `score_coverage` (not_assessed_count, total_criteria, unmatched_profile_fields,
+  complete) — **what the score was NOT computed over.** When `complete` is false the
+  percentage was computed over fewer criteria than the company warrants, so it is
+  **not** a clean result: say so in the commentary, name the unmatched profile field,
+  and do NOT lead with `overall_status` as though the review were whole. A shrunken
+  denominator is a gap in the review, not a strength and not a criticism.
 - `failed_items`, `warned_items`
 - `high_severity_warnings` (codes only)
 - `company_name`

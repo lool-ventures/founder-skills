@@ -1216,3 +1216,57 @@ def test_explore_checklist_summary_self_contained() -> None:
 # Dead-payload coverage for this explorer lives in test_dead_payload.py, which scans every
 # embedder in one place and distinguishes 'unread' from 'unverifiable'. The scan that used to be
 # here matched dotted access only, so a computed-name read would have read as a dead key.
+
+
+# ---------------------------------------------------------------------------
+# A score computed over a shrunken denominator must say so on the HTML surfaces.
+#
+# Driven END-TO-END through the generators on purpose. Calling the renderer with a
+# hand-built dict that already carries the keys proves nothing: explore.py's renderer
+# consumes a SLIM payload built upstream, so a disclosure added only to the renderer
+# finds nothing and the explorer keeps showing a bare "strong" badge. The builder is
+# the bug, so the test has to run the builder.
+# ---------------------------------------------------------------------------
+
+
+def _partial_checklist() -> dict:
+    """A real checklist result whose profile field could not be matched."""
+    import importlib.util as _il
+
+    spec = _il.spec_from_file_location("fmr_ck_viz", os.path.join(FMR_SCRIPTS_DIR, "checklist.py"))
+    assert spec and spec.loader
+    ck = _il.module_from_spec(spec)
+    spec.loader.exec_module(ck)
+    items = [{"id": m["id"], "status": "pass", "evidence": "e"} for m in ck.CHECKLIST_ITEMS]
+    result, errors = ck.validate_checklist(
+        json.loads(json.dumps(items)),
+        {"stage": "seed", "geography": "Israel/US", "revenue_model_type": "saas-plg", "traits": []},
+    )
+    assert not errors, errors
+    assert result["summary"]["unresolved_profile_exclusions"], "fixture did not drop any criteria"
+    result["validation"] = {"status": "valid", "errors": []}
+    return dict(result)
+
+
+def test_report_html_discloses_a_score_computed_over_fewer_criteria() -> None:
+    d = _make_artifact_dir({"checklist.json": _partial_checklist()})
+    rc, stdout, stderr = run_script_raw("visualize.py", ["--dir", d])
+    assert rc == 0, f"rc={rc} stderr={stderr}"
+    assert "not assessed" in stdout.lower(), (
+        "report.html shows the checklist score with no sign that criteria were dropped — "
+        "the percentage reads as a complete result"
+    )
+
+
+def test_explorer_html_discloses_a_score_computed_over_fewer_criteria() -> None:
+    d = _make_artifact_dir({"checklist.json": _partial_checklist()})
+    out = os.path.join(d, "explorer.html")
+    res = subprocess.run(
+        [sys.executable, os.path.join(FMR_SCRIPTS_DIR, "explore.py"), "--dir", d, "-o", out],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, f"rc={res.returncode} stderr={res.stderr}"
+    with open(out, encoding="utf-8") as fh:
+        html = fh.read()
+    assert "not assessed" in html.lower(), "explorer.html shows a score badge with no sign that criteria were dropped"

@@ -489,7 +489,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
     # --inputs so the scoring records a fingerprint of what it graded — without it that fingerprint is
     # null and staleness cannot be detected for this artifact at all.
-    "financial-model-review": 79_279,
+    # fmr raised 79,279 -> 79,649 (+370 B) for the Context B `score_coverage` instruction. The
+    # coaching sub-agent reasons from a CLOSED key list, so a payload field absent from the
+    # dispatch is a field it never reads: without this the coach keeps writing "strong" over a
+    # score whose denominator silently lost the criteria an unmatched profile field dropped.
+    # Deliberate, per this test's own remedy, and the wording was tightened first.
+    "financial-model-review": 79_649,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole

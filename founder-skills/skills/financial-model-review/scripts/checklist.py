@@ -668,6 +668,30 @@ _GATE_LABELS = {
     "model_format_gate": "needs a spreadsheet model",
 }
 
+# Founder-facing wording for a gate whose profile field never RESOLVED. Deliberately separate
+# from _GATE_LABELS: those say something about the company, these say we could not tell.
+#
+# The field named here is the one the founder can act on, not the one that failed to normalize.
+# For the sector gate those differ -- the unresolved input is `revenue_model_type`, which is an
+# internal token the founder-text policy flags, and HTML is NOT run through `substitute()`
+# (test_html_founder_text.py), so naming it accurately would leak it into report.html and red the
+# fleet ratchet. "your revenue model" is the same fact in founder language.
+_UNRESOLVED_GATE_FIELDS = {
+    "geography_gate": "geography",
+    "sector_gate": "revenue model",
+}
+
+
+def _unresolved_gate_reason(gate_type: str, company: dict[str, Any] | None) -> str:
+    """Explain that a gate could not be evaluated, quoting what the founder actually supplied."""
+    field = _UNRESOLVED_GATE_FIELDS.get(gate_type, gate_type.removesuffix("_gate"))
+    raw = ""
+    if company is not None:
+        source_key = "revenue_model_type" if gate_type == "sector_gate" else field
+        raw = str(company.get(source_key, "") or "").strip()
+    seen = f" ('{raw}')" if raw else ""
+    return f"we could not match your {field}{seen}, so we could not tell whether this applies to you"
+
 
 def _gate_depends_on_unresolved(meta: dict[str, Any], gate_type: str) -> bool:
     """Could resolving this profile field have changed whether the item applies?
@@ -808,13 +832,21 @@ def validate_checklist(
             is_applicable, gate_desc, gate_type = _item_applicable(meta, norm_company)
             if not is_applicable:
                 status = "not_applicable"
-                evidence = f"Not applicable — {gate_desc}"
                 if gate_type in unresolved_gates and _gate_depends_on_unresolved(meta, gate_type):
                     # Excluded by a gate whose profile field never resolved, so this is not an
-                    # answer about the company — it is the absence of one, and it looks
-                    # identical in the artifact to a criterion that genuinely does not apply.
+                    # answer about the company — it is the absence of one. Stamping the SAME
+                    # evidence as a genuine exclusion made the artifact assert a fact it did not
+                    # have: an Israeli company whose geography read "Israel/US" was told
+                    # "applies to a different geography" on every Israel-keyed criterion, while
+                    # report.md said the field could not be matched. The distinction has to live
+                    # in the artifact, because every renderer reads the evidence string from it.
                     field = gate_type.removesuffix("_gate")
                     unresolved_exclusions.setdefault(field, []).append(item_id)
+                    # `company`, not `norm_company`: quote the founder's own string back to them.
+                    # Normalization lowercases, and "israel/us" reads like a typo of what they wrote.
+                    evidence = f"Not assessed — {_unresolved_gate_reason(gate_type, company)}"
+                else:
+                    evidence = f"Not applicable — {gate_desc}"
             elif status == "not_applicable" and item_id not in _JUDGEMENT_NOT_APPLICABLE:
                 # The profile says this criterion applies, yet it came back excluded. That
                 # removes it from the score's denominator on a decision this script owns.

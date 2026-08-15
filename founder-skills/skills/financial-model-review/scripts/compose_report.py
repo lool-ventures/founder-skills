@@ -540,6 +540,14 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                     f"{len(self_gated)} criteria were marked not applicable during assessment "
                     f"though the company profile says they apply: {self_gated}. "
                     "They are missing from the score.",
+                    # Ids stay in `message` (machine surface); the founder gets labels. Without
+                    # this, `_section_warnings` renders `founder_message or message` and a raw
+                    # `['UNIT_10', 'METRIC_33']` reaches report.md as a Python list repr.
+                    founder_message=(
+                        f"{len(self_gated)} checks that apply to your company were marked not "
+                        f"applicable during the assessment, so they are missing from the score: "
+                        f"{_checklist_labels(checklist, self_gated)}."
+                    ),
                 )
             )
 
@@ -559,6 +567,11 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                     "CHECKLIST_PROFILE_UNRESOLVED",
                     f"company {field} could not be matched to a known value, so {len(dropped)} "
                     f"criteria keyed to it were excluded without being assessed: {dropped}",
+                    founder_message=(
+                        f"We could not match your {field} to a known value, so {len(dropped)} "
+                        f"checks that may apply to you were excluded from the score without being "
+                        f"assessed: {_checklist_labels(checklist, dropped)}."
+                    ),
                 )
             )
 
@@ -746,6 +759,28 @@ def _section_executive_summary(
     return "\n".join(lines) + "\n"
 
 
+def _checklist_labels(checklist: dict[str, Any] | None, ids: list[Any]) -> str:
+    """Render criterion ids as founder-facing labels.
+
+    Criterion ids are internal tokens a founder cannot act on, and this is the only thing
+    standing between them and a delivered report — so the fallback for a missing label is a
+    GENERIC PHRASE, never the id. Falling back to the id looks harmless and is how `CASH_30`
+    reached report.md: the label map is built from `items[]`, and a thin or partial items list
+    silently degrades every name back to the token this function exists to remove.
+    """
+    labels = {
+        str(i.get("id")): str(i.get("label") or "").strip()
+        for i in _as_list(_as_dict(checklist).get("items"))
+        if isinstance(i, dict)
+    }
+    named = [labels.get(str(i), "") for i in ids]
+    unnamed = sum(1 for n in named if not n)
+    parts = [n for n in named if n]
+    if unnamed:
+        parts.append(f"{unnamed} further check{'s' if unnamed != 1 else ''}")
+    return ", ".join(parts)
+
+
 def _section_checklist(checklist: dict[str, Any] | None) -> str:
     """Checklist results section."""
     if checklist is None:
@@ -772,10 +807,8 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
     # than the company warrants, and a reader cannot see that from the percentage alone.
     # Criterion ids are internal tokens a founder cannot act on, so these lines name the criteria
     # by their labels. The label map comes from the items list, which carries both.
-    labels = {str(i.get("id")): str(i.get("label") or i.get("id")) for i in _as_list(checklist.get("items"))}
-
     def _named(ids: list[Any]) -> str:
-        return ", ".join(labels.get(str(i), str(i)) for i in ids)
+        return _checklist_labels(checklist, ids)
 
     self_gated = _as_list(summary.get("self_gated_items"))
     if self_gated:
@@ -1263,6 +1296,30 @@ def _truncate_actionable_items(
     return failed_out, warned_out, True, dropped_count
 
 
+def _score_coverage(summary: dict[str, Any]) -> dict[str, Any]:
+    """What the score was NOT computed over, for the coaching sub-agent.
+
+    `score_pct` is a fraction whose denominator both `self_gated_items` and
+    `unresolved_profile_exclusions` shrink without moving the number, so a coach handed only
+    `overall_status: "strong"` writes an unqualified headline over a partial review. Counts plus
+    founder-facing labels -- no criterion ids, since this text reaches a founder via commentary.
+    """
+    self_gated = [str(i) for i in _as_list(summary.get("self_gated_items"))]
+    unresolved_fields: list[str] = []
+    unresolved_ids: list[str] = []
+    for field, ids in sorted(_as_dict(summary.get("unresolved_profile_exclusions")).items()):
+        got = [str(i) for i in _as_list(ids)]
+        if got:
+            unresolved_fields.append(str(field))
+            unresolved_ids.extend(got)
+    return {
+        "not_assessed_count": len(self_gated) + len(unresolved_ids),
+        "total_criteria": summary.get("total"),
+        "unmatched_profile_fields": unresolved_fields,
+        "complete": not self_gated and not unresolved_ids,
+    }
+
+
 def _emit_coaching_payload(
     inputs: dict[str, Any] | None,
     checklist: dict[str, Any] | None,
@@ -1332,6 +1389,13 @@ def _emit_coaching_payload(
             "warn": summary.get("warn"),
             "not_applicable": summary.get("not_applicable"),
         },
+        # TOP-LEVEL, deliberately, and not folded into `summary` above. The Context B key list in
+        # agents/financial-model-review.md is what the coach is told to reason from, and the
+        # contract test asserts TOP-LEVEL names -- `"summary"` is already in that set, so nesting
+        # these would leave the pin green while the sub-names could be deleted from the agent body
+        # at any time. Nesting is exactly how a coach keeps writing "strong" over a denominator
+        # that quietly lost criteria.
+        "score_coverage": _score_coverage(summary),
         "failed_items": failed_items,
         "warned_items": warned_items,
         # {code, label, message}, matching competitive-positioning — NOT a bare code list. The

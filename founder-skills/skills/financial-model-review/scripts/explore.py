@@ -397,11 +397,24 @@ def _build_data_payload(
     checklist_summary: dict[str, Any] | None = None
     if _usable(checklist):
         summary = _deep_get(checklist, "summary", default={})
+        # `not_assessed` is threaded HERE, not read in the renderer: the renderer consumes this
+        # slim dict rather than checklist.json, so a disclosure added downstream would find
+        # nothing and the explorer would keep showing a bare "strong" badge over a denominator
+        # that silently lost criteria.
+        _self_gated = summary.get("self_gated_items")
+        _not_assessed = len(_self_gated) if isinstance(_self_gated, list) else 0
+        _unresolved = summary.get("unresolved_profile_exclusions")
+        if isinstance(_unresolved, dict):
+            for _ids in _unresolved.values():
+                if isinstance(_ids, list):
+                    _not_assessed += len(_ids)
         checklist_summary = {
             "score_pct": summary.get("score_pct"),
             "overall": summary.get("overall_status"),
             "fails": summary.get("failed_items", []),
             "warns": summary.get("warned_items", []),
+            "not_assessed": _not_assessed,
+            "total": summary.get("total"),
         }
 
     return {
@@ -506,6 +519,13 @@ def _render_checklist_summary(checklist: dict[str, Any] | None) -> str:
         count_bits.append(f"{len(fails)} failing")
     if warns:
         count_bits.append(f"{len(warns)} warning")
+    # The score is a fraction and this shrank its denominator without moving the number, so a
+    # bare badge reads as a complete result. Threaded in from the payload builder above.
+    not_assessed = checklist.get("not_assessed")
+    if isinstance(not_assessed, int) and not_assessed > 0:
+        total = checklist.get("total")
+        over = f" of {int(total)}" if isinstance(total, (int, float)) else ""
+        count_bits.append(f"{not_assessed}{over} not assessed")
     if count_bits:
         header_bits.append(f'<span class="checklist-counts">{" &middot; ".join(count_bits)}</span>')
 

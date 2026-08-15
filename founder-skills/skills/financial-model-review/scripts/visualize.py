@@ -1109,6 +1109,31 @@ def _chart_revenue_waterfall(inputs: dict[str, Any] | None) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _score_coverage_note(summary: dict[str, Any]) -> str:
+    """Disclose that the score was computed over fewer criteria than the company warrants.
+
+    The percentage is a fraction, and both of these shrink its DENOMINATOR without moving the
+    number: criteria the assessment self-excluded, and criteria dropped because a profile field
+    could not be matched. `report.md` has said so since the warnings were added; this surface
+    showed a bare percentage, so an unmatched geography read as a clean, complete score --
+    measured at 91.2% "strong" on a run where four Israel-specific checks were never assessed.
+    """
+    self_gated = [str(i) for i in _as_list(summary.get("self_gated_items"))]
+    unresolved: list[str] = []
+    for _field, ids in sorted(_as_dict(summary.get("unresolved_profile_exclusions")).items()):
+        unresolved.extend(str(i) for i in _as_list(ids))
+    missing = len(self_gated) + len(unresolved)
+    if not missing:
+        return ""
+    total = summary.get("total")
+    over = f" of {int(_num(total))}" if total is not None else ""
+    return (
+        f'<div class="label" style="color:{_esc(_CLR_WARN)}">'
+        f"{missing}{over} checks were not assessed — scored over the rest"
+        f"</div>"
+    )
+
+
 def _executive_summary(
     inputs: dict[str, Any] | None,
     checklist: dict[str, Any] | None,
@@ -1144,6 +1169,7 @@ def _executive_summary(
                 f'<div class="label">Checklist Score</div>'
                 f'<div class="value" style="color:{_esc(color)}">{_esc(f"{_num(score_pct):.0f}%")}</div>'
                 f'<div class="label">{_esc(overall)}</div>'
+                f"{_score_coverage_note(summary)}"
                 f"</div>"
             )
 

@@ -35,6 +35,16 @@ def _load_checklist_module() -> types.ModuleType:
     return mod
 
 
+def _load_compose_module() -> types.ModuleType:
+    path = FMR_DIR / "scripts" / "compose_report.py"
+    spec = importlib.util.spec_from_file_location("fmr_compose_contract", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["fmr_compose_contract"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def _expand_ranges(text: str) -> set[str]:
     """Expand 'STRUCT_01..09'-style tokens, preserving zero-padding width."""
     ids: set[str] = set()
@@ -535,3 +545,82 @@ def test_agent_coaching_writes_raw_markdown_no_json_escaping() -> None:
     assert "escaped as `\\n`" not in agent_body
     assert 'escaped as `\\"`' not in agent_body
     assert "no pretty-print" not in agent_body.lower()
+
+
+# ---------------------------------------------------------------------------
+# Context B: the coaching payload's keys must be documented on BOTH surfaces.
+#
+# Every sibling skill has this test; financial-model-review did not, which is how
+# `score_coverage` could have been emitted into the payload and consumed by nobody.
+# Context B is a CLOSED key list -- the agent body tells the coach the payload
+# "contains these keys", so a key absent from that list is a key the coach is never
+# told to read, and the JSON carrying it is dead weight.
+#
+# Keys are asserted TOP-LEVEL and by name. Nesting a new field inside `summary` would
+# pass this test forever (`summary` is already required) while the sub-name could be
+# deleted from the agent body at any time -- a pin that cannot fail is the thing this
+# guards against, not a smaller version of it.
+# ---------------------------------------------------------------------------
+
+
+def test_post_compose_coaching_dispatch_includes_coaching_payload_keys() -> None:
+    """SKILL.md's dispatch step and the agent body must both name every consumed key."""
+    consumed_keys = {
+        "summary",
+        "score_coverage",
+        "failed_items",
+        "warned_items",
+        "high_severity_warnings",
+        "company_name",
+    }
+
+    skill_text = SKILL_MD.read_text(encoding="utf-8")
+    anchor = "POST_COMPOSE_COACHING"
+    start = skill_text.find("### Step 8c")
+    assert start != -1, f"{SKILL_MD.name} has no '### Step 8c' section"
+    assert anchor in skill_text[start:], f"{SKILL_MD.name} Step 8c does not name {anchor}"
+    # Bound on the next step heading rather than a character count: the dispatch grows,
+    # and a fixed window quietly stops covering its own tail.
+    step_end = skill_text.find("\n### ", start + 1)
+    section = skill_text[start : step_end if step_end != -1 else len(skill_text)]
+
+    for key in consumed_keys:
+        assert key in section, (
+            f"{SKILL_MD.name} Step 8c dispatch does not name coaching_payload key '{key}' — "
+            "a key the sub-agent is not told to read is a key it will not use"
+        )
+
+    agent_text = AGENT_MD.read_text(encoding="utf-8")
+    agent_start = agent_text.find("Context B")
+    assert agent_start != -1, f"{AGENT_MD.name} has no Context B section"
+    agent_section = agent_text[agent_start:]
+    for key in consumed_keys:
+        assert key in agent_section, f"{AGENT_MD.name} Context B key list is missing '{key}'"
+
+
+def test_score_coverage_is_emitted_top_level_and_flags_a_partial_score() -> None:
+    """`score_coverage` must be a TOP-LEVEL payload key, and must go false when criteria drop.
+
+    The defect: an unmatched profile field silently shrinks the score's denominator, so
+    `overall_status` reads "strong" over a review that never assessed four criteria. The
+    coach reasons from this payload, so the gap has to be IN it and at a name the agent
+    body lists.
+    """
+    mod = _load_compose_module()
+    summary = {
+        "score_pct": 91.2,
+        "overall_status": "strong",
+        "total": 46,
+        "self_gated_items": ["UNIT_10"],
+        "unresolved_profile_exclusions": {"geography": ["CASH_29", "CASH_30"]},
+    }
+    cov = mod._score_coverage(summary)
+    assert cov["complete"] is False
+    assert cov["not_assessed_count"] == 3
+    assert cov["unmatched_profile_fields"] == ["geography"]
+    # No criterion ids: this reaches a founder through the commentary.
+    assert "CASH_29" not in json.dumps(cov)
+    assert "UNIT_10" not in json.dumps(cov)
+
+    clean = mod._score_coverage({"score_pct": 80.0, "total": 46})
+    assert clean["complete"] is True and clean["not_assessed_count"] == 0
