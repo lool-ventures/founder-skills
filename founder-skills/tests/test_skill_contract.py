@@ -538,7 +538,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # sub-agent generalised from the one example and emitted `component_sum` for a sum of
     # cost lines. Rejected loudly and recovered on a retry, but an enum shown once by
     # example reads as a suggestion.
-    "deck-review": 91_984,
+    # +326 B: the LEDGER_EXTRACTION template now tells the model to spell out a trailing
+    # letter that is a UNIT rather than a multiplier. A real deck stated tower heights as
+    # "200-400m"; bare `m` reads as millions, a space does not help, and the code CANNOT
+    # decide — "32.5m businesses" recorded as 32.5 is structurally identical. Only the
+    # model saw the slide, so only the model can disambiguate; the producer validates.
+    "deck-review": 92_310,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

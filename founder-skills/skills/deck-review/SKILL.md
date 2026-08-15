@@ -632,6 +632,12 @@ Record each figure at FULL SCALE. A slide reading "$493K" is 493000, never 493 â
 this single error is the one that makes every later calculation wrong by a factor
 of a thousand, and `raw` is what it is checked against.
 
+If a trailing letter is a UNIT rather than a multiplier, spell it out in `raw`.
+A slide reading "200-400m" of building height is `raw: "200-400 metres"`, not
+"200-400m" â€” bare `m` reads as millions and a space does not help. Same for
+`k`, `b` and `t`. You are the only one who can tell these apart; nothing
+downstream can.
+
 `quote` must be the VERBATIM sentence or table row the figure was read from. It is
 checked against a second, independent reading of the same slide, so a paraphrase
 fails the check and the figure is dropped.

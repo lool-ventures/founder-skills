@@ -28,6 +28,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import sys
 from typing import Any
 
@@ -75,6 +76,39 @@ def _parsed_magnitude(raw: str) -> float | None:
     except ValueError:
         return None
     return magnitude * _raw_scale(raw)
+
+
+_BARE_SUFFIX = re.compile(r"\d\s*[kKmMbBtT]\s*$")
+
+
+def _ambiguous_suffix(raw: str, value: float, unit_kind: object, currency: object) -> bool:
+    """Is the trailing letter a UNIT (metres, months) rather than a multiplier?
+
+    Undecidable from the numbers alone, which is the whole point. Measured:
+
+        raw          value        value == mantissa   truth
+        200-400m       200              True          metres, correct
+        $493K          493              True          1000x scale error
+        32.5m          32.5             True          scale error
+
+    So this does not try to decide. It narrows to the shape where the question ARISES --
+    a bare k/m/b/t at the end of the raw, on a figure that is not money, whose value
+    equals the mantissa -- and swaps in a message that tells the model how to resolve it
+    instead of telling it to inflate a building.
+
+    Money is excluded because a currency marker settles it: "$493K" is thousands, always.
+    """
+    if unit_kind == MONEY or currency:
+        return False
+    if not _BARE_SUFFIX.search(raw):
+        return False
+    match = _NUM_RE.search(raw)
+    if not match or not match.group("int"):
+        return False
+    mantissa = float(match.group("int").replace(",", ""))
+    if match.group("frac"):
+        mantissa += float("0." + match.group("frac"))
+    return abs(abs(value) - mantissa) <= max(abs(mantissa) * 1e-9, 1e-9)
 
 
 def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tuple[list[str], list[str]]:
@@ -145,10 +179,31 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
                 relative = (precision[0] / precision[1]) if precision and precision[1] else 0.0
                 if observed == 0 or abs(observed - parsed) / parsed > relative:
                     ratio = observed / parsed if parsed else 0
-                    errors.append(
-                        f"{where} value {value!r} disagrees with raw {raw!r}, which reads as "
-                        f"{parsed:,.4g} (ratio {ratio:,.4g}) — record the figure at full scale"
-                    )
+                    if _ambiguous_suffix(raw, value, unit_kind, fig.get("currency")):
+                        # NOT a scale error, and the usual advice would make it one. A real
+                        # deck stated tower heights as "200-400m" and the model recorded 200
+                        # with a label saying "(metres)" -- correct, and "record at full
+                        # scale" would have pushed it to 200,000,000.
+                        #
+                        # The code cannot resolve this: "32.5m businesses" recorded as 32.5
+                        # (a genuine scale error) is structurally IDENTICAL to "200-400m"
+                        # metres recorded as 200. `value == mantissa` holds for both. The
+                        # disambiguating fact lives on the slide, so the model has to state
+                        # it -- and the existing word-boundary guard already reads the
+                        # spelled-out form correctly ("200-400 metres" -> 200). Note a bare
+                        # space does NOT help: "200-400 m" still parses as millions.
+                        errors.append(
+                            f"{where} raw {raw!r} is ambiguous: the trailing suffix reads as a "
+                            f"multiplier ({parsed:,.4g}) but value is {value!r}. If the suffix is a "
+                            f"UNIT rather than a multiplier, spell it out in raw (e.g. "
+                            f"'200-400 metres', '18 months'); if it is a multiplier, record value "
+                            f"at full scale"
+                        )
+                    else:
+                        errors.append(
+                            f"{where} value {value!r} disagrees with raw {raw!r}, which reads as "
+                            f"{parsed:,.4g} (ratio {ratio:,.4g}) — record the figure at full scale"
+                        )
 
     return errors, warnings
 

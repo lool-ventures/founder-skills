@@ -169,3 +169,49 @@ def test_a_coarse_raw_still_tolerates_the_rounding_it_implies() -> None:
     assert rc == 0, err
     rc, _, err = _run({"figures": [_fig(id="c", value=97, raw="100", unit_kind="count", quote="about 100 users")]})
     assert rc == 0, err
+
+
+def test_a_unit_suffix_is_not_reported_as_a_scale_error() -> None:
+    """ "200-400m" of building height, recorded as 200, is CORRECT extraction.
+
+    The old message told the model to "record the figure at full scale", which for a
+    200-metre tower means 200,000,000. The code cannot decide this — "32.5m businesses"
+    recorded as 32.5 (a genuine scale error) is structurally identical — so it stops
+    pretending to and tells the model how to disambiguate instead.
+    """
+    fig = _fig(
+        id="h",
+        value=200,
+        raw="200-400m",
+        unit_kind="count",
+        label="tower height range (metres)",
+        quote="towers of 200-400m",
+    )
+    del fig["currency"]  # a height is not money; the default helper supplies one
+    rc, _, err = _run({"figures": [fig]})
+    assert rc != 0
+    assert "ambiguous" in err and "spell it out" in err
+    assert "record the figure at full scale" not in err.split("ambiguous")[1]
+
+
+def test_spelling_the_unit_out_resolves_it() -> None:
+    """The escape hatch has to work, or the message sends the model in a circle."""
+    fig = _fig(
+        id="h",
+        value=200,
+        raw="200-400 metres",
+        unit_kind="count",
+        label="tower height range",
+        quote="towers of 200-400 metres",
+    )
+    del fig["currency"]
+    rc, _, err = _run({"figures": [fig]})
+    assert rc == 0, err
+
+
+def test_a_currency_marker_still_means_the_suffix_is_a_multiplier() -> None:
+    """Money is never ambiguous: "$493K" is thousands, so 493 stays a scale error."""
+    rc, _, err = _run({"figures": [_fig(value=493, raw="$493K")]})
+    assert rc != 0
+    assert "full scale" in err
+    assert "ambiguous" not in err
