@@ -5,12 +5,12 @@
       "x_axis": {
         "name": "AI-Native Workflow Automation",
         "description": "How much of the day-to-day bookkeeping workflow (categorization, reconciliation, close) is handled automatically without manual data entry",
-        "rationale": "Acmecorp's core differentiation claim is automated bookkeeping via AI; this axis directly tests that claim against incumbents' recently-added AI features and against Pilot's human-powered automation."
+        "rationale": "Placeholder \u2014 replaced by POSITIONING_SCORING dispatch"
       },
       "y_axis": {
         "name": "Installed Base / Distribution Reach",
         "description": "Size and reach of the current customer base and distribution channel (accountant ecosystem, direct, etc.)",
-        "rationale": "Distribution reach is the table-stakes dimension incumbents dominate; pairing it with automation depth shows whether Acmecorp's product edge is offset by a distribution disadvantage."
+        "rationale": "Placeholder \u2014 replaced by POSITIONING_SCORING dispatch"
       },
       "points": [
         {

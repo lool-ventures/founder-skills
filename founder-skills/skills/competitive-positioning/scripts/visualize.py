@@ -503,8 +503,19 @@ def _chart_positioning_map(
     y_axis = _as_dict(view.get("y_axis"))
     x_name = str(x_axis.get("name", "X"))
     y_name = str(y_axis.get("name", "Y"))
-    x_rationale = _axis_compat.axis_rationale(view, "x")
-    y_rationale = _axis_compat.axis_rationale(view, "y")
+    # Prefer the SCORED artifact for the rationale. `view` here is positioning.json — the pre-scoring
+    # draft the main thread writes before the POSITIONING_SCORING dispatch runs, whose rationales are
+    # placeholders by design. Reading it put `Placeholder — replaced by POSITIONING_SCORING dispatch`
+    # into founder-visible prose under the map in delivered reports.
+    #
+    # Only the RATIONALE is re-sourced, deliberately. The two artifacts have different shapes — the
+    # draft carries `id`/`x_axis`/`y_axis` objects, the scored file carries `view_id`/`x_axis_name`
+    # flat — so reading the whole view from the scored file would blank the axis NAMES (rendering
+    # literal "X"/"Y") and break the `view_id` lookup that drives the vanity overlays.
+    # `_axis_compat.axis_rationale` reads either shape, and falls back to the draft when the scored
+    # view is absent or carries none.
+    x_rationale = _axis_compat.axis_rationale(view_scores or {}, "x") or _axis_compat.axis_rationale(view, "x")
+    y_rationale = _axis_compat.axis_rationale(view_scores or {}, "y") or _axis_compat.axis_rationale(view, "y")
     points = _as_list(view.get("points"))
 
     # Check vanity flags from scores

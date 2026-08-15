@@ -49,6 +49,7 @@ Output:
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import re
@@ -201,6 +202,11 @@ def _check_rendered(artifacts: dict[str, dict[str, Any]], gate: int) -> list[dic
     ps = artifacts.get("positioning_scores.json", {}).get("_data")
     landscape = artifacts.get("landscape.json", {}).get("_data")
     verification = artifacts.get("competitor_verification.json", {}).get("_data")
+    # report.html is optional: absent means visualize.py did not run, which the existence check owns.
+    # None here disables the HTML probes rather than failing them — but note the consequence, since a
+    # silently-skipped check is the failure mode this gate exists to catch: if report.html stops being
+    # produced, these probes stop firing and say nothing about it.
+    report_html = artifacts.get("report.html", {}).get("_text")
 
     # --- 1. axis rationales: present in the scores AND visible in the report -------------
     for view in _as_list(_as_dict(ps).get("views")):
@@ -225,6 +231,23 @@ def _check_rendered(artifacts: dict[str, dict[str, Any]], gate: int) -> list[dic
                         "error",
                         f"view '{vid}' {axis.upper()}-axis rationale exists in positioning_scores.json but "
                         f"does not appear in report.md — computed and not rendered",
+                    )
+                )
+            # ...and report.md is not the only thing the founder reads. The HTML rendered its axis
+            # rationale from the PRE-SCORING draft, so `Placeholder — replaced by POSITIONING_SCORING
+            # dispatch` shipped in founder-visible prose under the map while this gate — checking only
+            # report.md, which was correct — reported "publishable, zero errors".
+            #
+            # UNESCAPE FIRST. `visualize.py` renders through `html.escape(..., quote=True)`, so a
+            # rationale containing an apostrophe, quote, `&`, `<` or `>` in its first 40 characters —
+            # i.e. most prose naming a company — is absent from correctly-rendered HTML as a raw
+            # substring. Comparing raw would fail every such report and hard-block delivery.
+            if probe and report_html is not None and probe not in html.unescape(report_html):
+                issues.append(
+                    _issue(
+                        "error",
+                        f"view '{vid}' {axis.upper()}-axis rationale exists in positioning_scores.json but "
+                        f"does not appear in report.html — computed and not rendered",
                     )
                 )
 

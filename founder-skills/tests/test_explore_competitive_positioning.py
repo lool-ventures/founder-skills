@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -492,15 +493,16 @@ def test_sibling_shaped_rationale_normalized_into_embedded_data() -> None:
 def test_sibling_shaped_rationale_nested_wins_when_both_present() -> None:
     """When a view carries both shapes and they differ, the nested (canonical)
     value must win — the normalization must not overwrite an already-nested
-    rationale with the sibling's."""
-    arts = _all_artifacts()
-    pos = dict(arts["positioning.json"])
-    v2 = dict(pos["views"][0])
-    v2["x_axis"] = dict(v2["x_axis"])
-    v2["x_axis"]["rationale"] = "Nested wins this one"
-    v2["x_axis_rationale"] = "Sibling loses this one"
-    pos["views"] = [v2] + [dict(v) for v in pos["views"][1:]]
-    arts["positioning.json"] = pos
+    rationale with the sibling's.
+
+    Exercised on `positioning_scores.json`, which is where the rationale is now sourced from. The
+    precedence rule is unchanged and still lives in `_axis_compat`; only the artifact it applies to
+    moved. Asserting it on the draft would no longer reach the renderer at all.
+    """
+    arts = copy.deepcopy(_all_artifacts())
+    sv = arts["positioning_scores.json"]["views"][0]
+    sv["x_axis"] = {"name": "X", "rationale": "Nested wins this one"}
+    sv["x_axis_rationale"] = "Sibling loses this one"
 
     with _make_artifact_dir(arts) as d:
         rc, stdout, stderr = _run_explore(d)
@@ -625,3 +627,33 @@ def test_explorer_stays_self_contained_with_new_panels() -> None:
 # Dead-payload coverage lives in test_dead_payload.py, which scans every embedder in one place
 # and distinguishes 'unread' from 'unverifiable' (this file's earlier scan matched dotted access
 # only, so a computed-name read read as a dead key).
+
+
+def test_axis_rationale_comes_from_the_scored_artifact_not_the_draft() -> None:
+    """Same defect as the static report: the explorer read its axis rationale from the pre-scoring
+    draft, whose rationales are placeholders by design, so an internal ALLCAPS dispatch name reached
+    founder-visible text.
+
+    `explore.py` already prefers the scored file for `differentiation_claims` twenty-five lines below
+    the axis path, with a comment explaining exactly why — the fix existed in the same function and had
+    not been applied here.
+
+    The two fixtures carry the same rationale text, so the placeholder is injected to tell the sources
+    apart; asserting against them unmodified would prove nothing.
+    """
+    artifacts = copy.deepcopy(_all_artifacts())
+    placeholder = "Placeholder — replaced by POSITIONING_SCORING dispatch"
+    for view in artifacts["positioning.json"]["views"]:
+        for axis in ("x_axis", "y_axis"):
+            if isinstance(view.get(axis), dict):
+                view[axis]["rationale"] = placeholder
+    scored = artifacts["positioning_scores.json"]["views"][0]["x_axis_rationale"]
+
+    with _make_artifact_dir(artifacts) as d:
+        rc, stdout, stderr = _run_explore(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        assert "POSITIONING_SCORING" not in stdout, (
+            "an internal dispatch name reached founder-visible explorer HTML — the axis rationale is "
+            "being read from the pre-scoring draft"
+        )
+        assert scored in stdout, f"the scored rationale never reached the explorer; expected {scored!r}"

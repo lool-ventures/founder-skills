@@ -124,6 +124,37 @@ def test_moat_radar_svg() -> None:
         assert stdout.count("<polygon") >= 2
 
 
+def test_axis_rationale_comes_from_the_scored_artifact_not_the_draft() -> None:
+    """The map's axis rationale was read from `positioning.json` — the PRE-SCORING draft.
+
+    That draft's rationales are placeholders by design: the main thread writes the view skeleton before
+    the POSITIONING_SCORING dispatch runs, and the sub-agent's real rationale lands in
+    `positioning_scores.json`. Reading the draft put the literal string
+    `Placeholder — replaced by POSITIONING_SCORING dispatch` into founder-visible prose under the map in
+    delivered reports — an internal ALLCAPS dispatch name, which the founder-text policy forbids
+    outright.
+
+    The two fixtures carry the SAME rationale text, so asserting against them unmodified proves nothing
+    about which source was read. The placeholder is injected here to tell them apart.
+    """
+    artifacts = copy.deepcopy(_all_artifacts())
+    placeholder = "Placeholder — replaced by POSITIONING_SCORING dispatch"
+    for view in artifacts["positioning.json"]["views"]:
+        for axis in ("x_axis", "y_axis"):
+            if isinstance(view.get(axis), dict):
+                view[axis]["rationale"] = placeholder
+    scored = artifacts["positioning_scores.json"]["views"][0]["x_axis_rationale"]
+
+    with _make_artifact_dir(artifacts) as d:
+        rc, stdout, stderr = _run_visualize(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        assert "POSITIONING_SCORING" not in stdout, (
+            "an internal dispatch name reached founder-visible HTML — the axis rationale is being read "
+            "from the pre-scoring draft"
+        )
+        assert scored in stdout, f"the scored rationale never reached the page; expected: {scored!r}"
+
+
 def test_competitor_table_shows_funding() -> None:
     """The HTML comparison table carried no capital column, so relative funding reached a founder
     reading only report.html nowhere at all.
@@ -526,9 +557,13 @@ def test_axis_rationale_displayed() -> None:
 
 
 def test_axis_rationale_omitted_when_missing() -> None:
-    """No axis-rationale block when rationale is not in the data."""
-    arts = _all_artifacts()
-    # Strip rationale from views
+    """No axis-rationale block when rationale is not in the data.
+
+    Strips BOTH artifacts. The rationale is sourced from `positioning_scores.json` with the draft as
+    fallback, so stripping only the draft leaves the scored value rendering and this test would assert
+    nothing about absence.
+    """
+    arts = copy.deepcopy(_all_artifacts())
     pos = dict(arts["positioning.json"])
     pos["views"] = []
     for v in arts["positioning.json"]["views"]:
@@ -537,6 +572,9 @@ def test_axis_rationale_omitted_when_missing() -> None:
         v2["y_axis"] = {k: v for k, v in v2["y_axis"].items() if k != "rationale"}
         pos["views"].append(v2)
     arts["positioning.json"] = pos
+    for sv in arts["positioning_scores.json"]["views"]:
+        sv.pop("x_axis_rationale", None)
+        sv.pop("y_axis_rationale", None)
     with _make_artifact_dir(arts) as d:
         rc, stdout, stderr = _run_visualize(d)
         assert rc == 0, f"exit {rc}, stderr={stderr}"
@@ -547,15 +585,12 @@ def test_axis_rationale_xss() -> None:
     """Malicious rationale text is HTML-escaped in the axis-rationale block."""
     import re
 
-    arts = _all_artifacts()
-    pos = dict(arts["positioning.json"])
-    pos["views"] = []
-    for v in arts["positioning.json"]["views"]:
-        v2 = dict(v)
-        v2["x_axis"] = dict(v2["x_axis"])
-        v2["x_axis"]["rationale"] = '<script>alert("xss")</script>'
-        pos["views"].append(v2)
-    arts["positioning.json"] = pos
+    # Inject into `positioning_scores.json` — the artifact the rationale is actually read from. The
+    # earlier version injected into the draft, which is now only a fallback, so the malicious string
+    # never reached the renderer and the test proved nothing about escaping.
+    arts = copy.deepcopy(_all_artifacts())
+    for sv in arts["positioning_scores.json"]["views"]:
+        sv["x_axis_rationale"] = '<script>alert("xss")</script>'
     with _make_artifact_dir(arts) as d:
         rc, stdout, stderr = _run_visualize(d)
         assert rc == 0, f"exit {rc}, stderr={stderr}"
@@ -602,15 +637,16 @@ def test_axis_rationale_sibling_shape_displayed() -> None:
 def test_axis_rationale_nested_wins_when_both_shapes_present() -> None:
     """When a view carries both the nested and sibling rationale and they
     differ, the nested (canonical) value must win, silently — this is the
-    schema-authority precedent from _axis_compat.axis_rationale()."""
-    arts = _all_artifacts()
-    pos = dict(arts["positioning.json"])
-    v2 = dict(pos["views"][0])
-    v2["x_axis"] = dict(v2["x_axis"])
-    v2["x_axis"]["rationale"] = "Nested wins this one"
-    v2["x_axis_rationale"] = "Sibling loses this one"
-    pos["views"] = [v2] + [dict(v) for v in pos["views"][1:]]
-    arts["positioning.json"] = pos
+    schema-authority precedent from _axis_compat.axis_rationale().
+
+    Exercised on `positioning_scores.json`, which is where the rationale is now read from. The
+    precedence rule itself is unchanged and still lives in `_axis_compat`; only the artifact it is
+    applied to moved.
+    """
+    arts = copy.deepcopy(_all_artifacts())
+    sv = arts["positioning_scores.json"]["views"][0]
+    sv["x_axis"] = {"name": "X", "rationale": "Nested wins this one"}
+    sv["x_axis_rationale"] = "Sibling loses this one"
     with _make_artifact_dir(arts) as d:
         rc, stdout, stderr = _run_visualize(d)
         assert rc == 0, f"exit {rc}, stderr={stderr}"

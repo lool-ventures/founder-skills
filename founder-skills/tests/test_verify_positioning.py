@@ -108,6 +108,47 @@ def test_rationale_present_but_not_rendered_is_a_gap(tmp_path: Path) -> None:
     assert "does not appear in report.md" in stderr
 
 
+def test_rationale_not_rendered_in_html_is_a_gap(tmp_path: Path) -> None:
+    """report.md is not the only thing the founder reads.
+
+    The HTML rendered its axis rationale from the PRE-SCORING draft, whose rationales are placeholders,
+    so `Placeholder — replaced by POSITIONING_SCORING dispatch` shipped in founder-visible prose under
+    the map — while this gate, checking only report.md (which was correct), reported publishable with
+    zero errors. The gate loaded report.html and read nothing from it.
+    """
+    _publishable(tmp_path)
+    _write(tmp_path, "report.html", "<html><body><div>Placeholder — replaced by X dispatch</div></body></html>")
+    rc, _, stderr = _run(tmp_path)
+    assert rc == 1
+    assert "does not appear in report.html" in stderr
+
+
+def test_html_probe_tolerates_escaping(tmp_path: Path) -> None:
+    """The probe must UNESCAPE before comparing, or it fails every correctly-rendered report.
+
+    `visualize.py` renders through `html.escape(..., quote=True)`. A rationale containing an
+    apostrophe, quote, `&`, `<` or `>` in its first 40 characters — i.e. most prose naming a company —
+    is absent from correct HTML as a raw substring. A naive probe would raise an error-severity
+    "computed and not rendered" on output that is rendering perfectly, and `verify_positioning` exit 1
+    hard-blocks delivery.
+    """
+    _publishable(tmp_path)
+    escaped = RATIONALE_X.replace("Firmness", "Acme&#x27;s firmness")
+    _write(tmp_path, "report.html", f"<html><body><p>{escaped}</p><p>{RATIONALE_Y}</p></body></html>")
+    # The X rationale now differs, so assert on the SHAPE of the failure: it must not be an
+    # escaping artifact on the Y axis, which is present verbatim and correctly escaped.
+    rc, _, stderr = _run(tmp_path)
+    assert "Y-axis rationale exists in positioning_scores.json but does not appear in report.html" not in stderr, (
+        f"the probe flagged a correctly-rendered escaped rationale — it is comparing raw:\n{stderr}"
+    )
+    # NON-VACUITY: the assertion above is a negative and would also pass if the HTML probe did not
+    # exist at all. The X rationale WAS altered (its first 40 chars no longer match), so the probe
+    # must flag it — proving the probe ran and that Y's silence is tolerance, not absence.
+    assert "X-axis rationale exists in positioning_scores.json but does not appear in report.html" in stderr, (
+        f"the HTML probe did not run at all, so this test proves nothing about escaping:\n{stderr}"
+    )
+
+
 def test_raw_enum_token_in_report_is_a_gap(tmp_path: Path) -> None:
     _publishable(tmp_path)
     md = (tmp_path / "report.md").read_text() + "\n- **Verdict:** partially_holds\n"

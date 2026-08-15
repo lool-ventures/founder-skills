@@ -116,7 +116,9 @@ _DEFENSIBILITY_COLORS: dict[str, str] = {
 }
 
 
-def _normalize_view_rationale(view: dict[str, Any], axis_compat: Any) -> dict[str, Any]:
+def _normalize_view_rationale(
+    view: dict[str, Any], axis_compat: Any, scored_view: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Copy `view`, folding a resolved axis rationale back into the nested shape.
 
     The embedded JS reads view.x_axis.rationale / view.y_axis.rationale directly (no
@@ -124,17 +126,28 @@ def _normalize_view_rationale(view: dict[str, Any], axis_compat: Any) -> dict[st
     view-level sibling (x_axis_rationale) instead, because the dispatch templates used
     to instruct that shape. `axis_compat.axis_rationale()` resolves either shape server
     side; this folds the resolved value into the nested `rationale` key so the JS's
-    single read path keeps working regardless of which shape the artifact used. A view
-    whose axis already carries a nested rationale is left untouched.
+    single read path keeps working regardless of which shape the artifact used.
+
+    `scored_view` (positioning_scores.json) WINS when it carries a rationale. `view` is the
+    pre-scoring draft the main thread writes before the POSITIONING_SCORING dispatch runs, and its
+    rationales are placeholders by design — reading it put `Placeholder — replaced by
+    POSITIONING_SCORING dispatch` into founder-visible text. This mirrors the preference the
+    `differentiation_claims` path in `_build_data_payload` already applies, for the same reason.
+    Only the rationale is re-sourced: the draft remains authoritative for axis names and points,
+    whose shapes differ between the two artifacts.
     """
     normalized = dict(view)
     for axis_key, axis_name in (("x_axis", "x"), ("y_axis", "y")):
         axis_val = normalized.get(axis_key)
-        if isinstance(axis_val, dict) and axis_val.get("rationale"):
-            continue  # already nested — nothing to resolve
-        rationale = axis_compat.axis_rationale(view, axis_name)
+        rationale = ""
+        if isinstance(scored_view, dict):
+            rationale = axis_compat.axis_rationale(scored_view, axis_name)
         if not rationale:
-            continue  # neither shape carries one — leave axis_val as-is
+            if isinstance(axis_val, dict) and axis_val.get("rationale"):
+                continue  # draft already nested and nothing scored to override it
+            rationale = axis_compat.axis_rationale(view, axis_name)
+        if not rationale:
+            continue  # no shape on either artifact carries one — leave axis_val as-is
         axis_obj = dict(axis_val) if isinstance(axis_val, dict) else {}
         axis_obj["rationale"] = rationale
         normalized[axis_key] = axis_obj
@@ -167,14 +180,8 @@ def _build_data_payload(dir_path: str) -> dict[str, Any]:
         md = _as_dict(report.get("metadata"))
         company_name = str(md.get("company_name", "Unknown"))
 
-    # Views with points
-    views: list[dict[str, Any]] = []
-    if _usable(positioning):
-        for v in _as_list(positioning.get("views")):
-            if isinstance(v, dict) and _as_list(v.get("points")):
-                views.append(_normalize_view_rationale(v, _axis_compat))
-
-    # View scores keyed by view id
+    # View scores keyed by view id. Built BEFORE the views themselves, because the scored view is the
+    # authoritative source for a view's axis rationale — the draft carries a placeholder there.
     view_scores_map: dict[str, dict[str, Any]] = {}
     if _usable(positioning_scores):
         for sv in _as_list(positioning_scores.get("views")):
@@ -182,6 +189,14 @@ def _build_data_payload(dir_path: str) -> dict[str, Any]:
                 vid = str(sv.get("view_id", sv.get("id", "")))
                 if vid:
                     view_scores_map[vid] = sv
+
+    # Views with points
+    views: list[dict[str, Any]] = []
+    if _usable(positioning):
+        for v in _as_list(positioning.get("views")):
+            if isinstance(v, dict) and _as_list(v.get("points")):
+                scored_v = view_scores_map.get(str(v.get("id", "")))
+                views.append(_normalize_view_rationale(v, _axis_compat, scored_v))
 
     # Competitors from landscape
     competitors: list[dict[str, Any]] = []
