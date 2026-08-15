@@ -3167,9 +3167,16 @@ class TestCompose:
                 capture_output=True,
                 text=True,
             )
-            assert "cites the criterion ID" in proc.stdout + proc.stderr, (
+            # Assert the specific finding, parsed — not a substring of combined output, and not
+            # the exit code. The fixture already produces unrelated gaps, so rc is 1 either way
+            # and asserting on it would pass with this defect absent.
+            report = json.loads(proc.stdout)
+            criterion_issues = [
+                i for i in json.dumps(report).split('"') if "cites the criterion ID" in i and "POS_05" in i
+            ]
+            assert criterion_issues, (
                 "the delivery gate must reject a criterion ID in report.md — that rejection is "
-                "the reason producers must supply a founder_message for this code"
+                f"the reason producers must supply a founder_message for this code. Gate said: {proc.stdout}"
             )
 
     # 10. MISSING_DO_NOTHING forwarded from landscape warnings
@@ -5678,6 +5685,45 @@ class TestScorePositioningViewsFingerprint:
             "polarity changes the scored map's meaning, so it must change its identity hash"
         )
 
+    # The fingerprint of a polarity-free map, PINNED. This is the only cross-version
+    # assertion in the suite and the reason it exists is measured: the "encode both
+    # polarities unconditionally" variant — which reads as an obvious tidy-up of the
+    # two-line conditional in views_fingerprint — passes every other test in this class,
+    # including the backward-compatibility one below, because those compare new code
+    # against new code. Only a constant computed under the OLD code can catch it.
+    #
+    # If this fails, do not re-baseline it. It means live `checklist.json` files whose
+    # `graded_against` predates the change will compare unequal and raise
+    # CHECKLIST_STALE_VS_POSITIONING at HIGH severity — which cannot be cleared via
+    # accepted_warnings — reporting maps as moved that never moved.
+    GOLDEN_NO_POLARITY_FP = "5f6d88c2b3a77873be9ef31e866ffc40234474e5acb8fb82a63bdd2aed13f22c"
+
+    def test_fingerprint_of_polarity_free_map_matches_pre_polarity_constant(self) -> None:
+        """A map with no polarity must hash exactly as it did before polarity existed."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_cp_score_positioning", os.path.join(CP_SCRIPTS_DIR, "score_positioning.py")
+        )
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        view = {
+            "view_id": "golden",
+            "x_axis_name": "Price",
+            "y_axis_name": "Power",
+            "points": [
+                {"competitor": "_startup", "x": 20, "y": 80},
+                {"competitor": "acme", "x": 80, "y": 20},
+            ],
+        }
+        assert mod.views_fingerprint([view]) == self.GOLDEN_NO_POLARITY_FP, (
+            "the identity of a polarity-free map changed. Every checklist graded before "
+            "this change now reads STALE against a map that did not move. Encode only the "
+            "non-default polarity value — see views_fingerprint's docstring."
+        )
+
     def test_fingerprint_polarity_encoding_is_backward_compatible(self) -> None:
         """An omitted polarity and an explicit `higher_is_better` hash IDENTICALLY.
 
@@ -5702,6 +5748,25 @@ class TestScorePositioningViewsFingerprint:
             "absent polarity and explicit higher_is_better score identically, so they are "
             "the same map and must hash the same"
         )
+
+    def test_empty_nested_polarity_does_not_hide_an_invalid_sibling(self) -> None:
+        """An empty nested polarity must not smuggle an unrecognised sibling past validation.
+
+        `_axis_polarity` falls back to the sibling on any FALSY nested value; validation used
+        to fall back only on `None`. So `x_axis.polarity: ""` with
+        `x_axis_polarity: "lower is better"` was accepted, and then silently scored as
+        higher-is-better — a price axis upside-down, which is the precise defect polarity
+        exists to prevent. The fingerprint cannot catch it: scoring and hashing share this
+        resolution, so both are wrong in the same direction.
+        """
+        payload = _make_valid_positioning_input()
+        payload["views"][0]["x_axis"]["polarity"] = ""
+        payload["views"][0]["x_axis_polarity"] = "lower is better"  # near-miss, not canonical
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 1, (
+            f"expected rejection, got rc={rc}. An unrecognised polarity must never be coerced: stdout={data}"
+        )
+        assert "polarity" in stderr
 
     def test_scored_view_emits_resolved_polarity(self) -> None:
         """Resolved polarity is always emitted, so consumers stop re-deriving it."""

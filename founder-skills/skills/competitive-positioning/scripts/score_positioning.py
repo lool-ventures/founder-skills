@@ -111,6 +111,9 @@ def _axis_polarity(view: dict[str, Any], axis: str) -> str:
     # Anything present but unrecognised is REJECTED upstream by _validate_input rather than
     # coerced here. Coercing sent "lower is better" — a plausible way for a model to say the
     # opposite — to higher_is_better, silently, which is the exact defect polarity exists to prevent.
+    # That guarantee holds only while _validate_input's nested->sibling fallback uses the same
+    # falsy test this one does; when it tested `is None` instead, an empty nested value hid an
+    # invalid sibling from validation and this line coerced it after all. Change both together.
     return _LOWER_IS_BETTER if str(raw).strip().lower() == _LOWER_IS_BETTER else _HIGHER_IS_BETTER
 
 
@@ -417,7 +420,15 @@ def _validate_input(data: dict[str, Any]) -> list[str]:
         for _ax in ("x", "y"):
             _obj = _view.get(f"{_ax}_axis")
             _raw = _obj.get("polarity") if isinstance(_obj, dict) else None
-            if _raw is None:
+            # This fallback condition MUST mirror `_axis_polarity`'s (`if not raw:`), not test
+            # `is None`. They disagreed, and the gap was silent: with a nested polarity of ""
+            # this loop kept the empty string, treated it as absent on the next line, and never
+            # looked at the sibling — while `_axis_polarity` fell through to the sibling and
+            # coerced an unrecognised value to higher_is_better. Measured, `x_axis.polarity: ""`
+            # plus `x_axis_polarity: "lower is better"` was ACCEPTED and scored a price axis
+            # upside-down: the founder is told they rank 1st where they rank 6th. The fingerprint
+            # cannot catch it either, since scoring and hashing share this resolution.
+            if not _raw:
                 _raw = _view.get(f"{_ax}_axis_polarity")
             if _raw is None or (isinstance(_raw, str) and not _raw.strip()):
                 continue  # absent is legal and means higher_is_better
