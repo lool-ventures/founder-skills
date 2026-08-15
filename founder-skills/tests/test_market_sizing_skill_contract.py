@@ -1034,6 +1034,11 @@ def test_post_compose_coaching_dispatch_includes_coaching_payload_keys() -> None
         "methodology",
         "confidence",
         "deck_coverage",
+        # A refused cross-check is invisible in every other key: the figure is present and
+        # `deck_coverage` still reports it as stated, so a coach not handed this writes as
+        # though it had been verified. COMPARISON_CURRENCY_UNKNOWN is medium, so it never
+        # arrives via high_severity_warnings.
+        "comparison_blocked",
         "tam",
         "sam",
         "som",

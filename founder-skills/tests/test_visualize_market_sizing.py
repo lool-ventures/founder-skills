@@ -1549,3 +1549,59 @@ def test_html_distant_row_carries_no_caveat() -> None:
     rc, stdout, _stderr = _run_visualize(d)
     assert rc == 0
     assert "Agreement on a number is not independent confirmation" not in stdout
+
+
+# ---------------------------------------------------------------------------
+# FX: report.md and report.html must not print different numbers for one field.
+#
+# test_visualize_market_sizing.py carried ZERO FX references, which is why the
+# md/html divergence shipped: the compose-side test existed and had no twin here.
+# ---------------------------------------------------------------------------
+
+
+def _fx_dir(tmp_path: Any, *, declared: bool) -> Any:
+    import sys as _sys
+
+    _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from test_market_sizing import _fx_claim_dir  # noqa: PLC0415
+
+    return _fx_claim_dir(tmp_path, declared=declared, name=f"viz-fx-{declared}")
+
+
+def _tam_row(html: str) -> str:
+    m = re.search(r"<tr>(?:(?!</tr>).)*?TAM \(Top-down\)(?:(?!</tr>).)*?</tr>", html, re.S)
+    assert m, "no TAM (Top-down) row in the provenance table"
+    return re.sub(r"<[^>]+>", " ", m.group(0))
+
+
+def test_html_deck_claim_matches_the_converted_figure_compose_prints(tmp_path: Any) -> None:
+    """A converting run must show the SAME claim on both surfaces.
+
+    Shipped defect: compose rendered `deck_claim_comparable` (360.0B ILS) and visualize
+    rendered the raw claim (90.0B) — and `_fmt_usd` suffixes the ANALYSIS currency, so the
+    raw EUR figure came out tagged ILS and the row was incoherent on its face.
+    """
+    d = _fx_dir(tmp_path, declared=True)
+    rc, stdout, stderr = _run_visualize(str(d))
+    assert rc == 0, stderr
+    row = _tam_row(stdout)
+    assert "360.0B ILS" in row, f"HTML is not showing the converted claim: {row}"
+    assert "90.0B" not in row, f"HTML still shows the raw, unconverted claim: {row}"
+
+
+def test_html_prints_no_delta_when_the_comparison_was_refused(tmp_path: Any) -> None:
+    """A blocked comparison has no delta — and the row must survive to say so.
+
+    The delta was computed against the RAW claim exactly when conversion was refused, so
+    "+11.1%" was the exchange rate's magnitude rather than a disagreement.
+    """
+    d = _fx_dir(tmp_path, declared=False)
+    rc, stdout, stderr = _run_visualize(str(d))
+    assert rc == 0, stderr
+    row = _tam_row(stdout)
+    assert "+11.1%" not in row, f"HTML prints a delta across a refused comparison: {row}"
+    assert "—" in row, f"the blocked row lost its em-dash delta cell: {row}"
+    assert "could not be checked" in stdout, (
+        "HTML drops the blocked comparison silently — the founder gets no attention item and no "
+        "reason, which is what the suppressed-arm comment warned against"
+    )

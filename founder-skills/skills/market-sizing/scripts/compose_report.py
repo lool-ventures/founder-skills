@@ -588,8 +588,14 @@ def _compute_provenance(
             # Compare like with like: when the claim converts, the delta (and the figure the table
             # prints) must be the CONVERTED claim, matching the warning block.
             comparable, blocked = _comparable_claim(deck_claim, sizing, inputs)
-            claim_for_delta = deck_claim if comparable is None else comparable
-            delta = _compute_delta(float(value), claim_for_delta) if deck_claim is not None else None
+            # A BLOCKED comparison has no delta -- not a delta computed from the wrong operand.
+            # Falling back to the raw claim here is what produced "+11.1%" in the table beside a
+            # warning saying the figure could not be cross-checked at all: the number was the
+            # exchange rate's magnitude, not a disagreement. Killing it at the producer means no
+            # renderer has to remember the guard.
+            delta = (
+                _compute_delta(float(value), comparable) if deck_claim is not None and comparable is not None else None
+            )
 
             approach_prov[metric] = {
                 "classification": classification,
@@ -1106,11 +1112,17 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                         else "the figure you stated"
                     )
                     _lbl = "deck" if _has_document_materials(artifacts.get("inputs.json")) else "you said"
+                    # Pass the currency EXPLICITLY. Validation runs ~60 lines before
+                    # `_set_currency()`, so the module default ("USD") is still in force here and
+                    # both figures rendered with a bare "$" on an ILS analysis -- in the same
+                    # report whose table correctly said ILS. Passing the code beats reordering
+                    # compose(), which would mean hoisting three artifact extractions.
+                    _ccy = _as_dict(sizing).get("currency")
                     warnings.append(
                         _warn(
                             "DECK_CLAIM_MISMATCH",
                             f"{metric.upper()} differs from {_src} by {delta:+.1f}% "
-                            f"({_lbl}: {_fmt_usd(float(claim))}, calculated: {_fmt_usd(val)})",
+                            f"({_lbl}: {_fmt_usd(float(claim), _ccy)}, calculated: {_fmt_usd(val, _ccy)})",
                         )
                     )
 
@@ -1298,7 +1310,11 @@ def _section_executive_summary(
                     m_data = _as_dict(approach_data.get(metric))
                     val = m_data.get("value", 0)
                     label = "Top-down" if approach_key == "top_down" else "Bottom-up"
-                    mismatches.append((label, float(val), float(deck_claim)))
+                    # The CONVERTED claim, matching the table and the warning. Printing the raw
+                    # one here put two different figures for the same field in one document,
+                    # 24 lines apart.
+                    _cmp = prov.get("deck_claim_comparable")
+                    mismatches.append((label, float(val), float(deck_claim if _cmp is None else _cmp)))
             if mismatches:
                 claim_str = _fmt_usd(mismatches[0][2])
                 if both_mode and len(mismatches) > 1:
@@ -1333,7 +1349,12 @@ def _section_methodology(methodology: dict[str, Any] | None) -> str:
     approach = methodology.get("approach_chosen", "unknown")
     rationale = methodology.get("rationale", "")
     approach_label = {
-        "both": "Both (top-down and bottom-up cross-validation)",
+        # NOT "cross-validation". That word asserts the comparison validates something, and the
+        # pipeline does not track where each input came from, so it cannot tell whether the two
+        # builds are independent -- the same reason the word is refused at the comparison note and
+        # in visualize.py. This was the last site left after the closeness-as-strength pass, and it
+        # sits on the Methodology line a founder quotes into a deck footnote.
+        "both": "Both (top-down and bottom-up, compared)",
         "top_down": "Top-down",
         "bottom_up": "Bottom-up",
     }.get(approach, approach)
@@ -1529,6 +1550,7 @@ def _section_sizing_table(
     if provenance:
         comparison_rows: list[str] = []
         close_agreement = False
+        blocked_rows = False
         for approach_key in ("top_down", "bottom_up"):
             if approach_key not in provenance:
                 continue
@@ -1537,26 +1559,53 @@ def _section_sizing_table(
                 deck_claim = prov.get("deck_claim")
                 delta_pct = prov.get("delta_vs_deck_pct")
                 classification = prov.get("classification", "")
-                if deck_claim is not None and delta_pct is not None:
+                # Gate the ROW on the claim, not on the delta. Gating on the delta means a blocked
+                # comparison drops the row entirely -- and with every row gone, the whole section
+                # disappears, taking the founder's own stated figure out of the report. A refused
+                # comparison is worth showing: here is what you said, here is what we got, and we
+                # could not put them side by side.
+                # NUMERIC, not merely non-None: `existing_claims: {tam: "big"}` is a legitimate
+                # input shape that produces no comparison at all, and gating on `is not None`
+                # sends a string into `float()`.
+                if isinstance(deck_claim, (int, float)) and not isinstance(deck_claim, bool):
                     approach_data = sizing.get(approach_key, {})
                     m = _as_dict(approach_data.get(metric))
                     val = m.get("value", 0)
                     method = "Top-down" if approach_key == "top_down" else "Bottom-up"
                     classification = _md_safe(classification)
                     marker = ""
-                    if abs(float(delta_pct)) <= CLOSE_AGREEMENT_PCT and not prov.get("comparison_blocked"):
+                    if (
+                        delta_pct is not None
+                        and abs(float(delta_pct)) <= CLOSE_AGREEMENT_PCT
+                        and not prov.get("comparison_blocked")
+                    ):
                         marker = " *"
                         close_agreement = True
+                    # `is not None`, not `or`: a legitimate comparable of 0.0 is falsy and would
+                    # silently fall back to the raw claim.
+                    _comparable = prov.get("deck_claim_comparable")
+                    _shown_claim = deck_claim if _comparable is None else _comparable
+                    _delta_cell = f"{delta_pct:+.1f}%{marker}" if delta_pct is not None else "—"
                     comparison_rows.append(
                         f"| {metric.upper()} ({method}) | "
-                        f"{_fmt_usd(float(prov.get('deck_claim_comparable') or deck_claim))} "
-                        f"| {_fmt_usd(val)} | {delta_pct:+.1f}%{marker} | {classification} |"
+                        f"{_fmt_usd(float(_shown_claim))} "
+                        f"| {_fmt_usd(val)} | {_delta_cell} | {classification} |"
                     )
+                    if delta_pct is None:
+                        blocked_rows = True
         if comparison_rows:
             lines.append("\n### Deck Claims vs. Our Estimates\n")
             lines.append("| Metric | Deck Claim | Our Estimate | Delta | Classification |")
             lines.append("|--------|-----------|--------------|-------|----------------|")
             lines.extend(comparison_rows)
+            if blocked_rows:
+                # A dash with no explanation reads as missing data rather than a refused
+                # comparison, and the founder cannot act on it without knowing the cause.
+                lines.append(
+                    "\nA delta of — means we could not compare the two figures: your figure and "
+                    "this calculation are in different currencies, and no stated currency was "
+                    "attached to yours. Say which currency your figure is in and this check runs."
+                )
             if close_agreement:
                 lines.append(
                     f"\n\\* Our figure lands within {CLOSE_AGREEMENT_PCT:.0f}% of the figure in "
@@ -1901,6 +1950,32 @@ def _resolve_headline_market_size(
     return figures, source_approach
 
 
+def _blocked_comparisons(inputs: dict[str, Any] | None, sizing: dict[str, Any] | None) -> dict[str, Any]:
+    """Which founder-stated figures could NOT be cross-checked, for the coaching sub-agent.
+
+    A refused comparison is invisible in the rest of the payload: the figure is still there,
+    `deck_reviewed` is still true, and `COMPARISON_CURRENCY_UNKNOWN` is medium so it never
+    reaches `high_severity_warnings`. A coach handed only that writes as though the deck's
+    number had been checked against ours.
+    """
+    blocked: list[str] = []
+    claims = _as_dict(_as_dict(inputs).get("existing_claims"))
+    for metric in ("tam", "sam", "som"):
+        claim = claims.get(metric)
+        if claim is None:
+            continue
+        comparable, is_blocked = _comparable_claim(claim, _as_dict(sizing), inputs)
+        if is_blocked and comparable is None:
+            blocked.append(metric.upper())
+    return {
+        "metrics": blocked,
+        "any": bool(blocked),
+        "reason": (
+            "the figures are in a different currency from the analysis and none was stated for them" if blocked else ""
+        ),
+    }
+
+
 def _emit_coaching_payload(
     inputs: dict[str, Any],
     methodology: dict[str, Any],
@@ -1969,6 +2044,12 @@ def _emit_coaching_payload(
         },
         "failed_items": summary.get("failed_items", []),
         "warned_items": [],  # market-sizing has no warn status; explicit empty for schema parity
+        # TOP-LEVEL. `COMPARISON_CURRENCY_UNKNOWN` is medium, and `high_severity_warnings` filters
+        # to high, so the coach was told `deck_reviewed: true` with nothing saying the cross-check
+        # had been refused -- and wrote as though the deck's figure had been checked. Promoting the
+        # warning to high would have carried it, but severity drives `accepted_warnings`, so that
+        # is a different change wearing this one's clothes.
+        "comparison_blocked": _blocked_comparisons(inputs, sizing),
         # {code, label, message}, matching competitive-positioning — NOT a bare code list. The
         # coaching sub-agent reads this payload and echoes it into commentary the founder reads;
         # handing it only `UNVALIDATED_CLAIMS` is how raw warning codes reached delivered reports.

@@ -288,6 +288,11 @@ keys (do not refetch from disk):
   `{deck_reviewed: true, stated: [...], missing: [...]}` listing which of
   `tam`/`sam`/`som` the deck stated vs left null. Use this to frame coaching
   about figures the deck omitted — see "Composing commentary" below.
+- `comparison_blocked` — `{metrics: [...], any: bool, reason: str}`. When `any`
+  is true, the figures named in `metrics` were **never cross-checked** against
+  ours: they are in a different currency and none was stated. `deck_coverage`
+  will still list them as stated, so do NOT write as though they were verified.
+  Say the check could not run and what would let it run.
 - `review_dir`, `report_path` — context only; you don't open either.
 - `insertion_marker` — consumed by the main thread's
   `insert_coaching.py` invocation, NOT by you. Ignore it.
@@ -298,7 +303,8 @@ keys (do not refetch from disk):
 
 Reason from the structured fields (`failed_items`, `warned_items`,
 `summary`, `high_severity_warnings`, `methodology`, `confidence`,
-`tam`, `sam`, `som`, `company_name`). Note: `warned_items` is always
+`tam`, `sam`, `som`, `company_name`, `comparison_blocked`). Note:
+`warned_items` is always
 `[]` for market-sizing — the checklist only uses pass/fail/not_applicable.
 The commentary should answer:
 

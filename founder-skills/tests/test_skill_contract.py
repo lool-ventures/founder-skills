@@ -483,7 +483,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # 88_904 -> 89_865 (PPTX): a .pptx deck is binary and Read refuses it, so market
     # figures inside a PowerPoint upload were invisible. Step now renders to PDF, or falls back
     # to text extraction and says what could not be read.
-    "market-sizing": 90_323,
+    # market-sizing raised 90,323 -> 90,525 (+202 B) for the Context B `comparison_blocked` field.
+    # A refused cross-check is invisible in every other payload key -- the figure is present and
+    # `deck_coverage` still reports it as stated -- so a coach not handed this writes as though the
+    # founder's own number had been verified against ours. Deliberate.
+    "market-sizing": 90_525,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes

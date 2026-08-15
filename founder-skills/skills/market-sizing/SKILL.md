@@ -1086,6 +1086,8 @@ Its shape (for reference — read the file, do not reconstruct it):
   "failed_items": [<array of failed checklist item objects with id and notes>],
   "warned_items": [],
   "high_severity_warnings": [<codes from report.json validation.warnings where severity=="high">],
+  "comparison_blocked": <copy from report.json coaching_payload.comparison_blocked — when `any` is
+                         true those figures were never cross-checked; do not coach as if they were>,
   "methodology": "<top_down|bottom_up|both from methodology.json>",
   "confidence": "<high|medium|low — copy from report.json coaching_payload.confidence>",
   "tam": <tam value from sizing.json>,

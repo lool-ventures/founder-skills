@@ -6000,3 +6000,56 @@ def test_checklist_criterion_rewards_explanation_not_agreement() -> None:
     section = rubric.split("### `approaches_reconciled`")[1].split("###")[0]
     assert "Agreement is **not** a pass on its own" in section, section
     assert "within 30%" not in section, section
+
+
+def test_blocked_comparison_keeps_the_row_and_prints_no_delta(tmp_path: Path) -> None:
+    """A refused cross-check must not produce a delta — and must not delete the table.
+
+    Two defects in one shape. The delta was computed against the RAW claim exactly when
+    conversion was refused, so the table read "+11.1%" beside a warning saying the figure
+    could not be cross-checked at all. And the row was gated on the delta, so suppressing
+    the delta would have dropped the row, emptied `comparison_rows`, and taken the whole
+    section — including the founder's own stated figure — out of the report.
+    """
+    d = _fx_claim_dir(tmp_path, declared=False, name="ms-fx-blocked-row")
+    md = _compose_md_text(d)
+    assert "### Deck Claims vs. Our Estimates" in md, "the blocked comparison deleted the whole section"
+    tam_row = next(ln for ln in md.splitlines() if ln.startswith("| TAM (Top-down)"))
+    assert "+11.1%" not in tam_row, f"delta computed across a refused comparison: {tam_row}"
+    assert "|" in tam_row and "—" in tam_row, f"blocked row has no em-dash delta cell: {tam_row}"
+    assert "90.0B ILS" in tam_row, "the founder's own stated figure vanished from the row"
+    assert "could not compare the two figures" in md, "the em-dash is unexplained"
+    assert "COMPARISON_CURRENCY_UNKNOWN" in _compose_codes(d)
+
+
+def test_every_surface_prints_one_figure_for_the_deck_claim(tmp_path: Path) -> None:
+    """The table, the mismatch note and the warning must agree — and carry the right currency.
+
+    One report carried three figures for one field: 90.0B ILS in the note (raw claim),
+    360.0B ILS in the table (converted), and `$360.0B` in the warning — a dollar sign on an
+    ILS analysis, because validation runs before `_set_currency()`.
+    """
+    d = _fx_claim_dir(tmp_path, declared=True, name="ms-fx-one-figure")
+    md = _compose_md_text(d)
+    note = next(ln for ln in md.splitlines() if "differ significantly" in ln)
+    warn = next(ln for ln in md.splitlines() if "differs from deck claim" in ln)
+    tam_row = next(ln for ln in md.splitlines() if ln.startswith("| TAM (Top-down)"))
+    for line, where in ((note, "note"), (warn, "warning"), (tam_row, "table")):
+        assert "360.0B ILS" in line, f"{where} is not showing the converted claim: {line}"
+        assert "$360.0B" not in line, f"{where} prints a dollar sign on an ILS analysis: {line}"
+
+
+def test_methodology_never_claims_the_two_builds_validate_each_other(tmp_path: Path) -> None:
+    """ "cross-validation" asserts an independence the pipeline cannot establish.
+
+    The pipeline does not track where each input came from, so it cannot tell whether the
+    two builds are independent — the reason the word is refused at the comparison note and
+    in visualize.py. This was the last site, and it sat on the Methodology line a founder
+    quotes into a deck footnote.
+    """
+    d = tmp_path / "ms-methodology"
+    d.mkdir()
+    _make_full_sizing_dir(d)
+    md = _compose_md_text(d)
+    assert "cross-validation" not in md.lower(), "report.md still claims the two approaches cross-validate each other"
+    assert "## Methodology" in md

@@ -327,9 +327,11 @@ def _compute_provenance(
             deck_claim = existing_claims.get(metric)
             value_num = _try_float(m.get("value", 0))
             comparable, blocked = _comparable_claim(deck_claim, sizing, inputs)
-            claim_for_delta = deck_claim if comparable is None else comparable
+            # Mirrors compose_report.py: a blocked comparison yields NO delta. See the note there.
             delta = (
-                _compute_delta(value_num, claim_for_delta) if value_num is not None and deck_claim is not None else None
+                _compute_delta(value_num, comparable)
+                if value_num is not None and deck_claim is not None and comparable is not None
+                else None
             )
 
             # A converted money input with no declared claim currency makes the delta carry the
@@ -1380,7 +1382,13 @@ def _chart_provenance_summary(
             color = badge_colors.get(classification, _CLR_NA)
             label = badge_labels.get(classification, classification)
 
-            deck_claim_num = _try_float(deck_claim) if deck_claim is not None else None
+            # The CONVERTED claim, matching report.md. Rendering the raw one made the two
+            # deliverables print different numbers for the same field, and `_fmt_usd` suffixes the
+            # ANALYSIS currency -- so a raw EUR figure came out tagged ILS.
+            # `is not None`, not `or`: a legitimate comparable of 0.0 is falsy.
+            _comparable = prov.get("deck_claim_comparable")
+            _shown_claim = deck_claim if _comparable is None else _comparable
+            deck_claim_num = _try_float(_shown_claim) if _shown_claim is not None else None
             deck_str = _esc(_fmt_usd(deck_claim_num)) if deck_claim_num is not None else "\u2014"
             delta_str = _esc(f"{delta:+.1f}%") if delta is not None else "\u2014"
             if delta is not None and abs(delta) <= CLOSE_AGREEMENT_PCT and not prov.get("comparison_blocked"):
@@ -1489,14 +1497,17 @@ def _chart_key_findings(
             for metric in ("tam", "sam", "som"):
                 prov = _as_dict(provenance[approach_key].get(metric))
                 delta = prov.get("delta_vs_deck_pct")
+                # REPLACED, not suppressed. The delta is now None whenever the comparison was
+                # refused, so neither arm below can speak across currencies -- but dropping the
+                # item silently would leave the founder nothing, which is what the previous
+                # comment here objected to. Say what could not be checked and what would fix it.
+                if delta is None and prov.get("comparison_blocked") and prov.get("deck_claim") is not None:
+                    attention.append(
+                        f"{metric.upper()} ({method}): could not be checked against your own "
+                        f"figure — it is in a different currency and none was stated for it"
+                    )
                 if delta is not None:
-                    if prov.get("comparison_blocked") and abs(delta) <= CLOSE_AGREEMENT_PCT:
-                        # Do not assert closeness across a comparison the pipeline refuses. The
-                        # distant arm is deliberately left speaking: suppressing it would remove an
-                        # attention item with nothing to replace it (compose emits
-                        # COMPARISON_CURRENCY_UNKNOWN; this surface has no equivalent).
-                        pass
-                    elif abs(delta) <= CLOSE_AGREEMENT_PCT:
+                    if abs(delta) <= CLOSE_AGREEMENT_PCT:
                         # NOT a strength. Landing on the founder's own number is the cheapest
                         # possible outcome — it happens when both analyses read the same source,
                         # or when our input came from their materials. Measured across a 3-deck
