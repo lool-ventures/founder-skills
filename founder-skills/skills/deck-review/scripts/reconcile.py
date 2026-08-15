@@ -1351,6 +1351,20 @@ def build(
     offline corpus parity check can call it without a filesystem.
     """
     figures = load_figures(ledger)
+    # Fuse endpoint twins into one interval BEFORE anything compares them. Extraction
+    # routinely splits a stated range across two rows -- the deck says "40-60x throughput"
+    # and the ledger comes back with a "low end" figure of 40x and a "high end" of 60x.
+    # Without this, each endpoint is compared as a POINT: a computed 50x contradicts the
+    # stated 40 and again the stated 60, while sitting comfortably inside the range the
+    # deck actually claims. Measured on one live deck: 9 contradictions reached the
+    # founder, 7 of them this artifact, and restoring the fuse left exactly the 2 an
+    # expert graded real.
+    #
+    # This step existed in the prototype pipeline and was dropped in the port -- the call
+    # lived in the eval DRIVER (surface.py), not in reconcile.py, so writing build() from
+    # this file's shape lost it at the file boundary. `compute()` has been reaching for
+    # `_alias` and finding nothing ever since.
+    figures, alias = merge_range_twins(figures)
     verify(figures, transcript, quote_in_doc)
     verified = [f for f in figures if f.verified]
     coverage = _coverage(figures, slides_transcribed or [])
@@ -1369,7 +1383,9 @@ def build(
         status = "checked"
 
     by_id = {f.id: f for f in figures}
-    computed = [compute(spec, by_id) for spec in rel_specs] if status == "checked" else []
+    # Copy each spec before stamping the alias map: the caller's payload is not ours to
+    # mutate, and a re-run with the same specs must behave identically.
+    computed = [compute({**spec, "_alias": alias}, by_id) for spec in rel_specs] if status == "checked" else []
 
     # The interpretation pass runs AFTER the arithmetic and BEFORE selection, so `select()`
     # stays the single place that decides what a founder sees. A downgrade is an input to

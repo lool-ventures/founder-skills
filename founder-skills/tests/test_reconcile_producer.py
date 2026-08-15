@@ -424,3 +424,137 @@ def test_status_distinguishes_not_run_from_not_needed() -> None:
     rc, out, err = _run([], ledger={"figures": _LEDGER["figures"][:2]})
     assert rc == 0, err
     assert out["interpretation"]["status"] == "not_needed"
+
+
+# ---------------------------------------------------------------------------
+# Endpoint twins must be fused into one interval BEFORE anything compares them.
+# ---------------------------------------------------------------------------
+
+_SPLIT_RANGE_LEDGER = {
+    "figures": [
+        {
+            "id": "contracts_before",
+            "value": 6,
+            "raw": "6",
+            "unit_kind": "count",
+            "label": "contracts per analyst per day, before",
+            "slide": 3,
+            "quote": "Contracts per Analyst / Day 6-10 300-500 40-60x throughput",
+        },
+        {
+            "id": "contracts_after",
+            "value": 300,
+            "raw": "300",
+            "unit_kind": "count",
+            "label": "contracts per analyst per day, after",
+            "slide": 3,
+            "quote": "Contracts per Analyst / Day 6-10 300-500 40-60x throughput",
+        },
+        # THE SHAPE THAT MATTERS: point raws, not "40-60x" on both rows. A live extraction
+        # emits these; the committed corpus happens to carry the full range in `raw`, so a
+        # corpus-shaped fixture gets its interval from `_range_kwargs` and would pass here
+        # with the fuse REMOVED — testing nothing.
+        {
+            "id": "throughput_low",
+            "value": 40,
+            "raw": "40x",
+            "unit_kind": "multiple",
+            "label": "throughput improvement — low end",
+            "slide": 3,
+            "quote": "Contracts per Analyst / Day 6-10 300-500 40-60x throughput",
+        },
+        {
+            "id": "throughput_high",
+            "value": 60,
+            "raw": "60x",
+            "unit_kind": "multiple",
+            "label": "throughput improvement — high end",
+            "slide": 3,
+            "quote": "Contracts per Analyst / Day 6-10 300-500 40-60x throughput",
+        },
+    ]
+}
+_SPLIT_RANGE_TRANSCRIPT = "Slide 3: Contracts per Analyst / Day 6-10 300-500 40-60x throughput"
+
+
+def _run_split_range(expected_id: str) -> tuple[int, dict, str]:
+    with tempfile.TemporaryDirectory() as d:
+        lp, sp = os.path.join(d, "l.json"), os.path.join(d, "s.json")
+        with open(lp, "w", encoding="utf-8") as f:
+            json.dump(_SPLIT_RANGE_LEDGER, f)
+        with open(sp, "w", encoding="utf-8") as f:
+            json.dump({"transcript": _SPLIT_RANGE_TRANSCRIPT, "slides_transcribed": [3]}, f)
+        rel = {
+            "kind": "derived_ratio",
+            "operator": "ratio",
+            "operands": ["contracts_after", "contracts_before"],
+            "expected_id": expected_id,
+        }
+        res = subprocess.run(
+            [sys.executable, SCRIPT, "--ledger", lp, "--second-read", sp, "--run-id", "r1"],
+            input=json.dumps({"relations": [rel]}),
+            capture_output=True,
+            text=True,
+        )
+    try:
+        parsed = json.loads(res.stdout)
+    except json.JSONDecodeError:
+        parsed = {}
+    return res.returncode, parsed, res.stderr
+
+
+def test_a_value_inside_a_split_stated_range_is_not_a_contradiction() -> None:
+    """300 ÷ 6 = 50x against a deck stating "40-60x". 50 is INSIDE the deck's own claim.
+
+    Measured on a live deck before this was fixed: 9 contradictions reached the founder and
+    7 were this artifact — each endpoint of a split range compared as a point value. The
+    fuse existed in the prototype and was dropped in the port, because the call lived in the
+    eval driver rather than in the engine file.
+    """
+    rc, out, err = _run_split_range("throughput_low")
+    assert rc == 0, err
+    verdicts = [r["verdict"] for r in out["relations"]]
+    assert "contradiction" not in verdicts, (
+        f"a computed 50x contradicted an endpoint of the stated 40-60x range: {out['relations']}"
+    )
+
+
+def test_the_fuse_addresses_either_endpoint_identically() -> None:
+    """Whichever twin the model names, it resolves to the same fused interval."""
+    for endpoint in ("throughput_low", "throughput_high"):
+        rc, out, err = _run_split_range(endpoint)
+        assert rc == 0, err
+        assert "contradiction" not in [r["verdict"] for r in out["relations"]], endpoint
+
+
+def test_a_value_outside_the_fused_range_still_contradicts() -> None:
+    """The counter-test: fusing must not blunt the engine.
+
+    A ratio landing well outside the deck's stated range is still a finding — otherwise the
+    fuse would be suppressing rather than correcting.
+    """
+    ledger = json.loads(json.dumps(_SPLIT_RANGE_LEDGER))
+    ledger["figures"][1]["value"] = 3000  # 3000 / 6 = 500x, far outside 40-60x
+    ledger["figures"][1]["raw"] = "3,000"
+    with tempfile.TemporaryDirectory() as d:
+        lp, sp = os.path.join(d, "l.json"), os.path.join(d, "s.json")
+        with open(lp, "w", encoding="utf-8") as f:
+            json.dump(ledger, f)
+        with open(sp, "w", encoding="utf-8") as f:
+            json.dump({"transcript": _SPLIT_RANGE_TRANSCRIPT + " 3,000", "slides_transcribed": [3]}, f)
+        rel = {
+            "kind": "derived_ratio",
+            "operator": "ratio",
+            "operands": ["contracts_after", "contracts_before"],
+            "expected_id": "throughput_low",
+        }
+        res = subprocess.run(
+            [sys.executable, SCRIPT, "--ledger", lp, "--second-read", sp, "--run-id", "r1"],
+            input=json.dumps({"relations": [rel]}),
+            capture_output=True,
+            text=True,
+        )
+    out = json.loads(res.stdout)
+    assert "contradiction" in [r["verdict"] for r in out["relations"]], (
+        "a 500x against a stated 40-60x was suppressed — the fuse is blunting real findings"
+    )
