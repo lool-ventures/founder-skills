@@ -558,3 +558,77 @@ def test_a_value_outside_the_fused_range_still_contradicts() -> None:
     assert "contradiction" in [r["verdict"] for r in out["relations"]], (
         "a 500x against a stated 40-60x was suppressed — the fuse is blunting real findings"
     )
+
+
+def test_contradictions_are_ordered_most_wrong_first() -> None:
+    """A wildly-off figure should reach the founder before a marginally-off one.
+
+    Until now the order was whatever the model happened to propose, so the most material
+    disagreement could sit last. Ordering is a strict improvement and loses nothing —
+    unlike a volume cap, which on the current engine would fire on no deck in the corpus
+    (4/2/0/1 contradictions across the four scored) and so would ship untested.
+    """
+    ledger = {
+        "figures": [
+            {
+                "id": "revenue",
+                "value": 9000,
+                "raw": "$9,000",
+                "unit_kind": "money",
+                "currency": "USD",
+                "label": "net revenue",
+                "slide": 1,
+                "quote": "net revenue of $9,000",
+            },
+            {
+                "id": "volume",
+                "value": 493000,
+                "raw": "$493,000",
+                "unit_kind": "money",
+                "currency": "USD",
+                "label": "volume",
+                "slide": 1,
+                "quote": "volume of $493,000",
+            },
+            {
+                "id": "near",
+                "value": 1.9,
+                "raw": "1.9%",
+                "unit_kind": "percent",
+                "label": "take rate stated on slide one",
+                "slide": 1,
+                "quote": "a take rate of 1.9%",
+            },
+            {
+                "id": "far",
+                "value": 6.2,
+                "raw": "6.2%",
+                "unit_kind": "percent",
+                "label": "take rate stated on slide four",
+                "slide": 1,
+                "quote": "a take rate of 6.2%",
+            },
+        ]
+    }
+    transcript = "Slide 1: net revenue of $9,000. volume of $493,000. a take rate of 1.9%. a take rate of 6.2%."
+    with tempfile.TemporaryDirectory() as d:
+        lp, sp = os.path.join(d, "l.json"), os.path.join(d, "s.json")
+        with open(lp, "w", encoding="utf-8") as f:
+            json.dump(ledger, f)
+        with open(sp, "w", encoding="utf-8") as f:
+            json.dump({"transcript": transcript, "slides_transcribed": [1]}, f)
+        rels = [
+            {"kind": "derived_ratio", "operator": "ratio", "operands": ["revenue", "volume"], "expected_id": "near"},
+            {"kind": "derived_ratio", "operator": "ratio", "operands": ["revenue", "volume"], "expected_id": "far"},
+        ]
+        res = subprocess.run(
+            [sys.executable, SCRIPT, "--ledger", lp, "--second-read", sp, "--run-id", "r1"],
+            input=json.dumps({"relations": rels}),
+            capture_output=True,
+            text=True,
+        )
+    out = json.loads(res.stdout)
+    cons = [r for r in out["relations"] if r["verdict"] == "contradiction"]
+    assert len(cons) == 2, f"fixture produced no comparison to order: {out['relations']}"
+    gaps = [abs(r["computed"] - r["expected_value"]) / abs(r["expected_value"]) for r in cons]
+    assert gaps == sorted(gaps, reverse=True), f"not ordered most-wrong-first: {gaps}"

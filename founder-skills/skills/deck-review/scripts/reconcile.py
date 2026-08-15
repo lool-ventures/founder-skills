@@ -1204,7 +1204,23 @@ def select(relations: list[Relation], max_derived: int = 3) -> list[Relation]:
             continue
         seen.add(sig)
         live.append(r)
-    contradictions = [r for r in live if r.verdict == "contradiction"]
+
+    # Order contradictions MOST-WRONG FIRST, by how far the computed value sits from the
+    # stated one in relative terms. A 50% discrepancy deserves the founder's attention
+    # before a 3% one, and until now the order was whatever the model happened to propose.
+    #
+    # Ordering rather than capping, deliberately. The docstring above assumes "roughly 3-6
+    # per deck", and one live deck delivered NINE -- but that was the pre-fix engine; on the
+    # current one the four scored decks give 4/2/0/1, back inside the premise. A cap today
+    # would fire on nothing, so it would be untested code written for a lever that has not
+    # landed. It becomes necessary if proposal-ensembling ships, because that is what breaks
+    # the volume assumption; add it then, with the volume it actually has to manage.
+    def _wrongness(r: Relation) -> float:
+        if r.expected_value in (None, 0) or r.computed is None:
+            return 0.0
+        return abs(r.computed - r.expected_value) / abs(r.expected_value)
+
+    contradictions = sorted((r for r in live if r.verdict == "contradiction"), key=_wrongness, reverse=True)
     derived = [r for r in live if r.verdict == "derived" and r.confidence == "high"]
     return contradictions + derived[:max_derived]
 

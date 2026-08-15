@@ -812,10 +812,20 @@ def test_a_derived_reading_is_labelled_as_a_judgement() -> None:
     assert "judgement call" in md
 
 
-def test_nothing_renders_when_every_relation_agrees() -> None:
-    """A list of confirmations is volume, and volume buries the findings that count."""
+def test_no_findings_still_reports_what_was_checked() -> None:
+    """A list of confirmations is volume — but silence is worse than volume.
+
+    This used to assert the section vanished entirely. Measured on a real deck, that meant
+    113 figures read, 101 corroborated and 20 comparisons run produced NO numbers section
+    at all: the deck the tool worked hardest on looked like the one it skipped. The
+    findings stay suppressed; the coverage line replaces the silence.
+    """
     md = _compose_markdown(_recon([]))
-    assert "What Your Numbers Say" not in md
+    assert "What Your Numbers Say" in md
+    assert "figures off your deck" in md
+    # No findings are invented to fill the space.
+    assert "Figures that disagree" not in md
+    assert "What the numbers imply" not in md
 
 
 def test_the_checklist_conflict_is_disclosed_rather_than_reconciled() -> None:

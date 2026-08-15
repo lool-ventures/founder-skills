@@ -119,11 +119,16 @@ WARNING_SEVERITY: dict[str, str] = {
     "MISSING_METADATA": "high",
     "CHECKLIST_FAILURES_CRITICAL": "high",
     # Medium — quality concerns worth surfacing
-    # Medium, and it carries a founder_message rather than the agent-facing text: when this
-    # fires the founder is looking at numeric findings that no judgement pass ever reviewed,
-    # and some of them are the kind a founder would rightly reject. The honest move is to
-    # tell them the checks below are a first pass, not to hide it or to name a step at them.
-    "NUMBERS_NOT_REVIEWED": "medium",
+    # HIGH, not medium, and the difference is load-bearing: `ACCEPTIBLE_SEVERITIES` is
+    # exactly {"medium"}, so at medium this warning could be ACCEPTED AWAY -- the one signal
+    # that a founder is reading findings nothing reviewed was itself dismissible.
+    #
+    # Measured skip rate for the review pass: 1 of 3 eligible live runs, and it skipped on
+    # the deck with 9 contradictions. Skipping shows MORE findings, not fewer, including the
+    # kind a founder would rightly reject. It carries a founder_message rather than the
+    # agent-facing text, because the founder's stake is "these are a first pass", not the
+    # name of a step.
+    "NUMBERS_NOT_REVIEWED": "high",
     "STAGE_MISMATCH": "medium",
     "SLIDE_COUNT_EXTREME": "medium",
     "UNCITED_CRITIQUE": "medium",
@@ -1025,6 +1030,41 @@ def _sanitize_items_for_coaching(items: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _coverage_line(reconciliation: dict[str, Any]) -> str:
+    """How much of the deck this actually looked at, in the founder's terms.
+
+    Without it the section's opening sentence is true and its silence is misleading: it
+    describes what was done to the figures SHOWN and says nothing about how many were read,
+    how many survived corroboration, or how many comparisons were run. A founder reading a
+    short list reasonably infers there was little to find.
+
+    Deliberately counts rather than characterises. "12 could not be confirmed" is a fact
+    the founder can act on -- they know which of their slides are hard to read. A
+    percentage or a grade would be a judgement this has no basis for.
+    """
+    if reconciliation.get("status") != "checked":
+        return ""
+    total = reconciliation.get("figures_total")
+    verified = reconciliation.get("figures_verified")
+    computed = reconciliation.get("relations_proposed")
+    if not isinstance(total, int) or not isinstance(verified, int):
+        return ""
+    bits = [f"I read **{total}** figures off your deck"]
+    if verified < total:
+        bits.append(
+            f"**{verified}** of them turned up again in a second, separate reading — the other "
+            f"**{total - verified}** I could not confirm, so nothing below rests on them"
+        )
+    else:
+        bits.append("all of them turned up again in a second, separate reading")
+    if isinstance(computed, int) and computed:
+        bits.append(f"and I ran **{computed}** comparisons across them")
+    return ", ".join(bits) + (
+        ". That is what was checked — a short list here means these particular comparisons "
+        "held, not that every number in the deck has been verified against every other.\n"
+    )
+
+
 def _section_numbers(
     reconciliation: dict[str, Any] | None,
     checklist: dict[str, Any] | None,
@@ -1045,8 +1085,22 @@ def _section_numbers(
     if not reconciliation:
         return ""
     relations = _as_list(reconciliation.get("relations"))
+
+    # THE COVERAGE LINE RENDERS EVEN WITH NOTHING TO REPORT, and that is the point.
+    #
+    # This section used to return "" on an empty relation set, so a founder saw no numbers
+    # section at all. Measured on a real deck: 113 figures read, 101 corroborated, 20
+    # relations computed, 12 figures rejected by the independent read -- and the report
+    # said nothing whatsoever. The deck the tool worked hardest on is the one it appeared
+    # to skip.
+    #
+    # Silence is the worst available answer here. It reads as "your numbers are fine" when
+    # what happened was "these particular comparisons held, and this many figures never got
+    # checked". Saying how much was looked at is an ADDITION to the claim, not a retreat
+    # from it: the founder can tell a clean bill of health from a thin one.
+    counts = _coverage_line(reconciliation)
     if not relations:
-        return ""
+        return "## What Your Numbers Say About Each Other\n\n" + counts if counts else ""
 
     # Split on VERDICT, not `kind`. `kind` is what the model PROPOSED the relation was;
     # `verdict` is what the engine computed it to be, and they routinely differ — the
@@ -1066,6 +1120,8 @@ def _section_numbers(
         "reading of the same slides, and then related by arithmetic rather than by eye. "
         "Figures that could not be corroborated twice were dropped rather than guessed at.\n"
     )
+    if counts:
+        lines.append(counts)
 
     if contradictions:
         lines.append("### Figures that disagree\n")
