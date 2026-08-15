@@ -674,3 +674,41 @@ def test_a_leading_bound_word_in_the_raw_string_is_read() -> None:
     assert detect_bound("Over 30%", "time to market") == "at_least"
     assert detect_bound("Less than 2,000", "tall buildings") == "at_most"
     assert detect_bound("30%", "turnover 30%") is None
+
+
+def test_a_reduction_is_not_compared_against_a_share() -> None:
+    """`10-12 ÷ >70 = 14.29-17.14% — but the deck states ↓75%` reached a real report.
+
+    "↓75%" is a reduction; the computed value is what REMAINS. They are complements, and
+    both carry `unit_kind: percent`, so the unit algebra passes them through and the
+    founder is shown 15% beside 75% with no way to tell what is alleged.
+    """
+    a = fig("10-12", 10, "count", "minimal FTE", id="after")
+    b = fig(">70", 70, "count", "traditional FTE", id="before")
+    e = fig("↓75%", 75, "percent", "FTE count reduction", id="cut")
+    r = _cmp("ratio", ["after", "before"], "cut", {"after": a, "before": b, "cut": e})
+    assert r.verdict != "contradiction"
+    assert any("complements" in x for x in r.reasons)
+
+
+def test_a_plain_share_is_still_tested_normally() -> None:
+    """The counter-test: only reduction-framed figures are refused, not every percent."""
+    a = fig("$9K", 9000, "money", "net revenue", id="rev")
+    b = fig("$493K", 493000, "money", "volume", id="vol")
+    e = fig("6.2%", 6.2, "percent", "take rate", id="tr")
+    assert _cmp("ratio", ["rev", "vol"], "tr", {"rev": a, "vol": b, "tr": e}).verdict == "contradiction"
+
+
+def test_the_reduction_words_have_no_competing_sense() -> None:
+    """`target` and `over` both produced false bounds today by matching another meaning.
+
+    These three are nouns of decrease with no other reading; `decline` is excluded on
+    purpose ("declined the offer").
+    """
+    from reconcile import _is_reduction  # noqa: PLC0415
+
+    assert _is_reduction(fig("↓75%", 75, "percent", "FTE count", id="x"))
+    assert _is_reduction(fig("75%", 75, "percent", "cost reduction", id="x"))
+    assert _is_reduction(fig("75%", 75, "percent", "annualised savings", id="x"))
+    assert not _is_reduction(fig("75%", 75, "percent", "gross margin", id="x"))
+    assert not _is_reduction(fig("75%", 75, "percent", "declined offers", id="x"))

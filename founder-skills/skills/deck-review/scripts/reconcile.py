@@ -670,6 +670,24 @@ widens by 3.3, nowhere near it.
 """
 
 
+_REDUCTION_GLYPH = re.compile(r"[↓▼]")
+_REDUCTION_WORDS = re.compile(r"\b(reduction|decrease|savings)\b", re.I)
+
+
+def _is_reduction(exp: Figure) -> bool:
+    """Does this stated percent describe a DECREASE rather than a share?
+
+    "↓75%" and a computed 15% share are complements, not disagreeing measurements of one
+    thing, and both carry `unit_kind: percent` so the unit algebra waves them through.
+
+    The glyph is the primary signal because it is unambiguous. The three words are chosen
+    for having no competing sense -- unlike `target` and `over`, both of which produced
+    false bounds in this file today by matching a different meaning of the same string.
+    `decline` is deliberately absent ("declined the offer").
+    """
+    return bool(_REDUCTION_GLYPH.search(exp.raw or "") or _REDUCTION_WORDS.search(exp.label or ""))
+
+
 def _is_self_comparison(r: Relation, operands: list[Figure]) -> bool:
     """Is this a cross-slide consistency check that came back clean?
 
@@ -1075,6 +1093,29 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         comparable: float | None = None
         if cu == exp_unit or (cu.startswith(exp.unit_kind) and not exp.period):
             comparable = r.computed
+        elif cu == "dimensionless" and exp.unit_kind == PERCENT and _is_reduction(exp):
+            # A REDUCTION AND A REMAINING RATIO ARE NOT THE SAME QUANTITY. They are
+            # complements -- reduction% = 100 - remaining% -- and both wear the `percent`
+            # unit, so nothing above catches it. A real deck stated "↓75%" for FTE count
+            # against 10-12 people down from >70, and the report read
+            #
+            #     10-12 ÷ >70 = 14.29-17.14%  — but the deck states ↓75%
+            #
+            # putting 15% beside 75% as though they should match. A founder cannot tell
+            # what is being alleged. (There IS tension underneath -- 11 of 70 is an 84%
+            # reduction, not 75% -- but that is a different comparison from the one shown,
+            # and it runs in the founder's favour.)
+            #
+            # REFUSED rather than converted. Converting means asserting that this stated
+            # figure is a reduction on the strength of a glyph and a couple of label
+            # words, and a wrong read there MANUFACTURES a contradiction by flipping the
+            # comparison. Refusing suppresses. The codebase already resolves this class
+            # the same way for currency and period mismatches: where a rule cannot decide,
+            # refuse the comparison rather than assert one.
+            r.reasons.append(
+                f"cannot test a computed share against {exp.raw}, which states a reduction — "
+                "they are complements, not the same quantity"
+            )
         elif cu == "dimensionless" and exp.unit_kind in (PERCENT, MULTIPLE):
             # a bare ratio IS a percent, once scaled
             comparable = r.computed * 100 if exp.unit_kind == PERCENT else r.computed
