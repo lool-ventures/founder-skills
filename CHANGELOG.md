@@ -9,7 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Highlights
 
-Five themes.
+Six themes.
+
+**Your own figure now reads the same in both documents.** When a figure you stated is in a
+different currency from the analysis, market sizing converts it before comparing. The written
+report compared the converted figure while the visual report showed the unconverted one — so the
+two documents you receive disagreed about your own number by exactly the exchange rate, and the
+visual report labelled a foreign figure with the analysis currency. Both now show the same
+converted figure, and so do the surrounding notes and warnings. When the comparison cannot be made
+at all, because no currency was stated for your figure, neither report prints a percentage
+difference any more: that number measured the exchange rate rather than any disagreement. Your
+figure still appears, beside a dash and the reason the two could not be lined up.
 
 **A competitive positioning rank now accounts for which end of an axis is good.** On an axis
 running price low to high, a startup sitting second-cheapest of nine was told it "ranks last of
@@ -32,9 +42,13 @@ comparisons held, not that a careful reader would find nothing more.
 Design & Readability criteria for one, without the slides having been rendered first. PowerPoint is
 now converted and rendered. When it cannot be converted, the slide text, table cells, speaker notes and
 chart data are recovered instead, the design criteria are excluded rather than guessed at, and the
-report says in its summary that the design was never reviewed and that sending a PDF gets it
-reviewed. The same gate now covers markdown decks, and decks that arrived unreadable or only
-partly readable.
+report says in its summary that the design was never reviewed — and what would get it reviewed,
+which depends on why: a deck described in conversation needs a file, a deck whose slides are
+images needs exporting from the original rather than scanning, and a deck read only in part needs
+re-sending in full. The same gate now covers markdown decks, and decks that arrived unreadable or
+only partly readable. Where the design criteria were excluded, the charts leave the category out
+altogether instead of scoring it over whichever criterion survived — it was being drawn at 100%
+and listed among your strengths.
 
 **Scores and sections say what they mean.** A deck-review `warn` earns half credit — every one of
 the 35 criteria defines warn as partial satisfaction, and it used to count for nothing. The score
@@ -50,8 +64,14 @@ a gap that was not there. Deck review states that its 35 criteria do not assess 
 and compliance questions. Competitive positioning names competitors that were never put through
 its adversarial verification. Financial model review names the checks that dropped out of the score
 — whether because the assessment excluded them or because your geography or sector could not be
-matched. And market sizing stops presenting agreement as evidence: two methods landing close
-together is not cross-validation, and reproducing the figure in your own deck is not a strength.
+matched — and it no longer states the wrong reason for the second case. A company in Israel whose
+geography was written "Israel/US" was told, on four Israel-specific checks, that they applied to a
+different geography; the checks had in fact never been assessed, and leaving them out of the total
+moved the score from solid to strong on the spelling alone. The report now says the field could not
+be matched, everywhere it says anything: in the written report, in the visual one, in the explorer,
+and in the count shown beside the score. And market sizing stops presenting agreement as evidence:
+two methods landing close together is not cross-validation, and reproducing the figure in your own
+deck is not a strength.
 
 ### Added
 
@@ -110,7 +130,21 @@ together is not cross-validation, and reproducing the figure in your own deck is
 - **market-sizing:** "cross-validation" is retired as a label — the pipeline cannot tell whether
   the two builds rest on the same underlying figures, so their agreement is not confirmation. The
   self-check no longer passes on the two answers being within 30% of each other; what earns the
-  point is explaining the gap, in either direction.
+  point is explaining the gap, in either direction. The methodology line said it too, and was the
+  last place it survived.
+- **market-sizing:** a figure you stated in another currency is now shown converted in every place
+  it appears — the comparison table, the note above it, the warning below it, and the visual
+  report. Four places, and they did not agree: one printed the converted figure, the others the
+  raw one, and one labelled a foreign figure with the analysis currency and put a dollar sign on an
+  analysis that was not in dollars.
+- **market-sizing:** a comparison that cannot be made no longer produces a percentage. Where your
+  figure's currency is unstated, the difference shown was the exchange rate rather than a
+  disagreement — a report could say a figure "could not be cross-checked" and print a difference
+  for it in the same breath. The row stays, so your figure is still there to see, with a dash and
+  an explanation in place of the number.
+- **market-sizing:** the coaching commentary is told when a cross-check was refused. It was given
+  your stated figures and told the deck had been reviewed, with nothing to say the comparison never
+  ran, so it could write as though your number had been checked against ours.
 - **market-sizing:** the "most sensitive parameter" is now the widest-stressed parameter, and every
   parameter tied at the top is named. The ranking follows how wide a stress band each input was
   given, not how much the answer depends on it, and the top spot was a tie on 11 of 14 runs
@@ -124,6 +158,18 @@ together is not cross-validation, and reproducing the figure in your own deck is
 - **financial-model-review:** which criteria count toward your score is now decided from the review
   inputs on disk rather than from a profile re-typed by the grading step; where the two disagree,
   each differing field is reported rather than absorbed.
+- **financial-model-review:** a check skipped because your geography or revenue model could not be
+  matched no longer reads as a statement about your company. It said "applies to a different
+  geography" — the same words used when a check genuinely does not apply to you — so a company in
+  Israel entered as "Israel/US" was told four Israel-specific checks were for somewhere else. They
+  had never been assessed, and dropping them from the total moved the score from solid to strong.
+  It now says the field could not be matched, and quotes back what you wrote.
+- **financial-model-review:** the score says when it was computed over fewer checks than your
+  company warrants. The written report had named the missing checks for a while; the visual report
+  and the explorer showed the percentage alone, so a partial review looked like a complete one. The
+  coaching commentary is told as well, and told not to lead with the headline status when it is.
+- **financial-model-review:** the two warnings about dropped checks name them in words rather than
+  by internal identifiers.
 - **financial-model-review:** the runway criterion's pass and warn bands did not cover their own
   axis for seed and Series A — 18-24 months fell in neither. A 22-month runway was graded a pass on
   evidence that described a warn.
