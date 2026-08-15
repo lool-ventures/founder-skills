@@ -1201,10 +1201,17 @@ def _widest_stressed(sensitivity: dict[str, Any] | None) -> list[str]:
     """Every parameter tied at the top of sensitivity_ranking.
 
     `most_sensitive` is `sensitivity_ranking[0]`, and the ranking sorts by `som_swing_pct` -- which,
-    for these pure-product models, is just the assigned stress band width. Ranges are assigned by
-    CONFIDENCE CLASS, not by leverage, so a well-sourced parameter can never top the ranking however
-    much the answer depends on it. Measured across three decks the top swing was a 3-, 4- and 3-way
-    TIE at exactly 100.0, broken by whatever order the sub-agent listed parameters.
+    for these pure-product models, is just the stress band width. So the "ranking" reflects how wide
+    a band each parameter was given, not how much the answer depends on it, and ties are common:
+    measured across 14 real runs, the top swing was a TIE on 11, broken by whatever order the
+    sub-agent listed parameters.
+
+    CORRECTED 2026-08-15 -- an earlier version of this note said ranges are "assigned by CONFIDENCE
+    CLASS, so a well-sourced parameter can never top the ranking". That is false as a mechanism:
+    `range_widened` is False on 83/83 scenarios across the corpus, i.e. CONFIDENCE_MIN_RANGE
+    (sensitivity.py) has never once fired. The bands arrive from the sub-agent already at those
+    widths; the producer floor only ever widens a NARROWER band and never had to. Sourced parameters
+    do top the ranking on real runs. The tie is real; the causal story was not.
 
     Derived from the artifact rather than stored as a new field: both render sites already read
     `sensitivity_ranking`, so a stored field would buy a schema row and a ceiling bump for nothing.
