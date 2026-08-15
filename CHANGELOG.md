@@ -5,6 +5,234 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — Checking the arithmetic, and saying what was not checked
+
+### Highlights
+
+Five themes.
+
+**A competitive positioning rank now accounts for which end of an axis is good.** On an axis
+running price low to high, a startup sitting second-cheapest of nine was told it "ranks last of
+eight companies on both price and analytical depth. That is the headline finding to address." The
+axis direction is now stated and carried through both halves of the differentiation score, and an
+unrecognised value is refused rather than silently read as its opposite.
+
+**Deck review now does the deck's arithmetic.** "The numbers are internally consistent" has been one
+of the 35 criteria since it shipped, assessed by reading rather than by calculation. It now reads
+every figure off your slides at full scale, has a second, independent reading of the same
+slides confirm them, works out which figures should relate to each other, and computes the result.
+Figures that disagree with each other are shown, along with readings the numbers imply. Figures the
+second reading could not confirm are dropped rather than guessed at, and a separate pass reviews
+each disagreement before you see it — it can withdraw one whose comparison does not really hold,
+and never the other way. The section says how many figures were read, how many were confirmed and
+how many comparisons were run, and says plainly that a short list means those particular
+comparisons held, not that a careful reader would find nothing more.
+
+**PowerPoint decks are now read as slides.** deck-review accepted `.pptx` and scored all five
+Design & Readability criteria for one, without the slides having been rendered first. PowerPoint is
+now converted and rendered. When it cannot be converted, the slide text, table cells, speaker notes and
+chart data are recovered instead, the design criteria are excluded rather than guessed at, and the
+report says in its summary that the design was never reviewed and that sending a PDF gets it
+reviewed. The same gate now covers markdown decks, and decks that arrived unreadable or only
+partly readable.
+
+**Scores and sections say what they mean.** A deck-review `warn` earns half credit — every one of
+the 35 criteria defines warn as partial satisfaction, and it used to count for nothing. The score
+is labelled deck-craft conformance and is explicitly not a prediction of investability; the verdict
+wording no longer promises "investor-ready". The coaching commentary — the only part of the report
+written by something that read your deck rather than scored it — moved from the very bottom to
+directly beneath the summary, and opens with a verdict. The fixes section now lists changes to
+make: the field it draws from had no stated contract, so on real decks it came back describing what
+had been *checked* rather than what to change.
+
+**Reports now name what they did not cover.** A gap the report did not mention was easy to read as
+a gap that was not there. Deck review states that its 35 criteria do not assess your market, technology, or sector regulatory
+and compliance questions. Competitive positioning names competitors that were never put through
+its adversarial verification. Financial model review names the checks that dropped out of the score
+— whether because the assessment excluded them or because your geography or sector could not be
+matched. And market sizing stops presenting agreement as evidence: two methods landing close
+together is not cross-validation, and reproducing the figure in your own deck is not a strength.
+
+### Added
+
+- **deck-review:** a numeric consistency chain — figures are recorded at full scale with the
+  verbatim text they were read from, transcribed again by a second, independent reading of the
+  figure-bearing slides, related to each other, and checked by arithmetic that applies scale,
+  currency and period rules. Two things reach you: figures that disagree with a figure your deck
+  itself states, and up to three readings the numbers imply, labelled as judgement. Confirmations,
+  restatements and unconfirmable figures are not shown. Where this arithmetic and the criteria
+  review disagree about your numbers, the report says both rather than quietly picking one.
+- **deck-review:** PowerPoint (`.pptx`) is converted and read. Without a converter, a fallback
+  reader recovers slide text, table cells, speaker notes and native chart series, records that the
+  deck arrived as text, and reports how many images it could not read.
+- **deck-review:** a coverage line stating how many figures were read, how many a second reading
+  confirmed, and how many comparisons were run — rendered even when nothing was found, so a
+  thin check is distinguishable from a clean one.
+- **deck-review:** an explicit statement of what the review does not cover.
+- **competitive-positioning:** a Funding column in the competitor tables of both the report and the
+  visual report. The research was already being done, and whether a rival has raised an order of
+  magnitude more money often decides how the rest of the analysis should be read — but it reached
+  you only when the write-up happened to mention it in prose.
+- **competitive-positioning:** the moat step is now told about the custom-moat path and given
+  distribution/channel defensibility as the case that keeps arising. A named partner reaching most
+  of your buyers previously had nowhere to go and was recorded as an absent network effect.
+- **competitive-positioning:** competitors added after the verification pass had already run are
+  named as not independently challenged, rather than presented alongside verified ones.
+- **financial-model-review:** checks that came back not-applicable although your profile says they
+  apply, and checks excluded because your geography or sector could not be matched, are now named
+  beside the score they qualify.
+- **market-sizing:** a warning when the serviceable market equals the total market — a serviceable
+  market that applies no narrowing carries no filtering work.
+
+### Changed
+
+- **deck-review:** a `warn` now earns half credit toward the score. The band thresholds are
+  deliberately unchanged: four decks measured span ten points while the same deck moved up to seven
+  between two runs that changed no scoring code, so a new boundary would flip bands on re-runs of
+  an unchanged deck.
+- **deck-review:** the score is presented as "deck-craft score" with its formula stated, and the
+  verdict wording describes craft rather than investability. The footnote projecting a score "if
+  all fixable items were resolved" is gone: with all 35 criteria mandatory, that figure works out to
+  100% for any deck, so it carried no information.
+- **deck-review:** the fixes section is renamed "Up to 5 Fixes to Make", states that it is not
+  ranked, leads with a critical missing slide, and skips any item whose text is not a change you
+  can make — at every place that text is rendered, including the coaching hand-off. A separate
+  warning records how many were skipped.
+- **deck-review:** the slide-count criterion is no longer excluded for text decks. Counting slides
+  is arithmetic, not a visual judgement, and the model was making the criticism in prose anyway —
+  unscored and without evidence.
+- **deck-review:** contradictions are ordered most-wrong-first by relative gap, so a figure that is
+  525% off reaches you before one that is 4% off. Previously the order was whatever the analysis
+  happened to propose.
+- **deck-review:** a review now takes noticeably longer, because reading the figures and
+  transcribing the slides a second time both look at the slide images. Only the figure-bearing
+  slides are read the second time, which is what keeps the difference bounded.
+- **market-sizing:** "cross-validation" is retired as a label — the pipeline cannot tell whether
+  the two builds rest on the same underlying figures, so their agreement is not confirmation. The
+  self-check no longer passes on the two answers being within 30% of each other; what earns the
+  point is explaining the gap, in either direction.
+- **market-sizing:** the "most sensitive parameter" is now the widest-stressed parameter, and every
+  parameter tied at the top is named. The ranking follows how wide a stress band each input was
+  given, not how much the answer depends on it, and the top spot was a tie on 11 of 14 runs
+  measured — broken by nothing more than list order.
+- **market-sizing:** a figure landing within 25% of one stated in your materials is annotated with
+  what that does and does not mean, and the "within 20% of deck claim" line has been removed from
+  the strengths list.
+- **competitive-positioning:** one score now yields one verdict. The differentiation score was
+  banded by three separate chains and the analysis-quality score by two, so a single report could
+  call the same figure "strong" in one line and "moderate" two lines below.
+- **financial-model-review:** which criteria count toward your score is now decided from the review
+  inputs on disk rather than from a profile re-typed by the grading step; where the two disagree,
+  each differing field is reported rather than absorbed.
+- **financial-model-review:** the runway criterion's pass and warn bands did not cover their own
+  axis for seed and Series A — 18-24 months fell in neither. A 22-month runway was graded a pass on
+  evidence that described a warn.
+
+### Fixed
+
+Fleet-wide:
+
+- Rewriting internal names into plain English also rewrote them inside links, so a citation
+  containing an underscore was handed to you broken. The check that should have caught it ran after
+  the damage and reported clean, because a corrupted link no longer carries the token it was
+  looking for. Links are now left byte-exact while prose around them is still translated, and
+  somebody else's URL slug is no longer reported as our internal token.
+
+**deck-review** — the numeric checks, all found by running real decks:
+
+- A correct deck was told it contradicted itself: `$493k ÷ $94k = 5.24x — but the deck states 425%`.
+  425% growth *is* 5.25x. The rule that recognises this convention was using a tolerance calibrated
+  for the opposite job, so it could only ever fail to suppress.
+- A range split across two rows was compared endpoint by endpoint as though each were a point, so a
+  computed figure sitting comfortably inside the range your deck states was reported as a
+  disagreement. On one live deck this accounted for seven of nine reported contradictions.
+- A figure recorded with a lost decimal produced a 0.006% "disagreement" on a table denominated in
+  thousands. The check that exists to catch precision loss had a floor that swallowed it.
+- Readings that restated the deck rather than testing it: a figure compared with itself across two slides
+  (`150+ ÷ 150+ = 100.0%`, `$12.5 trillion − $12.5 trillion = 0`), including the case where the same
+  quantity is stated in different units on different slides (9 million per month against 108 million
+  per year).
+- The figures a comparison was built from were checked against the second reading, but the figure it
+  was compared *against* was not — so a disagreement could rest on a number the second reading never
+  found. Both sides now clear the same gate, which is what the section's opening sentence describes.
+- Subtracting an open-ended figure ("Over 30%") reported an exact answer where only a ceiling is
+  honest, and a bound stated inside the figure's own text was not detected at all.
+- A percentage reduction was compared against a percentage share as though they were the same
+  quantity — they are complements. The comparison is now refused rather than converted, since
+  guessing the direction would manufacture a contradiction.
+- "Targets" and "projections" were treated as approximate and given up to 14% tolerance. A target is
+  a specific number and a projection is stated exactly, so widening there only made disagreements
+  less likely to surface. Genuine rounding markers still widen.
+- "200-400m" tower heights were rejected with advice that would have recorded them as 200 million
+  metres. Whether a trailing letter is a unit or a multiplier is settled on the slide, not in the
+  text, so the step now asks for it to be spelled out instead of resolving it either way.
+- The warning that the disagreements you are reading were never reviewed could be waived away. It
+  can no longer be.
+
+**deck-review** — everything else:
+
+- A deck whose comparisons all held produced no numbers section at all — on one real deck, 113
+  figures read, 101 confirmed and 20 comparisons run, with none of it reported. The coverage line now
+  renders whenever the checks ran, findings or not.
+- PowerPoint conversion, when it was first exercised for real, could not start at all and reported
+  the wrong reason — a converter that existed and failed looked identical to no converter. The three
+  outcomes are now distinct and the actual error is reported.
+- One run replied "I don't see a pitch deck attached" and stopped, with the deck sitting in place.
+  The review now locates the file first and asks only after a listing genuinely comes back empty.
+- Markdown decks were scored on "24pt+ body text" and "readable on mobile without zoom" — criteria
+  that cannot be evidenced for a deck with no rendered page.
+- When the design criteria were correctly excluded, the only disclosure was an annotation inside a
+  35-row table.
+- Reported unresolvable sector wording implied the industry list was incomplete. Sector type is a
+  revenue model, not an industry; the message now says so and states that the only consequence is
+  skipped sector gating.
+
+**competitive-positioning:**
+
+- Rank did not know which end of an axis was good. On a price axis running low to high, a startup
+  sitting second-cheapest of nine was told it "ranks last of eight companies on both price and
+  analytical depth. That is the headline finding to address." Both halves of the differentiation
+  score were affected, not just the rank. Axis polarity is now stated, an unrecognised value is
+  rejected rather than silently read as its opposite, and it forms part of the map's identity so a
+  quality check graded before a flip is no longer reported as current.
+- The positioning map's axis explanations were read from the pre-scoring draft, so founders were
+  shown "Placeholder — replaced by POSITIONING_SCORING dispatch" in visible prose beneath the map,
+  in both the visual report and the explorer.
+- A moat dimension that does not apply rendered as "Rank -1 of 0 ranked" and was still offered a
+  leader — a comparison on a dimension where no comparison was possible. On the moat radar, "does
+  not apply" and "assessed, and there is nothing here" were plotted at the same point; the chart now
+  names the non-applicable dimensions and states they are not scored as a weakness.
+- A quality check recorded against the wrong criterion — real evidence filed under someone else's
+  label — could not be detected, so a reader asking "why did this pass?" was shown the justification
+  for a different check. The grading step now echoes the criterion it believes it graded, and a
+  disagreement is reported.
+
+**financial-model-review:**
+
+- Criteria the profile says apply could be excluded during assessment and drop out of the score
+  unrecorded. Two delivered reviews excluded criteria by applying a rule backwards, and one was scored on
+  very nearly the complement of the right set — the percentage looks ordinary while covering fewer
+  checks than the company warrants.
+- The same company graded twice, differing only in how its geography was spelled, assessed 38
+  criteria one time and 34 the other, silently dropping the statutory, grant and VAT checks — with
+  the same score reported both times.
+- The runway table printed `None` for a company that never runs out of cash, where the adjacent
+  column already rendered "not applicable" properly.
+- The new exclusion lines named internal criterion ids; they now name the checks.
+
+**market-sizing:**
+
+- An unsourced exchange rate was recorded and read by nothing — the warning existed, was written to
+  the artifact, and reached neither the report nor you. A blank date or source now counts as absent
+  rather than passing as provenance, so a converted figure can no longer look sourced while showing
+  a blank where the date belongs.
+- The report and the visual report disagreed about when a divergence from your own stated figure is
+  worth flagging (25% in one, 50% in the other), so a deck sitting at -43% was called out in one and
+  passed over in the other.
+- With a currency conversion in play, one report could read "+11.1%" in the comparison table and
+  "differs from deck claim by -72.2%" in the warnings, about a single figure — the table compared
+  the raw claim while the warning compared the converted one.
+
 ## [0.7.1] - 2026-08-07 — Two ways a report could be wrong without saying so
 
 ### Highlights
