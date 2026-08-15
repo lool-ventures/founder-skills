@@ -51,6 +51,7 @@ WARNING_SEVERITY: dict[str, str] = {
     "CHECKLIST_FAILURES": "medium",
     "CHECKLIST_INCOMPLETE": "medium",
     "CHECKLIST_SELF_GATED": "medium",
+    "CHECKLIST_PROFILE_UNRESOLVED": "medium",
     "RUNWAY_INCONSISTENCY": "medium",
     "METRICS_GAPS": "medium",
     "METRIC_SELF_CONTRADICTION": "medium",
@@ -542,6 +543,25 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 )
             )
 
+    # 3c. CHECKLIST_PROFILE_UNRESOLVED -- criteria the SCRIPT dropped because a profile field
+    # could not be normalized. Distinct cause from CHECKLIST_SELF_GATED (which the assessment
+    # dropped), identical harm: criteria vanish from the denominator and the percentage does not
+    # move, so the gap is invisible in the delivered number.
+    if _usable(checklist):
+        summary = _as_dict(checklist.get("summary"))
+        unresolved = _as_dict(summary.get("unresolved_profile_exclusions"))
+        for field, ids in sorted(unresolved.items()):
+            dropped = [str(i) for i in _as_list(ids)]
+            if not dropped:
+                continue
+            warnings.append(
+                _warn(
+                    "CHECKLIST_PROFILE_UNRESOLVED",
+                    f"company {field} could not be matched to a known value, so {len(dropped)} "
+                    f"criteria keyed to it were excluded without being assessed: {dropped}",
+                )
+            )
+
     # 4. CHECKLIST_INCOMPLETE -- unexpected item count
     if _usable(checklist):
         items = _as_list(checklist.get("items"))
@@ -756,6 +776,19 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
             f"**Not assessed:** {len(self_gated)} criteria that apply to your company were marked "
             f"not applicable and are missing from the score above: {', '.join(self_gated)}\n"
         )
+
+    # Same harm, different cause: these were dropped by the gates because a profile field did not
+    # match a known value. Named separately so the reader can tell "nobody assessed this" from
+    # "we could not tell whether it applied to you".
+    unresolved = _as_dict(summary.get("unresolved_profile_exclusions"))
+    for field, ids in sorted(unresolved.items()):
+        dropped = [str(i) for i in _as_list(ids)]
+        if dropped:
+            lines.append(
+                f"**Not matched:** your {field} could not be matched to a known value, so "
+                f"{len(dropped)} criteria that may apply were excluded from the score above: "
+                f"{', '.join(dropped)}\n"
+            )
 
     # Failed items
     failed_items = _as_list(summary.get("failed_items"))

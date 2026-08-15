@@ -905,6 +905,67 @@ def test_script_gated_items_are_not_recorded_as_self_gated() -> None:
     assert data["summary"]["self_gated_items"] == []
 
 
+_FREEFORM_GEOGRAPHY = "Israel-founded, US target market (UK + EU secondary)"
+# Every criterion whose geography gate names a real geography rather than a trait. CASH_29's
+# gate is ["israel", "multi-entity"], so an unresolved geography drops it too — read these off
+# checklist.py's gates, not off the criteria doc, which records CASH_29 as geography "all".
+_ISRAEL_CRITERIA = ["CASH_29", "CASH_30", "CASH_31", "CASH_32"]
+
+
+def test_unresolved_geography_records_the_criteria_it_dropped() -> None:
+    """A profile field that fails to normalize matches no gate, so it silently drops criteria.
+
+    Same company, two spellings: 'israel' keeps the Israel-specific criteria, a free-form
+    string drops all three -- and the score reads the same either way, so nothing in the
+    delivered number reveals the gap.
+    """
+    payload = json.dumps(
+        {
+            "items": _make_checklist_items(),
+            "company": {**_PROFILE_SPREADSHEET, "geography": _FREEFORM_GEOGRAPHY},
+        }
+    )
+    rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0, "warn-and-record must not reject the payload"
+    dropped = data["summary"]["unresolved_profile_exclusions"]
+    assert sorted(dropped.get("geography", [])) == _ISRAEL_CRITERIA
+    assert "geography" in stderr
+
+
+def test_resolved_profile_records_nothing() -> None:
+    """The common case must stay quiet, or the signal becomes noise."""
+    payload = json.dumps({"items": _make_checklist_items(), "company": _PROFILE_SPREADSHEET})
+    rc, data, _stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data["summary"]["unresolved_profile_exclusions"] == {}
+    by_id = {i["id"]: i for i in data["items"]}
+    for crit in _ISRAEL_CRITERIA:
+        assert by_id[crit]["status"] != "not_applicable", "sanity: 'israel' must keep these"
+
+
+def test_unresolved_profile_records_nothing_without_a_profile() -> None:
+    """No profile means no gating, so nothing can be dropped by one."""
+    rc, data, _stderr = run_script(
+        "checklist.py", ["--pretty"], stdin_data=json.dumps({"items": _make_checklist_items()})
+    )
+    assert rc == 0
+    assert data["summary"]["unresolved_profile_exclusions"] == {}
+
+
+def test_gates_that_resolved_are_not_blamed_on_the_unresolved_field() -> None:
+    """Only exclusions caused by the unresolved field count -- a deck is gated for being a deck."""
+    payload = json.dumps(
+        {
+            "items": _make_checklist_items(),
+            "company": {**_PROFILE_SPREADSHEET, "model_format": "deck", "geography": _FREEFORM_GEOGRAPHY},
+        }
+    )
+    rc, data, _stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    dropped = data["summary"]["unresolved_profile_exclusions"]
+    assert "STRUCT_01" not in dropped.get("geography", []), "format gating is not a geography problem"
+
+
 def test_checklist_gating_normalizes_geography() -> None:
     """Free-form geography values are normalized; sector gates use sector_type."""
     company = {
@@ -2680,6 +2741,36 @@ def test_compose_flags_self_gated_criteria() -> None:
     assert "UNIT_10" in hits[0]["message"] and "METRIC_33" in hits[0]["message"]
 
 
+def test_compose_flags_unresolved_profile_exclusions(tmp_path: Any) -> None:
+    """Criteria the gates dropped on an unmatched profile field must reach the founder."""
+    checklist_unresolved = json.loads(json.dumps(_VALID_CHECKLIST))
+    checklist_unresolved["summary"]["unresolved_profile_exclusions"] = {
+        "geography": ["CASH_29", "CASH_30", "CASH_31", "CASH_32"]
+    }
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": checklist_unresolved,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    md_path = os.path.join(d, "report.md")
+    json_path = os.path.join(d, "report.json")
+    rc, _receipt, _err = run_script("compose_report.py", ["-d", d, "-o", json_path, "--write-md", md_path])
+    assert rc == 0
+    # With -o, stdout carries the write receipt; the report itself is on disk.
+    with open(json_path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    hits = [w for w in data["validation"]["warnings"] if w["code"] == "CHECKLIST_PROFILE_UNRESOLVED"]
+    assert len(hits) == 1
+    assert "geography" in hits[0]["message"] and "CASH_30" in hits[0]["message"]
+    # The founder-facing surface, not just the machine one.
+    with open(md_path, encoding="utf-8") as fh:
+        md = fh.read()
+    assert "Not matched:" in md and "CASH_30" in md
+
+
 def test_compose_silent_when_nothing_self_gated() -> None:
     """The common case must stay quiet, or the warning becomes noise nobody reads."""
     d = _make_fmr_artifact_dir(
@@ -3296,6 +3387,7 @@ def test_compose_severity_map_complete() -> None:
         "MISSING_OPTIONAL_ARTIFACT",
         "CHECKLIST_INCOMPLETE",
         "CHECKLIST_SELF_GATED",
+        "CHECKLIST_PROFILE_UNRESOLVED",
         "RUNWAY_INCONSISTENCY",
         "METRICS_GAPS",
         "MARKER_COLLISION",

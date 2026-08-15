@@ -581,9 +581,17 @@ def _has_ai_costs(inputs: dict[str, Any] | None) -> bool:
     return bool(_AI_COST_KEYS & cogs.keys())
 
 
-def _normalize_profile(company: dict[str, Any]) -> dict[str, Any]:
-    """Normalize free-form company profile values. Unknown values pass through with a warning."""
+def _normalize_profile(company: dict[str, Any]) -> tuple[dict[str, Any], set[str]]:
+    """Normalize free-form company profile values.
+
+    Returns the normalized profile and the set of gate types whose field could not be resolved.
+    A value that fails to normalize matches no gate value, so every criterion keyed to that
+    gate is excluded — silently, and indistinguishably from a criterion that genuinely does not
+    apply. The caller records which exclusions rest on an unresolved field rather than on a
+    real answer about the company.
+    """
     result = dict(company)
+    unresolved: set[str] = set()
 
     raw_geo = str(company.get("geography", "")).strip().lower()
     if raw_geo:
@@ -595,6 +603,7 @@ def _normalize_profile(company: dict[str, Any]) -> dict[str, Any]:
                 file=sys.stderr,
             )
             result["geography"] = raw_geo
+            unresolved.add("geography_gate")
 
     # Derive sector_type from revenue_model_type if not explicitly provided
     if not result.get("sector_type"):
@@ -607,15 +616,17 @@ def _normalize_profile(company: dict[str, Any]) -> dict[str, Any]:
                 f"Warning: could not derive sector_type from revenue_model_type '{rmt}'",
                 file=sys.stderr,
             )
+            unresolved.add("sector_gate")
         else:
             print(
                 "Warning: sector_type not set and revenue_model_type not provided; sector gates may not match.",
                 file=sys.stderr,
             )
+            unresolved.add("sector_gate")
 
     result["traits"] = [t.strip().lower() for t in company.get("traits", [])]
     result["stage"] = str(company.get("stage", "")).strip().lower()
-    return result
+    return result, unresolved
 
 
 def _gate_matches(
@@ -658,20 +669,45 @@ _GATE_LABELS = {
 }
 
 
-def _item_applicable(meta: dict[str, Any], company: dict[str, Any]) -> tuple[bool, str]:
-    """Check all four gates for an item. Returns (applicable, gate_description)."""
+def _gate_depends_on_unresolved(meta: dict[str, Any], gate_type: str) -> bool:
+    """Could resolving this profile field have changed whether the item applies?
+
+    Geography and sector gates are arrays matched against the profile field OR the company's
+    traits. A gate keyed to a TRAIT ("multi-currency", "multi-market") was answered by the
+    traits list, which resolved fine — so its exclusion is a real answer and must not be blamed
+    on the unresolved field. Only a gate naming a value from the field's own vocabulary could
+    have gone the other way. Without this the report accuses the profile of dropping criteria
+    it did not drop, which is the same class of false statement this is meant to prevent.
+    """
+    values = meta.get(gate_type, "all")
+    if not isinstance(values, list):
+        return False
+    if gate_type == "geography_gate":
+        return any(str(v).strip().lower() in _GEOGRAPHY_NORMALIZATION.values() for v in values)
+    if gate_type == "sector_gate":
+        return any(str(v).strip().lower() in _REVENUE_MODEL_TO_SECTOR.values() for v in values)
+    return False
+
+
+def _item_applicable(meta: dict[str, Any], company: dict[str, Any]) -> tuple[bool, str, str]:
+    """Check all four gates for an item.
+
+    Returns (applicable, gate_description, gate_type). The gate TYPE is returned alongside the
+    founder-facing description because the caller must tell an exclusion that rests on a real
+    answer about the company from one that rests on a profile field it could not resolve.
+    """
     for gate_type in ("stage_gate", "geography_gate", "sector_gate"):
         gate_value = meta.get(gate_type, "all")
         if not _gate_matches(gate_value, gate_type, company):
-            return False, _GATE_LABELS[gate_type]
+            return False, _GATE_LABELS[gate_type], gate_type
     # Model format gate: items gated to "spreadsheet" are N/A for deck/conversational.
     # "partial" = incomplete spreadsheet — structure is still assessable, so it evaluates
     # all 46 items just like "spreadsheet". Only deck/conversational remain fully gated.
     model_format = company.get("model_format", "spreadsheet")
     mf_gate = meta.get("model_format_gate", "all")
     if mf_gate == "spreadsheet" and model_format in ("deck", "conversational"):
-        return False, _GATE_LABELS["model_format_gate"]
-    return True, ""
+        return False, _GATE_LABELS["model_format_gate"], "model_format_gate"
+    return True, "", ""
 
 
 # Criteria whose own label carries an applicability qualifier ("where applicable", "where
@@ -741,11 +777,12 @@ def validate_checklist(
         return {"items": [], "summary": None}, errors
 
     # Normalize company profile if provided
-    norm_company = _normalize_profile(company) if company else None
+    norm_company, unresolved_gates = _normalize_profile(company) if company else (None, set())
 
     # Build enriched items and summary
     enriched: list[dict[str, Any]] = []
     self_gated: list[str] = []
+    unresolved_exclusions: dict[str, list[str]] = {}
     pass_count = 0
     fail_count = 0
     warn_count = 0
@@ -768,10 +805,16 @@ def validate_checklist(
         original_status = status
         original_evidence = evidence
         if norm_company is not None:
-            is_applicable, gate_desc = _item_applicable(meta, norm_company)
+            is_applicable, gate_desc, gate_type = _item_applicable(meta, norm_company)
             if not is_applicable:
                 status = "not_applicable"
                 evidence = f"Not applicable — {gate_desc}"
+                if gate_type in unresolved_gates and _gate_depends_on_unresolved(meta, gate_type):
+                    # Excluded by a gate whose profile field never resolved, so this is not an
+                    # answer about the company — it is the absence of one, and it looks
+                    # identical in the artifact to a criterion that genuinely does not apply.
+                    field = gate_type.removesuffix("_gate")
+                    unresolved_exclusions.setdefault(field, []).append(item_id)
             elif status == "not_applicable" and item_id not in _JUDGEMENT_NOT_APPLICABLE:
                 # The profile says this criterion applies, yet it came back excluded. That
                 # removes it from the score's denominator on a decision this script owns.
@@ -912,6 +955,7 @@ def validate_checklist(
             "failed_items": failed_items,
             "warned_items": warned_items,
             "self_gated_items": self_gated,
+            "unresolved_profile_exclusions": unresolved_exclusions,
         },
     }, []
 
