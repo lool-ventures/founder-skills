@@ -660,6 +660,28 @@ widens by 3.3, nowhere near it.
 """
 
 
+def _is_self_ratio(r: Relation, operands: list[Figure]) -> bool:
+    """Is this a cross-slide consistency check that came back clean?
+
+    Two operands holding the SAME quantity — same value within tolerance, same unit — with
+    no stated figure to test against. The model builds these deliberately, pairing "150+
+    accounts" on slide 2 against "150+ accounts" on slide 9 to see whether the deck agrees
+    with itself. A DISAGREEMENT there surfaces on its own merits and must not be caught
+    here, which is why the equality test is the gate.
+
+    Scoped tightly on purpose. It requires `ratio`, exactly two operands, no `expected_id`,
+    matching `unit_kind`, and equality within the operands' own tolerance. A ratio of two
+    genuinely different quantities that happens to land on 100% — breakeven, say — keeps
+    its `derived` verdict, because the operands are not the same quantity.
+    """
+    if r.operator != "ratio" or r.expected_id or len(operands) != 2:
+        return False
+    a, b = operands
+    if a.unit_kind != b.unit_kind or b.value == 0:
+        return False
+    return abs(a.value - b.value) <= max(figure_tolerance(a), figure_tolerance(b))
+
+
 def _convention_tolerance(exp: Figure, mid: float, operator: str, operands: list[Figure]) -> float:
     """How close to the convention point counts as "only the convention differs".
 
@@ -1118,6 +1140,17 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             r.rendered += f"  — {verb} {_stated(exp)}"
     elif r.operator == "sum" and len(real) == 2 and r.kind != "contradiction":
         # "52 + 3 = 55 customers" restates the deck rather than testing it.
+        r.verdict = "restatement"
+    elif _is_self_ratio(r, real):
+        # A CROSS-SLIDE CONSISTENCY CHECK THAT PASSED. The model pairs the same quantity
+        # stated on two slides -- "150+ accounts" on slide 2 against "150+ accounts" on
+        # slide 9 -- to see whether the deck contradicts itself. That is a good check, and
+        # when the two DIFFER the disagreement surfaces on its own merits.
+        #
+        # When they agree the answer is 100%, and rendering that as a founder-facing
+        # reading produced "150+ / 150+ = 100.0%" under "What the numbers imply". It tells
+        # a founder nothing and reads as a malfunction. Same principle as the sum branch
+        # above: a relation that reproduces what the deck already says is not a finding.
         r.verdict = "restatement"
 
     if any(f.attribution == "layout_attributed" for f in real):

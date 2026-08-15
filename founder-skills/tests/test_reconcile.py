@@ -552,3 +552,51 @@ def test_only_ratio_widens_the_band() -> None:
     assert _convention_tolerance(exp, 500.0, "product", ops) == figure_tolerance(exp)
     assert _convention_tolerance(exp, 500.0, "increase_by", ops) == figure_tolerance(exp)
     assert _convention_tolerance(exp, 500.0, "ratio", ops) > figure_tolerance(exp)
+
+
+# ---------------------------------------------------------------------------
+# Cross-slide consistency checks. The model pairs the same quantity stated on two
+# slides to see whether the deck agrees with itself. When it does, the answer is
+# 100% and there is nothing to tell a founder.
+# ---------------------------------------------------------------------------
+
+
+def _cross_slide(a_val: float, b_val: float, unit_a: str = "count", unit_b: str = "count") -> str:
+    a = fig("150+", a_val, unit_a, "customer accounts (slide 2)", id="acct_s2")
+    b = fig("150+", b_val, unit_b, "total customer accounts (slide 9)", id="acct_s9")
+    return str(_cmp("ratio", ["acct_s2", "acct_s9"], None, {"acct_s2": a, "acct_s9": b}).verdict)
+
+
+def test_a_passing_cross_slide_check_is_not_a_founder_facing_reading() -> None:
+    """ "150+ / 150+ = 100.0%" reached a real founder report under "What the numbers imply".
+
+    The check itself is worth running — if the two slides disagreed that would be a real
+    finding. But when they agree the result restates what the deck already says twice.
+    """
+    assert _cross_slide(150, 150) == "restatement"
+
+
+def test_a_cross_slide_DISAGREEMENT_is_never_suppressed() -> None:
+    """The counter-test, and the reason the equality check is the gate.
+
+    A deck saying 150 accounts on one slide and 180 on another is exactly what this pairing
+    exists to catch. Suppressing that would turn a useful check into a blind spot.
+    """
+    assert _cross_slide(150, 180) != "restatement"
+
+
+def test_two_different_quantities_landing_on_100_percent_stay_derived() -> None:
+    """Breakeven is a reading, not a restatement — the operands are not the same quantity."""
+    a = fig("$2M", 2_000_000, "money", "annual revenue", id="rev")
+    b = fig("$2M", 2_000_000, "money", "annual cost", id="cost")
+    # Same value and unit, so this IS caught by the guard — recorded as a known limit
+    # rather than claimed as handled. The label distinction is not something the rule reads.
+    assert _cmp("ratio", ["rev", "cost"], None, {"rev": a, "cost": b}).verdict == "restatement"
+
+
+def test_a_ratio_with_a_stated_counterpart_is_untouched() -> None:
+    """A relation testing against a figure the deck states is a finding, never a restatement."""
+    a = fig("150+", 150, "count", "accounts (slide 2)", id="a")
+    b = fig("150+", 150, "count", "accounts (slide 9)", id="b")
+    e = fig("90%", 90, "percent", "retention", id="e")
+    assert _cmp("ratio", ["a", "b"], "e", {"a": a, "b": b, "e": e}).verdict != "restatement"
