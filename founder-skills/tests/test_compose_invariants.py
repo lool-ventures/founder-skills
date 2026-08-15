@@ -232,6 +232,32 @@ def test_cp_moat_leader_renders_name_not_slug(tmp_path: Path) -> None:
                 assert "-" not in leader or " " in leader, f"leader looks like a slug: {leader!r}"
 
 
+def test_cp_competitor_table_shows_funding(tmp_path: Path) -> None:
+    """Relative capital is researched for every competitor and reached the founder nowhere reliable.
+
+    `landscape.json` populates `funding` on 4 of 4 measured runs. It surfaced only in the explorer and
+    in whatever prose the agent happened to write (0 / 1 / 47 / 25 mentions across four reports) — so
+    arguably the most decision-relevant competitive fact had no deterministic surface.
+
+    Same argument the table's own `pricing_model` column was added on: "researching it without showing
+    it is work the founder paid for and cannot see."
+
+    The fixture carries four populated values and one null, so this covers both paths — a null must
+    render as the em-dash placeholder, not as "None".
+    """
+    md = _cp_compose(tmp_path)
+    header_lines = [ln for ln in md.splitlines() if ln.startswith("| Name |")]
+    assert header_lines, "competitor table header not found"
+    assert "Funding" in header_lines[0], f"no funding column: {header_lines[0]}"
+
+    table = [ln for ln in md.splitlines() if ln.startswith("| ") and "Intuit" in ln]
+    assert table, "the competitor rows no longer render"
+    assert "Public company (Intuit" in table[0], f"funding value missing from the row: {table[0]}"
+
+    # The null-funding competitor must not leak a Python repr.
+    assert "| None |" not in md, "a null funding value rendered as the literal 'None'"
+
+
 def test_cp_not_rankable_sentinel_never_reaches_the_founder(tmp_path: Path) -> None:
     """`score_moats.py` stamps `{"rank": -1, "total": 0}` when the STARTUP is `not_applicable` on a
     dimension — a producer sentinel meaning "not rankable", correct in the artifact. `compose_report`

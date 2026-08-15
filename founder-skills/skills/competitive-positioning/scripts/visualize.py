@@ -913,6 +913,14 @@ def _section_competitor_table(
         category = _esc(_humanize(str(comp.get("category", "?"))))
         research = _esc(_humanize(str(comp.get("research_depth", "?"))))
 
+        # Relative capital is researched per competitor and is often the fact that decides how a
+        # founder should read the rest of this table. `or ""` catches a null BEFORE str() renders it
+        # as "None"; the trailing `or "—"` catches a present-but-empty value.
+        funding_raw = str(comp.get("funding", "") or "").strip()
+        if len(funding_raw) > 48:
+            funding_raw = funding_raw[:45].rstrip() + "..."
+        funding = _esc(funding_raw) if funding_raw else "—"
+
         comp_data = _as_dict(companies.get(slug))
         defensibility = str(comp_data.get("overall_defensibility", "unknown")).lower()
         def_color = _DEFENSIBILITY_COLORS.get(defensibility, "#A6AEB5")
@@ -925,6 +933,7 @@ def _section_competitor_table(
             f"<td><strong>{name}</strong></td>"
             f"<td>{category}</td>"
             f'<td style="color:{_esc(def_color)};font-weight:600;">{def_label}</td>'
+            f"<td>{funding}</td>"
             f"<td>{research}</td>"
             f"</tr>"
         )
@@ -934,7 +943,7 @@ def _section_competitor_table(
 
     table = (
         '<table class="comp-table">'
-        "<tr><th>Name</th><th>Category</th><th>Defensibility</th><th>Research Depth</th></tr>"
+        "<tr><th>Name</th><th>Category</th><th>Defensibility</th><th>Funding</th><th>Research Depth</th></tr>"
         + "".join(r[2] for r in rows)
         + "</table>"
     )

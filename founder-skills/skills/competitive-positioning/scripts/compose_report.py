@@ -998,8 +998,13 @@ def _section_competitor_landscape(landscape: dict[str, Any] | None) -> str:
     # `pricing_model` is researched per competitor and belongs in the table: how a rival charges is
     # part of the competitive picture a founder is reading this for, and researching it without
     # showing it is work the founder paid for and cannot see.
-    lines.append("| Name | Category | Pricing | Research Depth | Sourced Fields |")
-    lines.append("|------|----------|---------|---------------|----------------|")
+    # `funding` belongs here for the same reason `pricing_model` does, and more sharply: relative
+    # capital is often the competitive fact a founder most needs, it is researched for every
+    # competitor, and before this column it reached the delivered report only when the agent happened
+    # to mention it in prose — measured at 0, 1, 47 and 25 mentions across four runs of the same
+    # pipeline. A field that surfaces by luck is not delivered.
+    lines.append("| Name | Category | Pricing | Funding | Research Depth | Sourced Fields |")
+    lines.append("|------|----------|---------|---------|---------------|----------------|")
     for c in competitors:
         c = _as_dict(c)
         name = c.get("name", "?")
@@ -1009,7 +1014,12 @@ def _section_competitor_landscape(landscape: dict[str, Any] | None) -> str:
         pricing = str(c.get("pricing_model", "") or "").strip().replace("|", "\\|") or "—"
         if len(pricing) > 60:
             pricing = pricing[:57].rstrip() + "..."
-        lines.append(f"| {name} | {cat} | {pricing} | {rd} | {sfc} |")
+        # Same coercion as pricing: `or ""` catches a null BEFORE str() turns it into "None", and the
+        # trailing `or "—"` catches a value that was present but empty.
+        funding = str(c.get("funding", "") or "").strip().replace("|", "\\|") or "—"
+        if len(funding) > 60:
+            funding = funding[:57].rstrip() + "..."
+        lines.append(f"| {name} | {cat} | {pricing} | {funding} | {rd} | {sfc} |")
 
     return "\n".join(lines) + "\n"
 

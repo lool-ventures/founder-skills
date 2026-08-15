@@ -13,6 +13,7 @@ All tests use subprocess to exercise the script exactly as the agent does.
 from __future__ import annotations
 
 import contextlib
+import copy
 import importlib.util
 import json
 import os
@@ -121,6 +122,34 @@ def test_moat_radar_svg() -> None:
         assert "<polygon" in stdout
         # Should have at least 2 polygons: startup moat profile + competitor overlay
         assert stdout.count("<polygon") >= 2
+
+
+def test_competitor_table_shows_funding() -> None:
+    """The HTML comparison table carried no capital column, so relative funding reached a founder
+    reading only report.html nowhere at all.
+
+    `landscape.json` populates `funding` for every competitor. report.md now has a column for it; this
+    table is the other primary deliverable and is the at-a-glance comparison, which is exactly where a
+    capital asymmetry belongs. A null must render as the em-dash placeholder, never "None".
+    """
+    # The shared fixture carries no `funding`, so asserting against it unmodified would prove only
+    # that a column of em-dashes renders — vacuous for the value path. Inject instead of editing the
+    # shared fixture, which other test modules also consume.
+    artifacts = copy.deepcopy(_all_artifacts())
+    comps = artifacts["landscape.json"]["competitors"]
+    comps[0]["funding"] = "Series D, $270M total raised"
+    comps[1]["funding"] = None  # the null path must render the placeholder, never "None"
+
+    with _make_artifact_dir(artifacts) as d:
+        rc, stdout, stderr = _run_visualize(d)
+        assert rc == 0, f"exit {rc}, stderr={stderr}"
+        table = stdout.split("Competitor Comparison")[1]
+        assert "<th>Funding</th>" in table, f"no funding column in the comparison table:\n{table[:600]}"
+        assert "Series D, $270M total raised" in table, (
+            f"a populated funding value did not reach the table:\n{table[:900]}"
+        )
+        assert ">None<" not in table, "a null funding value rendered as the literal 'None'"
+        assert "—" in table, "the null funding value did not fall back to the em-dash placeholder"
 
 
 def test_moat_radar_discloses_non_applicable_dimensions() -> None:
