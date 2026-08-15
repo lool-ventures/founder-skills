@@ -823,6 +823,13 @@ Read positioning.json at <ANALYSIS_DIR_AGENT>/positioning.json and product_profi
 <ANALYSIS_DIR_AGENT>/product_profile.json (the only source for what the startup actually does —
 you are placing _startup on the map alongside researched competitors).
 
+Set each axis's `polarity` to say which END IS GOOD. Default `higher_is_better`; use
+`lower_is_better` whenever a LOW number is the desirable one — price, total cost of ownership,
+friction, latency, time-to-value, switching effort. This is not cosmetic: rank 1 means "best",
+and it feeds the differentiation score. Get it wrong on a price axis and the founder is told they
+rank last while being the second-cheapest in the set, with the score rewarding being expensive.
+If an axis genuinely has no good end, phrase it so it does, or leave the default.
+
 Position every competitor and _startup according to SCORING_BASIS: "shipped" means
 score only what is live and verifiable today, ignoring roadmap claims; "roadmap_12mo"
 means score the startup's stated 12-month roadmap as if already delivered; "mixed"
@@ -849,7 +856,8 @@ score_positioning.py:
   "scoring_basis": "<echo of SCORING_BASIS>",
   "views": [
     {
-      "id": "...", "x_axis": {"name": "...", "rationale": "..."}, "y_axis": {"name": "...", "rationale": "..."},
+      "id": "...", "x_axis": {"name": "...", "rationale": "...", "polarity": "higher_is_better|lower_is_better"},
+      "y_axis": {"name": "...", "rationale": "...", "polarity": "higher_is_better|lower_is_better"},
       "points": [
         {"competitor": "...", "x": 0-100, "y": 0-100,
          "x_evidence": "...", "y_evidence": "...",

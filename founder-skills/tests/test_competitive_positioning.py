@@ -1541,6 +1541,62 @@ class TestScorePositioning:
         assert "x_axis_vanity_flag" in view
         assert "y_axis_vanity_flag" in view
 
+    # 1b. Rank must respect axis polarity — a cheap price is a GOOD rank, not a bad one
+    def test_score_positioning_rank_respects_lower_is_better_axis(self) -> None:
+        """`_compute_rank` counted competitors with a HIGHER value and called that the rank, which is
+        only correct when higher is better.
+
+        Measured on a live run: the axis was `Price (total cost of ownership, low to high)`, the startup
+        sat at x=22 — second cheapest of nine — and the delivered report told the founder it "ranks last
+        of eight companies on both price and analytical depth. That is the headline finding to address."
+        The same inverted rank feeds `differentiation_score` at 50% weight, so on a price axis the
+        formula REWARDED being expensive.
+
+        Nothing in the schema or the dispatch expressed which direction was good, so the producer could
+        not have known. This asserts the field is honoured once present.
+        """
+        payload = _make_valid_positioning_input()
+        view = payload["views"][0]
+        view["x_axis"] = {
+            "name": "Price (total cost of ownership)",
+            "description": "First-year total cost to the buyer",
+            "rationale": "The deck claims a price advantage; this axis tests it",
+            "polarity": "lower_is_better",
+        }
+        # startup at 22; competitors at 60/30/50/20/70 -> exactly one competitor is cheaper.
+        view["points"] = [
+            _make_positioning_point("_startup", 22, 85),
+            _make_positioning_point("acme-corp", 60, 40),
+            _make_positioning_point("beta-inc", 30, 70),
+            _make_positioning_point("gamma-ltd", 50, 50),
+            _make_positioning_point("delta-co", 20, 60),
+            _make_positioning_point("epsilon-sa", 70, 30),
+        ]
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        v = data["views"][0]
+        assert v["startup_x_rank"] == 2, (
+            f"cheapest-but-one on a lower-is-better axis must rank 2, got {v['startup_x_rank']} — the "
+            f"rank is being computed as though a high price were good"
+        )
+        # Y is untouched and higher-is-better: startup at 85 beats every competitor.
+        assert v["startup_y_rank"] == 1, f"Y-axis rank changed unexpectedly: {v['startup_y_rank']}"
+
+    def test_score_positioning_polarity_defaults_to_higher_is_better(self) -> None:
+        """An artifact written before `polarity` existed must score exactly as it did before.
+
+        The field is optional and absent from every artifact produced to date, so the default is not a
+        style choice — it is what keeps already-written artifacts scoring the same.
+        """
+        payload = _make_valid_positioning_input()
+        assert "polarity" not in payload["views"][0]["x_axis"], "factory should not set polarity here"
+        rc, data, stderr = run_script("score_positioning.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"Expected exit 0, got {rc}. stderr: {stderr}"
+        assert data is not None
+        # startup x=90 is the highest of 90/60/30/50/20/70 -> rank 1 under higher-is-better.
+        assert data["views"][0]["startup_x_rank"] == 1
+
     # 2. Vanity axis detected when >80% of competitors cluster within 20% range
     def test_score_positioning_vanity_axis_detected(self) -> None:
         # 5 competitors all with x in [40, 60] (within 20% range), _startup at 90

@@ -364,8 +364,8 @@ Contains the canonical positioning views, moat assessments, differentiation stre
 |-------|------|----------|-------------|
 | `id` | string | yes | A descriptive kebab-case slug (e.g. `firmness-x-integration-burden`) — real runs use these; nothing validates an `"primary"`/`"secondary"` enum. **The primary view is `views[0]`** — with slug ids, "the primary view" has no other referent. |
 | `label` | string | no | Human-readable view name for display. **Optional — every existing artifact and test fixture lacks it; never require it.** When absent, consumers title-case the raw `id` (e.g. `firmness-x-integration-burden` → `Firmness-X-Integration-Burden`). |
-| `x_axis` | object | yes | `{name, description, rationale}` — rationale explains why this axis differentiates. See the axis-rationale note below for the canonical nesting and the compatibility fallback. |
-| `y_axis` | object | yes | `{name, description, rationale}` |
+| `x_axis` | object | yes | `{name, description, rationale, polarity}` — rationale explains why this axis differentiates. **`polarity`** is `"higher_is_better"` (default) or `"lower_is_better"`, and it decides what rank 1 MEANS: on a cost/friction/latency axis a low number is the good end. Omit it and scoring assumes higher-is-better — which is what keeps pre-existing artifacts scoring unchanged, and is also how a live run came to tell a founder they ranked last on price while sitting second-cheapest of nine. Set it whenever the good end is the low end. See the axis-rationale note below for the canonical nesting and the compatibility fallback. |
+| `y_axis` | object | yes | `{name, description, rationale, polarity}` — same contract as `x_axis`. |
 | `points` | object[] | yes | Per-competitor + `_startup` coordinate assignments |
 
 > **⚠ Common mistake — `x_axis` / `y_axis`:** These MUST be **objects**, not bare strings. `score_positioning.py` has a compatibility shim that wraps strings, but canonical artifacts must use the object format. Scoring scripts have compatibility shims, but always use canonical format — other consumers may not normalize.

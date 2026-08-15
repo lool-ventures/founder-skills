@@ -88,11 +88,38 @@ def _is_vanity_axis(competitor_values: list[float]) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _compute_rank(startup_val: float, competitor_vals: list[float]) -> int:
-    """Compute 1-based rank of startup among competitors (1 = highest value)."""
+_HIGHER_IS_BETTER = "higher_is_better"
+_LOWER_IS_BETTER = "lower_is_better"
+
+
+def _axis_polarity(view: dict[str, Any], axis: str) -> str:
+    """Which direction is GOOD on this axis. `axis` is "x" or "y".
+
+    Canonical shape is nested: view["x_axis"]["polarity"]. A view-level sibling
+    (view["x_axis_polarity"]) is accepted for the same reason `_axis_compat` accepts one for
+    rationale — dispatch templates have instructed both shapes over time.
+
+    Defaults to higher-is-better. That is not a preference: every artifact written before this field
+    existed omits it, and the default is what keeps them scoring exactly as they did.
+    """
+    axis_obj = view.get(f"{axis}_axis")
+    raw = axis_obj.get("polarity") if isinstance(axis_obj, dict) else None
+    if not raw:
+        raw = view.get(f"{axis}_axis_polarity")
+    return _LOWER_IS_BETTER if str(raw or "").strip().lower() == _LOWER_IS_BETTER else _HIGHER_IS_BETTER
+
+
+def _compute_rank(startup_val: float, competitor_vals: list[float], lower_is_better: bool = False) -> int:
+    """Compute 1-based rank of startup among competitors (1 = BEST).
+
+    "Best" depends on the axis. This function counted competitors with a higher value and returned
+    that, which is correct only when higher is better. On a price axis it inverted: a live run placed
+    a startup second-cheapest of nine and reported it as ranking last, and the same number feeds
+    `differentiation_score` at 50% weight, so the formula rewarded being expensive.
+    """
     rank = 1
     for cv in competitor_vals:
-        if cv > startup_val:
+        if (cv < startup_val) if lower_is_better else (cv > startup_val):
             rank += 1
     return rank
 
@@ -150,8 +177,10 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
         )
 
     # Rank-based differentiation with distance weighting
-    rank_x = _compute_rank(startup_x, comp_x_vals)
-    rank_y = _compute_rank(startup_y, comp_y_vals)
+    x_lower_better = _axis_polarity(view, "x") == _LOWER_IS_BETTER
+    y_lower_better = _axis_polarity(view, "y") == _LOWER_IS_BETTER
+    rank_x = _compute_rank(startup_x, comp_x_vals, x_lower_better)
+    rank_y = _compute_rank(startup_y, comp_y_vals, y_lower_better)
 
     # Distance-weighted formula: rank contributes 50%, gap contributes 50%.
     # This distinguishes "barely ahead" (rank 1, gap 2%) from "dramatically
@@ -162,12 +191,15 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
 
         # Gap: how far ahead the startup is from the next-best competitor
         # on each axis (0-1 scale, clamped to 0 if startup is behind).
-        sorted_x_desc = sorted(comp_x_vals, reverse=True)
-        sorted_y_desc = sorted(comp_y_vals, reverse=True)
-        next_best_x = sorted_x_desc[0] if sorted_x_desc else startup_x
-        next_best_y = sorted_y_desc[0] if sorted_y_desc else startup_y
-        gap_x = max(0.0, (startup_x - next_best_x) / 100)
-        gap_y = max(0.0, (startup_y - next_best_y) / 100)
+        #
+        # Polarity applies HERE TOO, and this is the half that is easy to miss: "next best" is the
+        # MAXIMUM competitor only when higher is better. On a lower-is-better axis the strongest rival
+        # is the cheapest one, and the gap runs the other way. Fixing the rank alone would leave the
+        # other 50% of the score still rewarding the wrong direction.
+        best_x = (min(comp_x_vals) if x_lower_better else max(comp_x_vals)) if comp_x_vals else startup_x
+        best_y = (min(comp_y_vals) if y_lower_better else max(comp_y_vals)) if comp_y_vals else startup_y
+        gap_x = max(0.0, (best_x - startup_x if x_lower_better else startup_x - best_x) / 100)
+        gap_y = max(0.0, (best_y - startup_y if y_lower_better else startup_y - best_y) / 100)
 
         x_gap_score = gap_x * 50
         y_gap_score = gap_y * 50

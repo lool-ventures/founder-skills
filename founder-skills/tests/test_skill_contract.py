@@ -551,7 +551,13 @@ SKILL_MD_CEILING: dict[str, int] = {
     # cp raised for the CHECKLIST dispatch template's evidence-wording rule. A live run put artifact
     # filenames in 13 items' evidence with the rule present only in the agent body; the dispatch
     # template is the surface that measurably changed behaviour in the sibling skill.
-    "competitive-positioning": 117_717,
+    # competitive-positioning +656 B: the POSITIONING_SCORING dispatch now instructs axis `polarity`.
+    # This is the half of the rank-polarity fix that makes it real — `score_positioning.py` can honour
+    # the field, but nothing produced it, so a script-only fix would have been inert on every live run
+    # and its test could not have failed. The prose names the concrete failure (told a founder they
+    # ranked last on price while second-cheapest) because "set the polarity" alone did not tell the
+    # model when it matters.
+    "competitive-positioning": 118_373,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -754,7 +760,10 @@ REFERENCES_CEILING: dict[str, int] = {
     # `Rank -1 of 0 ranked — leader: X (N/A)` reached founders, and reproduces from the committed
     # fixture. A convention documented without its sentinel is what let a consumer get it wrong; the
     # per-site guard alone would leave the identical trap for the next reader.
-    "competitive-positioning": 137_309,
+    # competitive-positioning +491 B: artifact-schemas.md documents the `polarity` field on x_axis /
+    # y_axis, including that omitting it means higher-is-better — the default that keeps every
+    # pre-existing artifact scoring unchanged.
+    "competitive-positioning": 137_800,
     # cap-table +422 B: inputs-skeleton.md promised "no warning, and downstream artifacts that look
     # right but contain zeros" — the PRE-FIX world. cap_state.py hard-errors E_NO_EQUITY_BASE now,
     # and prose telling a model that a missing base yields plausible zeros invites it to invent one.
