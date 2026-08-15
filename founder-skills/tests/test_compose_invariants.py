@@ -530,6 +530,75 @@ def test_composed_report_carries_no_internal_tokens(skill: str, tmp_path: Path) 
     )
 
 
+# A URL token: everything up to whitespace or a markdown/HTML delimiter. A URL that gets a space
+# inserted into it therefore TRUNCATES under this regex, which is what makes the set comparison below
+# a corruption detector rather than a formatting check.
+_URL_RE = re.compile(r"https?://[^\s)\]<>\"']+")
+
+# Skills whose reports render source URLs, so an empty URL set means the scan did not look at
+# anything. Named explicitly rather than inferred: an inferred list would silently shrink to nothing
+# and the test would pass by finding no URLs to check.
+_URL_RENDERING_SKILLS = frozenset({"market-sizing", "competitive-positioning"})
+
+
+@pytest.mark.parametrize("skill", COACHING_SKILLS)
+def test_composed_report_urls_survive_founder_text_substitution(skill: str, tmp_path: Path) -> None:
+    """A founder-visible string can be malformed rather than internal, and nothing scanned for that.
+
+    `substitute()` once found candidate tokens in a URL-stripped copy of the text and then ran the
+    replacement against the ORIGINAL, so a token that also appeared inside a link was rewritten there
+    too — a live report shipped `.../funding round/...` where the source had `funding_round`. The
+    founder is handed a dead citation, and `scan()` reports CLEAN because a broken link carries no
+    internal token. A defect that destroys its own evidence is invisible to the guard built to catch it.
+
+    The cause is fixed and unit-tested synthetically. This is the fleet-level guard on a REAL composed
+    report: substitution must be a no-op on every URL the report renders. It fires for any cause of URL
+    corruption, not only the one already fixed.
+    """
+    ft = _founder_text_module()
+    fixture_dir = REPO_ROOT / "founder-skills" / "tests" / "fixtures" / skill
+    if not fixture_dir.exists():
+        pytest.skip(f"No fixtures at {fixture_dir.relative_to(REPO_ROOT)}")
+    work_dir = tmp_path / skill
+    work_dir.mkdir(parents=True)
+    drive_compose(skill, fixture_dir, work_dir)
+
+    report_md = work_dir / "report.md"
+    assert report_md.exists(), f"{skill} composed no report.md"
+    text = report_md.read_text(encoding="utf-8")
+    urls = set(_URL_RE.findall(text))
+
+    if skill in _URL_RENDERING_SKILLS:
+        assert urls, (
+            f"{skill} renders source URLs in production but its fixture report.md has none — this scan "
+            f"would pass without checking anything. Add a sourced URL to the fixture."
+        )
+
+    keep = _cap_table_keep() if skill == "cap-table" else None
+
+    # Real report content first: whatever URLs this skill actually renders must survive untouched.
+    assert set(_URL_RE.findall(ft.substitute(text, extra_keep=keep))) == urls, (
+        f"{skill}: founder-text substitution altered a URL in report.md. A URL that gains a space "
+        f"truncates, so the mismatch names the corrupted link. The founder gets a dead citation."
+    )
+
+    # NON-VACUITY CANARY — this is load-bearing, not belt-and-braces. Measured: every fixture URL in
+    # the fleet today is underscore-free, so the check above cannot fail no matter how badly
+    # substitution corrupts links. Simulating the original bug against the real fixtures changed
+    # nothing. The canary carries a token substitution WOULD rewrite in prose (`gross_margin` is a
+    # real field name in the policy), so if URL protection regresses, this fires even when no shipped
+    # fixture happens to contain a vulnerable URL.
+    canary = "https://example.com/reports/gross_margin/2026-q1"
+    probed = ft.substitute(f"{text}\n\nSource: {canary} and the gross_margin figure.\n", extra_keep=keep)
+    assert canary in probed, (
+        f"{skill}: founder-text substitution rewrote a token INSIDE a URL — the link is now dead and "
+        f"scan() cannot see it, because a broken link carries no internal token"
+    )
+    assert "gross_margin" not in probed.replace(canary, ""), (
+        f"{skill}: URL protection over-reached — prose outside the link stopped being humanized"
+    )
+
+
 @pytest.mark.parametrize("skill", ["ic-sim", "market-sizing", "deck-review", "financial-model-review"])
 def test_compose_does_not_use_a_data_derived_keep_set(skill: str) -> None:
     """`identifier_values` is cap-table-only.
