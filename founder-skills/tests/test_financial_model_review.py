@@ -739,6 +739,98 @@ def test_checklist_not_applicable_pre_scored() -> None:
     assert data["summary"]["score_pct"] == 100.0
 
 
+def _load_fmr_checklist_module() -> Any:
+    import importlib.util
+
+    path = os.path.join(FMR_SCRIPTS_DIR, "checklist.py")
+    spec = importlib.util.spec_from_file_location("fmr_checklist_module", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["fmr_checklist_module"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_company_is_taken_from_inputs_not_the_payload() -> None:
+    """The payload is LLM-retyped; inputs.json is producer-written. The file wins."""
+    mod = _load_fmr_checklist_module()
+    company, warnings = mod._resolve_company(
+        {"stage": "series-a", "model_format": "spreadsheet"},
+        {"company": {"stage": "seed", "model_format": "deck"}},
+    )
+    assert company is not None
+    assert company["stage"] == "seed"
+    assert company["model_format"] == "deck"
+    assert any("stage" in w for w in warnings)
+    assert any("model_format" in w for w in warnings)
+
+
+def test_company_falls_back_to_payload_when_inputs_absent() -> None:
+    mod = _load_fmr_checklist_module()
+    company, warnings = mod._resolve_company({"stage": "seed"}, None)
+    assert company == {"stage": "seed"}
+    assert warnings == []
+
+
+def test_company_is_none_when_neither_source_has_it() -> None:
+    """None must keep meaning 'cannot gate', not 'gate as spreadsheet'."""
+    mod = _load_fmr_checklist_module()
+    company, warnings = mod._resolve_company(None, {"metadata": {}})
+    assert company is None
+    assert warnings == []
+
+
+def test_agreement_produces_no_warning() -> None:
+    mod = _load_fmr_checklist_module()
+    company, warnings = mod._resolve_company(
+        {"stage": "seed", "model_format": "deck"},
+        {"company": {"stage": "seed", "model_format": "deck"}},
+    )
+    assert company == {"stage": "seed", "model_format": "deck"}
+    assert warnings == []
+
+
+def test_inputs_file_profile_beats_the_payload_end_to_end(tmp_path: Any) -> None:
+    """Wiring test: the resolved profile must reach gating, not just exist as a helper.
+
+    The payload claims a spreadsheet model, the review inputs say deck. Deck must win, so the
+    spreadsheet-only criteria come back not_applicable and the divergence is reported.
+    """
+    inputs_path = tmp_path / "inputs.json"
+    inputs_path.write_text(
+        json.dumps(
+            {
+                "company": {
+                    "stage": "seed",
+                    "model_format": "deck",
+                    "geography": "israel",
+                    "revenue_model_type": "saas-sales-led",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    payload = json.dumps(
+        {
+            "items": _make_checklist_items(),
+            "company": {
+                "stage": "seed",
+                "model_format": "spreadsheet",
+                "geography": "israel",
+                "revenue_model_type": "saas-sales-led",
+            },
+        }
+    )
+    rc, data, stderr = run_script("checklist.py", ["--pretty", "--inputs", str(inputs_path)], stdin_data=payload)
+    assert rc == 0
+    by_id = {i["id"]: i for i in data["items"]}
+    # STRUCT_01 is "Model format: spreadsheet only" — a deck must gate it away.
+    assert by_id["STRUCT_01"]["status"] == "not_applicable"
+    # UNIT_10 is "Model format: all" — it must survive.
+    assert by_id["UNIT_10"]["status"] == "pass"
+    assert "company.model_format differs" in stderr
+
+
 def test_checklist_gating_normalizes_geography() -> None:
     """Free-form geography values are normalized; sector gates use sector_type."""
     company = {

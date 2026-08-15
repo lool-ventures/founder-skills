@@ -901,6 +901,32 @@ def validate_checklist(
     }, []
 
 
+def _resolve_company(
+    payload_company: dict[str, Any] | None,
+    inputs_doc: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Pick the authoritative company profile and report where the two sources disagree.
+
+    Which criteria count toward the score is an applicability decision, so the profile that
+    drives it must not be one a model re-typed by hand. The payload's copy is re-typed;
+    inputs.json is producer-written. Where both exist the file wins, and each divergent field
+    is reported — a profile that drifted is a signal about the hand-off, not something to
+    silently absorb.
+    """
+    file_company = (inputs_doc or {}).get("company")
+    if not isinstance(file_company, dict):
+        return payload_company, []
+    warnings: list[str] = []
+    if isinstance(payload_company, dict):
+        for key in sorted(set(file_company) | set(payload_company)):
+            if file_company.get(key) != payload_company.get(key):
+                warnings.append(
+                    f"company.{key} differs between the review inputs and the returned "
+                    f"assessment; using the inputs value"
+                )
+    return file_company, warnings
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Financial model review checklist scorer (reads JSON from stdin)")
     p.add_argument(
@@ -955,7 +981,24 @@ def main() -> None:
         result: dict[str, Any] = {"validation": {"status": "invalid", "errors": errors}, "items": [], "summary": None}
         _fail_invalid(result, args.output, indent)
 
-    company = data.get("company")
+    # Read --inputs BEFORE grading, not just for the fingerprint below: it carries the company
+    # profile that decides which criteria apply, and that decision must not rest on a copy a
+    # model re-typed. Unreadable is not fatal here — the payload copy still gates, and the
+    # fingerprint step below reports the read failure.
+    _inputs_file_doc: dict[str, Any] | None = None
+    if getattr(args, "inputs", None):
+        try:
+            with open(args.inputs, encoding="utf-8") as _f:
+                _loaded = json.load(_f)
+            if isinstance(_loaded, dict):
+                _inputs_file_doc = _loaded
+        except (OSError, json.JSONDecodeError):
+            _inputs_file_doc = None
+
+    company, _company_warnings = _resolve_company(data.get("company"), _inputs_file_doc)
+    for _w in _company_warnings:
+        print(f"Warning: {_w}", file=sys.stderr)
+
     inputs_data = data.get("inputs")
     # Hash the payload's inputs BEFORE validate_checklist sees them: it may consume or annotate the
     # object, and the verifier hashes the file on disk. This is the same ordering trap that made
