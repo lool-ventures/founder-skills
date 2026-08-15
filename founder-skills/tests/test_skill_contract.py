@@ -557,7 +557,13 @@ SKILL_MD_CEILING: dict[str, int] = {
     # and its test could not have failed. The prose names the concrete failure (told a founder they
     # ranked last on price while second-cheapest) because "set the polarity" alone did not tell the
     # model when it matters.
-    "competitive-positioning": 118_373,
+    # competitive-positioning +583 B: the CHECKLIST dispatch now asks the sub-agent to echo each
+    # criterion label verbatim. Measured on two archived runs, evidence landed on the wrong criterion
+    # id — "Do-nothing / status quo included" carrying evidence about how many direct competitors were
+    # named — and nothing could catch it, because the producer joins canonical label to sub-agent
+    # evidence by id and each half looked correct alone. The echo is the second signal that makes the
+    # mismatch detectable without judging the evidence text.
+    "competitive-positioning": 118_956,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.

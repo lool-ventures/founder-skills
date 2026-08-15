@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from typing import Any
 
@@ -88,6 +89,17 @@ CHECKLIST_ITEMS: list[dict[str, str]] = [
 VALID_IDS = {item["id"] for item in CHECKLIST_ITEMS}
 VALID_STATUSES = {"pass", "fail", "warn", "not_applicable"}
 ITEM_LOOKUP = {item["id"]: item for item in CHECKLIST_ITEMS}
+
+
+def _normalize_label(text: str) -> str:
+    """Fold a criterion label for comparison: case, whitespace and punctuation drift are not signal.
+
+    A model that rewords "Do-nothing / status quo included" as "Do nothing / status-quo included" has
+    not mis-assigned anything. Only a genuinely different criterion should raise CRITERION_MISMATCH —
+    a noisy signal is one nobody reads.
+    """
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text.lower()).split())
+
 
 # ---------------------------------------------------------------------------
 # Mode-based gating table.
@@ -160,6 +172,10 @@ def validate_and_score(
             print(f"Error: {err}", file=sys.stderr)
         sys.exit(1)
 
+    # Non-fatal signals surfaced to the founder-facing composer. Distinct from `errors`
+    # above, which reject the batch.
+    warnings: list[dict[str, Any]] = []
+
     # --- Mode gating ---
     gated_ids = MODE_GATING.get(input_mode, set())
 
@@ -199,6 +215,41 @@ def validate_and_score(
         if notes is not None:
             entry["notes"] = notes
         enriched.append(entry)
+
+        # Second signal against evidence landing on the wrong criterion.
+        #
+        # The label is canonical (from CHECKLIST_ITEMS); the evidence is the sub-agent's. They are
+        # joined by id, so if the sub-agent attaches evidence to the wrong id, the join silently
+        # produces a real label above someone else's justification — measured on two archived runs,
+        # e.g. COVER_04 "Do-nothing / status quo included" carrying "Five direct competitors named
+        # ... exceeds 2-3 minimum". Nothing could catch it: the id was valid and the evidence
+        # non-empty, so each half looked correct alone.
+        #
+        # `criterion` is the sub-agent echoing which criterion it believes it graded. Disagreement
+        # with the canonical label is a deterministic tell for a semantic slip, needing no judgement
+        # about the evidence text.
+        #
+        # WARN, not fail, and deliberately so: this signal is new and uncalibrated, with two known
+        # true positives and no measured false-positive rate. A hard failure on an unmeasured signal
+        # blocks delivery on the strength of a guess. Ratchet to an error once it has run clean over a
+        # meaningful number of real runs.
+        echoed = src.get("criterion")
+        if (
+            isinstance(echoed, str)
+            and echoed.strip()
+            and _normalize_label(echoed) != _normalize_label(item_def["label"])
+        ):
+            warnings.append(
+                {
+                    "code": "CRITERION_MISMATCH",
+                    "severity": "medium",
+                    "message": (
+                        f"{item_id}: graded as '{echoed.strip()}' but {item_id} is "
+                        f"'{item_def['label']}'. The evidence recorded here may belong to a "
+                        f"different criterion, which makes this grading unauditable."
+                    ),
+                }
+            )
 
         if status == "pass":
             pass_count += 1
@@ -279,6 +330,7 @@ def validate_and_score(
         "na_count": na_count,
         "total": total,
         "input_mode": input_mode,
+        "warnings": warnings,
         "metadata": {},  # placeholder, filled by caller
     }
 

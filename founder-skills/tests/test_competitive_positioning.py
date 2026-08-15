@@ -1995,6 +1995,21 @@ class TestScorePositioning:
 # Factory: valid checklist input for checklist.py
 # ---------------------------------------------------------------------------
 
+
+# Canonical id -> label, read from the producer itself rather than restated here. A second copy of
+# 25 labels is a second thing to drift, and the whole defect this guards is a label/evidence mismatch.
+def _load_item_labels() -> dict[str, str]:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_cp_checklist", os.path.join(CP_SCRIPTS_DIR, "checklist.py"))
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return {i["id"]: i["label"] for i in mod.CHECKLIST_ITEMS}
+
+
+ITEM_LABELS: dict[str, str] = _load_item_labels()
+
 # Canonical 25 checklist item IDs — must match checklist-criteria.md exactly.
 CHECKLIST_IDS: list[str] = [
     # Competitor Coverage (5)
@@ -2185,6 +2200,64 @@ class TestChecklist:
         assert data["metadata"]["run_id"] == "20260319T143045Z"
 
     # 2. Score computation: (pass_count + 0.5 * warn_count) / (total - na) * 100
+    def test_checklist_flags_evidence_attached_to_the_wrong_criterion(self) -> None:
+        """A grading whose evidence discusses a DIFFERENT criterion is unauditable.
+
+        Measured on two archived runs. Verbatim from the delivered checklist.json:
+
+            COVER_04 "Do-nothing / status quo included"
+              -> "Five direct competitors named (io.net, Aethir, ...) — exceeds 2-3 minimum."
+            POS_05   "Axis rationale explains differentiation value"
+              -> "_startup ranks #1 on both axes in both views (startup_x_rank 1, ...)"
+
+        The label is canonical, from CHECKLIST_ITEMS; the evidence comes from the sub-agent. The
+        producer joins them by id, so when the sub-agent attaches evidence to the wrong id the join
+        silently produces a real label над someone else's justification — and NOTHING could catch it,
+        because the id was valid and the evidence non-empty. Each half looked fine alone.
+
+        The fix is to give the producer a second signal: the sub-agent echoes the criterion it believes
+        it graded. A mismatch against the canonical label is then a deterministic tell for a semantic
+        error, needing no judgement about the evidence text.
+        """
+        payload = _make_valid_checklist_input()
+        for item in payload["items"]:
+            item["criterion"] = ITEM_LABELS[item["id"]]
+        # Simulate the observed defect: this item's evidence belongs to a different criterion, and the
+        # sub-agent's echo says so.
+        bad = next(i for i in payload["items"] if i["id"] == "COVER_04")
+        bad["criterion"] = "Minimum 5 competitors identified"
+        bad["evidence"] = "Five direct competitors named — exceeds the 2-3 minimum."
+
+        rc, data, stderr = run_script("checklist.py", stdin_data=json.dumps(payload))
+        assert rc == 0, f"a mismatch must not hard-fail the run; got {rc}. stderr: {stderr}"
+        assert data is not None
+        warnings = data.get("warnings", [])
+        codes = {w.get("code") for w in warnings}
+        assert "CRITERION_MISMATCH" in codes, (
+            f"evidence attached to the wrong criterion was not flagged; warnings={warnings}"
+        )
+        msg = " ".join(str(w.get("message", "")) for w in warnings)
+        assert "COVER_04" in msg, f"the warning does not name the offending item: {msg}"
+
+    def test_checklist_criterion_echo_is_optional_and_tolerant(self) -> None:
+        """Absent or paraphrased echoes must not warn.
+
+        Every artifact written before this field existed omits it, and a model that reworded the label
+        has not necessarily mis-assigned the id. Warning on either would make the signal noise, and a
+        noisy signal is one nobody reads.
+        """
+        payload = _make_valid_checklist_input()  # no `criterion` key at all
+        rc, data, _ = run_script("checklist.py", stdin_data=json.dumps(payload))
+        assert rc == 0 and data is not None
+        assert "CRITERION_MISMATCH" not in {w.get("code") for w in data.get("warnings", [])}
+
+        payload2 = _make_valid_checklist_input()
+        for item in payload2["items"]:
+            item["criterion"] = ITEM_LABELS[item["id"]].upper() + "  "  # case + whitespace drift
+        rc2, data2, _ = run_script("checklist.py", stdin_data=json.dumps(payload2))
+        assert rc2 == 0 and data2 is not None
+        assert "CRITERION_MISMATCH" not in {w.get("code") for w in data2.get("warnings", [])}
+
     def test_checklist_score_computation(self) -> None:
         # Use document mode which only gates NARR_03 (1 auto-gated).
         # Override 3 items to fail and 1 to warn.

@@ -1004,9 +1004,16 @@ founder knows it — never by our filename. They never saw `landscape.json` or
 State what is true of the COMPANY or its competitive set. The delivery gate
 flags an internal filename in evidence, so this is checked.
 
+**Copy each criterion's label verbatim into `criterion`.** It is a cross-check, not decoration:
+the label you are shown and the evidence you write are joined by `id` downstream, so if the id
+and the criterion you actually graded drift apart, a founder reads a real criterion above a
+justification for a different one — measured on real runs, e.g. "Do-nothing / status quo
+included" carrying evidence about how many direct competitors were named. Echoing the label is
+what makes that detectable. Grade the criterion you name.
+
 Use your Write tool to write to OUTPUT_PATH — the items array without a
 summary (the producer script computes the summary):
-{"items": [{"id": "COVER_01", "status": "pass", "evidence": "...", "notes": "..."}, ...all 25 items...]}
+{"items": [{"id": "COVER_01", "criterion": "<the criterion label, copied verbatim>", "status": "pass", "evidence": "...", "notes": "..."}, ...all 25 items...]}
 Then return ONLY the receipt JSON in your final assistant message:
 {"status": "complete", "output_path": "<echo of OUTPUT_PATH>"}
 Do NOT write any file other than OUTPUT_PATH — canonical artifacts are
