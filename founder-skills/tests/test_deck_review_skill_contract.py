@@ -823,6 +823,11 @@ def test_post_compose_coaching_dispatch_includes_coaching_payload_keys() -> None
         "high_severity_warnings",
         "stage",
         "ai_company_status",
+        # `summary.not_applicable` is a bare count that says nothing about WHY, so without this
+        # the coach writes "strong" over design criteria nobody could assess. Asserted as a
+        # TOP-LEVEL name deliberately: nesting it under `summary` would keep this test green
+        # while the field could be dropped from both prompts.
+        "design_gate",
     }
     # Mechanics keys: documented in the agent body (as ignore-these), and
     # insertion_marker is used by the main thread's script invocation.
@@ -1430,7 +1435,11 @@ def test_agent_coaching_writes_raw_markdown_no_json_escaping() -> None:
     json.dumps, which cannot emit malformed JSON."""
     agent_body = AGENT_MD.read_text(encoding="utf-8")
     idx = agent_body.index("### Context B")
-    section = agent_body[idx : idx + 4000]
+    # Bound on the next section heading, not a fixed character count. A 4,000-char window
+    # stopped covering its own tail the moment the payload key list grew by six lines, and
+    # the test then failed on content that was still present — widening N only defers that.
+    nxt = agent_body.find("\n### ", idx + 1)
+    section = agent_body[idx : nxt if nxt != -1 else len(agent_body)]
     assert "plain markdown" in section.lower()
     assert "do not escape anything" in section.lower() or "do not escape" in section.lower()
     assert "escaped as `\\n`" not in agent_body

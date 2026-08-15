@@ -4136,3 +4136,71 @@ def test_the_coverage_line_says_a_careful_reader_would_find_more() -> None:
     assert "clean bill of health" in md
     # No fabricated hit rate.
     assert "quarter" not in md and "%" not in md.split("first pass")[0].split("That is what was checked")[-1]
+
+
+# ---------------------------------------------------------------------------
+# The design gate fires on TWO reasons; the disclosure used to name one.
+# ---------------------------------------------------------------------------
+
+_GATE_ROWS = [
+    ("text", "good", "reached the review as text"),
+    ("markdown", "good", "reached the review as text"),
+    ("pdf", "image_only", "images with no readable text layer"),
+    ("pdf", "partial", "Not every page"),
+]
+
+
+def _gated_checklist(fmt: str, quality: str) -> dict:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("ck_gate2", os.path.join(DECK_REVIEW_DIR, "checklist.py"))
+    assert spec and spec.loader
+    ck = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ck)
+    items = [{"id": i["id"], "status": "pass", "evidence": "e"} for i in ck.CHECKLIST_ITEMS]
+    result, errors, _ = ck.validate_checklist(json.loads(json.dumps(items)))
+    assert not errors, errors
+    gated: dict = ck._apply_design_gating(result, fmt, quality)
+    return gated
+
+
+def test_design_disclosure_fires_on_every_gate_reason() -> None:
+    """Table-driven over BOTH reason axes, because only one of them was covered.
+
+    `_UNRENDERED_FORMATS` and `_UNRENDERED_QUALITY` are disjoint, so a PDF gates on quality
+    alone. The disclosure matched a prefix naming `input_format=` only, and an image-only or
+    partially-read PDF therefore lost four design criteria in total silence -- with the scope
+    note still telling the founder that design was among what the review assessed.
+    """
+    mod = _load_compose_report_module()
+    for fmt, quality, expected in _GATE_ROWS:
+        gated = _gated_checklist(fmt, quality)
+        note = mod._unreviewed_design_note(gated)
+        assert note, f"{fmt}/{quality} gated the design criteria and disclosed nothing"
+        assert expected in note[0], f"{fmt}/{quality} got the wrong reason text: {note[0]}"
+        # The founder who sent a PDF must not be told to send a PDF.
+        if fmt == "pdf":
+            assert "reached the review as text" not in note[0]
+        assert "design" not in mod._scope_note(gated)[0], (
+            f"{fmt}/{quality}: the scope note still lists design among what was assessed"
+        )
+
+
+def test_design_disclosure_is_silent_when_nothing_was_gated() -> None:
+    """A rendered deck must not carry the note, or it becomes noise."""
+    mod = _load_compose_report_module()
+    ungated = _gated_checklist("pdf", "good")
+    assert mod._unreviewed_design_note(ungated) == []
+    assert "design" in mod._scope_note(ungated)[0]
+
+
+def test_design_gate_reaches_the_coaching_payload() -> None:
+    """The coach reasons from the payload, so the gap has to be in it -- top-level."""
+    mod = _load_compose_report_module()
+    for fmt, quality, _expected in _GATE_ROWS:
+        payload = mod._design_gate_payload(_gated_checklist(fmt, quality))
+        assert payload["design_reviewed"] is False, f"{fmt}/{quality}"
+        assert payload["gated_count"] == 4, f"{fmt}/{quality}"
+        assert payload["reason"], f"{fmt}/{quality}: no founder-facing reason for the coach"
+    clean = mod._design_gate_payload(_gated_checklist("pdf", "good"))
+    assert clean["design_reviewed"] is True and clean["gated_count"] == 0

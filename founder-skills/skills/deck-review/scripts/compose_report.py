@@ -772,11 +772,11 @@ def _section_executive_summary(
         )
 
     lines.extend(_unreviewed_design_note(checklist))
-    lines.extend(_scope_note())
+    lines.extend(_scope_note(checklist))
     return "\n".join(lines) + "\n"
 
 
-def _scope_note() -> list[str]:
+def _scope_note(checklist: dict[str, Any] | None = None) -> list[str]:
     """State what this review does NOT cover, so its silence is not read as a clean bill.
 
     R8 offered two options: a sector-conditional criteria pack, or an explicit out-of-scope
@@ -791,9 +791,15 @@ def _scope_note() -> list[str]:
     So: the honest option. A founder who reads 35 criteria and sees no regulatory finding
     should not conclude there is no regulatory problem.
     """
+    # "design" is dropped when the design gate fired. Listing it there is an affirmative false
+    # statement — on an image-only deck this sentence claimed design was assessed while four
+    # design criteria had been excluded for want of a slide anyone could see.
+    built_from = (
+        "story, evidence, structure, design" if design_gate_reason(checklist) is None else "story, evidence, structure"
+    )
     return [
-        "\n> **What this review does not cover.** These 35 criteria assess how the deck is "
-        "built — story, evidence, structure, design. They do not assess your market, your "
+        f"\n> **What this review does not cover.** These 35 criteria assess how the deck is "
+        f"built — {built_from}. They do not assess your market, your "
         "technology, or the regulatory, clinical, licensing or compliance questions specific "
         "to your sector. An investor will ask about those separately, and a clean score here "
         "is not evidence they are handled."
@@ -801,39 +807,110 @@ def _scope_note() -> list[str]:
 
 
 # The evidence string `checklist.py` stamps when it gates a criterion on the input format.
-# Keyed on what the gate ACTUALLY DID rather than re-deriving from `input_format`, so the
-# disclosure cannot drift out of agreement with the gate it is describing.
-_FORMAT_GATE_EVIDENCE = "Auto-gated: not_applicable — input_format="
+# The prefix `checklist.py` stamps when it gates a design criterion. It stamps ONE of two
+# reasons -- `input_format=` or `input_quality=` -- and this used to name only the first, which
+# meant an image-only or partially-read PDF lost four criteria in total silence. The two reason
+# sets are DISJOINT (`{text, markdown}` vs `{image_only, partial}`), so a PDF gates on quality
+# alone and never matched. Match the shared stem and read the reason off the end.
+_DESIGN_GATE_EVIDENCE = "Auto-gated: not_applicable — input_"
+
+# One sentence per reason. A single sentence cannot serve all three: widening the old prefix
+# would have told a founder who sent an image-only PDF that "this deck reached the review as
+# text ... sending the deck as a PDF gets them reviewed" -- both clauses false, and the second
+# is advice they already followed.
+_DESIGN_GATE_REASONS: dict[str, str] = {
+    "format": (
+        "This deck reached the review as text — its slides were never rendered, so nothing here "
+        "judges how the deck *looks*: layout, typography, whitespace, or how it reads on a phone. "
+        "Sending the deck as a PDF gets them reviewed."
+    ),
+    "quality:image_only": (
+        "This deck's slides are images with no readable text layer, so nothing here judges how the "
+        "deck *looks*: layout, typography, whitespace, or how it reads on a phone. Exporting the "
+        "deck to PDF from the original file — rather than scanning or screenshotting it — gets "
+        "them reviewed."
+    ),
+    "quality:partial": (
+        "Not every page of this deck could be read, so nothing here judges how the deck *looks*: "
+        "layout, typography, whitespace, or how it reads on a phone. Re-sending the deck as a "
+        "complete PDF gets them reviewed."
+    ),
+}
+
+
+def design_gate_reason(checklist: dict[str, Any] | None) -> str | None:
+    """Which reason the design gate fired on, or None if it did not fire.
+
+    Keyed on what the gate ACTUALLY DID -- the evidence string in the artifact -- rather than
+    re-deriving from the inventory, so the disclosure cannot drift out of agreement with the
+    gate. Shared with `visualize.py`'s category charts, which must not report a gated category
+    as a percentage over its surviving criterion.
+    """
+    if checklist is None or _is_stub(checklist):
+        return None
+    for item in _as_list(checklist.get("items")):
+        if not isinstance(item, dict):
+            continue
+        evidence = str(item.get("evidence", ""))
+        if not evidence.startswith(_DESIGN_GATE_EVIDENCE):
+            continue
+        tail = evidence[len(_DESIGN_GATE_EVIDENCE) :]
+        if tail.startswith("format="):
+            return "format"
+        if tail.startswith("quality="):
+            return f"quality:{tail[len('quality=') :].strip()}"
+    return None
+
+
+def _design_gate_payload(checklist: dict[str, Any] | None) -> dict[str, Any]:
+    """Whether the design criteria were assessed at all, for the coaching sub-agent.
+
+    `summary.not_applicable` is a bare count and says nothing about WHY, so a coach handed a
+    "strong" overall status writes an unqualified headline over a deck whose design nobody
+    could see. Reasons are the founder-facing ones, not the gate's enum.
+    """
+    reason = design_gate_reason(checklist)
+    gated = [
+        item
+        for item in _as_list(_as_dict(checklist).get("items"))
+        if isinstance(item, dict) and str(item.get("evidence", "")).startswith(_DESIGN_GATE_EVIDENCE)
+    ]
+    return {
+        "design_reviewed": reason is None,
+        "gated_count": len(gated),
+        "reason": {
+            None: "",
+            "format": "the deck reached the review as text rather than as a rendered file",
+            "quality:image_only": "the slides are images with no readable text layer",
+            "quality:partial": "not every page of the deck could be read",
+        }.get(reason, "the slides could not be rendered"),
+    }
 
 
 def _unreviewed_design_note(checklist: dict[str, Any] | None) -> list[str]:
     """Tell the founder, in the summary, when the deck's design was never looked at.
 
-    A live run over a PowerPoint upload gated all five Design & Readability criteria
-    correctly and then never said so anywhere a founder would read: the report's only
-    disclosure was an "Auto-gated" annotation inside a 35-row table, and the closing
-    message reported "10 not-applicable" without explaining that five of them mean nobody
-    saw the slides. Leaving this to the model's prose did not work — hence a structural
-    note emitted from the artifact itself.
+    A live run over a PowerPoint upload gated the Design & Readability criteria correctly and
+    then never said so anywhere a founder would read: the report's only disclosure was an
+    "Auto-gated" annotation inside a 35-row table, and the closing message reported "10
+    not-applicable" without explaining that some of those mean nobody saw the slides. Leaving
+    this to the model's prose did not work — hence a structural note emitted from the artifact.
 
     The distinction matters to a founder in a specific way: an unscored design criterion
     is NOT a passed one, and it is not a criticism either. It is a gap in the review.
     """
-    if checklist is None or _is_stub(checklist):
+    reason = design_gate_reason(checklist)
+    if reason is None:
         return []
     gated = [
         item
-        for item in _as_list(checklist.get("items"))
-        if isinstance(item, dict) and str(item.get("evidence", "")).startswith(_FORMAT_GATE_EVIDENCE)
+        for item in _as_list(_as_dict(checklist).get("items"))
+        if isinstance(item, dict) and str(item.get("evidence", "")).startswith(_DESIGN_GATE_EVIDENCE)
     ]
-    if not gated:
-        return []
+    body = _DESIGN_GATE_REASONS.get(reason) or _DESIGN_GATE_REASONS["format"]
     return [
-        f"\n> **{len(gated)} design criteria could not be reviewed.** This deck reached the review "
-        "as text — its slides were never rendered, so nothing here judges how the deck *looks*: "
-        "layout, typography, whitespace, or how it reads on a phone. Those criteria are excluded "
-        "from the score rather than counted against you. Sending the deck as a PDF gets them "
-        "reviewed."
+        f"\n> **{len(gated)} design criteria could not be reviewed.** {body} Those criteria are "
+        "excluded from the score rather than counted against you."
     ]
 
 
@@ -1331,6 +1408,11 @@ def _emit_coaching_payload(
         ],
         "stage": stage_profile.get("detected_stage") or inventory.get("claimed_stage"),
         "ai_company_status": inventory.get("ai_company_status"),
+        # TOP-LEVEL, not folded into `summary`: the contract test asserts top-level names and
+        # `summary` is already required, so a nested field would leave the pin green forever.
+        # Without this the coach saw `not_applicable: 4` with no reason and wrote "strong" over
+        # a category nobody could look at.
+        "design_gate": _design_gate_payload(checklist),
         "company_name": inventory.get("company_name"),
         "review_dir": review_dir,
         "report_path": report_path,

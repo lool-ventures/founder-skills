@@ -330,7 +330,7 @@ Then branch on what it printed:
   from the command's output — do NOT write it to `$STAGING_DIR` and Read it back, because
   `$STAGING_DIR` is a `/tmp` path outside the session and the Read tool refuses it. Then
   build the inventory from that (it carries speaker notes, which often hold the real
-  narrative), and set `input_format` to **`"text"`** — which gates the 5 Design & Readability
+  narrative), and set `input_format` to **`"text"`** — which gates the 4 visual Design & Readability
   criteria to `not_applicable`. Scoring a deck's layout without having seen it is a confident
   review of something you never looked at. Tell the founder you read the content but could
   not see the design, mention `images_not_read` if non-zero, and that a PDF gets the full
@@ -348,7 +348,7 @@ Two fields carry the record, and both are load-bearing rather than bookkeeping:
   `"image_only"` when slides are pictures with no extractable text; `"partial"` when any
   page went unread. It is required precisely because its absence used to be
   indistinguishable from `"good"` — a review of a deck nobody could read looked identical to
-  a review of one that was read. `"image_only"` and `"partial"` gate the 5 Design &
+  a review of one that was read. `"image_only"` and `"partial"` gate the 4 visual Design &
   Readability criteria to `not_applicable` automatically, the same way `"text"` does.
 - `visual_evidence_captured` (per slide): `true` when you rendered and saw that slide,
   `false` when you have only its text.
@@ -1147,7 +1147,10 @@ re-issue the dispatch. Reporting it is the correct outcome.
 Follow your agent body's Context B procedure (POST_COMPOSE_COACHING):
 
 1. Compose commentary from the STAGED coaching_payload (failed_items,
-   warned_items, summary, high_severity_warnings, stage, ai_company_status).
+   warned_items, summary, high_severity_warnings, stage, ai_company_status,
+   design_gate). If `design_gate.design_reviewed` is false, that many design
+   criteria were never assessed — say so rather than writing as though the
+   deck's look had been judged.
    Do NOT Read the full report.md. Do NOT edit report.md or any canonical artifact.
    The commentary is appended to the founder's report, so write it in their language:
    never a checklist item id (`STRUCT_03`), a status enum (`major_revision`), a warning
@@ -1264,7 +1267,7 @@ stale answered gate (run_id mismatch) at the start of the next run.
 - **"Looks polished" bias:** A well-designed deck is not a strong deck. Score content, narrative, and evidence independently of visual quality. The checklist separates design (5 items) from content (8 items) for this reason.
 - **Template / AI-generated copy:** If multiple slides use generic phrasing ("revolutionize," "disrupt," "world-class team") with no specifics, flag this in coaching commentary as a credibility risk — investors notice formulaic decks. This is not a checklist item but affects overall narrative assessment.
 - **Benchmarks are medians, not gates:** A $3M seed round in a $1B TAM market is not automatically wrong — context matters. Use benchmarks from `deck-best-practices.md` as reference points, not hard pass/fail thresholds. The coaching commentary should explain deviations rather than penalize them.
-- **Founder provided text, not a file:** When the founder describes slides in conversation rather than uploading a file, adapt: write `deck_inventory.json` from the conversation, set `input_format: "text"`, and note reduced confidence in visual/design assessments. This is enforced deterministically, not just by prose: `checklist.py` reads `input_format` from `deck_inventory.json` (the same `--inventory` flag that drives AI-criteria gating) and forces the 5 Design & Readability criteria to `not_applicable` whenever it is `"text"`, regardless of what the sub-agent scored them. If the founder later shares screenshots, set `input_format` to whatever format now applies (e.g. `pdf`) so the gate does not fire and Design gets scored normally.
+- **Founder provided text, not a file:** When the founder describes slides in conversation rather than uploading a file, adapt: write `deck_inventory.json` from the conversation, set `input_format: "text"`, and note reduced confidence in visual/design assessments. This is enforced deterministically, not just by prose: `checklist.py` reads `input_format` from `deck_inventory.json` (the same `--inventory` flag that drives AI-criteria gating) and forces the 4 visual Design & Readability criteria to `not_applicable` whenever it is `"text"` (or whenever `input_quality` is `"image_only"`/`"partial"`), regardless of what the sub-agent scored them — `slide_count_appropriate` stays scored, since a slide count survives a text description. If the founder later shares screenshots, set `input_format` to whatever format now applies (e.g. `pdf`) so the gate does not fire and Design gets scored normally.
 - **Cross-skill context:** If `founder_context.py` returned prior market-sizing or financial-model-review runs, mention relevant findings in coaching commentary (e.g., "Your market sizing calculated $X TAM — your deck claims $Y"). Do not hard-fail on discrepancies; flag them for the founder.
 
 ## Main-Thread Return

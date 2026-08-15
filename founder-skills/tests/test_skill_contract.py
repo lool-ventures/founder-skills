@@ -552,7 +552,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # "200-400m"; bare `m` reads as millions, a space does not help, and the code CANNOT
     # decide — "32.5m businesses" recorded as 32.5 is structurally identical. Only the
     # model saw the slide, so only the model can disambiguate; the producer validates.
-    "deck-review": 92_310,
+    # deck-review raised 92,310 -> 92,668 (+358 B) for the Context B `design_gate` field and the
+    # corrected gate-count prose. `summary.not_applicable` is a bare count, so a coach handed only
+    # that wrote "strong" over design criteria nobody could assess. The prose edits are net-neutral
+    # digit swaps plus one clause naming `slide_count_appropriate` as deliberately still scored --
+    # the gate forces 4 of the category's 5, and five sites said 5. Deliberate.
+    "deck-review": 92_668,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

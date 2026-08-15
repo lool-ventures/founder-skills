@@ -177,6 +177,33 @@ _CANONICAL_CATEGORIES = [
 ]
 
 
+# The prefix `checklist.py` stamps on a criterion it auto-gated because no slide rendered.
+# Mirrors `compose_report.py`'s `_DESIGN_GATE_EVIDENCE`; standalone scripts cannot import
+# across each other, and `test_deck_review.py` pins the two in sync.
+_GATE_EVIDENCE = "Auto-gated: not_applicable — input_"
+
+
+def _gated_categories(checklist: dict[str, Any] | None) -> set[str]:
+    """Categories whose criteria were auto-gated for want of a slide anyone could see.
+
+    Every category percentage on this page divides by `pass + fail + warn`, which EXCLUDES
+    `not_applicable`. So a category with four gated criteria and one survivor scored 1/1 =
+    100% -- drawn on the radar's outer ring and printed as a strength, on a deck nobody could
+    look at. The honest denominator is not the point: there is no percentage that means
+    "we could not assess this", so the category is left out of both surfaces and the
+    disclosure carries it instead.
+    """
+    gated: set[str] = set()
+    if not isinstance(checklist, dict):
+        return gated
+    for item in _as_list(checklist.get("items")):
+        if isinstance(item, dict) and str(item.get("evidence", "")).startswith(_GATE_EVIDENCE):
+            category = str(item.get("category", "") or "")
+            if category:
+                gated.add(category)
+    return gated
+
+
 def _ordered_categories(by_category: dict[str, Any]) -> list[str]:
     """Return categories in canonical order, with unknown categories appended alphabetically."""
     canonical_set = set(_CANONICAL_CATEGORIES)
@@ -393,8 +420,13 @@ def _key_findings(
         by_category = _as_dict(summary.get("by_category"))
         items = _as_list(checklist.get("items"))
 
-        # Strong categories (>= 80% pass rate)
+        # Strong categories (>= 80% pass rate). A gated category is skipped: "1/1 criteria
+        # pass" is true of the arithmetic and false of the deck, and calling it a STRENGTH is
+        # the worst reading of the two.
+        gated_cats = _gated_categories(checklist)
         for cat in _ordered_categories(by_category):
+            if cat in gated_cats:
+                continue
             counts = _as_dict(by_category.get(cat))
             p = _num(counts.get("pass", 0))
             f = _num(counts.get("fail", 0))
@@ -636,7 +668,14 @@ def _chart_radar(checklist: dict[str, Any] | None) -> str:
     if not by_category:
         return _placeholder("No category data available")
 
-    categories = _ordered_categories(by_category)
+    # Drop any category the design gate touched BEFORE measuring anything: the pass rate below
+    # divides by pass+fail+warn, so a category with four gated criteria and one survivor plots
+    # at 100% on the outer ring and prints "100%" as its label. There is no honest vertex for
+    # "nobody could see this", so the category leaves the chart and the disclosure carries it.
+    # The stacked breakdown below is deliberately NOT changed -- it divides by a total that
+    # INCLUDES not_applicable and draws the N/A band, so it already tells the truth.
+    gated_cats = _gated_categories(checklist)
+    categories = [c for c in _ordered_categories(by_category) if c not in gated_cats]
     n = len(categories)
     if n == 0:
         return _placeholder("No category data available")

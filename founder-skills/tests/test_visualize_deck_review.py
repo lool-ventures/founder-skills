@@ -892,3 +892,42 @@ class TestDeckReviewCategoryCoverage:
         assert len(viz._CANONICAL_CATEGORIES) >= 7, (
             f"visualize._CANONICAL_CATEGORIES has only {len(viz._CANONICAL_CATEGORIES)} entries; expected >= 7."
         )
+
+
+def test_gated_category_is_not_drawn_as_a_perfect_score() -> None:
+    """A category nobody could assess must not appear at 100% or as a strength.
+
+    Every category percentage on this page divides by pass+fail+warn, which EXCLUDES
+    not_applicable. So an image-only deck -- four design criteria gated, one survivor --
+    scored 1/1 = 100%, drawn on the radar's outer ring, printed as its label, and listed
+    under "What's strong". The markdown was the honest surface; this one was not.
+
+    Asserted on the RADAR LABEL, not only on the findings list: the two are separate call
+    sites over the same bad denominator, so a fix can land on one and leave the other.
+    """
+    import importlib.util
+    import re
+
+    spec = importlib.util.spec_from_file_location(
+        "ck_viz_gate", os.path.join(os.path.dirname(SCRIPT_DIR), "skills", "deck-review", "scripts", "checklist.py")
+    )
+    assert spec and spec.loader
+    ck = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ck)
+    items = [{"id": i["id"], "status": "pass", "evidence": "e"} for i in ck.CHECKLIST_ITEMS]
+    result, errors, _ = ck.validate_checklist(json.loads(json.dumps(items)))
+    assert not errors, errors
+    gated = ck._apply_design_gating(result, "pdf", "image_only")
+
+    artifacts = _all_artifacts()
+    artifacts["checklist.json"] = gated
+    d = _make_artifact_dir(artifacts)
+    rc, stdout, stderr = _run_viz(d)
+    assert rc == 0, f"rc={rc}, stderr={stderr}"
+
+    assert "Design &amp; Readability: 1/1 criteria pass" not in stdout, (
+        "a category nobody could assess is listed under What's strong"
+    )
+    radar = stdout.split("Category Pass Rates")[1] if "Category Pass Rates" in stdout else stdout
+    labels = re.findall(r"Design &amp; Readability</text>\s*<text[^>]*>([^<]*)</text>", radar)
+    assert not any(lbl.strip() == "100%" for lbl in labels), f"the radar plots the gated category at 100%: {labels}"

@@ -200,6 +200,11 @@ keys (do not refetch from disk):
 - `failed_items`, `warned_items`
 - `high_severity_warnings` (codes only)
 - `stage`, `ai_company_status`, `company_name`
+- `design_gate` (design_reviewed, gated_count, reason) — when `design_reviewed`
+  is false, `gated_count` design criteria were **never assessed** because
+  `reason`. Say so, and do not present the score or `overall_status` as though
+  design had been judged. It is a gap in the review, not a strength and not a
+  criticism of the deck.
 - `review_dir`, `report_path` — context only; you don't open either.
 - `insertion_marker` — consumed by the main thread's
   `insert_coaching.py` invocation, NOT by you. Ignore it.

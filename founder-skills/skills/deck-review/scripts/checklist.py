@@ -316,7 +316,7 @@ def _apply_ai_gating(result: dict[str, Any], ai_company_status: str) -> dict[str
 def _apply_design_gating(result: dict[str, Any], input_format: str, input_quality: str = "") -> dict[str, Any]:
     """Apply deterministic Design & Readability gating based on input_format.
 
-    Force the 5 Design & Readability criteria to not_applicable when there is no
+    Force the 4 VISUAL Design & Readability criteria to not_applicable when there is no
     RENDERED SLIDE to assess visual design against, rather than letting them score
     fail for evidence that structurally cannot exist.
 
@@ -325,7 +325,7 @@ def _apply_design_gating(result: dict[str, Any], input_format: str, input_qualit
       * "markdown" — a file, but a plain-text one. It has no fonts, no colours and no
                      rendered page, so "24pt+ body text" and the phone test cannot be
                      assessed any more than they can for "text". Only "text" was gated
-                     originally, so markdown decks were scored on all five.
+                     originally, so markdown decks were scored on all four.
 
     "pdf" and "pptx" render, and pass through unchanged.
     """
