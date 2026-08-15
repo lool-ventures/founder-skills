@@ -600,3 +600,31 @@ def test_a_ratio_with_a_stated_counterpart_is_untouched() -> None:
     b = fig("150+", 150, "count", "accounts (slide 9)", id="b")
     e = fig("90%", 90, "percent", "retention", id="e")
     assert _cmp("ratio", ["a", "b"], "e", {"a": a, "b": b, "e": e}).verdict != "restatement"
+
+
+def test_the_stated_side_must_clear_the_gate_the_operands_clear() -> None:
+    """A contradiction may not cite a figure the independent read never found.
+
+    Operands are dropped hard when uncorroborated. The expected figure was not checked at
+    all, so the report could read "but the deck states $50k (ACV)" about a figure the
+    second read never located — telling a founder their numbers disagree with something
+    the deck may not say, and falsifying the report's own promise that every figure shown
+    was "checked against a second independent reading".
+
+    Suppresses rather than manufactures: the relation stays a derived reading.
+    """
+    a = fig("$100k", 100_000, "money", "revenue", id="a")
+    b = fig("4", 4, "count", "customers", id="b")
+    e = fig("$50k", 50_000, "money", "ACV", id="e")
+    e.verified = False  # the independent read never found it
+    r = _cmp("ratio", ["a", "b"], "e", {"a": a, "b": b, "e": e})
+    assert r.verdict != "contradiction"
+    assert any("not corroborated" in x for x in r.reasons)
+
+
+def test_a_corroborated_stated_side_still_produces_findings() -> None:
+    """The counter-test: the gate must not blunt the engine when the figure IS found."""
+    a = fig("$100k", 100_000, "money", "revenue", id="a")
+    b = fig("4", 4, "count", "customers", id="b")
+    e = fig("$50k", 50_000, "money", "ACV", id="e")
+    assert _cmp("ratio", ["a", "b"], "e", {"a": a, "b": b, "e": e}).verdict == "contradiction"

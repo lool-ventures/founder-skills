@@ -1011,6 +1011,23 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
     # is either an opinion (derived), a non-event (confirmation), or noise (restatement).
     exp_id = rel_spec.get("expected_id")
     exp_id = alias.get(str(exp_id), exp_id) if exp_id else exp_id
+    if exp_id and (exp := by_id.get(str(exp_id))) is not None and not exp.verified:
+        # THE STATED SIDE MUST CLEAR THE SAME GATE THE OPERANDS DO. Operands are dropped
+        # hard when an independent read cannot find them (above); the expected figure was
+        # not checked at all, so a contradiction could read
+        #
+        #     $100k / 4 = 25,000 per customer  — but the deck states $50k (ACV)
+        #
+        # where "$50k" is a figure the second read never found. Reproduced. That tells a
+        # founder their numbers disagree with something the deck may not say, and it makes
+        # the report's own promise -- "checked against a second independent reading" --
+        # false in the one direction that matters.
+        #
+        # Refusing the binding leaves the relation as a derived reading rather than a
+        # finding: it suppresses, never manufactures, which is what lets this be a silent
+        # guard rather than a new failure mode.
+        r.reasons.append("the stated figure was not corroborated by the independent read")
+        exp_id = None
     if exp_id and (exp := by_id.get(str(exp_id))) is not None and r.computed is not None:
         r.expected_id, r.expected_value = exp.id, exp.value
         # BRING BOTH SIDES INTO THE SAME UNIT BEFORE COMPARING, or refuse to compare.
