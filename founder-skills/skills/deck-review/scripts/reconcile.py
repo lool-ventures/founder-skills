@@ -714,11 +714,27 @@ def _is_self_comparison(r: Relation, operands: list[Figure]) -> bool:
     if r.operator not in ("ratio", "difference") or r.expected_id or len(operands) != 2:
         return False
     a, b = operands
-    if a.unit_kind != b.unit_kind:
+    if a.unit_kind != b.unit_kind or r.computed is None:
         return False
     if r.operator == "ratio" and b.value == 0:
         return False
-    return abs(a.value - b.value) <= max(figure_tolerance(a), figure_tolerance(b))
+    # TEST THE RESULT, NOT THE OPERANDS. Comparing operand values missed the case that
+    # matters most: a deck stating "9 million per month" on one slide and "108 million per
+    # annum" on another. Those are the same quantity, the engine's OWN period conversion
+    # proves it by computing exactly 1.0 — and 108,000,000 vs 9,000,000 are nowhere near
+    # equal, so an operand test waves it through. It shipped as
+    #
+    #     108 million ÷ 9 million = 100.0%
+    #
+    # which reads as a arithmetic failure to anyone who divides it in their head.
+    #
+    # The result IS the general form: a ratio of one, or a difference of zero, means the
+    # two sides are the same quantity however they were expressed. Operand equality was
+    # only ever a proxy for it, and a lossy one.
+    identity = 1.0 if r.operator == "ratio" else 0.0
+    tol = max(figure_tolerance(a), figure_tolerance(b))
+    scale = abs(a.value) or 1.0
+    return abs(r.computed - identity) <= (tol / scale if r.operator == "ratio" else tol)
 
 
 def _convention_tolerance(exp: Figure, mid: float, operator: str, operands: list[Figure]) -> float:

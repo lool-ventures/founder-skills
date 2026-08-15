@@ -712,3 +712,24 @@ def test_the_reduction_words_have_no_competing_sense() -> None:
     assert _is_reduction(fig("75%", 75, "percent", "annualised savings", id="x"))
     assert not _is_reduction(fig("75%", 75, "percent", "gross margin", id="x"))
     assert not _is_reduction(fig("75%", 75, "percent", "declined offers", id="x"))
+
+
+def test_the_same_quantity_in_two_periods_is_not_a_reading() -> None:
+    """`108 million ÷ 9 million = 100.0%` reached a real founder report.
+
+    "9 million per month" on one slide and "108 million per annum" on another are the same
+    quantity; the engine's own period conversion proves it by computing exactly 1.0. The
+    guard compared OPERANDS — 108,000,000 against 9,000,000, nowhere near equal — so it
+    waved the relation through, and the founder saw a division that reads as broken.
+    """
+    a = fig("108 million", 108_000_000, "count", "vacancies per annum", id="yr", period="year")
+    b = fig("9 million", 9_000_000, "count", "vacancies per month", id="mo", period="month")
+    assert _cmp("ratio", ["yr", "mo"], None, {"yr": a, "mo": b}).verdict == "restatement"
+
+
+def test_a_genuine_ratio_across_periods_still_reads() -> None:
+    """The counter-test: only a result of ONE is silenced, not every cross-period ratio."""
+    a = fig("60 million", 60_000_000, "count", "vacancies per annum", id="yr", period="year")
+    b = fig("9 million", 9_000_000, "count", "vacancies per month", id="mo", period="month")
+    r = _cmp("ratio", ["yr", "mo"], None, {"yr": a, "mo": b})
+    assert r.verdict != "restatement", f"a real 60m/yr vs 9m/mo gap was silenced: {r.rendered}"
