@@ -909,6 +909,97 @@ def test_compose_surfaces_implausible_pct_scale_warning() -> None:
     assert "segment %" in data["report_markdown"]  # humanized by the shared founder-text policy (_founder_text.py)
 
 
+def _compose_with_sizing_warning(fx: dict[str, Any], extra: dict[str, Any] | None = None) -> Any:
+    """Run the real producer with `fx`, optionally inject `extra`, and compose."""
+    rc, sizing, err = run_script(
+        "market_sizing.py", ["--stdin"], stdin_data=_fx_stdin(industry_total_currency="USD", fx=fx)
+    )
+    assert rc == 0, err
+    assert sizing is not None
+    if extra is not None:
+        sizing["validation"]["warnings"].append(extra)
+    d = _make_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "methodology.json": _VALID_METHODOLOGY,
+            "validation.json": _VALID_VALIDATION,
+            "sizing.json": sizing,
+            "sensitivity.json": _VALID_SENSITIVITY,
+            "checklist.json": _VALID_CHECKLIST,
+        }
+    )
+    return _run_compose(d)
+
+
+def test_compose_forwards_fx_unsourced() -> None:
+    """FX_UNSOURCED must reach the founder-facing Warnings section.
+
+    It was emitted into sizing.json and read by nothing: the forwarding loop matched the
+    single literal "IMPLAUSIBLE_PCT_SCALE", so the code was silently dropped for the two
+    releases it existed. The currency callout disclosed the gap inline, but the warning
+    itself never reached the Warnings list or report.json.
+    """
+    rc, data, _ = _compose_with_sizing_warning({"rates": {"USD:ILS": 3.72}})
+    assert rc == 0
+    assert data is not None
+    forwarded = [w for w in data["validation"]["warnings"] if w["code"] == "FX_UNSOURCED"]
+    assert forwarded, f"FX_UNSOURCED was not forwarded; got {[w['code'] for w in data['validation']['warnings']]}"
+    assert forwarded[0]["severity"] == "low", (
+        "low is deliberate: the inline currency callout already states the gap, so this is an "
+        "authoring task, not a blocker. Medium would fail --strict and SKILL.md then stops the "
+        "run before the coaching step, on a condition the agent usually cannot fix."
+    )
+
+
+def test_fx_unsourced_message_names_which_half_is_missing() -> None:
+    """The warning must not contradict the inline currency disclosure.
+
+    The warning fires when EITHER the rate's date or its source is absent, and the callout
+    renders whichever is present ("Rate as of 2026-01-15 (source not stated)"). A message
+    saying "no date or source" when a date IS shown puts two lines of one report in direct
+    conflict — worse than the silence it replaced.
+    """
+    base: dict[str, Any] = {"rates": {"USD:ILS": 3.72}}
+    cases: list[tuple[dict[str, Any], str, str]] = [
+        (base, "neither a date nor a source", "date not stated"),
+        ({**base, "as_of": "2026-01-15"}, "no source", "2026-01-15"),
+        ({**base, "source": "ECB"}, "no date", "ECB"),
+    ]
+    for fx, expected_phrase, inline_token in cases:
+        rc, data, _ = _compose_with_sizing_warning(fx)
+        assert rc == 0
+        assert data is not None
+        msg = next(w["message"] for w in data["validation"]["warnings"] if w["code"] == "FX_UNSOURCED")
+        assert expected_phrase in msg, f"fx={fx} -> {msg!r}"
+        callout = next(line for line in data["report_markdown"].splitlines() if "Currency:" in line)
+        assert inline_token in callout, "precondition: the inline callout must show the half that IS present"
+        # The JSON path must not reach the founder. _founder_text.scan() passes `fx.as_of`
+        # (the dot defeats it) while flagging a bare `as_of`, so no scanner guards this.
+        assert "fx.as_of" not in msg and "fx.source" not in msg
+
+
+def test_compose_does_not_forward_a_code_it_owns_itself() -> None:
+    """A producer artifact must not be able to assert a compose-owned code.
+
+    This is what keeps `_PRODUCER_FORWARDABLE` a subset rather than all of WARNING_SEVERITY.
+    Measured under blanket forwarding: a sizing.json carrying MISSING_ARTIFACT with all six
+    artifacts present emits `[HIGH] MISSING_ARTIFACT`, which cannot be accepted away
+    (ACCEPTIBLE_SEVERITIES is medium-only) and drags a FOUNDER_TEXT_TOKEN leak with it.
+    """
+    rc, data, _ = _compose_with_sizing_warning(
+        {"rates": {"USD:ILS": 3.72}},
+        extra={"code": "MISSING_ARTIFACT", "message": "sensitivity.json was not produced"},
+    )
+    assert rc == 0
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "MISSING_ARTIFACT" not in codes, (
+        "a sizing.json claim of MISSING_ARTIFACT was forwarded despite all six artifacts being "
+        "present — the forwarding set must stay a producer-owned subset"
+    )
+    assert "FX_UNSOURCED" in codes, "precondition: real producer warnings still forward"
+
+
 def test_compose_som_discrepancy_warning() -> None:
     """comparison.som_delta_pct > 30 -> SOM_DISCREPANCY."""
     import copy
@@ -1005,7 +1096,7 @@ def test_compose_severity_map_complete() -> None:
         # A rejected sensitivity/checklist step, same class as SIZING_INVALID.
         "ARTIFACT_INVALID",
     ]
-    assert len(sev_map) == 30, f"expected 30 codes, got {len(sev_map)}"
+    assert len(sev_map) == 31, f"expected 31 codes, got {len(sev_map)}"
     for code in expected_codes:
         assert code in sev_map, f"{code} missing from severity map"
     # All values are "high", "medium", or "low"

@@ -902,14 +902,30 @@ def main() -> None:
         conversions, conv_errors = _apply_fx_in_place(parsed, approach, args.currency, fx_rates, fx_field_currencies)
         errors.extend(conv_errors)
         if conversions and not (fx_as_of and fx_source):
-            missing = " and ".join(n for n, v in (("as_of", fx_as_of), ("source", fx_source)) if not v)
+            # This message is FOUNDER-FACING: compose forwards it verbatim into the report's
+            # Warnings section. Two constraints follow, and neither is enforced by a scanner.
+            #
+            # It must name WHICH of the two is missing. The report's currency callout already
+            # renders "Rate as of <date> (source not stated)", so a warning saying "no date or
+            # source" when a date IS present contradicts the same report two screens up.
+            #
+            # And it must not carry the JSON path. `_founder_text.scan()` passes `fx.as_of`
+            # clean — the dot defeats it, though it flags a bare `as_of` — so the policy scan
+            # will not catch a leak here; this wording is a hand judgement. (The previous text
+            # said "fx.as_of and source was not supplied", which was also ungrammatical in the
+            # both-missing case: the prefix applied to only the first name.)
+            _lacks = (
+                "neither a date nor a source"
+                if not fx_as_of and not fx_source
+                else ("no date" if not fx_as_of else "no source")
+            )
             input_warnings.append(
                 {
                     "code": "FX_UNSOURCED",
                     "field": "fx",
                     "message": (
-                        f"a currency conversion was applied but fx.{missing} was not supplied — the rate "
-                        f"is recorded and rendered, but its provenance is not"
+                        f"the exchange rate used to convert your figures records {_lacks} — the "
+                        f"converted numbers are shown, but the rate cannot be checked"
                     ),
                 }
             )

@@ -81,12 +81,33 @@ WARNING_SEVERITY: dict[str, str] = {
     "MISSING_OPTIONAL_ARTIFACT": "low",
     "DECK_CLAIM_MISMATCH": "low",
     "PROVENANCE_UNRESOLVED": "low",
+    # A conversion ran without a rate date/source. "low", for the same reason FOUNDER_TEXT_TOKEN
+    # is: the currency callout already states the gap inline ("Rate as of date not stated"), so
+    # the report is honest and what remains is an authoring task. Medium would block --strict,
+    # and SKILL.md tells the agent to stop before the coaching step on a non-zero compose — an
+    # abort on a condition it usually cannot fix, since the rate comes from the caller. The
+    # nearest registered analogue, PROVENANCE_UNRESOLVED, is low for the same reason.
+    "FX_UNSOURCED": "low",
     # Marker collision is informational only (uuid is per-run, won't collide)
     "MARKER_COLLISION": "low",
 }
 
 # Only medium-severity codes can be accepted. High-severity = integrity violations.
 ACCEPTIBLE_SEVERITIES = {"medium"}
+
+# Codes a PRODUCER may raise into `sizing.json`'s validation.warnings and have re-emitted into
+# the founder-facing Warnings section. Deliberately a subset of WARNING_SEVERITY, not all of it.
+#
+# Forwarding anything registered would let an artifact assert codes compose OWNS. Measured: a
+# `sizing.json` carrying {"code": "MISSING_ARTIFACT"} with all six artifacts present yields
+# `[HIGH] MISSING_ARTIFACT`, which is not clearable (ACCEPTIBLE_SEVERITIES is medium-only) and
+# drags a FOUNDER_TEXT_TOKEN leak behind it when the message names the file. The containment is
+# the point.
+#
+# It is still a list, so a new producer code is still stranded until added here — but the name
+# and this note say so, which the previous `== "IMPLAUSIBLE_PCT_SCALE"` literal did not. That
+# literal silently dropped FX_UNSOURCED for the two releases it existed.
+_PRODUCER_FORWARDABLE = {"IMPLAUSIBLE_PCT_SCALE", "FX_UNSOURCED"}
 
 # Quantitative params that should appear in sensitivity analysis if agent_estimate
 QUANTITATIVE_PARAMS = {
@@ -145,6 +166,7 @@ WARNING_LABELS: dict[str, str] = {
     "REFUTED_MISSING_REASON": "Refuted Claim Missing Reason",
     "DECK_CLAIM_MISMATCH": "Deck Claim Mismatch",
     "PROVENANCE_UNRESOLVED": "Provenance Unresolved",
+    "FX_UNSOURCED": "Exchange Rate Not Sourced",
     "EXISTING_CLAIMS_SHAPE": "Existing Claims Shape",
     "MARKER_COLLISION": "Marker Collision",
 }
@@ -791,8 +813,10 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     # them in the report's Warnings section rather than only on the script's stderr.
     if _usable(sizing):
         for w in _as_list((sizing.get("validation") or {}).get("warnings")):
-            if isinstance(w, dict) and w.get("code") == "IMPLAUSIBLE_PCT_SCALE":
-                warnings.append(_warn("IMPLAUSIBLE_PCT_SCALE", str(w.get("message") or "Implausible percentage input")))
+            if isinstance(w, dict) and w.get("code") in _PRODUCER_FORWARDABLE:
+                code = str(w["code"])
+                fallback = f"{_humanize_warning(code)} reported by the sizing step"
+                warnings.append(_warn(code, str(w.get("message") or fallback)))
 
     # 1. CORRUPT_ARTIFACT / MISSING_ARTIFACT — required artifacts
     for name in REQUIRED_ARTIFACTS:
