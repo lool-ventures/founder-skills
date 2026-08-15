@@ -563,7 +563,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # named — and nothing could catch it, because the producer joins canonical label to sub-agent
     # evidence by id and each half looked correct alone. The echo is the second signal that makes the
     # mismatch detectable without judging the evidence text.
-    "competitive-positioning": 118_956,
+    # competitive-positioning +811 B: the MOAT_SCORING dispatch now offers the custom-moat path and
+    # names distribution as the case the canonical six cannot express. The path already existed in
+    # moat-definitions.md and was accepted by score_moats.py, but the dispatch never mentioned it —
+    # measured 0 custom moats on 4 of 4 runs, while one of those runs scored a channel reaching ~80%
+    # of its target market as `network_effects: absent`. Correct reasoning, lost finding.
+    "competitive-positioning": 119_767,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -769,7 +774,11 @@ REFERENCES_CEILING: dict[str, int] = {
     # competitive-positioning +491 B: artifact-schemas.md documents the `polarity` field on x_axis /
     # y_axis, including that omitting it means higher-is-better — the default that keeps every
     # pre-existing artifact scoring unchanged.
-    "competitive-positioning": 137_800,
+    # competitive-positioning +712 B: moat-definitions.md gains `custom_distribution_channel`. The
+    # five existing custom types had no entry for channel/distribution — the nearest were ecosystem
+    # lock-in and geographic monopoly, neither of which fits "a named partner reaches 80% of our
+    # buyers". A documented path with no example for the case that actually arises is a path nobody takes.
+    "competitive-positioning": 138_512,
     # cap-table +422 B: inputs-skeleton.md promised "no warning, and downstream artifacts that look
     # right but contain zeros" — the PRE-FIX world. cap_state.py hard-errors E_NO_EQUITY_BASE now,
     # and prose telling a model that a missing base yields plausible zeros invites it to invent one.

@@ -1722,3 +1722,48 @@ def test_gate3_positioning_reality_check_two_step_and_provisional_threshold() ->
         "exhaustively tested; a copy here is what drifted last time (SKILL.md said top-2 where the "
         "script had already moved to top-tercile). Name the triggers, not their arithmetic."
     )
+
+
+def test_moat_scoring_dispatch_offers_the_custom_moat_path() -> None:
+    """The custom-moat escape hatch exists in the references and was invisible where it is used.
+
+    `moat-definitions.md` documents `custom_{slug}` types, `score_moats.py` accepts them, and
+    `compose_report.py` renders them — but the MOAT_SCORING dispatch never mentioned the path, so a
+    sub-agent had no way to know it was available. Measured: 0 custom moats across 4 runs, 6 canonical
+    every time.
+
+    That is not a cosmetic gap. On one run the most decision-relevant fact in the analysis — a named
+    channel relationship reaching roughly 80% of the target market — had nowhere to live, and was
+    scored away under `network_effects: absent` with the correct reasoning that channel leverage is
+    not a network effect. Correct, and the fact was lost.
+
+    Deliberately NOT solved by adding a 7th canonical type: that would break `MOAT_01` ("all 6
+    canonical moat types evaluated") for every artifact written to date, change the radar geometry from
+    six axes to seven, and stale every cassette — disproportionate to a gap the existing custom path
+    already covers once the agent is told it exists.
+    """
+    skill_text = SKILL_MD.read_text(encoding="utf-8")
+    start = skill_text.find("CONTEXT: MOAT_SCORING")
+    assert start != -1, "no MOAT_SCORING dispatch"
+    close_fence = skill_text.find("\n```\n", start)
+    section = skill_text[start:close_fence]
+
+    assert "custom_" in section, (
+        "the MOAT_SCORING dispatch never mentions the custom-moat path, so a sub-agent cannot know it "
+        "exists — measured 0 custom moats on 4 of 4 runs"
+    )
+    assert re.search(r"(?i)distribution|channel", section), (
+        "the dispatch does not name distribution/channel as the case the canonical six cannot express, "
+        "which is the gap that lost a real finding"
+    )
+
+
+def test_moat_definitions_documents_a_distribution_custom_type() -> None:
+    """`moat-definitions.md` listed five custom types and none covered distribution or channel.
+
+    The nearest were `custom_ecosystem_lock_in` and `custom_geographic_monopoly`, neither of which
+    fits "a named partner reaches 80% of our buyers". A path with no example for the case that
+    actually arose is a path nobody takes.
+    """
+    text = (CP_DIR / "references" / "moat-definitions.md").read_text(encoding="utf-8")
+    assert re.search(r"custom_distribution", text), "no custom moat type covers distribution/channel defensibility"

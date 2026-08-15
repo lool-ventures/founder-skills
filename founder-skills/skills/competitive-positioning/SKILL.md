@@ -776,6 +776,16 @@ Each moat: status (strong/moderate/weak/absent/not_applicable), evidence (requir
 evidence_source (researched/agent_estimate/founder_override), trajectory
 (building/stable/eroding).
 
+Those six are the comparison grid, not the whole vocabulary. You may ALSO add a
+`custom_{slug}` moat when a real, evidenced form of defensibility does not fit any of them —
+see the Custom Moat Types table in moat-definitions.md. Distribution is the case that keeps
+arising: a named partner or reseller covering a large share of the addressable market is
+defensibility, and it is NOT a network effect. Recording it as `network_effects: absent`
+because channel leverage does not make the product better with scale is correct reasoning
+that throws the finding away; use `custom_distribution_channel` instead. A custom moat needs
+the same evidence quality as a canonical one, and it reaches the founder's report — it does
+not appear on the six-axis radar, which stays canonical so companies remain comparable.
+
 trajectory is a DIFFERENT enum from status — it is one of building/stable/eroding only. Never write
 a status value (strong/moderate/weak/absent/not_applicable) into trajectory: the producer rejects it
 and the whole file comes back for repair, costing a round-trip.

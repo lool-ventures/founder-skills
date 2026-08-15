@@ -240,6 +240,7 @@ When the 6 canonical types do not capture a company's defensibility, the agent m
 | `custom_ecosystem_lock_in` | Company is deeply embedded in a platform ecosystem (e.g., Shopify app store) where the platform relationship creates unique advantage |
 | `custom_geographic_monopoly` | Company has exclusive access to a geographic market through relationships, licenses, or first-mover dynamics |
 | `custom_supply_chain` | Company has exclusive supplier relationships or vertically integrated supply chain that competitors cannot replicate |
+| `custom_distribution_channel` | Company reaches its buyers through a channel competitors cannot easily obtain — a named partner, reseller or platform relationship covering a large share of the addressable market, or an owned route to buyers that would take years to rebuild. **Use this rather than forcing channel into `network_effects`:** channel leverage helps you reach buyers faster; a network effect makes the product better as more people use it. Both can be real, they are not the same claim, and scoring the first as an absence of the second loses the finding. A real analysis had a partner reaching ~80% of its target market recorded as `network_effects: absent` — correct reasoning, lost fact. |
 
 **Rules for custom moats:**
 1. Must use `custom_{slug}` naming pattern (kebab-case slug)
