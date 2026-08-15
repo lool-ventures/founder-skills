@@ -674,6 +674,13 @@ def _item_applicable(meta: dict[str, Any], company: dict[str, Any]) -> tuple[boo
     return True, ""
 
 
+# Criteria whose own label carries an applicability qualifier ("where applicable", "where
+# material", "if applicable", "where mature enough"). For these, not_applicable is a judgement
+# about the company, which the assessor is entitled to make. Everywhere else, applicability is
+# decided after the assessment, from the company profile — never during it.
+_JUDGEMENT_NOT_APPLICABLE: frozenset[str] = frozenset({"UNIT_13", "UNIT_17", "CASH_22", "SECTOR_44"})
+
+
 _STRUCTURAL_CATEGORIES = {"Structure & Presentation", "Expenses, Cash & Runway"}
 
 # Per-criterion severity classification (v0.4.2 Phase 1 Task 2).
@@ -738,6 +745,7 @@ def validate_checklist(
 
     # Build enriched items and summary
     enriched: list[dict[str, Any]] = []
+    self_gated: list[str] = []
     pass_count = 0
     fail_count = 0
     warn_count = 0
@@ -764,6 +772,12 @@ def validate_checklist(
             if not is_applicable:
                 status = "not_applicable"
                 evidence = f"Not applicable — {gate_desc}"
+            elif status == "not_applicable" and item_id not in _JUDGEMENT_NOT_APPLICABLE:
+                # The profile says this criterion applies, yet it came back excluded. That
+                # removes it from the score's denominator on a decision this script owns.
+                # Recorded, not overridden: a self-excluded item carries no assessment to
+                # fall back on, and inventing one would be worse than reporting the gap.
+                self_gated.append(item_id)
 
         # Special-case: SECTOR_40 (AI inference costs) should apply when
         # expenses.cogs contains AI-related cost keys, even if the sector
@@ -897,6 +911,7 @@ def validate_checklist(
             "by_category": categories,
             "failed_items": failed_items,
             "warned_items": warned_items,
+            "self_gated_items": self_gated,
         },
     }, []
 
@@ -1008,6 +1023,15 @@ def main() -> None:
 
     _rejected = bool(errors)
     result["validation"] = {"status": "invalid", "errors": errors} if _rejected else {"status": "valid", "errors": []}
+
+    _self_gated = (result.get("summary") or {}).get("self_gated_items") or []
+    if _self_gated:
+        print(
+            "Warning: these criteria came back not applicable, but the company profile says they "
+            f"apply: {', '.join(_self_gated)}. They are excluded from the score, so the score is "
+            "computed over a smaller set of criteria than it should be.",
+            file=sys.stderr,
+        )
 
     # Provenance is stamped BEFORE the refusal below, deliberately: a rejected run writes no
     # artifact, but its diagnostic still goes to stdout, and a diagnostic that names the inputs it

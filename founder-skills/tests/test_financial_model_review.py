@@ -716,7 +716,14 @@ def test_checklist_gating_unknown_sector_warns() -> None:
 
 
 def test_checklist_not_applicable_pre_scored() -> None:
-    """Backward compat: without company profile, agent-supplied not_applicable is trusted."""
+    """Backward compat: without company profile, agent-supplied not_applicable is trusted.
+
+    This path is deliberate, not leftover permissiveness: with no profile the script has no
+    basis to say which criteria apply, so it cannot tell a correct exclusion from a wrong one.
+    Where a profile IS present the wrong ones are recorded in `summary.self_gated_items` --
+    see test_self_gated_applicable_item_is_recorded. Do not delete this test to "tighten" the
+    contract; deleting it would only hide the case the script genuinely cannot judge.
+    """
     items = _make_checklist_items(
         overrides={
             "CASH_28": {"status": "not_applicable", "evidence": "Single-currency company"},
@@ -829,6 +836,73 @@ def test_inputs_file_profile_beats_the_payload_end_to_end(tmp_path: Any) -> None
     # UNIT_10 is "Model format: all" — it must survive.
     assert by_id["UNIT_10"]["status"] == "pass"
     assert "company.model_format differs" in stderr
+
+
+_PROFILE_SPREADSHEET = {
+    "stage": "seed",
+    "model_format": "spreadsheet",
+    "geography": "israel",
+    "revenue_model_type": "saas-sales-led",
+}
+# Criteria whose own label carries an applicability qualifier ("where applicable",
+# "where material", ...) — excluding these is the grader's call, not the script's.
+_JUDGEMENT_NA = ("UNIT_13", "UNIT_17", "CASH_22", "SECTOR_44")
+
+
+def test_self_gated_applicable_item_is_recorded() -> None:
+    """A grader excluding an applicable item silently shrinks the score's denominator."""
+    items = _make_checklist_items(
+        overrides={"UNIT_10": {"status": "not_applicable", "evidence": "Auto-gated: model_format=deck"}}
+    )
+    payload = json.dumps({"items": items, "company": _PROFILE_SPREADSHEET})
+    rc, data, stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0, "warn-and-record must not reject the payload"
+    assert data["summary"]["self_gated_items"] == ["UNIT_10"]
+    assert "UNIT_10" in stderr
+
+
+def test_self_gating_is_recorded_but_not_regraded() -> None:
+    """Recording must not invent an assessment the grader never made."""
+    items = _make_checklist_items(
+        overrides={"UNIT_10": {"status": "not_applicable", "evidence": "Auto-gated: model_format=deck"}}
+    )
+    payload = json.dumps({"items": items, "company": _PROFILE_SPREADSHEET})
+    rc, data, _stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    by_id = {i["id"]: i for i in data["items"]}
+    assert by_id["UNIT_10"]["status"] == "not_applicable"
+
+
+def test_judgement_not_applicable_is_not_recorded() -> None:
+    """The four criteria whose labels carry their own qualifier are exempt."""
+    overrides = {i: {"status": "not_applicable", "evidence": "no expansion motion yet"} for i in _JUDGEMENT_NA}
+    payload = json.dumps({"items": _make_checklist_items(overrides=overrides), "company": _PROFILE_SPREADSHEET})
+    rc, data, _stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data["summary"]["self_gated_items"] == []
+
+
+def test_self_gating_not_recorded_without_a_profile() -> None:
+    """Without a profile the script cannot know what applies, so it must not accuse."""
+    items = _make_checklist_items(overrides={"UNIT_10": {"status": "not_applicable", "evidence": "no revenue model"}})
+    rc, data, _stderr = run_script("checklist.py", ["--pretty"], stdin_data=json.dumps({"items": items}))
+    assert rc == 0
+    assert data["summary"]["self_gated_items"] == []
+
+
+def test_script_gated_items_are_not_recorded_as_self_gated() -> None:
+    """An item the script itself gated away is not the grader shrinking the denominator."""
+    payload = json.dumps(
+        {
+            "items": _make_checklist_items(),
+            "company": {**_PROFILE_SPREADSHEET, "model_format": "deck"},
+        }
+    )
+    rc, data, _stderr = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    by_id = {i["id"]: i for i in data["items"]}
+    assert by_id["STRUCT_01"]["status"] == "not_applicable", "sanity: script gating still fires"
+    assert data["summary"]["self_gated_items"] == []
 
 
 def test_checklist_gating_normalizes_geography() -> None:
@@ -2586,6 +2660,42 @@ def test_pipeline_extract_to_compose() -> None:
 # --- Agent structural smoke test ---
 
 
+def test_compose_flags_self_gated_criteria() -> None:
+    """A recorded denominator shrink must reach a consumer, or recording it is theatre."""
+    checklist_self_gated = json.loads(json.dumps(_VALID_CHECKLIST))
+    checklist_self_gated["summary"]["self_gated_items"] = ["UNIT_10", "METRIC_33"]
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": checklist_self_gated,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, _stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    hits = [w for w in data["validation"]["warnings"] if w["code"] == "CHECKLIST_SELF_GATED"]
+    assert len(hits) == 1, "expected exactly one CHECKLIST_SELF_GATED warning"
+    assert "UNIT_10" in hits[0]["message"] and "METRIC_33" in hits[0]["message"]
+
+
+def test_compose_silent_when_nothing_self_gated() -> None:
+    """The common case must stay quiet, or the warning becomes noise nobody reads."""
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _VALID_UNIT_ECONOMICS,
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    rc, data, _stderr = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    assert [w for w in data["validation"]["warnings"] if w["code"] == "CHECKLIST_SELF_GATED"] == []
+
+
 def test_compose_deck_format_severity_downgrade() -> None:
     """CHECKLIST_FAILURES severity should be 'medium' when model_format is deck."""
     inputs_deck = json.loads(json.dumps(_VALID_INPUTS))
@@ -3185,6 +3295,7 @@ def test_compose_severity_map_complete() -> None:
         "CHECKLIST_FAILURES",
         "MISSING_OPTIONAL_ARTIFACT",
         "CHECKLIST_INCOMPLETE",
+        "CHECKLIST_SELF_GATED",
         "RUNWAY_INCONSISTENCY",
         "METRICS_GAPS",
         "MARKER_COLLISION",

@@ -50,6 +50,7 @@ WARNING_SEVERITY: dict[str, str] = {
     # Checklist failures are review findings, not data errors — present, don't block
     "CHECKLIST_FAILURES": "medium",
     "CHECKLIST_INCOMPLETE": "medium",
+    "CHECKLIST_SELF_GATED": "medium",
     "RUNWAY_INCONSISTENCY": "medium",
     "METRICS_GAPS": "medium",
     "METRIC_SELF_CONTRADICTION": "medium",
@@ -525,6 +526,22 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 )
             )
 
+    # 3b. CHECKLIST_SELF_GATED -- criteria excluded during assessment that the profile says apply.
+    # The score is a fraction, and this shrinks its denominator: the percentage looks normal while
+    # being computed over fewer criteria than the company warrants.
+    if _usable(checklist):
+        summary = _as_dict(checklist.get("summary"))
+        self_gated = [str(i) for i in _as_list(summary.get("self_gated_items"))]
+        if self_gated:
+            warnings.append(
+                _warn(
+                    "CHECKLIST_SELF_GATED",
+                    f"{len(self_gated)} criteria were marked not applicable during assessment "
+                    f"though the company profile says they apply: {self_gated}. "
+                    "They are missing from the score.",
+                )
+            )
+
     # 4. CHECKLIST_INCOMPLETE -- unexpected item count
     if _usable(checklist):
         items = _as_list(checklist.get("items"))
@@ -729,6 +746,16 @@ def _section_checklist(checklist: dict[str, Any] | None) -> str:
 
     lines.append(f"**Overall:** {status} ({score:.0f}%)  ")
     lines.append(f"**Breakdown:** {pass_ct} pass, {fail_ct} fail, {warn_ct} warn, {na_ct} N/A out of {total} items\n")
+
+    # Criteria excluded during assessment that the company profile says apply. Rendered next to
+    # the score because that is what they qualify: the percentage is computed over fewer criteria
+    # than the company warrants, and a reader cannot see that from the percentage alone.
+    self_gated = [str(i) for i in _as_list(summary.get("self_gated_items"))]
+    if self_gated:
+        lines.append(
+            f"**Not assessed:** {len(self_gated)} criteria that apply to your company were marked "
+            f"not applicable and are missing from the score above: {', '.join(self_gated)}\n"
+        )
 
     # Failed items
     failed_items = _as_list(summary.get("failed_items"))
