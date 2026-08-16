@@ -26,6 +26,9 @@ import sys
 import uuid
 from typing import Any, TypeGuard
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _thresholds  # noqa: E402
+
 # Sentinel for corrupt (unparseable) artifact files
 _CORRUPT: dict[str, Any] = {"__corrupt__": True}
 
@@ -51,9 +54,9 @@ WARNING_SEVERITY: dict[str, str] = {
     "CORRUPT_ARTIFACT": "high",
     "MISSING_ARTIFACT": "high",
     "STALE_ARTIFACT": "high",
-    # More failures than the sizing can be called solid with — see
-    # CHECKLIST_CRITICAL_FAILURES for the derivation. That is a statement about the run
-    # rather than about any one item, so it stays unacceptable.
+    # The sizing cannot be called solid however the rest is graded — see
+    # `_checklist_below_solid` for why that is read off the band and not an item count.
+    # A statement about the run rather than about any one item, so it stays unacceptable.
     "CHECKLIST_FAILURES_CRITICAL": "high",
     "OVERCLAIMED_VALIDATION": "high",
     "UNVALIDATED_CLAIMS": "high",
@@ -106,17 +109,34 @@ WARNING_SEVERITY: dict[str, str] = {
 # Only medium-severity codes can be accepted. High-severity = integrity violations.
 ACCEPTIBLE_SEVERITIES = {"medium"}
 
-CHECKLIST_CRITICAL_FAILURES = 6
-"""Above this many checklist failures, the finding is about the RUN, not about the items.
 
-DERIVED FROM `_thresholds.SOLID`, not chosen. With 22 items, 7 failures cap the score at
-15/22 = 68.2% — under the 70 that `solid` requires — while 6 can still reach 72.7%. So
-"more than 6" is exactly "cannot be called solid however the rest is graded", which is why
-that half is high severity and unacceptable while the other half is medium and can be
-accepted with a stated reason.
+def _checklist_below_solid(summary: dict[str, Any]) -> bool:
+    """Is this checklist unable to be called `solid`, however the rest is graded?
 
-The two numbers move together. If `SOLID` changes, re-derive this rather than nudging it.
-"""
+    THE RULE IS THE BAND, NOT A COUNT, and it took a review to see why. This was
+    `fail > 6`, derived correctly but on an assumption nobody wrote down: that all 22
+    criteria apply. They often do not. With 7 `not_applicable` items the applicable set is
+    15, and 5 failures already put the score at 66.7% — below solid — while the absolute
+    threshold said "acceptable content finding". Measured, that exact case fired the medium
+    warning and contradicted the rule the split is justified by.
+
+    Reading the band back off `score_pct` reproduces the documented 6/7 boundary exactly
+    when nothing is N/A (7 of 22 caps the score at 68.2%, under 70; 6 reaches 72.7%), so
+    this is the same rule stated in terms that survive N/A rather than a new one.
+
+    `score_pct` is recomputed here rather than trusted: the producer emits it, but this
+    decides a severity that cannot be accepted away, and it should not rest on an
+    upstream field a hand-built artifact may omit or contradict.
+    """
+    fail = summary.get("fail")
+    passed = summary.get("pass")
+    if not isinstance(fail, int) or not isinstance(passed, int) or fail <= 0:
+        return False
+    applicable = passed + fail
+    if applicable <= 0:
+        return False
+    return _thresholds.band_for(round(passed / applicable * 100, 1)) not in ("strong", "solid")
+
 
 # Codes a PRODUCER may raise into `sizing.json`'s validation.warnings and have re-emitted into
 # the founder-facing Warnings section. Deliberately a subset of WARNING_SEVERITY, not all of it.
@@ -1036,13 +1056,13 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
         fail_count = summary.get("fail")
         if not isinstance(fail_count, int):
             fail_count = len(failed)
-        if fail_count > CHECKLIST_CRITICAL_FAILURES:
+        if _checklist_below_solid(summary):
             failed_ids = [f.get("id", "?") for f in failed]
             warnings.append(
                 _warn(
                     "CHECKLIST_FAILURES_CRITICAL",
-                    f"Checklist has {fail_count} failures: {failed_ids}. More than "
-                    f"{CHECKLIST_CRITICAL_FAILURES} cannot score as solid however the rest is graded",
+                    f"Checklist has {fail_count} failures: {failed_ids} — that cannot score as "
+                    f"solid however the rest is graded",
                 )
             )
         elif fail_count > 0:

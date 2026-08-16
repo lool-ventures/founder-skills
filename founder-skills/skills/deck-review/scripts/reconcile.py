@@ -341,15 +341,39 @@ def _approx_symbol_marks_this_figure_in_quote(raw: str, quote: str) -> bool:
     number, and neither lets a glyph be positioned relative to the figure. Guessing is not
     available: every bound makes the comparison one-sided, so a false positive here buys
     silence on a real finding.
+
+    THE MATCH MUST BE A WHOLE TOKEN, and a bare `find` is not. `"$20"` occurs inside
+    `"≈$200B"`, so a quote reading "market ≈$200B and total $20" marked the $20 approximate
+    off the larger number's glyph -- measured end-to-end, `12 + 9.8 = 21.8` against that
+    stated $20 flipped from `contradiction` to `confirmation`. The character after the match
+    must not continue the number.
+
+    REPEATED OCCURRENCES THAT DISAGREE READ NOTHING. If the same string is printed twice,
+    once marked and once not, which one this figure is cannot be decided here -- and `any()`
+    resolved that toward `approximate`, i.e. toward silence, on no evidence. Unanimity or no
+    bound.
     """
     needle = (raw or "").strip()
     if not needle or not quote:
         return False
+    marked: list[bool] = []
     start = quote.find(needle)
     while start != -1:
-        if _QUOTE_APPROX_PREFIX.search(quote[:start]):
-            return True
+        end = start + len(needle)
+        # A trailing digit, decimal point or scale suffix means this is a longer number
+        # that merely begins with the needle, not an occurrence of the figure.
+        #
+        # The emptiness guard is load-bearing and its absence is a live trap: `"" in ".,%"`
+        # is TRUE in Python, so without it an occurrence at the very end of the quote --
+        # the single most common position for the figure a sentence is about -- was
+        # discarded as "part of a longer number" and the marker never bound.
+        tail = quote[end : end + 1]
+        if not (tail and (tail.isdigit() or tail in ".,%kKmMbBtT")):
+            marked.append(bool(_QUOTE_APPROX_PREFIX.search(quote[:start])))
         start = quote.find(needle, start + 1)
+    if not marked:
+        return False
+    return all(marked)
     return False
 
 
@@ -394,14 +418,50 @@ def detect_bound(raw: str, label: str, quote: str = "") -> str | None:
     # `_approx_symbol_marks_this_figure_in_quote`. Words are NOT read from the quote: a
     # sentence saying "about" attaches to whatever it is about, and unlike a glyph there is
     # no positional test that says which figure that is.
+    #
+    # A WORD IN `raw` ALSO NEEDS A NUMBER TO QUALIFY. The symbol path requires one -- that
+    # hole was closed when `≈` was added, because a bare "≈" (which `ledger.py` accepts,
+    # since it skips the scale check on an unparseable magnitude) marked a figure
+    # approximate off no number at all. The word path never got the same treatment, so
+    # `raw="about"` with `value=100` still read `approximate` and turned a summed 108
+    # against a stated 100 from a contradiction into a confirmation.
+    #
+    # The LABEL is deliberately exempt: a label is prose ABOUT the figure, so "about 100
+    # customers" as a label qualifies the figure it describes whether or not the label
+    # itself repeats the number. `raw` is supposed to BE the figure's printed string.
+    raw_word_binds = bool(_APPROX_WORDS.search(raw) and _NUM_RE.search(raw))
     if (
         _approx_symbol_marks_this_figure(raw)
-        or _APPROX_WORDS.search(raw)
+        or raw_word_binds
         or _APPROX_WORDS.search(label)
         or _approx_symbol_marks_this_figure_in_quote(raw, quote)
     ):
         return "approximate"
     return None
+
+
+_QUOTE_WORD = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
+
+
+def quote_is_identifying(quote: str) -> bool:
+    """Does this quote carry a WORD, rather than only figures and punctuation?
+
+    LIVES HERE, NOT IN `ledger.py`, because both need it and the dependency runs one way:
+    `ledger.py` already imports from this module, so the predicate cannot sit there
+    without a cycle. `ledger.py` warns on it at extraction time; `build()` counts it into
+    `reconciliation.json`, which is the first artifact downstream that compose actually
+    reads.
+
+    The test is the presence of a word, not a length. A short quote that keeps its row
+    label -- "Net revenue $493K" -- is exactly what the schema asks for and is three words
+    long; a word-count floor would flag it. Conversely "63.5% | $635K" is two tokens and
+    identifies nothing. What separates them is whether anything in the string says what
+    the number IS.
+
+    Three letters, so a scale suffix or a currency code cannot pass for a label: "493K"
+    and "$80B" carry no word, "GMV of $493K" carries two.
+    """
+    return bool(_QUOTE_WORD.search(quote or ""))
 
 
 def is_visible(quote: str) -> bool:
@@ -1701,6 +1761,15 @@ def build(
         "figures_total": len(figures),
         "figures_verified": len(verified),
         "second_read_coverage": coverage,
+        # A quote that carries no word identifies nothing: the gate matches TEXT, so "$80B"
+        # is re-found on any slide that prints $80B. `ledger.py` warns at extraction time,
+        # but that warning landed in `ledger.json`, which the receipt does not summarise,
+        # this script does not read for validation, and compose does not load at all — so
+        # it reached no human. Counted here because reconciliation IS read downstream.
+        "quote_quality": {
+            "thin": sum(1 for f in figures if not quote_is_identifying(f.quote)),
+            "total": len(figures),
+        },
         "attribution": {
             "quote_carries_label": sum(1 for f in verified if f.attribution == "quote_carries_label"),
             "layout_attributed": sum(1 for f in verified if f.attribution == "layout_attributed"),

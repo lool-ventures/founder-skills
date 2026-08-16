@@ -244,3 +244,101 @@ def test_an_unknown_source_is_refused() -> None:
         assert rc != 0
         with open(path) as f:
             assert "answer" not in json.load(f)
+
+
+# ---------------------------------------------------------------------------
+# `emit` is the OTHER entry point, and the auto-satisfy restriction guarded only one.
+#
+# The restriction lives in `cmd_answer`, and the schema makes `answer`/`answer_source`
+# optional, so `emit` accepted a gate that arrived already answered. Confirmed end to end:
+# emitting an `out_of_scope_choice` carrying answer "Proceed anyway (best-effort)" and
+# answer_source "auto_satisfied" succeeded and `setup_run.py` then reported resume:true —
+# the deck proceeds, self-authorised, on the one answer a founder most needs to give.
+#
+# An `emit` writes a gate to be ASKED. A gate that already has an answer is not that.
+# ---------------------------------------------------------------------------
+
+
+def test_emit_refuses_a_gate_that_arrives_already_answered() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "gate_state.json")
+        body = {
+            "gate_id": "out_of_scope_choice",
+            "question": "?",
+            "options": ["Stop review", "Proceed anyway (best-effort)"],
+            "context_summary": "x",
+            "answer": "Proceed anyway (best-effort)",
+        }
+        rc, _, err = _run(["emit", "--run-id", "r1", "-o", out], json.dumps(body))
+        assert rc != 0, "emit accepted a pre-answered gate"
+        assert "answer" in err
+        assert not os.path.exists(out), "a refused emit must not write the artifact"
+
+
+def test_emit_refuses_a_pre_set_answer_source() -> None:
+    """The provenance field is written by `answer`, which is where it is checked. Accepting
+    it here lets the whole restriction be routed around."""
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "gate_state.json")
+        body = {
+            "gate_id": "stage_confirmation",
+            "question": "?",
+            "options": ["Looks right"],
+            "context_summary": "x",
+            "answer_source": "auto_satisfied",
+        }
+        rc, _, err = _run(["emit", "--run-id", "r1", "-o", out], json.dumps(body))
+        assert rc != 0, "emit accepted a pre-set answer_source"
+        assert "answer_source" in err
+        assert not os.path.exists(out)
+
+
+def test_emit_still_writes_an_ordinary_pending_gate() -> None:
+    """The counter-test: the normal path must be untouched."""
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "gate_state.json")
+        body = {
+            "gate_id": "out_of_scope_choice",
+            "question": "?",
+            "options": ["Stop review", "Proceed anyway (best-effort)"],
+            "context_summary": "x",
+        }
+        rc, _, err = _run(["emit", "--run-id", "r1", "-o", out], json.dumps(body))
+        assert rc == 0, err
+        with open(out) as f:
+            written = json.load(f)
+        assert "answer" not in written
+        assert "answer_source" not in written
+
+
+def test_the_restriction_cannot_be_routed_around_by_emitting_then_resuming() -> None:
+    """The end-to-end path the review walked: emit a self-answered out-of-scope gate, then
+    ask setup_run whether the run may resume on it."""
+    import subprocess
+
+    setup = os.path.join(os.path.dirname(SCRIPT), "setup_run.py")
+    with tempfile.TemporaryDirectory() as d:
+        review_dir = os.path.join(d, "art", "deck-review-acme")
+        os.makedirs(review_dir)
+        body = {
+            "gate_id": "out_of_scope_choice",
+            "question": "?",
+            "options": ["Stop review", "Proceed anyway (best-effort)"],
+            "context_summary": "x",
+            "answer": "Proceed anyway (best-effort)",
+            "answer_source": "auto_satisfied",
+        }
+        rc, _, _ = _run(["emit", "--run-id", "r1", "-o", os.path.join(review_dir, "gate_state.json")], json.dumps(body))
+        assert rc != 0, "emit wrote the self-authorised gate"
+
+        # Belt and braces: even if such a file reaches disk by some other route, an
+        # auto_satisfied source on a gate that may not carry one must not resume.
+        with open(os.path.join(review_dir, "gate_state.json"), "w") as f:
+            json.dump({"metadata": {"run_id": "r1"}, **body}, f)
+        res = subprocess.run(
+            [sys.executable, setup, "--artifacts-root", os.path.join(d, "art"), "--slug", "acme", "--run-id", "r1"],
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode == 0, res.stderr
+        assert json.loads(res.stdout)["resume"] is False, "a self-answered out-of-scope gate was accepted as a resume"

@@ -330,3 +330,35 @@ def test_a_bad_quote_shape_never_fails_the_ledger() -> None:
     """The whole population would fail. Warn and let the run continue."""
     rc, _, err = _run({"figures": [_fig(quote="$80B"), _fig(id="b", quote="2010", value=2010, raw="2010")]})
     assert rc == 0, err
+
+
+def test_a_numberless_raw_is_refused_on_a_non_date_figure() -> None:
+    """`raw="about"` with `value=100` passed, then read as `approximate` downstream and
+    turned `60 + 48 = 108` against a stated 100 from a contradiction into a confirmation.
+
+    `raw` is supposed to be the figure's own printed string. A `raw` with no parseable
+    magnitude is not one, and the scale check — the whole reason `raw` is required —
+    silently does nothing on it, so the field's one guarantee is absent exactly where it
+    is least visible.
+    """
+    fig = _fig(value=100, raw="about", quote="about one hundred in total")
+    rc, _, err = _run({"figures": [fig]})
+    assert rc != 0
+    assert "about" in err
+
+
+def test_a_date_still_needs_a_number_in_its_raw() -> None:
+    """`raw="TBD"` with `value=2025` passed: the token list is empty, and the date rule
+    only compares against tokens that exist. An empty list is not agreement."""
+    rc, _, err = _run({"figures": [_date(raw="TBD", value=2025, quote="launch TBD")]})
+    assert rc != 0
+
+
+def test_a_real_figure_with_a_parseable_raw_is_untouched() -> None:
+    """The counter-test — every legitimate shape still passes."""
+    for raw, value, kind in (("$493K", 493000, "money"), ("2024", 2024, "date"), ("18 months", 18, "duration")):
+        fig = _fig(value=value, raw=raw, unit_kind=kind, quote=f"the figure is {raw}")
+        if kind != "money":
+            fig.pop("currency", None)
+        rc, _, err = _run({"figures": [fig]})
+        assert rc == 0, f"{raw!r} rejected: {err}"

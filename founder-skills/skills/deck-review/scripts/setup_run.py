@@ -46,6 +46,15 @@ _GATE_STATE_NAME = "gate_state.json"
 
 _AUDITABLE_SOURCES = ("founder", "auto_satisfied")
 
+# Auto-satisfy is legal on exactly one gate and one answer, and `gate_state.py` enforces
+# that at write time. This is the same rule re-checked at READ time, deliberately
+# duplicated: the write-time check was routable around through `emit`, and a rule that
+# authorises skipping a founder's decision should not rest on a single choke point.
+# Whatever put the file there, an auto_satisfied source that does not match this pair is
+# not something to resume on.
+_AUTO_SATISFIABLE_GATE = "stage_confirmation"
+_AUTO_SATISFIABLE_ANSWER = "Looks right"
+
 
 def _read_gate_state(review_dir: str) -> tuple[str, str, str]:
     """Return (answer, run_id, answer_source); ("", "", "") if absent/unreadable."""
@@ -59,12 +68,21 @@ def _read_gate_state(review_dir: str) -> tuple[str, str, str]:
         return "", "", ""
     if not isinstance(gate, dict):
         return "", "", ""
-    answer = gate.get("answer") or ""
+    answer = str(gate.get("answer") or "")
     run_id = ""
     meta = gate.get("metadata")
     if isinstance(meta, dict):
         run_id = meta.get("run_id") or ""
-    return str(answer), str(run_id), str(gate.get("answer_source") or "")
+    source = str(gate.get("answer_source") or "")
+    # Re-check the auto-satisfy pair at read time; see the constants above for why this
+    # is duplicated rather than trusted from the writer. Reported as an unrecorded source
+    # rather than as an error: the effect that matters is that the run does not resume on
+    # it and asks the founder instead.
+    if source == "auto_satisfied" and (
+        gate.get("gate_id") != _AUTO_SATISFIABLE_GATE or answer != _AUTO_SATISFIABLE_ANSWER
+    ):
+        source = ""
+    return answer, str(run_id), source
 
 
 def main() -> int:
@@ -157,6 +175,13 @@ def main() -> int:
         # inferred from `resume`: the two diverge exactly in the case this split exists
         # for — an unauditable same-run answer keeps its checkpoints and is not resumed.
         "cleaned": bool(args.clean and not same_run_answered),
+        # MAY STEPS 2-3 BE SKIPPED? Reported by name because the consumer needs it by name.
+        # Splitting the decision inside this script bought nothing while SKILL.md still
+        # keyed its skip on `resume`: the unauditable-answer case preserved the checkpoints
+        # and then re-ran them anyway, spending the exact three dispatches the preservation
+        # exists to protect. `resume` answers "may the gate be skipped"; this answers "are
+        # the artifacts on disk this run's".
+        "reuse_checkpoints": same_run_answered,
     }
     indent = 2 if args.pretty else None
     sys.stdout.write(json.dumps(out, indent=indent) + "\n")

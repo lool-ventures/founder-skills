@@ -35,7 +35,14 @@ from typing import Any
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from _artifact_writer import load_schema, write_artifact  # type: ignore[import-not-found]  # noqa: E402
-from reconcile import _NUM_RE, DATE, MONEY, _precision, _raw_scale  # type: ignore[import-not-found]  # noqa: E402
+from reconcile import (  # type: ignore[import-not-found]  # noqa: E402
+    _NUM_RE,
+    DATE,
+    MONEY,
+    _precision,
+    _raw_scale,
+    quote_is_identifying,
+)
 
 UNIT_KINDS = {"money", "count", "percent", "multiple", "duration", "date"}
 
@@ -97,24 +104,6 @@ def _numeric_tokens(raw: str) -> list[float]:
         except ValueError:
             continue
     return out
-
-
-_QUOTE_WORD = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
-
-
-def _quote_is_identifying(quote: str) -> bool:
-    """Does this quote carry a WORD, rather than only figures and punctuation?
-
-    The test is the presence of a word, not a length. A short quote that keeps its row
-    label — "Net revenue $493K" — is exactly what the schema asks for and is three words
-    long; a word-count floor would flag it. Conversely "63.5% | $635K" is two tokens and
-    identifies nothing. What separates them is whether anything in the string says what
-    the number IS.
-
-    Three letters, so a scale suffix or a currency code cannot pass for a label: "493K"
-    and "$80B" carry no word, "GMV of $493K" carries two.
-    """
-    return bool(_QUOTE_WORD.search(quote or ""))
 
 
 _BARE_SUFFIX = re.compile(r"\d\s*[kKmMbBtT]\s*$")
@@ -186,7 +175,7 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
         quote = fig.get("quote")
         if not isinstance(quote, str) or not quote.strip():
             errors.append(f"{where} has no quote; the verbatim quote is what the second read checks")
-        elif not _quote_is_identifying(quote):
+        elif not quote_is_identifying(quote):
             # The schema asks for "the verbatim sentence or table row"; this checked only
             # non-empty. A quote of "$80B" or "63.5% | $635K" satisfies that and identifies
             # nothing — the gate it feeds matches TEXT against the second read, so a bare
@@ -215,6 +204,21 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
         raw = fig.get("raw")
         if not isinstance(raw, str) or not raw.strip():
             errors.append(f"{where} has no raw; without the slide's own string, scale cannot be checked")
+        elif not _NUM_RE.search(raw):
+            # A `raw` WITH NO NUMBER IN IT IS NOT THE FIGURE'S PRINTED STRING, and every
+            # check that depends on `raw` quietly does nothing on one. The scale check —
+            # the whole reason the field is required — needs a magnitude to compare, and
+            # the date rule needs tokens to match against; both simply skip. So the one
+            # guarantee `raw` carries is absent exactly where nothing announces it.
+            #
+            # Measured downstream: `raw="about"` with `value=100` also reads as an
+            # approximation, widening tolerance by 10%, which turned a summed 108 against
+            # a stated 100 from a contradiction into a confirmation. `raw="TBD"` on a date
+            # passed for the mirror reason — an empty token list is not agreement.
+            errors.append(
+                f"{where} raw {raw!r} contains no number, so it is not the figure's printed string — "
+                f"record what the slide prints, or omit the figure"
+            )
 
         # A money figure with no currency divides fine and compares meaninglessly.
         if unit_kind == MONEY and not fig.get("currency"):

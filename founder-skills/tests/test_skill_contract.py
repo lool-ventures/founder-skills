@@ -606,7 +606,14 @@ SKILL_MD_CEILING: dict[str, int] = {
     # while identifying nothing — the second read matches TEXT, so a quote of nothing but the figure
     # is re-found on any slide that prints that figure. ledger.py warns on it now, and a warning the
     # extracting agent was never given the rule for is a warning nobody can act on.
-    "deck-review": 93_749,
+    # deck-review 93,749 -> 94,262 (+513): review found that splitting resume-eligibility from
+    # checkpoint-preservation inside setup_run.py bought nothing while SKILL.md still keyed its
+    # "skip Steps 2 and 3" branch on `resume`. The two come apart on exactly the case the split was
+    # built for — an unauditable same-run answer preserves the checkpoints and is not resumed — so
+    # the preserved artifacts were re-run and overwritten, spending the three dispatches the
+    # preservation exists to protect. The skip now reads `reuse_checkpoints`, and the distinction is
+    # stated, because a reader who does not know the two differ reaches for the familiar one.
+    "deck-review": 94_262,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

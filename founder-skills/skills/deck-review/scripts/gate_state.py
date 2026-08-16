@@ -53,6 +53,26 @@ def cmd_emit(args: argparse.Namespace) -> int:
         print("Error: stdin must be a JSON object", file=sys.stderr)
         return 1
 
+    # AN EMIT WRITES A GATE TO BE ASKED, so a gate that already carries an answer is not
+    # one. The schema makes `answer`/`answer_source` optional (a pending gate has neither
+    # and an old artifact may lack the source), which left `emit` accepting both — and the
+    # auto-satisfy restriction below lives in `cmd_answer`, so it was routable around
+    # entirely. Measured: emitting an `out_of_scope_choice` already answered "Proceed
+    # anyway (best-effort)" with `answer_source: auto_satisfied` succeeded, and
+    # `setup_run.py` then reported `resume: true`. The deck proceeds, self-authorised, on
+    # the one answer a founder most needs to give themselves.
+    #
+    # Enforced here rather than in the schema because the schema is shared with the
+    # post-answer artifact, where both fields are legitimate.
+    for field in ("answer", "answer_source"):
+        if field in data:
+            print(
+                f"Error: emit writes a gate to be ASKED and must not carry {field!r} — "
+                f"set it with `gate_state.py answer`, which is where the rules on it are enforced",
+                file=sys.stderr,
+            )
+            return 1
+
     schema = load_schema(_schema_path())
     try:
         receipt = write_artifact(

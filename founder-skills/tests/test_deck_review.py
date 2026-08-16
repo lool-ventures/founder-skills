@@ -1402,6 +1402,9 @@ def test_compose_severity_map_complete() -> None:
         "SLIDE_REVIEW_DUPLICATE",
         "NUMBERS_NOT_REVIEWED",
         "STALE_GATE_STATE",
+        # The ledger's quote-shape finding, surfaced where a human reads it. It was
+        # recorded in ledger.json and consumed by nothing.
+        "THIN_QUOTES",
     ]
     assert len(sev_map) == len(expected), f"expected {len(expected)} codes, got {len(sev_map)}"
     for code in expected:
@@ -4276,14 +4279,21 @@ def test_a_founder_answered_gate_says_nothing_extra() -> None:
     assert _AUTO_SATISFY_SENTENCE not in data["report_markdown"]
 
 
-def test_an_absent_gate_file_is_silent_but_an_unreadable_one_is_fatal() -> None:
-    """Two different conditions, and collapsing them is what makes a guard droppable.
+def test_a_supplied_but_missing_gate_file_is_fatal_and_no_flag_is_silent() -> None:
+    """Corrected: this test previously froze the wrong contract.
 
-    SKILL.md always passes --gate-state, so an absent file means the run never gated —
-    an ordinary, correct state with nothing to disclose. A file that exists and cannot
-    be parsed means the record of how the gate was answered has been destroyed, and
-    composing a report that silently asserts nothing about it is the failure this
-    disclosure exists to prevent.
+    It asserted that a --gate-state pointing at a missing file composes silently, on the
+    reasoning that "SKILL.md always passes the flag, so absent means the run never gated".
+    That reasoning is backwards. The gate sits unconditionally between Step 3 and Step 3.5
+    — there is no path through deck-review that skips it — so if the flag was supplied and
+    the file is not there, the gate step did not run. Composing a clean report over a
+    skipped gate is the "work that never happened" class, and the old assertion made it
+    the specified behaviour.
+
+    Three conditions, and each is now distinct:
+      no flag                 not a gated pipeline (fixtures, direct callers) -> silent
+      flag, file missing      the gate step did not run -> FATAL
+      flag, file unreadable   the record was destroyed -> FATAL
     """
     d = _make_artifact_dir(
         {
@@ -4294,10 +4304,16 @@ def test_an_absent_gate_file_is_silent_but_an_unreadable_one_is_fatal() -> None:
             "reconciliation.json": _VALID_RECONCILIATION,
         }
     )
-    rc, data, err = _run_compose(d, ["--gate-state", os.path.join(d, "nope.json")])
+    # No flag at all: silent, and the report still composes.
+    rc, data, err = _run_compose(d)
     assert rc == 0, err
     assert data is not None
     assert _AUTO_SATISFY_SENTENCE not in data["report_markdown"]
+
+    # Flag supplied, file missing: the gate step did not run.
+    rc_missing, _, err_missing = _run_compose(d, ["--gate-state", os.path.join(d, "nope.json")])
+    assert rc_missing != 0, "a supplied --gate-state pointing at nothing composed silently"
+    assert "gate_state" in err_missing
 
     _gate_file(d, body="{not json at all")
     rc2, _, err2 = _run_compose(d, ["--gate-state", os.path.join(d, "gate_state.json")])
@@ -4325,3 +4341,48 @@ def test_a_gate_from_another_run_is_not_read_as_this_runs_answer() -> None:
     assert _AUTO_SATISFY_SENTENCE not in data["report_markdown"], "a foreign run's gate was disclosed as this run's"
     codes = [w["code"] for w in data["validation"]["warnings"]]
     assert "STALE_GATE_STATE" in codes, f"the mismatch was swallowed silently: {codes}"
+
+
+def test_thin_quotes_reach_a_warning_a_human_reads() -> None:
+    """The last leg of the quote-shape path: counted in reconciliation, surfaced by compose.
+
+    Without this the count is one more artifact field nobody looks at, which is the same
+    defect one layer along — `ledger.py` warned, and the warning died in a file compose
+    does not load.
+    """
+    recon = dict(_VALID_RECONCILIATION)
+    recon["quote_quality"] = {"thin": 3, "total": 12}
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": recon,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    hits = [w for w in data["validation"]["warnings"] if w["code"] == "THIN_QUOTES"]
+    assert len(hits) == 1, [w["code"] for w in data["validation"]["warnings"]]
+    assert hits[0]["severity"] == "medium"
+    assert "3" in hits[0]["message"]
+
+
+def test_a_ledger_of_real_quotes_raises_no_thin_quote_warning() -> None:
+    recon = dict(_VALID_RECONCILIATION)
+    recon["quote_quality"] = {"thin": 0, "total": 12}
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": recon,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    assert "THIN_QUOTES" not in [w["code"] for w in data["validation"]["warnings"]]

@@ -942,3 +942,47 @@ def test_an_earlier_glyph_on_another_number_does_not_reach_this_figure() -> None
     assert detect_bound("$100", "revenue", "a market of ≈$20B and revenue of $100") is None
     # The counter-half: same shape, glyph now on THIS figure, so it must still bind.
     assert detect_bound("$100", "revenue", "a market of $20B and revenue of ≈$100") == "approximate"
+
+
+# ---------------------------------------------------------------------------
+# Two holes in the approximation binding, both found in review, both in the direction
+# that ERASES a real contradiction — which is the direction this module treats as the
+# worst thing it can emit.
+# ---------------------------------------------------------------------------
+
+
+def test_a_quote_glyph_on_a_longer_number_does_not_bind_to_a_shorter_one() -> None:
+    """`quote.find(raw)` matched "$20" inside "≈$200B" and marked the $20 approximate.
+
+    Measured end-to-end: `12 + 9.8 = 21.8` against a stated `$20` whose quote reads
+    "market ≈$200B and total $20" returned `confirmation`; without the glyph it returns
+    `contradiction`. A real finding erased by a substring of a different number.
+    """
+    assert detect_bound("$20", "revenue", "market ≈$200B and revenue $20") is None
+    # The counter-half: the same figure, glyph genuinely on it, must still bind.
+    assert detect_bound("$20", "revenue", "market $200B and revenue ≈$20") == "approximate"
+
+
+def test_repeated_occurrences_that_disagree_read_no_bound() -> None:
+    """One printed twice, once marked and once not, is ambiguous. `any()` resolved it to
+    approximate — the silencing direction — on no evidence about which one this figure is."""
+    assert detect_bound("$20B", "market", "segment A ≈$20B; segment B $20B exactly") is None
+    # Unambiguous repeats keep working, in both directions.
+    assert detect_bound("$20B", "market", "≈$20B in 2024 and ≈$20B in 2025") == "approximate"
+    assert detect_bound("$20B", "market", "$20B in 2024 and $20B in 2025") is None
+
+
+def test_an_approximation_word_still_needs_a_number_to_qualify() -> None:
+    """`raw="about"` with `value=100` reads `approximate` and turns `60 + 48 = 108`
+    against a stated 100 into a confirmation.
+
+    The symbol path already required a number to qualify (that hole was closed when `≈`
+    was added). The WORD path never got the same treatment, so a `raw` that is prose
+    rather than a printed figure still widens tolerance by 10% off no number at all.
+    """
+    assert detect_bound("about", "", "") is None
+    assert detect_bound("approximately", "total", "") is None
+    # A word beside an actual number still binds, and a word in the LABEL still binds to
+    # the figure the label describes — neither of those is what this closes.
+    assert detect_bound("about 100", "", "") == "approximate"
+    assert detect_bound("100", "about 100 customers", "") == "approximate"

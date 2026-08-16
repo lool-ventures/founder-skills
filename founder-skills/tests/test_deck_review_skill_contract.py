@@ -1569,3 +1569,22 @@ def test_compose_is_always_given_the_gate_record() -> None:
     assert invocations, "no compose_report.py bash invocation found in SKILL.md"
     for block in invocations:
         assert "--gate-state" in block, f"a compose_report.py invocation omits --gate-state:\n{block}"
+
+
+def test_the_skill_reads_checkpoint_reuse_from_its_own_field() -> None:
+    """Keying the Steps 2-3 skip on `resume` throws away preserved checkpoints.
+
+    `setup_run.py` reports `resume` (may the gate be skipped) and `reuse_checkpoints`
+    (are the artifacts on disk this run's) separately, and they come apart on exactly the
+    case the split was built for. A skill reading only `resume` re-runs three dispatches
+    it was handed for free.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    assert "reuse_checkpoints" in text, "SKILL.md never reads setup_run.py's reuse_checkpoints"
+    skip_clause = "Skip Steps 2 and 3 if both"
+    assert skip_clause in text
+    window = text[max(0, text.index(skip_clause) - 600) : text.index(skip_clause)]
+    assert "reuse_checkpoints" in window, (
+        "the Steps 2-3 skip is not governed by reuse_checkpoints; if it still keys on "
+        "`resume`, preserved checkpoints are re-run and overwritten"
+    )

@@ -129,6 +129,9 @@ WARNING_SEVERITY: dict[str, str] = {
     # agent-facing text, because the founder's stake is "these are a first pass", not the
     # name of a step.
     "NUMBERS_NOT_REVIEWED": "high",
+    # Medium: the figures are not wrong, the evidence that they were re-found is weak, and
+    # ~7.5% of a real corpus is this shape — too large a pre-existing population to block on.
+    "THIN_QUOTES": "medium",
     "STAGE_MISMATCH": "medium",
     "SLIDE_COUNT_EXTREME": "medium",
     "UNCITED_CRITIQUE": "medium",
@@ -1448,21 +1451,32 @@ def read_gate_state(path: str | None) -> dict[str, Any] | None:
 
     THREE CONDITIONS, and collapsing any two of them is what makes a disclosure droppable:
 
-      no --gate-state       the caller is not a gated pipeline. Nothing to say.
-      path absent           SKILL.md always passes the flag, so this means the run never
-                            gated — an ordinary, correct state with nothing to disclose.
+      no --gate-state       the caller is not a gated pipeline (the fixture-driven compose
+                            invariants, a direct call). Nothing to say.
+      path supplied, missing
+                            FATAL. The stage gate sits unconditionally between Step 3 and
+                            Step 3.5 — no path through the skill skips it — so a caller
+                            that names a gate file and has none did not run the gate step.
+                            An earlier version of this returned None here, on the argument
+                            that "SKILL.md always passes the flag, so absent means the run
+                            never gated". That is backwards: it is precisely BECAUSE the
+                            flag is always passed that absence means a skipped step, and
+                            composing a clean report over one is the work-that-never-
+                            happened class this disclosure exists to surface.
       path present, unreadable
-                            the record of how the gate was answered has been destroyed.
-                            Composing a report that quietly asserts nothing about it is
-                            precisely the failure the disclosure exists to prevent, so
-                            this is fatal rather than silent.
+                            FATAL. The record of how the gate was answered has been
+                            destroyed, and a report that quietly asserts nothing about it
+                            is the same failure in a different costume.
 
-    Raises ValueError for the third; the caller turns it into a non-zero exit.
+    Raises ValueError for the latter two; the caller turns it into a non-zero exit.
     """
     if not path:
         return None
     if not os.path.isfile(path):
-        return None
+        raise ValueError(
+            f"gate_state was named as {path} but no file is there — the stage gate is not optional, "
+            "so this run did not reach it"
+        )
     try:
         with open(path, encoding="utf-8") as f:
             gate = json.load(f)
@@ -1577,6 +1591,35 @@ def compose(
                         "The number checks below are a first pass — nobody reviewed them for "
                         "cases where the comparison itself does not hold, so read them as "
                         "questions to check rather than as settled problems."
+                    ),
+                )
+            )
+
+        # A quote carrying no word identifies nothing — the gate matches TEXT, so "$80B" is
+        # re-found on any slide that prints $80B. `ledger.py` warns on each one, and that
+        # warning went nowhere a human looks: the receipt it prints is {ok, path, bytes},
+        # `reconcile.py` never reads the ledger's validation block, and `ledger.json` is
+        # not in REQUIRED_ARTIFACTS. This is the surfacing step.
+        #
+        # Medium, and deliberately not high: ~7.5% of a real corpus is this shape, and the
+        # figures are not wrong — what is weak is the evidence that they were re-found. A
+        # high warning here would block runs over a known, pre-existing population.
+        quality = _as_dict(reconciliation.get("quote_quality"))
+        thin = quality.get("thin")
+        total = quality.get("total")
+        if isinstance(thin, int) and thin > 0:
+            warnings.append(
+                _warn(
+                    "THIN_QUOTES",
+                    (
+                        f"{thin} of {total} ledger quotes carry no word, so the second read "
+                        "confirmed only that the deck prints those figures somewhere — not that "
+                        "it prints them where the ledger says"
+                    ),
+                    founder_message=(
+                        f"{thin} of the {total} figures we checked were quoted as bare numbers, so "
+                        "the double-check on those was weaker than on the rest: it confirms the "
+                        "number appears in your deck, not that it appears where we say it does."
                     ),
                 )
             )

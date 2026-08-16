@@ -77,9 +77,14 @@ deck does not state. Two rules carry the weight:
   other, so a scale slip is caught rather than silently multiplying every later
   calculation by a thousand.
 - **`quote` is verbatim.** A second reader, who never sees your ledger, looks for that
-  exact wording in the same extracted deck text. The match tolerates small differences in
-  spacing and punctuation, but a reworded sentence fails it and the figure is dropped from
-  the analysis entirely. Copy the wording; do not restate it.
+  wording in the same extracted deck text. A quote that is not found there at all — one
+  you composed, summarised, or built out of a chart you were reading — is dropped from the
+  analysis entirely. Copy the wording; do not restate it.
+
+  Do not read the match as stricter than it is: after an exact and a whitespace-normalised
+  pass it falls back to a similarity ratio, so a close rewording can still pass, and it
+  compares text only — it never checks the figure's value. Copying the wording is what
+  makes the check mean something; it is not enforced word for word.
 
 For `SECOND_READ`: transcribe the listed slides verbatim — every number, label,
 axis value, table cell and footnote as printed. Write `slides_transcribed` (the

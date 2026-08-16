@@ -177,7 +177,7 @@ python3 "$SCRIPTS/setup_run.py" \
   --pretty
 ```
 
-Read `review_dir`, `run_id`, `resume`, and `gate_answer` from the JSON printed by the previous Bash command. Substitute `REVIEW_DIR` with the `review_dir` value, `RUN_ID` with the `run_id` value, and `IS_RESUMING` with `1` if `resume` is true, else empty, in every subsequent bash block. Then:
+Read `review_dir`, `run_id`, `resume`, `reuse_checkpoints`, and `gate_answer` from the JSON printed by the previous Bash command. Substitute `REVIEW_DIR` with the `review_dir` value, `RUN_ID` with the `run_id` value, and `IS_RESUMING` with `1` if `resume` is true, else empty, in every subsequent bash block. Then:
 
 ```bash
 # Context A hand-off dir — PER RUN: sub-agents WRITE their raw output JSON here (the audit trail —
@@ -208,7 +208,9 @@ To resume across a gate round-trip, the caller's task prompt must supply the pri
 
 Pass `RUN_ID` to every producer script via `--run-id`. Producer scripts inject it into `metadata.run_id` automatically. `compose_report.py` enforces that all required artifacts share the same `run_id` and emits a `MISSING_METADATA` (high) warning for any artifact without one. Keeping `RUN_ID` stable across the gate is what prevents a `STALE_ARTIFACT` mismatch with the pre-gate artifacts.
 
-**On re-invocation (`$IS_RESUMING` is set):** `gate_state.json`, `deck_inventory.json`, and `stage_profile.json` all survive `--clean` (same-run artifacts are preserved on resume). Skip Steps 2 and 3 if both `deck_inventory.json` and `stage_profile.json` exist and their `metadata.run_id` matches `$RUN_ID`; otherwise re-run them with the same `RUN_ID`. Apply the same rule to Steps 3.5-3.8: skip them when `reconciliation.json` exists with a matching `metadata.run_id`. It is the most expensive stretch of the pipeline — three dispatches, two of which read the deck — and re-running it on a gate round-trip spends that twice for an identical result.
+**When `reuse_checkpoints` is true:** `gate_state.json`, `deck_inventory.json`, and `stage_profile.json` survived `--clean` because they belong to THIS run. Skip Steps 2 and 3 if both `deck_inventory.json` and `stage_profile.json` exist and their `metadata.run_id` matches `$RUN_ID`; otherwise re-run them with the same `RUN_ID`.
+
+**Read `reuse_checkpoints`, not `resume`, for this decision — they are different questions and they do come apart.** `resume` says the gate may be skipped; `reuse_checkpoints` says the artifacts on disk are this run's. A same-run gate answered without a recorded source yields `resume: false` with `reuse_checkpoints: true`: ask the founder again, but keep what Steps 2-3 already produced. Keying the skip on `resume` re-runs and overwrites them, spending the three dispatches the preservation exists to protect. Apply the same rule to Steps 3.5-3.8: skip them when `reconciliation.json` exists with a matching `metadata.run_id`. It is the most expensive stretch of the pipeline — three dispatches, two of which read the deck — and re-running it on a gate round-trip spends that twice for an identical result.
 
 ### Step 1: Read or Create Founder Context
 

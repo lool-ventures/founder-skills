@@ -90,9 +90,19 @@ APPROVED: list[tuple[str, pathlib.Path, str, str]] = [
         "contract",
     ),
     (
+        # CORRECTED. This anchor used to be "a reworded sentence fails it", and that claim
+        # is false — the same defect the rest of this file exists to catch, committed by
+        # the file itself. Measured against `_quote_match.quote_in_doc`:
+        #     "ARR increased 40%"          vs "ARR decreased 40%"      -> passes (fuzzy)
+        #     "Revenue will double"        vs "Revenue will decline"   -> passes (fuzzy)
+        #     "Market size of $45 billion" vs "... of $46 billion"     -> passes (fuzzy)
+        # After the exact and normalised passes it falls back to a similarity ratio at
+        # 0.85, so rewordings — including negations, directional reversals and changed
+        # numbers — survive it. The agent body now states what the gate does establish:
+        # a quote that is not found AT ALL is dropped.
         "agent contract, matching is not exact",
         REPO_ROOT / "founder-skills" / "agents" / "deck-review.md",
-        "a reworded sentence fails it",
+        "it never checks the figure's value",
         "contract",
     ),
     (
@@ -209,3 +219,39 @@ def test_the_quote_matcher_still_falls_back_to_fuzzy() -> None:
         "the fuzzy fallback is gone or its threshold moved — re-check every surface that "
         "describes what the match tolerates, including agents/deck-review.md"
     )
+
+
+def test_what_the_matcher_actually_accepts_is_pinned_behaviourally() -> None:
+    """The structural pin above sees the threshold constant; this sees the consequence.
+
+    A constant can stay put while the surrounding passes change, and the claim these
+    files make is about behaviour, not about a number. Each case below was measured
+    against the shipped matcher and each one is a reworded sentence that PASSES — which
+    is why "a reworded sentence fails it" had to be withdrawn from the agent body.
+
+    If any of these starts failing the matcher has been hardened, which is good news: the
+    stricter wording becomes available and every surface describing the match should be
+    revisited in the same change.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_qm_probe", DECK_REVIEW / "scripts" / "_quote_match.py")
+    assert spec and spec.loader
+    qm = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(qm)
+
+    accepted_rewordings = [
+        ("ARR increased 40% year over year in 2024", "ARR decreased 40% year over year in 2024"),
+        ("Revenue will double over the next twelve months", "Revenue will decline over the next twelve months"),
+        ("Total market size of $45 billion by 2030", "Total market size of $46 billion by 2030"),
+    ]
+    for quote, doc in accepted_rewordings:
+        found, _how, _ratio = qm.quote_in_doc(quote, doc)
+        assert found, (
+            f"the matcher now REJECTS {quote!r} against {doc!r}. It has been hardened — revisit "
+            "agents/deck-review.md, which currently tells the agent the match is not word-for-word."
+        )
+
+    # The floor the gate does hold: text absent from the document is not found.
+    absent, _how, _ratio = qm.quote_in_doc("Gross margin of 82% on enterprise contracts", "Nothing of the sort here.")
+    assert not absent, "the matcher accepts a quote with no counterpart in the document at all"

@@ -259,9 +259,14 @@ def test_stale_gate_run_id_mismatch_with_clean_deletes_pipeline_artifacts() -> N
 # ---------------------------------------------------------------------------
 
 
-def _plant_sourced_gate(review_dir: str, run_id: str, answer: str, source: str | None) -> None:
+def _plant_sourced_gate(
+    review_dir: str, run_id: str, answer: str, source: str | None, gate_id: str = "stage_confirmation"
+) -> None:
+    """A planted gate carries a `gate_id`, because a real one always does — `emit`
+    schema-validates it as required. The auto-satisfy pair is re-checked at read time, so
+    a fixture omitting it is not merely incomplete, it exercises a different branch."""
     os.makedirs(review_dir, exist_ok=True)
-    body: dict = {"metadata": {"run_id": run_id}, "answer": answer}
+    body: dict = {"metadata": {"run_id": run_id}, "gate_id": gate_id, "answer": answer}
     if source is not None:
         body["answer_source"] = source
     with open(os.path.join(review_dir, "gate_state.json"), "w") as f:
@@ -386,3 +391,58 @@ def test_the_two_turn_gate_lifecycle_end_to_end() -> None:
         assert second["gate_answer"] == "Looks right"
         assert second["answer_source"] == "founder"
         assert os.path.exists(os.path.join(review_dir, "deck_inventory.json"))
+
+
+def test_auto_satisfied_is_re_checked_at_read_time_not_trusted() -> None:
+    """`gate_state.py` enforces the auto-satisfy pair at write time, and that check was
+    routable around through `emit`. A rule that authorises skipping a founder's decision
+    should not rest on one choke point, so it is re-checked here — whatever put the file
+    on disk, an `auto_satisfied` source outside its one legal pair does not resume."""
+    for gate_id, answer in (
+        ("out_of_scope_choice", "Proceed anyway (best-effort)"),
+        ("stage_choice", "Series A"),
+        ("stage_confirmation", "Different stage"),
+    ):
+        with tempfile.TemporaryDirectory() as d:
+            review_dir = os.path.join(d, "artifacts", "deck-review-acme-corp")
+            _plant_sourced_gate(review_dir, "r1", answer, "auto_satisfied", gate_id=gate_id)
+            out = _turn(d, "r1")
+            assert out["resume"] is False, f"{gate_id}/{answer!r} self-authorised a resume"
+
+    # The one legal pair still resumes, or the guard has eaten the feature.
+    with tempfile.TemporaryDirectory() as d:
+        review_dir = os.path.join(d, "artifacts", "deck-review-acme-corp")
+        _plant_sourced_gate(review_dir, "r1", "Looks right", "auto_satisfied")
+        assert _turn(d, "r1")["resume"] is True
+
+
+def test_checkpoint_reuse_is_reported_separately_from_gate_resume() -> None:
+    """Splitting the two variables inside `setup_run.py` bought nothing on its own.
+
+    The unauditable-answer case returns `resume: false` and preserves the checkpoints —
+    but SKILL.md keys its "skip Steps 2 and 3" branch on `resume`, so the preserved
+    artifacts were re-run and overwritten anyway, and the expensive stretch the
+    preservation exists to protect was spent regardless.
+
+    The consumer needs the second variable by name, so it is reported by name.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        review_dir = os.path.join(d, "artifacts", "deck-review-acme-corp")
+        _plant_sourced_gate(review_dir, "r1", "Looks right", None)
+        _plant_checkpoints(review_dir)
+        out = _turn(d, "r1")
+        assert out["resume"] is False, "the gate must still be re-asked"
+        assert out["reuse_checkpoints"] is True, "the preserved checkpoints are not reported as reusable"
+
+    # A genuine resume reuses them too.
+    with tempfile.TemporaryDirectory() as d:
+        review_dir = os.path.join(d, "artifacts", "deck-review-acme-corp")
+        _plant_sourced_gate(review_dir, "r1", "Looks right", "founder")
+        _plant_checkpoints(review_dir)
+        out = _turn(d, "r1")
+        assert out["resume"] is True and out["reuse_checkpoints"] is True
+
+    # A fresh run has nothing to reuse, and says so.
+    with tempfile.TemporaryDirectory() as d:
+        out = _turn(d, "r1")
+        assert out["resume"] is False and out["reuse_checkpoints"] is False

@@ -632,3 +632,68 @@ def test_contradictions_are_ordered_most_wrong_first() -> None:
     assert len(cons) == 2, f"fixture produced no comparison to order: {out['relations']}"
     gaps = [abs(r["computed"] - r["expected_value"]) / abs(r["expected_value"]) for r in cons]
     assert gaps == sorted(gaps, reverse=True), f"not ordered most-wrong-first: {gaps}"
+
+
+def test_thin_quotes_are_counted_where_something_downstream_can_see_them() -> None:
+    """The quote-shape warning was written into `ledger.json` and read by nothing.
+
+    Measured: `ledger.py` records it under `validation.warnings`, but the receipt printed
+    to stdout is `{ok, path, bytes}`, SKILL.md branches on the exit code alone,
+    `reconcile.py` never reads the ledger's validation block, and `ledger.json` is not in
+    compose's REQUIRED_ARTIFACTS. So a quote of `$80B` still verified globally and the
+    warning reached no human — computed, not delivered, which is the delivery-defect class
+    this fleet has shipped before.
+
+    Reconciliation is the first artifact downstream that compose does read, so the count
+    goes there.
+    """
+    ledger = {
+        "figures": [
+            {
+                "id": "a",
+                "value": 80e9,
+                "raw": "$80B",
+                "unit_kind": "money",
+                "label": "TAM",
+                "slide": 6,
+                "quote": "$80B",
+                "currency": "USD",
+            },
+            {
+                "id": "b",
+                "value": 2e6,
+                "raw": "$2M",
+                "unit_kind": "money",
+                "label": "ARR",
+                "slide": 6,
+                "quote": "ARR of $2M in 2024",
+                "currency": "USD",
+            },
+        ]
+    }
+    rc, out, err = _run([], ledger=ledger, transcript="Slide 6: $80B. ARR of $2M in 2024.")
+    assert rc == 0, err
+    quality = out.get("quote_quality")
+    assert isinstance(quality, dict), f"reconciliation.json carries no quote_quality block: {sorted(out)}"
+    assert quality["thin"] == 1, quality
+    assert quality["total"] == 2, quality
+
+
+def test_a_ledger_of_real_quotes_reports_none_thin() -> None:
+    ledger = {
+        "figures": [
+            {
+                "id": "b",
+                "value": 2e6,
+                "raw": "$2M",
+                "unit_kind": "money",
+                "label": "ARR",
+                "slide": 6,
+                "quote": "ARR of $2M in 2024",
+                "currency": "USD",
+            },
+        ]
+    }
+    rc, out, err = _run([], ledger=ledger, transcript="Slide 6: ARR of $2M in 2024.")
+    assert rc == 0, err
+    assert out["quote_quality"] == {"thin": 0, "total": 1}

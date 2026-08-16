@@ -6292,3 +6292,91 @@ def test_the_critical_half_can_never_be_accepted_away() -> None:
     assert len(critical) == 1
     assert critical[0]["severity"] == "high"
     assert "cannot accept" in stderr
+
+
+def test_the_critical_split_follows_the_band_not_an_item_count() -> None:
+    """The threshold was an absolute count derived on the assumption that all 22 criteria
+    apply. With `not_applicable` items the applicable set shrinks and the count at which
+    "cannot reach solid" begins drops with it — at 7 N/A it is 5, not 7.
+
+    Measured: pass=10, fail=5, na=7 scores 66.7%, band `needs_work` — below solid — and
+    fired the MEDIUM, acceptable warning, contradicting the rule the split states. The
+    severity has to come from the band the score actually lands in.
+    """
+    art = dict(_VALID_CHECKLIST)
+    art["summary"] = {
+        "total": 22,
+        "pass": 10,
+        "fail": 5,
+        "not_applicable": 7,
+        "score_pct": 66.7,
+        "overall_status": "needs_work",
+        "all_pass": False,
+        "failed_items": [{"id": f"i{n}", "category": "c", "label": f"i{n}", "notes": "n"} for n in range(5)],
+    }
+    d = _make_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "methodology.json": _VALID_METHODOLOGY,
+            "validation.json": _VALID_VALIDATION,
+            "sizing.json": _VALID_SIZING,
+            "sensitivity.json": _VALID_SENSITIVITY,
+            "checklist.json": art,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = _codes(data)
+    assert "CHECKLIST_FAILURES_CRITICAL" in codes, (
+        f"a sizing scoring below solid was filed as an acceptable content finding: {codes}"
+    )
+    assert "CHECKLIST_FAILURES" not in codes
+
+
+def test_the_all_applicable_boundary_is_unchanged() -> None:
+    """The band rule must reproduce the documented 6/7 boundary when nothing is N/A, or it
+    is a different rule wearing the same justification."""
+    rc6, d6, _ = _compose_with_checklist(6)
+    assert rc6 == 0 and d6 is not None
+    assert "CHECKLIST_FAILURES" in _codes(d6) and "CHECKLIST_FAILURES_CRITICAL" not in _codes(d6)
+    rc7, d7, _ = _compose_with_checklist(7)
+    assert rc7 == 0 and d7 is not None
+    assert "CHECKLIST_FAILURES_CRITICAL" in _codes(d7)
+
+
+def test_not_applicable_items_do_not_count_against_the_band() -> None:
+    """The discriminating case, and the reason the previous test was not enough.
+
+    pass=12, fail=3, na=7 is 12/15 = 80% — `solid`, so a medium content finding. Score it
+    against all 22 instead and it reads 54.5% (`needs_work`) and fires the unacceptable
+    warning on a sizing that is fine. Mutation-tested: hardcoding the denominator to 22
+    left the other N/A test green, because that one is below solid under both readings.
+    """
+    art = dict(_VALID_CHECKLIST)
+    art["summary"] = {
+        "total": 22,
+        "pass": 12,
+        "fail": 3,
+        "not_applicable": 7,
+        "score_pct": 80.0,
+        "overall_status": "solid",
+        "all_pass": False,
+        "failed_items": [{"id": f"i{n}", "category": "c", "label": f"i{n}", "notes": "n"} for n in range(3)],
+    }
+    d = _make_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "methodology.json": _VALID_METHODOLOGY,
+            "validation.json": _VALID_VALIDATION,
+            "sizing.json": _VALID_SIZING,
+            "sensitivity.json": _VALID_SENSITIVITY,
+            "checklist.json": art,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    codes = _codes(data)
+    assert "CHECKLIST_FAILURES" in codes, f"a solid sizing lost its acceptable warning: {codes}"
+    assert "CHECKLIST_FAILURES_CRITICAL" not in codes, f"N/A items were counted as failures against the band: {codes}"

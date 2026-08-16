@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "reconciliation.json",
-  "description": "What the deck's own numbers say about each other. Produced by reconcile.py from the ledger, the second read, and the model's proposed relations. `relations` holds ONLY what a founder sees \u2014 select() decides that, and suppressed relations are reported as counts so nothing downstream can reach past it.",
+  "description": "What the deck's own numbers say about each other. Produced by reconcile.py from the ledger, the second read, and the model's proposed relations. `relations` holds ONLY what a founder sees — select() decides that, and suppressed relations are reported as counts so nothing downstream can reach past it.",
   "type": "object",
   "required": [
     "status",
@@ -29,7 +29,7 @@
       "type": "integer"
     },
     "second_read_coverage": {
-      "description": "Which figure-bearing slides the second read actually covered, as DECLARED by the reader \u2014 this compares slide-number lists and never inspects the transcript. A figure whose slide is in slides_missing is one nobody looked at: our coverage gap, not the deck's problem. It does NOT follow that such a figure failed the gate \u2014 verification matches each quote against the whole transcript without consulting the figure's slide, so a quote from an uncovered slide can still be found in another slide's text.",
+      "description": "Which figure-bearing slides the second read actually covered, as DECLARED by the reader — this compares slide-number lists and never inspects the transcript. A figure whose slide is in slides_missing is one nobody looked at: our coverage gap, not the deck's problem. It does NOT follow that such a figure failed the gate — verification matches each quote against the whole transcript without consulting the figure's slide, so a quote from an uncovered slide can still be found in another slide's text.",
       "type": "object",
       "properties": {
         "slides_named": {
@@ -52,8 +52,20 @@
         }
       }
     },
+    "quote_quality": {
+      "description": "How many of the ledger's quotes carry no word of three or more letters. Such a quote identifies nothing: the gate matches TEXT, so a quote of '$80B' is re-found on any slide that prints $80B and confirms only that the deck contains that figure somewhere. ledger.py warns on each at extraction time; this count is the surface a reader downstream can actually see, because ledger.json is not loaded by compose.",
+      "type": "object",
+      "properties": {
+        "thin": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        }
+      }
+    },
     "attribution": {
-      "description": "Not a gate \u2014 a field. quote_carries_label means the label's words appear in the quote; layout_attributed means they do not, and the figure's meaning rests on where it sat on the slide. The weaker of the two bounds a relation's confidence.",
+      "description": "Not a gate — a field. quote_carries_label means the label's words appear in the quote; layout_attributed means they do not, and the figure's meaning rests on where it sat on the slide. The weaker of the two bounds a relation's confidence.",
       "type": "object",
       "properties": {
         "quote_carries_label": {
