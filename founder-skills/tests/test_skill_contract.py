@@ -491,7 +491,19 @@ SKILL_MD_CEILING: dict[str, int] = {
     # A refused cross-check is invisible in every other payload key -- the figure is present and
     # `deck_coverage` still reports it as stated -- so a coach not handed this writes as though the
     # founder's own number had been verified against ours. Deliberate.
-    "market-sizing": 90_547,
+    # market-sizing 90,547 -> 92,125 (+1,578 B) for the checklist band change, in three parts.
+    # (a) The warnings block is replaced by the two-class version deck-review already carries,
+    # with the discriminating test stated ("can re-running fix it?"). It also names the two codes
+    # that fit NEITHER class rather than filing them wrongly: IMPLAUSIBLE_PCT_SCALE cannot tell a
+    # 0.35-for-35% typo from a legitimate 0.35%, so calling it pipeline-integrity would instruct
+    # the model to fix-and-re-run a possibly-correct number; UNVALIDATED_CLAIMS conflates "not
+    # investigated" with "searched, nothing found". Both were previously covered by "fix
+    # high-severity warnings and re-run", which is wrong advice for a true content finding.
+    # (b) `--strict` is documented as blocking high AND medium, so it cannot serve as a
+    # pipeline-only gate — otherwise the split above reads as if it enables one.
+    # (c) The Context B payload template gains `overall_status` and `all_pass`. A payload key no
+    # prompt surface names is a key the sub-agent never reads.
+    "market-sizing": 92_125,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -807,7 +819,10 @@ REFERENCES_CEILING: dict[str, int] = {
     # +370 B (42_813 -> 43_183): the `approaches_reconciled` rubric was rewritten so that the
     # two approaches agreeing is no longer a pass on its own -- the pipeline cannot tell whether
     # both builds rest on the same underlying figures, so closeness is not confirmation.
-    "market-sizing": 43_183,
+    # +771 B (43_183 -> 43_954): artifact-schemas.md documented `overall_status` as the boolean
+    # ("pass" if fail==0) and CHECKLIST_FAILURES as high-severity-on-any-failure. Both statements
+    # became false with the band split, and the reference is where a producer author looks.
+    "market-sizing": 43_954,
     # fmr raised to document `graded_against` on the three producer outputs that stamp it — a new
     # artifact field is not discoverable from a schema doc that omits it, and the field exists to make
     # staleness detectable at all (run_id parity cannot see corrections applied within a run).

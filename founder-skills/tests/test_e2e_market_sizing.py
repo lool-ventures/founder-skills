@@ -92,6 +92,41 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
     for metric in ("tam", "sam", "som"):
         assert metric in payload, f"coaching payload is missing the headline {metric.upper()}"
 
+    # The band and the boolean, on the surface the sub-agent actually reads. The contract
+    # tests pin that these keys are emitted and named on both prompts; only a live run can
+    # show them arriving in a payload a coach then works from. Without these assertions this
+    # lane is green whether or not the change landed, and a paid run proves nothing about it.
+    assert payload["schema_version"] == "v0.5.0-market-sizing", (
+        f"coaching payload is at {payload.get('schema_version')!r}; the band change bumped it"
+    )
+    assert summary.get("overall_status") in {"strong", "solid", "needs_work", "major_revision"}, (
+        f"overall_status is {summary.get('overall_status')!r}, not a fleet band — the boolean "
+        "vocabulary is what the band change replaced"
+    )
+    assert isinstance(summary.get("all_pass"), bool), (
+        f"all_pass is {summary.get('all_pass')!r}; the coach cannot tell whether anything is "
+        "still outstanding without it"
+    )
+    # The two must be independently derived, not one computed from the other: `all_pass` is
+    # true exactly when nothing failed, whatever band the score lands in.
+    assert summary["all_pass"] == (summary.get("fail") == 0), f"all_pass disagrees with the failure count: {summary}"
+
+    # The checklist warnings are mutually exclusive and split on the failure count. Both
+    # present would show a founder the same failures twice under opposite acceptance rules.
+    report = json.loads((review_dir / "report.json").read_text(encoding="utf-8"))
+    codes = [w.get("code") for w in report.get("validation", {}).get("warnings", [])]
+    assert not ("CHECKLIST_FAILURES" in codes and "CHECKLIST_FAILURES_CRITICAL" in codes), (
+        f"both checklist warnings fired: {codes}"
+    )
+    for warning in report.get("validation", {}).get("warnings", []):
+        if warning.get("code") == "CHECKLIST_FAILURES":
+            assert warning.get("severity") in {"medium", "acknowledged"}, (
+                "CHECKLIST_FAILURES is high again, so a content finding cannot be accepted "
+                "with a stated reason and the only way past it is to re-run until it goes away"
+            )
+        if warning.get("code") == "CHECKLIST_FAILURES_CRITICAL":
+            assert warning.get("severity") == "high", warning
+
     assert_run_id_parity(
         review_dir,
         ["inputs.json", "sizing.json", "validation.json", "sensitivity.json", "checklist.json", "report.json"],

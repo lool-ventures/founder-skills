@@ -51,11 +51,22 @@ WARNING_SEVERITY: dict[str, str] = {
     "CORRUPT_ARTIFACT": "high",
     "MISSING_ARTIFACT": "high",
     "STALE_ARTIFACT": "high",
-    "CHECKLIST_FAILURES": "high",
+    # More failures than the sizing can be called solid with — see
+    # CHECKLIST_CRITICAL_FAILURES for the derivation. That is a statement about the run
+    # rather than about any one item, so it stays unacceptable.
+    "CHECKLIST_FAILURES_CRITICAL": "high",
     "OVERCLAIMED_VALIDATION": "high",
     "UNVALIDATED_CLAIMS": "high",
     "IMPLAUSIBLE_PCT_SCALE": "high",
     # Medium severity — include in Warnings section of report
+    #
+    # MEDIUM IS THE POINT, not a downgrade. `ACCEPTIBLE_SEVERITIES` is exactly {"medium"},
+    # so at high this could not be accepted with a stated reason at all, and SKILL.md's
+    # advice for a high warning — fix the underlying issue and re-run — was being given for
+    # a CONTENT finding. That is an instruction to re-run until a true finding disappears.
+    # A founder whose SOM share is deliberately conservative can now say so; a run with more
+    # failures than `solid` allows still cannot (see CHECKLIST_FAILURES_CRITICAL above).
+    "CHECKLIST_FAILURES": "medium",
     "UNSOURCED_ASSUMPTIONS": "medium",
     "APPROACH_MISMATCH": "medium",
     "TAM_DISCREPANCY": "medium",
@@ -94,6 +105,18 @@ WARNING_SEVERITY: dict[str, str] = {
 
 # Only medium-severity codes can be accepted. High-severity = integrity violations.
 ACCEPTIBLE_SEVERITIES = {"medium"}
+
+CHECKLIST_CRITICAL_FAILURES = 6
+"""Above this many checklist failures, the finding is about the RUN, not about the items.
+
+DERIVED FROM `_thresholds.SOLID`, not chosen. With 22 items, 7 failures cap the score at
+15/22 = 68.2% — under the 70 that `solid` requires — while 6 can still reach 72.7%. So
+"more than 6" is exactly "cannot be called solid however the rest is graded", which is why
+that half is high severity and unacceptable while the other half is medium and can be
+accepted with a stated reason.
+
+The two numbers move together. If `SOLID` changes, re-derive this rather than nudging it.
+"""
 
 # Codes a PRODUCER may raise into `sizing.json`'s validation.warnings and have re-emitted into
 # the founder-facing Warnings section. Deliberately a subset of WARNING_SEVERITY, not all of it.
@@ -150,6 +173,7 @@ WARNING_LABELS: dict[str, str] = {
     "MISSING_ARTIFACT": "Missing Artifact",
     "IMPLAUSIBLE_PCT_SCALE": "Implausible Percentage Scale",
     "CHECKLIST_FAILURES": "Checklist Failures",
+    "CHECKLIST_FAILURES_CRITICAL": "Critical Checklist Failures",
     "OVERCLAIMED_VALIDATION": "Overclaimed Validation",
     "UNVALIDATED_CLAIMS": "Unvalidated Claims",
     "MISSING_OPTIONAL_ARTIFACT": "Missing Optional Artifact",
@@ -997,16 +1021,36 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                 )
             )
 
-    # 9. CHECKLIST_FAILURES
+    # 9. CHECKLIST_FAILURES / CHECKLIST_FAILURES_CRITICAL
+    #
+    # THE TRIGGER READS THE COUNT, NOT THE BAND. It used to test
+    # `overall_status == "fail"`, a value the 4-band vocabulary no longer contains — left
+    # alone this became dead code and the warning stopped firing with nothing to say so.
+    # The count is what the warning is about anyway; the band was only ever a proxy for it.
+    #
+    # MUTUALLY EXCLUSIVE. Both firing would show a founder the same failures twice under two
+    # severities, and the acceptance rules for the two are opposite.
     if _usable(checklist):
         summary = _as_dict(checklist.get("summary"))
-        if summary.get("overall_status") == "fail":
-            failed = _as_list(summary.get("failed_items"))
+        failed = _as_list(summary.get("failed_items"))
+        fail_count = summary.get("fail")
+        if not isinstance(fail_count, int):
+            fail_count = len(failed)
+        if fail_count > CHECKLIST_CRITICAL_FAILURES:
+            failed_ids = [f.get("id", "?") for f in failed]
+            warnings.append(
+                _warn(
+                    "CHECKLIST_FAILURES_CRITICAL",
+                    f"Checklist has {fail_count} failures: {failed_ids}. More than "
+                    f"{CHECKLIST_CRITICAL_FAILURES} cannot score as solid however the rest is graded",
+                )
+            )
+        elif fail_count > 0:
             failed_ids = [f.get("id", "?") for f in failed]
             warnings.append(
                 _warn(
                     "CHECKLIST_FAILURES",
-                    f"Checklist has {len(failed)} failures: {failed_ids}",
+                    f"Checklist has {fail_count} failures: {failed_ids}",
                 )
             )
 
@@ -2015,7 +2059,7 @@ def _emit_coaching_payload(
     sizing: dict[str, Any] | None = None,
     currency: str = "USD",
 ) -> dict[str, Any]:
-    """Build the v0.4.2 coaching_payload for market-sizing (schema_version v0.4.2-market-sizing).
+    """Build the coaching_payload for market-sizing (schema_version v0.5.0-market-sizing).
 
     Read from existing artifacts; do not fabricate fields.
     market-sizing's checklist has only pass/fail/not_applicable (no warn status),
@@ -2061,10 +2105,16 @@ def _emit_coaching_payload(
         }
 
     return {
-        "schema_version": "v0.4.2-market-sizing",
+        "schema_version": "v0.5.0-market-sizing",
         "summary": {
             "score_pct": summary.get("score_pct"),
+            # The band (how good) and the boolean (is anything outstanding) are two facts,
+            # and the coach needs both. `strong` is compatible with an open item — 21 of 22
+            # is 95.5% — so a coach given only the band cannot tell the founder there is
+            # something left to do, and one given only the boolean reads 21/22 and 1/22 the
+            # same way.
             "overall_status": summary.get("overall_status"),
+            "all_pass": summary.get("all_pass"),
             "total": summary.get("total"),
             "pass": summary.get("pass"),
             "fail": summary.get("fail"),

@@ -273,7 +273,12 @@ file, and you never re-type or re-emit the commentary after the Write.
 The staged `coaching_payload.json` (Read it from the path in your dispatch prompt) contains these
 keys (do not refetch from disk):
 
-- `summary` (score_pct, total, pass, fail, not_applicable)
+- `summary` (score_pct, `"overall_status"`, `"all_pass"`, total, pass, fail, not_applicable).
+  `overall_status` is the band — strong / solid / needs_work / major_revision — and says how
+  good the sizing is. `all_pass` is true only when nothing failed. They are independent: 21
+  of 22 items passing is 95.5%, a strong sizing that still has one item open. Coach on both;
+  reading only the band hides outstanding work, reading only the boolean makes 21/22 and
+  1/22 sound alike.
 - `failed_items` — array of failed checklist items (market-sizing checklist
   has no `warn` status, so `warned_items` is always `[]`; reason from
   `failed_items` only)

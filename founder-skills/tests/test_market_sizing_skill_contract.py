@@ -1027,6 +1027,10 @@ def test_post_compose_coaching_dispatch_includes_coaching_payload_keys() -> None
     # pinned two-surface by test_coaching_payload_schema_version_is_market_sizing.
     required_keys = {
         "summary",
+        # Inside `summary`, but named here because the substring check is what the sub-agent
+        # actually needs: a key no prompt surface mentions is a key it never reads.
+        "overall_status",
+        "all_pass",
         "failed_items",
         "warned_items",
         "high_severity_warnings",
@@ -1543,3 +1547,29 @@ def test_sensitivity_dispatch_emits_validation_confidence_backstop() -> None:
         "`validation_confidence`. Without it, a range missing its own `confidence` falls back "
         "to `sourced` and a derived/agent_estimate parameter loses its widening floor silently."
     )
+
+
+def test_the_coaching_payload_carries_the_band_and_the_boolean() -> None:
+    """`overall_status` and `all_pass` are two different facts and the coach needs both.
+
+    Without the band the coach cannot say how good the sizing is — every failure count
+    read as the same word. Without the boolean it cannot say whether anything is still
+    outstanding, because a `strong` band is compatible with an open item (21/22 = 95.5%).
+
+    A payload key nothing names on the prompt surfaces is a key the sub-agent never reads,
+    which is the shape of every "computed, not delivered" defect in this fleet.
+    """
+    compose_src = (SCRIPTS_DIR / "compose_report.py").read_text(encoding="utf-8")
+    payload_start = compose_src.index("def _emit_coaching_payload")
+    payload_body = compose_src[payload_start:]
+    for key in ("overall_status", "all_pass"):
+        assert f'"{key}"' in payload_body, f"_emit_coaching_payload does not emit {key!r}"
+
+    skill_text = SKILL_MD.read_text(encoding="utf-8")
+    agent_text = AGENT_MD.read_text(encoding="utf-8")
+    agent_start = agent_text.find("### Context B")
+    assert agent_start != -1
+    agent_section = agent_text[agent_start : agent_start + 8000]
+    for key in ("overall_status", "all_pass"):
+        assert f'"{key}"' in skill_text, f"SKILL.md's Context B template does not name {key!r}"
+        assert key in agent_section, f"agents/market-sizing.md Context B does not name {key!r}"

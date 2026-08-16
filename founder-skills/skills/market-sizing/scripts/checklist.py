@@ -26,6 +26,9 @@ import os
 import sys
 from typing import Any, NoReturn
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _thresholds  # noqa: E402
+
 
 def _write_output(data: str, output_path: str | None, *, summary: dict[str, Any] | None = None) -> None:
     """Write JSON string to file or stdout."""
@@ -186,10 +189,23 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
     canonical_order = {item["id"]: i for i, item in enumerate(CHECKLIST_ITEMS)}
     enriched.sort(key=lambda x: canonical_order.get(x["id"], 999))
 
-    overall = "pass" if fail_count == 0 else "fail"
-
     applicable = len(CHECKLIST_ITEMS) - na_count
     score_pct = round((pass_count / applicable) * 100, 1) if applicable > 0 else 0.0
+
+    # TWO FACTS, NOT ONE. This emitted a zero-defect boolean spelled "pass"/"fail", so 21 of
+    # 22 items passing and 1 of 22 passing were the same word, and the `score_pct` computed
+    # on the line above decided nothing. The other three checklists in the fleet emit a
+    # 4-band grade, and a founder who runs two skills has to get grades that mean the same
+    # thing.
+    #
+    # `all_pass` keeps the boolean, because it is a real and separate statement and it is
+    # what the CHECKLIST_FAILURES warning keys on: the band says how good the sizing is,
+    # the boolean says whether anything is still outstanding. 95.5% with one open item is
+    # both `strong` and not all-pass.
+    #
+    # ORDERING IS LOAD-BEARING. `score_pct` was computed AFTER the old assignment; a band
+    # written in the old position reads an undefined name.
+    overall = _thresholds.band_for(score_pct)
 
     return {
         "items": enriched,
@@ -200,6 +216,7 @@ def validate_checklist(items: list[dict[str, Any]]) -> tuple[dict[str, Any], lis
             "not_applicable": na_count,
             "score_pct": score_pct,
             "overall_status": overall,
+            "all_pass": fail_count == 0,
             "failed_items": failed_items,
         },
     }, []

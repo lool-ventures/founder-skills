@@ -451,7 +451,10 @@ def test_checklist_all_pass() -> None:
     assert rc == 0
     assert data is not None
     s = data["summary"]
-    assert s["overall_status"] == "pass"
+    # The band, not a boolean: 22/22 is 100%, which is `strong`. `all_pass` carries what
+    # the old "pass" word meant, and the two are asserted separately on purpose.
+    assert s["overall_status"] == "strong"
+    assert s["all_pass"] is True
     assert s["pass"] == 22
     assert s["fail"] == 0
     assert len(s["failed_items"]) == 0
@@ -469,7 +472,9 @@ def test_checklist_some_fail() -> None:
     assert rc == 0
     assert data is not None
     s = data["summary"]
-    assert s["overall_status"] == "fail"
+    # 19/21 applicable = 90.5%, still `strong`; the two failures show up in `all_pass`.
+    assert s["overall_status"] == "strong"
+    assert s["all_pass"] is False
     assert s["fail"] == 2
     assert s["not_applicable"] == 1
     failed_ids = {f["id"] for f in s["failed_items"]}
@@ -531,7 +536,8 @@ def test_checklist_not_applicable() -> None:
     assert data is not None
     s = data["summary"]
     assert s["not_applicable"] == 5
-    assert s["overall_status"] == "pass"
+    assert s["overall_status"] == "strong"
+    assert s["all_pass"] is True
     assert s["fail"] == 0
 
 
@@ -682,7 +688,9 @@ _VALID_CHECKLIST = {
         "pass": 22,
         "fail": 0,
         "not_applicable": 0,
-        "overall_status": "pass",
+        "score_pct": 100.0,
+        "overall_status": "strong",
+        "all_pass": True,
         "failed_items": [],
     },
 }
@@ -776,7 +784,9 @@ def test_compose_checklist_failures() -> None:
         "pass": 20,
         "fail": 2,
         "not_applicable": 0,
-        "overall_status": "fail",
+        "score_pct": 90.9,
+        "overall_status": "strong",
+        "all_pass": False,
         "failed_items": [
             {
                 "id": "tam_matches_product_scope",
@@ -1135,8 +1145,11 @@ def test_compose_severity_map_complete() -> None:
         "COMPARISON_CURRENCY_UNKNOWN",
         # A rejected sensitivity/checklist step, same class as SIZING_INVALID.
         "ARTIFACT_INVALID",
+        # The unacceptable half of the checklist split: more failures than the sizing can
+        # score as solid with, which is a statement about the run rather than about items.
+        "CHECKLIST_FAILURES_CRITICAL",
     ]
-    assert len(sev_map) == 31, f"expected 31 codes, got {len(sev_map)}"
+    assert len(sev_map) == 32, f"expected 32 codes, got {len(sev_map)}"
     for code in expected_codes:
         assert code in sev_map, f"{code} missing from severity map"
     # All values are "high", "medium", or "low"
@@ -1241,7 +1254,9 @@ def test_compose_low_checklist_coverage() -> None:
         "pass": 14,
         "fail": 0,
         "not_applicable": 8,
-        "overall_status": "pass",
+        "score_pct": 100.0,
+        "overall_status": "strong",
+        "all_pass": True,
         "failed_items": [],
     }
     d = _make_artifact_dir(
@@ -1753,33 +1768,18 @@ def test_compose_accepted_warning_strict_passes() -> None:
 
 
 def test_compose_accepted_high_severity_ignored() -> None:
-    """accepted_warnings with high-severity code -> NOT downgraded, stderr mentions cannot accept."""
+    """accepted_warnings with high-severity code -> NOT downgraded, stderr mentions cannot accept.
+
+    Uses CHECKLIST_FAILURES_CRITICAL rather than CHECKLIST_FAILURES: the latter is now
+    MEDIUM and therefore acceptable by design, which is the whole point of the split. A
+    test about what cannot be accepted has to name a code that still cannot be.
+    """
     methodology = dict(_VALID_METHODOLOGY)
     methodology["accepted_warnings"] = [
-        {"code": "CHECKLIST_FAILURES", "reason": "Trust me", "match": "failures"},
+        {"code": "CHECKLIST_FAILURES_CRITICAL", "reason": "Trust me", "match": "failures"},
     ]
-    failed_checklist = dict(_VALID_CHECKLIST)
-    failed_checklist["summary"] = {
-        "total": 22,
-        "pass": 20,
-        "fail": 2,
-        "not_applicable": 0,
-        "overall_status": "fail",
-        "failed_items": [
-            {
-                "id": "tam_matches_product_scope",
-                "category": "TAM Scoping",
-                "label": "TAM matches product scope",
-                "notes": "Too broad",
-            },
-            {
-                "id": "som_share_defensible",
-                "category": "SOM Realism",
-                "label": "SOM share defensible",
-                "notes": "No justification",
-            },
-        ],
-    }
+    # 9 failures, past CHECKLIST_CRITICAL_FAILURES, so the unacceptable half fires.
+    failed_checklist = _checklist_artifact(9)
     d = _make_artifact_dir(
         {
             "inputs.json": _VALID_INPUTS,
@@ -1793,7 +1793,7 @@ def test_compose_accepted_high_severity_ignored() -> None:
     rc, data, stderr = _run_compose(d)
     assert rc == 0
     assert data is not None
-    checklist_w = [w for w in data["validation"]["warnings"] if w["code"] == "CHECKLIST_FAILURES"]
+    checklist_w = [w for w in data["validation"]["warnings"] if w["code"] == "CHECKLIST_FAILURES_CRITICAL"]
     assert len(checklist_w) == 1
     assert checklist_w[0]["severity"] == "high"
     assert "cannot accept" in stderr
@@ -3201,7 +3201,7 @@ def _make_full_sizing_arts() -> dict[str, Any]:
 
 
 def test_compose_emits_coaching_payload() -> None:
-    """compose emits a coaching_payload block with all v0.4.2-market-sizing fields."""
+    """compose emits a coaching_payload block with all v0.5.0-market-sizing fields."""
     import re
 
     d = _make_artifact_dir(_make_full_sizing_arts())
@@ -3211,7 +3211,11 @@ def test_compose_emits_coaching_payload() -> None:
     assert "coaching_payload" in data, "report.json missing coaching_payload block"
 
     payload = data["coaching_payload"]
-    assert payload["schema_version"] == "v0.4.2-market-sizing"
+    # Bumped with the band: `summary` gained `overall_status` and `all_pass`, and
+    # `overall_status`'s vocabulary changed from a pass/fail boolean to the fleet's 4 bands.
+    assert payload["schema_version"] == "v0.5.0-market-sizing"
+    assert payload["summary"]["overall_status"] in {"strong", "solid", "needs_work", "major_revision"}
+    assert isinstance(payload["summary"]["all_pass"], bool)
 
     # All expected top-level keys present
     for key in (
@@ -3407,7 +3411,8 @@ def test_payload_failed_items_match_summary_fail() -> None:
         "fail": 3,
         "not_applicable": 0,
         "score_pct": 86.4,
-        "overall_status": "fail",
+        "overall_status": "strong",
+        "all_pass": False,
         "failed_items": failed_items,
     }
 
@@ -3994,8 +3999,17 @@ def test_coaching_confidence_low() -> None:
 
 
 def test_coaching_confidence_none_when_score_absent() -> None:
-    """No score_pct in checklist summary → confidence is null (not fabricated)."""
-    arts = _make_full_sizing_arts()  # _VALID_CHECKLIST summary has no score_pct
+    """No score_pct in checklist summary → confidence is null (not fabricated).
+
+    The absence is set up EXPLICITLY rather than inherited from the shared fixture. It used
+    to rely on `_VALID_CHECKLIST` happening to omit `score_pct`, so adding the field to that
+    fixture silently changed what this test was testing.
+    """
+    arts = _make_full_sizing_arts()
+    checklist = dict(arts["checklist.json"])
+    summary = {k: v for k, v in dict(checklist["summary"]).items() if k != "score_pct"}
+    checklist["summary"] = summary
+    arts["checklist.json"] = checklist
     d = _make_artifact_dir(arts)
     rc, data, err = _run_compose(d)
     assert rc == 0, err
@@ -4249,7 +4263,9 @@ def test_compose_analysis_checklist_shows_failed_labels() -> None:
             "pass": 20,
             "fail": 2,
             "not_applicable": 0,
-            "overall_status": "pass",
+            "score_pct": 90.9,
+            "overall_status": "strong",
+            "all_pass": False,
             "failed_items": [
                 {
                     "id": "tam_matches_product_scope",
@@ -6080,3 +6096,199 @@ def test_a_non_positive_deck_claim_renders_no_row_and_no_currency_note(tmp_path:
     assert "could not compare the two figures" not in md, (
         "a currency explanation on a run with no currency conversion in it"
     )
+
+
+# ---------------------------------------------------------------------------
+# The checklist band. Three of the fleet's four checklists emit a 4-band score
+# (strong/solid/needs_work/major_revision); market-sizing emitted a zero-defect boolean —
+# "pass" iff nothing failed. So 21 of 22 passing and 1 of 22 passing were the same word,
+# and the score_pct the producer already computes decided nothing.
+#
+# `all_pass` keeps the boolean, which is a real and separate fact: it is what the
+# CHECKLIST_FAILURES warning keys on. The band says how good; the boolean says whether
+# anything is outstanding. Conflating them is what cost the band.
+# ---------------------------------------------------------------------------
+
+
+def _checklist_summary(overrides: dict) -> dict:
+    payload = json.dumps({"items": _make_checklist_items(overrides=overrides)})
+    rc, data, err = run_script("checklist.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0, err
+    assert data is not None
+    summary: dict = data["summary"]
+    return summary
+
+
+def test_a_flawless_checklist_scores_strong_and_all_pass() -> None:
+    s = _checklist_summary({})
+    assert s["overall_status"] == "strong"
+    assert s["all_pass"] is True
+    assert s["score_pct"] == 100.0
+
+
+def test_one_failure_out_of_twenty_two_is_still_strong_but_not_all_pass() -> None:
+    """The case that proves the band and the boolean are independent, and the reason both
+    are kept. 21/22 is 95.5% — a strong sizing with one outstanding item, which the old
+    single word rendered as a flat "fail"."""
+    s = _checklist_summary({"tam_matches_product_scope": {"status": "fail", "notes": "too broad"}})
+    assert s["score_pct"] == 95.5
+    assert s["overall_status"] == "strong"
+    assert s["all_pass"] is False
+
+
+def test_six_failures_land_in_solid() -> None:
+    """16/22 = 72.7%, which is where the live run scored."""
+    fail_ids = [item["id"] for item in _make_checklist_items()][:6]
+    s = _checklist_summary({cid: {"status": "fail", "notes": "n"} for cid in fail_ids})
+    assert s["score_pct"] == 72.7
+    assert s["overall_status"] == "solid"
+    assert s["all_pass"] is False
+
+
+def test_the_band_uses_the_same_vocabulary_as_the_rest_of_the_fleet() -> None:
+    fail_ids = [item["id"] for item in _make_checklist_items()]
+    bands = set()
+    for n in (0, 1, 6, 9, 14, 22):
+        s = _checklist_summary({cid: {"status": "fail", "notes": "n"} for cid in fail_ids[:n]})
+        bands.add(s["overall_status"])
+    assert bands <= {"strong", "solid", "needs_work", "major_revision"}, bands
+    assert len(bands) >= 3, f"the band never moves across 0..22 failures: {bands}"
+
+
+# ---------------------------------------------------------------------------
+# The checklist warning, split by whether a founder can act on it.
+#
+# `CHECKLIST_FAILURES` fired at HIGH for any failure at all, which had two costs. It made
+# one outstanding item indistinguishable from twelve, and because ACCEPTIBLE_SEVERITIES is
+# exactly {"medium"} it could never be accepted with a stated reason — so SKILL.md's advice
+# for a high warning ("fix the underlying issue and re-run") was being given for a content
+# finding, which is an instruction to re-run until a true finding disappears.
+#
+# Split on attainability, not on a ratio: 7 failures cap the score at 15/22 = 68.2%, below
+# the 70 that "solid" requires, while 6 can still reach 72.7%. So above 6 the sizing cannot
+# be called solid however the rest scores, and that is a different kind of statement.
+# ---------------------------------------------------------------------------
+
+
+def _checklist_artifact(fail_count: int) -> dict:
+    ids = [item["id"] for item in _make_checklist_items()]
+    failed = ids[:fail_count]
+    art = dict(_VALID_CHECKLIST)
+    applicable = 22
+    art["summary"] = {
+        "total": 22,
+        "pass": applicable - fail_count,
+        "fail": fail_count,
+        "not_applicable": 0,
+        "score_pct": round(((applicable - fail_count) / applicable) * 100, 1),
+        "overall_status": "strong" if fail_count == 0 else "solid",
+        "all_pass": fail_count == 0,
+        "failed_items": [{"id": i, "category": "c", "label": i, "notes": "n"} for i in failed],
+    }
+    return art
+
+
+def _compose_with_checklist(fail_count: int, methodology: dict | None = None) -> tuple[int, dict | None, str]:
+    d = _make_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "methodology.json": methodology or _VALID_METHODOLOGY,
+            "validation.json": _VALID_VALIDATION,
+            "sizing.json": _VALID_SIZING,
+            "sensitivity.json": _VALID_SENSITIVITY,
+            "checklist.json": _checklist_artifact(fail_count),
+        }
+    )
+    return _run_compose(d)
+
+
+def test_a_handful_of_failures_is_a_medium_content_finding() -> None:
+    rc, data, _ = _compose_with_checklist(6)
+    assert rc == 0
+    assert data is not None
+    warnings = [w for w in data["validation"]["warnings"] if w["code"] == "CHECKLIST_FAILURES"]
+    assert len(warnings) == 1
+    assert warnings[0]["severity"] == "medium"
+    assert "CHECKLIST_FAILURES_CRITICAL" not in _codes(data)
+
+
+def test_past_the_attainability_threshold_it_becomes_critical() -> None:
+    rc, data, _ = _compose_with_checklist(7)
+    assert rc == 0
+    assert data is not None
+    critical = [w for w in data["validation"]["warnings"] if w["code"] == "CHECKLIST_FAILURES_CRITICAL"]
+    assert len(critical) == 1
+    assert critical[0]["severity"] == "high"
+
+
+def test_the_two_checklist_warnings_are_mutually_exclusive() -> None:
+    """Both firing would show a founder the same failures twice under two severities."""
+    for fail_count in (1, 6, 7, 12):
+        rc, data, _ = _compose_with_checklist(fail_count)
+        assert rc == 0
+        assert data is not None
+        codes = _codes(data)
+        assert not ("CHECKLIST_FAILURES" in codes and "CHECKLIST_FAILURES_CRITICAL" in codes), (
+            f"both fired at {fail_count} failures"
+        )
+
+
+def test_a_clean_checklist_fires_neither() -> None:
+    rc, data, _ = _compose_with_checklist(0)
+    assert rc == 0
+    assert data is not None
+    codes = _codes(data)
+    assert "CHECKLIST_FAILURES" not in codes
+    assert "CHECKLIST_FAILURES_CRITICAL" not in codes
+
+
+def test_the_trigger_reads_the_failure_count_not_the_band() -> None:
+    """The warning used to key on `overall_status == "fail"`, a value the band change
+    removes from the vocabulary. Left alone it would have become dead code and the warning
+    would have stopped firing silently — the failure mode this whole split exists to avoid."""
+    art = _checklist_artifact(3)
+    art["summary"]["overall_status"] = "strong"  # a band that is not and never was "fail"
+    d = _make_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "methodology.json": _VALID_METHODOLOGY,
+            "validation.json": _VALID_VALIDATION,
+            "sizing.json": _VALID_SIZING,
+            "sensitivity.json": _VALID_SENSITIVITY,
+            "checklist.json": art,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    assert "CHECKLIST_FAILURES" in _codes(data)
+
+
+def test_a_content_finding_can_now_be_accepted_with_a_stated_reason() -> None:
+    """The point of medium. ACCEPTIBLE_SEVERITIES is {"medium"}, so at high this could not
+    be accepted at all and the only way past it was to re-run until it went away."""
+    methodology = dict(_VALID_METHODOLOGY)
+    methodology["accepted_warnings"] = [
+        {"code": "CHECKLIST_FAILURES", "reason": "SOM share is deliberately conservative", "match": "failures"},
+    ]
+    rc, data, _ = _compose_with_checklist(2, methodology=methodology)
+    assert rc == 0
+    assert data is not None
+    accepted = [w for w in data["validation"]["warnings"] if w["code"] == "CHECKLIST_FAILURES"]
+    assert len(accepted) == 1
+    assert accepted[0]["severity"] == "acknowledged", f"still blocking: {accepted}"
+    assert "SOM share is deliberately conservative" in accepted[0]["message"]
+
+
+def test_the_critical_half_can_never_be_accepted_away() -> None:
+    methodology = dict(_VALID_METHODOLOGY)
+    methodology["accepted_warnings"] = [
+        {"code": "CHECKLIST_FAILURES_CRITICAL", "reason": "Trust me", "match": "failures"},
+    ]
+    rc, data, stderr = _compose_with_checklist(9, methodology=methodology)
+    assert rc == 0
+    assert data is not None
+    critical = [w for w in data["validation"]["warnings"] if w["code"] == "CHECKLIST_FAILURES_CRITICAL"]
+    assert len(critical) == 1
+    assert critical[0]["severity"] == "high"
+    assert "cannot accept" in stderr

@@ -246,7 +246,7 @@ Each skill's `coaching_payload` has a distinct `schema_version`:
 | competitive-positioning | v0.4.2-competitive-positioning | checklist (failed_items + warned_items) |
 | financial-model-review | v0.4.2-financial-model-review | checklist + severity-sorted truncation |
 | ic-sim | v0.4.2-ic-sim | dimension-based (dealbreakers + concerns) |
-| market-sizing | v0.4.2-market-sizing | checklist (failed_items only — no warn status) |
+| market-sizing | v0.5.0-market-sizing | checklist (failed_items only — no warn status; `summary` carries the 4-band `overall_status` plus `all_pass`) |
 
 The 4 checklist-using skills share a `summary` block shape with
 `failed_items`/`warned_items` arrays (market-sizing's `warned_items`

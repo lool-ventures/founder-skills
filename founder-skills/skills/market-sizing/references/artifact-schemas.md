@@ -394,7 +394,8 @@ Direct output of `checklist.py`.
 | `fail` | integer | Count of fail items |
 | `not_applicable` | integer | Count of N/A items |
 | `score_pct` | number | `pass / (total - not_applicable) * 100`, rounded to 1 decimal; drives `coaching_payload.confidence` |
-| `overall_status` | string | `"pass"` if fail==0, else `"fail"` |
+| `overall_status` | string | The fleet band the score falls in: `"strong"` (>=85), `"solid"` (>=70), `"needs_work"` (>=50), else `"major_revision"`. Same vocabulary as deck-review, financial-model-review and competitive-positioning — a founder running two skills must get grades that mean the same thing. |
+| `all_pass` | boolean | `true` only when `fail == 0`. Independent of the band, not a summary of it: 21 of 22 items passing is 95.5%, a `strong` sizing that still has one item open. |
 | `failed_items` | object[] | List of failed items with id, category, label, notes |
 
 ### Canonical 22 checklist IDs
@@ -408,6 +409,7 @@ Direct output of `checklist.py`.
 **Presentation:** `assumptions_explicit`, `formulas_shown`, `sources_cited`
 
 **compose_report.py validates:**
-- `CHECKLIST_FAILURES`: `overall_status == "fail"` (high severity)
+- `CHECKLIST_FAILURES`: `fail` between 1 and 6 (**medium** severity — a content finding, acceptable via `accepted_warnings` with a stated reason)
+- `CHECKLIST_FAILURES_CRITICAL`: `fail > 6` (high severity, never acceptable). The threshold is derived, not chosen: 7 failures cap the score at 15/22 = 68.2%, under the 70 `solid` requires, while 6 can still reach 72.7%. The two warnings are mutually exclusive.
 - `CHECKLIST_INCOMPLETE`: fewer than 22 items
 - `LOW_CHECKLIST_COVERAGE`: more than 7 `not_applicable` items (medium severity)

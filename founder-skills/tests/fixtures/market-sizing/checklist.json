@@ -161,7 +161,8 @@
     "fail": 0,
     "not_applicable": 2,
     "score_pct": 100.0,
-    "overall_status": "pass",
+    "overall_status": "strong",
+    "all_pass": true,
     "failed_items": []
   },
   "validation": {

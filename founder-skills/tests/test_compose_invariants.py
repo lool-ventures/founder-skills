@@ -984,3 +984,130 @@ def test_a_filename_in_evidence_is_surfaced_to_the_agent(skill: str, tmp_path: P
         f"{skill}: the scan no longer detects an artifact filename in report text, so the warning P1 "
         f"tells the agent to act on would never fire"
     )
+
+
+# The band vocabulary, fleet-wide. `overall_status` is a grade a founder reads, and a
+# founder who runs two skills has to get grades that mean the same thing. Three checklists
+# emitted the 4-band vocabulary and market-sizing emitted a zero-defect boolean spelled
+# "pass"/"fail", so 21 of 22 items passing and 1 of 22 passing were the same word.
+#
+# Nothing was watching, which is why it survived: each skill's own tests pinned its own
+# vocabulary, and pinning the wrong word is indistinguishable from pinning the right one
+# when no test compares across skills. This is the test that would have caught it.
+_BAND_VOCABULARY = {"strong", "solid", "needs_work", "major_revision"}
+
+# Skills whose checklist.py assigns `overall_status`. cap-table and ic-sim have no
+# checklist producer of this shape; a skill added here must genuinely grade a checklist.
+_BANDED_CHECKLIST_SKILLS = [
+    "deck-review",
+    "market-sizing",
+    "financial-model-review",
+    "competitive-positioning",
+]
+
+
+@pytest.mark.parametrize("skill", _BANDED_CHECKLIST_SKILLS)
+def test_every_checklist_grades_in_the_fleet_band_vocabulary(skill: str) -> None:
+    """Trace what the `overall_status` KEY is actually given, not what the file mentions.
+
+    A first version of this test asked whether the source contained band literals and, if
+    it did not, accepted the presence of a `_thresholds` import as proof the band came from
+    there. Mutation-tested: reverting market-sizing to `overall = "pass" if fail_count == 0
+    else "fail"` — the precise defect this test exists for — left it GREEN, because the
+    variable is named `overall`, no band literals appear, and the now-unused import was
+    still at the top of the file. An escape hatch keyed on a mention rather than a use is
+    not a guard.
+
+    So: find the name bound to the `"overall_status"` key in the returned summary, then
+    check every assignment to that name.
+    """
+    src = (SKILLS_DIR / skill / "scripts" / "checklist.py").read_text(encoding="utf-8")
+
+    # Non-vacuity: the file must actually emit the key this test is about.
+    key_bindings = re.findall(r'"overall_status"\s*:\s*([A-Za-z_][A-Za-z_0-9]*|"[a-z_]+")', src)
+    assert key_bindings, f"{skill}/checklist.py never emits an overall_status key"
+
+    values: set[str] = set()
+    from_helper = False
+    for binding in key_bindings:
+        if binding.startswith('"'):
+            values.add(binding.strip('"'))
+            continue
+        # A name: every assignment to it is a candidate grade.
+        assignments = re.findall(rf"\b{re.escape(binding)}\s*=\s*(.+)", src)
+        assert assignments, f"{skill}/checklist.py binds overall_status to {binding!r}, which is never assigned"
+        for expr in assignments:
+            expr = expr.strip()
+            if "_thresholds.band_for" in expr or "band_for(" in expr:
+                from_helper = True
+                continue
+            literals = re.findall(r'"([a-z_]+)"', expr)
+            assert literals, (
+                f"{skill}/checklist.py assigns overall_status from {expr!r}, which is neither a "
+                "band literal nor the shared band helper — this test cannot see its vocabulary"
+            )
+            values.update(literals)
+
+    assert values or from_helper, f"{skill}/checklist.py: no grade vocabulary found"
+    unknown = values - _BAND_VOCABULARY
+    assert not unknown, (
+        f"{skill}/checklist.py grades with {sorted(unknown)}, outside the fleet vocabulary "
+        f"{sorted(_BAND_VOCABULARY)}. A founder running two skills gets two grades and the "
+        "words have to mean the same thing."
+    )
+
+
+# The coaching payload's `schema_version` has THREE surfaces, and only two were synced.
+# Each skill's own contract test compares the script literal against its SKILL.md template;
+# `tests/fixtures/dispatch_contracts.json` carries the same version and nothing compared it.
+# Measured: market-sizing's fixture sat at v0.4.2 while the script and SKILL.md moved to
+# v0.5.0, and the whole suite stayed green. A fixture that documents a contract it is not
+# checked against is a third copy of the truth with no owner.
+#
+# Read the version out of the PAYLOAD BUILDER's body, not the first match in the file. A
+# first-match regex reports cap-table as drifting: its builder uses a SCHEMA_VERSION
+# constant while an unrelated coverage-disclosure artifact carries a literal
+# "v0.1-coverage-disclosure" further down. That is a different artifact, not a defect.
+_PAYLOAD_BUILDERS = ("_emit_coaching_payload", "build_coaching_payload")
+
+
+def _payload_schema_version(skill: str) -> str | None:
+    path = SKILLS_DIR / skill / "scripts" / "compose_report.py"
+    if not path.exists():
+        return None
+    src = path.read_text(encoding="utf-8")
+    starts = [src.index(name) for name in _PAYLOAD_BUILDERS if f"def {name}" in src]
+    assert starts, f"{skill}/compose_report.py has none of the known payload builders {_PAYLOAD_BUILDERS}"
+    body = src[min(starts) :]
+    match = re.search(r'"schema_version"\s*:\s*("([^"]+)"|[A-Z_][A-Z_0-9]*)', body)
+    assert match, f"{skill}/compose_report.py's payload builder emits no schema_version"
+    if match.group(2):
+        return match.group(2)
+    # A named constant: resolve it in the same module.
+    const = re.search(rf'^{re.escape(match.group(1))}\s*=\s*"([^"]+)"', src, re.MULTILINE)
+    assert const, f"{skill}: schema_version constant {match.group(1)} is never assigned a literal"
+    return const.group(1)
+
+
+def test_the_dispatch_fixture_records_the_version_the_script_emits() -> None:
+    fixture = json.loads(
+        (REPO_ROOT / "founder-skills" / "tests" / "fixtures" / "dispatch_contracts.json").read_text(encoding="utf-8")
+    )
+    checked = 0
+    for skill, contexts in fixture.items():
+        if not isinstance(contexts, dict):
+            continue
+        for context, body in contexts.items():
+            if not isinstance(body, dict) or "schema_version" not in body:
+                continue
+            emitted = _payload_schema_version(skill)
+            if emitted is None:
+                continue
+            checked += 1
+            assert body["schema_version"] == emitted, (
+                f"dispatch_contracts.json {skill}/{context} records "
+                f"{body['schema_version']!r} but compose_report.py emits {emitted!r}"
+            )
+    # Non-vacuity: this must actually reach the skills it claims to cover. Passing because
+    # the fixture shape changed and nothing matched is the failure mode it replaces.
+    assert checked >= 5, f"only {checked} skills were compared; the fixture shape may have moved"

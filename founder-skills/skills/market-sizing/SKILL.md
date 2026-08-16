@@ -21,7 +21,6 @@ Help startup founders build credible, defensible TAM/SAM/SOM analysis — the ki
 - **Exports:**
   - `sizing.json` → `financial-model-review`, `ic-sim`, `fundraise-readiness`
   - `sensitivity.json` → `financial-model-review`
-  - `checklist.json` → `ic-sim`
 
 ## Skill Execution Model (READ FIRST)
 
@@ -994,7 +993,30 @@ python3 "$SCRIPTS/compose_report.py" --dir "$ANALYSIS_DIR" --pretty \
   --write-md "$ANALYSIS_DIR/report.md"
 ```
 
-Fix high-severity warnings and re-run. Use `--strict` to enforce a clean report.
+Warnings split into two kinds — treat them differently. **The discriminating test is: can
+re-running fix it?**
+
+- **Pipeline-integrity** (`SIZING_INVALID`, `ARTIFACT_INVALID`, `CORRUPT_ARTIFACT`,
+  `MISSING_ARTIFACT`, `STALE_ARTIFACT`, `OVERCLAIMED_VALIDATION`) mean the run itself is
+  broken. Fix the underlying issue and re-run compose.
+- **Content findings** (`CHECKLIST_FAILURES`, `CHECKLIST_FAILURES_CRITICAL`) are the
+  analysis's honest verdict about the sizing. Report them to the founder as-is — never
+  re-score, re-dispatch, or otherwise make them disappear. Re-running cannot fix a
+  finding that is true.
+
+Two codes sit in neither class, and saying so is more useful than filing them wrongly:
+
+- **`IMPLAUSIBLE_PCT_SCALE`** fires for any share between 0 and 1, because `0.35` meaning
+  35% and a legitimate `0.35%` are indistinguishable from the number alone — the producer
+  says so itself. Treating it as pipeline-integrity would tell you to "fix and re-run" a
+  figure that may be correct, which is an instruction to change a right number. Ask the
+  founder which they meant.
+- **`UNVALIDATED_CLAIMS`** cannot distinguish *not investigated* from *searched and no
+  support found*. The first is a gap in the run, the second is a finding about the market.
+  Say which one it is, from what the run actually did.
+
+Use `--strict` to enforce a clean report. Note it blocks on high **and** medium, so it
+cannot be used as a pipeline-only gate — a content finding stops it too.
 
 **A warning code you do not recognise is still real.** Treat it by what it is, never
 by silence: fix it and re-run if the run itself is broken, otherwise say what it means
@@ -1075,9 +1097,11 @@ re-issue the dispatch. Reporting it is the correct outcome.
 
 Its shape (for reference — read the file, do not reconstruct it):
 {
-  "schema_version": "v0.4.2-market-sizing",
+  "schema_version": "v0.5.0-market-sizing",
   "summary": {
     "score_pct": <number from checklist.json summary>,
+    "overall_status": "<strong | solid | needs_work | major_revision — how good the sizing is>",
+    "all_pass": <true only when nothing failed — a `strong` sizing can still have an open item>,
     "total": <number>,
     "pass": <number>,
     "fail": <number>,
