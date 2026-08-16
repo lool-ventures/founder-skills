@@ -75,6 +75,11 @@ EXCLUDED_FILES = {
     "CHANGELOG.md",
     # This file names the forbidden strings in order to forbid them.
     "test_no_independence_claims.py",
+    # Its companion states the contract positively, which means enumerating the claims no
+    # surface may make — so it names them too, in a docstring and in a failure message. Same
+    # exemption, same reason. (That this scan flagged it on the day it was added is the
+    # negation limitation documented above, working exactly as described.)
+    "test_second_read_claims_are_approved.py",
 }
 
 
