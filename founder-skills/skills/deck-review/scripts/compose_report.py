@@ -1141,11 +1141,11 @@ def _coverage_line(reconciliation: dict[str, Any]) -> str:
     bits = [f"I read **{total}** figures off your deck"]
     if verified < total:
         bits.append(
-            f"**{verified}** of them turned up again in a second, separate reading — the other "
+            f"**{verified}** of them had their wording checked back against your deck — the other "
             f"**{total - verified}** I could not confirm, so nothing below rests on them"
         )
     else:
-        bits.append("all of them turned up again in a second, separate reading")
+        bits.append("all of them had their wording checked back against your deck")
     if isinstance(computed, int) and computed:
         bits.append(f"and I ran **{computed}** comparisons across them")
     return ", ".join(bits) + (
@@ -1168,7 +1168,7 @@ def _section_numbers(
 
     This renderer never decides what is shown. `select()` in reconcile.py is the single
     place that decides, and it has already dropped confirmations, restatements, relations
-    resting on a figure the independent read could not corroborate, and every
+    resting on a figure whose quote the second read could not confirm, and every
     `convention_differs` pair. Reaching past `relations` here — into the suppressed
     counts, or back into the engine — would put a second decider in the pipeline and
     silently widen what a founder sees.
@@ -1181,8 +1181,8 @@ def _section_numbers(
     #
     # This section used to return "" on an empty relation set, so a founder saw no numbers
     # section at all. Measured on a real deck: 113 figures read, 101 corroborated, 20
-    # relations computed, 12 figures rejected by the independent read -- and the report
-    # said nothing whatsoever. The deck the tool worked hardest on is the one it appeared
+    # relations computed, 12 figures whose quotes weren't found in the second read -- and
+    # the report said nothing whatsoever. The deck the tool worked hardest on is the one it appeared
     # to skip.
     #
     # Silence is the worst available answer here. It reads as "your numbers are fine" when
@@ -1207,9 +1207,9 @@ def _section_numbers(
 
     lines = ["## What Your Numbers Say About Each Other\n"]
     lines.append(
-        "Every figure below was read off your deck, checked against a second independent "
-        "reading of the same slides, and then related by arithmetic rather than by eye. "
-        "Figures that could not be corroborated twice were dropped rather than guessed at.\n"
+        "Every figure below was read off your deck, had its wording checked back against "
+        "the deck's own text, and was then related by arithmetic rather than by eye. "
+        "Figures whose wording could not be found again were dropped rather than guessed at.\n"
     )
     if counts:
         lines.append(counts)

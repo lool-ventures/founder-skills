@@ -20,13 +20,21 @@ operand and never multiplied. So the behaviour change comes from asking for rela
 all. This file's contribution is that the resulting number is right, that it is
 traceable, and that SKILL.md's "never arithmetic in prose" rule has a sanctioned outlet.
 
-WHAT THE GATE ESTABLISHES, precisely. A figure passes if its verbatim quote appears in
-an INDEPENDENT second reading of the deck (a fresh vision transcription that never saw
-the ledger). Measured on three decks: 95.7-100% true-pass, 0.0% cross-deck false-pass,
-0.0% on invented quotes. Two independent reads agreeing is strong evidence a figure was
-not invented. It is NOT proof of provenance -- both reads can misread the same ambiguous
-chart identically -- and it says nothing about ATTRIBUTION, which is tracked separately
-below and is the weaker link.
+WHAT THE GATE ESTABLISHES, precisely. A figure's quote passes if it is re-found by a
+second reader who never saw the ledger. That catches an invented quote, and a reworded
+one -- though not a near-identical restatement, since matching falls back to a fuzzy pass
+at 0.85 (`_quote_match.py`).
+It does NOT establish that the figure's VALUE is correct -- the matcher deliberately
+omits value binding, see `_quote_match.py` -- and the second reader does not read the
+deck independently of the first: both are handed the same main-thread-extracted text,
+so the two readings descend from one act of reading, not two. It says nothing about
+ATTRIBUTION either, which is tracked separately below and is the weaker link.
+
+The calibration numbers this docstring used to cite here (95.7-100% true-pass, 0.0%
+cross-deck false-pass, 0.0% on invented quotes) described a PROTOTYPE design -- a
+genuinely independent vision transcription -- that was never shipped. They are kept
+here, marked as such, rather than deleted, because they describe a design that was
+considered, not the gate that runs today.
 """
 
 from __future__ import annotations
@@ -266,7 +274,45 @@ _AT_LEAST_WORDS = re.compile(r"\b(at least|more than|over|exceeds|minimum|or mor
 #
 # A bound can only ever suppress a contradiction (see detect_bound), so every entry here
 # buys silence. Add one only for a word that genuinely marks rounding.
-_APPROX_WORDS = re.compile(r"(~|\bapprox\w*|\babout\b|\baround\b|\broughly\b|\best\b|\bestimated\b)", re.I)
+#
+# SYMBOLS AND WORDS ARE SEPARATE BECAUSE THEY ARE READ FROM DIFFERENT PLACES. `detect_bound`
+# states the rule -- symbols come from `raw` ONLY, because a label's symbol routinely
+# qualifies something other than the figure. The approximate branch used to search a single
+# combined pattern against `raw` AND `label`, so a `~` anywhere in a label widened tolerance
+# by `APPROX_WIDENING` on a figure that was never marked approximate. Measured: a summed
+# 108 against a stated 100 returns `contradiction`, but with an unrelated `~` or `≈` in the
+# label it returns `confirmation` -- a real finding erased by a glyph belonging to a
+# different number. The `>200m` case pinned in `test_a_symbol_in_the_label_is_never_read_as_a_bound`
+# was already guarded; this closes the same hole on the approximate path.
+#
+# `≈` (U+2248) sits with `~`, and reaches less than it looks like it should: this function
+# sees `raw` and `label`, never `quote`. A deck that prints a bare bar value and carries the
+# `≈` only in the surrounding sentence puts the glyph where nothing here can read it. Binding
+# an approximation marker from the quote to the figure is a separate problem.
+# The symbol must qualify THIS figure's number, so it has to appear BEFORE the first
+# numeric token -- the same token `_parsed_magnitude` reads the magnitude from -- and there
+# has to be a number for it to qualify. `raw` is supposed to be one figure's own printed
+# string, but the schema permits any string and nothing enforces it, so a whole-string
+# search marks "$100 vs 2024 ≈ 20" approximate off a glyph belonging to a different number,
+# and a bare "≈" (which `ledger.py` also accepts, since it skips the scale check when `raw`
+# has no parseable magnitude) marks a figure approximate off no number at all. Both widen
+# tolerance to 10% and can only erase a contradiction. No corpus instance of either shape
+# exists; this is a contract guard.
+#
+# The prefix is located with `_NUM_RE` rather than an inline digit class, so this shares the
+# parser's Unicode `\d` grammar instead of duplicating it as ASCII `[0-9]`.
+_APPROX_SYMBOLS = re.compile(r"[~≈]")
+
+
+def _approx_symbol_marks_this_figure(raw: str) -> bool:
+    """Is there an approximation glyph before this figure's own number?"""
+    match = _NUM_RE.search(raw)
+    if not match:
+        return False
+    return bool(_APPROX_SYMBOLS.search(raw[: match.start()]))
+
+
+_APPROX_WORDS = re.compile(r"(\bapprox\w*|\babout\b|\baround\b|\broughly\b|\best\b|\bestimated\b)", re.I)
 
 
 def detect_bound(raw: str, label: str) -> str | None:
@@ -305,7 +351,10 @@ def detect_bound(raw: str, label: str) -> str | None:
         return None  # contradictory signals -- fall back to the plain two-sided test
     if votes:
         return next(iter(votes))
-    return "approximate" if (_APPROX_WORDS.search(raw) or _APPROX_WORDS.search(label)) else None
+    # Symbols from `raw` only (the rule stated above); words from either side.
+    if _approx_symbol_marks_this_figure(raw) or _APPROX_WORDS.search(raw) or _APPROX_WORDS.search(label):
+        return "approximate"
+    return None
 
 
 def is_visible(quote: str) -> bool:
@@ -566,8 +615,9 @@ def verify(figures: list[Figure], transcript: str, quote_in_doc: Any) -> None:
     """Gate on the quote, and classify ATTRIBUTION separately.
 
     These are different questions and conflating them is the trap. The gate asks "was
-    this figure invented?". Attribution asks "does the label belong to this number?" --
-    which the gate cannot see, because roughly half of all figures take their label from
+    this QUOTE invented?" -- not whether the VALUE is right, which it cannot see at all.
+    Attribution asks "does the label belong to this number?" --
+    which the gate cannot see either, because roughly half of all figures take their label from
     slide LAYOUT (a table column, a header above) rather than from the quoted string.
     Measured on real extractions: layout reading was correct everywhere it could be
     checked, but one case was unverifiable from any text source at all.
@@ -581,7 +631,7 @@ def verify(figures: list[Figure], transcript: str, quote_in_doc: Any) -> None:
             f.drop_reason = "no quote"
             continue
         if not quote_in_doc(f.quote, transcript)[0]:
-            f.drop_reason = "quote not found in the independent second read"
+            f.drop_reason = "quote not found in the second read"
             continue
         f.verified = True
         label_words = {w for w in f.label.lower().split() if len(w) > 3}
@@ -879,7 +929,7 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
     unverified = [f.id for f in real if not f.verified]
     if unverified:
         # Not "reduced confidence" -- dropped. A relation resting on a figure we could
-        # not find in an independent read is unfounded, not weak.
+        # not find in the second read is unfounded, not weak.
         r.dropped = True
         r.reasons = [f"operand {i} failed verification" for i in unverified]
         return r
@@ -1081,20 +1131,20 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
     exp_id = alias.get(str(exp_id), exp_id) if exp_id else exp_id
     if exp_id and (exp := by_id.get(str(exp_id))) is not None and not exp.verified:
         # THE STATED SIDE MUST CLEAR THE SAME GATE THE OPERANDS DO. Operands are dropped
-        # hard when an independent read cannot find them (above); the expected figure was
+        # hard when the second read cannot find them (above); the expected figure was
         # not checked at all, so a contradiction could read
         #
         #     $100k / 4 = 25,000 per customer  — but the deck states $50k (ACV)
         #
         # where "$50k" is a figure the second read never found. Reproduced. That tells a
         # founder their numbers disagree with something the deck may not say, and it makes
-        # the report's own promise -- "checked against a second independent reading" --
-        # false in the one direction that matters.
+        # the report's own promise -- that a figure's wording was "checked back against
+        # your deck" -- false in the one direction that matters.
         #
         # Refusing the binding leaves the relation as a derived reading rather than a
         # finding: it suppresses, never manufactures, which is what lets this be a silent
         # guard rather than a new failure mode.
-        r.reasons.append("the stated figure was not corroborated by the independent read")
+        r.reasons.append("the stated figure was not corroborated by the second read")
         exp_id = None
     if exp_id and (exp := by_id.get(str(exp_id))) is not None and r.computed is not None:
         r.expected_id, r.expected_value = exp.id, exp.value
@@ -1638,7 +1688,7 @@ def main() -> int:
 
     ap = argparse.ArgumentParser(description="Verify a deck's numeric ledger and reconcile it against itself.")
     ap.add_argument("--ledger", required=True, help="ledger.json from LEDGER_EXTRACTION")
-    ap.add_argument("--second-read", required=True, help="second_read.json — the independent transcription")
+    ap.add_argument("--second-read", required=True, help="second_read.json — the second-read transcript")
     ap.add_argument("--inventory", help="deck_inventory.json; enables the no_figures refusal")
     ap.add_argument(
         "--downgrades",

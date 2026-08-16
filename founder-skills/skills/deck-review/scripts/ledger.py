@@ -16,10 +16,10 @@ a thousand. Because `raw` and `value` are two independent statements about the s
 figure, disagreement between them is detectable without ever seeing the deck — which is
 what makes it a validation rather than a second opinion.
 
-WHAT THIS IS NOT. It is not the provenance gate. Whether a figure exists in the deck at
-all is settled later, in `reconcile.py`, against an INDEPENDENT second reading — checking
-a quote against the prompt the model was handed would be checking the model against
-itself. Nothing here reads the deck.
+WHAT THIS IS NOT. It is not the provenance gate. Whether a figure's quote can be re-found
+in the deck's slides is settled later, in `reconcile.py`, against a second reading that
+never saw the ledger — checking a quote against the prompt the model was handed would be
+checking the model against itself. Nothing here reads the deck.
 """
 
 from __future__ import annotations

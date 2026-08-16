@@ -1,4 +1,4 @@
-"""Quote matching for the numeric ledger's independent-read gate.
+"""Quote matching for the numeric ledger's second-read gate.
 
 WHY THIS IS A COPY AND NOT AN IMPORT. Skill scripts are standalone — they are run by
 path, from a skill directory, with no package context — so deck-review cannot import

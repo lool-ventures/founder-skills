@@ -528,7 +528,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # R3/R6: verdict-first coaching order, and the visual-pass record (input_quality now
     # required, per-slide visual_evidence_captured, 20-page read batches).
     # 78_224 -> 87_344 (R5): the numeric chain — four new steps (3.5 ledger extraction,
-    # 3.6 independent second read, 3.7 relation proposal, 3.8 reconcile). This is the
+    # 3.6 second read, 3.7 relation proposal, 3.8 reconcile). This is the
     # largest single increase this file has taken and it buys a capability the skill has
     # claimed for its whole life without having: `numbers_consistent` is one of the 35
     # criteria and was scored entirely on the reviewer's say-so, with no arithmetic
@@ -561,7 +561,17 @@ SKILL_MD_CEILING: dict[str, int] = {
     # that wrote "strong" over design criteria nobody could assess. The prose edits are net-neutral
     # digit swaps plus one clause naming `slide_count_appropriate` as deliberately still scored --
     # the gate forces 4 of the category's 5, and five sites said 5. Deliberate.
-    "deck-review": 92_683,
+    # deck-review 92,683 -> 92,687 (+4): the second-read section's independence claims were
+    # corrected. The step is not an independent or vision reading of the DECK — the reader is
+    # handed the same extracted text the ledger agent got — and it corroborates a quote, not a
+    # figure's value. Saying that accurately is close to length-neutral: "ledger-blind" paid for
+    # most of it, and the +4 is "so a reworded sentence fails" replacing "so a paraphrase fails",
+    # which was false — the matcher falls back to a fuzzy pass at 0.85, so a near-identical
+    # restatement DOES pass. That nuance is documented in reconcile.py and agents/deck-review.md
+    # rather than here, deliberately: telling the extracting agent what the matcher tolerates
+    # invites the sloppiness the verbatim instruction exists to prevent.
+    # See test_no_independence_claims.py.
+    "deck-review": 92_687,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

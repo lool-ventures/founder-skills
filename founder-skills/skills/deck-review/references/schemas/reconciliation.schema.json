@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "reconciliation.json",
-  "description": "What the deck's own numbers say about each other. Produced by reconcile.py from the ledger, the independent second read, and the model's proposed relations. `relations` holds ONLY what a founder sees \u2014 select() decides that, and suppressed relations are reported as counts so nothing downstream can reach past it.",
+  "description": "What the deck's own numbers say about each other. Produced by reconcile.py from the ledger, the second read, and the model's proposed relations. `relations` holds ONLY what a founder sees \u2014 select() decides that, and suppressed relations are reported as counts so nothing downstream can reach past it.",
   "type": "object",
   "required": [
     "status",
@@ -13,7 +13,7 @@
   ],
   "properties": {
     "status": {
-      "description": "checked = relations were computed. no_figures = the deck states too few numbers to relate; refused when the deck's own text is full of numerals. gate_failed = the independent read could not corroborate enough of the ledger to trust it. Absence of this artifact means the step did not run, which is a pipeline error and is deliberately distinguishable from all three.",
+      "description": "checked = relations were computed. no_figures = the deck states too few numbers to relate; refused when the deck's own text is full of numerals. gate_failed = the second read could not corroborate enough of the ledger's quotes to trust it. Absence of this artifact means the step did not run, which is a pipeline error and is deliberately distinguishable from all three.",
       "type": "string",
       "enum": [
         "checked",
@@ -25,11 +25,11 @@
       "type": "integer"
     },
     "figures_verified": {
-      "description": "Figures whose verbatim quote was found in the independent second read.",
+      "description": "Figures whose verbatim quote was found in the second read.",
       "type": "integer"
     },
     "second_read_coverage": {
-      "description": "Which figure-bearing slides the independent read actually covered. A figure whose slide is in slides_missing failed the gate because nobody looked, not because the ledger is untrustworthy \u2014 two failures the gate alone cannot tell apart, and only one of them is the deck's problem.",
+      "description": "Which figure-bearing slides the second read actually covered, as DECLARED by the reader \u2014 this compares slide-number lists and never inspects the transcript. A figure whose slide is in slides_missing is one nobody looked at: our coverage gap, not the deck's problem. It does NOT follow that such a figure failed the gate \u2014 verification matches each quote against the whole transcript without consulting the figure's slide, so a quote from an uncovered slide can still be found in another slide's text.",
       "type": "object",
       "properties": {
         "slides_named": {

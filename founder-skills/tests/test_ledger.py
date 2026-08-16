@@ -103,7 +103,7 @@ def test_rejects_duplicate_ids() -> None:
 
 
 def test_rejects_a_figure_with_no_quote() -> None:
-    """The quote is what the independent second read is checked against."""
+    """The quote is what the second read is checked against."""
     rc, _, err = _run({"figures": [_fig(quote="")]})
     assert rc != 0
     assert "quote" in err

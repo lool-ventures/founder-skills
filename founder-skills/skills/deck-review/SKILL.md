@@ -58,7 +58,7 @@ All scripts are at `${CLAUDE_PLUGIN_ROOT}/skills/deck-review/scripts/`:
 - **`stage_profile.py`** — Producer for `stage_profile.json`; `--rebuild-stage` + `--confidence {high,low}` for founder-corrected stages
 - **`gate_state.py`** — Producer (`emit`) + answer-writer (`answer`) for the stage-confirmation gate
 - **`ledger.py`** — Producer for `ledger.json`; refuses a figure whose `value` disagrees with its own `raw` string
-- **`reconcile.py`** — Producer for `reconciliation.json`; corroborates each figure against the second read, computes the proposed relations, and decides which reach the founder
+- **`reconcile.py`** — Producer for `reconciliation.json`; corroborates each figure's quote against the second read, computes the proposed relations, and decides which reach the founder
 - **`slide_reviews.py`** — Producer for `slide_reviews.json` (agent provides JSON via stdin; schema-validated). `--reconciliation` is required: the numeric chain must have run for this run_id
 - **`checklist.py`** — Scores 35 criteria across 7 categories (pass/fail/warn/not_applicable)
 - **`compose_report.py`** — Assembles artifacts into final report with cross-artifact validation; `--strict` exits 1 on high/medium warnings
@@ -88,7 +88,7 @@ Every review deposits structured JSON artifacts into a working directory. The fi
 | 2 | `deck_inventory.json` | `deck_inventory.py` (agent provides JSON via stdin) |
 | 3 | `stage_profile.json` | `stage_profile.py` (agent provides JSON via stdin) |
 | 3.5 | `ledger.json` | `ledger.py` (agent provides JSON via stdin) |
-| 3.6 | `second_read.json` | an independent transcription of the figure-bearing slides |
+| 3.6 | `second_read.json` | a ledger-blind re-read of the figure-bearing slide text |
 | 3.8 | `reconciliation.json` | `reconcile.py` (agent proposes relations via stdin) |
 | 4 | `slide_reviews.json` | `slide_reviews.py` (agent provides JSON via stdin) |
 | 5 | `checklist.json` | `checklist.py` |
@@ -604,8 +604,8 @@ append-only rule in Step 0.
 
 ### Step 3.5: Extract the Deck's Numbers -> `ledger.json` (Context A dispatch)
 
-The deck states numbers. Steps 3.5-3.8 record them, corroborate them against a second
-independent reading, and do the arithmetic the deck implies but never shows. Every figure
+The deck states numbers. Steps 3.5-3.8 record them, corroborate their quotes against a
+ledger-blind second reading, and do the arithmetic the deck implies but never shows. Every figure
 a founder sees in the numbers section of the report comes from here.
 
 **Dispatch the deck-review sub-agent in Context A (LEDGER_EXTRACTION).** **Call the `Task`
@@ -639,7 +639,7 @@ A slide reading "200-400m" of building height is `raw: "200-400 metres"`, not
 downstream can.
 
 `quote` must be the VERBATIM sentence or table row the figure was read from. It is
-checked against a second, independent reading of the same slide, so a paraphrase
+re-found by a ledger-blind reader in the same extracted text, so a reworded sentence
 fails the check and the figure is dropped.
 
 Use your Write tool to write to OUTPUT_PATH exactly the shape expected by
@@ -675,10 +675,10 @@ If the pipe fails, the ledger disagreed with itself — most often a figure reco
 wrong scale. The error names the figure. Re-dispatch with the correction; do not hand-edit
 the file.
 
-### Step 3.6: Read Those Slides Again, Independently -> `second_read.json` (Context A dispatch)
+### Step 3.6: Re-Read Those Slides, Ledger-Blind -> `second_read.json` (Context A dispatch)
 
-A figure is trusted when two readings that never saw each other agree on it. Checking the
-extraction against the text it was handed would be checking it against itself.
+A quote is trusted when it is re-found by a second reader who never saw the ledger.
+Checking the ledger's quote against the ledger itself would prove nothing.
 
 **Dispatch a FRESH sub-agent in Context A (SECOND_READ).** Give it the slide numbers and
 nothing else. **It must not receive the ledger, any figure from it, or any summary of it** —
@@ -791,7 +791,7 @@ cat "$HANDOFF_DIR/relations_output.json" | \
 
 `status` records what happened, and all three outcomes are legitimate:
 
-- **`checked`** — figures were corroborated and relations computed.
+- **`checked`** — quotes were corroborated and relations computed.
 - **`no_figures`** — the deck states too few numbers to relate anything. Refused if the
   deck's own text is full of numerals, because an empty ledger is the cheapest way to skip
   this work and must not be indistinguishable from a wordless deck.

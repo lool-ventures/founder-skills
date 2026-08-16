@@ -202,11 +202,74 @@ def test_multiplicative_relations_do_not_propagate() -> None:
         ("2,000", "tall buildings (>200m) existing worldwide (fewer than)", "at_most"),
         ("20+", "global patents targeted (minimum)", "at_least"),
         ("~3.5%", "", "approximate"),
+        ("≈20", "", "approximate"),  # U+2248, same standing as the ASCII tilde
+        ("20", "estimated market size", "approximate"),  # a WORD in the label still binds
         ("1,700", "trial signups per month", None),
     ],
 )
 def test_detect_bound(raw: str, label: str, expected: str | None) -> None:
     assert detect_bound(raw, label) == expected
+
+
+def test_an_approximation_symbol_in_the_label_is_never_read_as_a_bound() -> None:
+    """Same rule as `>200m`, on the approximate path: symbols come from `raw` ONLY.
+
+    A label's glyph routinely qualifies a different number than the one the figure holds.
+    Reading it as an approximation marker widens the stated figure's tolerance to
+    `APPROX_WIDENING` (10%) at `reconcile.py:426`, on a figure nobody marked approximate.
+
+    Note the mechanism, which an earlier version of this docstring got wrong: `approximate`
+    does NOT make the comparison one-sided. Only `at_least` and `at_most` do that
+    (`reconcile.py:1190-1193`); `approximate` falls to the two-sided branch with a wider
+    `tol`. The suppress-only conclusion still holds, for a different reason -- a larger
+    tolerance can only make `disjoint` false, never true -- so the sole effect is to erase
+    a contradiction.
+    """
+    assert detect_bound("108", "sum vs the 2024 ≈ 20 chart") is None
+    assert detect_bound("108", "vs ~200 units on the other axis") is None
+    # Same rule inside `raw`: the glyph must precede THIS figure's number.
+    assert detect_bound("$100 vs 2024 ≈ 20", "") is None
+    assert detect_bound("2024 ≈ 20", "") is None
+    # ...and there must be a number for it to qualify. `ledger.py` accepts a numberless
+    # `raw` (it skips the scale check when the magnitude will not parse), so without this
+    # a bare glyph would mark a figure approximate off nothing at all.
+    assert detect_bound("≈", "") is None
+    # The prefix search shares `_NUM_RE`'s Unicode digit grammar, not an ASCII class.
+    assert detect_bound("≈١٠", "") == "approximate"
+    # The word form in a label is still legitimate, and still binds.
+    assert detect_bound("108", "approximate total") == "approximate"
+    # And the symbol in `raw` — where it does qualify this figure — still binds.
+    assert detect_bound("≈108", "") == "approximate"
+
+
+def test_a_label_glyph_cannot_turn_a_contradiction_into_a_confirmation() -> None:
+    """End-to-end: the harm the rule above prevents, at the verdict level.
+
+    60 + 48 = 108 against a stated 100 is a contradiction. Before symbols were split out of
+    the label search, an unrelated `≈` in the stated figure's label widened its tolerance to
+    10% and the same relation came back `confirmation`.
+    """
+    ops = [fig("$60.00", 60.0, id="a"), fig("$48.00", 48.0, id="b")]
+    stated = fig("$100.00", 100.0, label="total vs the 2024 ≈ 20 chart", id="t")
+    by_id = {f.id: f for f in [*ops, stated]}
+    rel = compute(
+        {"kind": "derived_ratio", "operator": "sum", "operands": ["a", "b"], "expected_id": "t"},
+        by_id,
+    )
+    assert stated.bound is None, "an unrelated label glyph must not mark the figure approximate"
+    assert rel.verdict == "contradiction", f"expected contradiction, got {rel.verdict}"
+
+
+def test_an_approximation_marker_only_in_the_quote_is_not_visible_here() -> None:
+    """`detect_bound` reads `raw` and `label`; the quote is not one of its inputs.
+
+    A deck that prints a bare bar value and puts the `≈` in the surrounding sentence
+    ("2024 ≈ 20") therefore gets NO bound, whatever `_APPROX_WORDS` contains. Measured on one
+    live ledger: the glyph appeared in 0 of 81 `raw` values and 7 quotes, so adding it to the
+    pattern reached none of the figures that motivated it. Pinned so that a later reader does
+    not mistake the glyph's presence in the pattern for coverage of that class.
+    """
+    assert detect_bound("$20B", "Computer vision market 2024") is None
 
 
 def test_a_symbol_in_the_label_is_never_read_as_a_bound() -> None:
@@ -603,20 +666,20 @@ def test_a_ratio_with_a_stated_counterpart_is_untouched() -> None:
 
 
 def test_the_stated_side_must_clear_the_gate_the_operands_clear() -> None:
-    """A contradiction may not cite a figure the independent read never found.
+    """A contradiction may not cite a figure the second read never found.
 
     Operands are dropped hard when uncorroborated. The expected figure was not checked at
     all, so the report could read "but the deck states $50k (ACV)" about a figure the
     second read never located — telling a founder their numbers disagree with something
     the deck may not say, and falsifying the report's own promise that every figure shown
-    was "checked against a second independent reading".
+    had its wording "checked back against your deck".
 
     Suppresses rather than manufactures: the relation stays a derived reading.
     """
     a = fig("$100k", 100_000, "money", "revenue", id="a")
     b = fig("4", 4, "count", "customers", id="b")
     e = fig("$50k", 50_000, "money", "ACV", id="e")
-    e.verified = False  # the independent read never found it
+    e.verified = False  # the second read never found it
     r = _cmp("ratio", ["a", "b"], "e", {"a": a, "b": b, "e": e})
     assert r.verdict != "contradiction"
     assert any("not corroborated" in x for x in r.reasons)

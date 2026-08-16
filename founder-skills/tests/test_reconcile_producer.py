@@ -133,7 +133,7 @@ def test_both_sides_of_a_finding_render_in_the_same_number_space() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The gate. A figure the independent read cannot corroborate is not merely low
+# The gate. A figure the second read cannot corroborate is not merely low
 # confidence — it is dropped, and so is anything resting on it.
 # ---------------------------------------------------------------------------
 

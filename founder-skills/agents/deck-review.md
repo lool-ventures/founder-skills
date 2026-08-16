@@ -76,9 +76,10 @@ deck does not state. Two rules carry the weight:
   `raw` keeps the slide's own string and the producer checks the two against each
   other, so a scale slip is caught rather than silently multiplying every later
   calculation by a thousand.
-- **`quote` is verbatim.** It is checked against a second, independent reading of
-  the same slide by someone who never saw your ledger. A paraphrase fails that
-  check and the figure is dropped from the analysis entirely.
+- **`quote` is verbatim.** A second reader, who never sees your ledger, looks for that
+  exact wording in the same extracted deck text. The match tolerates small differences in
+  spacing and punctuation, but a reworded sentence fails it and the figure is dropped from
+  the analysis entirely. Copy the wording; do not restate it.
 
 For `SECOND_READ`: transcribe the listed slides verbatim — every number, label,
 axis value, table cell and footnote as printed. Write `slides_transcribed` (the

@@ -11,7 +11,7 @@
       "required_fields_minus_metadata": [
         "figures"
       ],
-      "notes": "Agent writes {figures: [...]} to OUTPUT_PATH; each figure requires id, value, raw, unit_kind, label, quote. ledger.py validates and injects metadata.run_id. Two checks are the point of the producer and neither is expressible in the schema: `value` must agree with what `raw` parses to within 2% (the scale-slip class, where \"$493K\" is recorded as 493 and every later calculation is wrong by a thousand), and `slide` must be within the deck's slide count from --inventory. The agent never computes anything here and never relates figures to each other."
+      "notes": "Agent writes {figures: [...]} to OUTPUT_PATH; each figure requires id, value, raw, unit_kind, label, quote. ledger.py validates and injects metadata.run_id. Two checks are the point of the producer and neither is expressible in the schema: `value` must agree with what `raw` parses to, within the precision `raw`'s own significant figures claim (SIGFIG_ONLY; the older flat 2% floor was removed because it hid a real one-part-in-17,772 precision loss) (the scale-slip class, where \"$493K\" is recorded as 493 and every later calculation is wrong by a thousand), and `slide` must be within the deck's slide count from --inventory. The agent never computes anything here and never relates figures to each other."
     },
     "SECOND_READ": {
       "schema": null,
@@ -25,7 +25,7 @@
         "slides_transcribed",
         "transcript"
       ],
-      "notes": "A FRESH sub-agent transcribes only the slides the ledger names, and is given slide numbers with NO figures \u2014 the independence is the entire value of the step and is a property of the dispatch prompt, not of any script. reconcile.py checks each ledger quote against this transcript; a figure that fails is dropped, and any relation resting on it is dropped with it. Checking the ledger against the text the extracting agent was handed would be checking the model against itself."
+      "notes": "A FRESH sub-agent transcribes only the slides the ledger names, and is given slide numbers with NO figures \u2014 being blind to the ledger is the entire value of the step and is a property of the dispatch prompt, not of any script. Note it is NOT blind to the deck text: it is handed the same main-thread extraction the ledger agent got, so both readings descend from one act of reading. reconcile.py checks each ledger quote against this transcript; a figure that fails is dropped, and any relation resting on it is dropped with it. Checking the ledger against the text the extracting agent was handed would be checking the model against itself."
     },
     "RELATION_PROPOSAL": {
       "schema": null,

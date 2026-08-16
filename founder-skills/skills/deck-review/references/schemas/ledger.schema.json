@@ -32,7 +32,7 @@
             "type": "string"
           },
           "quote": {
-            "description": "The verbatim sentence or table row the figure was read from. This is what the independent second read is checked against, so a paraphrase defeats the gate.",
+            "description": "The verbatim sentence or table row the figure was read from. This is what the second read is checked against, so a paraphrase defeats the gate.",
             "type": "string"
           },
           "slide": { "type": "integer" },
