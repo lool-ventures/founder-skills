@@ -571,7 +571,25 @@ SKILL_MD_CEILING: dict[str, int] = {
     # rather than here, deliberately: telling the extracting agent what the matcher tolerates
     # invites the sloppiness the verbatim instruction exists to prevent.
     # See test_no_independence_claims.py.
-    "deck-review": 92_687,
+    # deck-review 92,687 -> 93,208 (+521): gate answers now record where they came from, and the
+    # deleted inline resume detector paid for less than half of it. Three additions, each of which
+    # costs more to omit than it costs in bytes. (a) `--source` is REQUIRED on `gate_state.py
+    # answer`, and an undocumented required flag is argparse exit 2 in production — this file's own
+    # comment records the last time the model copied `emit`'s flags onto `answer` and hit exactly
+    # that. (b) `auto_satisfied` is legal only on the `stage_confirmation` gate and only for "Looks
+    # right"; without stating the restriction the model tries it on out_of_scope_choice and the
+    # script refuses mid-run. (c) a third auto-satisfy condition — there must BE a Step 1 answer —
+    # which IS the reported defect: a skipped form was treated as one and the gate self-answered.
+    # The re-invocation section shrank: the inline `python3 -c` detector that read gate_state.json
+    # directly is gone, because resume detection weighs run_id parity AND answer provenance, and a
+    # second copy of that rule in shell had already drifted from setup_run.py's.
+    # deck-review 93,208 -> 93,549 (+341): compose_report.py gains --gate-state, and the flag is
+    # optional at the CLI (a caller with no gate must not be forced to invent one) but mandatory in
+    # the pipeline. Nothing about an optional flag's own shape stops the skill from dropping it, and
+    # a dropped flag is silent by construction — the report composes cleanly and simply never
+    # discloses a stage confirmed on the founder's behalf. The prose says pass it even when you
+    # believe the run never gated, because that belief is the failure mode.
+    "deck-review": 93_549,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

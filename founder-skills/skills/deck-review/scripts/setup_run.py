@@ -44,24 +44,27 @@ _CLEANABLE_NAMES = {
 _GATE_STATE_NAME = "gate_state.json"
 
 
-def _read_gate_state(review_dir: str) -> tuple[str, str]:
-    """Return (answer, run_id) from gate_state.json, ("", "") if absent/unreadable."""
+_AUDITABLE_SOURCES = ("founder", "auto_satisfied")
+
+
+def _read_gate_state(review_dir: str) -> tuple[str, str, str]:
+    """Return (answer, run_id, answer_source); ("", "", "") if absent/unreadable."""
     path = os.path.join(review_dir, _GATE_STATE_NAME)
     if not os.path.isfile(path):
-        return "", ""
+        return "", "", ""
     try:
         with open(path, encoding="utf-8") as f:
             gate = json.load(f)
     except (json.JSONDecodeError, OSError):
-        return "", ""
+        return "", "", ""
     if not isinstance(gate, dict):
-        return "", ""
+        return "", "", ""
     answer = gate.get("answer") or ""
     run_id = ""
     meta = gate.get("metadata")
     if isinstance(meta, dict):
         run_id = meta.get("run_id") or ""
-    return str(answer), str(run_id)
+    return str(answer), str(run_id), str(gate.get("answer_source") or "")
 
 
 def main() -> int:
@@ -93,10 +96,27 @@ def main() -> int:
     # against stale content from a different run.  On a fresh (non-resume) run
     # _CLEANABLE_NAMES are deleted unconditionally so no prior run's artifacts
     # pollute the new run.
-    gate_answer, gate_run_id = _read_gate_state(review_dir)
-    resume = bool(gate_answer) and gate_run_id == run_id
+    #
+    # RESUME ELIGIBILITY AND CHECKPOINT PRESERVATION ARE SEPARATE DECISIONS, and were one
+    # variable until an answer arrived that was same-run but unauditable. The skill always
+    # passes --clean, and the rule was `if args.clean and not resume: delete`, so "re-ask
+    # the gate but keep the checkpoints" could not be expressed: turning resume off deleted
+    # the very artifacts it wanted kept. Steps 2-3 are three dispatches, two of which read
+    # the deck; throwing them away to re-ask one question is the wrong trade.
+    #
+    #   same_run_answered  — this gate belongs to THIS run and has been answered, so the
+    #                        checkpoints beside it are this run's. Governs deletion.
+    #   resume             — the answer can be acted on, which additionally requires that
+    #                        it record where it came from. Governs skipping the re-ask.
+    #
+    # An answered same-run gate with no `answer_source` was written by a path that bypassed
+    # `gate_state.py answer` or predates the field. It cannot be audited, so it is not
+    # resumed — but it is also not evidence that the checkpoints are stale, so they stay.
+    gate_answer, gate_run_id, answer_source = _read_gate_state(review_dir)
+    same_run_answered = bool(gate_answer) and gate_run_id == run_id
+    resume = same_run_answered and answer_source in _AUDITABLE_SOURCES
 
-    if args.clean and not resume:
+    if args.clean and not same_run_answered:
         # Fresh run: remove all cleanable pipeline artifacts so no stale
         # content from a prior run contaminates this invocation.
         #
@@ -118,10 +138,11 @@ def main() -> int:
         if os.path.isfile(gate_path):
             with contextlib.suppress(OSError):
                 os.remove(gate_path)
-            gate_answer, gate_run_id, resume = "", "", False
-    # resume is true: _CLEANABLE_NAMES artifacts are same-run checkpoints —
-    # leave them intact.  gate_state.json is also preserved (it holds the
-    # founder's answer that enabled resume detection).
+            gate_answer, gate_run_id, answer_source, resume = "", "", "", False
+    # same_run_answered is true: _CLEANABLE_NAMES artifacts are same-run checkpoints —
+    # leave them intact, whether or not the answer beside them can be resumed on.
+    # gate_state.json is also preserved (an unauditable answer is re-asked, and
+    # `gate_state.py emit` overwrites the file when the gate is put again).
 
     out = {
         "review_dir": review_dir,
@@ -130,7 +151,12 @@ def main() -> int:
         "artifacts_root": artifacts_root,
         "gate_answer": gate_answer,
         "gate_run_id": gate_run_id,
+        "answer_source": answer_source,
         "resume": resume,
+        # Whether this invocation removed the cleanable artifacts. Reported rather than
+        # inferred from `resume`: the two diverge exactly in the case this split exists
+        # for — an unauditable same-run answer keeps its checkpoints and is not resumed.
+        "cleaned": bool(args.clean and not same_run_answered),
     }
     indent = 2 if args.pretty else None
     sys.stdout.write(json.dumps(out, indent=indent) + "\n")

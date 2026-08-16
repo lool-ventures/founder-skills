@@ -66,11 +66,15 @@ def test_setup_run_cleans_existing_artifacts_with_clean_flag() -> None:
             assert not os.path.exists(os.path.join(review_dir, name))
 
 
-def _plant_gate(review_dir: str, run_id: str, answer: str | None) -> None:
+def _plant_gate(review_dir: str, run_id: str, answer: str | None, source: str = "founder") -> None:
+    """An answered gate carries a source by default, because a real one always does —
+    `gate_state.py answer` requires `--source`. The source-less case is a distinct
+    condition with its own tests below; these ones are about run_id parity."""
     os.makedirs(review_dir, exist_ok=True)
     body: dict = {"metadata": {"run_id": run_id}}
     if answer is not None:
         body["answer"] = answer
+        body["answer_source"] = source
     with open(os.path.join(review_dir, "gate_state.json"), "w") as f:
         json.dump(body, f)
 
@@ -238,3 +242,147 @@ def test_stale_gate_run_id_mismatch_with_clean_deletes_pipeline_artifacts() -> N
             assert not os.path.exists(os.path.join(review_dir, name)), (
                 f"{name} should be deleted when run_id mismatches (stale prior run)"
             )
+
+
+# ---------------------------------------------------------------------------
+# Resume eligibility and checkpoint preservation are SEPARATE decisions, and collapsing
+# them is why the obvious fix does not work. The skill always passes `--clean`, and the
+# code was `if args.clean and not resume: delete`. So "re-ask the gate but keep the
+# checkpoints" — the correct handling of an answer whose source is unrecorded — was not
+# expressible: turning resume off deleted the very artifacts it wanted kept, throwing
+# away the most expensive stretch of the pipeline to re-ask one question.
+#
+# These are the two-turn lifecycle tests. The paid deck-review e2e structurally cannot
+# cover this: it exposes no question tool, instructs the model not to ask, and supplies
+# no answer turn, so there is no second turn for it to observe. A green e2e is not F4
+# coverage and must not be read as any.
+# ---------------------------------------------------------------------------
+
+
+def _plant_sourced_gate(review_dir: str, run_id: str, answer: str, source: str | None) -> None:
+    os.makedirs(review_dir, exist_ok=True)
+    body: dict = {"metadata": {"run_id": run_id}, "answer": answer}
+    if source is not None:
+        body["answer_source"] = source
+    with open(os.path.join(review_dir, "gate_state.json"), "w") as f:
+        json.dump(body, f)
+
+
+def _plant_checkpoints(review_dir: str) -> None:
+    for name in ("deck_inventory.json", "stage_profile.json"):
+        with open(os.path.join(review_dir, name), "w") as f:
+            f.write("{}")
+
+
+def _turn(d: str, run_id: str) -> dict:
+    artifacts_root = os.path.join(d, "artifacts")
+    rc, out, _ = _run(
+        ["--artifacts-root", artifacts_root, "--slug", "acme-corp", "--run-id", run_id, "--clean", "--pretty"],
+        cwd=d,
+    )
+    assert rc == 0
+    assert out is not None
+    return out
+
+
+def test_a_founder_sourced_answer_resumes() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        review_dir = os.path.join(d, "artifacts", "deck-review-acme-corp")
+        _plant_sourced_gate(review_dir, "r1", "Looks right", "founder")
+        _plant_checkpoints(review_dir)
+        out = _turn(d, "r1")
+        assert out["resume"] is True
+        assert out["answer_source"] == "founder"
+        assert os.path.exists(os.path.join(review_dir, "deck_inventory.json"))
+
+
+def test_an_auto_satisfied_answer_also_resumes() -> None:
+    """Auto-satisfy is a legitimate path — the founder answered in Step 1. Recording it
+    is the point; blocking it would defeat the step it exists to skip."""
+    with tempfile.TemporaryDirectory() as d:
+        review_dir = os.path.join(d, "artifacts", "deck-review-acme-corp")
+        _plant_sourced_gate(review_dir, "r1", "Looks right", "auto_satisfied")
+        _plant_checkpoints(review_dir)
+        out = _turn(d, "r1")
+        assert out["resume"] is True
+        assert out["answer_source"] == "auto_satisfied"
+
+
+def test_an_answer_with_no_recorded_source_re_asks_but_keeps_the_checkpoints() -> None:
+    """The defect this fix exists for, and the reason the two variables had to split.
+
+    An answered same-run gate carrying no `answer_source` was written by a path that
+    bypassed the CLI or predates it, so it cannot be audited — re-ask it. But Steps 2-3
+    already ran for this run_id, and re-running them is three dispatches, two of which
+    read the deck. Keep them.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        review_dir = os.path.join(d, "artifacts", "deck-review-acme-corp")
+        _plant_sourced_gate(review_dir, "r1", "Looks right", None)
+        _plant_checkpoints(review_dir)
+        out = _turn(d, "r1")
+        assert out["resume"] is False, "an unauditable answer must not silently resume"
+        for name in ("deck_inventory.json", "stage_profile.json"):
+            assert os.path.exists(os.path.join(review_dir, name)), f"{name} was deleted to re-ask one question"
+
+
+def test_a_prior_runs_answer_is_still_stale_however_it_was_sourced() -> None:
+    """The run_id rule is unchanged and takes precedence: a `founder` source on a
+    DIFFERENT run's gate is a real answer to a question about a different run."""
+    with tempfile.TemporaryDirectory() as d:
+        review_dir = os.path.join(d, "artifacts", "deck-review-acme-corp")
+        _plant_sourced_gate(review_dir, "old-run", "Looks right", "founder")
+        _plant_checkpoints(review_dir)
+        out = _turn(d, "new-run")
+        assert out["resume"] is False
+        assert not os.path.exists(os.path.join(review_dir, "gate_state.json"))
+        for name in ("deck_inventory.json", "stage_profile.json"):
+            assert not os.path.exists(os.path.join(review_dir, name)), "a fresh run must not inherit checkpoints"
+
+
+def test_the_two_turn_gate_lifecycle_end_to_end() -> None:
+    """Turn 1 emits and is answered; turn 2 resumes on the answer turn 1 recorded."""
+    with tempfile.TemporaryDirectory() as d:
+        review_dir = os.path.join(d, "artifacts", "deck-review-acme-corp")
+
+        first = _turn(d, "r1")
+        assert first["resume"] is False, "a run with no gate on disk is not a resume"
+
+        gate_path = os.path.join(review_dir, "gate_state.json")
+        gate_script = os.path.join(os.path.dirname(SCRIPT), "gate_state.py")
+        body = {
+            "gate_id": "stage_confirmation",
+            "question": "Does this stage detection look right?",
+            "options": ["Looks right", "Different stage"],
+            "context_summary": "Detected: Seed",
+        }
+        emit = subprocess.run(
+            [sys.executable, gate_script, "emit", "--run-id", "r1", "-o", gate_path],
+            input=json.dumps(body),
+            capture_output=True,
+            text=True,
+        )
+        assert emit.returncode == 0, emit.stderr
+        _plant_checkpoints(review_dir)
+        ans = subprocess.run(
+            [
+                sys.executable,
+                gate_script,
+                "answer",
+                "--file",
+                gate_path,
+                "--answer",
+                "Looks right",
+                "--source",
+                "founder",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert ans.returncode == 0, ans.stderr
+
+        second = _turn(d, "r1")
+        assert second["resume"] is True
+        assert second["gate_answer"] == "Looks right"
+        assert second["answer_source"] == "founder"
+        assert os.path.exists(os.path.join(review_dir, "deck_inventory.json"))

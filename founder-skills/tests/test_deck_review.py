@@ -1401,6 +1401,7 @@ def test_compose_severity_map_complete() -> None:
         "SLIDE_REVIEW_MISSING",
         "SLIDE_REVIEW_DUPLICATE",
         "NUMBERS_NOT_REVIEWED",
+        "STALE_GATE_STATE",
     ]
     assert len(sev_map) == len(expected), f"expected {len(expected)} codes, got {len(sev_map)}"
     for code in expected:
@@ -4204,3 +4205,123 @@ def test_design_gate_reaches_the_coaching_payload() -> None:
         assert payload["reason"], f"{fmt}/{quality}: no founder-facing reason for the coach"
     clean = mod._design_gate_payload(_gated_checklist("pdf", "good"))
     assert clean["design_reviewed"] is True and clean["gated_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Auto-satisfied gate disclosure. The gate can be answered without the founder being
+# asked — legitimately, when Step 1 already captured a matching stage. `gate_state.py`
+# records that as `answer_source: auto_satisfied`; this is where the founder finds out.
+#
+# The disclosure lives beside the stage it concerns, because that is the claim it
+# qualifies: the report states a detected stage as confirmed, and the founder is
+# entitled to know whether they confirmed it.
+# ---------------------------------------------------------------------------
+
+_AUTO_SATISFY_SENTENCE = "you named this stage earlier"
+
+
+def _gate_file(d: str, run_id: str = "run-test", answer_source: str | None = "founder", body: str | None = None) -> str:
+    path = os.path.join(d, "gate_state.json")
+    with open(path, "w") as f:
+        if body is not None:
+            f.write(body)
+        else:
+            gate = {
+                "metadata": {"run_id": run_id},
+                "gate_id": "stage_confirmation",
+                "question": "?",
+                "options": ["Looks right"],
+                "context_summary": "x",
+                "answer": "Looks right",
+            }
+            if answer_source is not None:
+                gate["answer_source"] = answer_source
+            json.dump(gate, f)
+    return path
+
+
+def test_an_auto_satisfied_gate_is_disclosed_to_the_founder() -> None:
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": _VALID_RECONCILIATION,
+        }
+    )
+    gate = _gate_file(d, answer_source="auto_satisfied")
+    rc, data, err = _run_compose(d, ["--gate-state", gate])
+    assert rc == 0, err
+    assert data is not None
+    assert _AUTO_SATISFY_SENTENCE in data["report_markdown"], "the founder is not told the gate answered itself"
+
+
+def test_a_founder_answered_gate_says_nothing_extra() -> None:
+    """The disclosure is about the exception, not the rule. A founder who answered the
+    gate does not need to be told they answered it."""
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": _VALID_RECONCILIATION,
+        }
+    )
+    gate = _gate_file(d, answer_source="founder")
+    rc, data, err = _run_compose(d, ["--gate-state", gate])
+    assert rc == 0, err
+    assert data is not None
+    assert _AUTO_SATISFY_SENTENCE not in data["report_markdown"]
+
+
+def test_an_absent_gate_file_is_silent_but_an_unreadable_one_is_fatal() -> None:
+    """Two different conditions, and collapsing them is what makes a guard droppable.
+
+    SKILL.md always passes --gate-state, so an absent file means the run never gated —
+    an ordinary, correct state with nothing to disclose. A file that exists and cannot
+    be parsed means the record of how the gate was answered has been destroyed, and
+    composing a report that silently asserts nothing about it is the failure this
+    disclosure exists to prevent.
+    """
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": _VALID_RECONCILIATION,
+        }
+    )
+    rc, data, err = _run_compose(d, ["--gate-state", os.path.join(d, "nope.json")])
+    assert rc == 0, err
+    assert data is not None
+    assert _AUTO_SATISFY_SENTENCE not in data["report_markdown"]
+
+    _gate_file(d, body="{not json at all")
+    rc2, _, err2 = _run_compose(d, ["--gate-state", os.path.join(d, "gate_state.json")])
+    assert rc2 != 0, "an unreadable gate_state was composed over in silence"
+    assert "gate_state" in err2
+
+
+def test_a_gate_from_another_run_is_not_read_as_this_runs_answer() -> None:
+    """run_id parity. A gate_state left by a prior run says nothing about this one, and
+    reading its source either way — disclosing or staying silent — asserts something
+    unfounded about how THIS run was answered."""
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": _VALID_RECONCILIATION,
+        }
+    )
+    gate = _gate_file(d, run_id="some-other-run", answer_source="auto_satisfied")
+    rc, data, err = _run_compose(d, ["--gate-state", gate])
+    assert rc == 0, err
+    assert data is not None
+    assert _AUTO_SATISFY_SENTENCE not in data["report_markdown"], "a foreign run's gate was disclosed as this run's"
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "STALE_GATE_STATE" in codes, f"the mismatch was swallowed silently: {codes}"

@@ -68,7 +68,7 @@ def test_gate_state_answer_updates_existing_file() -> None:
                 },
                 f,
             )
-        rc, _, err = _run(["answer", "--file", path, "--answer", "Looks right"])
+        rc, _, err = _run(["answer", "--file", path, "--answer", "Looks right", "--source", "founder"])
         assert rc == 0, err
         with open(path) as f:
             written = json.load(f)
@@ -81,7 +81,7 @@ def test_gate_state_answer_handles_corrupt_file_cleanly() -> None:
         path = os.path.join(d, "gate_state.json")
         with open(path, "w") as f:
             f.write('{"metadata": {"run_id": "r1"}, "options": [')  # truncated JSON
-        rc, _, err = _run(["answer", "--file", path, "--answer", "Looks right"])
+        rc, _, err = _run(["answer", "--file", path, "--answer", "Looks right", "--source", "founder"])
         assert rc == 1
         assert "not valid json" in err.lower()
         assert "Traceback" not in err
@@ -93,7 +93,7 @@ def test_gate_state_answer_rejects_non_dict_json() -> None:
         path = os.path.join(d, "gate_state.json")
         with open(path, "w") as f:
             f.write("[1, 2, 3]")
-        rc, _, err = _run(["answer", "--file", path, "--answer", "Looks right"])
+        rc, _, err = _run(["answer", "--file", path, "--answer", "Looks right", "--source", "founder"])
         assert rc == 1
         assert "json object" in err.lower()
         assert "Traceback" not in err
@@ -114,7 +114,7 @@ def test_gate_state_answer_pretty_exits_0_and_emits_indented_json() -> None:
                 },
                 f,
             )
-        rc, stdout, err = _run(["answer", "--file", path, "--answer", "Looks right", "--pretty"])
+        rc, stdout, err = _run(["answer", "--file", path, "--answer", "Looks right", "--source", "founder", "--pretty"])
         assert rc == 0, err
         # stdout is the receipt; it must be valid JSON
         receipt = json.loads(stdout)
@@ -142,6 +142,105 @@ def test_gate_state_answer_rejects_answer_not_in_options() -> None:
                 },
                 f,
             )
-        rc, _, err = _run(["answer", "--file", path, "--answer", "Unicorn"])
+        rc, _, err = _run(["answer", "--file", path, "--answer", "Unicorn", "--source", "founder"])
         assert rc != 0
         assert "Unicorn" in err
+
+
+# ---------------------------------------------------------------------------
+# Answer provenance. A live run showed the gate self-answering "Looks right" with no
+# founder input, and the artifact could not distinguish that from a real answer — the
+# two are byte-identical once written. `--source` makes the difference recorded.
+#
+# This is OBSERVABILITY, NOT PROVENANCE, and the distinction is not pedantry: the flag
+# is supplied by the same model that would self-answer, so it cannot prove a founder
+# spoke. What it does is make the auto-satisfy path state itself, so a run that took it
+# is auditable afterwards and a run that recorded nothing is visibly un-auditable.
+# ---------------------------------------------------------------------------
+
+
+def _gate(path: str, gate_id: str = "stage_confirmation", options: list[str] | None = None) -> None:
+    with open(path, "w") as f:
+        json.dump(
+            {
+                "metadata": {"run_id": "r1"},
+                "gate_id": gate_id,
+                "question": "?",
+                "options": options or ["Looks right", "Different stage"],
+                "context_summary": "x",
+            },
+            f,
+        )
+
+
+def test_a_founder_answer_records_its_source() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "gate_state.json")
+        _gate(path)
+        rc, _, err = _run(["answer", "--file", path, "--answer", "Looks right", "--source", "founder"])
+        assert rc == 0, err
+        with open(path) as f:
+            assert json.load(f)["answer_source"] == "founder"
+
+
+def test_the_auto_satisfy_path_records_that_it_was_not_the_founder() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "gate_state.json")
+        _gate(path)
+        rc, _, err = _run(["answer", "--file", path, "--answer", "Looks right", "--source", "auto_satisfied"])
+        assert rc == 0, err
+        with open(path) as f:
+            assert json.load(f)["answer_source"] == "auto_satisfied"
+
+
+def test_an_out_of_scope_gate_cannot_be_self_answered() -> None:
+    """The schema admits three gate_ids and only one has an auto-satisfy rationale.
+    Without this restriction the model could self-record "Proceed anyway (best-effort)"
+    on a deck it just judged out of scope — the one answer no founder should skip."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "gate_state.json")
+        _gate(path, "out_of_scope_choice", ["Stop review", "Proceed anyway (best-effort)"])
+        rc, _, err = _run(
+            ["answer", "--file", path, "--answer", "Proceed anyway (best-effort)", "--source", "auto_satisfied"]
+        )
+        assert rc != 0
+        assert "out_of_scope_choice" in err
+        with open(path) as f:
+            assert "answer" not in json.load(f), "a refused answer must leave the file untouched"
+
+
+def test_only_the_confirmation_answer_can_be_self_answered() -> None:
+    """Auto-satisfy exists for "the founder already told us the stage and it matches".
+    Any other option on the same gate is a decision the founder has not made."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "gate_state.json")
+        _gate(path)
+        rc, _, err = _run(["answer", "--file", path, "--answer", "Different stage", "--source", "auto_satisfied"])
+        assert rc != 0
+        assert "Different stage" in err
+        with open(path) as f:
+            assert "answer" not in json.load(f)
+
+
+def test_an_answer_with_no_stated_source_is_refused() -> None:
+    """Required, not defaulted. Defaulting to `founder` would mint false provenance for
+    exactly the self-answered case this exists to expose; defaulting to nothing leaves
+    the artifact as ambiguous as it was. Omitting the flag writes nothing at all, which
+    `setup_run.py` then reads as an unanswered gate and re-asks."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "gate_state.json")
+        _gate(path)
+        rc, _, _ = _run(["answer", "--file", path, "--answer", "Looks right"])
+        assert rc != 0
+        with open(path) as f:
+            assert "answer" not in json.load(f)
+
+
+def test_an_unknown_source_is_refused() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "gate_state.json")
+        _gate(path)
+        rc, _, _ = _run(["answer", "--file", path, "--answer", "Looks right", "--source", "the_founder_probably"])
+        assert rc != 0
+        with open(path) as f:
+            assert "answer" not in json.load(f)

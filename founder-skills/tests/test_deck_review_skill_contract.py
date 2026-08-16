@@ -1504,3 +1504,68 @@ def test_relation_proposal_template_closes_the_kind_enum() -> None:
     assert "`kind` must be exactly" in block, "the RELATION_PROPOSAL template does not close the `kind` enum"
     for value in ("contradiction", "derived_ratio"):
         assert value in block, f"the template does not name the allowed kind {value!r}"
+
+
+def test_resume_detection_has_exactly_one_authority() -> None:
+    """SKILL.md must not carry its own reader of gate_state.json.
+
+    It used to. `setup_run.py` decides resume, and says in its own source that detection
+    lives there "so it cannot drift" — but an inline `python3 -c` block a few hundred
+    lines away read the same file and printed the stored answer on `answer` + run_id
+    parity alone. The two agreed until the rule gained a third term (does the answer
+    record where it came from?), at which point the snippet acted on answers
+    `setup_run.py` had declined to resume on. Two detectors that agree today drift
+    tomorrow; one authority cannot.
+
+    The check is deliberately about READING the file, not about the word "resume":
+    the drift is a second copy of the decision, whatever it is called.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+
+    # Non-vacuity: the gate section, the file, and setup_run's report must all still be
+    # here. A guard that passes because the feature vanished is the failure mode it
+    # replaces.
+    assert "### Gate: Confirm Stage and Scope" in text
+    assert "gate_state.json" in text
+    assert "`setup_run.py` printed `resume` and `gate_answer`" in text, (
+        "SKILL.md must point at setup_run.py's reported resume as the one authority"
+    )
+
+    for block in re.findall(r"```bash\n(.*?)```", text, re.DOTALL):
+        if "gate_state.json" not in block:
+            continue
+        inline_python = re.search(r"python3\s+-c", block)
+        assert not inline_python, (
+            "a bash block reads gate_state.json through an inline `python3 -c`:\n"
+            f"{block}\nResume detection belongs to setup_run.py alone."
+        )
+
+
+def test_every_gate_answer_invocation_states_its_source() -> None:
+    """`gate_state.py answer` requires `--source`, so an invocation missing it is
+    argparse exit 2 at runtime — the exact failure the file's own comment records from
+    the last time the model copied `emit`'s flag shape onto `answer`."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    invocations = [
+        block
+        for block in re.findall(r"```bash\n(.*?)```", text, re.DOTALL)
+        if re.search(r"gate_state\.py\"?\s+answer", block)
+    ]
+    assert invocations, "no `gate_state.py answer` bash invocation found in SKILL.md"
+    for block in invocations:
+        assert "--source" in block, f"a gate_state.py answer invocation omits --source:\n{block}"
+
+
+def test_compose_is_always_given_the_gate_record() -> None:
+    """`--gate-state` is optional at the CLI and mandatory in the pipeline.
+
+    It has to be optional so a caller with no gate is not forced to invent one, which
+    means nothing about the flag's own shape stops the skill from quietly dropping it —
+    and a dropped flag is silent by construction: the report composes cleanly and simply
+    never discloses that the stage gate answered itself. This is the guard.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    invocations = [block for block in re.findall(r"```bash\n(.*?)```", text, re.DOTALL) if "compose_report.py" in block]
+    assert invocations, "no compose_report.py bash invocation found in SKILL.md"
+    for block in invocations:
+        assert "--gate-state" in block, f"a compose_report.py invocation omits --gate-state:\n{block}"

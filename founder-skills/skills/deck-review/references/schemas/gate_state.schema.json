@@ -9,6 +9,11 @@
     "question": {"type": "string"},
     "options": {"type": "array", "items": {"type": "string"}},
     "context_summary": {"type": "string"},
-    "answer": {"type": "string"}
+    "answer": {"type": "string"},
+    "answer_source": {
+      "type": "string",
+      "enum": ["founder", "auto_satisfied"],
+      "description": "Who produced `answer`. Optional here because a gate that has not been answered has no source, and because an artifact written before this field existed is readable rather than invalid. `gate_state.py answer` requires it, and setup_run.py treats an answered gate without it as unauditable and re-asks. Observability, not provenance: the value is supplied by the same model that would self-answer."
+    }
   }
 }

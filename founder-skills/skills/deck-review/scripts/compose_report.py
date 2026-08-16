@@ -146,6 +146,11 @@ WARNING_SEVERITY: dict[str, str] = {
     "NAME_DRIFT": "medium",
     # v0.4.2 Mitigation 2 — informational only (uuid is per-run, won't collide)
     "MARKER_COLLISION": "low",
+    # Medium, not high: every deliverable is valid and complete. What is unavailable is the
+    # statement of how this run's stage gate was answered, which is a disclosure gap, not a
+    # broken pipeline. See the parity check in compose() for why neither disclosing nor
+    # staying silent is acceptable on a foreign run's gate record.
+    "STALE_GATE_STATE": "medium",
     # AI classification quality
     "UNSUBSTANTIATED_AI_CLAIM": "medium",
     # Content-accuracy: two inventory slides share a number, so the per-slide
@@ -914,7 +919,14 @@ def _unreviewed_design_note(checklist: dict[str, Any] | None) -> list[str]:
     ]
 
 
-def _section_stage_context(profile: dict[str, Any] | None) -> str:
+AUTO_SATISFY_DISCLOSURE = (
+    "*The stage above was not put to you as a question: you named this stage earlier and the deck "
+    "agreed, so it was taken as confirmed. If that is wrong, say so — everything below is graded "
+    "against it.*"
+)
+
+
+def _section_stage_context(profile: dict[str, Any] | None, gate_auto_satisfied: bool = False) -> str:
     """Stage-specific context for what investors expect."""
     if profile is None or _is_stub(profile):
         return "## Stage Context\n\n*No stage profile available.*\n"
@@ -940,6 +952,17 @@ def _section_stage_context(profile: dict[str, Any] | None) -> str:
         lines.append(f"**Typical Round Size:** {round_range}")
         lines.append(f"**Expected Traction:** {traction}")
         lines.append(f"**Runway Expectation:** {runway}")
+
+    if gate_auto_satisfied:
+        # The confirmation gate can be answered without the founder being asked — legitimately,
+        # when Step 1 already captured a matching stage, since re-asking a question they answered
+        # two minutes ago reads as not listening. But the report then presents a *confirmed* stage,
+        # and every criterion below is graded against it. A founder who never saw the question is
+        # entitled to know that this one was decided on their behalf, and where.
+        #
+        # Only the exception is disclosed. Telling a founder who answered the gate that they
+        # answered it is noise, and noise is what makes a disclosure stop being read.
+        lines.append("\n" + AUTO_SATISFY_DISCLOSURE)
 
     lines.append(
         "\n*Stage benchmarks are reference data from industry standards "
@@ -1420,7 +1443,41 @@ def _emit_coaching_payload(
     }
 
 
-def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
+def read_gate_state(path: str | None) -> dict[str, Any] | None:
+    """Load the gate artifact for the disclosure, or fail loudly.
+
+    THREE CONDITIONS, and collapsing any two of them is what makes a disclosure droppable:
+
+      no --gate-state       the caller is not a gated pipeline. Nothing to say.
+      path absent           SKILL.md always passes the flag, so this means the run never
+                            gated — an ordinary, correct state with nothing to disclose.
+      path present, unreadable
+                            the record of how the gate was answered has been destroyed.
+                            Composing a report that quietly asserts nothing about it is
+                            precisely the failure the disclosure exists to prevent, so
+                            this is fatal rather than silent.
+
+    Raises ValueError for the third; the caller turns it into a non-zero exit.
+    """
+    if not path:
+        return None
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            gate = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        raise ValueError(f"gate_state at {path} exists but cannot be read: {e}") from e
+    if not isinstance(gate, dict):
+        raise ValueError(f"gate_state at {path} is not a JSON object")
+    return gate
+
+
+def compose(
+    dir_path: str,
+    report_path: str | None = None,
+    gate_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Main composition: load artifacts, validate, assemble report."""
     all_names = REQUIRED_ARTIFACTS + OPTIONAL_ARTIFACTS
     artifacts: dict[str, dict[str, Any] | None] = {}
@@ -1432,6 +1489,35 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
 
     # Run validation
     warnings = validate_artifacts(artifacts)
+
+    # RUN-ID PARITY ON THE GATE RECORD. A gate_state.json left by a prior run says nothing
+    # about this one, and reading its source either way asserts something unfounded: disclose
+    # and we claim this run self-answered when it may not have; stay silent and we withhold a
+    # disclosure this run may owe. So neither — say that the record does not belong to this run.
+    #
+    # Medium, not high. Every deliverable is valid and complete; what is missing is our ability
+    # to state how one question was answered. `setup_run.py --clean` removes a prior run's gate,
+    # so reaching this means something upstream did not run or could not delete.
+    gate_auto_satisfied = False
+    if gate_state is not None:
+        artifact_run_ids = [
+            rid
+            for name in REQUIRED_ARTIFACTS
+            if _usable(artifacts.get(name))
+            and isinstance(rid := _as_dict(_as_dict(artifacts[name]).get("metadata")).get("run_id"), str)
+            and rid
+        ]
+        gate_run_id = _as_dict(gate_state.get("metadata")).get("run_id")
+        if artifact_run_ids and gate_run_id != artifact_run_ids[0]:
+            warnings.append(
+                _warn(
+                    "STALE_GATE_STATE",
+                    f"the gate record is from run '{gate_run_id}' but this report is run "
+                    f"'{artifact_run_ids[0]}' — how this run's stage gate was answered is unrecorded",
+                )
+            )
+        else:
+            gate_auto_satisfied = gate_state.get("answer_source") == "auto_satisfied"
 
     # Apply accepted_warnings from stage_profile (medium-severity only)
     profile = artifacts.get("stage_profile.json")
@@ -1510,7 +1596,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
         _section_title(inventory),
         _section_executive_summary(stage_profile, checklist_data, inventory),
         marker,
-        _section_stage_context(stage_profile),
+        _section_stage_context(stage_profile, gate_auto_satisfied),
         _section_slide_feedback(slide_reviews, inventory),
         _section_numbers(reconciliation, checklist_data),
         _section_checklist(checklist_data),
@@ -1635,6 +1721,11 @@ def parse_args() -> argparse.Namespace:
         "--write-md",
         help="Also write the report markdown to this path (in addition to JSON output via -o)",
     )
+    p.add_argument(
+        "--gate-state",
+        help="Path to gate_state.json. An absent file is fine (the run never gated); an unreadable "
+        "one is fatal, because the record of how the gate was answered is what the report discloses.",
+    )
     return p.parse_args()
 
 
@@ -1646,7 +1737,12 @@ def main() -> None:
         sys.exit(1)
 
     report_path = os.path.abspath(args.write_md) if args.write_md else None
-    result = compose(args.dir, report_path=report_path)
+    try:
+        gate_state = read_gate_state(args.gate_state)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    result = compose(args.dir, report_path=report_path, gate_state=gate_state)
 
     if args.write_md:
         report_markdown = result.get("report_markdown", "")

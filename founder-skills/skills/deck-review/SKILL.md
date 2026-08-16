@@ -422,32 +422,33 @@ PROFILE_EOF
 python3 "$SCRIPTS/gate_state.py" answer \
   --file "$REVIEW_DIR/gate_state.json" \
   --run-id "$RUN_ID" \
-  --answer "<the founder's chosen option, verbatim>"
+  --answer "<the founder's chosen option, verbatim>" \
+  --source founder
 ```
 
-then re-invokes this sub-agent. (`--file`, `--run-id`, `--answer`; `-o`/`--output` are accepted as aliases for `--file`, and `--run-id` is checked for parity against the gate's `metadata.run_id`.) The sub-agent detects re-invocation by checking whether `gate_state.json` already has an `answer` field. (The plain-text round-trip works correctly even without `AskUserQuestion`.)
+then re-invokes this sub-agent. (`--file`, `--run-id`, `--answer`, `--source`; `-o`/`--output` are accepted as aliases for `--file`, and `--run-id` is checked for parity against the gate's `metadata.run_id`.) `--source` is required and says who produced the answer: `founder` here, because they were asked and replied. (The plain-text round-trip works correctly even without `AskUserQuestion`.)
 
-**How to detect re-invocation:** you were re-invoked if `$REVIEW_DIR/gate_state.json` exists, has a non-empty `answer`, AND its `metadata.run_id` matches `$RUN_ID`. The run_id comparison is what distinguishes a genuine gate resume from a stale answered gate left by a *prior* completed run for the same company. (`setup_run.py` already deletes that stale file on a fresh run, but verify here as well.) Skip the gate-emit and read the answer:
-
-```bash
-python3 -c 'import json,sys
-g=json.load(open(sys.argv[1]))
-print(g.get("answer","") if g.get("metadata",{}).get("run_id","")==sys.argv[2] else "")' "$REVIEW_DIR/gate_state.json" "$RUN_ID" 2>/dev/null || true
-```
-
-If the previous Bash command printed a non-empty value, that is the gate answer — jump to "After the gate" below.
+**How to detect re-invocation: you already did, in Step 1.** `setup_run.py` printed `resume` and `gate_answer`. If `resume` was true, skip the gate-emit and jump to "After the gate" below with that `gate_answer`. **Do not re-read `gate_state.json` to decide this** — resume detection lives in `setup_run.py` and nowhere else, because it weighs run_id parity *and* whether the answer records where it came from. This file used to carry a second copy that checked only the first two, so an answer `setup_run.py` had declined to resume on was acted on regardless.
 
 **Auto-satisfy branch — the founder already told you the stage in Step 1.** If Step 1's `AskUserQuestion`
 captured a stage and the detected stage MATCHES it, do not ask again: write that answer straight through —
 `gate_state.py emit` the gate exactly as below, then immediately `gate_state.py answer` it with
-`"Looks right"` — and continue to "After the gate". Re-asking a
+`--answer "Looks right" --source auto_satisfied` — and continue to "After the gate". Re-asking a
 question the founder answered two minutes ago reads as not listening, and it is the single most common
 reason a founder abandons a gated run.
 
-Two conditions, both required, and neither is optional:
+`--source auto_satisfied` is what makes this branch auditable afterwards. It is accepted **only** here —
+only on the `stage_confirmation` gate, only for `"Looks right"` — because any other gate or option is a
+decision the founder has not made, and the script refuses it.
+
+Three conditions, all required, and none is optional:
 
 - **It must MATCH.** If Step 1 says seed and detection says Series A, that disagreement is exactly what
   the gate exists to surface — emit it normally and let the founder adjudicate.
+- **There must BE a Step 1 answer.** A form the founder skipped, dismissed, or left on its default is
+  not an answer, and neither is a stage you inferred while Step 1 ran. In each case this branch is
+  unavailable — emit the gate normally. The ask need not have been a structured form; a plain-text
+  question they answered counts. What is required is that a founder actually said it.
 - **Say that you did it.** The founder must see "you told me seed, and the deck agrees — proceeding on
   that" rather than the step silently vanishing. A gate that self-answers invisibly is indistinguishable
   from a gate that was skipped.
@@ -487,7 +488,7 @@ Then return — as your final assistant message — a JSON object the parent age
 
 **For out-of-scope stages (series_b, growth):** use `gate_id: "out_of_scope_choice"`, question `"This looks out of scope. What should I do?"`, options `["Stop review", "Different stage", "Proceed anyway (best-effort)"]`.
 
-**After the gate (when the gate-check Bash command printed a non-empty answer):** branch on the printed value:
+**After the gate (you are resuming on Step 1's `gate_answer`, or you just auto-satisfied):** branch on that answer:
 
 - `Looks right`: proceed to Step 4 with the detected stage.
 - `Different stage`: emit a second gate (gate_id `stage_choice`) via `gate_state.py emit` to ask which stage. The candidates, each label with the `--rebuild-stage` token it maps to: Pre-seed (`pre_seed`), Seed (`seed`), Series A (`series_a`), Series B (`series_b`), Growth (`growth`) — that is the complete enum, and anything outside it fails argparse when the answer is rebuilt below. `AskUserQuestion` renders at most four options, so offer **exactly four: the enum minus the stage `stage_profile.json` currently holds.** Reaching this gate means the founder just rejected that stage, so it can never be the answer. **On a repeat pass, drop the stage the profile holds NOW**, not the one first detected — otherwise you re-offer what they just rejected and hide the one they now want. Never add an explicit `Other` — the tool supplies one. Treat this as a fresh gate — return a new `needs_input` payload and let the parent answer it the same way. When that one comes back answered, translate the founder's pick to its token and rebuild the profile for the chosen stage at **high** confidence (the founder explicitly picked it), then re-emit the original `stage_confirmation` gate to confirm:
@@ -1065,8 +1066,11 @@ cat "$HANDOFF_DIR/checklist_output.json" | python3 "$SCRIPTS/checklist.py" --run
 ```bash
 python3 "$SCRIPTS/compose_report.py" --dir "$REVIEW_DIR" --pretty \
   -o "$REVIEW_DIR/report.json" \
-  --write-md "$REVIEW_DIR/report.md"
+  --write-md "$REVIEW_DIR/report.md" \
+  --gate-state "$REVIEW_DIR/gate_state.json"
 ```
+
+**Always pass `--gate-state`, including on a run you believe never gated.** An absent file is fine and says nothing; the flag is what lets the report disclose a stage that was confirmed on the founder's behalf rather than by them. Deciding not to pass it is deciding they do not need to know.
 
 `compose_report.py` writes both `report.json` and `report.md` deterministically. **Do NOT** read `report_markdown` out of `report.json` and re-write it via heredoc — heredoc re-writing can corrupt `report.json`. Compose owns the file outputs.
 
