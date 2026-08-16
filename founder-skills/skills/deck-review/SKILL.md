@@ -641,7 +641,9 @@ downstream can.
 
 `quote` must be the VERBATIM sentence or table row the figure was read from. It is
 re-found by a ledger-blind reader in the same extracted text, so a reworded sentence
-fails the check and the figure is dropped.
+fails the check and the figure is dropped. Keep the words that say what the number
+IS: `"Net revenue $493K"`, never `"$493K"`. A quote of nothing but the figure is
+matched wherever that figure is printed, on any slide, so it confirms nothing.
 
 Use your Write tool to write to OUTPUT_PATH exactly the shape expected by
 ledger.py (no metadata block; the producer script adds it):

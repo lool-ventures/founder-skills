@@ -589,7 +589,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # a dropped flag is silent by construction — the report composes cleanly and simply never
     # discloses a stage confirmed on the founder's behalf. The prose says pass it even when you
     # believe the run never gated, because that belief is the failure mode.
-    "deck-review": 93_549,
+    # deck-review 93,549 -> 93,749 (+200): the LEDGER_EXTRACTION template now says to keep the words
+    # that say what the number IS. `quote` was specified only as "verbatim", which "$493K" satisfies
+    # while identifying nothing — the second read matches TEXT, so a quote of nothing but the figure
+    # is re-found on any slide that prints that figure. ledger.py warns on it now, and a warning the
+    # extracting agent was never given the rule for is a warning nobody can act on.
+    "deck-review": 93_749,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

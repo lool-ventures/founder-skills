@@ -278,3 +278,55 @@ def test_the_date_rule_does_not_leak_into_money() -> None:
     rc, _, err = _run({"figures": [_fig(value=493, raw="$493K in 2024", quote="$493K in 2024")]})
     assert rc != 0
     assert "full scale" in err
+
+
+# ---------------------------------------------------------------------------
+# Quote shape. The schema calls `quote` "the verbatim sentence or table row the figure was
+# read from", and the validator checked only that it was a non-empty string. A quote of
+# "$80B" or "2010" satisfies that and identifies nothing: the gate it feeds matches text
+# against the second read, so a single token matches wherever that token happens to appear.
+#
+# This is the class every measured wrong-page verification on the corpus belongs to, and it
+# is NOT fixed by checking the claimed slide instead of the whole deck — narrowing the
+# haystack does not make a one-token needle identifying. Probed: a quote of "2010" against
+# a claimed slide reading "Founded 2010. Team of 12." verifies under both rules.
+#
+# WARN, never error. 7.5% of a real corpus is too large a population to refuse without a
+# migration, and some table rows are legitimately terse.
+# ---------------------------------------------------------------------------
+
+
+def test_a_single_token_quote_is_warned_about_but_accepted() -> None:
+    rc, out, err = _run({"figures": [_fig(quote="$493K")]})
+    assert rc == 0, err
+    warnings = json.loads(out)["validation"]["warnings"]
+    assert any("quote" in w for w in warnings), f"no quote-shape warning: {warnings}"
+
+
+def test_a_quote_with_no_real_word_is_warned_about() -> None:
+    """ "63.5% | $635K" is a table row with the row's own name stripped off — the part that
+    would have made it identifying."""
+    rc, out, err = _run({"figures": [_fig(quote="63.5% | $635K")]})
+    assert rc == 0, err
+    assert any("quote" in w for w in json.loads(out)["validation"]["warnings"])
+
+
+def test_a_verbatim_sentence_is_not_warned_about() -> None:
+    """The counter-test. A real quote must pass silently or the warning is noise."""
+    rc, out, err = _run({"figures": [_fig(quote="GMV of $493K in 2024, up from $210K")]})
+    assert rc == 0, err
+    assert not [w for w in json.loads(out)["validation"]["warnings"] if "quote" in w]
+
+
+def test_a_terse_but_identifying_table_row_is_not_warned_about() -> None:
+    """A table row that keeps its label is exactly what the schema asks for, and it is
+    short. The predicate keys on whether the quote carries a WORD, not on its length."""
+    rc, out, err = _run({"figures": [_fig(quote="Net revenue $493K")]})
+    assert rc == 0, err
+    assert not [w for w in json.loads(out)["validation"]["warnings"] if "quote" in w]
+
+
+def test_a_bad_quote_shape_never_fails_the_ledger() -> None:
+    """The whole population would fail. Warn and let the run continue."""
+    rc, _, err = _run({"figures": [_fig(quote="$80B"), _fig(id="b", quote="2010", value=2010, raw="2010")]})
+    assert rc == 0, err

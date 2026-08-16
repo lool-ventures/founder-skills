@@ -260,14 +260,17 @@ def test_a_label_glyph_cannot_turn_a_contradiction_into_a_confirmation() -> None
     assert rel.verdict == "contradiction", f"expected contradiction, got {rel.verdict}"
 
 
-def test_an_approximation_marker_only_in_the_quote_is_not_visible_here() -> None:
-    """`detect_bound` reads `raw` and `label`; the quote is not one of its inputs.
+def test_a_bare_raw_and_label_still_read_no_bound_without_the_quote() -> None:
+    """`raw` and `label` alone reach none of the figures that motivated the glyph.
 
-    A deck that prints a bare bar value and puts the `≈` in the surrounding sentence
-    ("2024 ≈ 20") therefore gets NO bound, whatever `_APPROX_WORDS` contains. Measured on one
-    live ledger: the glyph appeared in 0 of 81 `raw` values and 7 quotes, so adding it to the
-    pattern reached none of the figures that motivated it. Pinned so that a later reader does
-    not mistake the glyph's presence in the pattern for coverage of that class.
+    Measured on one live ledger: `≈` appeared in 0 of 81 `raw` values and 7 quotes, so a deck
+    printing a bare bar value and marking it approximate in the surrounding sentence got no
+    bound from these two fields — which is why adding the glyph to the symbol pattern closed
+    nothing on its own.
+
+    That gap is now closed by reading the quote under a stricter binding (see the N8 block
+    below), and this test keeps the underlying property honest: the two-argument call still
+    reads nothing, so the coverage comes from the quote and not from a widened `raw` rule.
     """
     assert detect_bound("$20B", "Computer vision market 2024") is None
 
@@ -869,3 +872,73 @@ def test_non_date_relations_are_untouched() -> None:
     r = _cmp("ratio", ["a", "b"], None, {"a": a, "b": b})
     assert not r.dropped
     assert r.computed == pytest.approx(25_000)
+
+
+# ---------------------------------------------------------------------------
+# N8 — the approximation marker that lives only in the quote.
+#
+# A deck that prints a bare bar value and puts the `≈` in the surrounding sentence gets no
+# bound from `raw` or `label`, because neither carries the glyph. Measured on one live
+# ledger: `≈` appeared in 0 of 81 `raw` values and 7 quotes, so adding the glyph to the
+# symbol pattern reached none of the figures that motivated it.
+#
+# The quote is a whole sentence and may hold several numbers, so the binding has to be
+# TIGHTER than the `raw` rule, not looser. `raw` uses "the glyph precedes the first number";
+# a quote needs "the glyph precedes THIS figure's number", which means locating the figure's
+# own printed string inside the quote. A bound can only ever suppress a contradiction, so a
+# false positive here buys silence on a real finding — this errs toward reading nothing.
+# ---------------------------------------------------------------------------
+
+
+def test_an_approximation_marker_in_the_quote_binds_to_its_own_figure() -> None:
+    """N8's motivating case: the bar is printed bare and the sentence marks it approximate."""
+    assert detect_bound("$20B", "Computer vision market 2024", "Computer vision market ≈$20B in 2024") == "approximate"
+
+
+def test_a_tilde_in_the_quote_binds_the_same_way() -> None:
+    assert detect_bound("1,200", "customers", "roughly ~1,200 customers today") == "approximate"
+
+
+def test_a_quote_glyph_belonging_to_a_different_number_does_not_bind() -> None:
+    """The whole hazard. The quote names two figures and the glyph qualifies the other one;
+    reading it as this figure's bound would erase a real contradiction about this figure."""
+    assert detect_bound("$100", "revenue", "revenue of $100 against a market of ≈$20B") is None
+
+
+def test_a_quote_glyph_after_the_figure_does_not_bind() -> None:
+    """ "$20B" then "≈20 competitors" later in the sentence is not a marker on $20B."""
+    assert detect_bound("$20B", "market", "market of $20B with ≈20 competitors") is None
+
+
+def test_a_figure_absent_from_its_own_quote_reads_no_bound() -> None:
+    """A quote that does not contain the figure's printed string cannot position a glyph
+    relative to it, so there is nothing to bind and the answer is no bound — never a guess."""
+    assert detect_bound("$20B", "market", "the market is approximately twenty billion dollars") is None
+
+
+def test_the_quote_is_optional_and_omitting_it_changes_nothing() -> None:
+    """Every existing caller passes two arguments; the third must default to no quote and
+    leave all prior behaviour identical."""
+    assert detect_bound("$20B", "Computer vision market 2024") is None
+    assert detect_bound("≈20", "") == "approximate"
+    assert detect_bound("$200B+", "") == "at_least"
+
+
+def test_an_explicit_bound_still_beats_a_quote_approximation() -> None:
+    """`approximate` is the fallback branch: a stated floor is a stronger claim than a
+    marker in the prose around it, and the ordering must not change."""
+    assert detect_bound("$200B+", "market", "the market is ≈$200B+ today") == "at_least"
+
+
+def test_an_earlier_glyph_on_another_number_does_not_reach_this_figure() -> None:
+    """The anchor is what makes the binding tight, and this is the case that tests it.
+
+    Here the glyph sits BEFORE this figure in the quote but belongs to a different number.
+    "Is there a glyph somewhere in front of it?" answers yes and erases a real finding about
+    $100; "is the glyph immediately in front of it?" answers no. Both readings agree on every
+    other case in this block, which is why this one has to exist — the anchor was added on
+    the right reasoning and pinned by nothing until a mutation removed it and no test moved.
+    """
+    assert detect_bound("$100", "revenue", "a market of ≈$20B and revenue of $100") is None
+    # The counter-half: same shape, glyph now on THIS figure, so it must still bind.
+    assert detect_bound("$100", "revenue", "a market of $20B and revenue of ≈$100") == "approximate"

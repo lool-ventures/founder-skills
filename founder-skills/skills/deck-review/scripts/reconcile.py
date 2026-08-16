@@ -314,8 +314,46 @@ def _approx_symbol_marks_this_figure(raw: str) -> bool:
 
 _APPROX_WORDS = re.compile(r"(\bapprox\w*|\babout\b|\baround\b|\broughly\b|\best\b|\bestimated\b)", re.I)
 
+# Only whitespace may sit between the glyph and the figure it qualifies.
+_QUOTE_APPROX_PREFIX = re.compile(r"[~≈]\s*$")
 
-def detect_bound(raw: str, label: str) -> str | None:
+
+def _approx_symbol_marks_this_figure_in_quote(raw: str, quote: str) -> bool:
+    """Does the QUOTE carry an approximation glyph attached to this figure's own number?
+
+    Measured on one live ledger: `≈` appeared in **0 of 81 `raw` values and 7 quotes** — the
+    seven chart bars a deck printed bare while marking them approximate in the surrounding
+    sentence. Reading `raw` and `label` alone reaches none of them, so those figures were
+    carried as exact claims and could be reported as contradicting a number the deck itself
+    said was approximate. That is the false-contradiction direction this module treats as
+    the worst thing it can emit.
+
+    THE BINDING IS TIGHTER THAN THE `raw` RULE, NOT LOOSER, and it has to be. `raw` is
+    supposed to be one figure's own printed string, so "the glyph precedes the first number"
+    is nearly always the right reading there. A quote is a whole sentence and routinely names
+    several figures, so the same rule would let a glyph belonging to one number qualify
+    another -- the exact hole that was closed on the `raw` path, reopened one field over.
+    Here the figure's own printed string must be located inside the quote and the glyph must
+    sit IMMEDIATELY before it, whitespace only.
+
+    A figure whose `raw` does not appear verbatim in its own quote reads NO bound. The quote
+    is required to be verbatim, so that is either a paraphrase or a differently-formatted
+    number, and neither lets a glyph be positioned relative to the figure. Guessing is not
+    available: every bound makes the comparison one-sided, so a false positive here buys
+    silence on a real finding.
+    """
+    needle = (raw or "").strip()
+    if not needle or not quote:
+        return False
+    start = quote.find(needle)
+    while start != -1:
+        if _QUOTE_APPROX_PREFIX.search(quote[:start]):
+            return True
+        start = quote.find(needle, start + 1)
+    return False
+
+
+def detect_bound(raw: str, label: str, quote: str = "") -> str | None:
     """Is this figure a floor, a ceiling, an approximation, or an exact claim?
 
     A quarter of the harm this module can do comes from reading "$200B+" as exactly
@@ -331,7 +369,7 @@ def detect_bound(raw: str, label: str) -> str | None:
     two-sided test. So a false positive here can only ever suppress a contradiction, and
     never manufacture one -- which is the direction this whole module errs in.
     """
-    raw, label = raw or "", label or ""
+    raw, label, quote = raw or "", label or "", quote or ""
     votes: set[str] = set()
     if _PLUS_RE.search(raw):
         votes.add("at_least")
@@ -351,8 +389,17 @@ def detect_bound(raw: str, label: str) -> str | None:
         return None  # contradictory signals -- fall back to the plain two-sided test
     if votes:
         return next(iter(votes))
-    # Symbols from `raw` only (the rule stated above); words from either side.
-    if _approx_symbol_marks_this_figure(raw) or _APPROX_WORDS.search(raw) or _APPROX_WORDS.search(label):
+    # Symbols from `raw` only (the rule stated above); words from either side. The quote is
+    # read for symbols too, but under a stricter binding -- see
+    # `_approx_symbol_marks_this_figure_in_quote`. Words are NOT read from the quote: a
+    # sentence saying "about" attaches to whatever it is about, and unlike a glyph there is
+    # no positional test that says which figure that is.
+    if (
+        _approx_symbol_marks_this_figure(raw)
+        or _APPROX_WORDS.search(raw)
+        or _APPROX_WORDS.search(label)
+        or _approx_symbol_marks_this_figure_in_quote(raw, quote)
+    ):
         return "approximate"
     return None
 
@@ -507,7 +554,7 @@ def load_figures(ledger: dict[str, Any]) -> list[Figure]:
                 # against the verbatim quote; until those ledgers exist, and permanently
                 # as the fallback for a figure the model says nothing about, it is read
                 # off the raw string and the label.
-                bound=detect_bound(str(raw.get("raw", "")), str(raw.get("label", ""))),
+                bound=detect_bound(str(raw.get("raw", "")), str(raw.get("label", "")), str(raw.get("quote", ""))),
                 visible=is_visible(str(raw.get("quote", ""))),
                 **_range_kwargs(str(raw.get("raw", ""))),
             )

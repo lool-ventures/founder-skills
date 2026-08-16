@@ -99,6 +99,24 @@ def _numeric_tokens(raw: str) -> list[float]:
     return out
 
 
+_QUOTE_WORD = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
+
+
+def _quote_is_identifying(quote: str) -> bool:
+    """Does this quote carry a WORD, rather than only figures and punctuation?
+
+    The test is the presence of a word, not a length. A short quote that keeps its row
+    label — "Net revenue $493K" — is exactly what the schema asks for and is three words
+    long; a word-count floor would flag it. Conversely "63.5% | $635K" is two tokens and
+    identifies nothing. What separates them is whether anything in the string says what
+    the number IS.
+
+    Three letters, so a scale suffix or a currency code cannot pass for a label: "493K"
+    and "$80B" carry no word, "GMV of $493K" carries two.
+    """
+    return bool(_QUOTE_WORD.search(quote or ""))
+
+
 _BARE_SUFFIX = re.compile(r"\d\s*[kKmMbBtT]\s*$")
 
 
@@ -168,6 +186,31 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
         quote = fig.get("quote")
         if not isinstance(quote, str) or not quote.strip():
             errors.append(f"{where} has no quote; the verbatim quote is what the second read checks")
+        elif not _quote_is_identifying(quote):
+            # The schema asks for "the verbatim sentence or table row"; this checked only
+            # non-empty. A quote of "$80B" or "63.5% | $635K" satisfies that and identifies
+            # nothing — the gate it feeds matches TEXT against the second read, so a bare
+            # token matches wherever that token happens to appear on any slide.
+            #
+            # Every measured wrong-page verification on the corpus is this class, and
+            # narrowing the match to the figure's claimed slide does NOT fix it: a one-token
+            # needle is not made identifying by a smaller haystack. Probed — a quote of
+            # "2010" against a claimed slide reading "Founded 2010. Team of 12." verifies
+            # under a slide-scoped rule exactly as it does under a whole-deck one.
+            #
+            # WARN, never error. This is ~7.5% of a real corpus, too large to refuse without
+            # a migration, and some table rows are legitimately terse. Promote after
+            # observation.
+            #
+            # KNOWN GAP: this catches a quote that is too THIN, not one that is not a quote
+            # at all. Chart descriptions ("the third bar, unlabelled") carry plenty of words
+            # and are ~16% of one live ledger. They need the extracting agent to distinguish
+            # a printed string from a reading of a picture, which no shape test can do.
+            warnings.append(
+                f"{where} quote {quote!r} carries no word — the second read matches this as text, so a "
+                f"bare figure matches on any slide that happens to print it. Quote the sentence or the "
+                f"whole table row, label included."
+            )
 
         raw = fig.get("raw")
         if not isinstance(raw, str) or not raw.strip():
