@@ -38,6 +38,7 @@ from reconcile import (  # type: ignore[import-not-found]  # noqa: E402
     merge_range_twins,
     operand_tolerance,
     parse_range,
+    quote_is_identifying,
 )
 
 
@@ -986,3 +987,62 @@ def test_an_approximation_word_still_needs_a_number_to_qualify() -> None:
     # the figure the label describes — neither of those is what this closes.
     assert detect_bound("about 100", "", "") == "approximate"
     assert detect_bound("100", "about 100 customers", "") == "approximate"
+
+
+def test_sentence_punctuation_after_the_figure_keeps_the_marker() -> None:
+    """A REGRESSION introduced by the token-boundary fix, and the common case at that.
+
+    The boundary check rejected any trailing `.` or `,` as "this is a longer number", but a
+    quote is a SENTENCE and the figure it is about routinely ends it. Measured:
+
+        "market ≈$20B"   -> approximate
+        "market ≈$20B."  -> None      <- the marker silently lost
+        "market ≈$20B,"  -> None
+
+    Losing the bound makes the comparison two-sided again, so ordinary punctuation could
+    turn a confirmation into a contradiction — the direction that manufactures findings.
+
+    Punctuation is numeric continuation only when a DIGIT follows it.
+    """
+    for quote in ("market ≈$20B", "market ≈$20B.", "market ≈$20B,", "market ≈$20B; and so on", "(≈$20B)"):
+        assert detect_bound("$20B", "market", quote) == "approximate", quote
+
+    # Still not fooled by a genuine longer number.
+    assert detect_bound("$20", "revenue", "market ≈$20.5B and revenue $20") is None
+    assert detect_bound("$1", "count", "≈$1,200 in total") is None
+
+
+def test_punctuation_does_not_flip_a_verdict() -> None:
+    """The end-to-end half: the same figures, one full stop apart, must not disagree."""
+
+    def _verdict(quote: str) -> str:
+        a = fig("6", 6, "count", id="a")
+        b = fig("5", 5, "count", id="b")
+        e = Figure(
+            id="e",
+            value=10.0,
+            raw="≈10",
+            unit_kind="count",
+            label="team",
+            slide=1,
+            quote=quote,
+            bound=detect_bound("≈10", "team", quote),
+            verified=True,
+        )
+        verdict: str = _cmp("sum", ["a", "b"], "e", {"a": a, "b": b, "e": e}).verdict
+        return verdict
+
+    assert _verdict("the team is ≈10") == _verdict("the team is ≈10."), "a trailing full stop changed the verdict"
+
+
+def test_a_quote_needs_a_word_that_says_what_the_number_is() -> None:
+    """ "Any three-letter word" was too weak a predicate to mean what it claimed.
+
+    `USD $493K`, `the $80B` and `about $80B` all carried a qualifying "word" and passed,
+    while identifying nothing: a currency code, an article and a hedge say nothing about
+    WHICH quantity the number is. The point of the check is that the quote names the thing.
+    """
+    for quote in ("USD $493K", "the $80B", "about $80B", "$80B", "63.5% | $635K", "approx 12"):
+        assert not quote_is_identifying(quote), quote
+    for quote in ("Net revenue $493K", "GMV of $493K in 2024", "ARR $2M", "customers 1,200"):
+        assert quote_is_identifying(quote), quote

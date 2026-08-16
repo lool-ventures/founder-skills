@@ -1484,6 +1484,22 @@ def read_gate_state(path: str | None) -> dict[str, Any] | None:
         raise ValueError(f"gate_state at {path} exists but cannot be read: {e}") from e
     if not isinstance(gate, dict):
         raise ValueError(f"gate_state at {path} is not a JSON object")
+
+    # AND IT MUST BE AN ANSWERED GATE. Parsing as an object was the whole check, so a gate
+    # that was emitted and never answered -- the founder asked, no reply -- composed with
+    # exit 0 and no warning, presenting the stage as settled. Same skipped-decision class
+    # as the missing file, one field along. The rules live in `gate_state.py` because three
+    # readers need them and enforcing them at one reader is what produced this.
+    from gate_state import is_answered, validate_answered_gate  # noqa: PLC0415
+
+    if not is_answered(gate):
+        raise ValueError(
+            f"gate_state at {path} was emitted but never answered — the stage was not confirmed, "
+            "so there is nothing to compose a report against"
+        )
+    problems = validate_answered_gate(gate)
+    if problems:
+        raise ValueError(f"gate_state at {path} is not a valid answered gate: " + "; ".join(problems))
     return gate
 
 
@@ -1532,6 +1548,38 @@ def compose(
             )
         else:
             gate_auto_satisfied = gate_state.get("answer_source") == "auto_satisfied"
+
+    # THIN QUOTES — emitted HERE, before acceptances, and the position is the point.
+    # This was appended near the end of compose, after `accepted_warnings` had already been
+    # processed, so the one thing its MEDIUM severity is supposed to buy — acceptance with a
+    # stated reason — was unreachable. A severity promising a remedy the ordering denies is
+    # worse than the higher severity, because it reads as available.
+    #
+    # A quote carrying no word identifies nothing: the gate matches TEXT, so "$80B" is
+    # re-found on any slide that prints $80B. `ledger.py` warns on each at extraction time,
+    # and that warning went nowhere a human looks — its receipt is {ok, path, bytes},
+    # `reconcile.py` does not read the ledger's validation block, and `ledger.json` is not in
+    # REQUIRED_ARTIFACTS. This is the surfacing step.
+    _recon = artifacts.get("reconciliation.json")
+    if _usable(_recon):
+        _quality = _as_dict(_recon.get("quote_quality"))
+        _thin, _total = _quality.get("thin"), _quality.get("total")
+        if isinstance(_thin, int) and _thin > 0:
+            warnings.append(
+                _warn(
+                    "THIN_QUOTES",
+                    (
+                        f"{_thin} of {_total} ledger quotes carry no word, so the second read "
+                        "confirmed only that the deck prints those figures somewhere — not that "
+                        "it prints them where the ledger says"
+                    ),
+                    founder_message=(
+                        f"{_thin} of the {_total} figures we checked were quoted as bare numbers, so "
+                        "the double-check on those was weaker than on the rest: it confirms the "
+                        "number appears in your deck, not that it appears where we say it does."
+                    ),
+                )
+            )
 
     # Apply accepted_warnings from stage_profile (medium-severity only)
     profile = artifacts.get("stage_profile.json")
@@ -1591,35 +1639,6 @@ def compose(
                         "The number checks below are a first pass — nobody reviewed them for "
                         "cases where the comparison itself does not hold, so read them as "
                         "questions to check rather than as settled problems."
-                    ),
-                )
-            )
-
-        # A quote carrying no word identifies nothing — the gate matches TEXT, so "$80B" is
-        # re-found on any slide that prints $80B. `ledger.py` warns on each one, and that
-        # warning went nowhere a human looks: the receipt it prints is {ok, path, bytes},
-        # `reconcile.py` never reads the ledger's validation block, and `ledger.json` is
-        # not in REQUIRED_ARTIFACTS. This is the surfacing step.
-        #
-        # Medium, and deliberately not high: ~7.5% of a real corpus is this shape, and the
-        # figures are not wrong — what is weak is the evidence that they were re-found. A
-        # high warning here would block runs over a known, pre-existing population.
-        quality = _as_dict(reconciliation.get("quote_quality"))
-        thin = quality.get("thin")
-        total = quality.get("total")
-        if isinstance(thin, int) and thin > 0:
-            warnings.append(
-                _warn(
-                    "THIN_QUOTES",
-                    (
-                        f"{thin} of {total} ledger quotes carry no word, so the second read "
-                        "confirmed only that the deck prints those figures somewhere — not that "
-                        "it prints them where the ledger says"
-                    ),
-                    founder_message=(
-                        f"{thin} of the {total} figures we checked were quoted as bare numbers, so "
-                        "the double-check on those was weaker than on the rest: it confirms the "
-                        "number appears in your deck, not that it appears where we say it does."
                     ),
                 )
             )

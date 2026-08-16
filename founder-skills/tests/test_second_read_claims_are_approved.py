@@ -255,3 +255,52 @@ def test_what_the_matcher_actually_accepts_is_pinned_behaviourally() -> None:
     # The floor the gate does hold: text absent from the document is not found.
     absent, _how, _ratio = qm.quote_in_doc("Gross margin of 82% on enterprise contracts", "Nothing of the sort here.")
     assert not absent, "the matcher accepts a quote with no counterpart in the document at all"
+
+
+# The blocklist half. The approved-wording anchors above check that each surface says the
+# right thing SOMEWHERE; they cannot see a false claim in the next paragraph, and the
+# per-file coverage rule is satisfied by one hit. Measured cost of that gap: after the
+# agent body was corrected, `SKILL.md`, `ledger.schema.json` and `reconcile.py`'s module
+# docstring all still said a reworded quote or a paraphrase fails the gate — three live
+# surfaces, one of them the production extraction instruction, all green.
+#
+# Stems, not whole phrases, for the reason the independence sweep uses them: the same claim
+# was written three different ways.
+# Only stems that cannot appear inside a TRUE statement. "word for word" was tried and
+# withdrawn: the corrected agent body says the match "is not enforced word for word", so
+# the stem flagged the fix. A blocklist that fires on the correction teaches the next
+# author to delete the correction.
+_OVERCLAIM_STEMS = (
+    "reworded sentence fails",
+    "a reworded one",
+    "paraphrase defeats",
+    "paraphrase fails",
+    "exact wording in the same",
+)
+
+_CLAIM_SURFACES = (
+    DECK_REVIEW / "SKILL.md",
+    DECK_REVIEW / "scripts" / "reconcile.py",
+    DECK_REVIEW / "scripts" / "ledger.py",
+    DECK_REVIEW / "scripts" / "_quote_match.py",
+    DECK_REVIEW / "references" / "schemas" / "ledger.schema.json",
+    DECK_REVIEW / "references" / "schemas" / "reconciliation.schema.json",
+    REPO_ROOT / "founder-skills" / "agents" / "deck-review.md",
+)
+
+
+def test_no_surface_claims_the_match_is_stricter_than_it_is() -> None:
+    """Sweep every surface, not just the one whose anchor was being edited."""
+    hits: list[str] = []
+    for path in _CLAIM_SURFACES:
+        assert path.exists(), f"claim surface has moved or been renamed: {path}"
+        lowered = path.read_text(encoding="utf-8").lower()
+        hits += [f"{path.name}: {stem!r}" for stem in _OVERCLAIM_STEMS if stem in lowered]
+    assert not hits, "surfaces overstating what the quote match establishes:\n  " + "\n  ".join(hits)
+
+
+def test_the_overclaim_sweep_reaches_real_files() -> None:
+    """Non-vacuity: a sweep over a mistyped path list passes by finding nothing."""
+    assert len(_CLAIM_SURFACES) >= 6
+    corpus = "\n".join(p.read_text(encoding="utf-8") for p in _CLAIM_SURFACES)
+    assert corpus.count("quote") > 20, "the sweep is not reading the files that discuss quoting"

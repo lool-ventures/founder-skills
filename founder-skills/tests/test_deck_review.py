@@ -4386,3 +4386,128 @@ def test_a_ledger_of_real_quotes_raises_no_thin_quote_warning() -> None:
     assert rc == 0
     assert data is not None
     assert "THIN_QUOTES" not in [w["code"] for w in data["validation"]["warnings"]]
+
+
+def test_an_unanswered_gate_is_not_composed_over() -> None:
+    """A gate file that exists but was never answered composed with exit 0 and no warning.
+
+    `read_gate_state` checked existence, JSON-ness and object-ness — not whether the gate
+    was actually answered. So the founder was asked, never replied, and the report was
+    produced anyway with the stage presented as settled. That is the same skipped-decision
+    class as the missing-file case, one field along.
+    """
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": _VALID_RECONCILIATION,
+        }
+    )
+    path = os.path.join(d, "gate_state.json")
+    with open(path, "w") as f:
+        json.dump(
+            {
+                "metadata": {"run_id": "run-test"},
+                "gate_id": "stage_confirmation",
+                "question": "?",
+                "options": ["Looks right", "Different stage"],
+                "context_summary": "x",
+            },
+            f,
+        )
+    rc, _, err = _run_compose(d, ["--gate-state", path])
+    assert rc != 0, "an unanswered gate composed silently"
+    assert "answer" in err
+
+
+def test_a_gate_answer_outside_its_own_options_is_not_composed_over() -> None:
+    """`gate_state.py answer` validates membership; a hand-written file bypasses it."""
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": _VALID_RECONCILIATION,
+        }
+    )
+    path = os.path.join(d, "gate_state.json")
+    with open(path, "w") as f:
+        json.dump(
+            {
+                "metadata": {"run_id": "run-test"},
+                "gate_id": "stage_confirmation",
+                "question": "?",
+                "options": ["Looks right", "Different stage"],
+                "context_summary": "x",
+                "answer": "Whatever I felt like",
+                "answer_source": "founder",
+            },
+            f,
+        )
+    rc, _, err = _run_compose(d, ["--gate-state", path])
+    assert rc != 0
+    assert "options" in err
+
+
+def test_an_illegally_auto_satisfied_gate_is_not_composed_over() -> None:
+    """The same tuple `gate_state.py` and `setup_run.py` enforce, checked at the third
+    reader too — compose is the one that renders the disclosure, so it must not render a
+    self-authorised answer as though it were legitimate."""
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": _VALID_RECONCILIATION,
+        }
+    )
+    path = os.path.join(d, "gate_state.json")
+    with open(path, "w") as f:
+        json.dump(
+            {
+                "metadata": {"run_id": "run-test"},
+                "gate_id": "out_of_scope_choice",
+                "question": "?",
+                "options": ["Stop review", "Proceed anyway (best-effort)"],
+                "context_summary": "x",
+                "answer": "Proceed anyway (best-effort)",
+                "answer_source": "auto_satisfied",
+            },
+            f,
+        )
+    rc, _, err = _run_compose(d, ["--gate-state", path])
+    assert rc != 0
+    assert "auto_satisfied" in err
+
+
+def test_a_medium_warning_can_actually_be_accepted() -> None:
+    """THIN_QUOTES was appended AFTER accepted_warnings were processed, so the one thing
+    its medium severity is supposed to buy — acceptance with a stated reason — was
+    unreachable. A severity that promises a remedy the ordering denies is worse than the
+    higher severity, because it reads as available.
+    """
+    profile = json.loads(json.dumps(_VALID_PROFILE))
+    profile["accepted_warnings"] = [
+        {"code": "THIN_QUOTES", "reason": "chart bars carry no printed label on this deck", "match": "quotes"}
+    ]
+    recon = dict(_VALID_RECONCILIATION)
+    recon["quote_quality"] = {"thin": 3, "total": 12}
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": profile,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": recon,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    hits = [w for w in data["validation"]["warnings"] if w["code"] == "THIN_QUOTES"]
+    assert len(hits) == 1
+    assert hits[0]["severity"] == "acknowledged", f"medium but unacceptable: {hits[0]}"

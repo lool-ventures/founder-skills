@@ -33,6 +33,61 @@ AUTO_SATISFIABLE_GATE = "stage_confirmation"
 AUTO_SATISFIABLE_ANSWER = "Looks right"
 
 
+def validate_answered_gate(gate: object) -> list[str]:
+    """Every rule an ANSWERED gate must satisfy, in one place, for all three readers.
+
+    THE SHARED VALIDATOR EXISTS BECAUSE THE RULES KEPT BEING ENFORCED AT ONE READER. The
+    auto-satisfy restriction lived only in `cmd_answer` and was reachable through `emit`;
+    once that was closed, `setup_run.py` and `compose_report.py` still accepted anything
+    that parsed as a JSON object, so a gate that was never answered at all -- the founder
+    asked, no reply -- composed cleanly with the stage presented as settled. Three readers,
+    one rule set, and the rule set is here.
+
+    Returns a list of human-readable problems; empty means the gate is a legitimate
+    answered state. Callers decide severity: `answer` refuses at write time, `setup_run`
+    declines to resume, `compose_report` refuses to compose.
+
+    A PENDING gate is not an error and is not this function's business -- ask
+    `is_answered()` first. This validates the answered state only.
+    """
+    problems: list[str] = []
+    if not isinstance(gate, dict):
+        return ["gate_state is not a JSON object"]
+
+    answer = gate.get("answer")
+    if not isinstance(answer, str) or not answer.strip():
+        problems.append("gate_state carries no answer: the gate was emitted and never answered")
+        return problems
+
+    options = gate.get("options")
+    if not isinstance(options, list) or not all(isinstance(o, str) for o in options):
+        problems.append("gate_state has no options array, so its answer cannot be checked against one")
+    elif answer not in options:
+        problems.append(f"answer {answer!r} is not one of the gate's own options {options!r}")
+
+    source = gate.get("answer_source")
+    if source is None:
+        problems.append("gate_state records no answer_source, so who answered it cannot be established")
+    elif source not in ANSWER_SOURCES:
+        problems.append(f"answer_source {source!r} is not one of {list(ANSWER_SOURCES)}")
+    elif source == AUTO_SATISFIED:
+        if gate.get("gate_id") != AUTO_SATISFIABLE_GATE:
+            problems.append(
+                f"answer_source auto_satisfied is only legal on the {AUTO_SATISFIABLE_GATE!r} gate, "
+                f"not {gate.get('gate_id')!r}"
+            )
+        elif answer != AUTO_SATISFIABLE_ANSWER:
+            problems.append(
+                f"answer_source auto_satisfied is only legal for {AUTO_SATISFIABLE_ANSWER!r}, not {answer!r}"
+            )
+    return problems
+
+
+def is_answered(gate: object) -> bool:
+    """Has this gate been answered at all? Distinguishes pending from malformed."""
+    return isinstance(gate, dict) and isinstance(gate.get("answer"), str) and bool(gate["answer"].strip())
+
+
 def _schema_path() -> str:
     return os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),

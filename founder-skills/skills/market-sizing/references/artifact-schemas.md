@@ -410,6 +410,6 @@ Direct output of `checklist.py`.
 
 **compose_report.py validates:**
 - `CHECKLIST_FAILURES`: `fail` between 1 and 6 (**medium** severity — a content finding, acceptable via `accepted_warnings` with a stated reason)
-- `CHECKLIST_FAILURES_CRITICAL`: `fail > 6` (high severity, never acceptable). The threshold is derived, not chosen: 7 failures cap the score at 15/22 = 68.2%, under the 70 `solid` requires, while 6 can still reach 72.7%. The two warnings are mutually exclusive.
+- `CHECKLIST_FAILURES_CRITICAL`: the score cannot reach `solid` — `pass / (pass + fail)` below 70 (high severity, never acceptable). Stated as a BAND, not a failure count: an absolute `fail > 6` assumes all 22 criteria apply, and with 7 `not_applicable` items the boundary is 5, so a checklist scoring 66.7% was filed as the acceptable warning. The band reproduces 6/7 exactly when nothing is N/A (7 of 22 caps the score at 68.2%; 6 reaches 72.7%). The two warnings are mutually exclusive.
 - `CHECKLIST_INCOMPLETE`: fewer than 22 items
 - `LOW_CHECKLIST_COVERAGE`: more than 7 `not_applicable` items (medium severity)

@@ -66,12 +66,29 @@ def test_setup_run_cleans_existing_artifacts_with_clean_flag() -> None:
             assert not os.path.exists(os.path.join(review_dir, name))
 
 
+def _gate_body(run_id: str, gate_id: str = "stage_confirmation", options: list[str] | None = None) -> dict:
+    """A COMPLETE gate, as `gate_state.py emit` would write it.
+
+    Planting three fields and hoping was itself a defect: the readers now validate the
+    whole answered state, and a fixture that omits `options` is not a smaller version of a
+    real gate — it is a record no writer could produce, which made the fixtures assert that
+    a schema-invalid gate resumes.
+    """
+    return {
+        "metadata": {"run_id": run_id},
+        "gate_id": gate_id,
+        "question": "Does this stage detection look right?",
+        "options": options if options is not None else ["Looks right", "Different stage"],
+        "context_summary": "Detected stage: Seed",
+    }
+
+
 def _plant_gate(review_dir: str, run_id: str, answer: str | None, source: str = "founder") -> None:
     """An answered gate carries a source by default, because a real one always does —
     `gate_state.py answer` requires `--source`. The source-less case is a distinct
     condition with its own tests below; these ones are about run_id parity."""
     os.makedirs(review_dir, exist_ok=True)
-    body: dict = {"metadata": {"run_id": run_id}}
+    body = _gate_body(run_id)
     if answer is not None:
         body["answer"] = answer
         body["answer_source"] = source
@@ -266,7 +283,13 @@ def _plant_sourced_gate(
     schema-validates it as required. The auto-satisfy pair is re-checked at read time, so
     a fixture omitting it is not merely incomplete, it exercises a different branch."""
     os.makedirs(review_dir, exist_ok=True)
-    body: dict = {"metadata": {"run_id": run_id}, "gate_id": gate_id, "answer": answer}
+    options = ["Looks right", "Different stage"]
+    if gate_id == "out_of_scope_choice":
+        options = ["Stop review", "Proceed anyway (best-effort)"]
+    elif gate_id == "stage_choice":
+        options = ["Pre-seed", "Seed", "Series A"]
+    body = _gate_body(run_id, gate_id=gate_id, options=options)
+    body["answer"] = answer
     if source is not None:
         body["answer_source"] = source
     with open(os.path.join(review_dir, "gate_state.json"), "w") as f:

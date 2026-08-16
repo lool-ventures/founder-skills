@@ -21,9 +21,11 @@ all. This file's contribution is that the resulting number is right, that it is
 traceable, and that SKILL.md's "never arithmetic in prose" rule has a sanctioned outlet.
 
 WHAT THE GATE ESTABLISHES, precisely. A figure's quote passes if it is re-found by a
-second reader who never saw the ledger. That catches an invented quote, and a reworded
-one -- though not a near-identical restatement, since matching falls back to a fuzzy pass
-at 0.85 (`_quote_match.py`).
+second reader who never saw the ledger. That catches a quote that is not in the deck at
+all -- invented, or composed out of a chart. It does NOT catch rewording: matching falls
+back to a similarity ratio at 0.85 (`_quote_match.py`), and measured against the shipped
+matcher, "increased" vs "decreased", "double" vs "decline" and "$45 billion" vs
+"$46 billion" all pass.
 It does NOT establish that the figure's VALUE is correct -- the matcher deliberately
 omits value binding, see `_quote_match.py` -- and the second reader does not read the
 deck independently of the first: both are handed the same main-thread-extracted text,
@@ -360,15 +362,24 @@ def _approx_symbol_marks_this_figure_in_quote(raw: str, quote: str) -> bool:
     start = quote.find(needle)
     while start != -1:
         end = start + len(needle)
-        # A trailing digit, decimal point or scale suffix means this is a longer number
-        # that merely begins with the needle, not an occurrence of the figure.
+        # A trailing digit or scale suffix means this is a longer number that merely
+        # begins with the needle, not an occurrence of the figure.
+        #
+        # PUNCTUATION IS CONTINUATION ONLY WHEN A DIGIT FOLLOWS IT. Rejecting every
+        # trailing `.` or `,` was a regression, and on the commonest shape there is: a
+        # quote is a SENTENCE and the figure it is about routinely ends it, so
+        # "market ≈$20B." silently lost its marker while "market ≈$20B" kept it. Losing a
+        # bound makes the comparison two-sided again, which manufactures findings -- the
+        # direction this module treats as its worst outcome. `$20.5B` still continues;
+        # `$20B.` does not.
         #
         # The emptiness guard is load-bearing and its absence is a live trap: `"" in ".,%"`
-        # is TRUE in Python, so without it an occurrence at the very end of the quote --
-        # the single most common position for the figure a sentence is about -- was
-        # discarded as "part of a longer number" and the marker never bound.
+        # is TRUE in Python, so without it an occurrence at the very end of the quote was
+        # discarded outright.
         tail = quote[end : end + 1]
-        if not (tail and (tail.isdigit() or tail in ".,%kKmMbBtT")):
+        after_tail = quote[end + 1 : end + 2]
+        continues = bool(tail) and (tail.isdigit() or tail in "kKmMbBtT%" or (tail in ".," and after_tail.isdigit()))
+        if not continues:
             marked.append(bool(_QUOTE_APPROX_PREFIX.search(quote[:start])))
         start = quote.find(needle, start + 1)
     if not marked:
@@ -442,6 +453,52 @@ def detect_bound(raw: str, label: str, quote: str = "") -> str | None:
 
 _QUOTE_WORD = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
 
+# Words that are three letters long and say nothing about WHICH quantity the number is:
+# currency codes, articles, prepositions, and the hedges that already have their own
+# meaning elsewhere in this module. "USD $493K" and "the $80B" passed the bare word test
+# while identifying exactly as little as "$493K" does.
+_NON_IDENTIFYING_WORDS = frozenset(
+    {
+        "usd",
+        "eur",
+        "gbp",
+        "ils",
+        "nis",
+        "chf",
+        "jpy",
+        "cad",
+        "aud",
+        "the",
+        "and",
+        "for",
+        "per",
+        "was",
+        "are",
+        "our",
+        "its",
+        "his",
+        "her",
+        "their",
+        "approx",
+        "approximately",
+        "about",
+        "around",
+        "roughly",
+        "circa",
+        "est",
+        "over",
+        "under",
+        "near",
+        "nearly",
+        "some",
+        "than",
+        "with",
+        "from",
+        "into",
+        "onto",
+    }
+)
+
 
 def quote_is_identifying(quote: str) -> bool:
     """Does this quote carry a WORD, rather than only figures and punctuation?
@@ -458,10 +515,17 @@ def quote_is_identifying(quote: str) -> bool:
     identifies nothing. What separates them is whether anything in the string says what
     the number IS.
 
-    Three letters, so a scale suffix or a currency code cannot pass for a label: "493K"
-    and "$80B" carry no word, "GMV of $493K" carries two.
+    Three letters, so a scale suffix cannot pass for a label: "493K" and "$80B" carry no
+    word, "GMV of $493K" carries two.
+
+    AND THE WORD HAS TO SAY SOMETHING. "Any three-letter word" was the first cut and it was
+    too weak to mean what it claimed: `USD $493K`, `the $80B` and `about $80B` all passed
+    while identifying nothing. A currency code, an article and a hedge are not what the
+    number IS. They are subtracted rather than enumerated positively, because the set of
+    words that DO identify a quantity is the whole language.
     """
-    return bool(_QUOTE_WORD.search(quote or ""))
+    words = {w.lower() for w in _QUOTE_WORD.findall(quote or "")}
+    return bool(words - _NON_IDENTIFYING_WORDS)
 
 
 def is_visible(quote: str) -> bool:

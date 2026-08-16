@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from typing import Any
 
 SCRIPT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -342,3 +343,80 @@ def test_the_restriction_cannot_be_routed_around_by_emitting_then_resuming() -> 
         )
         assert res.returncode == 0, res.stderr
         assert json.loads(res.stdout)["resume"] is False, "a self-answered out-of-scope gate was accepted as a resume"
+
+
+# The shared validator, tested directly. Both callers guard it behind an answered-check,
+# so mutating its own answer branch left every caller-level test green — the branch is
+# reachable only through the function's public contract, and that contract is what three
+# readers now depend on.
+
+
+def _import_gate_state() -> Any:
+    import importlib.util
+
+    # The script `sys.path`-inserts its own directory at runtime; importing it by path
+    # skips that, so the sibling helper it imports has to be reachable first.
+    scripts_dir = os.path.dirname(SCRIPT)
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    spec = importlib.util.spec_from_file_location("_gs_probe", SCRIPT)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _full_gate(**over: Any) -> dict[str, Any]:
+    gate: dict[str, Any] = {
+        "metadata": {"run_id": "r1"},
+        "gate_id": "stage_confirmation",
+        "question": "?",
+        "options": ["Looks right", "Different stage"],
+        "context_summary": "x",
+        "answer": "Looks right",
+        "answer_source": "founder",
+    }
+    gate.update(over)
+    return gate
+
+
+def test_validator_accepts_a_legitimate_answered_gate() -> None:
+    gs = _import_gate_state()
+    assert gs.validate_answered_gate(_full_gate()) == []
+    assert gs.validate_answered_gate(_full_gate(answer_source="auto_satisfied")) == []
+
+
+def test_validator_rejects_each_way_a_gate_can_be_wrong() -> None:
+    gs = _import_gate_state()
+    cases: dict[str, dict[str, Any]] = {
+        "never answered": {"answer": ""},
+        "answer outside options": {"answer": "Whatever"},
+        "no source": {"answer_source": None},
+        "unknown source": {"answer_source": "vibes"},
+        "auto-satisfied wrong gate": {
+            "gate_id": "out_of_scope_choice",
+            "answer": "Looks right",
+            "answer_source": "auto_satisfied",
+        },
+        "auto-satisfied wrong answer": {"answer": "Different stage", "answer_source": "auto_satisfied"},
+        "no options to check against": {"options": None},
+    }
+    for name, over in cases.items():
+        gate = _full_gate(**over)
+        if over.get("answer_source") is None and "answer_source" in over:
+            gate.pop("answer_source")
+        if over.get("options") is None and "options" in over:
+            gate.pop("options")
+        assert gs.validate_answered_gate(gate), f"validator accepted a gate that is {name}"
+
+
+def test_validator_and_is_answered_split_pending_from_malformed() -> None:
+    """A pending gate is not malformed, and the two must not be conflated: one is the
+    normal state between emit and answer, the other is a record no writer produced."""
+    gs = _import_gate_state()
+    pending = _full_gate()
+    del pending["answer"]
+    del pending["answer_source"]
+    assert not gs.is_answered(pending)
+    assert gs.is_answered(_full_gate())
+    assert not gs.is_answered({"answer": "   "})

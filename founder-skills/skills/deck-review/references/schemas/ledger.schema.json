@@ -32,7 +32,7 @@
             "type": "string"
           },
           "quote": {
-            "description": "The verbatim sentence or table row the figure was read from. This is what the second read is checked against, so a paraphrase defeats the gate. It must keep the words that say what the number is — \"Net revenue $493K\", not \"$493K\": the check matches text, so a quote of nothing but the figure is re-found on any slide that prints that figure and confirms nothing. A quote carrying no word warns.",
+            "description": "The verbatim sentence or table row the figure was read from. This is what the second read is checked against. The match falls back to a similarity ratio rather than requiring the exact string, so a close rewording can still pass and the check never inspects the figure's value; what it establishes is that the wording exists in the deck at all. It must keep the words that say what the number is — \"Net revenue $493K\", not \"$493K\": the check matches text, so a quote of nothing but the figure is re-found on any slide that prints that figure and confirms nothing. A quote carrying no word warns.",
             "type": "string"
           },
           "slide": { "type": "integer" },

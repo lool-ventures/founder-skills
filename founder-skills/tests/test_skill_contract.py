@@ -613,7 +613,15 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the preserved artifacts were re-run and overwritten, spending the three dispatches the
     # preservation exists to protect. The skip now reads `reuse_checkpoints`, and the distinction is
     # stated, because a reader who does not know the two differ reaches for the familiar one.
-    "deck-review": 94_262,
+    # deck-review 94,262 -> 94,528 (+266): the LEDGER_EXTRACTION template said "a reworded sentence
+    # fails the check and the figure is dropped", which is false — measured, the matcher accepts
+    # increased/decreased, double/decline and $45B/$46B through its 0.85 fuzzy fallback. This is the
+    # PRODUCTION instruction the extracting agent reads, and it was missed when the same claim was
+    # corrected in the agent body, because the approved-wording guard requires only one approved
+    # substring per file and cannot see a false claim in the next paragraph. It now says what the
+    # gate establishes — a quote found nowhere is dropped — and says the match is not word-for-word
+    # while still telling the agent to copy the wording, which is what makes the check worth running.
+    "deck-review": 94_528,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -829,7 +837,11 @@ REFERENCES_CEILING: dict[str, int] = {
     # +771 B (43_183 -> 43_954): artifact-schemas.md documented `overall_status` as the boolean
     # ("pass" if fail==0) and CHECKLIST_FAILURES as high-severity-on-any-failure. Both statements
     # became false with the band split, and the reference is where a producer author looks.
-    "market-sizing": 43_954,
+    # +229 B (43_954 -> 44_183): the CHECKLIST_FAILURES_CRITICAL row still documented `fail > 6`.
+    # That absolute cutoff assumes all 22 criteria apply; with 7 not_applicable the boundary is 5,
+    # and a checklist scoring 66.7% was filed as the acceptable warning. The row now states the band
+    # rule and records that it reproduces 6/7 exactly when nothing is N/A.
+    "market-sizing": 44_183,
     # fmr raised to document `graded_against` on the three producer outputs that stamp it — a new
     # artifact field is not discoverable from a schema doc that omits it, and the field exists to make
     # staleness detectable at all (run_id parity cannot see corrections applied within a run).

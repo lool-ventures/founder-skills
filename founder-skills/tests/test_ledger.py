@@ -362,3 +362,53 @@ def test_a_real_figure_with_a_parseable_raw_is_untouched() -> None:
             fig.pop("currency", None)
         rc, _, err = _run({"figures": [fig]})
         assert rc == 0, f"{raw!r} rejected: {err}"
+
+
+def test_a_raw_of_zero_does_not_bypass_the_scale_check() -> None:
+    """The scale check ran only `if parsed != 0`, so a zero `raw` skipped it entirely.
+
+    `raw="$0"` with `value=100` validated. Worse in combination: `raw="about $0"` also
+    reads as an approximation now that a word needs a number beside it, which re-opens the
+    contradiction-suppression path from the other end. Zero needs an absolute comparison,
+    not a skipped one — the one figure where a relative test is undefined is exactly the
+    one where it must not be silently dropped.
+    """
+    fig = _fig(value=100, raw="$0", quote="total of $0 here")
+    rc, _, err = _run({"figures": [fig]})
+    assert rc != 0, "raw='$0' with value=100 validated"
+
+    fig2 = _fig(value=100, raw="about $0", quote="about $0 in total")
+    rc2, _, _ = _run({"figures": [fig2]})
+    assert rc2 != 0
+
+
+def test_a_genuine_zero_still_validates() -> None:
+    """The counter-test: 18 corpus figures are zero and one is an operand of a live
+    contradiction, so zero itself must stay legal."""
+    rc, _, err = _run({"figures": [_fig(value=0, raw="$0", quote="net loss of $0")]})
+    assert rc == 0, err
+
+
+def test_a_date_value_must_look_like_a_date_component() -> None:
+    """A headcount recorded as a date passed, and the blast radius was not "computes
+    nothing" as previously claimed.
+
+    Measured: `raw="Founded 2025; 50 employees"`, `value=50`, `unit_kind=date` validated,
+    and adding that one row flipped a reconciliation from `no_figures` to `checked` with
+    `figures_total=2, figures_verified=2`. DATE rows are refused by the ARITHMETIC but
+    still count toward the gate and the founder-facing verified count.
+
+    The rule stays permissive about WHICH token — that is what closed F2's resolution
+    question, and both readings of "Q4 2025" are still legal — but a date component is
+    either a four-digit year or a small quarter/month ordinal. 50 is neither.
+    """
+    rc, _, err = _run({"figures": [_date(raw="Founded 2025; 50 employees", value=50, label="founding year")]})
+    assert rc != 0, "a headcount validated as a date"
+
+    # Both readings of a quarter-prefixed year remain legal.
+    for value in (2025, 4):
+        rc_ok, _, err_ok = _run({"figures": [_date(value=value)]})
+        assert rc_ok == 0, f"{value} rejected: {err_ok}"
+    # And a plain year range.
+    rc_r, _, err_r = _run({"figures": [_date(raw="2024-2030", value=2030, quote="2024-2030")]})
+    assert rc_r == 0, err_r

@@ -127,6 +127,23 @@ def test_market_sizing_smoke(tmp_path: Path) -> None:
         if warning.get("code") == "CHECKLIST_FAILURES_CRITICAL":
             assert warning.get("severity") == "high", warning
 
+    # THE SEVERITY CHECKS ABOVE ONLY RUN IF A WARNING HAPPENS TO APPEAR, so on a clean run
+    # they assert nothing and reverting to the old absolute cutoff would still pass. This
+    # is the unconditional half: whatever the run scored, the band and the warning must
+    # agree about whether the checklist could reach `solid`.
+    summary_fail = summary.get("fail")
+    summary_pass = summary.get("pass")
+    assert isinstance(summary_fail, int) and isinstance(summary_pass, int), summary
+    applicable = summary_pass + summary_fail
+    below_solid = applicable > 0 and (summary_pass / applicable) * 100 < 70.0
+    assert ("CHECKLIST_FAILURES_CRITICAL" in codes) == below_solid, (
+        f"the critical warning and the band disagree: pass={summary_pass} fail={summary_fail} "
+        f"applicable={applicable} below_solid={below_solid} codes={codes}"
+    )
+    assert ("CHECKLIST_FAILURES" in codes) == (summary_fail > 0 and not below_solid), (
+        f"the acceptable warning does not match the failure count: {summary} {codes}"
+    )
+
     assert_run_id_parity(
         review_dir,
         ["inputs.json", "sizing.json", "validation.json", "sensitivity.json", "checklist.json", "report.json"],

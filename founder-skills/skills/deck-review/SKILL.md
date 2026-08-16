@@ -642,10 +642,14 @@ A slide reading "200-400m" of building height is `raw: "200-400 metres"`, not
 downstream can.
 
 `quote` must be the VERBATIM sentence or table row the figure was read from. It is
-re-found by a ledger-blind reader in the same extracted text, so a reworded sentence
-fails the check and the figure is dropped. Keep the words that say what the number
-IS: `"Net revenue $493K"`, never `"$493K"`. A quote of nothing but the figure is
-matched wherever that figure is printed, on any slide, so it confirms nothing.
+re-found by a ledger-blind reader in the same extracted text; a quote that is not
+found there at all — one you composed, summarised, or read off a chart — is dropped.
+The match is not word-for-word: it falls back to a similarity ratio, so a close
+rewording can pass, and it compares text only and never checks the value. Copy the
+wording anyway; that is what makes the check worth running. Keep the words that say
+what the number IS: `"Net revenue $493K"`, never `"$493K"`. A quote of nothing but
+the figure is matched wherever that figure is printed, on any slide, so it confirms
+nothing.
 
 Use your Write tool to write to OUTPUT_PATH exactly the shape expected by
 ledger.py (no metadata block; the producer script adds it):

@@ -46,14 +46,12 @@ _GATE_STATE_NAME = "gate_state.json"
 
 _AUDITABLE_SOURCES = ("founder", "auto_satisfied")
 
-# Auto-satisfy is legal on exactly one gate and one answer, and `gate_state.py` enforces
-# that at write time. This is the same rule re-checked at READ time, deliberately
-# duplicated: the write-time check was routable around through `emit`, and a rule that
-# authorises skipping a founder's decision should not rest on a single choke point.
-# Whatever put the file there, an auto_satisfied source that does not match this pair is
-# not something to resume on.
-_AUTO_SATISFIABLE_GATE = "stage_confirmation"
-_AUTO_SATISFIABLE_ANSWER = "Looks right"
+# The answered-gate rules are re-checked at READ time, deliberately: the write-time check
+# was routable around through `emit`, and a rule that authorises skipping a founder's
+# decision should not rest on a single choke point. IMPORTED rather than restated — a
+# hand-copied pair here is a fourth copy waiting to drift from the other three.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from gate_state import validate_answered_gate  # noqa: E402
 
 
 def _read_gate_state(review_dir: str) -> tuple[str, str, str]:
@@ -74,13 +72,14 @@ def _read_gate_state(review_dir: str) -> tuple[str, str, str]:
     if isinstance(meta, dict):
         run_id = meta.get("run_id") or ""
     source = str(gate.get("answer_source") or "")
-    # Re-check the auto-satisfy pair at read time; see the constants above for why this
-    # is duplicated rather than trusted from the writer. Reported as an unrecorded source
-    # rather than as an error: the effect that matters is that the run does not resume on
-    # it and asks the founder instead.
-    if source == "auto_satisfied" and (
-        gate.get("gate_id") != _AUTO_SATISFIABLE_GATE or answer != _AUTO_SATISFIABLE_ANSWER
-    ):
+    # Validate the whole answered state, not just the source string. Reading three fields
+    # out of a dict accepts a record no writer would have produced — an answer outside the
+    # gate's own options, an illegal auto-satisfy pair — and the write-time checks were
+    # reachable around. Shared with `compose_report.py` so the readers cannot drift.
+    #
+    # Reported as an unrecorded source rather than as an error: the effect that matters is
+    # that the run does not resume on it and puts the question to the founder again.
+    if answer and validate_answered_gate(gate):
         source = ""
     return answer, str(run_id), source
 

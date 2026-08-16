@@ -106,6 +106,20 @@ def _numeric_tokens(raw: str) -> list[float]:
     return out
 
 
+def _is_date_component(value: float) -> bool:
+    """Is this number shaped like part of a date — a year, or a quarter/month ordinal?
+
+    Deliberately loose on WHICH component, because both readings of "Q4 2025" are legal and
+    that is what closed the resolution question. Tight enough that a headcount sharing the
+    raw string ("Founded 2025; 50 employees" -> 50) is not one.
+    """
+    magnitude = abs(value)
+    if magnitude != int(magnitude):
+        return False
+    whole = int(magnitude)
+    return 1 <= whole <= 12 or 1000 <= whole <= 9999
+
+
 _BARE_SUFFIX = re.compile(r"\d\s*[kKmMbBtT]\s*$")
 
 
@@ -253,6 +267,18 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
             # dates to four-digit years nor adding a self-attested resolution field buys
             # anything here. If date arithmetic is ever un-refused, this is the second place
             # to revisit.
+            #
+            # BUT THE TOKEN MUST ALSO LOOK LIKE A DATE COMPONENT, and the first cut of this
+            # rule left that out. `raw="Founded 2025; 50 employees"` with `value=50` is a
+            # headcount recorded as a date, and it passed because 50 is printed. The cost
+            # was not the "computes nothing" this was first defended with: measured, adding
+            # that one row flipped a reconciliation from `no_figures` to `checked` with
+            # `figures_total=2, figures_verified=2`, so a bogus DATE row moves the gate and
+            # the founder-facing verified count even though the arithmetic refuses it.
+            #
+            # A date component is a four-digit year or a small quarter/month ordinal. That
+            # keeps both readings of "Q4 2025" — which is what closed the resolution
+            # question — and rejects a headcount that happens to share the string.
             tokens = _numeric_tokens(raw)
             if tokens and not any(abs(abs(value) - token) < 1e-9 for token in tokens):
                 printed = ", ".join(f"{token:g}" for token in tokens)
@@ -260,9 +286,25 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
                     f"{where} value {value!r} is not one of the numbers raw {raw!r} prints "
                     f"({printed}) — a date must be a number stated on the slide"
                 )
+            elif not _is_date_component(value):
+                errors.append(
+                    f"{where} value {value!r} is recorded as a date but is neither a four-digit year "
+                    f"nor a quarter/month ordinal (1-12) — check the unit_kind, or record the year"
+                )
         elif value is not None and isinstance(raw, str):
             parsed = _parsed_magnitude(raw)
-            if parsed is not None and parsed != 0:
+            if parsed == 0:
+                # ZERO NEEDS AN ABSOLUTE COMPARISON, NOT A SKIPPED ONE. The guard used to be
+                # `parsed is not None and parsed != 0`, so a zero `raw` bypassed the whole
+                # check: `raw="$0"` with `value=100` validated. The relative test is
+                # undefined at zero, which is a reason to compare differently, not a reason
+                # to stop comparing — and `raw="about $0"` re-opens the tolerance-widening
+                # path from the other end.
+                if abs(value) > 1e-9:
+                    errors.append(
+                        f"{where} raw {raw!r} reads as zero but value is {value!r} — record the figure the slide prints"
+                    )
+            elif parsed is not None:
                 observed = abs(value)
                 # Tolerance from the raw string's OWN significant figures, floored.
                 # "$1.2M" claims two figures and covers 1.15M-1.25M; "$1,238,400" claims
