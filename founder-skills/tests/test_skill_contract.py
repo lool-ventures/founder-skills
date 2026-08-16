@@ -14,6 +14,7 @@ the body.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -629,7 +630,14 @@ SKILL_MD_CEILING: dict[str, int] = {
     # file over-trusts every figure it clears. The dispatch now says what it actually receives, and
     # says it is not re-reading, because removing a false claim without stating the true one leaves
     # the sub-agent to assume.
-    "deck-review": 94_777,
+    # deck-review 94,777 -> 95,586 (+809): setup_run.py reports `gate_action` and `gate_id`, and
+    # SKILL.md was still branching on the answer STRING — the same defect as the checkpoint one, one
+    # field along: the script computes the transition and the skill re-derives it. They disagree the
+    # moment an answer is gate-specific, and "Seed" is exactly that (rebuild-and-re-ask on
+    # stage_choice, meaningless elsewhere). The five actions are tabulated because a reader who does
+    # not know `continue_if_rebuilt` exists will treat "proceed anyway" as terminal, which is the
+    # defect this replaced: it authorised a report whose profile may never have been downgraded.
+    "deck-review": 95_586,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -2090,3 +2098,108 @@ def test_producer_rejects_loudly_without_clobbering(
     assert json.loads(out.read_text(encoding="utf-8")) == {"sentinel": True}, (
         f"{where} overwrote the canonical artifact with an analysis-free stub on a rejected run"
     )
+
+
+def test_paid_lanes_require_explicit_opt_in_not_merely_credentials() -> None:
+    """A credential is a capability, not permission to spend.
+
+    Measured cause of a real incident: plain `uv run pytest` collected all three paid e2e
+    lanes (the `e2e` marker is registered but nothing deselects it by default), and
+    `has_claude_auth()` returns True on **any** macOS host because the Keychain cannot be
+    probed cheaply. So an audit that ran the default suite on a Mac started paid runs
+    against the operator's subscription without anyone asking for them.
+
+    Two independent gates are required and this pins both: the default run must deselect
+    `e2e`, and the lanes must additionally require a deliberate opt-in.
+    """
+    config = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    ini_start = config.index("[tool.pytest.ini_options]")
+    rest = config[ini_start + 1 :]
+    next_section = rest.find("\n[tool.")
+    ini = rest if next_section == -1 else rest[:next_section]
+    assert "addopts" in ini, "pytest has no addopts, so nothing deselects the paid lanes by default"
+    assert "not e2e" in ini, "the default pytest run does not deselect `e2e`; a plain `pytest` will start paid runs"
+
+    harness = (REPO_ROOT / "founder-skills" / "tests" / "_e2e_harness.py").read_text(encoding="utf-8")
+    assert "RUN_PAID_E2E" in harness, (
+        "_e2e_harness.py gates only on credential detection. A credential says a run CAN "
+        "happen, never that it MAY — add an explicit opt-in."
+    )
+
+
+def test_every_paid_lane_gates_on_the_opt_in() -> None:
+    """All three lanes, not just the two that share a harness.
+
+    deck-review deliberately carries its own auth check (it is the lane the release tag
+    gates on), so a gate added to the shared harness alone leaves it open — which is the
+    exact shape of the incident: one of two copies.
+    """
+    import importlib.util
+
+    lanes = sorted((REPO_ROOT / "founder-skills" / "tests").glob("test_e2e_*.py"))
+    assert len(lanes) == 3, [p.name for p in lanes]
+
+    saved = {k: os.environ.get(k) for k in ("RUN_PAID_E2E", "ANTHROPIC_API_KEY")}
+    try:
+        os.environ.pop("RUN_PAID_E2E", None)
+        os.environ["ANTHROPIC_API_KEY"] = "sk-probe-not-a-real-key"
+        for lane in lanes:
+            # BEHAVIOURAL, not a grep. The first version asked whether the file MENTIONED
+            # the flag; deleting the two lines that enforce it left the constant and the
+            # helper behind, so the check stayed green with the gate gone. Call whatever
+            # each lane actually consults.
+            spec = importlib.util.spec_from_file_location(f"_lane_{lane.stem}", lane)
+            assert spec and spec.loader
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            checker = getattr(module, "_has_claude_auth", None) or getattr(module, "has_claude_auth", None)
+            assert checker is not None, (
+                f"{lane.name} exposes no auth check, so nothing gates it — if it now reaches the "
+                "shared harness under another name, teach this test that name"
+            )
+            assert checker() is False, f"{lane.name} authorizes a paid run on a credential alone, with no opt-in"
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def test_the_paid_opt_in_is_behaviourally_enforced_not_merely_mentioned() -> None:
+    """Grepping for the flag name is not a guard, and mutation proved it.
+
+    The first version of this check asserted `"RUN_PAID_E2E" in harness_source`. Deleting
+    the two lines that ENFORCE it left the constant, the helper and the docstring in place,
+    so the check stayed green while a plain credential once again authorized spending. The
+    question is what the function returns, so ask it.
+    """
+    import importlib.util
+
+    harness_path = REPO_ROOT / "founder-skills" / "tests" / "_e2e_harness.py"
+    spec = importlib.util.spec_from_file_location("_paid_probe", harness_path)
+    assert spec and spec.loader
+    harness = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(harness)
+
+    saved = {k: os.environ.get(k) for k in ("RUN_PAID_E2E", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")}
+    try:
+        # A credential present, opt-in absent: must NOT authorize.
+        os.environ.pop("RUN_PAID_E2E", None)
+        os.environ["ANTHROPIC_API_KEY"] = "sk-probe-not-a-real-key"
+        assert harness.has_claude_auth() is False, (
+            "a credential alone authorized a paid run — that is the exact incident this closes"
+        )
+        # Opt-in present with a credential: authorizes, or the lane can never run.
+        os.environ["RUN_PAID_E2E"] = "1"
+        assert harness.has_claude_auth() is True
+        # Opt-in present, no credential of any kind: still refuses on non-macOS; on macOS
+        # the Keychain cannot be probed, so only assert the direction that must hold.
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+        assert harness.paid_run_authorized() is True
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value

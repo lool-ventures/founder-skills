@@ -75,10 +75,25 @@ def validate_answered_gate(gate: object) -> list[str]:
         return problems
 
     options = gate.get("options")
+    gate_id = str(gate.get("gate_id") or "")
     if not isinstance(options, list) or not all(isinstance(o, str) for o in options):
         problems.append("gate_state has no options array, so its answer cannot be checked against one")
-    elif answer not in options:
-        problems.append(f"answer {answer!r} is not one of the gate's own options {options!r}")
+    else:
+        if answer not in options:
+            problems.append(f"answer {answer!r} is not one of the gate's own options {options!r}")
+        # And the options themselves must be the GATE's, not the emitter's -- see
+        # CANONICAL_OPTIONS for why a caller-defined choice set is not consent.
+        if gate_id in CANONICAL_OPTIONS:
+            expected = CANONICAL_OPTIONS[gate_id]
+            if tuple(options) != expected:
+                problems.append(
+                    f"{gate_id} was offered {options!r}, not its own options {list(expected)!r} — "
+                    "the choices a gate presents are not the asker's to pick"
+                )
+        elif gate_id == "stage_choice":
+            outside = [o for o in options if o not in STAGE_CHOICE_OPTIONS]
+            if outside:
+                problems.append(f"stage_choice offered {outside!r}, which are not stages")
 
     source = gate.get("answer_source")
     if source is None:
@@ -110,14 +125,38 @@ def is_answered(gate: object) -> bool:
 # existed -- "Stop review" (the founder said do not), "Different stage" (a rebuild is owed
 # first) and an intermediate `stage_choice` pick (re-confirmation is owed). The first of
 # those produced a review for a founder who had asked for none.
+# THE GATE'S OWN OPTIONS, not the caller's. Validation used to check the answer against
+# whatever list the emitter supplied, which makes consent caller-defined: an
+# `out_of_scope_choice` offering ONLY "Proceed anyway (best-effort)" validated and
+# authorised a clean report, with "Stop review" simply never presented. A gate whose
+# choices the asker picks is not a gate.
+CANONICAL_OPTIONS: dict[str, tuple[str, ...]] = {
+    "stage_confirmation": ("Looks right", "Different stage", "Not sure — proceed anyway"),
+    "out_of_scope_choice": ("Stop review", "Different stage", "Proceed anyway (best-effort)"),
+}
+
+# `stage_choice` is the one gate whose options are chosen at RUN TIME -- four of the five
+# stages, minus the one the founder just rejected -- so it cannot have a fixed list. It is
+# held to the enum instead.
+STAGE_CHOICE_OPTIONS: frozenset[str] = frozenset({"Pre-seed", "Seed", "Series A", "Series B", "Growth"})
+
+# Answers that authorise the rest of the pipeline OUTRIGHT.
 CONTINUE_ANSWERS: dict[str, frozenset[str]] = {
-    "stage_confirmation": frozenset({"Looks right", "Not sure — proceed anyway"}),
-    "out_of_scope_choice": frozenset({"Proceed anyway (best-effort)"}),
+    "stage_confirmation": frozenset({"Looks right"}),
+    "out_of_scope_choice": frozenset(),
     # `stage_choice` has NO continuing answer by construction: every pick rebuilds the
     # profile and re-emits `stage_confirmation`, so a stage_choice answer is always an
     # intermediate state.
     "stage_choice": frozenset(),
 }
+
+# Answers that continue ONLY IF the profile was first rebuilt at low confidence. SKILL.md
+# requires that rebuild for both; calling them terminal authorised a report whose stage
+# profile may never have been downgraded, so a founder who said "not sure" got a review
+# graded as though they had confirmed. The rebuild is a checkable POSTCONDITION -- the
+# profile's own confidence -- rather than something to take on trust; `compose_report.py`
+# verifies it.
+CONTINUE_IF_REBUILT_ANSWERS: frozenset[str] = frozenset({"Not sure — proceed anyway", "Proceed anyway (best-effort)"})
 
 STOP_ANSWERS: frozenset[str] = frozenset({"Stop review"})
 
@@ -143,6 +182,8 @@ def gate_action(gate: object) -> str:
         return "stop"
     if answer in CONTINUE_ANSWERS.get(str(gate.get("gate_id")), frozenset()):
         return "continue"
+    if answer in CONTINUE_IF_REBUILT_ANSWERS:
+        return "continue_if_rebuilt"
     return "rebuild"
 
 

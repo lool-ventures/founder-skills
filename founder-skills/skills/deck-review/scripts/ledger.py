@@ -115,10 +115,14 @@ def _numeric_tokens(raw: str) -> list[float]:
 #
 # So bind to what the raw string MARKS as a date: a four-digit year, a two-digit year
 # behind FY or an apostrophe, or an ordinal behind a quarter/month marker.
-_YEAR_4 = re.compile(r"(?<!\d)(\d{4})(?!\d)")
-_YEAR_2 = re.compile(r"(?:FY|')\s?(\d{2})(?!\d)", re.I)
-_QUARTER = re.compile(r"\bQ\s?([1-4])(?!\d)", re.I)
-_MONTH_NUM = re.compile(r"\bM\s?(1[0-2]|[1-9])(?!\d)", re.I)
+# A marker only marks a date when it stands as its OWN token. These were substring scans,
+# so ordinary prose produced date components: "Maybe 5 employees" matched the month pattern
+# on the M of "Maybe", "Marching with 3" matched "March", and "Unify25 users" matched FY25.
+# Each bogus DATE row then inflates figures_total, figures_verified and the checked gate.
+_YEAR_4 = re.compile(r"(?<![\d.,])(\d{4})(?![\d.,])")
+_YEAR_2 = re.compile(r"(?:\bFY|')\s?(\d{2})(?![\d.,])", re.I)
+_QUARTER = re.compile(r"(?<![A-Za-z])Q\s?([1-4])(?![\d.,])", re.I)
+_MONTH_NUM = re.compile(r"(?<![A-Za-z])M\s?(1[0-2]|[1-9])(?![\d.,])")
 _MONTH_NAMES = (
     "january",
     "february",
@@ -133,6 +137,25 @@ _MONTH_NAMES = (
     "november",
     "december",
 )
+_MONTH_NAME_RE = re.compile(r"\b(" + "|".join(_MONTH_NAMES) + r")\b", re.I)
+
+
+_YEAR_RANGE = re.compile(r"(?<![\d.,])\d{4}\s*[-–—/]\s*\d{4}(?![\d.,])")
+
+
+def _ambiguous_bare_years(text: str) -> bool:
+    """Two unmarked four-digit candidates that are not a range.
+
+    Syntax cannot separate them: in "Founded 2025; 2000 employees" both 2025 and 2000 are
+    well-formed years, and only the surrounding words say one is a headcount. `raw` is
+    supposed to be ONE figure's printed string, so a string naming two plausible years with
+    no marker distinguishing them is not something to guess at — refusing names the repair
+    (record the date's own printed string) where a guess silently accepts a headcount.
+    """
+    bare = [m for m in _YEAR_4.finditer(text) if 1900 <= int(m.group(1)) <= 2100]
+    if len(bare) < 2:
+        return False
+    return not _YEAR_RANGE.search(text)
 
 
 def _date_values(raw: str) -> set[float]:
@@ -145,8 +168,8 @@ def _date_values(raw: str) -> set[float]:
     values |= {float(m.group(1)) for m in _YEAR_2.finditer(text)}
     values |= {float(m.group(1)) for m in _QUARTER.finditer(text)}
     values |= {float(m.group(1)) for m in _MONTH_NUM.finditer(text)}
-    lowered = text.lower()
-    values |= {float(i + 1) for i, name in enumerate(_MONTH_NAMES) if name in lowered}
+    # Whole words only: "Marching" contains "march" and names no month.
+    values |= {float(_MONTH_NAMES.index(m.group(1).lower()) + 1) for m in _MONTH_NAME_RE.finditer(text)}
     return values
 
 
@@ -312,7 +335,12 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
             # SIGN IS PRESERVED. The token comparison used abs(value), so -2025 passed as
             # a year. There is no negative date.
             allowed = _date_values(raw)
-            if allowed and value not in allowed:
+            if _ambiguous_bare_years(raw):
+                errors.append(
+                    f"{where} raw {raw!r} names two four-digit numbers with nothing marking which is "
+                    f"the date — record the date's own printed string"
+                )
+            elif allowed and value not in allowed:
                 printed = ", ".join(f"{v:g}" for v in sorted(allowed))
                 errors.append(
                     f"{where} value {value!r} is not a date the raw {raw!r} marks "

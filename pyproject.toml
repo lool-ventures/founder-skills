@@ -60,6 +60,12 @@ module = ["pptx"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
+# PAID LANES ARE DESELECTED BY DEFAULT. Registering the `e2e` marker never excluded it, so
+# a plain `pytest` collected all three lanes and started real, billed runs. That is not
+# hypothetical: an audit running the default suite on a macOS host began two paid
+# market-sizing runs nobody had approved. Opting IN is one flag (`-m e2e`), which is the
+# right side for the cost to sit on.
+addopts = "-m 'not e2e'"
 testpaths = ["founder-skills/tests"]
 python_files = "test_*.py"
 pythonpath = ["founder-skills/tests"]

@@ -1164,22 +1164,38 @@ def _coverage_line(reconciliation: dict[str, Any]) -> str:
     computed = reconciliation.get("relations_proposed")
     if not isinstance(total, int) or not isinstance(verified, int):
         return ""
+    # WHAT THE CHECK IS AGAINST. "checked back against your deck" overstates the source:
+    # both readers are handed the SAME extracted text, so what is re-found is the wording in
+    # that extraction, not the slide. A founder who reads "against your deck" believes the
+    # figure was looked at twice on the page; it was looked at twice in one transcription.
     bits = [f"I read **{total}** figures off your deck"]
     if verified < total:
         bits.append(
-            f"**{verified}** of them had their wording checked back against your deck — the other "
-            f"**{total - verified}** I could not confirm, so nothing below rests on them"
+            f"**{verified}** of them had their wording found again in the deck's extracted text — "
+            f"the other **{total - verified}** I could not confirm, so nothing below rests on them"
         )
     else:
-        bits.append("all of them had their wording checked back against your deck")
-    if isinstance(computed, int) and computed:
-        bits.append(f"and I ran **{computed}** comparisons across them")
-    return ", ".join(bits) + (
-        ". That is what was checked. A short list here means these particular comparisons "
+        bits.append("all of them had their wording found again in the deck's extracted text")
+
+    # ATTEMPTED IS NOT EVALUATED. `relations_proposed` counts every comparison the model
+    # PROPOSED, including ones the engine then refused outright -- a date relation is
+    # refused before any arithmetic happens. Rendering that count as "I ran N comparisons"
+    # and following it with "these particular comparisons held" describes refusals as
+    # successful checks, which is the opposite of what happened.
+    dropped = _as_dict(reconciliation.get("suppressed")).get("dropped")
+    refused = dropped if isinstance(dropped, int) else 0
+    evaluated = (computed - refused) if isinstance(computed, int) else 0
+    if evaluated > 0:
+        bits.append(f"and I ran **{evaluated}** comparisons across them")
+    if refused > 0:
+        bits.append(f"**{refused}** further comparison{'s' if refused != 1 else ''} could not be made at all")
+    tail = (
+        ". That is what was checked. A short list here means the comparisons that DID run "
         "held — not that every number in the deck has been verified against every other, and "
         "not that a careful reader would find nothing more. Treat this as a first pass over "
         "your arithmetic, not a clean bill of health.\n"
     )
+    return ", ".join(bits) + tail
 
 
 def _section_numbers(
@@ -1522,6 +1538,20 @@ def read_gate_state(path: str | None) -> dict[str, Any] | None:
             f"gate_state at {path} records the answer {gate.get('answer')!r} — the founder declined "
             "the review, so no report is to be produced"
         )
+    if action == "continue_if_rebuilt":
+        # SKILL.md requires the profile to be rebuilt at LOW confidence before either
+        # "proceed anyway" answer continues. Checked as a POSTCONDITION rather than trusted:
+        # the caller that was supposed to perform the rebuild is the same one telling us it
+        # happened, and a founder who said "not sure" should not get a review graded as
+        # though they had confirmed.
+        profile = _load_artifact(os.path.dirname(os.path.abspath(path)) or ".", "stage_profile.json")
+        confidence = _as_dict(profile).get("confidence") if _usable(profile) else None
+        if confidence != "low":
+            raise ValueError(
+                f"gate_state at {path} records {gate.get('answer')!r}, which continues only after the "
+                f"stage profile is rebuilt at low confidence — its confidence is {confidence!r}"
+            )
+        return gate
     if action != "continue":
         raise ValueError(
             f"gate_state at {path} records {gate.get('answer')!r} on the {gate.get('gate_id')!r} gate, "

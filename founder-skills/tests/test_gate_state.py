@@ -367,13 +367,22 @@ def _import_gate_state() -> Any:
 
 
 def _full_gate(**over: Any) -> dict[str, Any]:
+    """A gate as `emit` would write it, including its CANONICAL options.
+
+    The options default to the real ones for whichever gate_id is asked for: they are the
+    gate's, not the caller's, and a fixture inventing a shorter list exercises a record no
+    writer could produce.
+    """
+    gs = _import_gate_state()
+    gate_id = str(over.get("gate_id", "stage_confirmation"))
+    default_options = list(gs.CANONICAL_OPTIONS.get(gate_id, ("Pre-seed", "Seed", "Series A")))
     gate: dict[str, Any] = {
         "metadata": {"run_id": "r1"},
-        "gate_id": "stage_confirmation",
+        "gate_id": gate_id,
         "question": "?",
-        "options": ["Looks right", "Different stage"],
+        "options": default_options,
         "context_summary": "x",
-        "answer": "Looks right",
+        "answer": "Looks right" if gate_id == "stage_confirmation" else default_options[0],
         "answer_source": "founder",
     }
     gate.update(over)
@@ -384,6 +393,7 @@ def test_validator_accepts_a_legitimate_answered_gate() -> None:
     gs = _import_gate_state()
     assert gs.validate_answered_gate(_full_gate()) == []
     assert gs.validate_answered_gate(_full_gate(answer_source="auto_satisfied")) == []
+    assert gs.validate_answered_gate(_full_gate(gate_id="out_of_scope_choice", answer="Stop review")) == []
 
 
 def test_validator_rejects_each_way_a_gate_can_be_wrong() -> None:
@@ -435,36 +445,18 @@ def test_validator_and_is_answered_split_pending_from_malformed() -> None:
 def test_only_terminal_continue_answers_authorize_a_report() -> None:
     gs = _import_gate_state()
     assert gs.gate_action(_full_gate(answer="Looks right")) == "continue"
+    # The two "proceed anyway" answers are conditional, not terminal — see
+    # test_proceed_anyway_answers_are_conditional_on_the_rebuild.
+    assert gs.gate_action(_full_gate(answer="Not sure — proceed anyway")) == "continue_if_rebuilt"
     assert (
-        gs.gate_action(
-            _full_gate(
-                gate_id="stage_confirmation",
-                answer="Not sure — proceed anyway",
-                options=["Looks right", "Different stage", "Not sure — proceed anyway"],
-            )
-        )
-        == "continue"
-    )
-    assert (
-        gs.gate_action(
-            _full_gate(
-                gate_id="out_of_scope_choice",
-                answer="Proceed anyway (best-effort)",
-                options=["Stop review", "Different stage", "Proceed anyway (best-effort)"],
-            )
-        )
-        == "continue"
+        gs.gate_action(_full_gate(gate_id="out_of_scope_choice", answer="Proceed anyway (best-effort)"))
+        == "continue_if_rebuilt"
     )
 
 
 def test_stop_and_rebuild_answers_do_not_authorize_a_report() -> None:
     gs = _import_gate_state()
-    stop = _full_gate(
-        gate_id="out_of_scope_choice",
-        answer="Stop review",
-        options=["Stop review", "Proceed anyway (best-effort)"],
-    )
-    assert gs.gate_action(stop) == "stop"
+    assert gs.gate_action(_full_gate(gate_id="out_of_scope_choice", answer="Stop review")) == "stop"
 
     rebuild = _full_gate(answer="Different stage")
     assert gs.gate_action(rebuild) == "rebuild"
@@ -481,3 +473,65 @@ def test_an_unanswered_gate_is_a_reask_not_a_continue() -> None:
     assert gs.gate_action(pending) == "reask"
     # And a malformed answered record is likewise not an authorization.
     assert gs.gate_action(_full_gate(answer="Whatever")) == "reask"
+
+
+# CANONICAL OPTIONS. The validator checked the answer against the caller's OWN option
+# list, which makes consent caller-defined: an `out_of_scope_choice` offering only
+# "Proceed anyway (best-effort)" validates and authorizes a clean report, with "Stop
+# review" simply never presented. A gate whose choices the asker picks is not a gate.
+
+
+def test_a_gate_cannot_omit_the_option_that_declines() -> None:
+    gs = _import_gate_state()
+    rigged = _full_gate(
+        gate_id="out_of_scope_choice",
+        options=["Proceed anyway (best-effort)"],
+        answer="Proceed anyway (best-effort)",
+    )
+    problems = gs.validate_answered_gate(rigged)
+    assert problems, "a gate that never offered Stop review was accepted"
+    assert any("Stop review" in p or "options" in p for p in problems), problems
+
+
+def test_the_canonical_options_are_the_only_ones_accepted() -> None:
+    gs = _import_gate_state()
+    for gate_id in ("stage_confirmation", "out_of_scope_choice"):
+        canonical = list(gs.CANONICAL_OPTIONS[gate_id])
+        ok = _full_gate(gate_id=gate_id, options=canonical, answer=canonical[0])
+        assert gs.validate_answered_gate(ok) == [], (gate_id, gs.validate_answered_gate(ok))
+        padded = _full_gate(gate_id=gate_id, options=[*canonical, "Just ship it"], answer=canonical[0])
+        assert gs.validate_answered_gate(padded), f"{gate_id} accepted an invented extra option"
+
+
+def test_stage_choice_options_must_come_from_the_stage_enum() -> None:
+    """`stage_choice` is the one gate whose options are chosen at runtime — four of five
+    stages, minus the one just rejected — so it cannot have a fixed list. It can still be
+    held to the enum."""
+    gs = _import_gate_state()
+    ok = _full_gate(gate_id="stage_choice", options=["Pre-seed", "Seed", "Series A"], answer="Seed")
+    assert gs.validate_answered_gate(ok) == []
+    bogus = _full_gate(gate_id="stage_choice", options=["Seed", "Whatever you think"], answer="Seed")
+    assert gs.validate_answered_gate(bogus), "stage_choice accepted an option outside the stage enum"
+
+
+# The two "proceed anyway" answers are NOT terminal. SKILL.md requires the profile to be
+# rebuilt at LOW confidence first, so treating them as `continue` authorized a report whose
+# stage profile may never have been downgraded — the founder said "not sure" and the review
+# was graded as though they had confirmed.
+
+
+def test_proceed_anyway_answers_are_conditional_on_the_rebuild() -> None:
+    gs = _import_gate_state()
+    unsure = _full_gate(
+        answer="Not sure — proceed anyway",
+        options=list(gs.CANONICAL_OPTIONS["stage_confirmation"]),
+    )
+    assert gs.gate_action(unsure) == "continue_if_rebuilt"
+    best_effort = _full_gate(
+        gate_id="out_of_scope_choice",
+        answer="Proceed anyway (best-effort)",
+        options=list(gs.CANONICAL_OPTIONS["out_of_scope_choice"]),
+    )
+    assert gs.gate_action(best_effort) == "continue_if_rebuilt"
+    # The unconditional one is unchanged.
+    assert gs.gate_action(_full_gate(options=list(gs.CANONICAL_OPTIONS["stage_confirmation"]))) == "continue"

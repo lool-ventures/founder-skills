@@ -45,13 +45,37 @@ def detect_auth_kind() -> str:
     return "none"
 
 
-def has_claude_auth() -> bool:
-    """True when ANY of the three auth paths is available.
+PAID_OPT_IN_ENV = "RUN_PAID_E2E"
 
-    Deliberately permissive: on macOS the subscription credential lives in the Keychain
-    and cannot be probed cheaply, so we let the run start and fail loudly rather than
-    skip a lane the operator believes is running.
+
+def paid_run_authorized() -> bool:
+    """Has anyone actually ASKED for a billed run?
+
+    A CREDENTIAL IS A CAPABILITY, NOT AN AUTHORIZATION, and conflating the two cost real
+    money. `has_claude_auth()` returns True on **any** macOS host — the Keychain cannot be
+    probed cheaply, so the check was deliberately permissive — which means "can this run?"
+    was answered yes on every developer machine, and nothing else was asked. An audit that
+    ran the default suite started two paid market-sizing runs against a subscription
+    nobody had offered.
+
+    So the credential check stays permissive (it exists to avoid a confusing skip) and
+    THIS is the gate: an explicit `RUN_PAID_E2E=1`. Deselection in `addopts` is the other
+    half; two independent gates, because the failure mode is spending someone else's money
+    and one of them was already shown to be missing.
     """
+    return os.environ.get(PAID_OPT_IN_ENV, "").strip().lower() in {"1", "true", "yes"}
+
+
+def has_claude_auth() -> bool:
+    """True when ANY of the three auth paths is available AND a paid run was authorized.
+
+    Deliberately permissive about credentials: on macOS the subscription credential lives
+    in the Keychain and cannot be probed cheaply, so we let the run start and fail loudly
+    rather than skip a lane the operator believes is running. That permissiveness is
+    exactly why the opt-in above is required — see `paid_run_authorized`.
+    """
+    if not paid_run_authorized():
+        return False
     if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
         return True
     if (Path.home() / ".claude" / ".credentials.json").is_file():

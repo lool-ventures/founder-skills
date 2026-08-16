@@ -62,13 +62,15 @@ APPROVED: list[tuple[str, pathlib.Path, str, str]] = [
         # deck" is a SUBSTRING of the all-verified line below, so it would keep passing
         # while this branch drifted. Caught by mutating the branch and watching the suite
         # stay green — an anchor that another anchor subsumes asserts nothing of its own.
-        "of them had their wording checked back against your deck — the other ",
+        # Branch-specific AND contiguous in the source: the partial branch is the only one
+        # that says what happens to the unconfirmed figures, and this clause sits on one line.
+        "I could not confirm, so nothing below rests on them",
         "founder",
     ),
     (
         "coverage line, all verified",
         DECK_REVIEW / "scripts" / "compose_report.py",
-        "all of them had their wording checked back against your deck",
+        "all of them had their wording found again in the deck's extracted text",
         "founder",
     ),
     (

@@ -4233,7 +4233,7 @@ def _gate_file(d: str, run_id: str = "run-test", answer_source: str | None = "fo
                 "metadata": {"run_id": run_id},
                 "gate_id": "stage_confirmation",
                 "question": "?",
-                "options": ["Looks right"],
+                "options": ["Looks right", "Different stage", "Not sure — proceed anyway"],
                 "context_summary": "x",
                 "answer": "Looks right",
             }
@@ -4414,7 +4414,7 @@ def test_an_unanswered_gate_is_not_composed_over() -> None:
                 "metadata": {"run_id": "run-test"},
                 "gate_id": "stage_confirmation",
                 "question": "?",
-                "options": ["Looks right", "Different stage"],
+                "options": ["Looks right", "Different stage", "Not sure — proceed anyway"],
                 "context_summary": "x",
             },
             f,
@@ -4442,7 +4442,7 @@ def test_a_gate_answer_outside_its_own_options_is_not_composed_over() -> None:
                 "metadata": {"run_id": "run-test"},
                 "gate_id": "stage_confirmation",
                 "question": "?",
-                "options": ["Looks right", "Different stage"],
+                "options": ["Looks right", "Different stage", "Not sure — proceed anyway"],
                 "context_summary": "x",
                 "answer": "Whatever I felt like",
                 "answer_source": "founder",
@@ -4474,7 +4474,7 @@ def test_an_illegally_auto_satisfied_gate_is_not_composed_over() -> None:
                 "metadata": {"run_id": "run-test"},
                 "gate_id": "out_of_scope_choice",
                 "question": "?",
-                "options": ["Stop review", "Proceed anyway (best-effort)"],
+                "options": ["Stop review", "Different stage", "Proceed anyway (best-effort)"],
                 "context_summary": "x",
                 "answer": "Proceed anyway (best-effort)",
                 "answer_source": "auto_satisfied",
@@ -4549,7 +4549,9 @@ def test_a_founder_who_said_stop_does_not_get_a_report() -> None:
     """The worst of the gate defects: `Stop review` is the answer that means DO NOT
     produce a review, and it composed a clean one. Answered was being read as authorized."""
     d = _full_arts()
-    path = _gate_at(d, "out_of_scope_choice", "Stop review", ["Stop review", "Proceed anyway (best-effort)"])
+    path = _gate_at(
+        d, "out_of_scope_choice", "Stop review", ["Stop review", "Different stage", "Proceed anyway (best-effort)"]
+    )
     rc, _, err = _run_compose(d, ["--gate-state", path])
     assert rc != 0, "a report was composed for a founder who declined the review"
     assert "Stop review" in err or "stop" in err.lower()
@@ -4559,7 +4561,7 @@ def test_an_intermediate_gate_answer_does_not_authorize_a_report() -> None:
     """`Different stage` and a `stage_choice` pick both owe a rebuild and a
     re-confirmation before anything downstream is entitled to run."""
     for gate_id, answer, options in (
-        ("stage_confirmation", "Different stage", ["Looks right", "Different stage"]),
+        ("stage_confirmation", "Different stage", ["Looks right", "Different stage", "Not sure — proceed anyway"]),
         ("stage_choice", "Seed", ["Pre-seed", "Seed", "Series A"]),
     ):
         d = _full_arts()
@@ -4572,17 +4574,10 @@ def test_an_intermediate_gate_answer_does_not_authorize_a_report() -> None:
 def test_the_answers_that_do_authorize_a_report_still_compose() -> None:
     """The counter-test — the guard must not eat the normal paths."""
     for gate_id, answer, options in (
-        ("stage_confirmation", "Looks right", ["Looks right", "Different stage"]),
-        (
-            "stage_confirmation",
-            "Not sure — proceed anyway",
-            ["Looks right", "Different stage", "Not sure — proceed anyway"],
-        ),
-        (
-            "out_of_scope_choice",
-            "Proceed anyway (best-effort)",
-            ["Stop review", "Proceed anyway (best-effort)"],
-        ),
+        ("stage_confirmation", "Looks right", ["Looks right", "Different stage", "Not sure — proceed anyway"]),
+        # The two conditional answers are covered by
+        # test_proceed_anyway_requires_the_profile_to_have_been_downgraded, which also
+        # sets up the low-confidence rebuild they depend on.
     ):
         d = _full_arts()
         path = _gate_at(d, gate_id, answer, options)
@@ -4594,7 +4589,13 @@ def test_a_foreign_runs_gate_cannot_authorize_this_run() -> None:
     """Run parity was a medium warning; it also has to block. A gate from another run
     authorises nothing about this one, and a warning is not an authorization check."""
     d = _full_arts()
-    path = _gate_at(d, "stage_confirmation", "Looks right", ["Looks right"], run_id="some-other-run")
+    path = _gate_at(
+        d,
+        "stage_confirmation",
+        "Looks right",
+        ["Looks right", "Different stage", "Not sure — proceed anyway"],
+        run_id="some-other-run",
+    )
     rc, _, err = _run_compose(d, ["--gate-state", path])
     assert rc != 0, "a foreign run's gate authorized this run's report"
     assert "run" in err.lower()
@@ -4646,3 +4647,102 @@ def test_the_thin_quote_message_still_explains_the_limit_when_figures_did_verify
     hits = [w for w in data["validation"]["warnings"] if w["code"] == "THIN_QUOTES"]
     message = hits[0]["founder_message"]
     assert "could only confirm the number appears somewhere" in message, message
+
+
+def test_proceed_anyway_requires_the_profile_to_have_been_downgraded() -> None:
+    """SKILL.md requires a low-confidence rebuild before either "proceed anyway" answer
+    continues. Treating them as terminal authorized a report whose stage profile may never
+    have been downgraded — the founder said "not sure" and the deck was graded as though
+    they had confirmed.
+
+    The rebuild is a checkable POSTCONDITION (the profile's own confidence), not something
+    to take on trust from the caller that was supposed to perform it.
+    """
+    for gate_id, answer in (
+        ("stage_confirmation", "Not sure — proceed anyway"),
+        ("out_of_scope_choice", "Proceed anyway (best-effort)"),
+    ):
+        options = {
+            "stage_confirmation": ["Looks right", "Different stage", "Not sure — proceed anyway"],
+            "out_of_scope_choice": ["Stop review", "Different stage", "Proceed anyway (best-effort)"],
+        }[gate_id]
+
+        high = json.loads(json.dumps(_VALID_PROFILE))
+        high["confidence"] = "high"
+        d = _make_artifact_dir(
+            {
+                "deck_inventory.json": _VALID_INVENTORY,
+                "stage_profile.json": high,
+                "slide_reviews.json": _VALID_REVIEWS,
+                "checklist.json": _VALID_CHECKLIST,
+                "reconciliation.json": _VALID_RECONCILIATION,
+            }
+        )
+        path = _gate_at(d, gate_id, answer, options)
+        rc, _, err = _run_compose(d, ["--gate-state", path])
+        assert rc != 0, f"{answer!r} composed without the low-confidence rebuild"
+        assert "confidence" in err.lower(), err
+
+        low = json.loads(json.dumps(_VALID_PROFILE))
+        low["confidence"] = "low"
+        d2 = _make_artifact_dir(
+            {
+                "deck_inventory.json": _VALID_INVENTORY,
+                "stage_profile.json": low,
+                "slide_reviews.json": _VALID_REVIEWS,
+                "checklist.json": _VALID_CHECKLIST,
+                "reconciliation.json": _VALID_RECONCILIATION,
+            }
+        )
+        path2 = _gate_at(d2, gate_id, answer, options)
+        rc2, _, err2 = _run_compose(d2, ["--gate-state", path2])
+        assert rc2 == 0, f"{answer!r} was refused after a correct rebuild: {err2}"
+
+
+def test_refused_comparisons_are_not_reported_as_comparisons_that_held() -> None:
+    """`relations_proposed` counts what the model PROPOSED, refusals included.
+
+    A date relation is refused before any arithmetic runs, yet the coverage line said "I
+    ran 1 comparisons" and then "these particular comparisons held". So the one thing that
+    demonstrably did not happen was described to the founder as a check that passed. This
+    is why the deferred `suppressed` breakdown was not harmless debt: a count with no
+    reason attached gets rendered as a success.
+    """
+    recon = json.loads(json.dumps(_VALID_RECONCILIATION))
+    recon["relations"] = []
+    recon["relations_proposed"] = 1
+    recon["suppressed"] = {"dropped": 1}
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": recon,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    assert "I ran **1** comparisons" not in md, md[:400]
+    assert "could not be made at all" in md, md[:400]
+
+
+def test_comparisons_that_did_run_are_still_reported() -> None:
+    recon = json.loads(json.dumps(_VALID_RECONCILIATION))
+    recon["relations_proposed"] = 3
+    recon["suppressed"] = {"dropped": 1}
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": recon,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    assert "I ran **2** comparisons" in data["report_markdown"]

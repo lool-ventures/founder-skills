@@ -152,8 +152,23 @@ def _summarize_sdk_message(msg: object) -> str:
     return f"{type_name}: {str(msg)[:120]}"
 
 
+PAID_OPT_IN_ENV = "RUN_PAID_E2E"
+
+
+def _paid_run_authorized() -> bool:
+    """Has anyone actually ASKED for a billed run? A credential is not permission.
+
+    Duplicated from `_e2e_harness.paid_run_authorized` because this lane deliberately does
+    not use the shared harness (it is the one the release tag gates on). The duplication is
+    the failure point to watch: a gate present in one of two copies is exactly the shape of
+    the incident this closes — an audit ran the default suite on a Mac and started two paid
+    runs, because credential detection was the only question anyone asked.
+    """
+    return os.environ.get(PAID_OPT_IN_ENV, "").strip().lower() in {"1", "true", "yes"}
+
+
 def _has_claude_auth() -> bool:
-    """True if any of the SDK's auth paths is available.
+    """True if a paid run was authorized AND any of the SDK's auth paths is available.
 
     Order of preference inside the SDK matches:
       1. ANTHROPIC_API_KEY env var (per-token API billing)
@@ -166,6 +181,8 @@ def _has_claude_auth() -> bool:
                          keychain unlock prompt)
          - Linux/Win:    ~/.claude/.credentials.json
     """
+    if not _paid_run_authorized():
+        return False
     if os.environ.get("ANTHROPIC_API_KEY"):
         return True
     if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
@@ -194,9 +211,10 @@ def _has_claude_auth() -> bool:
 @pytest.mark.skipif(
     not _has_claude_auth(),
     reason=(
-        "End-to-end smoke needs Claude auth: set ANTHROPIC_API_KEY, "
-        "CLAUDE_CODE_OAUTH_TOKEN, or run `claude /login` (subscription) "
-        "to populate ~/.claude/.credentials.json"
+        "Paid end-to-end smoke: set RUN_PAID_E2E=1 to authorize a billed run, AND have "
+        "Claude auth (ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, or `claude /login`). "
+        "The opt-in is separate on purpose — a credential says a run CAN happen, not that "
+        "it may."
     ),
 )
 def test_deck_review_smoke(tmp_path: Path) -> None:

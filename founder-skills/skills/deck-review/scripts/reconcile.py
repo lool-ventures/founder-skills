@@ -319,6 +319,16 @@ _APPROX_WORDS = re.compile(r"(\bapprox\w*|\babout\b|\baround\b|\broughly\b|\best
 # Only whitespace may sit between the glyph and the figure it qualifies.
 _QUOTE_APPROX_PREFIX = re.compile(r"[~≈]\s*$")
 
+# Everything that means "the number did not end here": a scale word, grouped thousands
+# behind any common separator (space, thin space, apostrophe, prime), or an exponent.
+# Checked on the text FOLLOWING the match, so it sees more than one character.
+_NUMBER_CONTINUES = re.compile(
+    r"(?:\s*(?:thousand|million|billion|trillion)\b"
+    r"|[\s\u00a0\u202f'\u2019\u2032]\d{3}(?![\d])"
+    r"|[eE][-+]?\d)",
+    re.I,
+)
+
 
 def _approx_symbol_marks_this_figure_in_quote(raw: str, quote: str) -> bool:
     """Does the QUOTE carry an approximation glyph attached to this figure's own number?
@@ -378,6 +388,16 @@ def _approx_symbol_marks_this_figure_in_quote(raw: str, quote: str) -> bool:
         # discarded outright.
         tail = quote[end : end + 1]
         after_tail = quote[end + 1 : end + 2]
+        # THE ONE-CHARACTER TAIL TEST WAS NOT ENOUGH. It caught a trailing digit and a
+        # scale LETTER, and missed every other way a number keeps going: a scale WORD
+        # ("≈$20 billion"), space- or apostrophe-grouped thousands ("≈$20 000",
+        # "≈$20′000"), and exponent notation ("≈$20e6"). In each of those `raw="$20"`
+        # matched a prefix of a number a thousand times its size and inherited its
+        # approximation -- measured end to end, turning a real contradiction into a
+        # suppressed confirmation.
+        if _NUMBER_CONTINUES.match(quote[end:]):
+            start = quote.find(needle, start + 1)
+            continue
         # `isdecimal()`, NOT `isdigit()`. `str.isdigit()` is True for superscripts and
         # enclosed forms -- `¹`, `²`, `①` -- so a footnote marker, the commonest thing to
         # sit immediately after a figure on a slide, read as "this is a longer number" and

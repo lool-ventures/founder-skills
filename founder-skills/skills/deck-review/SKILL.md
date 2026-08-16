@@ -177,7 +177,17 @@ python3 "$SCRIPTS/setup_run.py" \
   --pretty
 ```
 
-Read `review_dir`, `run_id`, `resume`, `reuse_checkpoints`, and `gate_answer` from the JSON printed by the previous Bash command. Substitute `REVIEW_DIR` with the `review_dir` value, `RUN_ID` with the `run_id` value, and `IS_RESUMING` with `1` if `resume` is true, else empty, in every subsequent bash block. Then:
+Read `review_dir`, `run_id`, `resume`, `reuse_checkpoints`, `gate_id`, `gate_action`, and `gate_answer` from the JSON printed by the previous Bash command. **`gate_action` is what to do next — branch on it, not on the answer string.** It is one of:
+
+| `gate_action` | what it means |
+|---|---|
+| `continue` | the founder confirmed; proceed |
+| `continue_if_rebuilt` | they said "proceed anyway"; rebuild the profile at **low** confidence FIRST, then proceed |
+| `rebuild` | an intermediate answer (`Different stage`, or a `stage_choice` pick): rebuild and re-emit the confirmation gate — this run is not finished asking |
+| `stop` | the founder declined the review. Stop. Produce nothing. |
+| `reask` | no usable answer; emit the gate |
+
+Read `gate_id` too when you act on the answer: `"Seed"` means one thing on `stage_choice` and nothing at all on the others, and the answer string alone cannot tell you which gate you are resuming. Substitute `REVIEW_DIR` with the `review_dir` value, `RUN_ID` with the `run_id` value, and `IS_RESUMING` with `1` if `resume` is true, else empty, in every subsequent bash block. Then:
 
 ```bash
 # Context A hand-off dir — PER RUN: sub-agents WRITE their raw output JSON here (the audit trail —

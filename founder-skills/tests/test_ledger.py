@@ -440,3 +440,38 @@ def test_the_year_forms_decks_actually_print_are_representable() -> None:
     for raw, value in (("FY25", 25), ("Q4 '25", 25), ("Q4 2025", 2025), ("Q4 2025", 4), ("2024-2030", 2030)):
         rc, _, err = _run({"figures": [_date(raw=raw, value=value, quote=f"target {raw}")]})
         assert rc == 0, f"{raw!r}/{value} rejected: {err}"
+
+
+def test_date_syntax_does_not_scan_arbitrary_prose() -> None:
+    """The syntax rule was a SUBSTRING scan, so ordinary prose produced date components.
+
+    `Maybe 5 employees` matched the month pattern on the "M" of "Maybe"; `Marching with 3`
+    matched "March"; `Unify25 users` matched `FY25`; and any four-digit quantity in
+    1900-2100 became a year, so `Founded 2025; 2000 employees` still admitted 2000. Each
+    bogus DATE row then inflates `figures_total`, `figures_verified` and the checked gate.
+
+    A marker only marks a date when it stands as its own token.
+    """
+    for raw, value in (
+        ("Founded 2025; 2000 employees", 2000),
+        ("Maybe 5 employees", 5),
+        ("Marching with 3 employees", 3),
+        ("Unify25 users", 25),
+    ):
+        rc, _, _ = _run({"figures": [_date(raw=raw, value=value, label="x", quote=raw)]})
+        assert rc != 0, f"{raw!r} admitted {value} as a date"
+
+
+def test_real_date_syntax_still_parses() -> None:
+    for raw, value in (
+        ("Q4 2025", 2025),
+        ("Q4 2025", 4),
+        ("FY25", 25),
+        ("Q4 '25", 25),
+        ("2024-2030", 2030),
+        ("March 2026", 3),
+        ("March 2026", 2026),
+        ("Founded 2025", 2025),
+    ):
+        rc, _, err = _run({"figures": [_date(raw=raw, value=value, quote=f"as of {raw}")]})
+        assert rc == 0, f"{raw!r}/{value} rejected: {err}"

@@ -74,11 +74,17 @@ def _gate_body(run_id: str, gate_id: str = "stage_confirmation", options: list[s
     real gate — it is a record no writer could produce, which made the fixtures assert that
     a schema-invalid gate resumes.
     """
+    canonical = {
+        "stage_confirmation": ["Looks right", "Different stage", "Not sure — proceed anyway"],
+        "out_of_scope_choice": ["Stop review", "Different stage", "Proceed anyway (best-effort)"],
+    }
     return {
         "metadata": {"run_id": run_id},
         "gate_id": gate_id,
         "question": "Does this stage detection look right?",
-        "options": options if options is not None else ["Looks right", "Different stage"],
+        # The gate's OWN options. A fixture inventing a shorter list is a record `emit`
+        # could not write, and the validator now says so.
+        "options": options if options is not None else canonical.get(gate_id, ["Pre-seed", "Seed", "Series A"]),
         "context_summary": "Detected stage: Seed",
     }
 
@@ -283,12 +289,7 @@ def _plant_sourced_gate(
     schema-validates it as required. The auto-satisfy pair is re-checked at read time, so
     a fixture omitting it is not merely incomplete, it exercises a different branch."""
     os.makedirs(review_dir, exist_ok=True)
-    options = ["Looks right", "Different stage"]
-    if gate_id == "out_of_scope_choice":
-        options = ["Stop review", "Proceed anyway (best-effort)"]
-    elif gate_id == "stage_choice":
-        options = ["Pre-seed", "Seed", "Series A"]
-    body = _gate_body(run_id, gate_id=gate_id, options=options)
+    body = _gate_body(run_id, gate_id=gate_id)
     body["answer"] = answer
     if source is not None:
         body["answer_source"] = source
@@ -381,7 +382,7 @@ def test_the_two_turn_gate_lifecycle_end_to_end() -> None:
         body = {
             "gate_id": "stage_confirmation",
             "question": "Does this stage detection look right?",
-            "options": ["Looks right", "Different stage"],
+            "options": ["Looks right", "Different stage", "Not sure — proceed anyway"],
             "context_summary": "Detected: Seed",
         }
         emit = subprocess.run(

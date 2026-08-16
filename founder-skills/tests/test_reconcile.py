@@ -1063,3 +1063,26 @@ def test_a_footnote_marker_is_not_numeric_continuation() -> None:
     # Real continuations are still continuations, including non-ASCII decimal digits.
     assert detect_bound("$20", "revenue", "market ≈$205B and revenue $20") is None
     assert detect_bound("$2", "revenue", "≈$2٠ in total") is None
+
+
+def test_a_numeric_prefix_does_not_inherit_the_larger_number_marker() -> None:
+    """The one-character tail test missed every separator that is not a digit.
+
+    `raw="$20"` matched inside `≈$20 billion`, `≈$20 000` and `≈$20′000` — a scale WORD, a
+    space-grouped thousand and an apostrophe-grouped one — so the smaller figure inherited
+    an approximation belonging to a number a thousand times its size. Probed end to end,
+    that turned a real contradiction into a suppressed confirmation.
+    """
+    for quote in (
+        "market ≈$20 billion",
+        "market ≈$20 million",
+        "≈$20 000",
+        "≈$20′000",
+        "≈$20 000 000",
+        "≈$20e6",
+    ):
+        assert detect_bound("$20", "revenue", quote) is None, quote
+
+    # And the genuine case is untouched: the figure itself, marked, ending the clause.
+    assert detect_bound("$20", "revenue", "revenue of ≈$20 last year") == "approximate"
+    assert detect_bound("$20B", "market", "market ≈$20B") == "approximate"

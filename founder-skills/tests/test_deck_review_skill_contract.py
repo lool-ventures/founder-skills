@@ -1588,3 +1588,18 @@ def test_the_skill_reads_checkpoint_reuse_from_its_own_field() -> None:
         "the Steps 2-3 skip is not governed by reuse_checkpoints; if it still keys on "
         "`resume`, preserved checkpoints are re-run and overwritten"
     )
+
+
+def test_the_skill_branches_on_the_reported_gate_action() -> None:
+    """`setup_run.py` reports `gate_action`; SKILL.md branched on the answer STRING.
+
+    That is the same defect as the checkpoint one, one field along: the script computes the
+    transition, the skill re-derives it, and the two disagree the moment an answer means
+    something gate-specific. `"Seed"` is the case — it means rebuild-and-re-ask on
+    `stage_choice` and nothing at all anywhere else.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    assert "gate_action" in text, "SKILL.md never reads setup_run.py's gate_action"
+    for action in ("continue", "continue_if_rebuilt", "rebuild", "stop", "reask"):
+        assert f"`{action}`" in text, f"SKILL.md does not say what gate_action {action!r} means"
+    assert "gate_id" in text, "SKILL.md never reads gate_id, so it cannot tell which gate it resumed"
