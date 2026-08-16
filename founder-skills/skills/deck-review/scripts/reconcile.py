@@ -934,6 +934,33 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         r.reasons = [f"operand {i} failed verification" for i in unverified]
         return r
 
+    # A DATE IS NOT A MAGNITUDE, and every operator computed one anyway. The unit algebra
+    # below never consulted `unit_kind` for dates, so a year fell through to the numeric
+    # branches on its face value: 2030 x 2025 gave 4,110,750 carrying a `derived` verdict,
+    # and "2030 increased by 20% = 2,436" rendered as a founder-facing line.
+    #
+    # REFUSED, not converted -- including `difference`, which is the one date relation with
+    # an obvious meaning. Computing it is still unsafe: the result carries `unit_kind: date`,
+    # `time_scale` normalizes time units in the `ratio` branch ONLY, and the comparison gate
+    # matches a bare duration against ANY stated DURATION regardless of the unit written on
+    # the slide. So "10 years - 5 years = 5" against a stated "60 months" would return a
+    # CONTRADICTION where today it returns incomparable, and a false contradiction is the
+    # worst thing this module can emit. Generic duration normalization has to land first,
+    # as its own change; until then a date difference computes nothing, which is safe.
+    #
+    # THE STATED SIDE IS INCLUDED. Otherwise a count sum gets compared against a year and
+    # that year's tolerance decides it -- and a quarter-prefixed year's tolerance is 101.25,
+    # because `_precision` reads the leading token and so takes "Q4 2025" to be precise to
+    # half a unit of FOUR. Every comparison against it would confirm. Refusing every
+    # participant is what makes that vacuous tolerance unreachable rather than merely
+    # unlikely, and is why there is no separate date-tolerance rule here.
+    exp_ref = rel_spec.get("expected_id")
+    exp_fig = by_id.get(str(alias.get(str(exp_ref), exp_ref))) if exp_ref else None
+    dated = [f.id for f in [*real, *([exp_fig] if exp_fig is not None else [])] if f.unit_kind == DATE]
+    if dated:
+        r.dropped, r.reasons = True, [f"{', '.join(dated)} is a date, and date arithmetic is refused"]
+        return r
+
     # ---- unit algebra -------------------------------------------------------
     # Two defects this replaced, both found by computing REAL model proposals rather
     # than hand-picked ones:

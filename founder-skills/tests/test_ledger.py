@@ -215,3 +215,66 @@ def test_a_currency_marker_still_means_the_suffix_is_a_multiplier() -> None:
     assert rc != 0
     assert "full scale" in err
     assert "ambiguous" not in err
+
+
+# ---------------------------------------------------------------------------
+# Dates. The scale check reads the FIRST numeric token in `raw`, which is the wrong
+# token for a date: "Q4 2025" reads as 4, so a correctly-extracted year is rejected as
+# a 506x scale error. A date is not a magnitude with a scale — it is one of the tokens
+# printed on the slide, and the check has to say so.
+# ---------------------------------------------------------------------------
+
+
+def _date(**over: object) -> dict:
+    base = _fig(
+        id="founded",
+        value=2025,
+        raw="Q4 2025",
+        unit_kind="date",
+        label="target launch",
+        quote="Launch in Q4 2025",
+    )
+    del base["currency"]
+    del base["period"]
+    base.update(over)
+    return base
+
+
+def test_a_quarter_prefix_no_longer_rejects_a_correctly_extracted_year() -> None:
+    """The motivating case. "Q4 2025" recorded as 2025 is right, and was refused."""
+    rc, _, err = _run({"figures": [_date()]})
+    assert rc == 0, err
+
+
+def test_a_year_range_accepts_either_printed_endpoint() -> None:
+    """ "2024-2030" carries two years; recording the later one is not a scale error."""
+    rc, _, err = _run({"figures": [_date(raw="2024-2030", value=2030, quote="2024-2030")]})
+    assert rc == 0, err
+
+
+def test_a_quarter_recorded_as_the_quarter_is_still_accepted() -> None:
+    """4 IS a token printed in "Q4 2025". The label is what disambiguates it, and no
+    date arithmetic runs (see test_reconcile.py), so admitting both readings is free."""
+    rc, _, err = _run({"figures": [_date(value=4, label="launch quarter")]})
+    assert rc == 0, err
+
+
+def test_a_date_value_matching_no_printed_token_is_rejected() -> None:
+    """The check still has to catch a fabricated year."""
+    rc, _, err = _run({"figures": [_date(value=2019)]})
+    assert rc != 0
+    assert "2019" in err
+
+
+def test_a_date_off_by_a_factor_of_ten_is_still_rejected() -> None:
+    """The scale-slip class the check exists for does not get an exemption."""
+    rc, _, err = _run({"figures": [_date(raw="2024", value=20240, quote="2024")]})
+    assert rc != 0
+
+
+def test_the_date_rule_does_not_leak_into_money() -> None:
+    """A money figure whose value equals a later token in raw is still a scale error:
+    the token-equality rule is scoped to `date` and nothing else."""
+    rc, _, err = _run({"figures": [_fig(value=493, raw="$493K in 2024", quote="$493K in 2024")]})
+    assert rc != 0
+    assert "full scale" in err

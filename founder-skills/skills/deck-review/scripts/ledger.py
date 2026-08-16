@@ -35,7 +35,7 @@ from typing import Any
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from _artifact_writer import load_schema, write_artifact  # type: ignore[import-not-found]  # noqa: E402
-from reconcile import _NUM_RE, MONEY, _precision, _raw_scale  # type: ignore[import-not-found]  # noqa: E402
+from reconcile import _NUM_RE, DATE, MONEY, _precision, _raw_scale  # type: ignore[import-not-found]  # noqa: E402
 
 UNIT_KINDS = {"money", "count", "percent", "multiple", "duration", "date"}
 
@@ -76,6 +76,27 @@ def _parsed_magnitude(raw: str) -> float | None:
     except ValueError:
         return None
     return magnitude * _raw_scale(raw)
+
+
+def _numeric_tokens(raw: str) -> list[float]:
+    """Every number the raw string prints, in the order printed, scale suffixes ignored.
+
+    `_parsed_magnitude` reads the FIRST token and applies a scale to it, which is right
+    for a magnitude and wrong for a date: "Q4 2025" reads as 4, so a correctly-extracted
+    2025 was rejected as a 506x scale error. A date has no scale — it is one of the
+    numbers on the slide — so the date check compares against all of them.
+    """
+    out: list[float] = []
+    for match in _NUM_RE.finditer(raw or ""):
+        digits = (match.group("int") or "").replace(",", "")
+        if not digits:
+            continue
+        frac = match.group("frac")
+        try:
+            out.append(float(f"{digits}.{frac}") if frac else float(digits))
+        except ValueError:
+            continue
+    return out
 
 
 _BARE_SUFFIX = re.compile(r"\d\s*[kKmMbBtT]\s*$")
@@ -166,7 +187,33 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
         elif total_slides is not None and slide > total_slides:
             errors.append(f"{where} slide {slide} is past the deck's last slide ({total_slides})")
 
-        if value is not None and isinstance(raw, str):
+        if value is not None and isinstance(raw, str) and unit_kind == DATE:
+            # A DATE IS NOT A MAGNITUDE WITH A SCALE, and the check below assumes it is.
+            # It reads the first numeric token and applies a scale rule to it, so "Q4 2025"
+            # recorded as 2025 — the correct extraction — was refused as a 506x error, while
+            # "2024-2030" recorded as its later endpoint was refused as a 1.003x one.
+            #
+            # The rule that fits a date is token equality: the value has to be a number the
+            # slide actually prints. That still catches the two classes this check exists
+            # for — a fabricated year, and the 10x slip ("2024" recorded as 20240) — without
+            # a scale rule a date has no use for.
+            #
+            # BOTH readings of "Q4 2025" are admitted, the quarter and the year, on the
+            # strength of the figure's label. That would be an ambiguity if anything
+            # computed with dates: `Q4 − Q2` would yield "2 years". Nothing does —
+            # `reconcile.py` refuses every relation with a date participant, operands and
+            # stated side alike — so the ambiguity is unreachable, and neither restricting
+            # dates to four-digit years nor adding a self-attested resolution field buys
+            # anything here. If date arithmetic is ever un-refused, this is the second place
+            # to revisit.
+            tokens = _numeric_tokens(raw)
+            if tokens and not any(abs(abs(value) - token) < 1e-9 for token in tokens):
+                printed = ", ".join(f"{token:g}" for token in tokens)
+                errors.append(
+                    f"{where} value {value!r} is not one of the numbers raw {raw!r} prints "
+                    f"({printed}) — a date must be a number stated on the slide"
+                )
+        elif value is not None and isinstance(raw, str):
             parsed = _parsed_magnitude(raw)
             if parsed is not None and parsed != 0:
                 observed = abs(value)

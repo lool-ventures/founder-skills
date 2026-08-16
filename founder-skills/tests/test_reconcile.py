@@ -796,3 +796,76 @@ def test_a_genuine_ratio_across_periods_still_reads() -> None:
     b = fig("9 million", 9_000_000, "count", "vacancies per month", id="mo", period="month")
     r = _cmp("ratio", ["yr", "mo"], None, {"yr": a, "mo": b})
     assert r.verdict != "restatement", f"a real 60m/yr vs 9m/mo gap was silenced: {r.rendered}"
+
+
+# ---------------------------------------------------------------------------
+# Dates are not magnitudes. Every operator computed something from them anyway, and
+# every answer was nonsense a founder could be shown: 2030 × 2025 = 4,110,750 with a
+# `derived` verdict, 2030 increased by 20% = 2,436. The unit algebra never guarded the
+# kind, so `date` fell through to the numeric branches on its face value.
+#
+# The refusal is COMPLETE — every operator, and the stated side too. That completeness
+# is what makes the vacuous date tolerance unreachable rather than merely unlikely:
+# `figure_tolerance` is only ever called from inside `compute()` after an operator
+# branch has succeeded, so a relation refused before dispatch never consults it. The
+# reachability test at the bottom of this block is what pins that, and it is the guard
+# that goes red if any operator is un-refused later.
+# ---------------------------------------------------------------------------
+
+
+def _dates() -> dict[str, Figure]:
+    return {
+        "d1": fig("2030", 2030, "date", "target year", id="d1"),
+        "d2": fig("2025", 2025, "date", "launch year", id="d2"),
+    }
+
+
+@pytest.mark.parametrize("operator", ["difference", "sum", "product", "ratio"])
+def test_no_operator_computes_on_dates(operator: str) -> None:
+    r = _cmp(operator, ["d1", "d2"], None, _dates())
+    assert r.dropped, f"{operator} computed {r.computed} from two years: {r.rendered}"
+    assert r.computed is None
+    assert any("date" in reason for reason in r.reasons), r.reasons
+
+
+def test_increase_by_does_not_grow_a_year() -> None:
+    """`2030 increased by 20% = 2,436` was reachable and rendered as a founder-facing
+    line. `increase_by` was omitted from the operator guard drafted for the other four."""
+    by = {"d1": _dates()["d1"], "p": fig("20%", 20, "percent", "growth", id="p")}
+    r = _cmp("increase_by", ["d1", "p"], None, by)
+    assert r.dropped, r.rendered
+    assert any("date" in reason for reason in r.reasons), r.reasons
+
+
+def test_a_stated_date_cannot_be_the_expected_side_either() -> None:
+    """The stated side clears the same gate the operands do — otherwise a count sum
+    gets compared against a year, and the year's tolerance is what decides it."""
+    by = {
+        "a": fig("12", 12, "count", "pilots", id="a"),
+        "b": fig("2013", 2013, "count", "seats", id="b"),
+        "e": fig("2025", 2025, "date", "launch year", id="e"),
+    }
+    r = _cmp("sum", ["a", "b"], "e", by)
+    assert r.dropped, r.rendered
+    assert any("date" in reason for reason in r.reasons), r.reasons
+
+
+def test_the_vacuous_date_tolerance_is_unreachable() -> None:
+    """`figure_tolerance` on a quarter-prefixed year is 101.25 — every comparison
+    against it confirms. The fix is not a better tolerance; it is that no relation
+    survives to consult one. This test states the tolerance is still wrong AND still
+    unreachable, so relaxing the refusal fails here rather than shipping silently."""
+    quarter = fig("Q4 2025", 2025, "date", "launch", id="q")
+    assert figure_tolerance(quarter) > 100, "the underlying precision bug is still present"
+    by = {"q": quarter, "d2": _dates()["d2"]}
+    for operator in ("difference", "sum", "product", "ratio"):
+        assert _cmp(operator, ["q", "d2"], None, by).dropped
+
+
+def test_non_date_relations_are_untouched() -> None:
+    """The guard keys on `unit_kind`, so nothing else changes shape."""
+    a = fig("$100k", 100_000, "money", id="a")
+    b = fig("4", 4, "count", id="b")
+    r = _cmp("ratio", ["a", "b"], None, {"a": a, "b": b})
+    assert not r.dropped
+    assert r.computed == pytest.approx(25_000)
