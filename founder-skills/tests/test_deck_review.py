@@ -4322,9 +4322,14 @@ def test_a_supplied_but_missing_gate_file_is_fatal_and_no_flag_is_silent() -> No
 
 
 def test_a_gate_from_another_run_is_not_read_as_this_runs_answer() -> None:
-    """run_id parity. A gate_state left by a prior run says nothing about this one, and
-    reading its source either way — disclosing or staying silent — asserts something
-    unfounded about how THIS run was answered."""
+    """run_id parity. A gate_state left by a prior run says nothing about this one.
+
+    STRENGTHENED: this originally asserted the run WARNS and composes, and that froze a
+    contract too weak by half. The gate does not only tell us how a question was answered
+    — it is what permits the report to exist, and a foreign run's gate permits nothing
+    here. Warning and proceeding accepted an authorization from somewhere else. It now
+    warns AND refuses; the warning still carries the diagnosis.
+    """
     d = _make_artifact_dir(
         {
             "deck_inventory.json": _VALID_INVENTORY,
@@ -4335,12 +4340,9 @@ def test_a_gate_from_another_run_is_not_read_as_this_runs_answer() -> None:
         }
     )
     gate = _gate_file(d, run_id="some-other-run", answer_source="auto_satisfied")
-    rc, data, err = _run_compose(d, ["--gate-state", gate])
-    assert rc == 0, err
-    assert data is not None
-    assert _AUTO_SATISFY_SENTENCE not in data["report_markdown"], "a foreign run's gate was disclosed as this run's"
-    codes = [w["code"] for w in data["validation"]["warnings"]]
-    assert "STALE_GATE_STATE" in codes, f"the mismatch was swallowed silently: {codes}"
+    rc, _, err = _run_compose(d, ["--gate-state", gate])
+    assert rc != 0, "a foreign run's gate authorized this run's report"
+    assert "some-other-run" in err, err
 
 
 def test_thin_quotes_reach_a_warning_a_human_reads() -> None:
@@ -4511,3 +4513,136 @@ def test_a_medium_warning_can_actually_be_accepted() -> None:
     hits = [w for w in data["validation"]["warnings"] if w["code"] == "THIN_QUOTES"]
     assert len(hits) == 1
     assert hits[0]["severity"] == "acknowledged", f"medium but unacceptable: {hits[0]}"
+
+
+def _gate_at(d: str, gate_id: str, answer: str, options: list[str], run_id: str = "run-test") -> str:
+    path = os.path.join(d, "gate_state.json")
+    with open(path, "w") as f:
+        json.dump(
+            {
+                "metadata": {"run_id": run_id},
+                "gate_id": gate_id,
+                "question": "?",
+                "options": options,
+                "context_summary": "x",
+                "answer": answer,
+                "answer_source": "founder",
+            },
+            f,
+        )
+    return path
+
+
+def _full_arts() -> str:
+    return _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": _VALID_RECONCILIATION,
+        }
+    )
+
+
+def test_a_founder_who_said_stop_does_not_get_a_report() -> None:
+    """The worst of the gate defects: `Stop review` is the answer that means DO NOT
+    produce a review, and it composed a clean one. Answered was being read as authorized."""
+    d = _full_arts()
+    path = _gate_at(d, "out_of_scope_choice", "Stop review", ["Stop review", "Proceed anyway (best-effort)"])
+    rc, _, err = _run_compose(d, ["--gate-state", path])
+    assert rc != 0, "a report was composed for a founder who declined the review"
+    assert "Stop review" in err or "stop" in err.lower()
+
+
+def test_an_intermediate_gate_answer_does_not_authorize_a_report() -> None:
+    """`Different stage` and a `stage_choice` pick both owe a rebuild and a
+    re-confirmation before anything downstream is entitled to run."""
+    for gate_id, answer, options in (
+        ("stage_confirmation", "Different stage", ["Looks right", "Different stage"]),
+        ("stage_choice", "Seed", ["Pre-seed", "Seed", "Series A"]),
+    ):
+        d = _full_arts()
+        path = _gate_at(d, gate_id, answer, options)
+        rc, _, err = _run_compose(d, ["--gate-state", path])
+        assert rc != 0, f"{gate_id}/{answer!r} composed a report mid-transition"
+        assert "gate" in err.lower()
+
+
+def test_the_answers_that_do_authorize_a_report_still_compose() -> None:
+    """The counter-test — the guard must not eat the normal paths."""
+    for gate_id, answer, options in (
+        ("stage_confirmation", "Looks right", ["Looks right", "Different stage"]),
+        (
+            "stage_confirmation",
+            "Not sure — proceed anyway",
+            ["Looks right", "Different stage", "Not sure — proceed anyway"],
+        ),
+        (
+            "out_of_scope_choice",
+            "Proceed anyway (best-effort)",
+            ["Stop review", "Proceed anyway (best-effort)"],
+        ),
+    ):
+        d = _full_arts()
+        path = _gate_at(d, gate_id, answer, options)
+        rc, _, err = _run_compose(d, ["--gate-state", path])
+        assert rc == 0, f"{gate_id}/{answer!r} was refused: {err}"
+
+
+def test_a_foreign_runs_gate_cannot_authorize_this_run() -> None:
+    """Run parity was a medium warning; it also has to block. A gate from another run
+    authorises nothing about this one, and a warning is not an authorization check."""
+    d = _full_arts()
+    path = _gate_at(d, "stage_confirmation", "Looks right", ["Looks right"], run_id="some-other-run")
+    rc, _, err = _run_compose(d, ["--gate-state", path])
+    assert rc != 0, "a foreign run's gate authorized this run's report"
+    assert "run" in err.lower()
+
+
+def test_the_thin_quote_message_does_not_claim_confirmation_when_nothing_verified() -> None:
+    """`quote_quality.thin` counts every figure, verified or not, so on a gate_failed run
+    with `figures_verified: 0` the founder was told the check "confirms the number appears
+    in your deck" — about figures nothing confirmed at all."""
+    recon = json.loads(json.dumps(_VALID_RECONCILIATION))
+    recon["status"] = "gate_failed"
+    recon["figures_verified"] = 0
+    recon["relations"] = []
+    recon["quote_quality"] = {"thin": 3, "total": 12}
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": recon,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    hits = [w for w in data["validation"]["warnings"] if w["code"] == "THIN_QUOTES"]
+    assert len(hits) == 1
+    message = hits[0]["founder_message"]
+    assert "could only confirm" not in message, message
+    assert "could not be completed" in message, message
+
+
+def test_the_thin_quote_message_still_explains_the_limit_when_figures_did_verify() -> None:
+    recon = json.loads(json.dumps(_VALID_RECONCILIATION))
+    recon["quote_quality"] = {"thin": 3, "total": 12}
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": recon,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    hits = [w for w in data["validation"]["warnings"] if w["code"] == "THIN_QUOTES"]
+    message = hits[0]["founder_message"]
+    assert "could only confirm the number appears somewhere" in message, message

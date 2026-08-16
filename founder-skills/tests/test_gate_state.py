@@ -420,3 +420,64 @@ def test_validator_and_is_answered_split_pending_from_malformed() -> None:
     assert not gs.is_answered(pending)
     assert gs.is_answered(_full_gate())
     assert not gs.is_answered({"answer": "   "})
+
+
+# ANSWERED IS NOT AUTHORIZED. `validate_answered_gate` establishes that a record is a
+# well-formed answer; it says nothing about whether that answer permits a report to be
+# written. Those are different questions and conflating them let three valid answered
+# gates compose a clean report: "Stop review" (the founder said do not), "Different stage"
+# (a rebuild is owed first) and an intermediate `stage_choice` pick (re-confirmation is
+# owed). The worst of the three produced a review for a founder who asked for none.
+#
+# SKILL.md's own transition table is the authority for which answers continue.
+
+
+def test_only_terminal_continue_answers_authorize_a_report() -> None:
+    gs = _import_gate_state()
+    assert gs.gate_action(_full_gate(answer="Looks right")) == "continue"
+    assert (
+        gs.gate_action(
+            _full_gate(
+                gate_id="stage_confirmation",
+                answer="Not sure — proceed anyway",
+                options=["Looks right", "Different stage", "Not sure — proceed anyway"],
+            )
+        )
+        == "continue"
+    )
+    assert (
+        gs.gate_action(
+            _full_gate(
+                gate_id="out_of_scope_choice",
+                answer="Proceed anyway (best-effort)",
+                options=["Stop review", "Different stage", "Proceed anyway (best-effort)"],
+            )
+        )
+        == "continue"
+    )
+
+
+def test_stop_and_rebuild_answers_do_not_authorize_a_report() -> None:
+    gs = _import_gate_state()
+    stop = _full_gate(
+        gate_id="out_of_scope_choice",
+        answer="Stop review",
+        options=["Stop review", "Proceed anyway (best-effort)"],
+    )
+    assert gs.gate_action(stop) == "stop"
+
+    rebuild = _full_gate(answer="Different stage")
+    assert gs.gate_action(rebuild) == "rebuild"
+
+    intermediate = _full_gate(gate_id="stage_choice", answer="Seed", options=["Pre-seed", "Seed", "Series A"])
+    assert gs.gate_action(intermediate) == "rebuild"
+
+
+def test_an_unanswered_gate_is_a_reask_not_a_continue() -> None:
+    gs = _import_gate_state()
+    pending = _full_gate()
+    del pending["answer"]
+    del pending["answer_source"]
+    assert gs.gate_action(pending) == "reask"
+    # And a malformed answered record is likewise not an authorization.
+    assert gs.gate_action(_full_gate(answer="Whatever")) == "reask"

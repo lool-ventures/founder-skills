@@ -412,3 +412,31 @@ def test_a_date_value_must_look_like_a_date_component() -> None:
     # And a plain year range.
     rc_r, _, err_r = _run({"figures": [_date(raw="2024-2030", value=2030, quote="2024-2030")]})
     assert rc_r == 0, err_r
+
+
+def test_a_date_binds_to_date_syntax_not_to_a_value_range() -> None:
+    """The range heuristic narrowed the example and left the misbinding.
+
+    `1-12 or 1000-9999` accepts any printed token in those ranges, so a headcount still
+    masqueraded as a date whenever it happened to fall in one — `"Founded 2025; 12
+    employees"` recorded as 12, and `"Founded 2025; 3000 employees"` as 3000. It also
+    compared `abs(value)`, so -2025 passed, and it made the years decks actually print —
+    `FY25`, `Q4 '25` — unrepresentable.
+
+    Bind to the SYNTAX instead: the value must be a year the raw prints as four digits, or
+    a quarter/month the raw marks as one.
+    """
+    for value in (12, 3000):
+        rc, _, _ = _run(
+            {"figures": [_date(raw=f"Founded 2025; {value} employees", value=value, label="founding year")]}
+        )
+        assert rc != 0, f"a headcount of {value} validated as a date"
+
+    rc_neg, _, _ = _run({"figures": [_date(raw="2025", value=-2025, quote="2025")]})
+    assert rc_neg != 0, "a negative year validated"
+
+
+def test_the_year_forms_decks_actually_print_are_representable() -> None:
+    for raw, value in (("FY25", 25), ("Q4 '25", 25), ("Q4 2025", 2025), ("Q4 2025", 4), ("2024-2030", 2030)):
+        rc, _, err = _run({"figures": [_date(raw=raw, value=value, quote=f"target {raw}")]})
+        assert rc == 0, f"{raw!r}/{value} rejected: {err}"

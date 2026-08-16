@@ -621,7 +621,15 @@ SKILL_MD_CEILING: dict[str, int] = {
     # substring per file and cannot see a false claim in the next paragraph. It now says what the
     # gate establishes — a quote found nowhere is dropped — and says the match is not word-for-word
     # while still telling the agent to copy the wording, which is what makes the check worth running.
-    "deck-review": 94_528,
+    # deck-review 94,528 -> 94,777 (+249): a SECOND overclaim axis, which the wording ratchet above
+    # does not reach. Step 3.6 was titled "Re-Read Those Slides" and its dispatch said "transcribe
+    # the slides listed below from the deck" — but the second reader is handed the SAME extracted
+    # text the ledger agent got, so it can establish that a quote exists in that text and nothing
+    # about whether the extraction matched the slide. A reader who believes the pass returned to the
+    # file over-trusts every figure it clears. The dispatch now says what it actually receives, and
+    # says it is not re-reading, because removing a false claim without stating the true one leaves
+    # the sub-agent to assume.
+    "deck-review": 94_777,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -841,7 +849,10 @@ REFERENCES_CEILING: dict[str, int] = {
     # That absolute cutoff assumes all 22 criteria apply; with 7 not_applicable the boundary is 5,
     # and a checklist scoring 66.7% was filed as the acceptable warning. The row now states the band
     # rule and records that it reproduces 6/7 exactly when nothing is N/A.
-    "market-sizing": 44_183,
+    # +223 B (44_183 -> 44_406): the CHECKLIST_FAILURES row still said "between 1 and 6", which is
+    # the same all-22-applicable assumption its critical counterpart had just been corrected for —
+    # the two adjacent lines contradicted each other whenever any item was not_applicable.
+    "market-sizing": 44_406,
     # fmr raised to document `graded_against` on the three producer outputs that stamp it — a new
     # artifact field is not discoverable from a schema doc that omits it, and the field exists to make
     # staleness detectable at all (run_id parity cannot see corrections applied within a run).

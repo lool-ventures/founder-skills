@@ -86,11 +86,14 @@ deck does not state. Two rules carry the weight:
   compares text only — it never checks the figure's value. Copying the wording is what
   makes the check mean something; it is not enforced word for word.
 
-For `SECOND_READ`: transcribe the listed slides verbatim — every number, label,
-axis value, table cell and footnote as printed. Write `slides_transcribed` (the
-slide numbers you actually covered) and `transcript` (the text). You will be given slide numbers
-and no figures, deliberately: your reading is the check on someone else's, and it
-is worth nothing if it has been told what to find. Do not summarise, do not
+For `SECOND_READ`: copy out the listed slides from the extracted deck text you are
+given — every number, label, axis value, table cell and footnote it contains. You are
+NOT re-reading the deck: you receive the same extracted text the ledger agent did, so
+what you can catch is a quote that is not in that text, not a mis-transcription of the
+original file. Write `slides_transcribed` (the slide numbers you actually covered) and
+`transcript` (the text). You are given slide numbers and no figures, deliberately: your
+pass is the check on someone else's, and it is worth nothing if it has been told what to
+find. Do not summarise, do not
 interpret, and do not correct anything that looks wrong.
 
 For `RELATION_PROPOSAL`: choose which figures relate arithmetically. **Do not

@@ -51,21 +51,30 @@ _AUDITABLE_SOURCES = ("founder", "auto_satisfied")
 # decision should not rest on a single choke point. IMPORTED rather than restated — a
 # hand-copied pair here is a fourth copy waiting to drift from the other three.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gate_state import validate_answered_gate  # noqa: E402
+from gate_state import gate_action, validate_answered_gate  # noqa: E402
 
 
-def _read_gate_state(review_dir: str) -> tuple[str, str, str]:
-    """Return (answer, run_id, answer_source); ("", "", "") if absent/unreadable."""
+def _read_gate_state(review_dir: str) -> tuple[str, str, str, str, str]:
+    """Return (answer, run_id, answer_source, gate_id, action).
+
+    `gate_id` and `action` are reported because the caller cannot derive them. Returning
+    only the answer STRING meant a `stage_choice` answer arrived as `gate_answer: "Seed"`
+    and nothing else -- indistinguishable from a `stage_confirmation` answer, and matching
+    no branch downstream, because "Seed" means "rebuild the profile and re-ask", not
+    "proceed". The transition is decided in one place (`gate_state.gate_action`) and
+    reported, rather than re-inferred from a string by every reader.
+    """
+    empty = ("", "", "", "", "reask")
     path = os.path.join(review_dir, _GATE_STATE_NAME)
     if not os.path.isfile(path):
-        return "", "", ""
+        return empty
     try:
         with open(path, encoding="utf-8") as f:
             gate = json.load(f)
     except (json.JSONDecodeError, OSError):
-        return "", "", ""
+        return empty
     if not isinstance(gate, dict):
-        return "", "", ""
+        return empty
     answer = str(gate.get("answer") or "")
     run_id = ""
     meta = gate.get("metadata")
@@ -81,7 +90,7 @@ def _read_gate_state(review_dir: str) -> tuple[str, str, str]:
     # that the run does not resume on it and puts the question to the founder again.
     if answer and validate_answered_gate(gate):
         source = ""
-    return answer, str(run_id), source
+    return answer, str(run_id), source, str(gate.get("gate_id") or ""), gate_action(gate)
 
 
 def main() -> int:
@@ -129,7 +138,7 @@ def main() -> int:
     # An answered same-run gate with no `answer_source` was written by a path that bypassed
     # `gate_state.py answer` or predates the field. It cannot be audited, so it is not
     # resumed — but it is also not evidence that the checkpoints are stale, so they stay.
-    gate_answer, gate_run_id, answer_source = _read_gate_state(review_dir)
+    gate_answer, gate_run_id, answer_source, gate_id, action = _read_gate_state(review_dir)
     same_run_answered = bool(gate_answer) and gate_run_id == run_id
     resume = same_run_answered and answer_source in _AUDITABLE_SOURCES
 
@@ -155,7 +164,7 @@ def main() -> int:
         if os.path.isfile(gate_path):
             with contextlib.suppress(OSError):
                 os.remove(gate_path)
-            gate_answer, gate_run_id, answer_source, resume = "", "", "", False
+            gate_answer, gate_run_id, answer_source, gate_id, action, resume = "", "", "", "", "reask", False
     # same_run_answered is true: _CLEANABLE_NAMES artifacts are same-run checkpoints —
     # leave them intact, whether or not the answer beside them can be resumed on.
     # gate_state.json is also preserved (an unauditable answer is re-asked, and
@@ -169,6 +178,11 @@ def main() -> int:
         "gate_answer": gate_answer,
         "gate_run_id": gate_run_id,
         "answer_source": answer_source,
+        # WHICH gate, and what it authorises. The caller cannot derive either from the
+        # answer string: "Seed" on `stage_choice` means rebuild-and-re-ask, and nothing
+        # downstream branches on it. `continue` | `stop` | `rebuild` | `reask`.
+        "gate_id": gate_id,
+        "gate_action": action,
         "resume": resume,
         # Whether this invocation removed the cleanable artifacts. Reported rather than
         # inferred from `resume`: the two diverge exactly in the case this split exists

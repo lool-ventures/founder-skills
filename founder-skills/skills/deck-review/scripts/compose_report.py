@@ -1446,6 +1446,15 @@ def _emit_coaching_payload(
     }
 
 
+class GateNotAuthorized(ValueError):
+    """The gate does not permit this report to be composed.
+
+    A distinct type because it is raised from inside `compose()`, after artifacts are
+    loaded, while the read-time failures are raised before — `main` has to turn both into
+    the same clean non-zero exit rather than a traceback.
+    """
+
+
 def read_gate_state(path: str | None) -> dict[str, Any] | None:
     """Load the gate artifact for the disclosure, or fail loudly.
 
@@ -1490,7 +1499,7 @@ def read_gate_state(path: str | None) -> dict[str, Any] | None:
     # exit 0 and no warning, presenting the stage as settled. Same skipped-decision class
     # as the missing file, one field along. The rules live in `gate_state.py` because three
     # readers need them and enforcing them at one reader is what produced this.
-    from gate_state import is_answered, validate_answered_gate  # noqa: PLC0415
+    from gate_state import gate_action, is_answered, validate_answered_gate  # noqa: PLC0415
 
     if not is_answered(gate):
         raise ValueError(
@@ -1500,6 +1509,25 @@ def read_gate_state(path: str | None) -> dict[str, Any] | None:
     problems = validate_answered_gate(gate)
     if problems:
         raise ValueError(f"gate_state at {path} is not a valid answered gate: " + "; ".join(problems))
+
+    # ANSWERED IS NOT AUTHORIZED, and reading it that way produced the worst defect in this
+    # area: `Stop review` — the answer that means DO NOT produce a review — composed a
+    # clean report. `Different stage` and an intermediate `stage_choice` pick did too, each
+    # of which owes a profile rebuild and a re-confirmation before anything downstream is
+    # entitled to run. The transition belongs to `gate_state.gate_action`; compose accepts
+    # only a terminal `continue`.
+    action = gate_action(gate)
+    if action == "stop":
+        raise ValueError(
+            f"gate_state at {path} records the answer {gate.get('answer')!r} — the founder declined "
+            "the review, so no report is to be produced"
+        )
+    if action != "continue":
+        raise ValueError(
+            f"gate_state at {path} records {gate.get('answer')!r} on the {gate.get('gate_id')!r} gate, "
+            f"which is an intermediate state ({action}): the stage profile is rebuilt and the gate "
+            "re-asked before a report is composed"
+        )
     return gate
 
 
@@ -1539,12 +1567,20 @@ def compose(
         ]
         gate_run_id = _as_dict(gate_state.get("metadata")).get("run_id")
         if artifact_run_ids and gate_run_id != artifact_run_ids[0]:
+            # A WARNING IS NOT AN AUTHORIZATION CHECK. This started as medium — "we cannot
+            # state how the gate was answered" — but the gate is also what permits the
+            # report to exist at all, and a gate belonging to another run permits nothing
+            # about this one. Warning and proceeding accepted a foreign authorization.
             warnings.append(
                 _warn(
                     "STALE_GATE_STATE",
                     f"the gate record is from run '{gate_run_id}' but this report is run "
                     f"'{artifact_run_ids[0]}' — how this run's stage gate was answered is unrecorded",
                 )
+            )
+            raise GateNotAuthorized(
+                f"the gate record is from run {gate_run_id!r} but this report is run "
+                f"{artifact_run_ids[0]!r} — a gate from another run authorises nothing here"
             )
         else:
             gate_auto_satisfied = gate_state.get("answer_source") == "auto_satisfied"
@@ -1562,6 +1598,7 @@ def compose(
     # REQUIRED_ARTIFACTS. This is the surfacing step.
     _recon = artifacts.get("reconciliation.json")
     if _usable(_recon):
+        _verified_any = isinstance(_recon.get("figures_verified"), int) and _recon["figures_verified"] > 0
         _quality = _as_dict(_recon.get("quote_quality"))
         _thin, _total = _quality.get("thin"), _quality.get("total")
         if isinstance(_thin, int) and _thin > 0:
@@ -1573,10 +1610,24 @@ def compose(
                         "confirmed only that the deck prints those figures somewhere — not that "
                         "it prints them where the ledger says"
                     ),
+                    # The wording has to depend on whether anything actually verified.
+                    # `quote_quality.thin` counts every figure, verified or not, so on a
+                    # gate_failed run with nothing verified the founder was told the check
+                    # "confirms the number appears in your deck" — about figures nothing
+                    # confirmed at all. Describing a match that never happened as a weak
+                    # confirmation is worse than saying nothing.
                     founder_message=(
-                        f"{_thin} of the {_total} figures we checked were quoted as bare numbers, so "
-                        "the double-check on those was weaker than on the rest: it confirms the "
-                        "number appears in your deck, not that it appears where we say it does."
+                        (
+                            f"{_thin} of the {_total} figures were quoted as bare numbers rather than "
+                            "as the sentence around them, so even where the double-check did run it "
+                            "could only confirm the number appears somewhere in your deck."
+                        )
+                        if _verified_any
+                        else (
+                            f"{_thin} of the {_total} figures were quoted as bare numbers rather than "
+                            "as the sentence around them, which is part of why the cross-check on your "
+                            "numbers could not be completed."
+                        )
                     ),
                 )
             )
@@ -1804,7 +1855,11 @@ def main() -> None:
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
-    result = compose(args.dir, report_path=report_path, gate_state=gate_state)
+    try:
+        result = compose(args.dir, report_path=report_path, gate_state=gate_state)
+    except GateNotAuthorized as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
     if args.write_md:
         report_markdown = result.get("report_markdown", "")

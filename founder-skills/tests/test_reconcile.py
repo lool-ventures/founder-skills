@@ -1046,3 +1046,20 @@ def test_a_quote_needs_a_word_that_says_what_the_number_is() -> None:
         assert not quote_is_identifying(quote), quote
     for quote in ("Net revenue $493K", "GMV of $493K in 2024", "ARR $2M", "customers 1,200"):
         assert quote_is_identifying(quote), quote
+
+
+def test_a_footnote_marker_is_not_numeric_continuation() -> None:
+    """`str.isdigit()` is True for `¹`, `²` and `①`, so a superscript footnote — the
+    commonest thing to sit immediately after a figure on a slide — read as "this is a
+    longer number" and the approximation marker vanished. Losing a bound surfaces
+    contradictions, so this is the manufacturing direction again.
+
+    `isdecimal()` is the narrower predicate: true for `0-9` and other decimal digit
+    systems, false for superscripts and enclosed forms.
+    """
+    for marker in ("¹", "²", "³", "①", "†", "*", ")", "]", ""):
+        assert detect_bound("$20B", "market", f"market ≈$20B{marker}") == "approximate", repr(marker)
+
+    # Real continuations are still continuations, including non-ASCII decimal digits.
+    assert detect_bound("$20", "revenue", "market ≈$205B and revenue $20") is None
+    assert detect_bound("$2", "revenue", "≈$2٠ in total") is None

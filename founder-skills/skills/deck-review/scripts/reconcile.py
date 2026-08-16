@@ -378,7 +378,15 @@ def _approx_symbol_marks_this_figure_in_quote(raw: str, quote: str) -> bool:
         # discarded outright.
         tail = quote[end : end + 1]
         after_tail = quote[end + 1 : end + 2]
-        continues = bool(tail) and (tail.isdigit() or tail in "kKmMbBtT%" or (tail in ".," and after_tail.isdigit()))
+        # `isdecimal()`, NOT `isdigit()`. `str.isdigit()` is True for superscripts and
+        # enclosed forms -- `¹`, `²`, `①` -- so a footnote marker, the commonest thing to
+        # sit immediately after a figure on a slide, read as "this is a longer number" and
+        # the approximation marker vanished. Losing a bound surfaces contradictions, so
+        # this is the manufacturing direction. `isdecimal()` covers 0-9 and other decimal
+        # digit systems and excludes exactly those forms.
+        continues = bool(tail) and (
+            tail.isdecimal() or tail in "kKmMbBtT%" or (tail in ".," and after_tail.isdecimal())
+        )
         if not continues:
             marked.append(bool(_QUOTE_APPROX_PREFIX.search(quote[:start])))
         start = quote.find(needle, start + 1)

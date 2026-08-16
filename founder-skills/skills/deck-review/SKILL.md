@@ -684,7 +684,7 @@ If the pipe fails, the ledger disagreed with itself — most often a figure reco
 wrong scale. The error names the figure. Re-dispatch with the correction; do not hand-edit
 the file.
 
-### Step 3.6: Re-Read Those Slides, Ledger-Blind -> `second_read.json` (Context A dispatch)
+### Step 3.6: Re-Search the Extracted Text, Ledger-Blind -> `second_read.json` (Context A dispatch)
 
 A quote is trusted when it is re-found by a second reader who never saw the ledger.
 Checking the ledger's quote against the ledger itself would prove nothing.
@@ -704,11 +704,15 @@ CONTEXT: SECOND_READ
 OUTPUT_PATH: <HANDOFF_AGENT>/second_read_output.json
 RUN_ID: <RUN_ID>
 
-You are the deck-review agent dispatched in Context A (SECOND_READ). Transcribe the
-slides listed below from the deck, verbatim. Include every number, label, axis
-value, table cell and footnote exactly as printed.
+You are the deck-review agent dispatched in Context A (SECOND_READ). Copy out the
+slides listed below from the extracted deck text supplied under DECK, verbatim.
+Include every number, label, axis value, table cell and footnote it contains.
 
-SLIDES TO TRANSCRIBE: <comma-separated slide numbers>
+You are NOT re-reading the original file: this is the same extracted text the ledger
+agent worked from. What your pass can establish is that a quote exists in that text —
+not that the extraction matched the slide.
+
+SLIDES TO COPY OUT: <comma-separated slide numbers>
 
 DECK:
 <inline the deck's full extracted text here — verbatim, all slides>

@@ -469,3 +469,51 @@ def test_checkpoint_reuse_is_reported_separately_from_gate_resume() -> None:
     with tempfile.TemporaryDirectory() as d:
         out = _turn(d, "r1")
         assert out["resume"] is False and out["reuse_checkpoints"] is False
+
+
+def test_resume_reports_which_gate_and_what_to_do_next() -> None:
+    """A `stage_choice` answer resumed as `gate_answer: "Seed"` and nothing else.
+
+    The caller cannot tell that from a `stage_confirmation` answer, and the resumed branch
+    has no `Seed`/`Series A` handler — those answers mean "rebuild the profile and re-ask",
+    not "proceed". Returning the answer string alone made the caller re-derive a transition
+    it has no way to derive.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        review_dir = os.path.join(d, "artifacts", "deck-review-acme-corp")
+        _plant_sourced_gate(review_dir, "r1", "Seed", "founder", gate_id="stage_choice")
+        out = _turn(d, "r1")
+        assert out["gate_id"] == "stage_choice"
+        assert out["gate_action"] == "rebuild", out
+        assert out["resume"] is True, "the run continues; it just is not finished asking"
+
+    with tempfile.TemporaryDirectory() as d:
+        review_dir = os.path.join(d, "artifacts", "deck-review-acme-corp")
+        _plant_sourced_gate(review_dir, "r1", "Looks right", "founder")
+        out = _turn(d, "r1")
+        assert out["gate_id"] == "stage_confirmation"
+        assert out["gate_action"] == "continue"
+
+    with tempfile.TemporaryDirectory() as d:
+        review_dir = os.path.join(d, "artifacts", "deck-review-acme-corp")
+        _plant_sourced_gate(review_dir, "r1", "Stop review", "founder", gate_id="out_of_scope_choice")
+        out = _turn(d, "r1")
+        assert out["gate_action"] == "stop", "a declined review reported as resumable"
+
+    with tempfile.TemporaryDirectory() as d:
+        out = _turn(d, "r1")
+        assert out["gate_id"] == ""
+        assert out["gate_action"] == "reask"
+
+
+def test_a_gate_missing_required_schema_fields_does_not_resume() -> None:
+    """The shared validator checked the answer, not the record. A gate with no `gate_id`,
+    `question` or `context_summary` is not a smaller gate — it is one `emit` could never
+    have written, and its gate_id is exactly what the transition depends on."""
+    with tempfile.TemporaryDirectory() as d:
+        review_dir = os.path.join(d, "artifacts", "deck-review-acme-corp")
+        os.makedirs(review_dir, exist_ok=True)
+        with open(os.path.join(review_dir, "gate_state.json"), "w") as f:
+            json.dump({"metadata": {"run_id": "r1"}, "answer": "Looks right", "answer_source": "founder"}, f)
+        out = _turn(d, "r1")
+        assert out["resume"] is False, "a schema-invalid gate resumed"

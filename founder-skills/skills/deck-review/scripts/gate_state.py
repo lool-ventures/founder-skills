@@ -33,6 +33,11 @@ AUTO_SATISFIABLE_GATE = "stage_confirmation"
 AUTO_SATISFIABLE_ANSWER = "Looks right"
 
 
+def _as_run_id(gate: dict[str, object]) -> object:
+    meta = gate.get("metadata")
+    return meta.get("run_id") if isinstance(meta, dict) else None
+
+
 def validate_answered_gate(gate: object) -> list[str]:
     """Every rule an ANSWERED gate must satisfy, in one place, for all three readers.
 
@@ -53,6 +58,16 @@ def validate_answered_gate(gate: object) -> list[str]:
     problems: list[str] = []
     if not isinstance(gate, dict):
         return ["gate_state is not a JSON object"]
+
+    # The record's own required fields, not just its answer. A gate missing `gate_id` is
+    # not a smaller gate -- it is one `emit` could never have written, and `gate_id` is
+    # exactly what the transition below depends on, so accepting it silently means
+    # resolving an unknown gate's answer against no rule at all.
+    for field in ("metadata", "gate_id", "question", "options", "context_summary"):
+        if field not in gate:
+            problems.append(f"gate_state is missing the required field {field!r}")
+    if not isinstance(_as_run_id(gate), str) or not _as_run_id(gate):
+        problems.append("gate_state has no metadata.run_id")
 
     answer = gate.get("answer")
     if not isinstance(answer, str) or not answer.strip():
@@ -86,6 +101,49 @@ def validate_answered_gate(gate: object) -> list[str]:
 def is_answered(gate: object) -> bool:
     """Has this gate been answered at all? Distinguishes pending from malformed."""
     return isinstance(gate, dict) and isinstance(gate.get("answer"), str) and bool(gate["answer"].strip())
+
+
+# What each answer AUTHORIZES, from SKILL.md's own transition table. Kept beside the
+# validator because the two questions kept being conflated: `validate_answered_gate` says
+# a record is a well-formed ANSWER, which is not the same as saying that answer permits a
+# report to be written. Three valid answered gates composed a clean report before this
+# existed -- "Stop review" (the founder said do not), "Different stage" (a rebuild is owed
+# first) and an intermediate `stage_choice` pick (re-confirmation is owed). The first of
+# those produced a review for a founder who had asked for none.
+CONTINUE_ANSWERS: dict[str, frozenset[str]] = {
+    "stage_confirmation": frozenset({"Looks right", "Not sure — proceed anyway"}),
+    "out_of_scope_choice": frozenset({"Proceed anyway (best-effort)"}),
+    # `stage_choice` has NO continuing answer by construction: every pick rebuilds the
+    # profile and re-emits `stage_confirmation`, so a stage_choice answer is always an
+    # intermediate state.
+    "stage_choice": frozenset(),
+}
+
+STOP_ANSWERS: frozenset[str] = frozenset({"Stop review"})
+
+
+def gate_action(gate: object) -> str:
+    """What this gate authorises: `continue` | `stop` | `rebuild` | `reask`.
+
+    THE ONE PLACE THE TRANSITION IS DECIDED. Callers must not infer it from the answer
+    string themselves -- that inference is what every reader was doing implicitly by
+    treating "answered" as "may proceed".
+
+      continue  a terminal answer that authorises the rest of the pipeline
+      stop      the founder declined the review; nothing downstream should run
+      rebuild   an intermediate answer; the profile is rebuilt and the gate re-emitted,
+                so this run is not finished asking
+      reask     unanswered, or an answered record that does not validate
+    """
+    if not is_answered(gate) or validate_answered_gate(gate):
+        return "reask"
+    assert isinstance(gate, dict)  # is_answered established this
+    answer = str(gate.get("answer"))
+    if answer in STOP_ANSWERS:
+        return "stop"
+    if answer in CONTINUE_ANSWERS.get(str(gate.get("gate_id")), frozenset()):
+        return "continue"
+    return "rebuild"
 
 
 def _schema_path() -> str:

@@ -304,3 +304,34 @@ def test_the_overclaim_sweep_reaches_real_files() -> None:
     assert len(_CLAIM_SURFACES) >= 6
     corpus = "\n".join(p.read_text(encoding="utf-8") for p in _CLAIM_SURFACES)
     assert corpus.count("quote") > 20, "the sweep is not reading the files that discuss quoting"
+
+
+# Source fidelity is a SECOND overclaim axis, and the stem ratchet above does not reach it.
+# The wording about what the MATCH tolerates is now accurate; the wording about what the
+# second reader READS was not. Production called Step 3.6 a re-read of the slides and told
+# the sub-agent to "transcribe ... from the deck", when it receives the same main-thread
+# extracted text the ledger agent got. A reader who believes the second pass went back to
+# the file will over-trust every figure it clears.
+_SOURCE_OVERCLAIM_STEMS = (
+    "re-read those slides",
+    "transcribe the\nslides listed below from the deck",
+    "transcribe the listed slides",
+)
+
+
+def test_no_surface_claims_the_second_read_returns_to_the_deck() -> None:
+    hits: list[str] = []
+    for path in _CLAIM_SURFACES:
+        lowered = path.read_text(encoding="utf-8").lower()
+        hits += [f"{path.name}: {stem!r}" for stem in _SOURCE_OVERCLAIM_STEMS if stem in lowered]
+    assert not hits, "surfaces claiming the second read goes back to the deck:\n  " + "\n  ".join(hits)
+
+
+def test_the_dispatch_says_what_the_second_reader_actually_receives() -> None:
+    """Removing the false claim is half the job; the true one has to be stated, or the
+    sub-agent is left to assume."""
+    skill = (DECK_REVIEW / "SKILL.md").read_text(encoding="utf-8")
+    start = skill.index("CONTEXT: SECOND_READ")
+    block = skill[start : start + 2000]
+    assert "extracted deck text" in block, "the SECOND_READ dispatch does not say what it is given"
+    assert "NOT re-reading" in block, "the dispatch does not correct the natural assumption"

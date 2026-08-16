@@ -106,18 +106,48 @@ def _numeric_tokens(raw: str) -> list[float]:
     return out
 
 
-def _is_date_component(value: float) -> bool:
-    """Is this number shaped like part of a date — a year, or a quarter/month ordinal?
+# Date SYNTAX, not a value range. The first cut accepted any printed token in 1-12 or
+# 1000-9999, which narrowed the example and left the misbinding: a headcount still
+# masqueraded as a date whenever it fell in one of those ranges ("Founded 2025; 12
+# employees" -> 12, "; 3000 employees" -> 3000). It also made the year forms decks actually
+# print -- FY25, Q4 '25 -- unrepresentable, which pushes the model toward recording
+# something else.
+#
+# So bind to what the raw string MARKS as a date: a four-digit year, a two-digit year
+# behind FY or an apostrophe, or an ordinal behind a quarter/month marker.
+_YEAR_4 = re.compile(r"(?<!\d)(\d{4})(?!\d)")
+_YEAR_2 = re.compile(r"(?:FY|')\s?(\d{2})(?!\d)", re.I)
+_QUARTER = re.compile(r"\bQ\s?([1-4])(?!\d)", re.I)
+_MONTH_NUM = re.compile(r"\bM\s?(1[0-2]|[1-9])(?!\d)", re.I)
+_MONTH_NAMES = (
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+)
 
-    Deliberately loose on WHICH component, because both readings of "Q4 2025" are legal and
-    that is what closed the resolution question. Tight enough that a headcount sharing the
-    raw string ("Founded 2025; 50 employees" -> 50) is not one.
-    """
-    magnitude = abs(value)
-    if magnitude != int(magnitude):
-        return False
-    whole = int(magnitude)
-    return 1 <= whole <= 12 or 1000 <= whole <= 9999
+
+def _date_values(raw: str) -> set[float]:
+    """Every number the raw string marks AS a date component."""
+    text = raw or ""
+    # A four-digit token is only a year in a plausible range. Without the bound, "Founded
+    # 2025; 3000 employees" marks 3000 as a date and the headcount validates again — the
+    # shape test alone does not distinguish a year from any other four-digit quantity.
+    values: set[float] = {float(m.group(1)) for m in _YEAR_4.finditer(text) if 1900 <= int(m.group(1)) <= 2100}
+    values |= {float(m.group(1)) for m in _YEAR_2.finditer(text)}
+    values |= {float(m.group(1)) for m in _QUARTER.finditer(text)}
+    values |= {float(m.group(1)) for m in _MONTH_NUM.finditer(text)}
+    lowered = text.lower()
+    values |= {float(i + 1) for i, name in enumerate(_MONTH_NAMES) if name in lowered}
+    return values
 
 
 _BARE_SUFFIX = re.compile(r"\d\s*[kKmMbBtT]\s*$")
@@ -279,17 +309,19 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
             # A date component is a four-digit year or a small quarter/month ordinal. That
             # keeps both readings of "Q4 2025" — which is what closed the resolution
             # question — and rejects a headcount that happens to share the string.
-            tokens = _numeric_tokens(raw)
-            if tokens and not any(abs(abs(value) - token) < 1e-9 for token in tokens):
-                printed = ", ".join(f"{token:g}" for token in tokens)
+            # SIGN IS PRESERVED. The token comparison used abs(value), so -2025 passed as
+            # a year. There is no negative date.
+            allowed = _date_values(raw)
+            if allowed and value not in allowed:
+                printed = ", ".join(f"{v:g}" for v in sorted(allowed))
                 errors.append(
-                    f"{where} value {value!r} is not one of the numbers raw {raw!r} prints "
-                    f"({printed}) — a date must be a number stated on the slide"
+                    f"{where} value {value!r} is not a date the raw {raw!r} marks "
+                    f"(it marks {printed}) — a date must be a year or a quarter/month the slide states"
                 )
-            elif not _is_date_component(value):
+            elif not allowed:
                 errors.append(
-                    f"{where} value {value!r} is recorded as a date but is neither a four-digit year "
-                    f"nor a quarter/month ordinal (1-12) — check the unit_kind, or record the year"
+                    f"{where} raw {raw!r} marks no date — a date figure needs a year (2025, FY25, '25) "
+                    f"or a quarter/month (Q4, March) in the slide's own string"
                 )
         elif value is not None and isinstance(raw, str):
             parsed = _parsed_magnitude(raw)
