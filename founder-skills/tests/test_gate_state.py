@@ -32,7 +32,7 @@ def test_gate_state_emit_writes_validated_artifact() -> None:
             "options": ["Looks right", "Different stage", "Not sure — proceed anyway"],
             "context_summary": "Detected: Seed",
         }
-        rc, _, err = _run(["emit", "--run-id", "r1", "-o", out, "--pretty"], json.dumps(body))
+        rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", out, "--pretty"], json.dumps(body))
         assert rc == 0, err
         with open(out) as f:
             written = json.load(f)
@@ -50,7 +50,7 @@ def test_gate_state_emit_rejects_unknown_gate_id() -> None:
             "options": ["a"],
             "context_summary": "x",
         }
-        rc, _, err = _run(["emit", "--run-id", "r1", "-o", out], json.dumps(body))
+        rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", out], json.dumps(body))
         assert rc != 0
         assert "gate_id" in err and "enum" in err.lower()
 
@@ -272,7 +272,7 @@ def test_emit_refuses_a_gate_that_arrives_already_answered() -> None:
             "context_summary": "x",
             "answer": "Proceed anyway (best-effort)",
         }
-        rc, _, err = _run(["emit", "--run-id", "r1", "-o", out], json.dumps(body))
+        rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", out], json.dumps(body))
         assert rc != 0, "emit accepted a pre-answered gate"
         assert "answer" in err
         assert not os.path.exists(out), "a refused emit must not write the artifact"
@@ -290,7 +290,7 @@ def test_emit_refuses_a_pre_set_answer_source() -> None:
             "context_summary": "x",
             "answer_source": "auto_satisfied",
         }
-        rc, _, err = _run(["emit", "--run-id", "r1", "-o", out], json.dumps(body))
+        rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", out], json.dumps(body))
         assert rc != 0, "emit accepted a pre-set answer_source"
         assert "answer_source" in err
         assert not os.path.exists(out)
@@ -306,7 +306,7 @@ def test_emit_still_writes_an_ordinary_pending_gate() -> None:
             "options": ["Stop review", "Different stage", "Proceed anyway (best-effort)"],
             "context_summary": "x",
         }
-        rc, _, err = _run(["emit", "--run-id", "r1", "-o", out], json.dumps(body))
+        rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", out], json.dumps(body))
         assert rc == 0, err
         with open(out) as f:
             written = json.load(f)
@@ -331,7 +331,10 @@ def test_the_restriction_cannot_be_routed_around_by_emitting_then_resuming() -> 
             "answer": "Proceed anyway (best-effort)",
             "answer_source": "auto_satisfied",
         }
-        rc, _, _ = _run(["emit", "--run-id", "r1", "-o", os.path.join(review_dir, "gate_state.json")], json.dumps(body))
+        rc, _, _ = _run(
+            ["emit", "--run-id", "r1", "--stage", "seed", "-o", os.path.join(review_dir, "gate_state.json")],
+            json.dumps(body),
+        )
         assert rc != 0, "emit wrote the self-authorised gate"
 
         # Belt and braces: even if such a file reaches disk by some other route, an
@@ -560,12 +563,12 @@ def test_emitting_over_an_answered_gate_preserves_it_as_history() -> None:
             "options": list(gs.CANONICAL_OPTIONS["stage_confirmation"]),
             "context_summary": "x",
         }
-        rc, _, err = _run(["emit", "--run-id", "r1", "-o", path], json.dumps(body))
+        rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", path], json.dumps(body))
         assert rc == 0, err
         rc, _, err = _run(["answer", "--file", path, "--answer", "Different stage", "--source", "founder"])
         assert rc == 0, err
 
-        rc, _, err = _run(["emit", "--run-id", "r1", "-o", path], json.dumps(body))
+        rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", path], json.dumps(body))
         assert rc == 0, err
         with open(path) as f:
             written = json.load(f)
@@ -584,7 +587,7 @@ def test_a_decline_cannot_be_erased_by_emitting_another_gate() -> None:
             "options": list(gs.CANONICAL_OPTIONS["out_of_scope_choice"]),
             "context_summary": "x",
         }
-        _run(["emit", "--run-id", "r1", "-o", path], json.dumps(oos))
+        _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", path], json.dumps(oos))
         _run(["answer", "--file", path, "--answer", "Stop review", "--source", "founder"])
 
         stage = {
@@ -593,7 +596,7 @@ def test_a_decline_cannot_be_erased_by_emitting_another_gate() -> None:
             "options": list(gs.CANONICAL_OPTIONS["stage_confirmation"]),
             "context_summary": "x",
         }
-        _run(["emit", "--run-id", "r1", "-o", path], json.dumps(stage))
+        _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", path], json.dumps(stage))
         _run(["answer", "--file", path, "--answer", "Looks right", "--source", "founder"])
 
         with open(path) as f:
@@ -627,13 +630,13 @@ def test_emit_refuses_a_gate_that_does_not_offer_its_own_options() -> None:
             "options": ["Proceed anyway (best-effort)"],
             "context_summary": "x",
         }
-        rc, _, err = _run(["emit", "--run-id", "r1", "-o", out], json.dumps(rigged))
+        rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", out], json.dumps(rigged))
         assert rc != 0, "emit wrote a gate that never offers the option to decline"
         assert "Stop review" in err or "options" in err
         assert not os.path.exists(out)
 
         ok = dict(rigged, options=list(gs.CANONICAL_OPTIONS["out_of_scope_choice"]))
-        rc_ok, _, err_ok = _run(["emit", "--run-id", "r1", "-o", out], json.dumps(ok))
+        rc_ok, _, err_ok = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", out], json.dumps(ok))
         assert rc_ok == 0, err_ok
 
 
@@ -643,10 +646,12 @@ def test_emit_holds_stage_choice_to_four_stage_options() -> None:
     with tempfile.TemporaryDirectory() as d:
         out = os.path.join(d, "gate_state.json")
         body = {"gate_id": "stage_choice", "question": "?", "context_summary": "x"}
-        rc, _, err = _run(["emit", "--run-id", "r1", "-o", out], json.dumps({**body, "options": ["Seed"]}))
+        rc, _, err = _run(
+            ["emit", "--run-id", "r1", "--stage", "seed", "-o", out], json.dumps({**body, "options": ["Seed"]})
+        )
         assert rc != 0, "a one-option stage_choice was written"
         rc2, _, err2 = _run(
-            ["emit", "--run-id", "r1", "-o", out],
+            ["emit", "--run-id", "r1", "--stage", "seed", "-o", out],
             json.dumps({**body, "options": ["Pre-seed", "Seed", "Series A", "Series B"]}),
         )
         assert rc2 == 0, err2
@@ -671,7 +676,7 @@ def test_answering_an_already_answered_gate_is_refused() -> None:
             "options": list(gs.CANONICAL_OPTIONS["out_of_scope_choice"]),
             "context_summary": "x",
         }
-        _run(["emit", "--run-id", "r1", "-o", path], json.dumps(body))
+        _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", path], json.dumps(body))
         rc, _, err = _run(["answer", "--file", path, "--answer", "Stop review", "--source", "founder"])
         assert rc == 0, err
 
@@ -696,7 +701,7 @@ def test_re_answering_with_the_same_answer_is_idempotent() -> None:
             "options": list(gs.CANONICAL_OPTIONS["stage_confirmation"]),
             "context_summary": "x",
         }
-        _run(["emit", "--run-id", "r1", "-o", path], json.dumps(body))
+        _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", path], json.dumps(body))
         _run(["answer", "--file", path, "--answer", "Looks right", "--source", "founder"])
         rc, _, err = _run(["answer", "--file", path, "--answer", "Looks right", "--source", "founder"])
         assert rc == 0, err
@@ -732,7 +737,7 @@ def test_emit_returns_the_payload_to_present_verbatim() -> None:
             "options": list(gs.CANONICAL_OPTIONS["out_of_scope_choice"]),
             "context_summary": "Detected: growth",
         }
-        rc, stdout, err = _run(["emit", "--run-id", "r1", "-o", out], json.dumps(body))
+        rc, stdout, err = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", out], json.dumps(body))
         assert rc == 0, err
         receipt = json.loads(stdout)
         payload = receipt.get("needs_input")
@@ -800,6 +805,13 @@ def _gs() -> Any:
 
 
 def _record(**over: object) -> dict:
+    """A gate as `emit` writes it, INCLUDING `confirmed_stage`.
+
+    The gate now records which stage it was asked about, because nothing tied the two
+    together: confirming Seed, rebuilding the profile to Series A, and composing against the
+    original gate produced a clean Series A report. A fixture omitting it is a record no
+    emitter makes.
+    """
     rec: dict = {
         "metadata": {"run_id": "r1"},
         "gate_id": "stage_confirmation",
@@ -808,6 +820,7 @@ def _record(**over: object) -> dict:
         "context_summary": "x",
         "answer": "Looks right",
         "answer_source": "founder",
+        "confirmed_stage": "seed",
     }
     rec.update(over)
     return rec
@@ -910,7 +923,7 @@ def test_the_reader_refuses_an_out_of_scope_confirmation_however_it_was_written(
             "context_summary": "Detected: growth",
         }
         if writer == "emit_then_answer":
-            _run(["emit", "--run-id", "r1", "-o", path], json.dumps(body))
+            _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", path], json.dumps(body))
             _run(["answer", "--file", path, "--answer", "Looks right", "--source", "auto_satisfied"])
         elif writer == "hand_written":
             with open(path, "w") as f:
@@ -920,7 +933,7 @@ def test_the_reader_refuses_an_out_of_scope_confirmation_however_it_was_written(
         else:
             with open(path, "w") as f:
                 f.write("{ truncated")
-            _run(["emit", "--run-id", "r1", "-o", path], json.dumps(body))
+            _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", path], json.dumps(body))
             _run(["answer", "--file", path, "--answer", "Looks right", "--source", "founder"])
 
         with open(path) as f:
@@ -931,21 +944,41 @@ def test_the_reader_refuses_an_out_of_scope_confirmation_however_it_was_written(
         )
 
 
-def test_an_out_of_scope_deck_is_authorized_only_through_its_own_gate() -> None:
+def test_an_out_of_scope_profile_is_never_authorized_at_all() -> None:
+    """REWRITTEN, and the concept it tested is deleted rather than corrected.
+
+    This used to assert that an out-of-scope deck could be authorized "through its own
+    gate" — i.e. that a growth profile plus an `out_of_scope_choice` answer composes. It
+    cannot, and the fix for that was a four-property search through history for consent,
+    which then let historical consent skip the rebuild it was meant to trigger.
+
+    SKILL.md:531-533 leaves no path where an out-of-scope profile reaches compose: the
+    founder either declines, or the profile is rebuilt to series_a at low confidence. So the
+    rule is one check on the artifact being composed, and consent-in-history is not consulted
+    at all.
+    """
     gs = _gs()
-    declined_properly = _record(
+    for stage in ("growth", "series_b"):
+        for gate_id, answer, options in (
+            ("stage_confirmation", "Looks right", _CANON_CONFIRM),
+            ("out_of_scope_choice", "Proceed anyway (best-effort)", _CANON_OOS),
+        ):
+            gate = _record(gate_id=gate_id, answer=answer, options=list(options), confirmed_stage=stage)
+            profile = {"metadata": {"run_id": "r1"}, "detected_stage": stage, "confidence": "low"}
+            assert not gs.authorize(gate, profile, "r1").permitted, (
+                f"an out-of-scope {stage} profile was authorized via {gate_id}/{answer!r}"
+            )
+
+    # And the state the founder's "proceed anyway" actually leads to IS authorized.
+    rebuilt = _record(
         gate_id="out_of_scope_choice",
-        options=list(_CANON_OOS),
         answer="Proceed anyway (best-effort)",
+        options=list(_CANON_OOS),
+        confirmed_stage="series_a",
     )
-    # Still needs the rebuild, so this is refused for THAT reason, not the scope one.
-    refused = gs.authorize(declined_properly, _profile_for(stage="growth", confidence="high"), "r1")
-    assert not refused.permitted
-    assert "confidence" in refused.reason.lower(), refused.reason
-    permitted = gs.authorize(
-        declined_properly, {"metadata": {"run_id": "r1"}, "detected_stage": "series_a", "confidence": "low"}, "r1"
-    )
-    assert permitted.permitted, permitted.reason
+    assert gs.authorize(
+        rebuilt, {"metadata": {"run_id": "r1"}, "detected_stage": "series_a", "confidence": "low"}, "r1"
+    ).permitted
 
 
 def test_a_pending_gate_replaced_by_another_emit_leaves_a_trace() -> None:
@@ -962,14 +995,14 @@ def test_a_pending_gate_replaced_by_another_emit_leaves_a_trace() -> None:
             "options": list(gs.CANONICAL_OPTIONS["out_of_scope_choice"]),
             "context_summary": "x",
         }
-        _run(["emit", "--run-id", "r1", "-o", path], json.dumps(oos))
+        _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", path], json.dumps(oos))
         confirm = {
             "gate_id": "stage_confirmation",
             "question": "?",
             "options": list(gs.CANONICAL_OPTIONS["stage_confirmation"]),
             "context_summary": "x",
         }
-        _run(["emit", "--run-id", "r1", "-o", path], json.dumps(confirm))
+        _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", path], json.dumps(confirm))
         with open(path) as f:
             written = json.load(f)
         history = written.get("history", [])
@@ -977,43 +1010,6 @@ def test_a_pending_gate_replaced_by_another_emit_leaves_a_trace() -> None:
         assert history[0]["gate_id"] == "out_of_scope_choice"
         assert history[0].get("answer") is None
         assert history[0].get("superseded") is True, history[0]
-
-
-def test_auto_satisfy_is_unavailable_on_an_out_of_scope_deck() -> None:
-    """Every worst-case defect in six rounds flowed through self-answering, and the
-    precondition that made it defensible — "the founder already told us, and detection
-    agrees" — was prose only. It cannot hold for a deck detection puts out of scope: there
-    is nothing the founder said in Step 1 that authorizes skipping the question about
-    whether to proceed at all."""
-    gs = _gs()
-    # The case where the fence is REACHABLE, which took a mutation to find: a plain
-    # growth + stage_confirmation record is already refused by the scope binding, so
-    # asserting on that tested nothing. Here the out-of-scope question WAS put (it is in
-    # this run's history), so the scope binding is satisfied — and the follow-up
-    # confirmation is then self-answered while the deck is still out of scope.
-    record = _record(
-        answer_source="auto_satisfied",
-        history=[
-            {
-                "gate_id": "out_of_scope_choice",
-                "answer": "Different stage",
-                "answer_source": "founder",
-                "run_id": "r1",
-            }
-        ],
-    )
-    assert not gs.authorize(record, _profile_for(stage="growth"), "r1").permitted, (
-        "an out-of-scope deck was self-confirmed after the out-of-scope question had been asked"
-    )
-    # CORRECTED. This previously asserted that the same record with `answer_source:
-    # founder` IS permitted — i.e. that an out-of-scope answer of "Different stage"
-    # authorizes a growth report. It does not: "Different stage" means rebuild and re-ask.
-    # Asserting otherwise froze a bypass in a test written to close one.
-    founder_answered = dict(record, answer_source="founder")
-    assert not gs.authorize(founder_answered, _profile_for(stage="growth"), "r1").permitted, (
-        "'Different stage' on the out-of-scope gate is not consent to proceed"
-    )
-    assert gs.authorize(_record(answer_source="auto_satisfied"), _profile_for(stage="seed"), "r1").permitted
 
 
 # ---------------------------------------------------------------------------
@@ -1070,13 +1066,6 @@ def test_only_an_answered_founder_proceed_satisfies_out_of_scope_consent(label: 
     assert not verdict.permitted, f"out-of-scope consent was inferred from: {label}"
 
 
-def test_the_one_form_of_out_of_scope_consent_is_accepted() -> None:
-    """The counter-test, or the rule above is just a refusal of everything."""
-    gs = _gs()
-    record = _record(history=_oos_history("Proceed anyway (best-effort)"))
-    assert gs.authorize(record, _profile_for(stage="growth"), "r1").permitted
-
-
 def test_the_profile_must_belong_to_this_run_for_an_ordinary_confirmation_too() -> None:
     """Run parity was checked only on the rebuild branch, so an ordinary `Looks right`
     composed happily against a stage profile left by an earlier review."""
@@ -1120,13 +1109,183 @@ def test_a_hand_written_superseded_consent_is_still_refused() -> None:
 
 
 def test_an_unrecognised_gate_action_denies(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The deny-by-default fallthrough is unreachable today — `gate_action` returns five
-    values and all five are handled — so mutation removing it changed nothing. Its whole
-    purpose is the SIXTH: a future action added to `gate_action` and not considered here
-    must refuse rather than be waved through by an else-branch. Reached by forcing it,
-    because the alternative is decorative code nobody has seen work."""
+    """A future `gate_action` value must refuse rather than fall through.
+
+    I removed this guard on the reasoning that the allow table subsumed it. It does not: the
+    table keys on (gate_id, answer), so an unrecognised ACTION falls straight through to a
+    matching row — verified by probe, which is why the branch is back. The table constrains
+    what the answer IS; the action allowlist constrains what the run may DO with it.
+    """
     gs = _gs()
     monkeypatch.setattr(gs, "gate_action", lambda _gate: "provisionally_fine")
     verdict = gs.authorize(_record(), _profile_for(), "r1")
     assert not verdict.permitted, "an unrecognised action was treated as permission"
-    assert "provisionally_fine" in verdict.reason
+
+
+# ---------------------------------------------------------------------------
+# THE CLOSED TABLE. The previous version was still refusal-predicates-then-permit, and a
+# probe refuted the claim that "a case nobody enumerated now refuses": a hand-written
+# `gate_id: frobnicate` carrying the globally-recognised answer "Not sure — proceed anyway"
+# authorized a clean report. `gate_action` classified the ANSWER without reference to the
+# gate, and the bottom of `authorize` was an unconditional permit.
+#
+# So the permitted set is now written out. Three rows, each a (gate_id, answer) pair with
+# the profile state it requires. Nothing else authorizes anything.
+#
+# `_out_of_scope_consent` is GONE, not fixed. Every legitimate path through SKILL.md either
+# exits on "Stop review" or rebuilds to series_a at low confidence (SKILL.md:531-533), so an
+# out-of-scope profile reaching compose is always wrong regardless of what history says.
+# Requiring the composed profile to be in scope replaces a four-property consent search
+# with one check, and closes the case where historical consent skipped its own rebuild.
+# ---------------------------------------------------------------------------
+
+_IN_SCOPE = {"metadata": {"run_id": "r1"}, "detected_stage": "seed", "confidence": "high"}
+
+
+def _bound(stage: str = "seed", **over: object) -> dict:
+    """A gate that records which stage it confirmed — see `confirmed_stage`."""
+    return _record(confirmed_stage=stage, **over)
+
+
+@pytest.mark.parametrize(
+    ("label", "gate", "profile"),
+    [
+        (
+            "stage_confirmation / Looks right",
+            _bound(),
+            {"metadata": {"run_id": "r1"}, "detected_stage": "seed", "confidence": "high"},
+        ),
+        (
+            "stage_confirmation / Not sure — proceed anyway, after the low rebuild",
+            _bound(answer="Not sure — proceed anyway"),
+            {"metadata": {"run_id": "r1"}, "detected_stage": "seed", "confidence": "low"},
+        ),
+        (
+            "out_of_scope_choice / Proceed anyway, after the series_a low rebuild",
+            _record(
+                gate_id="out_of_scope_choice",
+                options=["Stop review", "Different stage", "Proceed anyway (best-effort)"],
+                answer="Proceed anyway (best-effort)",
+                confirmed_stage="series_a",
+            ),
+            {"metadata": {"run_id": "r1"}, "detected_stage": "series_a", "confidence": "low"},
+        ),
+    ],
+)
+def test_the_allow_table_is_exactly_these_rows(label: str, gate: dict, profile: dict) -> None:
+    gs = _gs()
+    verdict = gs.authorize(gate, profile, "r1")
+    assert verdict.permitted, f"a permitted row was refused ({label}): {verdict.reason}"
+
+
+@pytest.mark.parametrize(
+    ("label", "gate", "profile"),
+    [
+        # THE PROBE THAT REFUTED THE PREVIOUS CLAIM.
+        (
+            "an unknown gate_id riding a recognised answer",
+            _bound(gate_id="frobnicate", answer="Not sure — proceed anyway"),
+            {"metadata": {"run_id": "r1"}, "detected_stage": "seed", "confidence": "low"},
+        ),
+        # The composed profile is out of scope, whatever the history says.
+        (
+            "an out-of-scope profile with historical consent",
+            _bound(
+                stage="growth",
+                history=[
+                    {
+                        "gate_id": "out_of_scope_choice",
+                        "answer": "Proceed anyway (best-effort)",
+                        "answer_source": "founder",
+                        "run_id": "r1",
+                    }
+                ],
+            ),
+            {"metadata": {"run_id": "r1"}, "detected_stage": "growth", "confidence": "high"},
+        ),
+        # The gate confirmed a different stage than the one being graded.
+        (
+            "the profile was rebuilt after the gate confirmed it",
+            _bound(stage="seed"),
+            {"metadata": {"run_id": "r1"}, "detected_stage": "series_a", "confidence": "high"},
+        ),
+        (
+            "a gate that records no stage at all",
+            {k: v for k, v in _record().items() if k != "confirmed_stage"},
+            _IN_SCOPE,
+        ),
+        # Right pair, wrong profile state.
+        (
+            "'Not sure' without the low rebuild",
+            _bound(answer="Not sure — proceed anyway"),
+            {"metadata": {"run_id": "r1"}, "detected_stage": "seed", "confidence": "high"},
+        ),
+        (
+            "out-of-scope proceed left on a non-series_a stage",
+            _record(
+                gate_id="out_of_scope_choice",
+                options=["Stop review", "Different stage", "Proceed anyway (best-effort)"],
+                answer="Proceed anyway (best-effort)",
+                confirmed_stage="seed",
+            ),
+            {"metadata": {"run_id": "r1"}, "detected_stage": "seed", "confidence": "low"},
+        ),
+        # Answers that are not in the table at all.
+        ("'Different stage' is not a terminal row", _bound(answer="Different stage"), _IN_SCOPE),
+        (
+            "a stage_choice pick is not a terminal row",
+            _record(
+                gate_id="stage_choice",
+                options=["Pre-seed", "Seed", "Series A", "Series B"],
+                answer="Seed",
+                confirmed_stage="seed",
+            ),
+            _IN_SCOPE,
+        ),
+    ],
+)
+def test_everything_outside_the_allow_table_is_refused(label: str, gate: dict, profile: dict) -> None:
+    gs = _gs()
+    verdict = gs.authorize(gate, profile, "r1")
+    assert not verdict.permitted, f"authorize permitted a row that is not in the table: {label}"
+    assert verdict.reason
+
+
+def test_history_reduces_in_order_so_a_corrected_stage_is_not_held_against_the_run() -> None:
+    """`gate_action` scanned history existentially, so an out-of-scope pick the founder
+    later CORRECTED still forced a rebuild forever — a multi-round correction could never
+    finish. Transitions are ordered; the last stage pick is the operative one."""
+    gs = _gs()
+    corrected = _bound(
+        history=[
+            {"gate_id": "stage_choice", "answer": "Growth", "answer_source": "founder", "run_id": "r1"},
+            {"gate_id": "stage_choice", "answer": "Seed", "answer_source": "founder", "run_id": "r1"},
+        ]
+    )
+    assert gs.gate_action(corrected) == "continue", "a corrected stage pick still forced a rebuild"
+    # And the reverse order still refuses: the LAST pick is out of scope.
+    reversed_order = _bound(
+        history=[
+            {"gate_id": "stage_choice", "answer": "Seed", "answer_source": "founder", "run_id": "r1"},
+            {"gate_id": "stage_choice", "answer": "Growth", "answer_source": "founder", "run_id": "r1"},
+        ]
+    )
+    assert gs.gate_action(reversed_order) == "rebuild"
+
+
+def test_a_stop_is_absorbing_whatever_follows_it() -> None:
+    """Ordered reduction must not let a later answer overwrite a decline."""
+    gs = _gs()
+    declined = _bound(
+        history=[
+            {"gate_id": "out_of_scope_choice", "answer": "Stop review", "answer_source": "founder", "run_id": "r1"},
+            {"gate_id": "stage_choice", "answer": "Seed", "answer_source": "founder", "run_id": "r1"},
+        ]
+    )
+    assert gs.gate_action(declined) == "stop"
+
+
+def test_the_gate_id_enum_is_validated_at_read_time() -> None:
+    gs = _gs()
+    problems = gs.validate_answered_gate(_bound(gate_id="frobnicate"))
+    assert any("frobnicate" in p for p in problems), problems

@@ -29,6 +29,17 @@
         "stage_choice"
       ]
     },
+    "confirmed_stage": {
+      "description": "The stage token this gate asked about, written by `gate_state.py emit --stage`. Binds the answer to the profile it confirms: without it, confirming Seed and then rebuilding the same-run profile to Series A composed a clean Series A report against a gate that had never asked about Series A. compose refuses when this and stage_profile.detected_stage disagree.",
+      "type": "string",
+      "enum": [
+        "pre_seed",
+        "seed",
+        "series_a",
+        "series_b",
+        "growth"
+      ]
+    },
     "question": {
       "type": "string"
     },

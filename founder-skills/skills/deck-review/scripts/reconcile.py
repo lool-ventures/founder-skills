@@ -132,11 +132,19 @@ class Relation:
 # so adding the guard without also parsing the words would regress them. Both are needed,
 # and "trillion" was never handled at all.
 _SCALE_WORDS = {"thousand": 1e3, "million": 1e6, "billion": 1e9, "trillion": 1e12}
-_SCALE = {"k": 1e3, "m": 1e6, "b": 1e9, "t": 1e12, **_SCALE_WORDS}
+# `mm`/`mn`/`bn`/`tn` are the accounting and finance spellings decks actually print, and
+# they were added to the QUOTE-side lexeme without being added here — where the
+# authoritative magnitude lives. The two grammars then disagreed by a factor of a million:
+# `raw="$20MM"` with the correct value 20,000,000 was REJECTED as disagreeing with a raw
+# that "reads as 20", while the wrong value 20 was accepted. One grammar, or the boundary
+# check and the producer it feeds contradict each other.
+_SCALE = {"k": 1e3, "m": 1e6, "mm": 1e6, "mn": 1e6, "b": 1e9, "bn": 1e9, "t": 1e12, "tn": 1e12, **_SCALE_WORDS}
 
 _NUM_RE = re.compile(
     r"(?P<int>\d[\d,]*)(?:\.(?P<frac>\d+))?\s*"
-    r"(?P<suf>thousand|million|billion|trillion|[kKmMbBtT](?![a-zA-Z]))?",
+    # Longest suffix first, so `MM` is not read as `M` with a stray letter left over, and
+    # the not-a-word guard covers every abbreviation rather than only the single letters.
+    r"(?P<suf>thousand|million|billion|trillion|(?:mm|mn|bn|tn|[kmbt])(?![a-zA-Z]))?",
     re.I,
 )
 

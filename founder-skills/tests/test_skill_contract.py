@@ -649,7 +649,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # review" could sit beside a displayed choice that omitted it, and validation would guarantee
     # what was recorded rather than what was asked. `emit` now returns the payload and the skill
     # presents it verbatim.
-    "deck-review": 97_371,
+    # deck-review 97,371 -> 97,920 (+549): `emit` now requires `--stage`, recording which stage the
+    # gate asked about. Nothing tied a gate to the profile it confirmed, so confirming Seed,
+    # rebuilding the same-run profile to Series A, and composing against the original gate produced
+    # a clean report graded as Series A. The prose says to RE-EMIT after a rebuild rather than reuse
+    # the record, because that is the failure the binding turns into a refusal.
+    "deck-review": 97_920,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

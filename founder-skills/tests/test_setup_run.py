@@ -386,7 +386,7 @@ def test_the_two_turn_gate_lifecycle_end_to_end() -> None:
             "context_summary": "Detected: Seed",
         }
         emit = subprocess.run(
-            [sys.executable, gate_script, "emit", "--run-id", "r1", "-o", gate_path],
+            [sys.executable, gate_script, "emit", "--run-id", "r1", "--stage", "seed", "-o", gate_path],
             input=json.dumps(body),
             capture_output=True,
             text=True,

@@ -471,7 +471,7 @@ normal path below.
 **Otherwise, write `gate_state.json` via the producer script and emit a needs_input payload:**
 
 ```bash
-cat <<'GATE_EOF' | python3 "$SCRIPTS/gate_state.py" emit --run-id "$RUN_ID" -o "$REVIEW_DIR/gate_state.json" --pretty
+cat <<'GATE_EOF' | python3 "$SCRIPTS/gate_state.py" emit --run-id "$RUN_ID" --stage <detected-stage-token> -o "$REVIEW_DIR/gate_state.json" --pretty
 {
   "gate_id": "stage_confirmation",
   "question": "Does this stage detection look right?",
@@ -497,6 +497,8 @@ Then return — as your final assistant message — a JSON object the parent age
   "run_id": "<RUN_ID>"
 }
 ```
+
+`--stage` is the stage token this gate is ASKING about (`pre_seed`/`seed`/`series_a`/`series_b`/`growth`), and it is required. It binds the founder's answer to the profile it confirms: without it, a gate that confirmed Seed authorised a report graded as Series A after the profile was rebuilt, because nothing connected the two. `compose_report.py` refuses when the recorded stage and the composed profile disagree — so after any rebuild, **re-emit the gate with the new stage** rather than reusing the old record.
 
 **For out-of-scope stages (series_b, growth):** use `gate_id: "out_of_scope_choice"`, question `"This looks out of scope. What should I do?"`, options `["Stop review", "Different stage", "Proceed anyway (best-effort)"]`.
 

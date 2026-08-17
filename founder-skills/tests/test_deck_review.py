@@ -4243,6 +4243,7 @@ def _gate_file(d: str, run_id: str = "run-test", answer_source: str | None = "fo
         else:
             gate = {
                 "metadata": {"run_id": run_id},
+                "confirmed_stage": "seed",
                 "gate_id": "stage_confirmation",
                 "question": "?",
                 "options": ["Looks right", "Different stage", "Not sure — proceed anyway"],
@@ -4527,12 +4528,16 @@ def test_a_medium_warning_can_actually_be_accepted() -> None:
     assert hits[0]["severity"] == "acknowledged", f"medium but unacceptable: {hits[0]}"
 
 
-def _gate_at(d: str, gate_id: str, answer: str, options: list[str], run_id: str = "run-test") -> str:
+def _gate_at(
+    d: str, gate_id: str, answer: str, options: list[str], run_id: str = "run-test", stage: str = "seed"
+) -> str:
+    """A gate as `emit --stage` writes it: the stage it asked about travels with it."""
     path = os.path.join(d, "gate_state.json")
     with open(path, "w") as f:
         json.dump(
             {
                 "metadata": {"run_id": run_id},
+                "confirmed_stage": stage,
                 "gate_id": gate_id,
                 "question": "?",
                 "options": options,
@@ -4711,7 +4716,7 @@ def test_proceed_anyway_requires_the_profile_to_have_been_downgraded() -> None:
                 "reconciliation.json": _VALID_RECONCILIATION,
             }
         )
-        path2 = _gate_at(d2, gate_id, answer, options)
+        path2 = _gate_at(d2, gate_id, answer, options, stage=str(low["detected_stage"]))
         rc2, _, err2 = _run_compose(d2, ["--gate-state", path2])
         assert rc2 == 0, f"{answer!r} was refused after a correct rebuild: {err2}"
 
@@ -4810,14 +4815,25 @@ def test_out_of_scope_proceed_requires_the_stage_the_contract_names() -> None:
     options = ["Stop review", "Different stage", "Proceed anyway (best-effort)"]
     d_wrong = _arts_with(_profile("growth", "low"))
     rc, _, err = _run_compose(
-        d_wrong, ["--gate-state", _gate_at(d_wrong, "out_of_scope_choice", "Proceed anyway (best-effort)", options)]
+        d_wrong,
+        [
+            "--gate-state",
+            _gate_at(d_wrong, "out_of_scope_choice", "Proceed anyway (best-effort)", options, stage="growth"),
+        ],
     )
     assert rc != 0, "an out-of-scope proceed composed against a growth profile"
-    assert "series_a" in err
+    # Refused earlier now, and for a stronger reason: an out-of-scope PROFILE never reaches
+    # a report at all, whatever the gate says. The series_a requirement is still asserted by
+    # the allow-table tests in test_gate_state.py.
+    assert "not a stage this review covers" in err, err
 
     d_ok = _arts_with(_profile("series_a", "low"))
     rc_ok, _, err_ok = _run_compose(
-        d_ok, ["--gate-state", _gate_at(d_ok, "out_of_scope_choice", "Proceed anyway (best-effort)", options)]
+        d_ok,
+        [
+            "--gate-state",
+            _gate_at(d_ok, "out_of_scope_choice", "Proceed anyway (best-effort)", options, stage="series_a"),
+        ],
     )
     assert rc_ok == 0, err_ok
 
@@ -4965,3 +4981,37 @@ def test_one_agreement_does_not_license_a_claim_about_all_of_them() -> None:
     assert rc == 0
     assert data is not None
     assert "the comparisons that ran held" not in data["report_markdown"], data["report_markdown"][:400]
+
+
+def test_the_coverage_counts_add_up() -> None:
+    """`dropped` was subtracted from the evaluated count and then counted again inside
+    `inconclusive`, so a valid artifact rendered arithmetic that cannot be true: "ran 1
+    comparisons", "1 further comparison could not be made", "Of those, 2 could not be
+    settled". A founder reading three numbers that do not reconcile learns to distrust all
+    three."""
+    recon = json.loads(json.dumps(_VALID_RECONCILIATION))
+    recon["relations"] = []
+    # Chosen so the double-count is DETECTABLE: evaluated = 3 - 2 = 1, while counting
+    # `dropped` again gives 3 unsettled. With dropped=1 the two happen to tie at 2 and the
+    # test passes either way — mutation showed that.
+    recon["relations_proposed"] = 3
+    recon["suppressed"] = {"dropped": 2, "incomparable": 1}
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": recon,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    ran = re.search(r"I ran \*\*(\d+)\*\* comparisons", md)
+    unsettled = re.search(r"\*\*(\d+)\*\* could not be settled", md)
+    assert ran and unsettled, md[:400]
+    assert int(unsettled.group(1)) <= int(ran.group(1)), (
+        f"more comparisons unsettled ({unsettled.group(1)}) than ran ({ran.group(1)}): {md[:400]}"
+    )

@@ -28,6 +28,7 @@ from reconcile import (  # type: ignore[import-not-found]  # noqa: E402
     Figure,
     Relation,
     _is_exact_count,
+    _raw_scale,
     _scale_divergent,
     _stated,
     compute,
@@ -1134,3 +1135,18 @@ def test_the_lexeme_covers_the_scale_forms_decks_actually_print() -> None:
     assert detect_bound("$20MM", "m", "market of ≈$20MM") == "approximate"
     assert detect_bound("20x", "m", "≈20x improvement") == "approximate"
     assert detect_bound("20", "m", "roughly ≈20 people") == "approximate"
+
+
+def test_the_quote_lexeme_and_the_magnitude_parser_agree_on_scale() -> None:
+    """A divergence I introduced: the quote lexeme learned `MM`/`Mn`/`bn` so a figure would
+    stop inheriting a larger number's approximation, and `_parsed_magnitude` — the
+    authoritative parser the ledger validates against — did not learn them.
+
+    Measured before the fix: `raw="$20MM"` with the CORRECT value 20,000,000 was rejected
+    as disagreeing with a raw that "reads as 20", while the wrong value 20 was accepted.
+    One join upstream from a boundary check, the two grammars disagreed by a factor of a
+    million, in the direction that admits the error.
+    """
+    for raw, expected in (("$20MM", 20e6), ("$20Mn", 20e6), ("$20bn", 20e9), ("$20M", 20e6), ("$20K", 20e3)):
+        assert implied_tolerance(raw) > 0, raw
+        assert _raw_scale(raw) == expected / 20, (raw, _raw_scale(raw))

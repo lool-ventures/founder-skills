@@ -1207,10 +1207,15 @@ def _coverage_line(reconciliation: dict[str, Any]) -> str:
     verdicts = [str(_as_dict(r).get("verdict")) for r in _as_list(reconciliation.get("relations"))]
     disagreements = sum(1 for v in verdicts if v == "contradiction")
     suppressed_counts = _as_dict(reconciliation.get("suppressed"))
+    # `dropped` counts comparisons that were REFUSED before any arithmetic ran; it is
+    # already subtracted from `evaluated` above and reported on its own line. Including it
+    # here counted it twice and produced arithmetic a founder can see is impossible — "ran
+    # 1", "1 could not be made", "of those, 2 could not be settled". Unsettled means
+    # evaluated-but-inconclusive, so it must exclude what was never evaluated.
     inconclusive = sum(
         int(count)
         for key, count in suppressed_counts.items()
-        if key not in ("confirmation", "restatement") and isinstance(count, int)
+        if key not in ("confirmation", "restatement", "dropped") and isinstance(count, int)
     )
     agreed = (
         sum(1 for v in verdicts if v in ("confirmation", "restatement"))

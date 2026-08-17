@@ -77,6 +77,12 @@ def validate_answered_gate(gate: object) -> list[str]:
     for field in ("metadata", "gate_id", "question", "options", "context_summary"):
         if field not in gate:
             problems.append(f"gate_state is missing the required field {field!r}")
+    # PRESENCE IS NOT VALIDITY. Only the field's existence was checked, so a hand-written
+    # `gate_id: frobnicate` validated — and because `gate_action` classified the ANSWER
+    # without reference to the gate, an unknown gate carrying a recognised answer reached
+    # the permit at the bottom of `authorize`.
+    if gate.get("gate_id") not in KNOWN_GATE_IDS:
+        problems.append(f"gate_id {gate.get('gate_id')!r} is not one of {sorted(KNOWN_GATE_IDS)}")
     if not isinstance(_as_run_id(gate), str) or not _as_run_id(gate):
         problems.append("gate_state has no metadata.run_id")
 
@@ -192,13 +198,8 @@ def gate_action(gate: object) -> str:
     # A STOP IN THIS RUN'S HISTORY OUTRANKS EVERYTHING, including a pending replacement.
     # Checked before the answered-ness test, because re-emitting after a decline leaves a
     # PENDING gate -- which read as "just ask again" rather than "they already said no".
-    if isinstance(gate, dict):
-        this_run = _as_run_id(gate)
-        for entry in gate.get("history", []):
-            if not isinstance(entry, dict):
-                continue
-            if entry.get("answer") in STOP_ANSWERS and entry.get("run_id") == this_run:
-                return "stop"
+    if isinstance(gate, dict) and _reduce_history(gate, str(_as_run_id(gate) or "")) == "stop":
+        return "stop"
     if not is_answered(gate) or validate_answered_gate(gate):
         return "reask"
     assert isinstance(gate, dict)  # is_answered established this
@@ -211,11 +212,8 @@ def gate_action(gate: object) -> str:
         # report at high confidence -- the out-of-scope question, the only one offering
         # "Stop review", was never asked. The prior pick is in this run's history, so the
         # skipped step is checkable rather than trusted.
-        for entry in gate.get("history", []):
-            if not isinstance(entry, dict) or entry.get("run_id") != _as_run_id(gate):
-                continue
-            if entry.get("gate_id") == "stage_choice" and entry.get("answer") in OUT_OF_SCOPE_STAGES:
-                return "rebuild"
+        if _reduce_history(gate, str(_as_run_id(gate) or "")) == "out_of_scope_pick":
+            return "rebuild"
         return "continue"
     if answer in CONTINUE_IF_REBUILT_ANSWERS:
         return "continue_if_rebuilt"
@@ -223,6 +221,51 @@ def gate_action(gate: object) -> str:
 
 
 OUT_OF_SCOPE_STAGE_TOKENS: frozenset[str] = frozenset({"series_b", "growth"})
+KNOWN_GATE_IDS: frozenset[str] = frozenset({"stage_confirmation", "out_of_scope_choice", "stage_choice"})
+IN_SCOPE_STAGE_TOKENS: frozenset[str] = frozenset({"pre_seed", "seed", "series_a"})
+
+# THE COMPLETE SET OF STATES THAT AUTHORIZE A REPORT: (gate_id, answer) -> what the stage
+# profile must look like. Everything absent from this table is refused.
+#
+# The previous version was refusal-predicates-then-permit, and a probe refuted its claim
+# that an unenumerated case would deny: `gate_id: frobnicate` with the globally-recognised
+# answer "Not sure — proceed anyway" authorized a clean report. Writing the PERMITTED set
+# out is the difference between deny-by-default as a description and as a mechanism.
+#
+# Three rows, because that is how many terminal states the gate actually has. `confidence`
+# of None means "not constrained"; `stage` of None means "any in-scope stage".
+TERMINAL_ROWS: dict[tuple[str, str], dict[str, str | None]] = {
+    ("stage_confirmation", "Looks right"): {"confidence": None, "stage": None},
+    # SKILL.md rebuilds at LOW confidence before this one continues.
+    ("stage_confirmation", "Not sure — proceed anyway"): {"confidence": "low", "stage": None},
+    # SKILL.md rebuilds to series_a at low confidence before this one continues.
+    ("out_of_scope_choice", "Proceed anyway (best-effort)"): {"confidence": "low", "stage": "series_a"},
+}
+
+
+def _reduce_history(gate: dict[str, object], run_id: str) -> str | None:
+    """The operative earlier transition for this run, reduced IN ORDER.
+
+    The scan used to be existential, so an out-of-scope stage pick the founder later
+    CORRECTED still forced a rebuild for the rest of the run — a multi-round correction
+    could never finish. Order matters: the last stage pick is the operative one.
+
+    A stop is ABSORBING. Reduction must not let a later answer overwrite a decline, which
+    is the one place "last wins" would be exactly wrong.
+    """
+    operative: str | None = None
+    entries = gate.get("history", [])
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict) or entry.get("run_id") != run_id:
+            continue
+        answer = entry.get("answer")
+        if answer in STOP_ANSWERS:
+            return "stop"
+        if entry.get("superseded"):
+            continue
+        if entry.get("gate_id") == "stage_choice":
+            operative = "out_of_scope_pick" if answer in OUT_OF_SCOPE_STAGES else "in_scope_pick"
+    return operative
 
 
 class Authorization:
@@ -238,77 +281,47 @@ class Authorization:
         return self.permitted
 
 
-def _out_of_scope_consent(gate: dict[str, object], run_id: str) -> bool:
-    """Did the founder answer the out-of-scope question and say proceed?
-
-    THREE THINGS, ALL REQUIRED, and the first version checked none of them -- it asked only
-    whether an `out_of_scope_choice` appeared in this run's history. `emit` deliberately
-    writes PENDING superseded gates into history, so the moment both features landed (in
-    the same commit) "the question is in the record" and "the founder consented" came
-    apart: a pending question, a "Different stage", even a "Stop review" all read as
-    consent. The failure shape is presence-instead-of-content, the same one that made two
-    grep-based guards vacuous earlier in this work.
-    """
-    history = gate.get("history", [])
-    for entry in history if isinstance(history, list) else []:
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("gate_id") != "out_of_scope_choice" or entry.get("run_id") != run_id:
-            continue
-        if entry.get("superseded"):
-            continue
-        if entry.get("answer") != "Proceed anyway (best-effort)":
-            continue
-        if entry.get("answer_source") != FOUNDER:
-            # Self-answering the out-of-scope question is exactly what must not authorize
-            # an out-of-scope review.
-            continue
-        return True
-    # The gate in hand can carry the consent itself, under the same rules.
-    return (
-        gate.get("gate_id") == "out_of_scope_choice"
-        and gate.get("answer") == "Proceed anyway (best-effort)"
-        and gate.get("answer_source") == FOUNDER
-    )
-
-
 def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization:
-    """THE ONE PLACE A GATE BECOMES PERMISSION TO PRODUCE A REPORT — deny by default.
+    """THE ONE PLACE A GATE BECOMES PERMISSION TO PRODUCE A REPORT — a closed allow table.
 
-    Six review rounds closed the same class one path at a time, because the rules lived in
-    four places and grew a fifth every round. Consolidating them here was right; the FIRST
-    version of this function was still written the wrong way round -- a list of ways to say
-    no, permitting whatever fell through. That shape is why a presence check slipped in:
-    falling through was the success path, so a missing predicate cost a bypass rather than
-    a refusal.
+    Two earlier shapes failed, and the difference between them is the lesson. First the
+    rules were spread across four call sites and grew a fifth every review round. Then they
+    were consolidated here but written as refusal-predicates-then-permit, which SOUNDS like
+    deny-by-default and is not: falling off the bottom was still success, so `gate_id:
+    frobnicate` carrying the globally-recognised answer "Not sure — proceed anyway"
+    authorized a clean report. The predicates were all correct; the default was wrong.
 
-    Inverted here. Below is the whole allow list, and anything not on it is refused. A
-    predicate nobody thought of now denies.
+    Now the PERMITTED set is written out (`TERMINAL_ROWS`) and a state absent from it is
+    refused because nothing permits it, not because a check happened to catch it.
+
+    `_out_of_scope_consent` is gone rather than fixed. Every path through SKILL.md either
+    exits on "Stop review" or rebuilds to series_a at low confidence, so an out-of-scope
+    profile reaching compose is always wrong whatever history records — which replaces a
+    four-property search through history with one check on the artifact being composed, and
+    closes the case where historical consent skipped the rebuild it was supposed to trigger.
 
     Honest boundary, unchanged: none of this proves a founder spoke. The record is written
     by the same agent that would misuse it, on a filesystem it can write to directly. What
-    IS enforceable -- and what every defect found in six rounds actually was -- is that the
-    record is internally coherent and consistent with the artifacts being composed.
+    is enforceable — and what every defect found across eight rounds actually was — is that
+    the record is internally coherent and consistent with the artifacts being composed.
     """
     if not isinstance(gate, dict):
         return Authorization(False, "gate_state is not a JSON object")
     profile = stage_profile if isinstance(stage_profile, dict) else {}
 
-    # --- the record must belong to this run, and so must the profile it is judged against
+    # --- the record and the profile must both belong to this run
     gate_run = _as_run_id(gate)
     if gate_run != run_id:
         return Authorization(False, f"the gate is from run {gate_run!r} but this report is run {run_id!r}")
     prof_run = _as_run_id(profile)
     if prof_run != run_id:
-        # Checked for EVERY answer, not only the rebuild ones. An ordinary "Looks right"
-        # composed happily against a stage profile left by an earlier review.
         return Authorization(
             False,
             f"the stage profile is from run {prof_run!r}, not this run {run_id!r} — the gate confirms "
             "a stage this report is not being graded against",
         )
 
-    # --- the record must be a coherent, answered, terminal-or-conditional state
+    # --- the record must be coherent, and its answer must be one the run can act on
     action = gate_action(gate)
     if action == "stop":
         return Authorization(False, "the founder declined the review, so no report is to be produced")
@@ -321,54 +334,70 @@ def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization
             f"{gate.get('answer')!r} on the {gate.get('gate_id')!r} gate is an intermediate answer — "
             "the profile is rebuilt and the gate re-asked before a report is composed",
         )
+
     if action not in ("continue", "continue_if_rebuilt"):
-        # Deny-by-default in its literal form: a new action added to `gate_action` and not
-        # considered here refuses, rather than being waved through by an else-branch.
+        # NOT decorative, and removing it was a mistake worth recording: the allow table
+        # keys on (gate_id, answer), so an unrecognised ACTION falls straight through to a
+        # matching row. The table constrains what the answer is; this constrains what the
+        # run may do with it. Both are needed.
         return Authorization(False, f"unrecognised gate action {action!r}")
 
+    # --- the deck being graded must be in scope
     stage = str(profile.get("detected_stage") or "").lower()
-    out_of_scope = stage in OUT_OF_SCOPE_STAGE_TOKENS
-
-    # --- an out-of-scope deck needs the founder's own answer to the out-of-scope question
-    if out_of_scope and not _out_of_scope_consent(gate, run_id):
+    if stage not in IN_SCOPE_STAGE_TOKENS:
         return Authorization(
             False,
-            f"the deck is {stage!r}, which is out of scope — proceeding needs the founder's own "
-            "answer to the out-of-scope question, the only one that offers to stop",
+            f"the profile being composed is {stage!r}, which is not a stage this review covers — an "
+            "out-of-scope deck is either declined or rebuilt to series_a before a report exists",
+        )
+
+    # --- THE TABLE. One row must match, or nothing authorizes this.
+    row = TERMINAL_ROWS.get((str(gate.get("gate_id")), str(gate.get("answer"))))
+    if row is None:
+        return Authorization(
+            False,
+            f"{gate.get('answer')!r} on the {gate.get('gate_id')!r} gate is not a state that authorizes a report",
+        )
+    required_confidence = row["confidence"]
+    if required_confidence is not None and profile.get("confidence") != required_confidence:
+        return Authorization(
+            False,
+            f"{gate.get('answer')!r} continues only against a profile rebuilt at {required_confidence} "
+            f"confidence — this one has {profile.get('confidence')!r}",
+        )
+    required_stage = row["stage"]
+    if required_stage is not None and stage != required_stage:
+        return Authorization(
+            False,
+            f"{gate.get('answer')!r} continues only against a {required_stage} profile — this one holds "
+            f"{profile.get('detected_stage')!r}",
+        )
+
+    # --- the gate must have confirmed THE STAGE BEING GRADED
+    # Nothing tied the two together, so confirming Seed, rebuilding the same-run profile to
+    # Series A, and composing against the original Seed gate produced a clean Series A
+    # report. The gate records which stage it was asked about; that has to be this one.
+    confirmed = str(gate.get("confirmed_stage") or "").lower()
+    if not confirmed:
+        return Authorization(
+            False,
+            "the gate does not record which stage it confirmed, so it cannot be checked against the "
+            "profile this report is graded on",
+        )
+    if confirmed != stage:
+        return Authorization(
+            False,
+            f"the gate confirmed {confirmed!r} but the profile being composed is {stage!r} — the stage "
+            "changed after the founder answered",
         )
 
     # --- auto-satisfy: the checkable half of its documented precondition
-    if gate.get("answer_source") == AUTO_SATISFIED:
-        if out_of_scope:
-            return Authorization(
-                False,
-                f"the deck is {stage!r} and this gate was self-answered — an out-of-scope deck is the "
-                "founder's call to make, not one to record on their behalf",
-            )
-        if profile.get("confidence") == "low":
-            # Its rationale is "the founder named the stage and detection AGREES". Whether
-            # they answered Step 1 is not in the artifact and cannot be checked; the
-            # confidence of the detection is, and was not being checked at all.
-            return Authorization(
-                False,
-                "auto-satisfy claims the detected stage agrees with what the founder said, but the "
-                "detection is low confidence — ask them",
-            )
-
-    # --- "proceed anyway" continues only against the rebuild it promised
-    if action == "continue_if_rebuilt":
-        if profile.get("confidence") != "low":
-            return Authorization(
-                False,
-                f"{gate.get('answer')!r} continues only after the stage profile is rebuilt at low "
-                f"confidence — the profile being composed has confidence {profile.get('confidence')!r}",
-            )
-        if gate.get("gate_id") == "out_of_scope_choice" and stage != "series_a":
-            return Authorization(
-                False,
-                f"an out-of-scope 'proceed anyway' rebuilds to series_a at low confidence — the "
-                f"profile holds {profile.get('detected_stage')!r}",
-            )
+    if gate.get("answer_source") == AUTO_SATISFIED and profile.get("confidence") == "low":
+        return Authorization(
+            False,
+            "auto-satisfy claims the detected stage agrees with what the founder said, but the "
+            "detection is low confidence — ask them",
+        )
 
     return Authorization(True)
 
@@ -444,6 +473,10 @@ def cmd_emit(args: argparse.Namespace) -> int:
     # THE OPTIONS ARE CHECKED WHERE THE QUESTION IS WRITTEN. Validating them only at
     # ANSWER time meant a rigged gate still reached the founder and was refused afterwards
     # -- after they had been shown a choice that omitted "Stop review".
+    # The stage this gate is about travels WITH the record, so a later profile rebuild
+    # cannot silently re-point a founder's answer at a different stage.
+    data["confirmed_stage"] = args.stage
+
     gate_id = str(data.get("gate_id") or "")
     options = data.get("options")
     if isinstance(options, list) and all(isinstance(o, str) for o in options):
@@ -612,6 +645,14 @@ def main() -> int:
 
     sp_emit = sub.add_parser("emit", help="Write a fresh gate_state.json from stdin body")
     sp_emit.add_argument("--run-id", required=True)
+    sp_emit.add_argument(
+        "--stage",
+        required=True,
+        help="The stage token this gate is asking about (pre_seed|seed|series_a|series_b|growth). "
+        "Recorded as `confirmed_stage` so the answer can be checked against the profile the report "
+        "is graded on — nothing tied the two together, so confirming Seed, rebuilding to Series A "
+        "and composing against the original gate produced a clean Series A report.",
+    )
     sp_emit.add_argument("-o", "--output", required=True)
     sp_emit.add_argument("--pretty", action="store_true")
     sp_emit.set_defaults(func=cmd_emit)
