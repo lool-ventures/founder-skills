@@ -62,6 +62,12 @@
           "outputs/artifacts/founder-context-cadence.json",
           "outputs/Cadence_*"
         ]
+      },
+      {
+        "gate_answers_delivered": true
+      },
+      {
+        "gate_answer_count_min": 1
       }
     ],
     "skills": [

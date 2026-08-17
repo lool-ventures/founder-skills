@@ -76,6 +76,12 @@
           "outputs/artifacts/founder-context-acmecorp.json",
           "outputs/Acmecorp_Deck_Review.*"
         ]
+      },
+      {
+        "gate_answers_delivered": true
+      },
+      {
+        "gate_answer_count_min": 1
       }
     ],
     "skills": [

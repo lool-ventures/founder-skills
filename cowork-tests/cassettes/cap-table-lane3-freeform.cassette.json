@@ -80,9 +80,6 @@
         "subagent_tool_absent": "Bash"
       },
       {
-        "gate_answers_delivered": true
-      },
-      {
         "questions_count_max": 8
       },
       {

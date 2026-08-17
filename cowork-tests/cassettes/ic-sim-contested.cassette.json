@@ -101,6 +101,12 @@
           "outputs/artifacts/founder-context-ridgeline.json",
           "outputs/Ridgeline_IC_Simulation.*"
         ]
+      },
+      {
+        "gate_answers_delivered": true
+      },
+      {
+        "gate_answer_count_min": 1
       }
     ],
     "skills": [

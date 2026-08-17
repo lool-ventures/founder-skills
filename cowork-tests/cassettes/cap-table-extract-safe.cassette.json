@@ -101,6 +101,9 @@
           "outputs/artifacts/founder-context-acmecorp-inc.json",
           "outputs/Acmecorp_*"
         ]
+      },
+      {
+        "gate_answer_count_min": 1
       }
     ],
     "skills": [
