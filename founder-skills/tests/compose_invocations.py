@@ -70,7 +70,10 @@ def _run_compose_subprocess(skill: str, work_dir: Path, extra_args: list[str]) -
 _COMPOSE_FLAGS: dict[str, list[str]] = {
     # Every row must pass --write-md. A row that omits it produces no report.md, and a fixture-driven
     # fleet scan then reports that skill CLEAN without having looked at it.
-    "deck-review": ["-o", "REPORT_JSON_OUT", "--write-md", "REPORT_MD_OUT"],
+    # `--ungated`: these fixtures exercise composition, not the stage gate, and deck-review
+    # now requires an explicit choice rather than letting a missing flag skip its
+    # authorization boundary silently. Saying "ungated" out loud is the point of the flag.
+    "deck-review": ["-o", "REPORT_JSON_OUT", "--write-md", "REPORT_MD_OUT", "--ungated"],
     # cap-table also requires --write-md; the harness substitutes REPORT_JSON_OUT
     # but also needs a markdown sibling path. We pass an explicit md path.
     "cap-table": ["-o", "REPORT_JSON_OUT", "--write-md", "REPORT_MD_OUT", "--run-id", "test-run"],

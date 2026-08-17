@@ -132,6 +132,9 @@ WARNING_SEVERITY: dict[str, str] = {
     # Medium: the figures are not wrong, the evidence that they were re-found is weak, and
     # ~7.5% of a real corpus is this shape — too large a pre-existing population to block on.
     "THIN_QUOTES": "medium",
+    # Medium: the review itself is sound, but nobody confirmed the stage it was graded
+    # against. A founder should know that; it is not a broken pipeline.
+    "UNGATED_REVIEW": "medium",
     "STAGE_MISMATCH": "medium",
     "SLIDE_COUNT_EXTREME": "medium",
     "UNCITED_CRITIQUE": "medium",
@@ -1224,7 +1227,10 @@ def _coverage_line(reconciliation: dict[str, Any]) -> str:
             f". Of those, **{inconclusive}** could not be settled either way — the two sides were "
             "not comparable, or the comparison was withdrawn on review"
         )
-    elif agreed:
+    elif agreed and agreed == evaluated:
+        # UNIVERSAL, so it needs universal evidence. `agreed > 0` licensed "the comparisons
+        # that ran held" from a single confirmation sitting beside an unproven derived
+        # reading — one agreement standing in for a claim about all of them.
         settled = ". That is what was checked, and the comparisons that ran held"
     else:
         settled = ". That is what was checked"
@@ -1584,6 +1590,18 @@ def compose(
     # to state how one question was answered. `setup_run.py --clean` removes a prior run's gate,
     # so reaching this means something upstream did not run or could not delete.
     gate_auto_satisfied = False
+    if gate_state is None:
+        warnings.append(
+            _warn(
+                "UNGATED_REVIEW",
+                "composed with no stage gate: the stage this review is graded against was never confirmed",
+                founder_message=(
+                    "Nobody confirmed what stage this deck is being judged at, so treat the "
+                    "stage-specific expectations below as a starting assumption rather than a "
+                    "settled one."
+                ),
+            )
+        )
     if gate_state is not None:
         # ONE CALL, at the reader. The rules used to be spread across `emit`, `answer`,
         # `gate_action` and here, each added where a reported defect happened to pass, and
@@ -1855,6 +1873,14 @@ def parse_args() -> argparse.Namespace:
         help="Also write the report markdown to this path (in addition to JSON output via -o)",
     )
     p.add_argument(
+        "--ungated",
+        action="store_true",
+        help="Compose without a stage gate. The ungated path is legitimate (fixtures, direct calls) "
+        "but it is not the production one, and omitting --gate-state used to spell both the same "
+        "way — skipping the sole authorization boundary by leaving a flag off. Saying so is now "
+        "explicit, and the report records it.",
+    )
+    p.add_argument(
         "--gate-state",
         help="Path to gate_state.json. An absent file is fine (the run never gated); an unreadable "
         "one is fatal, because the record of how the gate was answered is what the report discloses.",
@@ -1867,6 +1893,14 @@ def main() -> None:
 
     if not os.path.isdir(args.dir):
         print(f"Error: directory not found: {args.dir}", file=sys.stderr)
+        sys.exit(1)
+
+    if not args.gate_state and not args.ungated:
+        print(
+            "Error: no --gate-state and no --ungated. The stage gate is what authorizes a report; "
+            "composing without one is a deliberate choice and has to be spelled as one.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     report_path = os.path.abspath(args.write_md) if args.write_md else None

@@ -1116,3 +1116,21 @@ def test_the_quote_binding_uses_a_maximal_numeric_lexeme() -> None:
     assert detect_bound("$20", "revenue", "revenue of ≈$20 last year") == "approximate"
     assert detect_bound("$20B", "market", "market ≈$20B.") == "approximate"
     assert detect_bound("1,200", "customers", "roughly ~1,200 customers today") == "approximate"
+
+
+def test_the_lexeme_covers_the_scale_forms_decks_actually_print() -> None:
+    """Fourth pass on this boundary, and the previous three each closed the named cases.
+
+    Still importing: `≈$20MM` (accounting millions), `≈20x` (a multiple), `≈20×10⁶`
+    (superscript exponent — `\\d` does not match `⁶`), `≈20 MM`. In each, raw `20` is a
+    prefix of a larger claim and inherits its approximation, turning `12 + 9.8` against a
+    stated 20 from contradiction into confirmation.
+    """
+    for quote in ("≈$20MM", "≈20 MM", "≈20x", "≈20×10⁶", "≈20·10⁶", "≈20bn", "≈20 Mn"):
+        raw = "$20" if "$" in quote else "20"
+        assert detect_bound(raw, "m", quote) is None, quote
+
+    # The figure itself, marked, still binds — including with a scale the figure OWNS.
+    assert detect_bound("$20MM", "m", "market of ≈$20MM") == "approximate"
+    assert detect_bound("20x", "m", "≈20x improvement") == "approximate"
+    assert detect_bound("20", "m", "roughly ≈20 people") == "approximate"

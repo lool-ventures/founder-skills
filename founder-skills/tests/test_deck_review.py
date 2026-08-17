@@ -720,10 +720,19 @@ _VALID_RECONCILIATION = {
 
 
 def _run_compose(artifact_dir: str, extra_args: list[str] | None = None) -> tuple[int, dict | None, str]:
-    """Run compose_report.py with given artifact dir."""
+    """Run compose_report.py with given artifact dir.
+
+    Defaults to `--ungated`, because most of these tests are about COMPOSITION and not
+    about the stage gate. compose now requires the choice to be explicit — omitting
+    `--gate-state` used to skip the authorization boundary silently — and stating it here
+    keeps that requirement visible rather than making every unrelated test carry a flag.
+    Tests about the gate pass `--gate-state` (which wins) or call `run_script` directly.
+    """
     args = ["--dir", artifact_dir, "--pretty"]
     if extra_args:
         args.extend(extra_args)
+    if not any(a in ("--gate-state", "--ungated") for a in args):
+        args.append("--ungated")
     return run_script("compose_report.py", args)
 
 
@@ -1405,6 +1414,9 @@ def test_compose_severity_map_complete() -> None:
         # The ledger's quote-shape finding, surfaced where a human reads it. It was
         # recorded in ledger.json and consumed by nothing.
         "THIN_QUOTES",
+        # Composing with no stage gate is legitimate for a direct caller, but the founder
+        # should know the stage their deck was graded at was never confirmed.
+        "UNGATED_REVIEW",
     ]
     assert len(sev_map) == len(expected), f"expected {len(expected)} codes, got {len(sev_map)}"
     for code in expected:
@@ -1807,7 +1819,7 @@ def test_compose_strict_mode_writes_output_file() -> None:
     try:
         rc, stdout, stderr = run_script_raw(
             "compose_report.py",
-            ["--dir", d, "--pretty", "--strict", "-o", tmp],
+            ["--dir", d, "--pretty", "--strict", "-o", tmp, "--ungated"],
         )
         assert rc == 1
         assert os.path.exists(tmp)
@@ -2124,7 +2136,7 @@ def _complete_artifacts() -> dict[str, dict]:
 def test_compose_benchmarks_framing() -> None:
     """Report contains 'reference data' framing for stage benchmarks."""
     d = _make_artifact_dir(_complete_artifacts())
-    rc, data, _stderr = run_script("compose_report.py", ["--dir", d, "--pretty"])
+    rc, data, _stderr = run_script("compose_report.py", ["--dir", d, "--pretty", "--ungated"])
     assert rc == 0
     assert data is not None
     md = data["report_markdown"]
@@ -2134,7 +2146,7 @@ def test_compose_benchmarks_framing() -> None:
 def test_compose_slide_framing() -> None:
     """Report contains agent evaluation framing for slide reviews."""
     d = _make_artifact_dir(_complete_artifacts())
-    rc, data, _stderr = run_script("compose_report.py", ["--dir", d, "--pretty"])
+    rc, data, _stderr = run_script("compose_report.py", ["--dir", d, "--pretty", "--ungated"])
     assert rc == 0
     assert data is not None
     md = data["report_markdown"]
@@ -2221,7 +2233,7 @@ def test_compose_emits_schema_violation_for_malformed_checklist(tmp_path: Path) 
 
     rc, out, stderr = run_script(
         "compose_report.py",
-        ["--dir", str(review_dir), "--pretty"],
+        ["--dir", str(review_dir), "--pretty", "--ungated"],
     )
     assert out is not None, stderr
     warnings = out["validation"]["warnings"]
@@ -2294,7 +2306,7 @@ def test_compose_emits_missing_metadata_for_artifact_without_run_id(tmp_path: Pa
         )
     )
 
-    rc, out, _ = run_script("compose_report.py", ["--dir", str(review_dir), "--pretty"])
+    rc, out, _ = run_script("compose_report.py", ["--dir", str(review_dir), "--pretty", "--ungated"])
     assert out is not None
     codes = [w["code"] for w in out["validation"]["warnings"]]
     assert "MISSING_METADATA" in codes
@@ -2364,7 +2376,7 @@ def test_compose_writes_report_md_directly(tmp_path: Path) -> None:
     md_path = str(review_dir / "report.md")
     rc, _, err = run_script(
         "compose_report.py",
-        ["--dir", str(review_dir), "-o", json_path, "--write-md", md_path],
+        ["--dir", str(review_dir), "-o", json_path, "--write-md", md_path, "--ungated"],
     )
     assert rc == 0, err
     with open(json_path) as f:
@@ -2449,7 +2461,7 @@ def test_compose_emits_name_drift_when_report_contains_close_variant(tmp_path: P
             }
         )
     )
-    rc, out, _ = run_script("compose_report.py", ["--dir", str(review_dir), "--pretty"])
+    rc, out, _ = run_script("compose_report.py", ["--dir", str(review_dir), "--pretty", "--ungated"])
     assert out is not None
     codes = [w["code"] for w in out["validation"]["warnings"]]
     assert "NAME_DRIFT" in codes
@@ -2622,7 +2634,7 @@ def test_compose_verifies_outputs_exist_after_write(tmp_path: Path) -> None:
     md_path = str(review_dir / "report.md")
     rc, _, err = run_script(
         "compose_report.py",
-        ["--dir", str(review_dir), "-o", json_path, "--write-md", md_path],
+        ["--dir", str(review_dir), "-o", json_path, "--write-md", md_path, "--ungated"],
     )
     assert rc == 0, err
     assert os.path.isfile(json_path)
@@ -2643,7 +2655,7 @@ def test_compose_exits_nonzero_if_write_md_path_unwritable(tmp_path: Path) -> No
     json_path = str(review_dir / "report.json")
     rc, _, err = run_script(
         "compose_report.py",
-        ["--dir", str(review_dir), "-o", json_path, "--write-md", bad_md_path],
+        ["--dir", str(review_dir), "-o", json_path, "--write-md", bad_md_path, "--ungated"],
     )
     assert rc != 0, "compose should exit nonzero when --write-md target is unwritable"
     # Cleanup: restore writable mode so tmp_path can be deleted
@@ -3706,7 +3718,7 @@ def _compose_with(review_dir: Path, slides: list[dict], reviews: list[dict]) -> 
     rv = json.loads((review_dir / "slide_reviews.json").read_text())
     rv["reviews"] = reviews
     (review_dir / "slide_reviews.json").write_text(json.dumps(rv))
-    rc, data, err = run_script("compose_report.py", ["--dir", str(review_dir)])
+    rc, data, err = run_script("compose_report.py", ["--dir", str(review_dir), "--ungated"])
     assert data is not None, err
     return data
 
@@ -4856,9 +4868,13 @@ def test_the_summary_still_says_they_held_when_nothing_contradicts() -> None:
     for rel in recon["relations"]:
         rel["verdict"] = "derived"
         rel["kind"] = "derived_ratio"
-    # "Held" now requires positive evidence, so the fixture has to carry some: a run whose
-    # only outcome is `derived` has established nothing about agreement either.
-    recon["suppressed"] = {"confirmation": 1}
+    # CORRECTED. This set `suppressed = {"confirmation": 1}` beside two `derived`
+    # relations and asserted "held" — i.e. it pinned that ONE agreement licenses a
+    # universal claim about all of them. It does not. "Held" requires every evaluated
+    # comparison to have agreed, so the fixture now says that.
+    recon["relations"] = []
+    recon["relations_proposed"] = 2
+    recon["suppressed"] = {"confirmation": 2}
     d = _make_artifact_dir(
         {
             "deck_inventory.json": _VALID_INVENTORY,
@@ -4897,3 +4913,55 @@ def test_inconclusive_comparisons_are_not_reported_as_having_held() -> None:
     md = data["report_markdown"]
     assert "the comparisons that ran held" not in md, md[:500]
     assert "could not be settled either way" in md
+
+
+def test_composing_without_a_gate_requires_an_explicit_opt_out() -> None:
+    """`authorize()` was called only when `--gate-state` was supplied, so the sole
+    authorization boundary was skipped by omitting a flag — and a test froze that as
+    correct. The ungated path is real (fixtures, direct calls) but it is not the production
+    one, and the two should not be spelled the same way."""
+    d = _full_arts()
+    # Deliberately NOT via `_run_compose`, which supplies `--ungated` for the many tests
+    # that are about composition rather than the gate.
+    rc, _, err = run_script("compose_report.py", ["--dir", d, "--pretty"])
+    assert rc != 0, "a report composed with no gate and no acknowledgement that it was ungated"
+    assert "--gate-state" in err or "ungated" in err
+
+    rc_ok, data, err_ok = _run_compose(d, ["--ungated"])
+    assert rc_ok == 0, err_ok
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "UNGATED_REVIEW" in codes, f"an ungated report carries no record that it was ungated: {codes}"
+
+
+def test_the_gated_path_is_unaffected() -> None:
+    d = _full_arts()
+    path = _gate_at(
+        d, "stage_confirmation", "Looks right", ["Looks right", "Different stage", "Not sure — proceed anyway"]
+    )
+    rc, _, err = _run_compose(d, ["--gate-state", path])
+    assert rc == 0, err
+
+
+def test_one_agreement_does_not_license_a_claim_about_all_of_them() -> None:
+    """ "The comparisons that ran held" is a universal statement and was emitted whenever
+    at least one relation agreed — so one confirmation beside an unproven derived reading
+    said all of them held. Either every evaluated comparison agreed, or the sentence is
+    not available."""
+    recon = json.loads(json.dumps(_VALID_RECONCILIATION))
+    recon["relations"] = [dict(recon["relations"][0], verdict="derived", kind="derived_ratio")]
+    recon["relations_proposed"] = 2
+    recon["suppressed"] = {"confirmation": 1}
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": recon,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    assert "the comparisons that ran held" not in data["report_markdown"], data["report_markdown"][:400]

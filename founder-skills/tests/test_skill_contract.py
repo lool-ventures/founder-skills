@@ -2257,3 +2257,14 @@ def test_the_authorized_paid_job_supplies_the_opt_in_and_fails_on_skips() -> Non
         f"the paid job's expected-lane list is {sorted(listed)} but the lanes are "
         f"{sorted(lane_names)}; if a lane stops being collected the gate passes having run fewer"
     )
+
+
+def test_the_release_path_runs_the_whole_free_suite() -> None:
+    """The paid lane and the release tag both hang off `contract-tests`, which ran four
+    skill-quality meta-check files. The gate authorization tests, the ledger grammar and
+    the reconciliation rules live elsewhere, so a tag could go green having run none of
+    them. `ci.yml` covers push and PR; it does not cover the tag path."""
+    workflow = (REPO_ROOT / ".github" / "workflows" / "skill-quality.yml").read_text(encoding="utf-8")
+    assert "pytest founder-skills/tests/ -q" in workflow, (
+        "the job the release tag depends on does not run the full free suite"
+    )

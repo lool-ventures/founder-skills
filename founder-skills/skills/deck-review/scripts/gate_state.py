@@ -238,38 +238,78 @@ class Authorization:
         return self.permitted
 
 
+def _out_of_scope_consent(gate: dict[str, object], run_id: str) -> bool:
+    """Did the founder answer the out-of-scope question and say proceed?
+
+    THREE THINGS, ALL REQUIRED, and the first version checked none of them -- it asked only
+    whether an `out_of_scope_choice` appeared in this run's history. `emit` deliberately
+    writes PENDING superseded gates into history, so the moment both features landed (in
+    the same commit) "the question is in the record" and "the founder consented" came
+    apart: a pending question, a "Different stage", even a "Stop review" all read as
+    consent. The failure shape is presence-instead-of-content, the same one that made two
+    grep-based guards vacuous earlier in this work.
+    """
+    history = gate.get("history", [])
+    for entry in history if isinstance(history, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("gate_id") != "out_of_scope_choice" or entry.get("run_id") != run_id:
+            continue
+        if entry.get("superseded"):
+            continue
+        if entry.get("answer") != "Proceed anyway (best-effort)":
+            continue
+        if entry.get("answer_source") != FOUNDER:
+            # Self-answering the out-of-scope question is exactly what must not authorize
+            # an out-of-scope review.
+            continue
+        return True
+    # The gate in hand can carry the consent itself, under the same rules.
+    return (
+        gate.get("gate_id") == "out_of_scope_choice"
+        and gate.get("answer") == "Proceed anyway (best-effort)"
+        and gate.get("answer_source") == FOUNDER
+    )
+
+
 def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization:
-    """THE ONE PLACE A GATE IS TURNED INTO PERMISSION TO PRODUCE A REPORT.
+    """THE ONE PLACE A GATE BECOMES PERMISSION TO PRODUCE A REPORT — deny by default.
 
-    Six review rounds closed the same class of defect one path at a time -- a gate never
-    answered, an answer outside its own options, an out-of-scope gate self-answered, a
-    decline erased through `emit` and then through `answer`, an intermediate answer treated
-    as terminal, an out-of-scope stage confirmed by the in-scope gate. Each fix was correct
-    and each was placed wherever the reported case happened to pass: `emit` checked
-    options, `answer` checked the auto-satisfy tuple, `gate_action` checked one chain,
-    `compose` checked one postcondition. The invariant lived in four places and grew a
-    fifth every round, which is why enumerating writers kept failing -- there was no single
-    statement of what "authorized" means to enumerate against.
+    Six review rounds closed the same class one path at a time, because the rules lived in
+    four places and grew a fifth every round. Consolidating them here was right; the FIRST
+    version of this function was still written the wrong way round -- a list of ways to say
+    no, permitting whatever fell through. That shape is why a presence check slipped in:
+    falling through was the success path, so a missing predicate cost a bypass rather than
+    a refusal.
 
-    This is that statement. Writer-side checks remain (a wrong gate should be refused
-    before a founder sees it), but they are convenience: THIS is the chokepoint, at the
-    reader, on the producer of the deliverable, and a writer that bypasses the CLI cannot
-    route around it.
+    Inverted here. Below is the whole allow list, and anything not on it is refused. A
+    predicate nobody thought of now denies.
 
     Honest boundary, unchanged: none of this proves a founder spoke. The record is written
-    by the same agent that would misuse it, and the medium is a JSON file. What is
-    enforceable is that the RECORD is internally coherent and consistent with the artifacts
-    being composed -- which is every defect actually found.
+    by the same agent that would misuse it, on a filesystem it can write to directly. What
+    IS enforceable -- and what every defect found in six rounds actually was -- is that the
+    record is internally coherent and consistent with the artifacts being composed.
     """
-    profile = stage_profile if isinstance(stage_profile, dict) else {}
-    action = gate_action(gate)
     if not isinstance(gate, dict):
         return Authorization(False, "gate_state is not a JSON object")
+    profile = stage_profile if isinstance(stage_profile, dict) else {}
 
+    # --- the record must belong to this run, and so must the profile it is judged against
     gate_run = _as_run_id(gate)
     if gate_run != run_id:
         return Authorization(False, f"the gate is from run {gate_run!r} but this report is run {run_id!r}")
+    prof_run = _as_run_id(profile)
+    if prof_run != run_id:
+        # Checked for EVERY answer, not only the rebuild ones. An ordinary "Looks right"
+        # composed happily against a stage profile left by an earlier review.
+        return Authorization(
+            False,
+            f"the stage profile is from run {prof_run!r}, not this run {run_id!r} — the gate confirms "
+            "a stage this report is not being graded against",
+        )
 
+    # --- the record must be a coherent, answered, terminal-or-conditional state
+    action = gate_action(gate)
     if action == "stop":
         return Authorization(False, "the founder declined the review, so no report is to be produced")
     if action == "reask":
@@ -281,48 +321,47 @@ def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization
             f"{gate.get('answer')!r} on the {gate.get('gate_id')!r} gate is an intermediate answer — "
             "the profile is rebuilt and the gate re-asked before a report is composed",
         )
+    if action not in ("continue", "continue_if_rebuilt"):
+        # Deny-by-default in its literal form: a new action added to `gate_action` and not
+        # considered here refuses, rather than being waved through by an else-branch.
+        return Authorization(False, f"unrecognised gate action {action!r}")
 
-    # AN OUT-OF-SCOPE DECK MAY ONLY BE AUTHORIZED BY THE GATE THAT OFFERS A DECLINE.
-    # Nothing bound `gate_id` to the detected stage, so emitting `stage_confirmation` for a
-    # growth deck -- and self-answering it -- produced a clean report for a founder who was
-    # never asked whether they wanted one. `stage_confirmation` has no "Stop review".
     stage = str(profile.get("detected_stage") or "").lower()
-    if stage in OUT_OF_SCOPE_STAGE_TOKENS:
-        answered_out_of_scope = gate.get("gate_id") == "out_of_scope_choice" or any(
-            isinstance(h, dict) and h.get("gate_id") == "out_of_scope_choice" and h.get("run_id") == run_id
-            for h in gate.get("history", [])
-        )
-        if not answered_out_of_scope:
-            return Authorization(
-                False,
-                f"the deck is {stage!r}, which is out of scope — that has to be put to the founder "
-                "through the out-of-scope question, the only one that offers to stop",
-            )
+    out_of_scope = stage in OUT_OF_SCOPE_STAGE_TOKENS
 
-    # AUTO-SATISFY IS UNAVAILABLE OUT OF SCOPE. Its whole rationale is "the founder already
-    # told us the stage in Step 1 and detection agrees" — which authorizes skipping a
-    # confirmation, never the separate question of whether to review an out-of-scope deck
-    # at all. Every worst-case defect across six rounds flowed through self-answering.
-    if stage in OUT_OF_SCOPE_STAGE_TOKENS and gate.get("answer_source") == "auto_satisfied":
+    # --- an out-of-scope deck needs the founder's own answer to the out-of-scope question
+    if out_of_scope and not _out_of_scope_consent(gate, run_id):
         return Authorization(
             False,
-            f"the deck is {stage!r} and this gate was self-answered — an out-of-scope deck is the "
-            "founder's call to make, not one to record on their behalf",
+            f"the deck is {stage!r}, which is out of scope — proceeding needs the founder's own "
+            "answer to the out-of-scope question, the only one that offers to stop",
         )
 
+    # --- auto-satisfy: the checkable half of its documented precondition
+    if gate.get("answer_source") == AUTO_SATISFIED:
+        if out_of_scope:
+            return Authorization(
+                False,
+                f"the deck is {stage!r} and this gate was self-answered — an out-of-scope deck is the "
+                "founder's call to make, not one to record on their behalf",
+            )
+        if profile.get("confidence") == "low":
+            # Its rationale is "the founder named the stage and detection AGREES". Whether
+            # they answered Step 1 is not in the artifact and cannot be checked; the
+            # confidence of the detection is, and was not being checked at all.
+            return Authorization(
+                False,
+                "auto-satisfy claims the detected stage agrees with what the founder said, but the "
+                "detection is low confidence — ask them",
+            )
+
+    # --- "proceed anyway" continues only against the rebuild it promised
     if action == "continue_if_rebuilt":
         if profile.get("confidence") != "low":
             return Authorization(
                 False,
                 f"{gate.get('answer')!r} continues only after the stage profile is rebuilt at low "
                 f"confidence — the profile being composed has confidence {profile.get('confidence')!r}",
-            )
-        prof_run = _as_run_id(profile)
-        if prof_run != run_id:
-            return Authorization(
-                False,
-                f"the low-confidence profile is from run {prof_run!r}, not this run {run_id!r} — a "
-                "profile left by an earlier review is not evidence that this one rebuilt anything",
             )
         if gate.get("gate_id") == "out_of_scope_choice" and stage != "series_a":
             return Authorization(

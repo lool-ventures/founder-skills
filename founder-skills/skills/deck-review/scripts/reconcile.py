@@ -335,9 +335,17 @@ _NUMERIC_LEXEME = re.compile(
     # digits ("20 000"), so it cannot swallow an unrelated number two words later; the
     # non-space marks are unambiguous and take \d+.
     r"(?:[.,\u00a0\u202f\u2009'\u2019\u2032\u066c]\d[\d\u0660-\u0669\u06f0-\u06f9]*|\ \d{3}(?!\d))*"
-    r"(?:\s*[×xX*]\s*10\s*[\^]?\s*[-+]?\d+)?"
+    # Scientific notation, including SUPERSCRIPT exponents: `\d` does not match `⁶`, so
+    # "≈20×10⁶" left the `20` looking like a complete number.
+    r"(?:\s*[×xX*·]\s*10\s*[\^]?\s*[-+]?[\d\u2070-\u209f]+)?"
     r"(?:[eE][-+]?\d+)?"
-    r"(?:\s*%|\s*[-\u2010-\u2015]?\s*(?:thousand|million|billion|trillion|crore|lakh|k|m|bn|b|tn|t)\b)?",
+    # A trailing scale, and `\b` is wrong for this: "20MM" ends the token at the FIRST M,
+    # so the second one read as ordinary text and the number looked finished. Match the
+    # longest scale first and require only that a LETTER does not continue it — `MM`, `Mn`
+    # and `bn` are scales, `Monday` is not. A bare `x`/`X` is a multiple, which is a scale
+    # on the figure just as much as `k` is.
+    r"(?:\s*%|\s*[-\u2010-\u2015]?\s*"
+    r"(?:thousand|million|billion|trillion|crore|lakh|mm|mn|bn|tn|k|m|b|t|x)(?![A-Za-z]))?",
     re.I,
 )
 

@@ -766,10 +766,20 @@ def test_a_stage_pick_that_puts_the_deck_out_of_scope_is_not_confirmed_in_scope(
 # writer and every reader") and the very next round fixed `emit` without checking
 # `cmd_answer`, the only other writer in the same file.
 #
-# This is that enumeration, executable. Every invariant is asserted against every way a
-# gate record can reach disk, and the assertion is always on the READER: whatever wrote
-# the file, `authorize()` must refuse it. A writer-side check is a convenience; the reader
-# is the chokepoint a wrong writer cannot route around.
+# This is that enumeration, executable — but it is NOT the full cross-product, and calling
+# it "every invariant against every writer" (as this comment first did) was an overclaim
+# worth correcting rather than quietly satisfying. What it actually is:
+#
+#   * every invariant × one constructed record  (the parametrized refusal table below)
+#   * one invariant × every writer              (emit+answer / hand-written / truncate+emit)
+#
+# The full product is not the goal, and mechanically generating
+# `stage × confidence × gate × answer × source × history × run × writer` would produce
+# thousands of cases, nearly all meaningless, and bury the rule set it is meant to expose.
+# What makes the rule set reviewable is that `authorize()` is deny-by-default with a short
+# allow list: a case nobody enumerated REFUSES. The writer axis is crossed against the one
+# invariant where the writer genuinely varies the outcome — whether the record reached disk
+# through the CLI at all — because the reader is the chokepoint either way.
 # ---------------------------------------------------------------------------
 
 _CANON_CONFIRM = ["Looks right", "Different stage", "Not sure — proceed anyway"]
@@ -995,7 +1005,128 @@ def test_auto_satisfy_is_unavailable_on_an_out_of_scope_deck() -> None:
     assert not gs.authorize(record, _profile_for(stage="growth"), "r1").permitted, (
         "an out-of-scope deck was self-confirmed after the out-of-scope question had been asked"
     )
-    # The founder answering it themselves is fine, and so is auto-satisfy in scope.
+    # CORRECTED. This previously asserted that the same record with `answer_source:
+    # founder` IS permitted — i.e. that an out-of-scope answer of "Different stage"
+    # authorizes a growth report. It does not: "Different stage" means rebuild and re-ask.
+    # Asserting otherwise froze a bypass in a test written to close one.
     founder_answered = dict(record, answer_source="founder")
-    assert gs.authorize(founder_answered, _profile_for(stage="growth"), "r1").permitted
+    assert not gs.authorize(founder_answered, _profile_for(stage="growth"), "r1").permitted, (
+        "'Different stage' on the out-of-scope gate is not consent to proceed"
+    )
     assert gs.authorize(_record(answer_source="auto_satisfied"), _profile_for(stage="seed"), "r1").permitted
+
+
+# ---------------------------------------------------------------------------
+# DENY BY DEFAULT. `authorize` was built permissive-with-refusals: it walked a list of
+# ways to say no and permitted whatever fell through. That shape is why a PRESENCE check
+# slipped in — "an out_of_scope_choice appears in history" was written where "the founder
+# answered it, and said proceed" was meant, and nothing failed, because falling through is
+# the success path.
+#
+# The table below is the whole allow list. Anything not in it is refused, so the next
+# missing predicate costs a refusal rather than a bypass.
+# ---------------------------------------------------------------------------
+
+
+def _oos_history(answer: str | None, source: str | None = "founder", **extra: object) -> list[dict]:
+    entry: dict = {"gate_id": "out_of_scope_choice", "run_id": "r1"}
+    if answer is not None:
+        entry["answer"] = answer
+    if source is not None:
+        entry["answer_source"] = source
+    entry.update(extra)
+    return [entry]
+
+
+@pytest.mark.parametrize(
+    ("label", "history"),
+    [
+        ("pending, superseded by another emit", _oos_history(None, None, superseded=True)),
+        ("pending with no answer at all", _oos_history(None, None)),
+        ("answered 'Different stage' — a rebuild, not consent", _oos_history("Different stage")),
+        ("answered 'Stop review' — the opposite of consent", _oos_history("Stop review")),
+        ("self-answered 'Proceed anyway'", _oos_history("Proceed anyway (best-effort)", "auto_satisfied")),
+        ("consent recorded with no source", _oos_history("Proceed anyway (best-effort)", None)),
+        (
+            "consent from a different run",
+            [
+                {
+                    "gate_id": "out_of_scope_choice",
+                    "answer": "Proceed anyway (best-effort)",
+                    "answer_source": "founder",
+                    "run_id": "older",
+                }
+            ],
+        ),
+    ],
+)
+def test_only_an_answered_founder_proceed_satisfies_out_of_scope_consent(label: str, history: list[dict]) -> None:
+    """`emit` deliberately writes PENDING superseded gates into history, so "an
+    out_of_scope_choice is present" and "the founder consented" diverged the moment both
+    features landed — in the same commit."""
+    gs = _gs()
+    record = _record(history=history)
+    verdict = gs.authorize(record, _profile_for(stage="growth"), "r1")
+    assert not verdict.permitted, f"out-of-scope consent was inferred from: {label}"
+
+
+def test_the_one_form_of_out_of_scope_consent_is_accepted() -> None:
+    """The counter-test, or the rule above is just a refusal of everything."""
+    gs = _gs()
+    record = _record(history=_oos_history("Proceed anyway (best-effort)"))
+    assert gs.authorize(record, _profile_for(stage="growth"), "r1").permitted
+
+
+def test_the_profile_must_belong_to_this_run_for_an_ordinary_confirmation_too() -> None:
+    """Run parity was checked only on the rebuild branch, so an ordinary `Looks right`
+    composed happily against a stage profile left by an earlier review."""
+    gs = _gs()
+    foreign = {"metadata": {"run_id": "older"}, "detected_stage": "seed", "confidence": "high"}
+    assert not gs.authorize(_record(), foreign, "r1").permitted
+
+
+def test_auto_satisfy_needs_the_confident_detection_it_claims() -> None:
+    """SKILL.md's auto-satisfy branch requires the founder's Step 1 answer to MATCH a
+    confident detection. Whether they answered Step 1 is not in the artifact and cannot be
+    checked — but the detection's confidence is, and it was not being checked. Enforce the
+    checkable half rather than neither."""
+    gs = _gs()
+    low = {"metadata": {"run_id": "r1"}, "detected_stage": "seed", "confidence": "low"}
+    assert not gs.authorize(_record(answer_source="auto_satisfied"), low, "r1").permitted
+    # A founder answering the same gate on the same profile is fine: they were asked.
+    assert gs.authorize(_record(answer_source="founder"), low, "r1").permitted
+
+
+def test_a_hand_written_superseded_consent_is_still_refused() -> None:
+    """`emit` marks an entry superseded only when it is UNANSWERED, so the superseded
+    check is subsumed by the answer check for anything the CLI produces — mutation showed
+    that by removing it with the suite still green. It is reachable through the writer
+    the matrix exists for: a file written directly, carrying both an answer and the
+    superseded mark. That record is not something any emitter made, and the reader is
+    where that has to be caught."""
+    gs = _gs()
+    record = _record(
+        history=[
+            {
+                "gate_id": "out_of_scope_choice",
+                "answer": "Proceed anyway (best-effort)",
+                "answer_source": "founder",
+                "run_id": "r1",
+                "superseded": True,
+            }
+        ]
+    )
+    assert not gs.authorize(record, _profile_for(stage="growth"), "r1").permitted
+
+
+def test_an_unrecognised_gate_action_denies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The deny-by-default fallthrough is unreachable today — `gate_action` returns five
+    values and all five are handled — so mutation removing it changed nothing. Its whole
+    purpose is the SIXTH: a future action added to `gate_action` and not considered here
+    must refuse rather than be waved through by an else-branch. Reached by forcing it,
+    because the alternative is decorative code nobody has seen work."""
+    gs = _gs()
+    monkeypatch.setattr(gs, "gate_action", lambda _gate: "provisionally_fine")
+    verdict = gs.authorize(_record(), _profile_for(), "r1")
+    assert not verdict.permitted, "an unrecognised action was treated as permission"
+    assert "provisionally_fine" in verdict.reason

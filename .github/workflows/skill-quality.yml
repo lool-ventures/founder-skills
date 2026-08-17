@@ -49,6 +49,12 @@ jobs:
             founder-skills/tests/test_skill_orchestration.py \
             founder-skills/tests/test_compose_invariants.py \
             -v -m "not e2e"
+      # THE WHOLE FREE SUITE, because this job is what the paid lane and the release tag
+      # depend on. The four files above are the skill-quality meta-checks; the gate
+      # authorization tests, the ledger grammar and the reconciliation rules live
+      # elsewhere, so a tag could go green having run none of them. `ci.yml` runs the full
+      # suite on push and PR, which covers merges — it does not cover the tag path.
+      - run: uv run pytest founder-skills/tests/ -q
 
   deck-review-e2e-smoke:
     # Job id kept as `deck-review-e2e-smoke` deliberately: it is the required status
