@@ -70,7 +70,7 @@ APPROVED: list[tuple[str, pathlib.Path, str, str]] = [
     (
         "coverage line, all verified",
         DECK_REVIEW / "scripts" / "compose_report.py",
-        "all of them had their wording found again in the deck's extracted text",
+        "all of them had closely matching wording returned by a second pass over the same ",
         "founder",
     ),
     (
@@ -80,7 +80,11 @@ APPROVED: list[tuple[str, pathlib.Path, str, str]] = [
         # twice on the page.
         "numbers section preamble",
         DECK_REVIEW / "scripts" / "compose_report.py",
-        "in the same extracted text by a reader who had not seen the first pass",
+        # "found again" implied an identity the matcher does not establish: it accepts a
+        # 0.85 similarity, so changed values and negations pass. "Closely matching wording
+        # returned by" is what actually happened.
+        # Distinct from the coverage line's anchor, which shares the opening clause.
+        "over the same extracted text that had not seen the first",
         "founder",
     ),
     (
@@ -324,6 +328,8 @@ _SOURCE_OVERCLAIM_STEMS = (
     # The founder-facing renderer carried it while the ratchet approved the sentence.
     "against the deck's own text",
     "checked back against your deck",
+    "had its wording found again",
+    "had their wording found again",
     "re-read those slides",
     "transcribe the\nslides listed below from the deck",
     "transcribe the listed slides",

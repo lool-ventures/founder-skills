@@ -171,6 +171,10 @@ CONTINUE_IF_REBUILT_ANSWERS: frozenset[str] = frozenset({"Not sure — proceed a
 
 STOP_ANSWERS: frozenset[str] = frozenset({"Stop review"})
 
+# Stages whose selection puts the deck out of scope. Confirming one of these through
+# `stage_confirmation` skips the only gate that offers a way to decline.
+OUT_OF_SCOPE_STAGES: frozenset[str] = frozenset({"Series B", "Growth"})
+
 
 def gate_action(gate: object) -> str:
     """What this gate authorises: `continue` | `stop` | `rebuild` | `reask`.
@@ -185,6 +189,16 @@ def gate_action(gate: object) -> str:
                 so this run is not finished asking
       reask     unanswered, or an answered record that does not validate
     """
+    # A STOP IN THIS RUN'S HISTORY OUTRANKS EVERYTHING, including a pending replacement.
+    # Checked before the answered-ness test, because re-emitting after a decline leaves a
+    # PENDING gate -- which read as "just ask again" rather than "they already said no".
+    if isinstance(gate, dict):
+        this_run = _as_run_id(gate)
+        for entry in gate.get("history", []):
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("answer") in STOP_ANSWERS and entry.get("run_id") == this_run:
+                return "stop"
     if not is_answered(gate) or validate_answered_gate(gate):
         return "reask"
     assert isinstance(gate, dict)  # is_answered established this
@@ -201,6 +215,16 @@ def gate_action(gate: object) -> str:
         if entry.get("answer") in STOP_ANSWERS and entry.get("run_id") == this_run:
             return "stop"
     if answer in CONTINUE_ANSWERS.get(str(gate.get("gate_id")), frozenset()):
+        # THE CHAIN MATTERS, not just this record. Picking an out-of-scope stage at
+        # `stage_choice` and then confirming through `stage_confirmation` composed a growth
+        # report at high confidence -- the out-of-scope question, the only one offering
+        # "Stop review", was never asked. The prior pick is in this run's history, so the
+        # skipped step is checkable rather than trusted.
+        for entry in gate.get("history", []):
+            if not isinstance(entry, dict) or entry.get("run_id") != _as_run_id(gate):
+                continue
+            if entry.get("gate_id") == "stage_choice" and entry.get("answer") in OUT_OF_SCOPE_STAGES:
+                return "rebuild"
         return "continue"
     if answer in CONTINUE_IF_REBUILT_ANSWERS:
         return "continue_if_rebuilt"
@@ -311,6 +335,17 @@ def cmd_emit(args: argparse.Namespace) -> int:
     except ArtifactValidationError as e:
         print(f"Error: gate_state validation failed: {e}", file=sys.stderr)
         return 1
+    # THE PAYLOAD THE FOUNDER SEES, produced by the code that validated it. Canonical
+    # options are enforced on the FILE, and SKILL.md retyped the `needs_input` block by
+    # hand -- so a record containing "Stop review" could sit beside a displayed choice that
+    # omitted it. Validation then guarantees what was recorded, not what was asked.
+    receipt["needs_input"] = {
+        "gate_state_path": os.path.abspath(args.output),
+        "gate_id": data.get("gate_id"),
+        "question": data.get("question"),
+        "options": data.get("options"),
+        "context_summary": data.get("context_summary"),
+    }
     sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     return 0
 
@@ -336,6 +371,27 @@ def cmd_answer(args: argparse.Namespace) -> int:
         print(
             f"Error: --run-id {args.run_id!r} does not match gate_state metadata.run_id {gate_run_id!r} "
             "(refusing to answer a gate from a different run)",
+            file=sys.stderr,
+        )
+        return 1
+
+    # COMPARE-AND-SET. `emit` was taught to carry an answered gate into history; this path
+    # was not, and it overwrote the answer in place -- so the erasure closed through one
+    # door and stayed open through the one beside it: answer "Stop review", answer again
+    # with "Proceed anyway", and the decline is gone with no trace. An answer is a founder's
+    # decision, and a decision is not something a later call gets to replace.
+    #
+    # Idempotent on an identical re-answer: the gate round-trip re-invokes the sub-agent and
+    # a caller cannot always tell whether its previous write landed, so a retry must not
+    # fail the run.
+    existing = gate.get("answer")
+    if isinstance(existing, str) and existing.strip():
+        if existing == args.answer:
+            sys.stdout.write(json.dumps({"ok": True, "path": args.file, "unchanged": True}) + "\n")
+            return 0
+        print(
+            f"Error: this gate was already answered {existing!r} and cannot be re-answered "
+            f"{args.answer!r} — emit a new gate if another question is genuinely being asked",
             file=sys.stderr,
         )
         return 1

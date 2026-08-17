@@ -52,6 +52,10 @@
         }
       }
     },
+    "dates_excluded": {
+      "description": "Date figures dropped before the numeric gate. Every operator refuses a date participant, so a date can neither support nor contradict anything — but counting them inflated figures_total/figures_verified and could carry a thin ledger past the minimum-figures gate. Reported so the exclusion is visible rather than silent.",
+      "type": "integer"
+    },
     "quote_quality": {
       "description": "How many of the ledger's quotes carry no word of three or more letters. Such a quote identifies nothing: the gate matches TEXT, so a quote of '$80B' is re-found on any slide that prints $80B and confirms only that the deck contains that figure somewhere. ledger.py warns on each at extraction time; this count is the surface a reader downstream can actually see, because ledger.json is not loaded by compose.",
       "type": "object",

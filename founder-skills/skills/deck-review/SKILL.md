@@ -483,7 +483,7 @@ GATE_EOF
 
 The script schema-validates the body and injects `metadata.run_id`. **Never write `gate_state.json` directly via heredoc.**
 
-Then return — as your final assistant message — a JSON object the parent agent can act on:
+Then return — as your final assistant message — a JSON object the parent agent can act on. **Use the `needs_input` block `gate_state.py emit` printed, verbatim.** Do not retype the question or the options: the canonical options are enforced on the FILE, so a hand-written payload can show the founder a shorter list than the one that was recorded — including one with no way to decline. The shape it returns is:
 
 ```json
 {

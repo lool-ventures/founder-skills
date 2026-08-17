@@ -1774,6 +1774,17 @@ def build(
     offline corpus parity check can call it without a filesystem.
     """
     figures = load_figures(ledger)
+    # DATE ROWS ARE NOT CHECKABLE FIGURES. Every operator refuses a date participant, so a
+    # date can never support or contradict anything -- yet it counted toward
+    # `figures_total`, `figures_verified` and the minimum-figures gate. Measured: one real
+    # figure alone yields `no_figures`, and adding a date turns the run `checked` with two
+    # "verified" figures. The date contributed nothing and moved the gate, which is the one
+    # place a bogus date could still do damage once the arithmetic refused it.
+    #
+    # Excluded, not hidden: the count is reported so a deck whose ledger is mostly dates is
+    # visible rather than quietly thin.
+    dates_excluded = sum(1 for f in figures if f.unit_kind == DATE)
+    figures = [f for f in figures if f.unit_kind != DATE]
     # Fuse endpoint twins into one interval BEFORE anything compares them. Extraction
     # routinely splits a stated range across two rows -- the deck says "40-60x throughput"
     # and the ledger comes back with a "low end" figure of 40x and a "high end" of 60x.
@@ -1848,6 +1859,7 @@ def build(
         # but that warning landed in `ledger.json`, which the receipt does not summarise,
         # this script does not read for validation, and compose does not load at all — so
         # it reached no human. Counted here because reconciliation IS read downstream.
+        "dates_excluded": dates_excluded,
         "quote_quality": {
             "thin": sum(1 for f in figures if not quote_is_identifying(f.quote)),
             "total": len(figures),

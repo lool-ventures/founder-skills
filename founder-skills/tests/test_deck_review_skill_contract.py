@@ -1629,3 +1629,13 @@ def test_an_out_of_scope_stage_pick_is_confirmed_by_the_out_of_scope_gate() -> N
     assert "out_of_scope_choice" in window
     for stage in ("series_b", "growth"):
         assert stage in window, f"the out-of-scope re-emit does not name {stage}"
+
+
+def test_the_presented_gate_payload_comes_from_the_producer() -> None:
+    """Canonical options are enforced on the file; the founder reads the payload. If the
+    skill retypes it, validation guarantees what was recorded and not what was asked — a
+    file containing "Stop review" beside a displayed choice that omits it."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    assert "`needs_input` block `gate_state.py emit` printed, verbatim" in text, (
+        "SKILL.md does not tell the agent to present the producer's own payload"
+    )

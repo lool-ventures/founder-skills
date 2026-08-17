@@ -648,3 +648,110 @@ def test_emit_holds_stage_choice_to_four_stage_options() -> None:
             json.dumps({**body, "options": ["Pre-seed", "Seed", "Series A", "Series B"]}),
         )
         assert rc2 == 0, err2
+
+
+# THE OTHER WRITER. `emit` was taught to carry an answered gate into history; `answer`
+# was not, and it overwrites the answer in place. So the erasure closed through one door
+# and stayed open through the door next to it:
+#
+#   answer "Stop review" -> answer again with "Proceed anyway" -> continue_if_rebuilt
+#
+# This is the same one-of-two-copies shape recorded twice already in this file.
+
+
+def test_answering_an_already_answered_gate_is_refused() -> None:
+    gs = _import_gate_state()
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "gate_state.json")
+        body = {
+            "gate_id": "out_of_scope_choice",
+            "question": "?",
+            "options": list(gs.CANONICAL_OPTIONS["out_of_scope_choice"]),
+            "context_summary": "x",
+        }
+        _run(["emit", "--run-id", "r1", "-o", path], json.dumps(body))
+        rc, _, err = _run(["answer", "--file", path, "--answer", "Stop review", "--source", "founder"])
+        assert rc == 0, err
+
+        rc2, _, err2 = _run(
+            ["answer", "--file", path, "--answer", "Proceed anyway (best-effort)", "--source", "founder"]
+        )
+        assert rc2 != 0, "an answered gate was re-answered in place, erasing the founder's decision"
+        assert "already answered" in err2.lower()
+        with open(path) as f:
+            assert json.load(f)["answer"] == "Stop review", "the original answer was overwritten"
+
+
+def test_re_answering_with_the_same_answer_is_idempotent() -> None:
+    """A retried write must not fail the run: the gate round-trip is re-invoked, and the
+    caller cannot always tell whether its previous call landed."""
+    gs = _import_gate_state()
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "gate_state.json")
+        body = {
+            "gate_id": "stage_confirmation",
+            "question": "?",
+            "options": list(gs.CANONICAL_OPTIONS["stage_confirmation"]),
+            "context_summary": "x",
+        }
+        _run(["emit", "--run-id", "r1", "-o", path], json.dumps(body))
+        _run(["answer", "--file", path, "--answer", "Looks right", "--source", "founder"])
+        rc, _, err = _run(["answer", "--file", path, "--answer", "Looks right", "--source", "founder"])
+        assert rc == 0, err
+
+
+def test_a_pending_replacement_still_honours_an_earlier_stop() -> None:
+    """`gate_action` returned `reask` for a pending gate before it looked at history, so
+    re-emitting after a decline read as "just ask again" rather than "they already said no"."""
+    gs = _import_gate_state()
+    pending = _full_gate()
+    del pending["answer"]
+    del pending["answer_source"]
+    pending["history"] = [
+        {"gate_id": "out_of_scope_choice", "answer": "Stop review", "answer_source": "founder", "run_id": "r1"}
+    ]
+    assert gs.gate_action(pending) == "stop"
+
+
+def test_emit_returns_the_payload_to_present_verbatim() -> None:
+    """The canonical options are enforced on the FILE and the founder sees the PAYLOAD.
+
+    SKILL.md retyped the `needs_input` block by hand, so a file containing "Stop review"
+    could sit beside a displayed choice that omitted it — the validation guarantees what
+    was recorded, not what was shown. `emit` now returns the payload to present, so the
+    thing the founder reads is produced by the same code that validated it.
+    """
+    gs = _import_gate_state()
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "gate_state.json")
+        body = {
+            "gate_id": "out_of_scope_choice",
+            "question": "This looks out of scope. What should I do?",
+            "options": list(gs.CANONICAL_OPTIONS["out_of_scope_choice"]),
+            "context_summary": "Detected: growth",
+        }
+        rc, stdout, err = _run(["emit", "--run-id", "r1", "-o", out], json.dumps(body))
+        assert rc == 0, err
+        receipt = json.loads(stdout)
+        payload = receipt.get("needs_input")
+        assert payload, f"emit returned no needs_input payload: {receipt}"
+        assert payload["options"] == list(gs.CANONICAL_OPTIONS["out_of_scope_choice"])
+        assert payload["question"] == body["question"]
+        assert payload["gate_state_path"] == os.path.abspath(out)
+        assert payload["gate_id"] == "out_of_scope_choice"
+
+
+def test_a_stage_pick_that_puts_the_deck_out_of_scope_is_not_confirmed_in_scope() -> None:
+    """Choosing Growth at `stage_choice` and then confirming through `stage_confirmation`
+    composed a Growth report at high confidence — the out-of-scope question, the only one
+    offering `Stop review`, was never asked. The chain is checkable from the history."""
+    gs = _import_gate_state()
+    gate = _full_gate(answer="Looks right")
+    gate["history"] = [{"gate_id": "stage_choice", "answer": "Growth", "answer_source": "founder", "run_id": "r1"}]
+    assert gs.gate_action(gate) == "rebuild", (
+        "an out-of-scope stage pick was confirmed by the in-scope gate, skipping the decline option"
+    )
+    # An in-scope pick confirmed the same way is fine.
+    ok = _full_gate(answer="Looks right")
+    ok["history"] = [{"gate_id": "stage_choice", "answer": "Seed", "answer_source": "founder", "run_id": "r1"}]
+    assert gs.gate_action(ok) == "continue"

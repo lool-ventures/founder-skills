@@ -160,8 +160,20 @@ def main() -> int:
                     os.remove(path)
         # Also remove a stale answered gate_state.json so it cannot be
         # misread as a resume signal on a later invocation.
+        #
+        # EXCEPT when it carries a decline for THIS run. After a "Stop review" is re-emitted
+        # over, the gate is pending again and the stop survives only in its history — so
+        # this cleanup was deleting the record of the founder's refusal, and the next pass
+        # started as though they had never been asked. A decline from a PRIOR run is still
+        # removed: it belongs to that review, not this one.
         gate_path = os.path.join(review_dir, _GATE_STATE_NAME)
-        if os.path.isfile(gate_path):
+        # `action == "stop"` is computed against the GATE's own run_id, so a prior run's
+        # declined gate is internally consistent and would be preserved too. It must also
+        # be THIS run's, or a fresh review of the same company inherits a refusal that was
+        # never given to it.
+        if os.path.isfile(gate_path) and action == "stop" and gate_run_id == run_id:
+            pass
+        elif os.path.isfile(gate_path):
             with contextlib.suppress(OSError):
                 os.remove(gate_path)
             gate_answer, gate_run_id, answer_source, gate_id, action, resume = "", "", "", "", "reask", False

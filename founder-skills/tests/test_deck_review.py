@@ -4856,6 +4856,9 @@ def test_the_summary_still_says_they_held_when_nothing_contradicts() -> None:
     for rel in recon["relations"]:
         rel["verdict"] = "derived"
         rel["kind"] = "derived_ratio"
+    # "Held" now requires positive evidence, so the fixture has to carry some: a run whose
+    # only outcome is `derived` has established nothing about agreement either.
+    recon["suppressed"] = {"confirmation": 1}
     d = _make_artifact_dir(
         {
             "deck_inventory.json": _VALID_INVENTORY,
@@ -4869,3 +4872,28 @@ def test_the_summary_still_says_they_held_when_nothing_contradicts() -> None:
     assert rc == 0
     assert data is not None
     assert "the comparisons that ran held" in data["report_markdown"]
+
+
+def test_inconclusive_comparisons_are_not_reported_as_having_held() -> None:
+    """`select()` withholds most verdicts from `relations`, so a run whose comparisons came
+    back `incomparable` — visible only as a suppressed count — still rendered "the
+    comparisons that ran held". Two sides that could not be compared establish nothing."""
+    recon = json.loads(json.dumps(_VALID_RECONCILIATION))
+    recon["relations"] = [dict(recon["relations"][0], verdict="derived", kind="derived_ratio")]
+    recon["relations_proposed"] = 2
+    recon["suppressed"] = {"incomparable": 1}
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": recon,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    assert "the comparisons that ran held" not in md, md[:500]
+    assert "could not be settled either way" in md

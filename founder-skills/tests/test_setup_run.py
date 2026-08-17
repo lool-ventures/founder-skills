@@ -518,3 +518,50 @@ def test_a_gate_missing_required_schema_fields_does_not_resume() -> None:
             json.dump({"metadata": {"run_id": "r1"}, "answer": "Looks right", "answer_source": "founder"}, f)
         out = _turn(d, "r1")
         assert out["resume"] is False, "a schema-invalid gate resumed"
+
+
+def test_clean_does_not_delete_a_history_carrying_a_decline() -> None:
+    """`--clean` removes an unanswered gate, and after a decline is re-emitted over, the
+    gate IS unanswered — it is pending again, carrying the stop only in its history. So the
+    cleanup deleted the record of the founder's refusal and the next pass started fresh."""
+    with tempfile.TemporaryDirectory() as d:
+        review_dir = os.path.join(d, "artifacts", "deck-review-acme-corp")
+        os.makedirs(review_dir, exist_ok=True)
+        pending_with_stop = _gate_body("r1")
+        pending_with_stop["history"] = [
+            {
+                "gate_id": "out_of_scope_choice",
+                "answer": "Stop review",
+                "answer_source": "founder",
+                "run_id": "r1",
+            }
+        ]
+        with open(os.path.join(review_dir, "gate_state.json"), "w") as f:
+            json.dump(pending_with_stop, f)
+
+        out = _turn(d, "r1")
+        assert os.path.exists(os.path.join(review_dir, "gate_state.json")), (
+            "--clean deleted the record of a founder's decline"
+        )
+        assert out["gate_action"] == "stop", out
+
+
+def test_clean_still_removes_a_prior_runs_declined_gate() -> None:
+    """The counter-test: a decline belongs to ITS run. A fresh review of the same company
+    is not bound by it, and the file must not survive to bind one."""
+    with tempfile.TemporaryDirectory() as d:
+        review_dir = os.path.join(d, "artifacts", "deck-review-acme-corp")
+        os.makedirs(review_dir, exist_ok=True)
+        old = _gate_body("older-run")
+        old["history"] = [
+            {
+                "gate_id": "out_of_scope_choice",
+                "answer": "Stop review",
+                "answer_source": "founder",
+                "run_id": "older-run",
+            }
+        ]
+        with open(os.path.join(review_dir, "gate_state.json"), "w") as f:
+            json.dump(old, f)
+        _turn(d, "new-run")
+        assert not os.path.exists(os.path.join(review_dir, "gate_state.json"))

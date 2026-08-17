@@ -1171,11 +1171,15 @@ def _coverage_line(reconciliation: dict[str, Any]) -> str:
     bits = [f"I read **{total}** figures off your deck"]
     if verified < total:
         bits.append(
-            f"**{verified}** of them had their wording found again in the deck's extracted text — "
-            f"the other **{total - verified}** I could not confirm, so nothing below rests on them"
+            f"**{verified}** of them had closely matching wording returned by a second pass over "
+            f"the same extracted text, made without sight of the first — the other "
+            f"**{total - verified}** I could not confirm, so nothing below rests on them"
         )
     else:
-        bits.append("all of them had their wording found again in the deck's extracted text")
+        bits.append(
+            "all of them had closely matching wording returned by a second pass over the same "
+            "extracted text, made without sight of the first"
+        )
 
     # ATTEMPTED IS NOT EVALUATED. `relations_proposed` counts every comparison the model
     # PROPOSED, including ones the engine then refused outright -- a date relation is
@@ -1192,15 +1196,38 @@ def _coverage_line(reconciliation: dict[str, Any]) -> str:
     # "The comparisons that DID run held" was UNCONDITIONAL, so a report could say it and
     # then list a contradiction in the same artifact. Whether they held is a fact about the
     # verdicts; read it rather than asserting it.
+    # "HELD" NEEDS POSITIVE EVIDENCE, not merely the absence of a selected contradiction.
+    # `select()` withholds most verdicts from `relations`, so a run whose comparisons came
+    # back `incomparable`, `downgraded` or `convention_differs` -- visible only as
+    # suppressed counts -- rendered "the comparisons that ran held". None of those
+    # establishes that anything held; two of them mean the comparison could not be made.
     verdicts = [str(_as_dict(r).get("verdict")) for r in _as_list(reconciliation.get("relations"))]
     disagreements = sum(1 for v in verdicts if v == "contradiction")
+    suppressed_counts = _as_dict(reconciliation.get("suppressed"))
+    inconclusive = sum(
+        int(count)
+        for key, count in suppressed_counts.items()
+        if key not in ("confirmation", "restatement") and isinstance(count, int)
+    )
+    agreed = (
+        sum(1 for v in verdicts if v in ("confirmation", "restatement"))
+        + int(suppressed_counts.get("confirmation", 0) or 0)
+        + int(suppressed_counts.get("restatement", 0) or 0)
+    )
     if disagreements:
         settled = (
             f". **{disagreements}** of those comparisons disagree with a figure your deck itself "
             "states, and they are listed below"
         )
-    else:
+    elif inconclusive:
+        settled = (
+            f". Of those, **{inconclusive}** could not be settled either way — the two sides were "
+            "not comparable, or the comparison was withdrawn on review"
+        )
+    elif agreed:
         settled = ". That is what was checked, and the comparisons that ran held"
+    else:
+        settled = ". That is what was checked"
     tail = (
         settled + " — not that every number in the deck has been verified against every other, and "
         "not that a careful reader would find nothing more. Treat this as a first pass over "
@@ -1260,9 +1287,10 @@ def _section_numbers(
 
     lines = ["## What Your Numbers Say About Each Other\n"]
     lines.append(
-        "Every figure below was read off your deck, had its wording looked for a second time "
-        "in the same extracted text by a reader who had not seen the first pass, and was then "
-        "related by arithmetic rather than by eye. "
+        "Every figure below was read off your deck, had closely matching wording returned by a "
+        "second pass over the same extracted text that had not seen the first, and was then "
+        "related by arithmetic rather than by eye. The match is on wording, not on meaning or "
+        "value — it does not establish that a figure is right. "
         "Figures whose wording could not be found again were dropped rather than guessed at.\n"
     )
     if counts:

@@ -146,11 +146,23 @@ jobs:
         run: |
           python3 - <<'CHECK'
           import sys, xml.etree.ElementTree as ET
+
+          # THE EXACT THREE, BY NAME. Counting only skipped nodes let two passing lanes
+          # masquerade as three: drop the `e2e` marker from one and it is silently not
+          # collected, leaving a clean XML with two passes. "Zero skips" is not "everything
+          # ran" unless you also say what everything is.
+          EXPECTED = {
+              "test_deck_review_smoke",
+              "test_financial_model_review_smoke",
+              "test_market_sizing_smoke",
+          }
           suite = ET.parse("e2e-results.xml").getroot()
-          cases = suite.iter("testcase")
-          skipped = [c.get("name") for c in cases if c.find("skipped") is not None]
-          if skipped:
-              print(f"::error::paid lanes were SKIPPED, so this gate proved nothing: {skipped}")
+          cases = list(suite.iter("testcase"))
+          ran = {c.get("name") for c in cases if c.find("skipped") is None}
+          skipped = sorted(c.get("name") for c in cases if c.find("skipped") is not None)
+          missing = sorted(EXPECTED - ran)
+          if skipped or missing:
+              print(f"::error::paid lanes did not all run — skipped={skipped} missing={missing}")
               sys.exit(1)
-          print("all paid lanes executed")
+          print(f"all {len(EXPECTED)} paid lanes executed")
           CHECK

@@ -644,7 +644,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # or Growth at `stage_choice` was re-confirmed through `stage_confirmation`, which never offers
     # `Stop review`, so a founder was told their deck is out of scope by a question giving them no
     # way to decline. Those two stages now re-emit `out_of_scope_choice`.
-    "deck-review": 97_048,
+    # deck-review 97,048 -> 97,371 (+323): the canonical options are enforced on the FILE and the
+    # founder reads the PAYLOAD, which SKILL.md retyped by hand — so a record containing "Stop
+    # review" could sit beside a displayed choice that omitted it, and validation would guarantee
+    # what was recorded rather than what was asked. `emit` now returns the payload and the skill
+    # presents it verbatim.
+    "deck-review": 97_371,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -2233,4 +2238,22 @@ def test_the_authorized_paid_job_supplies_the_opt_in_and_fails_on_skips() -> Non
     # A skipped lane must be an error, not a pass.
     assert "skipped" in workflow.lower(), (
         "nothing in the paid job notices a SKIPPED lane; a skip and a pass exit the same way"
+    )
+
+    # AND IT MUST NAME THE LANES. "Zero skips" is not "everything ran": drop the `e2e`
+    # marker from one test and it is never collected, leaving a clean report with two
+    # passes and a checker that says all lanes executed. The expected set is therefore
+    # explicit — and pinned here against the real test names, because a list in a workflow
+    # is exactly the sort of thing that drifts silently from the code it describes.
+    lane_names = set()
+    for lane in sorted((REPO_ROOT / "founder-skills" / "tests").glob("test_e2e_*.py")):
+        lane_names |= set(re.findall(r"^def (test_\w+_smoke)\(", lane.read_text(encoding="utf-8"), re.M))
+    assert len(lane_names) == 3, f"expected three paid lane tests, found {sorted(lane_names)}"
+    # Quoted, not substring: renaming the workflow's entry to `test_market_sizing_smoke_2`
+    # leaves the real name as a substring of it, and a bare `in` check passes while the
+    # list has drifted. Mutation caught exactly that.
+    listed = set(re.findall(r'"(test_\w+_smoke)"', workflow))
+    assert listed == lane_names, (
+        f"the paid job's expected-lane list is {sorted(listed)} but the lanes are "
+        f"{sorted(lane_names)}; if a lane stops being collected the gate passes having run fewer"
     )

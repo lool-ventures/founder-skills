@@ -697,3 +697,66 @@ def test_a_ledger_of_real_quotes_reports_none_thin() -> None:
     rc, out, err = _run([], ledger=ledger, transcript="Slide 6: ARR of $2M in 2024.")
     assert rc == 0, err
     assert out["quote_quality"] == {"thin": 0, "total": 1}
+
+
+def test_date_rows_do_not_count_toward_the_numeric_gate() -> None:
+    """A DATE row is refused by every operator, so it can never support a finding — but it
+    still counted toward `figures_total`, `figures_verified` and the minimum-figures gate.
+
+    Measured: one genuine figure alone yields `no_figures`; add a date and the run reports
+    `checked` with `figures_total=2, figures_verified=2`. The date contributed nothing and
+    moved the gate, which is the only place a bogus date can still do damage now that the
+    arithmetic refuses it. Counting participants of no relation as evidence of a numeric
+    check is the same "computed, not delivered" inversion in reverse.
+    """
+    ledger = {
+        "figures": [
+            {
+                "id": "a",
+                "value": 2e6,
+                "raw": "$2M",
+                "unit_kind": "money",
+                "label": "ARR",
+                "slide": 6,
+                "quote": "ARR of $2M in 2024",
+                "currency": "USD",
+            },
+            {
+                "id": "d",
+                "value": 2025,
+                "raw": "Founded 2025",
+                "unit_kind": "date",
+                "label": "founded",
+                "slide": 6,
+                "quote": "Founded 2025",
+            },
+        ]
+    }
+    rc, out, err = _run([], ledger=ledger, transcript="Slide 6: ARR of $2M in 2024. Founded 2025")
+    assert rc == 0, err
+    assert out["figures_total"] == 1, f"the date row was counted as a checkable figure: {out}"
+    assert out["figures_verified"] == 1, out
+    assert out["status"] == "no_figures", (
+        "one real figure plus a date passed the minimum-figures gate on the date's back"
+    )
+
+
+def test_dates_are_still_reported_so_the_exclusion_is_visible() -> None:
+    """Excluded from the gate is not the same as unrecorded — a count nobody can see is how
+    a silent exclusion becomes a silent loss."""
+    ledger = {
+        "figures": [
+            {
+                "id": "d",
+                "value": 2025,
+                "raw": "Founded 2025",
+                "unit_kind": "date",
+                "label": "founded",
+                "slide": 6,
+                "quote": "Founded 2025",
+            },
+        ]
+    }
+    rc, out, err = _run([], ledger=ledger, transcript="Slide 6: Founded 2025")
+    assert rc == 0, err
+    assert out["dates_excluded"] == 1, out
