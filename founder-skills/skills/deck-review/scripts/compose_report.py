@@ -307,6 +307,16 @@ def _founder_text_policy() -> Any:
         return None
 
 
+INCONCLUSIVE_SUPPRESSION_CLASSES = ("incomparable", "downgraded", "convention_differs")
+"""Suppression classes the coverage line may describe as "could not be settled either way".
+
+A CLOSED SET, and the reason it is closed rather than an exclusion list: the sentence names a
+specific cause ("the two sides were not comparable, or the comparison was withdrawn on
+review"), so a class that does not have that cause must not be counted under it. `derived` is
+the class that proved this -- it reached a founder wearing this explanation.
+"""
+
+
 def _warn(code: str, message: str, founder_message: str | None = None) -> dict[str, str]:
     """Create a warning dict with code, message, and severity.
 
@@ -1212,11 +1222,21 @@ def _coverage_line(reconciliation: dict[str, Any]) -> str:
     # here counted it twice and produced arithmetic a founder can see is impossible — "ran
     # 1", "1 could not be made", "of those, 2 could not be settled". Unsettled means
     # evaluated-but-inconclusive, so it must exclude what was never evaluated.
+    # ALLOW-LIST, not a deny-list. These three are the classes the sentence below is TRUE of:
+    # two sides that could not be compared, or a comparison withdrawn on review. Written as
+    # `key not in ("confirmation", "restatement", "dropped")`, every other suppression class
+    # inherited their explanation -- measured on a live run, `suppressed: {"derived": 2}` told
+    # a founder "the two sides were not comparable", when the sides were comparable and
+    # nothing was withdrawn: `select()` had withheld two derived readings for low confidence.
+    # A class this line has not heard of gets no sentence; its count stays in the artifact.
     inconclusive = sum(
         int(count)
         for key, count in suppressed_counts.items()
-        if key not in ("confirmation", "restatement", "dropped") and isinstance(count, int)
+        if key in INCONCLUSIVE_SUPPRESSION_CLASSES and isinstance(count, int)
     )
+    # Withheld derivations are a separate fact and get their own words. They are not failures
+    # to compare -- the arithmetic ran and produced a figure the engine would not stand behind.
+    withheld_derived = int(suppressed_counts.get("derived", 0) or 0)
     agreed = (
         sum(1 for v in verdicts if v in ("confirmation", "restatement"))
         + int(suppressed_counts.get("confirmation", 0) or 0)
@@ -1232,6 +1252,11 @@ def _coverage_line(reconciliation: dict[str, Any]) -> str:
             f". Of those, **{inconclusive}** could not be settled either way — the two sides were "
             "not comparable, or the comparison was withdrawn on review"
         )
+    elif withheld_derived:
+        settled = (
+            f". Of those, **{withheld_derived}** produced a figure worked out from your numbers "
+            "that I am not confident enough to report"
+        )
     elif agreed and agreed == evaluated:
         # UNIVERSAL, so it needs universal evidence. `agreed > 0` licensed "the comparisons
         # that ran held" from a single confirmation sitting beside an unproven derived
@@ -1239,10 +1264,19 @@ def _coverage_line(reconciliation: dict[str, Any]) -> str:
         settled = ". That is what was checked, and the comparisons that ran held"
     else:
         settled = ". That is what was checked"
+    # A NEW SENTENCE, not an appositive. Written as "— not that every number ...", this
+    # qualifier parsed only after ". That is what was checked"; after every other branch
+    # ending the "not that" clause had no head, and a founder read "the comparison was
+    # withdrawn on review — not that every number in the deck has been verified against every
+    # other". Starting a sentence makes it grammatical after all five endings.
     tail = (
-        settled + " — not that every number in the deck has been verified against every other, and "
-        "not that a careful reader would find nothing more. Treat this as a first pass over "
-        "your arithmetic, not a clean bill of health.\n"
+        # Not "None of that means ...": the fleet sentinel scan reads a bare `None` in
+        # founder-facing prose as a leaked Python repr, and it cannot tell the English word
+        # from the value. A correct sentence that trips a real guard is still the wrong
+        # sentence to ship.
+        settled + ". It does not follow that every number in the deck has been verified against "
+        "every other, or that a careful reader would find nothing more. Treat this as a first "
+        "pass over your arithmetic, not a clean bill of health.\n"
     )
     return ", ".join(bits) + tail
 

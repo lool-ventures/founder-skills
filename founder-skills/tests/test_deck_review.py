@@ -5018,3 +5018,125 @@ def test_the_coverage_counts_add_up() -> None:
     assert int(unsettled.group(1)) <= int(ran.group(1)), (
         f"more comparisons unsettled ({unsettled.group(1)}) than ran ({ran.group(1)}): {md[:400]}"
     )
+
+
+def test_a_withheld_derived_reading_is_not_reported_as_an_uncomparable_pair() -> None:
+    """`suppressed` keys must not inherit an explanation written for other keys.
+
+    MEASURED ON A LIVE RUN (2026-08-17): a real deck produced `suppressed: {"derived": 2}`
+    and the founder was told "**2** could not be settled either way — the two sides were not
+    comparable, or the comparison was withdrawn on review". Neither clause is true of a
+    derived reading withheld for low confidence: the sides WERE comparable and nothing was
+    withdrawn. `select()` withholds a `derived` relation when its confidence is not high.
+
+    The mechanism is a DENY-list -- `key not in ("confirmation", "restatement", "dropped")` --
+    so every suppression class that is not one of those three silently acquires a sentence
+    written for `incomparable`/`downgraded`/`convention_differs`. The existing test for this
+    line used `{"incomparable": 1}`, the one key the prose does fit, which is why the
+    mismatch survived. Same allow-vs-deny shape as the gate's terminal-row table.
+    """
+    recon = json.loads(json.dumps(_VALID_RECONCILIATION))
+    recon["relations"] = []
+    recon["relations_proposed"] = 2
+    recon["suppressed"] = {"derived": 2}
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": recon,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0 and data is not None
+    md = data["report_markdown"]
+    assert "the two sides were not comparable" not in md, (
+        "a withheld derived reading was described as an uncomparable pair:\n" + md[:600]
+    )
+    assert "the comparisons that ran held" not in md, md[:600]
+    # NOT-WRONG IS NOT ENOUGH. Deleting the branch that says what actually happened left both
+    # negative asserts above green -- measured by mutation. Silence here reads as "your
+    # numbers are fine" when two comparisons produced a figure the engine would not stand
+    # behind, so the count has to reach the founder, not merely avoid the false explanation.
+    assert "**2**" in md and "not confident enough to report" in md, (
+        "the two withheld derivations are not reported at all:\n" + md[:600]
+    )
+
+
+def test_an_unrecognised_suppression_class_earns_no_explanation() -> None:
+    """Deny-by-default for PROSE: a class this line has never heard of gets no sentence.
+
+    The counts stay in the artifact either way. What must not happen is a future suppression
+    key arriving and being handed the nearest existing explanation, which is exactly how
+    `derived` came to be described as an uncomparable pair.
+    """
+    recon = json.loads(json.dumps(_VALID_RECONCILIATION))
+    recon["relations"] = []
+    recon["relations_proposed"] = 1
+    recon["suppressed"] = {"some_future_class": 1}
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": recon,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0 and data is not None
+    md = data["report_markdown"]
+    assert "could not be settled either way" not in md, md[:600]
+    assert "the comparisons that ran held" not in md, md[:600]
+
+
+def test_the_coverage_line_is_a_grammatical_sentence_in_every_branch() -> None:
+    """The closing qualifier must parse after each of the five branch endings.
+
+    MEASURED ON A LIVE RUN (2026-08-17). The qualifier was written as an appositive to
+    ". That is what was checked" -- "— not that every number ... has been verified" -- and
+    reads correctly only there. After the other branches a founder got, verbatim: "the
+    comparison was withdrawn on review — not that every number in the deck has been verified
+    against every other". The "not that" clause has no head to attach to; it is broken
+    English on a surface a founder reads.
+
+    Asserted structurally rather than by pinning one string: the qualifier must begin a new
+    sentence, so no branch ending can leave it dangling.
+    """
+    scenarios: dict[str, dict[str, Any]] = {
+        "contradiction": {"relations": _VALID_RECONCILIATION["relations"], "suppressed": {}},
+        "inconclusive": {"relations": [], "suppressed": {"incomparable": 2}},
+        "withheld_derived": {"relations": [], "suppressed": {"derived": 2}},
+        "unknown_class": {"relations": [], "suppressed": {"some_future_class": 1}},
+        # Agreements live in `suppressed`, never in `relations`: `select()` returns
+        # contradictions + high-confidence derived and nothing else, so a confirmation
+        # sitting in `relations` is a shape no writer produces. Building it there made the
+        # numbers section return "" and read as a rendering defect -- the fifth time in this
+        # work a fabricated fixture accused correct code. `relations` stays empty here.
+        "agreed": {"relations": [], "suppressed": {"confirmation": 2}},
+    }
+    for name, patch in scenarios.items():
+        recon = json.loads(json.dumps(_VALID_RECONCILIATION))
+        recon.update(json.loads(json.dumps(patch)))
+        # `evaluated = relations_proposed - suppressed.dropped`, and the "held" branch needs
+        # `agreed == evaluated`, so the proposed count must equal what the scenario accounts for.
+        suppressed: dict[str, int] = patch["suppressed"]
+        recon["relations_proposed"] = max(1, len(recon["relations"]) + sum(suppressed.values()))
+        d = _make_artifact_dir(
+            {
+                "deck_inventory.json": _VALID_INVENTORY,
+                "stage_profile.json": _VALID_PROFILE,
+                "slide_reviews.json": _VALID_REVIEWS,
+                "checklist.json": _VALID_CHECKLIST,
+                "reconciliation.json": recon,
+            }
+        )
+        rc, data, _ = _run_compose(d)
+        assert rc == 0 and data is not None, name
+        md = data["report_markdown"]
+        assert "— not that every number" not in md, (
+            f"[{name}] the closing qualifier is still an appositive, so it dangles after this "
+            f"branch's ending:\n" + md[:600]
+        )
+        assert "a careful reader would find nothing more" in md, f"[{name}] qualifier lost"
