@@ -49,6 +49,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -207,18 +208,42 @@ def _has_claude_auth() -> bool:
     return creds.is_file()
 
 
-@pytest.mark.e2e
-@pytest.mark.skipif(
-    not _has_claude_auth(),
-    reason=(
-        "Paid end-to-end smoke: set RUN_PAID_E2E=1 to authorize a billed run, AND have "
-        "Claude auth (ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, or `claude /login`). "
-        "The opt-in is separate on purpose — a credential says a run CAN happen, not that "
-        "it may."
-    ),
-)
-def test_deck_review_smoke(tmp_path: Path) -> None:
-    """Run deck-review against the synthetic fixture; assert structural signals."""
+CONTRADICTION_DECK = FIXTURES / "decks" / "synthetic-contradiction-deck.txt"
+CONTRADICTION_GOLDEN = FIXTURES / "golden" / "deck-review" / "synthetic-contradiction-deck.expected.json"
+
+# The contradiction lane bills SEPARATELY from the release gate, and that is the point.
+# `test_deck_review_smoke` is what a tag spends on; adding a second deck to it would double
+# the cost of every release for a lane that answers a different question. This variable is
+# the opt-in, and the CI skip-check names the lane as a deliberate opt-out so a skip here
+# still cannot pass for a run.
+CONTRADICTION_OPT_IN_ENV = "RUN_PAID_E2E_CONTRADICTION"
+
+
+def _contradiction_lane_authorized() -> bool:
+    return _has_claude_auth() and os.environ.get(CONTRADICTION_OPT_IN_ENV, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+def _drive_deck_review_lane(
+    tmp_path: Path,
+    *,
+    deck_fixture: Path,
+    golden_path: Path,
+    company: str,
+    slug: str,
+    extra_checks: Callable[..., None] | None = None,
+) -> None:
+    """Drive deck-review against one deck fixture and check it against one golden file.
+
+    EXTRACTED so a second deck does not mean a second copy of the SDK setup. This file
+    already carries one deliberate duplication (the auth gate, noted above as "the failure
+    point to watch"); a third copy of 200 lines of options, streaming and assertions would be
+    the same mistake at ten times the size. The release gate's test function keeps its exact
+    name -- CI matches paid lanes BY NAME -- and becomes a two-line caller.
+    """
     # Imports are inside the test so test collection works without the SDK
     # installed (CI install handles it via the dev extras).
     from claude_agent_sdk import ClaudeAgentOptions, query
@@ -226,8 +251,8 @@ def test_deck_review_smoke(tmp_path: Path) -> None:
     # Stage a workspace; the skill creates artifacts/ under cwd.
     workdir = tmp_path / "workspace"
     workdir.mkdir()
-    deck_dst = workdir / "synthetic-seed-deck.txt"
-    shutil.copy(DECK_FIXTURE, deck_dst)
+    deck_dst = workdir / deck_fixture.name
+    shutil.copy(deck_fixture, deck_dst)
 
     plugin_path = REPO_ROOT / "founder-skills"
 
@@ -300,8 +325,8 @@ def test_deck_review_smoke(tmp_path: Path) -> None:
     # "detection was not confident", not "nobody said what stage this is".
     prompt = (
         f"Use the deck-review skill to review the synthetic deck at "
-        f"{deck_dst}. It's a fictional SaaS company called Acmecorp. "
-        f"Use 'acmecorp' as the slug. I am the founder and the stage is "
+        f"{deck_dst}. It's a fictional company called {company}. "
+        f"Use '{slug}' as the slug. I am the founder and the stage is "
         f"seed — treat that as my answer if you would otherwise ask. "
         f"Don't ask clarifying questions — just run."
     )
@@ -359,7 +384,7 @@ def test_deck_review_smoke(tmp_path: Path) -> None:
         )
     review_dir = review_dirs[0]
 
-    expected = json.loads(GOLDEN.read_text())
+    expected = json.loads(golden_path.read_text())
     a = expected["assertions"]
 
     # 1. Required outputs
@@ -608,6 +633,9 @@ def test_deck_review_smoke(tmp_path: Path) -> None:
                     "fixture's assertion means items, not categories, and the golden file should say so"
                 )
 
+    if extra_checks is not None:
+        extra_checks(review_dir=review_dir, report=report, assertions=a, observed=observed, failures=failures)
+
     print("\n[e2e] ---- observed values (calibration data for this lane) ----", flush=True)
     for key in sorted(observed):
         print(f"[e2e]   {key} = {observed[key]!r}", flush=True)
@@ -616,4 +644,123 @@ def test_deck_review_smoke(tmp_path: Path) -> None:
 
     assert not failures, "live deck-review run failed {} check(s):\n{}\n\nreview_dir: {}".format(
         len(failures), "\n".join(f"  - {f}" for f in failures), review_dir
+    )
+
+
+@pytest.mark.e2e
+@pytest.mark.skipif(
+    not _has_claude_auth(),
+    reason=(
+        "Paid end-to-end smoke: set RUN_PAID_E2E=1 to authorize a billed run, AND have "
+        "Claude auth (ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, or `claude /login`). "
+        "The opt-in is separate on purpose — a credential says a run CAN happen, not that "
+        "it may."
+    ),
+)
+def test_deck_review_smoke(tmp_path: Path) -> None:
+    """The release gate. One deck, the thin-stub fixture; a tag spends on exactly this."""
+    _drive_deck_review_lane(
+        tmp_path,
+        deck_fixture=DECK_FIXTURE,
+        golden_path=GOLDEN,
+        company="Acmecorp",
+        slug="acmecorp",
+    )
+
+
+def _check_contradictions(
+    *,
+    review_dir: Path,
+    report: dict,
+    assertions: dict,
+    observed: dict,
+    failures: list,
+) -> None:
+    """The whole reason this lane exists: a contradiction has to reach the founder.
+
+    The stub lane surfaced ZERO relations, so `select()`, the tolerance and materiality
+    rules, the ordering by relative wrongness and the rendering were all untested against a
+    real model. Everything here is about the FOUNDER-VISIBLE half — the engine's own
+    arithmetic is covered offline, and this cannot re-derive it.
+    """
+    recon_path = review_dir / "reconciliation.json"
+    if not recon_path.exists():
+        failures.append("reconciliation.json absent, so the contradiction path cannot be judged")
+        return
+    recon = json.loads(recon_path.read_text())
+
+    wanted = assertions.get("reconciliation_status_in")
+    if wanted and recon.get("status") not in wanted:
+        failures.append(f"reconciliation status {recon.get('status')!r} not in {wanted}")
+
+    relations = [r for r in (recon.get("relations") or []) if isinstance(r, dict)]
+    # Split on VERDICT, never `kind`: `kind` is what the model proposed and `verdict` is what
+    # the engine computed, and the flagship finding is proposed `derived_ratio` and returns
+    # `contradiction`.
+    contradictions = [r for r in relations if r.get("verdict") == "contradiction"]
+    observed["surfaced_contradictions"] = len(contradictions)
+    observed["surfaced_rendered"] = [r.get("rendered") for r in contradictions]
+    observed["reconciliation.suppressed"] = recon.get("suppressed")
+
+    floor = assertions.get("surfaced_contradictions_min")
+    if floor is not None and len(contradictions) < floor:
+        failures.append(
+            f"only {len(contradictions)} contradiction(s) surfaced, expected >= {floor}. The deck "
+            f"states an MRR its own customer count and ARPU refute by ~78% and a TAM its own "
+            f"inputs refute by ~20%; suppressed={recon.get('suppressed')!r}"
+        )
+
+    # A surfaced contradiction must actually be RENDERED to the founder. The artifact holding
+    # it is not the deliverable, and a founder reads report.md.
+    md_path = review_dir / "report.md"
+    if contradictions and md_path.exists():
+        md = md_path.read_text()
+        if "What Your Numbers Say About Each Other" not in md:
+            failures.append("a contradiction survived select() but report.md has no numbers section")
+        unrendered = [
+            r.get("rendered")
+            for r in contradictions
+            if r.get("rendered") and str(r.get("rendered")).split("=")[0].strip() not in md
+        ]
+        if unrendered:
+            failures.append(f"contradictions surfaced but absent from report.md: {unrendered}")
+
+    # ORDERING, asserted only when there are two to order — with one, order is not a claim.
+    if len(contradictions) >= 2:
+
+        def wrongness(rel: dict) -> float:
+            expected, computed = rel.get("expected_value"), rel.get("computed")
+            if not isinstance(expected, (int, float)) or not isinstance(computed, (int, float)) or not expected:
+                return -1.0
+            return abs(computed - expected) / abs(expected)
+
+        scores = [wrongness(r) for r in contradictions]
+        observed["surfaced_wrongness"] = [round(x, 3) for x in scores]
+        if any(x < 0 for x in scores):
+            failures.append(f"a surfaced contradiction carries no comparable magnitude: {scores}")
+        elif scores != sorted(scores, reverse=True):
+            failures.append(
+                f"contradictions are not ordered most-wrong-first: {[round(x, 3) for x in scores]}. "
+                "A 78% discrepancy has to reach the founder before a 20% one"
+            )
+
+
+@pytest.mark.e2e
+@pytest.mark.skipif(
+    not _contradiction_lane_authorized(),
+    reason=(
+        "Contradiction lane: needs RUN_PAID_E2E=1 AND RUN_PAID_E2E_CONTRADICTION=1 plus Claude "
+        "auth. Billed separately from the release gate on purpose — a tag should not pay for "
+        "two decks, and this one answers a different question."
+    ),
+)
+def test_deck_review_contradiction_lane(tmp_path: Path) -> None:
+    """A deck that contradicts itself must tell the founder so, most-wrong-first."""
+    _drive_deck_review_lane(
+        tmp_path,
+        deck_fixture=CONTRADICTION_DECK,
+        golden_path=CONTRADICTION_GOLDEN,
+        company="Foobar Systems",
+        slug="foobar",
+        extra_checks=_check_contradictions,
     )

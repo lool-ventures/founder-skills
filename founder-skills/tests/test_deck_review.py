@@ -719,6 +719,26 @@ _VALID_RECONCILIATION = {
 }
 
 
+def _load_compose_module() -> Any:
+    """Import deck-review's compose_report as a module, for the few tests that need to reach
+    inside it. Everything else drives it as a subprocess through `_run_compose`, which is
+    closer to production; this exists only where a test must patch a module global (the
+    coaching marker's uuid) that no CLI flag exposes."""
+    import importlib.util
+
+    path = os.path.join(DECK_REVIEW_DIR, "compose_report.py")
+    spec = importlib.util.spec_from_file_location("deck_review_compose_module", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    sys.path.insert(0, DECK_REVIEW_DIR)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(DECK_REVIEW_DIR)
+    return module
+
+
 def _run_compose(artifact_dir: str, extra_args: list[str] | None = None) -> tuple[int, dict | None, str]:
     """Run compose_report.py with given artifact dir.
 
@@ -5140,3 +5160,54 @@ def test_the_coverage_line_is_a_grammatical_sentence_in_every_branch() -> None:
             f"branch's ending:\n" + md[:600]
         )
         assert "a careful reader would find nothing more" in md, f"[{name}] qualifier lost"
+
+
+def test_composes_own_insertion_marker_is_not_flagged_as_a_leaked_token() -> None:
+    """compose must not report its own transient marker as an internal-token leak.
+
+    MEASURED ON A LIVE RUN (2026-08-17): a delivered report.json carried
+    `FOUNDER_TEXT_TOKEN: the report contains the internal token
+    'COACHING_INSERTION_POINT_23328636'`. The marker is compose's OWN, inserted deliberately
+    at the coaching insertion point and replaced by insert_coaching.py a step later — the
+    final report.md contained zero markers and a correct `## Coaching Commentary` section.
+    So the pipeline flagged a token it had just written and was about to remove.
+
+    WORSE THAN A PLAIN FALSE POSITIVE, because it is NONDETERMINISTIC. The marker is
+    `uuid.uuid4().hex[:8]`, and the scan matches ALLCAPS-with-underscore, so it fires only
+    when the random suffix happens to be all digits — roughly one run in forty-three
+    ((10/16)**8). A warning that appears at random is close to undiagnosable later, and a
+    spurious FOUNDER_TEXT_TOKEN is corrosive to a class whose whole job is catching real
+    leaks reaching a founder.
+
+    Pinned with an all-digit marker so the test does not itself depend on that 2.3%.
+    """
+    import unittest.mock as mock
+    import uuid as uuid_mod
+
+    module = _load_compose_module()
+
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": _VALID_RECONCILIATION,
+        }
+    )
+    all_digits = uuid_mod.UUID("12345678-1234-5678-1234-567812345678")
+    with mock.patch.object(module.uuid, "uuid4", return_value=all_digits):
+        result = module.compose(d)
+
+    codes = [w.get("code") for w in result["validation"]["warnings"]]
+    offenders = [
+        w.get("message")
+        for w in result["validation"]["warnings"]
+        if w.get("code") == "FOUNDER_TEXT_TOKEN" and "COACHING_INSERTION_POINT" in str(w.get("message"))
+    ]
+    assert not offenders, (
+        f"compose flagged its own insertion marker as a leaked internal token: {offenders} (all codes: {codes})"
+    )
+    # NON-VACUITY: the marker really is present in what was scanned, so the assert above is
+    # about the scan excluding it and not about the marker being absent.
+    assert "COACHING_INSERTION_POINT_12345678" in result["report_markdown"]

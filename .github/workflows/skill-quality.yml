@@ -162,10 +162,23 @@ jobs:
               "test_financial_model_review_smoke",
               "test_market_sizing_smoke",
           }
+          # DELIBERATE OPT-OUTS, named one by one. A tag pays for one deck per skill; the
+          # contradiction lane answers a different question (does a self-contradicting deck
+          # reach the founder) and carries its own RUN_PAID_E2E_CONTRADICTION opt-in, so it
+          # is skipped here by design. Naming it keeps "a skipped lane must not look like a
+          # passing one" intact: an UNEXPECTED skip still reds, and adding a lane to this set
+          # is a visible decision to stop gating on it rather than a silent omission.
+          ALLOWED_SKIPS = {
+              "test_deck_review_contradiction_lane",
+          }
           suite = ET.parse("e2e-results.xml").getroot()
           cases = list(suite.iter("testcase"))
           ran = {c.get("name") for c in cases if c.find("skipped") is None}
-          skipped = sorted(c.get("name") for c in cases if c.find("skipped") is not None)
+          skipped = sorted(
+              c.get("name")
+              for c in cases
+              if c.find("skipped") is not None and c.get("name") not in ALLOWED_SKIPS
+          )
           missing = sorted(EXPECTED - ran)
           if skipped or missing:
               print(f"::error::paid lanes did not all run — skipped={skipped} missing={missing}")

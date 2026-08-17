@@ -1838,7 +1838,19 @@ def compose(
         # Our own warning codes are kept: compose renders them in small print beside a humanized
         # label (the md_term convention), which is deliberate. A code leaking anywhere else is
         # caught by the skill's own gate, not by widening this scan into a false positive.
-        _found = _ft.scan(report_markdown, extra_keep=frozenset(WARNING_SEVERITY))
+        # SCAN WHAT A FOUNDER WILL READ, not the transient scaffold. `marker` is compose's own
+        # coaching insertion point, written here and replaced by insert_coaching.py one step
+        # later -- the delivered report.md contains none. Scanning it made the pipeline report
+        # its own marker as a leaked internal token, and NONDETERMINISTICALLY: the suffix is
+        # `uuid4().hex[:8]` and the enum rule matches ALLCAPS-with-underscore, so it fired only
+        # when the random hex happened to be all digits, about one run in forty-three. A
+        # spurious FOUNDER_TEXT_TOKEN is worse than no warning, because this class exists to
+        # catch real leaks and readers learn to discount it.
+        #
+        # This does NOT weaken the check for a STRAY marker: the guard above already refuses a
+        # second `COACHING_INSERTION_POINT_` anywhere in the body, using this same
+        # remove-the-known-one idiom.
+        _found = _ft.scan(report_markdown.replace(marker, ""), extra_keep=frozenset(WARNING_SEVERITY))
         for _tok in _found["enums"]:
             warnings.append(
                 _warn(

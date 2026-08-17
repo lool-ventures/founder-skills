@@ -1,0 +1,55 @@
+{
+  "fixture_version": 1,
+  "skill": "deck-review",
+  "input": "synthetic-contradiction-deck.txt",
+  "assertions": {
+    "report_json_exists": true,
+    "report_md_exists": true,
+    "all_artifacts_have_run_id": true,
+    "schema_validation_passes": true,
+    "coaching_payload_present": true,
+    "score_pct_range": [
+      10,
+      70
+    ],
+    "overall_status_in": [
+      "needs_work",
+      "major_revision"
+    ],
+    "no_high_severity_warnings_other_than": [
+      "CHECKLIST_FAILURES_CRITICAL"
+    ],
+    "reconciliation_status_in": [
+      "checked"
+    ],
+    "surfaced_contradictions_min": 1
+  },
+  "_calibration_notes": [
+    "THIS LANE EXISTS FOR ONE REASON: the stub-deck lane surfaced ZERO relations, so the",
+    "founder-visible contradiction path -- select(), the tolerance and materiality rules, the",
+    "ordering by relative wrongness, and the rendering -- was untested against a real model.",
+    "A deck whose numbers agree cannot exercise it at all.",
+    "",
+    "The deck carries two deliberate contradictions, verified through the real producers",
+    "offline before this lane was ever run: 412 x $95/month = $39,140 against a stated $22K",
+    "MRR (~78% relative), and 1,200,000 x $1,200 = $1.44B against a stated $1,800MM TAM",
+    "(~20%). Both above any materiality floor, ~4x apart in wrongness so their ORDER is a",
+    "test rather than an accident.",
+    "",
+    "surfaced_contradictions_min is 1, NOT 2, and the floor is deliberate. Whether the",
+    "extraction sub-agent proposes both relations is model-dependent and has never been",
+    "measured on this fixture; the offline probe proves the ENGINE surfaces both when both",
+    "are proposed, which is a different claim. Asserting 2 would red the lane on proposal",
+    "variance rather than on a defect. The observed count is printed either way, so the floor",
+    "can be tightened once two runs have been seen -- the same rule the stub lane's own notes",
+    "set for its score floor.",
+    "",
+    "Ordering is asserted only when at least two contradictions surface, for the same reason.",
+    "",
+    "score_pct ceiling raised to 70 vs the stub's 65: this deck has 7 slides including a real",
+    "market slide, so more criteria can pass. Floor left at 10 -- a deck that contradicts",
+    "itself twice should not score well, and how an LLM weighs that has not been measured.",
+    "",
+    "Foobar Systems is fictional. No real founder or company data."
+  ]
+}

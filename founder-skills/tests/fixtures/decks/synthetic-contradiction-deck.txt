@@ -1,0 +1,53 @@
+SLIDE 1: TITLE
+Foobar Systems — invoice reconciliation for mid-market logistics
+
+SLIDE 2: PROBLEM
+Finance teams at mid-market freight brokers reconcile invoices by hand.
+A 40-person brokerage burns 30+ hours/week on it.
+
+SLIDE 3: SOLUTION
+Foobar ingests carrier invoices and auto-matches them to load records.
+
+SLIDE 4: MARKET
+1 200 000 target businesses worldwide at a $1,200 annual contract value.
+Bottom-up TAM: $1,800MM.
+
+SLIDE 5: TRACTION
+412 paying customers at an ARPU of $95/month.
+MRR of $22K, growing since launch.
+Qualified pipeline of $20MM.
+
+SLIDE 6: TEAM
+Three founders, ex-Flexport (ops) and two ex-Oracle (eng).
+
+SLIDE 7: ASK
+Raising $3M seed at $17M post-money.
+
+[Note: 7 slides. Foobar Systems is FICTIONAL — no real founder or company data.
+
+THIS FIXTURE IS ENGINEERED TO CONTRADICT ITSELF, and the two contradictions are
+deliberate, not sloppiness in the fixture. The lane it serves needs figures that
+disagree, because a deck whose numbers agree cannot exercise the engine's
+founder-visible output path at all.
+
+  Slide 5, LARGE: 412 customers x $95/month = $39,140/month against a stated MRR
+  of $22K. Relative error on the stated side ~78%.
+
+  Slide 4, MODERATE: 1,200,000 x $1,200 = $1.44B against a stated TAM of
+  $1,800MM. Relative error ~20%.
+
+Both are above any materiality floor, and they differ by roughly 4x in relative
+wrongness, which is what makes them a test of ordering rather than of detection:
+the slide-5 contradiction must be reported before the slide-4 one.
+
+THE SCALE NOTATION IS LOAD-BEARING, not decoration. The TAM contradiction only
+computes if `$1,800MM` is read as 1.8e9; read as 1800 it becomes nonsense and the
+relation is dropped rather than surfaced. `1 200 000` is space-grouped thousands
+and `$20MM` is a second multi-letter scale. Every one of these forms was, until
+recently, a form one numeric grammar recognised and another did not.
+
+Stage signals are deliberately UNAMBIGUOUS (explicit seed round, priced
+post-money, real revenue) so stage detection lands at high confidence and the
+gate's auto-satisfy path is reachable. An ambiguous-stage deck is a separate
+fixture: ambiguity requires removing the round line and the traction, which is
+exactly what these contradictions are built from, so one deck cannot do both.]
