@@ -19,6 +19,8 @@
   "warrants": [],
   "option_grants": [],
   "metadata": {
-    "run_id": "fixture-run"
-  }
+    "run_id": "fixture-run",
+    "schema_version": "v0.5.0-instruments"
+  },
+  "convertible_notes": []
 }

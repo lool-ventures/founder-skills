@@ -1150,3 +1150,48 @@ def test_the_quote_lexeme_and_the_magnitude_parser_agree_on_scale() -> None:
     for raw, expected in (("$20MM", 20e6), ("$20Mn", 20e6), ("$20bn", 20e9), ("$20M", 20e6), ("$20K", 20e3)):
         assert implied_tolerance(raw) > 0, raw
         assert _raw_scale(raw) == expected / 20, (raw, _raw_scale(raw))
+
+
+def test_the_four_numeric_grammars_agree_on_what_a_scale_is() -> None:
+    """No scale may be known to one numeric grammar and unknown to another.
+
+    Four regexes describe the same notation -- the magnitude parser, the range parser, the
+    open-ended `+` parser, and the token-boundary lexeme -- and each used to carry its own
+    hand-typed list of scale words. Every divergence was a scale error pointing the same
+    way: a figure whose scale one grammar could not see was read as a bare mantissa, so the
+    CORRECT value was rejected and the 1000x-smaller one accepted. Three review rounds each
+    fixed the forms that had been named and left the rest, which is why this asserts the
+    property rather than the examples.
+    """
+    import reconcile  # type: ignore[import-not-found]
+
+    for scale in reconcile.SCALE_TOKENS:
+        raw = f"$20{scale}"
+        magnitude = _raw_scale(raw)
+        expected = reconcile._SCALE[scale]
+        assert magnitude == expected, f"{raw!r}: the magnitude parser read a scale of {magnitude}, not {expected}"
+        lexeme = reconcile._NUMERIC_LEXEME.match(raw, 1)
+        ended_at = lexeme.group(0) if lexeme else None
+        assert ended_at == f"20{scale}", (
+            f"{raw!r}: the token boundary ended at {ended_at!r}, so the scale reads as "
+            "unrelated text and the bare mantissa looks like a whole number"
+        )
+        assert reconcile._PLUS_RE.search(f"{raw}+"), (
+            f"{raw}+: the open-ended parser did not see a floor, so the figure reads as exact"
+        )
+        rng = reconcile._RANGE_RE.search(f"$20-30{scale}")
+        read_as = (rng.group("suf") or "") if rng else None
+        assert read_as is not None and read_as.lower() == scale, (
+            f"$20-30{scale}: the range parser read the shared suffix as {read_as!r}, so both ends lose their scale"
+        )
+
+
+def test_the_scale_agreement_sweep_covers_the_multi_letter_forms() -> None:
+    """Non-vacuity: the sweep above is only meaningful if it reaches past `k`/`m`/`b`/`t`.
+
+    The single letters were never the bug -- every grammar always knew those. The defects
+    were all in the forms that need more than one character.
+    """
+    import reconcile  # type: ignore[import-not-found]
+
+    assert {"mm", "mn", "bn", "tn", "crore", "lakh", "lac"} <= set(reconcile.SCALE_TOKENS)

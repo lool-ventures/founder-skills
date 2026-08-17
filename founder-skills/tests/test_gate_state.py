@@ -652,7 +652,7 @@ def test_emit_holds_stage_choice_to_four_stage_options() -> None:
         assert rc != 0, "a one-option stage_choice was written"
         rc2, _, err2 = _run(
             ["emit", "--run-id", "r1", "--stage", "seed", "-o", out],
-            json.dumps({**body, "options": ["Pre-seed", "Seed", "Series A", "Series B"]}),
+            json.dumps({**body, "options": ["Pre-seed", "Series A", "Series B", "Growth"]}),
         )
         assert rc2 == 0, err2
 
@@ -1390,11 +1390,14 @@ def test_the_presented_payload_states_the_stage_it_will_authorize() -> None:
     reads and the thing that authorizes cannot disagree."""
     with tempfile.TemporaryDirectory() as d:
         out = os.path.join(d, "gate_state.json")
+        # The prose must AGREE with the stage now — a summary naming Seed under
+        # `--stage series_a` is refused outright (see
+        # test_the_founder_visible_stage_cannot_contradict_the_authorized_one).
         body = {
             "gate_id": "stage_confirmation",
             "question": "Does this stage detection look right?",
             "options": list(_CANON_CONFIRM),
-            "context_summary": "Detected stage: Seed",
+            "context_summary": "Detected stage: Series A",
         }
         rc, stdout, err = _run(["emit", "--run-id", "r1", "--stage", "series_a", "-o", out], json.dumps(body))
         assert rc == 0, err
@@ -1484,6 +1487,164 @@ def test_stage_choice_options_must_be_four_distinct_stages() -> None:
         assert "distinct" in err.lower() or "duplicate" in err.lower(), err
         rc_ok, _, err_ok = _run(
             ["emit", "--run-id", "r1", "--stage", "seed", "-o", out],
-            json.dumps({**body, "options": ["Pre-seed", "Seed", "Series A", "Series B"]}),
+            json.dumps({**body, "options": ["Pre-seed", "Series A", "Series B", "Growth"]}),
         )
         assert rc_ok == 0, err_ok
+
+
+def test_concurrent_answers_cannot_lose_a_decline() -> None:
+    """`os.replace` prevents partial bytes, not lost decisions.
+
+    `answer` reads, checks "already answered?", then writes — with nothing holding the file
+    between the read and the write. Two calls racing (a founder's decline and a
+    self-answered proceed) both saw an unanswered gate, both passed the check, and the
+    later write won. Atomic file replacement is exactly the wrong tool for this: the
+    hazard is a lost update, not a torn one.
+    """
+    import subprocess as sp
+    import threading
+
+    gs = _gs()
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "gate_state.json")
+        body = {
+            "gate_id": "out_of_scope_choice",
+            "question": "?",
+            "options": list(gs.CANONICAL_OPTIONS["out_of_scope_choice"]),
+            "context_summary": "x",
+        }
+        _run(["emit", "--run-id", "r1", "--stage", "growth", "-o", path], json.dumps(body))
+
+        barrier = threading.Barrier(2)
+        results: list[int] = []
+
+        def answer(value: str) -> None:
+            barrier.wait()
+            res = sp.run(
+                [sys.executable, SCRIPT, "answer", "--file", path, "--answer", value, "--source", "founder"],
+                capture_output=True,
+                text=True,
+            )
+            results.append(res.returncode)
+
+        threads = [
+            threading.Thread(target=answer, args=("Stop review",)),
+            threading.Thread(target=answer, args=("Proceed anyway (best-effort)",)),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert sorted(results) == [0, 1], f"both concurrent answers succeeded: {results}"
+        with open(path) as f:
+            written = json.load(f)
+        # Whichever won, the loser must have been refused rather than overwriting.
+        assert written["answer"] in ("Stop review", "Proceed anyway (best-effort)")
+
+
+def test_stage_choice_must_offer_the_enum_minus_the_rejected_stage() -> None:
+    """Uniqueness and a count of four were checked; the CONTRACT was not.
+
+    With `--stage seed` the producer accepted `Pre-seed, Seed, Series A, Series B` — it
+    reoffered the stage the founder had just rejected and hid Growth entirely. SKILL.md:520
+    says exactly four: the enum minus the stage the profile holds now. A test I wrote froze
+    the wrong set as valid.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "gate_state.json")
+        body = {"gate_id": "stage_choice", "question": "?", "context_summary": "x"}
+        rc, _, err = _run(
+            ["emit", "--run-id", "r1", "--stage", "seed", "-o", out],
+            json.dumps({**body, "options": ["Pre-seed", "Seed", "Series A", "Series B"]}),
+        )
+        assert rc != 0, "the rejected stage was reoffered and Growth was hidden"
+        assert "Seed" in err
+
+        rc_ok, _, err_ok = _run(
+            ["emit", "--run-id", "r1", "--stage", "seed", "-o", out],
+            json.dumps({**body, "options": ["Pre-seed", "Series A", "Series B", "Growth"]}),
+        )
+        assert rc_ok == 0, err_ok
+
+
+def test_the_founder_visible_stage_cannot_contradict_the_authorized_one() -> None:
+    """Appending the structured stage to caller prose still allowed both to be present:
+    "Detected stage: Seed" and "(Confirming stage: series_a.)" in one payload, with the
+    hidden token deciding. A test I wrote blessed exactly that payload."""
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "gate_state.json")
+        body = {
+            "gate_id": "stage_confirmation",
+            "question": "Does Seed look right?",
+            "options": list(_CANON_CONFIRM),
+            "context_summary": "Detected stage: Seed",
+        }
+        rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "series_a", "-o", out], json.dumps(body))
+        assert rc != 0, "a payload naming two different stages was accepted"
+        assert "seed" in err.lower() and "series_a" in err.lower(), err
+
+
+def test_prose_that_agrees_with_the_stage_is_accepted() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "gate_state.json")
+        body = {
+            "gate_id": "stage_confirmation",
+            "question": "Does this stage detection look right?",
+            "options": list(_CANON_CONFIRM),
+            "context_summary": "Detected stage: Series A (high confidence). 14 slides.",
+        }
+        rc, stdout, err = _run(["emit", "--run-id", "r1", "--stage", "series_a", "-o", out], json.dumps(body))
+        assert rc == 0, err
+        assert json.loads(stdout)["needs_input"]["confirmed_stage"] == "series_a"
+
+
+def test_consent_to_one_question_is_not_consent_to_another() -> None:
+    """History was reduced to two booleans — "some out-of-scope gate was answered" and
+    "some out-of-scope gate was not" — so an ANSWERED question neutralised a later
+    UNANSWERED one. Reproduced: growth asked and answered, series_b asked and abandoned,
+    then a series_a confirmation authorized the run.
+
+    Consent attaches to the question that was put, so each unanswered out-of-scope question
+    has to be answered on its own terms."""
+    gs = _gs()
+    gate = _asked(
+        "series_a",
+        history=[
+            {
+                "gate_id": "out_of_scope_choice",
+                "confirmed_stage": "growth",
+                "answer": "Proceed anyway (best-effort)",
+                "answer_source": "founder",
+                "run_id": "r1",
+            },
+            {"gate_id": "out_of_scope_choice", "confirmed_stage": "series_b", "run_id": "r1", "superseded": True},
+        ],
+    )
+    verdict = gs.authorize(gate, _prof("series_a", "low"), "r1")
+    assert not verdict.permitted, "consent to the growth question was read as consent to the series_b one"
+    assert "series_b" in verdict.reason, verdict.reason
+
+
+def test_each_out_of_scope_question_answered_on_its_own_terms_permits() -> None:
+    gs = _gs()
+    gate = _asked(
+        "series_a",
+        history=[
+            {
+                "gate_id": "out_of_scope_choice",
+                "confirmed_stage": "growth",
+                "answer": "Proceed anyway (best-effort)",
+                "answer_source": "founder",
+                "run_id": "r1",
+            },
+            {
+                "gate_id": "out_of_scope_choice",
+                "confirmed_stage": "series_b",
+                "answer": "Proceed anyway (best-effort)",
+                "answer_source": "founder",
+                "run_id": "r1",
+            },
+        ],
+    )
+    assert gs.authorize(gate, _prof("series_a", "low"), "r1").permitted

@@ -565,3 +565,30 @@ def test_clean_still_removes_a_prior_runs_declined_gate() -> None:
             json.dump(old, f)
         _turn(d, "new-run")
         assert not os.path.exists(os.path.join(review_dir, "gate_state.json"))
+
+
+def test_clean_refuses_to_delete_an_unreadable_gate() -> None:
+    """`emit` was taught to refuse an unreadable prior; `setup_run --clean` runs FIRST.
+
+    The skill always calls setup_run before anything else (SKILL.md:169), and its reader
+    mapped malformed JSON to the empty state, after which `--clean` deleted the file. So the
+    erasure path survived one consumer upstream of the writer I fixed: Stop review →
+    truncate → setup_run --clean → gate gone → fresh gate → answered → authorized.
+
+    An unreadable gate might hold a decision this run already made. Refuse, and say so.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        review_dir = os.path.join(d, "artifacts", "deck-review-acme-corp")
+        os.makedirs(review_dir, exist_ok=True)
+        gate_path = os.path.join(review_dir, "gate_state.json")
+        with open(gate_path, "w") as f:
+            f.write("{ truncated")
+
+        artifacts_root = os.path.join(d, "artifacts")
+        rc, _, err = _run(
+            ["--artifacts-root", artifacts_root, "--slug", "acme-corp", "--run-id", "r1", "--clean"],
+            cwd=d,
+        )
+        assert rc != 0, "setup_run deleted an unreadable gate that may have held a decline"
+        assert os.path.exists(gate_path), "the unreadable gate was removed"
+        assert "unreadable" in err.lower() or "corrupt" in err.lower(), err

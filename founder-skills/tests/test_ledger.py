@@ -530,3 +530,34 @@ def test_the_scale_forms_the_quote_grammar_knows_are_the_ones_the_ledger_validat
         wrong = _fig(value=20, raw=raw, quote=f"total of {raw}")
         rc_wrong, _, _ = _run({"figures": [wrong]})
         assert rc_wrong != 0, f"{raw!r} accepted a bare mantissa as its value"
+
+
+def test_every_numeric_form_the_quote_grammar_knows_is_one_the_ledger_validates() -> None:
+    """Third attempt, and the point of this one is that the grammars now SHARE their pieces.
+
+    Previous rounds fixed the named forms and left the next: `MM/Mn/bn`, then `crore/lakh`,
+    then `$20e6`, space-grouped `$20 000`, and ranges with a shared suffix (`$20-30MM`).
+    Four independent regexes — `_NUM_RE`, `_RANGE_RE`, `_PLUS_RE`, `_NUMERIC_LEXEME` — each
+    knew a different subset, and every mismatch admitted a scale error: the CORRECT value
+    rejected, the bare mantissa accepted.
+
+    They are built from shared constants now, so a form one recognises cannot be a form
+    another does not.
+    """
+    for raw, correct in (
+        ("$20e6", 20_000_000),
+        ("$20 000", 20_000),
+        ("$20-30MM", 20_000_000),
+        ("$20–30 crore", 200_000_000),
+        ("$20 lac", 2_000_000),
+        ("$20MM", 20_000_000),
+        ("$20 crore", 200_000_000),
+        ("$20×10⁶", 20_000_000),
+    ):
+        fig = _fig(value=correct, raw=raw, quote=f"total of {raw}")
+        rc, _, err = _run({"figures": [fig]})
+        assert rc == 0, f"{raw!r} with its correct value {correct} was rejected: {err}"
+
+        bare = _fig(value=20, raw=raw, quote=f"total of {raw}")
+        rc_bare, _, _ = _run({"figures": [bare]})
+        assert rc_bare != 0, f"{raw!r} accepted a bare mantissa of 20 as its value"

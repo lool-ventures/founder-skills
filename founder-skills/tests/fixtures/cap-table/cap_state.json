@@ -40,7 +40,8 @@
     "preferred_shares_as_converted": 0,
     "options_outstanding": 0,
     "options_available": 1000000,
-    "fully_diluted_shares": 11000000
+    "fully_diluted_shares": 11000000,
+    "warrants_underlying_total": 0
   },
   "metadata": {
     "produced_by": "cap_state.py",
@@ -48,6 +49,7 @@
       "inputs.json",
       "instruments.json"
     ],
-    "run_id": "fixture-run"
+    "run_id": "fixture-run",
+    "schema_version": "v0.5.0-cap-state"
   }
 }

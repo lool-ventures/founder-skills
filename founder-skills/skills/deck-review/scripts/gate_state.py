@@ -18,6 +18,8 @@ Used by SKILL.md to keep gate state on disk and out of model-message drift.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 import sys
@@ -170,6 +172,17 @@ CANONICAL_OPTIONS: dict[str, tuple[str, ...]] = {
 # stages, minus the one the founder just rejected -- so it cannot have a fixed list. It is
 # held to the enum instead.
 STAGE_CHOICE_OPTIONS: frozenset[str] = frozenset({"Pre-seed", "Seed", "Series A", "Series B", "Growth"})
+
+# The one mapping between the token the machinery uses and the words a founder reads. Both
+# the option contract and the contradiction check below need it, and deriving it twice is how
+# the two drift.
+STAGE_LABELS: dict[str, str] = {
+    "pre_seed": "Pre-seed",
+    "seed": "Seed",
+    "series_a": "Series A",
+    "series_b": "Series B",
+    "growth": "Growth",
+}
 
 # Answers that authorise the rest of the pipeline OUTRIGHT.
 CONTINUE_ANSWERS: dict[str, frozenset[str]] = {
@@ -424,23 +437,32 @@ def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization
     # series_a/low profile carrying a superseded out-of-scope question in its history must
     # show that question was answered.
     if asked_class == _ASKED_IN_SCOPE:
-        unanswered_out_of_scope = False
-        answered_out_of_scope = False
+        # CONSENT ATTACHES TO THE QUESTION THAT WAS PUT. This reduced history to two
+        # booleans — "some out-of-scope gate was answered" / "some was not" — so an answered
+        # question NEUTRALISED a later abandoned one: growth asked and answered, series_b
+        # asked and dropped, and the run proceeded as though both had been settled. Each
+        # unanswered out-of-scope question is tracked by the stage it asked about, so
+        # answering one cannot stand in for another.
+        unanswered: set[str] = set()
+        answered: set[str] = set()
         entries = gate.get("history", [])
         for entry in entries if isinstance(entries, list) else []:
             if not isinstance(entry, dict) or entry.get("run_id") != run_id:
                 continue
             if entry.get("gate_id") != "out_of_scope_choice":
                 continue
+            about = str(entry.get("confirmed_stage") or "")
             if isinstance(entry.get("answer"), str) and entry["answer"].strip():
-                answered_out_of_scope = True
+                answered.add(about)
             else:
-                unanswered_out_of_scope = True
-        if unanswered_out_of_scope and not answered_out_of_scope:
+                unanswered.add(about)
+        outstanding = sorted(unanswered - answered)
+        if outstanding:
             return Authorization(
                 False,
-                "an out-of-scope question was put to the founder in this run and never answered — "
-                "the deck cannot be reviewed on the strength of a question they did not get to answer",
+                f"an out-of-scope question about {', '.join(repr(s) for s in outstanding)} was put to "
+                "the founder in this run and never answered — answering a different one does not "
+                "settle it",
             )
 
     required_confidence = row["confidence"]
@@ -587,6 +609,19 @@ def cmd_emit(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
                 return 1
+            rejected = STAGE_LABELS.get(args.stage)
+            expected_set = STAGE_CHOICE_OPTIONS - {rejected} if rejected else STAGE_CHOICE_OPTIONS
+            if set(options) != expected_set:
+                # THE CONTRACT, not just the shape. Uniqueness and a count of four accepted
+                # `Pre-seed, Seed, Series A, Series B` for `--stage seed`: it reoffered the
+                # stage the founder had just rejected and hid Growth entirely.
+                print(
+                    f"Error: stage_choice must offer exactly the stages other than {rejected!r} "
+                    f"({sorted(expected_set)}), got {sorted(set(options))} — reaching this gate means "
+                    "the founder rejected that stage, so it cannot be among the choices",
+                    file=sys.stderr,
+                )
+                return 1
             if len(options) != 4:
                 # Four is what AskUserQuestion renders and what SKILL.md offers: the enum
                 # minus the stage just rejected. Fewer hides a stage the founder may want.
@@ -618,6 +653,22 @@ def cmd_emit(args: argparse.Namespace) -> int:
     # `--stage series_a` behind "Detected stage: Seed" let a "Looks right" authorize a
     # Series A report. The producer appends the stage it will authorize, so the sentence the
     # founder reads and the token that authorizes cannot disagree.
+    # THE PROSE MAY NOT NAME A DIFFERENT STAGE. Appending the structured stage left both in
+    # the payload — "Detected stage: Seed" beside "(Confirming stage: series_a.)" — with the
+    # hidden token deciding. A founder reading the first sentence has been told something
+    # the record contradicts.
+    prose = f"{data.get('question') or ''} {data.get('context_summary') or ''}".lower()
+    for token, label in STAGE_LABELS.items():
+        if token == args.stage:
+            continue
+        if label.lower() in prose or token in prose:
+            print(
+                f"Error: this gate confirms {args.stage!r} but its question or summary names "
+                f"{label!r} — a founder cannot be shown one stage and asked to authorize another",
+                file=sys.stderr,
+            )
+            return 1
+
     summary = str(data.get("context_summary") or "")
     stated = f"{summary}\n(Confirming stage: {args.stage}.)" if summary else f"Confirming stage: {args.stage}."
     receipt["needs_input"] = {
@@ -633,11 +684,30 @@ def cmd_emit(args: argparse.Namespace) -> int:
 
 
 def cmd_answer(args: argparse.Namespace) -> int:
+    # HELD ACROSS READ-CHECK-WRITE. `os.replace` makes the write atomic, which prevents a
+    # TORN file and does nothing about a LOST UPDATE: two calls both read an unanswered gate,
+    # both pass the "already answered?" check, and the later write wins — so a founder's
+    # decline could be overwritten by a self-answered proceed. Atomicity of the write was the
+    # wrong tool for a read-modify-write.
+    #
+    # A race test that passes is weak evidence (the window is small); the lock is what makes
+    # the property hold rather than usually hold.
     if not os.path.isfile(args.file):
         print(f"Error: gate_state file not found: {args.file}", file=sys.stderr)
         return 1
+    lock_path = f"{args.file}.lock"
+    with open(lock_path, "a+", encoding="utf-8") as lock:
+        # No advisory locking available (some network filesystems) is not fatal: proceed
+        # rather than strand the run, since the compare-and-set below still catches the
+        # common case of two writers.
+        with contextlib.suppress(OSError):
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        return _answer_locked(args, gate_path=args.file)
+
+
+def _answer_locked(args: argparse.Namespace, gate_path: str) -> int:
     try:
-        with open(args.file, encoding="utf-8") as f:
+        with open(gate_path, encoding="utf-8") as f:
             gate = json.load(f)
     except json.JSONDecodeError as e:
         print(f"Error: gate_state file is not valid JSON: {e}", file=sys.stderr)

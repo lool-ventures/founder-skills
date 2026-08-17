@@ -178,9 +178,16 @@ def test_no_figures_is_refused_on_a_deck_plainly_full_of_numbers() -> None:
     An empty ledger is indistinguishable from a genuinely wordless deck unless something
     else has looked at the deck — which is what `--inventory` is for.
     """
+    # `content_summary`, which is what the schema requires and what production writes. This
+    # fixture said `summary` — a key no inventory has — so it exercised a branch that never
+    # runs and the fuse was inert on every real deck while this test stayed green.
     numeral_rich = {
         "slides": [
-            {"summary": "ARR 1200000 growth 340 percent 2024 2025 45 customers 89 NPS 12 months"} for _ in range(8)
+            {
+                "slide_number": n,
+                "content_summary": "ARR 1200000 growth 340 percent 2024 2025 45 customers 89 NPS 12 months",
+            }
+            for n in range(1, 9)
         ]
     }
     rc, out, err = _run([], ledger={"figures": []}, inventory=numeral_rich)
@@ -760,3 +767,36 @@ def test_dates_are_still_reported_so_the_exclusion_is_visible() -> None:
     rc, out, err = _run([], ledger=ledger, transcript="Slide 6: Founded 2025")
     assert rc == 0, err
     assert out["dates_excluded"] == 1, out
+
+
+def test_the_no_figures_fuse_reads_the_field_production_writes() -> None:
+    """The fuse read `summary`/`content`/`text`; the schema requires `content_summary`.
+
+    So on every real inventory it counted ZERO numerals and the safeguard was inert — and
+    the test that was supposed to prove otherwise fabricated a `summary` key, which is how
+    the mismatch survived. A fixture that does not validate against the schema is not
+    evidence about production.
+    """
+    import pathlib
+
+    if SCRIPTS not in sys.path:
+        sys.path.insert(0, SCRIPTS)
+    import reconcile as rec  # noqa: PLC0415
+
+    schema_path = pathlib.Path(SCRIPTS).parent / "references" / "schemas" / "deck_inventory.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    slide_props = schema["properties"]["slides"]["items"]["properties"]
+    assert "content_summary" in slide_props, "the schema field this fuse depends on has been renamed"
+
+    number_rich = {
+        "slides": [
+            {"slide_number": n, "content_summary": f"Slide {n}: ARR $2.4M, 120 customers, 38% growth"}
+            for n in range(1, 9)
+        ]
+    }
+    assert rec._inventory_numerals(number_rich) > 40, (
+        "a number-rich, schema-valid inventory produced too few numerals to arm the fuse"
+    )
+
+    empty = {"slides": [{"slide_number": n, "content_summary": "Team photo and a logo"} for n in range(1, 9)]}
+    assert rec._inventory_numerals(empty) == 0

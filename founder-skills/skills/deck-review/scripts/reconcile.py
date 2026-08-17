@@ -159,15 +159,41 @@ _SCALE = {
 # Every scale token, longest first, for both grammars to build their alternations from.
 SCALE_TOKENS: tuple[str, ...] = tuple(sorted(_SCALE, key=len, reverse=True))
 
+# THE SHARED PIECES. Four regexes used to define these independently -- `_NUM_RE`,
+# `_RANGE_RE`, `_PLUS_RE` and `_NUMERIC_LEXEME` -- and each knew a different subset of
+# scales and separators. Every mismatch admitted a scale error in the same direction: the
+# CORRECT value rejected because the authoritative parser read a bare mantissa, and the
+# mantissa accepted. Three review rounds each fixed the named forms and left the next set.
+# Defined once so a form one grammar recognises cannot be a form another does not.
+_SCALE_ALT = "|".join(SCALE_TOKENS)
+# Grouping marks decks use between thousands: comma, thin/no-break space, apostrophe,
+# prime, Arabic thousands separator. A plain space is handled separately, because it needs
+# a following group of exactly three digits to be unambiguous.
+_GROUP_MARKS = ",\u00a0\u202f\u2009'\u2019\u2032\u066c"
+_MANTISSA = rf"\d[\d{_GROUP_MARKS}]*(?:\ \d{{3}}(?!\d))*"
+
+
+def strip_group_marks(digits: str) -> str:
+    """Remove every grouping mark `_MANTISSA` admits, so a matched mantissa is float-able.
+
+    The grammar and the digit-stripping are two statements about the same notation, and
+    keeping them apart is what let `_MANTISSA` match "20 000" while `float()` raised on it.
+    One function, so widening the grammar cannot leave a caller behind.
+    """
+    for mark in _GROUP_MARKS + " ":
+        digits = digits.replace(mark, "")
+    return digits
+
+
+# Scientific notation, plain or superscript, written `e6`, `x10^6` or `×10⁶`.
+_EXPONENT = r"(?:[eE][-+]?(?P<eexp>\d+)|\s*[\u00d7xX*\u00b7]\s*10\s*\^?\s*(?P<exp>[-+]?[\d\u2070-\u209f]+))"
+
 _NUM_RE = re.compile(
-    r"(?P<int>\d[\d,]*)(?:\.(?P<frac>\d+))?\s*"
+    rf"(?P<int>{_MANTISSA})(?:\.(?P<frac>\d+))?\s*"
     # Longest suffix first, so `MM` is not read as `M` with a stray letter left over, and
     # the not-a-word guard covers every abbreviation rather than only the single letters.
-    # Built from SCALE_TOKENS so this cannot drift from `_SCALE` again: a suffix the lexeme
-    # recognises and the magnitude parser does not is a scale error waiting to be admitted.
-    r"(?P<suf>(?:" + "|".join(SCALE_TOKENS) + r")(?![a-zA-Z]))?"
-    # Scientific notation, so "$20×10⁶" is not read as a bare 20.
-    r"(?:\s*[×xX*·]\s*10\s*\^?\s*(?P<exp>[-+]?[\d\u2070-\u209f]+))?",
+    rf"(?P<suf>(?:{_SCALE_ALT})(?![a-zA-Z]))?"
+    rf"{_EXPONENT}?",
     re.I,
 )
 
@@ -208,7 +234,10 @@ def _raw_scale(raw: str) -> float:
     scale = _SCALE.get((m.group("suf") or "").lower(), 1.0)
     # Scientific notation is a scale like any other: "$20×10⁶" is twenty million, and
     # reading it as a bare 20 was the same admit-the-error direction as an unknown suffix.
-    exponent = m.groupdict().get("exp")
+    # Either spelling of an exponent: `e6` and `×10⁶` are one concept in two notations, and
+    # reading only one of them left the other as a bare mantissa.
+    groups = m.groupdict()
+    exponent = groups.get("exp") or groups.get("eexp")
     if exponent:
         with contextlib.suppress(ValueError):
             scale *= 10 ** int(exponent.translate(_SUPERSCRIPT_DIGITS))
@@ -245,7 +274,7 @@ def _precision(raw: str) -> tuple[float, float] | None:
     m = _NUM_RE.search(raw or "")
     if not m:
         return None
-    ints = (m.group("int") or "").replace(",", "")
+    ints = strip_group_marks(m.group("int") or "")
     frac = m.group("frac") or ""
     if not ints:
         return None
@@ -261,8 +290,10 @@ _RANGE_RE = re.compile(
     # The suffix must not be the first letter of a WORD: "12-14 Months" is twelve to
     # fourteen months, not twelve to fourteen million. Requiring a non-letter after it
     # is what separates "$150-250K" from "0–18 Months".
-    r"(?P<a>\d[\d,]*(?:\.\d+)?)\s*[-–—]\s*\$?\s*(?P<b>\d[\d,]*(?:\.\d+)?)\s*"
-    r"(?P<suf>thousand|million|billion|trillion|[kKmMbBtT](?![a-zA-Z]))?",
+    rf"(?P<a>{_MANTISSA}(?:\.\d+)?)\s*[-\u2013\u2014]\s*\$?\s*(?P<b>{_MANTISSA}(?:\.\d+)?)\s*"
+    # Same scale alternation as every other grammar: `$20-30MM` was a range whose shared
+    # suffix only `_NUMERIC_LEXEME` understood.
+    rf"(?P<suf>(?:{_SCALE_ALT})(?![a-zA-Z]))?",
     re.I,
 )
 
@@ -283,15 +314,15 @@ def parse_range(raw: str) -> tuple[float, float] | None:
     if not m:
         return None
     scale = _SCALE.get((m.group("suf") or "").lower(), 1.0)
-    lo = float(m.group("a").replace(",", "")) * scale
-    hi = float(m.group("b").replace(",", "")) * scale
+    lo = float(strip_group_marks(m.group("a"))) * scale
+    hi = float(strip_group_marks(m.group("b"))) * scale
     return (lo, hi) if lo <= hi else (hi, lo)
 
 
 # A trailing "+" is a floor; a LEADING "+" is a delta sign and not a bound at all. The
 # corpus carries "+76%" and "100%+" on the same deck as "$200B+", so requiring a digit
 # before the "+" is what separates them. Not end-anchored: "270+ sites" is a floor too.
-_PLUS_RE = re.compile(r"\d\s*[kKmMbBtT%]?\s*\+")
+_PLUS_RE = re.compile(rf"\d\s*(?:(?:{_SCALE_ALT})(?![a-zA-Z])|%)?\s*\+", re.I)
 _LEAD_AT_MOST = re.compile(r"^\s*[<≤]")
 _LEAD_AT_LEAST = re.compile(r"^\s*[>≥]")
 # A bound word LEADING the raw string qualifies the figure itself: "Over 30%", "at least
@@ -388,7 +419,9 @@ _NUMERIC_LEXEME = re.compile(
     # and `bn` are scales, `Monday` is not. A bare `x`/`X` is a multiple, which is a scale
     # on the figure just as much as `k` is.
     r"(?:\s*%|\s*[-\u2010-\u2015]?\s*"
-    r"(?:thousand|million|billion|trillion|crore|lakh|mm|mn|bn|tn|k|m|b|t|x)(?![A-Za-z]))?",
+    # `x` is not a magnitude in `_SCALE` (it is a multiple, not a power of ten) but it does
+    # end a number, so it is appended rather than folded in.
+    rf"(?:{_SCALE_ALT}|x)(?![A-Za-z]))?",
     re.I,
 )
 
@@ -715,7 +748,7 @@ def operand_tolerance(operator: str, figs: list[Figure]) -> float:
 
 def _norm(v: Any) -> float | None:
     try:
-        return float(str(v).replace(",", "").replace("$", "").strip())
+        return float(strip_group_marks(str(v).replace("$", "")).strip())
     except (TypeError, ValueError):
         return None
 
@@ -1696,7 +1729,11 @@ def _inventory_numerals(inventory: dict[str, Any]) -> int:
     for slide in slides:
         if not isinstance(slide, dict):
             continue
-        for key in ("headline", "summary", "content", "text"):
+        # `content_summary` IS THE SCHEMA'S FIELD NAME. This read `summary`/`content`/`text`
+        # — none of which a real inventory has — so the fuse counted zero numerals on every
+        # production deck and never armed. The test that was meant to prove it worked
+        # fabricated a `summary` key, which is exactly how a field-name mismatch survives.
+        for key in ("headline", "content_summary"):
             value = slide.get(key)
             if isinstance(value, str):
                 total += len(_DIGIT_RUN.findall(value))

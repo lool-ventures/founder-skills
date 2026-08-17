@@ -46,6 +46,11 @@ _GATE_STATE_NAME = "gate_state.json"
 
 _AUDITABLE_SOURCES = ("founder", "auto_satisfied")
 
+
+class UnreadableGate(Exception):
+    """A gate file exists but cannot be parsed. It may hold a decision already made."""
+
+
 # The answered-gate rules are re-checked at READ time, deliberately: the write-time check
 # was routable around through `emit`, and a rule that authorises skipping a founder's
 # decision should not rest on a single choke point. IMPORTED rather than restated — a
@@ -71,8 +76,12 @@ def _read_gate_state(review_dir: str) -> tuple[str, str, str, str, str]:
     try:
         with open(path, encoding="utf-8") as f:
             gate = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return empty
+    except (json.JSONDecodeError, OSError) as e:
+        # UNREADABLE IS NOT ABSENT, and this reader runs BEFORE the writer that already
+        # learned that. The skill calls setup_run first, so mapping malformed JSON to the
+        # empty state let `--clean` delete a file that may hold this run's decline —
+        # `gate_state.py emit`'s fail-closed check was one consumer too late.
+        raise UnreadableGate(str(e)) from e
     if not isinstance(gate, dict):
         return empty
     answer = str(gate.get("answer") or "")
@@ -138,7 +147,16 @@ def main() -> int:
     # An answered same-run gate with no `answer_source` was written by a path that bypassed
     # `gate_state.py answer` or predates the field. It cannot be audited, so it is not
     # resumed — but it is also not evidence that the checkpoints are stale, so they stay.
-    gate_answer, gate_run_id, answer_source, gate_id, action = _read_gate_state(review_dir)
+    try:
+        gate_answer, gate_run_id, answer_source, gate_id, action = _read_gate_state(review_dir)
+    except UnreadableGate as e:
+        print(
+            f"Error: {os.path.join(review_dir, _GATE_STATE_NAME)} exists but is unreadable ({e}). It "
+            "may record a decision this run already made — including a decline — so it is neither "
+            "read nor removed. Repair or delete it deliberately.",
+            file=sys.stderr,
+        )
+        return 1
     same_run_answered = bool(gate_answer) and gate_run_id == run_id
     resume = same_run_answered and answer_source in _AUDITABLE_SOURCES
 

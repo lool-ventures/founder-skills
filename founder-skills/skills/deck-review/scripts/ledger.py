@@ -42,6 +42,7 @@ from reconcile import (  # type: ignore[import-not-found]  # noqa: E402
     _precision,
     _raw_scale,
     quote_is_identifying,
+    strip_group_marks,
 )
 
 UNIT_KINDS = {"money", "count", "percent", "multiple", "duration", "date"}
@@ -76,7 +77,9 @@ def _parsed_magnitude(raw: str) -> float | None:
     match = _NUM_RE.search(raw or "")
     if not match or not match.group("int"):
         return None
-    digits = match.group("int").replace(",", "")
+    # Strip every grouping mark the shared mantissa admits, not just the comma: "$20 000"
+    # is twenty thousand, and reading it as 20 made the correct value look like a 1000x error.
+    digits = strip_group_marks(match.group("int"))
     frac = match.group("frac")
     try:
         magnitude = float(f"{digits}.{frac}") if frac else float(digits)
@@ -95,7 +98,7 @@ def _numeric_tokens(raw: str) -> list[float]:
     """
     out: list[float] = []
     for match in _NUM_RE.finditer(raw or ""):
-        digits = (match.group("int") or "").replace(",", "")
+        digits = strip_group_marks(match.group("int") or "")
         if not digits:
             continue
         frac = match.group("frac")
