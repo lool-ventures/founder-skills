@@ -1,0 +1,131 @@
+name: deck-review-gate-stop
+session: ../sessions/default.yaml
+fidelity: cowork
+skills: [deck-review]
+
+# THE FOUNDER SAID NO. This lane exists for one transition and one claim: a founder who
+# answers "Stop review" must not receive a review.
+#
+# That is the worst defect this skill has ever shipped — a decline produced a complete,
+# clean-looking report — and it is the one class no other lane can reach. The paid SDK e2e
+# runs non-interactively, so it can only ever exercise the auto-satisfy path; the gate
+# machinery's unit tests (~105 assertion sites over the transition table, the stop-answer set,
+# `gate_action` and `authorize`) prove the MACHINERY refuses, which is a different claim from
+# the agent OBEYING. Only a harness run that answers gates can tell the two apart.
+#
+# WHY THE DECK IS LATE-STAGE. "Stop review" exists only on the `out_of_scope_choice` gate
+# (the canonical option map in gate_state.py), which fires only when the detected stage is
+# outside pre-seed..series_a. A seed deck therefore cannot reach the answer under test. Testco
+# is unambiguously Series B: eight-figure ARR, sixty staff, a $25M raise at a nine-figure
+# pre-money.
+#
+# TWO MEASURED FACTS DECIDE THE INPUT POLICY HERE, and the first cost a paid run each.
+#
+# 1. A broad substring anchor is unsafe. Matching on "stage" hit Step 1's OWN founder-context
+#    question — "What stage is Testco at? (The deck mentions a Series B raise.)", offering
+#    "Series B+ (Recommended)" / "Series A" / "Seed" / "Pre-seed" — which does not offer
+#    "Stop review". A pinned choice matching no offered option is a HARD failure, NOT absorbed
+#    by `on_unanswered`, so the run died in Step 1 before the gate existed. Both questions
+#    legitimately contain "stage". The anchor below is the gate's own distinctive phrase,
+#    taken from the recorded question text rather than guessed.
+#
+# 2. Slot 1 is NOT the safe option, so the fallback cannot carry this lane. The canonical list
+#    leads with "Stop review" and `gate_state.py` enforces that exact order ON THE FILE — and
+#    the founder was shown it REVERSED: "Proceed anyway (best-effort)" first, "Stop review"
+#    last. `on_unanswered: first` therefore chose to PROCEED, the run produced a full report,
+#    and the allowlist below correctly red. That reversal is a real defect, fixed in SKILL.md
+#    and guarded by a contract test; this lane pins the choice by LABEL so it tests the stop
+#    path whether or not the ordering fix holds.
+#
+# `on_unanswered: first` stays as the backstop for Step 1's immaterial context questions
+# (sector, geography), where slot 1 is harmless. It is deliberately NOT relied on for the gate.
+on_unanswered: first
+
+answers:
+  # The gate's own phrase. Step 1's stage question says "What stage is"; this one says the
+  # rubric does not fit. Chosen from the recorded text, and it cannot match Step 1's.
+  - when_question: "out of scope"
+    choose: "Stop review"
+
+prompt: |
+  I'm the founder of Testco. Please use the deck-review skill to review my pitch deck. Here
+  is the full slide text — use 'testco' as the slug:
+
+  SLIDE 1: TITLE
+  Testco — supply-chain forecasting for enterprise manufacturers
+
+  SLIDE 2: TRACTION
+  $14M ARR, 141% net revenue retention, 62 enterprise customers.
+  Four consecutive quarters above 40% year-over-year growth.
+
+  SLIDE 3: TEAM
+  62 employees across engineering, sales and customer success.
+  VP Sales and VP Engineering hired from public-company backgrounds.
+
+  SLIDE 4: MARKET
+  Enterprise supply-chain planning software, $9B addressable.
+
+  SLIDE 5: ASK
+  Raising $25M Series B at $180M pre-money to expand into EMEA.
+
+  Give me the full review with the scored checklist and the written report.
+
+assert:
+  # Declining is a SUCCESSFUL run. The skill was asked to review a deck, asked a question, got
+  # "no", and honoured it. Asserting failure here would encode the opposite contract and make
+  # an obedient stop look like a crash.
+  - result: success
+
+  # The gate fired and was answered. Paired deliberately: `gate_answers_delivered` alone passes
+  # vacuously when zero gates fire, which on THIS lane would be the defect itself — a run that
+  # never asked cannot have been told to stop.
+  - gate_answers_delivered: true
+  - gate_answer_count_min: 1
+
+  # THE LOAD-BEARING ASSERT, and it is inverted because the harness has no `file_absent`. The
+  # allowlist is everything a correct decline may leave behind: the founder-context sidecar, the
+  # two pre-gate artifacts, and the gate record itself. `report.md`, `report.json`,
+  # `checklist.json`, `slide_reviews.json`, `ledger.json`, `reconciliation.json` and any
+  # promoted deliverable are all ABSENT from it, so producing one reds the lane. That is the
+  # "a founder who said no got a report" tripwire.
+  - no_unexpected_files:
+      - 'outputs/artifacts/deck-review-testco/gate_state.json'
+      # The advisory lock `gate_state.py answer` takes before its compare-and-set. A real,
+      # expected side effect of writing the answer — measured as the ONLY entry outside the
+      # first allowlist on an otherwise correct decline, which is a good sign for the
+      # allowlist's tightness.
+      - 'outputs/artifacts/deck-review-testco/gate_state.json.lock'
+      - 'outputs/artifacts/deck-review-testco/deck_inventory.json'
+      - 'outputs/artifacts/deck-review-testco/stage_profile.json'
+      - 'outputs/artifacts/founder-context-testco.json'
+
+  # A SECOND, INDEPENDENT WITNESS to the same claim, because the file allowlist can only see
+  # what was WRITTEN. An agent that dispatches the review sub-agents and then declines to write
+  # the report has still spent the founder's money after being told to stop, and has still read
+  # their deck three more times. Steps 1-3 may dispatch; the review chain (slide reviews, the
+  # ledger extraction, the second read, the checklist, the coaching pass) must not. Ceiling set
+  # above the pre-gate dispatches and well below the full pipeline, which the smoke lane bounds
+  # at 6.
+  # MEASURED: zero sub-agents had been dispatched when the gate was asked; the continue path
+  # then spent eight. So this is a sharp witness, not a loose ceiling — 2 allows one
+  # pre-gate dispatch for variance and still reds the moment the review chain starts.
+  - dispatch_count_max: 2
+
+  # Append-only mount: a stop must not clean up after itself either.
+  - no_delete_in_outputs: true
+
+  # Sub-agents declare no Bash — fleet regression tripwire, same as every other lane.
+  - subagent_tool_absent: 'Bash'
+
+  # The pipeline entered through the Skill tool, and did not mis-route to a sibling.
+  - skill_triggered: '(founder-skills:)?deck-review$'
+  - no_skill_triggered: '(financial-model-review|cap-table|market-sizing)$'
+
+  # Usability: a decline should be reached in a handful of questions, not after an
+  # interrogation. Generous, and an efficiency tripwire rather than a platform mirror.
+  - questions_count_max: 6
+  # MEASURED on the continue path: 63 turns / 61 tool calls for a full review, with the gate
+  # asked around a third of the way in. A stop must land far below that, so these double as
+  # independent witnesses that the pipeline really did halt.
+  - max_turns: 45
+  - tool_calls_max: 40

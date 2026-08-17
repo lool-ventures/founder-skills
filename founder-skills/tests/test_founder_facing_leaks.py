@@ -184,3 +184,43 @@ def test_block_stats_reports_a_ratio_not_just_hits() -> None:
     path.unlink()
     assert (leak_blocks, total_blocks) == (1, 2)
     assert hits > leak_blocks, "one block carried several hits — which is why the ratio is the metric"
+
+
+def test_the_published_command_keep_set_is_narrow() -> None:
+    """A code span holding a command the plugin PUBLISHES is not a leak — and nothing else is.
+
+    `/founder-skills:feedback` is a slash command a founder is meant to type, so naming it is
+    the sanctioned feedback channel rather than leaked plumbing. Counting it inflated the
+    fleet total by one, in the one direction that matters for a ratchet.
+
+    This test exists because a keep-set is exactly the shape that quietly becomes a hole. It
+    pins all four properties: the exemption fires for a published command, does NOT fire for an
+    unpublished one, leaves every other leak class untouched, and is load-bearing (emptying it
+    restores the finding). The members are derived from `founder-skills/commands/`, so the set
+    cannot drift from what the plugin actually ships.
+    """
+    import leak_scan
+
+    published = "/founder-skills:feedback"
+    assert published in leak_scan.PUBLISHED_COMMANDS, (
+        f"{published} is no longer derived from commands/; the keep-set reads that directory, so "
+        "either the command was renamed or the derivation broke"
+    )
+    assert not leak_scan.scan_text(f"you can run `{published}` any time"), "a published command was flagged"
+
+    # NOT a blank cheque for anything command-shaped.
+    assert leak_scan.scan_text("run `/founder-skills:not-a-real-command`"), (
+        "an UNPUBLISHED command-shaped token was exempted — the keep-set has become a pattern"
+    )
+
+    # Every other class is untouched, including a code span that is genuine plumbing.
+    for plumbing in ("I ran `compose_report.py`", "hit `W_THIN_QUOTES`", "see `--gate-state`"):
+        assert leak_scan.scan_text(plumbing), f"a genuine leak stopped firing: {plumbing!r}"
+
+    # Load-bearing: without the set, the finding comes back.
+    original = leak_scan.PUBLISHED_COMMANDS
+    try:
+        leak_scan.PUBLISHED_COMMANDS = frozenset()
+        assert leak_scan.scan_text(f"run `{published}`"), "the keep-set is not what suppresses this"
+    finally:
+        leak_scan.PUBLISHED_COMMANDS = original

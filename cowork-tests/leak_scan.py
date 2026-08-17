@@ -121,11 +121,38 @@ def founder_text_blocks(cassette: dict, *, turn: int | None = None) -> list[str]
     return out
 
 
+# A code span holding a command the PLUGIN PUBLISHES is not a leak. `/founder-skills:feedback`
+# is a slash command a founder is meant to type; naming it is the sanctioned feedback channel,
+# and counting it as internal plumbing makes the metric wrong in the one direction that matters
+# — it inflates the number a ratchet is supposed to drive down.
+#
+# This is a KEEP-SET, not a blocklist, which is why it does not contradict this file's design
+# note. It is bounded and self-maintaining: the members are read off `founder-skills/commands/`,
+# so publishing a command exempts it and deleting one un-exempts it, with no list to update.
+_PLUGIN_ROOT = Path(__file__).resolve().parent.parent / "founder-skills"
+_PLUGIN_NAME = "founder-skills"
+
+
+def _published_commands() -> frozenset[str]:
+    """Slash commands this plugin ships, in the forms a founder could be shown."""
+    names = {p.stem for p in (_PLUGIN_ROOT / "commands").glob("*.md")}
+    forms: set[str] = set()
+    for n in names:
+        forms |= {f"/{n}", f"/{_PLUGIN_NAME}:{n}", f"{_PLUGIN_NAME}:{n}"}
+    return frozenset(forms)
+
+
+PUBLISHED_COMMANDS = _published_commands()
+
+
 def scan_text(text: str) -> list[tuple[str, str]]:
     hits: list[tuple[str, str]] = []
     for name, pat in LEAK_CLASSES:
         for m in pat.finditer(text):
-            hits.append((name, m.group(0)))
+            token = m.group(0)
+            if name == "code_span" and token.strip("`").strip() in PUBLISHED_COMMANDS:
+                continue
+            hits.append((name, token))
     return hits
 
 
