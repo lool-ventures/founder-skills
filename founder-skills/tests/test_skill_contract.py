@@ -654,7 +654,14 @@ SKILL_MD_CEILING: dict[str, int] = {
     # rebuilding the same-run profile to Series A, and composing against the original gate produced
     # a clean report graded as Series A. The prose says to RE-EMIT after a rebuild rather than reuse
     # the record, because that is the failure the binding turns into a refusal.
-    "deck-review": 97_920,
+    # deck-review 97,920 -> 98,706 (+786): the round-eight binding was an EQUALITY (asked stage ==
+    # composed stage), which made the documented out-of-scope flow impossible — that gate asks about
+    # growth and "Proceed anyway" rebuilds to series_a. It is now stated as a TRANSITION, and the
+    # prose says which gate may be emitted for which stage, because `stage_confirmation` about an
+    # out-of-scope deck offers the founder no way to decline. The `needs_input` note is here because
+    # a hand-written summary let a founder read "Detected stage: Seed" over a record authorizing
+    # Series A.
+    "deck-review": 98_706,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

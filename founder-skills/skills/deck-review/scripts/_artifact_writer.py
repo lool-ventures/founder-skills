@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from typing import Any
@@ -40,8 +41,22 @@ def write_artifact(
         text = json.dumps(merged, indent=2, sort_keys=False) + "\n"
     else:
         text = json.dumps(merged, sort_keys=False) + "\n"
-    with open(abs_path, "w", encoding="utf-8") as f:
-        f.write(text)
+    # ATOMIC. `open(..., "w")` truncates first, so an interrupted write leaves a partial
+    # file — and for gate_state.json a partial file is an ERASURE: the record holds a
+    # founder's decision plus the history that carries it forward, and a reader that finds
+    # unparseable JSON has no way to distinguish "never asked" from "asked and truncated".
+    # Write beside the target and rename, which is atomic within a directory.
+    tmp_path = f"{abs_path}.tmp.{os.getpid()}"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, abs_path)
+    finally:
+        if os.path.exists(tmp_path):
+            with contextlib.suppress(OSError):
+                os.remove(tmp_path)
 
     return {"ok": True, "path": abs_path, "bytes": len(text.encode("utf-8"))}
 

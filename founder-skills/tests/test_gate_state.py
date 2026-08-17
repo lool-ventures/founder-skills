@@ -272,7 +272,7 @@ def test_emit_refuses_a_gate_that_arrives_already_answered() -> None:
             "context_summary": "x",
             "answer": "Proceed anyway (best-effort)",
         }
-        rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", out], json.dumps(body))
+        rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "growth", "-o", out], json.dumps(body))
         assert rc != 0, "emit accepted a pre-answered gate"
         assert "answer" in err
         assert not os.path.exists(out), "a refused emit must not write the artifact"
@@ -306,7 +306,7 @@ def test_emit_still_writes_an_ordinary_pending_gate() -> None:
             "options": ["Stop review", "Different stage", "Proceed anyway (best-effort)"],
             "context_summary": "x",
         }
-        rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", out], json.dumps(body))
+        rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "growth", "-o", out], json.dumps(body))
         assert rc == 0, err
         with open(out) as f:
             written = json.load(f)
@@ -332,7 +332,7 @@ def test_the_restriction_cannot_be_routed_around_by_emitting_then_resuming() -> 
             "answer_source": "auto_satisfied",
         }
         rc, _, _ = _run(
-            ["emit", "--run-id", "r1", "--stage", "seed", "-o", os.path.join(review_dir, "gate_state.json")],
+            ["emit", "--run-id", "r1", "--stage", "growth", "-o", os.path.join(review_dir, "gate_state.json")],
             json.dumps(body),
         )
         assert rc != 0, "emit wrote the self-authorised gate"
@@ -587,7 +587,7 @@ def test_a_decline_cannot_be_erased_by_emitting_another_gate() -> None:
             "options": list(gs.CANONICAL_OPTIONS["out_of_scope_choice"]),
             "context_summary": "x",
         }
-        _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", path], json.dumps(oos))
+        _run(["emit", "--run-id", "r1", "--stage", "growth", "-o", path], json.dumps(oos))
         _run(["answer", "--file", path, "--answer", "Stop review", "--source", "founder"])
 
         stage = {
@@ -630,13 +630,13 @@ def test_emit_refuses_a_gate_that_does_not_offer_its_own_options() -> None:
             "options": ["Proceed anyway (best-effort)"],
             "context_summary": "x",
         }
-        rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", out], json.dumps(rigged))
+        rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "growth", "-o", out], json.dumps(rigged))
         assert rc != 0, "emit wrote a gate that never offers the option to decline"
         assert "Stop review" in err or "options" in err
         assert not os.path.exists(out)
 
         ok = dict(rigged, options=list(gs.CANONICAL_OPTIONS["out_of_scope_choice"]))
-        rc_ok, _, err_ok = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", out], json.dumps(ok))
+        rc_ok, _, err_ok = _run(["emit", "--run-id", "r1", "--stage", "growth", "-o", out], json.dumps(ok))
         assert rc_ok == 0, err_ok
 
 
@@ -676,7 +676,7 @@ def test_answering_an_already_answered_gate_is_refused() -> None:
             "options": list(gs.CANONICAL_OPTIONS["out_of_scope_choice"]),
             "context_summary": "x",
         }
-        _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", path], json.dumps(body))
+        _run(["emit", "--run-id", "r1", "--stage", "growth", "-o", path], json.dumps(body))
         rc, _, err = _run(["answer", "--file", path, "--answer", "Stop review", "--source", "founder"])
         assert rc == 0, err
 
@@ -737,7 +737,7 @@ def test_emit_returns_the_payload_to_present_verbatim() -> None:
             "options": list(gs.CANONICAL_OPTIONS["out_of_scope_choice"]),
             "context_summary": "Detected: growth",
         }
-        rc, stdout, err = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", out], json.dumps(body))
+        rc, stdout, err = _run(["emit", "--run-id", "r1", "--stage", "growth", "-o", out], json.dumps(body))
         assert rc == 0, err
         receipt = json.loads(stdout)
         payload = receipt.get("needs_input")
@@ -931,10 +931,23 @@ def test_the_reader_refuses_an_out_of_scope_confirmation_however_it_was_written(
                     {**body, "metadata": {"run_id": "r1"}, "answer": "Looks right", "answer_source": "founder"}, f
                 )
         else:
+            # A truncated prior is now REFUSED by `emit` rather than treated as absent (see
+            # test_a_truncated_gate_file_does_not_erase_a_decline), so this writer reaches
+            # the reader by writing the whole record directly — which is the case the matrix
+            # is actually about.
             with open(path, "w") as f:
                 f.write("{ truncated")
-            _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", path], json.dumps(body))
-            _run(["answer", "--file", path, "--answer", "Looks right", "--source", "founder"])
+            with open(path, "w") as f:
+                json.dump(
+                    {
+                        **body,
+                        "metadata": {"run_id": "r1"},
+                        "confirmed_stage": "growth",
+                        "answer": "Looks right",
+                        "answer_source": "founder",
+                    },
+                    f,
+                )
 
         with open(path) as f:
             record = json.load(f)
@@ -944,41 +957,28 @@ def test_the_reader_refuses_an_out_of_scope_confirmation_however_it_was_written(
         )
 
 
-def test_an_out_of_scope_profile_is_never_authorized_at_all() -> None:
-    """REWRITTEN, and the concept it tested is deleted rather than corrected.
+def test_an_out_of_scope_profile_is_never_the_thing_being_graded() -> None:
+    """REWRITTEN twice, and the second correction is the instructive one.
 
-    This used to assert that an out-of-scope deck could be authorized "through its own
-    gate" — i.e. that a growth profile plus an `out_of_scope_choice` answer composes. It
-    cannot, and the fix for that was a four-property search through history for consent,
-    which then let historical consent skip the rebuild it was meant to trigger.
+    The rule is about the profile the report is GRADED on, not about what the gate asked.
+    An out-of-scope gate is legitimate and necessary — it is how the founder is offered
+    "Stop review" — and its "Proceed anyway" answer resolves to series_a/low. What must
+    never happen is a REPORT graded at series_b or growth.
 
-    SKILL.md:531-533 leaves no path where an out-of-scope profile reaches compose: the
-    founder either declines, or the profile is rebuilt to series_a at low confidence. So the
-    rule is one check on the artifact being composed, and consent-in-history is not consulted
-    at all.
+    The previous version of this test asserted that an `out_of_scope_choice` gate cannot
+    authorize anything, using a fabricated in-scope `confirmed_stage`. That conflated the
+    question asked with the stage graded, and the rule it pinned refused the documented
+    flow outright.
     """
     gs = _gs()
     for stage in ("growth", "series_b"):
-        for gate_id, answer, options in (
-            ("stage_confirmation", "Looks right", _CANON_CONFIRM),
-            ("out_of_scope_choice", "Proceed anyway (best-effort)", _CANON_OOS),
-        ):
-            gate = _record(gate_id=gate_id, answer=answer, options=list(options), confirmed_stage=stage)
-            profile = {"metadata": {"run_id": "r1"}, "detected_stage": stage, "confidence": "low"}
-            assert not gs.authorize(gate, profile, "r1").permitted, (
-                f"an out-of-scope {stage} profile was authorized via {gate_id}/{answer!r}"
-            )
-
-    # And the state the founder's "proceed anyway" actually leads to IS authorized.
-    rebuilt = _record(
-        gate_id="out_of_scope_choice",
-        answer="Proceed anyway (best-effort)",
-        options=list(_CANON_OOS),
-        confirmed_stage="series_a",
-    )
-    assert gs.authorize(
-        rebuilt, {"metadata": {"run_id": "r1"}, "detected_stage": "series_a", "confidence": "low"}, "r1"
-    ).permitted
+        # A confirmation gate asked about an out-of-scope stage is refused at the writer,
+        # and refused here too if one reaches the reader by another route.
+        assert not gs.authorize(_asked(stage), _prof(stage, "high"), "r1").permitted
+        # And the out-of-scope gate does not authorize a report still graded out of scope.
+        assert not gs.authorize(_asked(stage, "out_of_scope_choice"), _prof(stage, "low"), "r1").permitted, (
+            f"a report graded at {stage} was authorized"
+        )
 
 
 def test_a_pending_gate_replaced_by_another_emit_leaves_a_trace() -> None:
@@ -995,7 +995,7 @@ def test_a_pending_gate_replaced_by_another_emit_leaves_a_trace() -> None:
             "options": list(gs.CANONICAL_OPTIONS["out_of_scope_choice"]),
             "context_summary": "x",
         }
-        _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", path], json.dumps(oos))
+        _run(["emit", "--run-id", "r1", "--stage", "growth", "-o", path], json.dumps(oos))
         confirm = {
             "gate_id": "stage_confirmation",
             "question": "?",
@@ -1161,12 +1161,17 @@ def _bound(stage: str = "seed", **over: object) -> dict:
             {"metadata": {"run_id": "r1"}, "detected_stage": "seed", "confidence": "low"},
         ),
         (
-            "out_of_scope_choice / Proceed anyway, after the series_a low rebuild",
+            # CORRECTED: this fabricated `confirmed_stage="series_a"` on an
+            # `out_of_scope_choice` gate — a record no writer can produce, since that gate
+            # is emitted only for out-of-scope stages. It made a rule that refused the
+            # documented flow look correct. The gate asks about the OUT-OF-SCOPE stage; the
+            # profile is what the answer rebuilt it to.
+            "out_of_scope_choice asked about growth / Proceed anyway, rebuilt to series_a low",
             _record(
                 gate_id="out_of_scope_choice",
                 options=["Stop review", "Different stage", "Proceed anyway (best-effort)"],
                 answer="Proceed anyway (best-effort)",
-                confirmed_stage="series_a",
+                confirmed_stage="growth",
             ),
             {"metadata": {"run_id": "r1"}, "detected_stage": "series_a", "confidence": "low"},
         ),
@@ -1289,3 +1294,196 @@ def test_the_gate_id_enum_is_validated_at_read_time() -> None:
     gs = _gs()
     problems = gs.validate_answered_gate(_bound(gate_id="frobnicate"))
     assert any("frobnicate" in p for p in problems), problems
+
+
+# ---------------------------------------------------------------------------
+# TRANSITIONS, NOT TERMINAL PAIRS. The table keyed on (gate_id, answer) plus the FINAL
+# profile, and required the stage the gate asked about to equal the stage being graded.
+# That is wrong for the one path where the answer's whole purpose is to CHANGE the stage:
+# an out-of-scope gate asks about growth, and "Proceed anyway" rebuilds to series_a. So the
+# documented flow was refused — I shipped a false refusal on a working path, and my own
+# positive tests hid it by fabricating `confirmed_stage="series_a"` on an
+# `out_of_scope_choice` gate, a record that cannot exist because that gate is only emitted
+# for out-of-scope stages.
+#
+# A row is therefore (asked stage, answer, source) -> (resulting stage, confidence).
+# ---------------------------------------------------------------------------
+
+
+def _asked(stage: str, gate_id: str = "stage_confirmation", **over: Any) -> dict[str, Any]:
+    options = _CANON_OOS if gate_id == "out_of_scope_choice" else _CANON_CONFIRM
+    base: dict[str, Any] = {
+        "metadata": {"run_id": "r1"},
+        "gate_id": gate_id,
+        "question": "?",
+        "options": list(options),
+        "context_summary": "x",
+        "answer": "Looks right" if gate_id == "stage_confirmation" else "Proceed anyway (best-effort)",
+        "answer_source": "founder",
+        "confirmed_stage": stage,
+    }
+    base.update(over)
+    return base
+
+
+def _prof(stage: str, confidence: str, run_id: str = "r1") -> dict:
+    return {"metadata": {"run_id": run_id}, "detected_stage": stage, "confidence": confidence}
+
+
+@pytest.mark.parametrize("asked", ["growth", "series_b"])
+def test_the_documented_out_of_scope_path_is_authorized(asked: str) -> None:
+    """The regression this block exists for. SKILL.md:535 rebuilds to series_a at low
+    confidence after the founder says proceed; the gate necessarily asked about the
+    out-of-scope stage, because that is the only stage for which it is emitted."""
+    gs = _gs()
+    gate = _asked(asked, "out_of_scope_choice")
+    verdict = gs.authorize(gate, _prof("series_a", "low"), "r1")
+    assert verdict.permitted, f"the documented out-of-scope path was refused: {verdict.reason}"
+
+
+def test_the_out_of_scope_answer_must_land_on_the_stage_it_promises() -> None:
+    """The transition is the check: proceed-anyway resolves to series_a/low and nothing
+    else, so the rebuild cannot quietly land somewhere more favourable."""
+    gs = _gs()
+    for stage, confidence in (("seed", "low"), ("series_a", "high"), ("growth", "low")):
+        verdict = gs.authorize(_asked("growth", "out_of_scope_choice"), _prof(stage, confidence), "r1")
+        assert not verdict.permitted, f"out-of-scope proceed landed on {stage}/{confidence}"
+
+
+def test_an_out_of_scope_gate_about_an_in_scope_stage_is_incoherent() -> None:
+    """The record my own tests fabricated. `out_of_scope_choice` is emitted only for
+    series_b/growth, so one claiming to have asked about seed was never produced by any
+    writer and must not be treated as evidence of anything."""
+    gs = _gs()
+    assert not gs.authorize(_asked("seed", "out_of_scope_choice"), _prof("series_a", "low"), "r1").permitted
+
+
+def test_an_in_scope_confirmation_still_requires_the_stage_to_be_unchanged() -> None:
+    """The binding that closed the round-eight defect stays for the gates whose answer does
+    NOT change the stage: confirming Seed cannot authorize a Series A report."""
+    gs = _gs()
+    assert gs.authorize(_asked("seed"), _prof("seed", "high"), "r1").permitted
+    assert not gs.authorize(_asked("seed"), _prof("series_a", "high"), "r1").permitted
+
+
+def test_an_out_of_scope_gate_cannot_be_emitted_for_an_in_scope_stage() -> None:
+    """Refused at the writer too, so the incoherent record is never produced."""
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "gate_state.json")
+        body = {
+            "gate_id": "out_of_scope_choice",
+            "question": "?",
+            "options": list(_CANON_OOS),
+            "context_summary": "x",
+        }
+        rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", out], json.dumps(body))
+        assert rc != 0, "an out-of-scope gate was emitted about an in-scope stage"
+        assert "seed" in err
+
+
+def test_the_presented_payload_states_the_stage_it_will_authorize() -> None:
+    """`--stage` was a hidden token: the founder saw a caller-written `context_summary` and
+    the artifact carried something else. Probed — emitting `--stage series_a` while showing
+    "Detected stage: Seed" let a `Looks right` authorize a Series A report.
+
+    The payload now carries the stage, and the producer states it, so the thing the founder
+    reads and the thing that authorizes cannot disagree."""
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "gate_state.json")
+        body = {
+            "gate_id": "stage_confirmation",
+            "question": "Does this stage detection look right?",
+            "options": list(_CANON_CONFIRM),
+            "context_summary": "Detected stage: Seed",
+        }
+        rc, stdout, err = _run(["emit", "--run-id", "r1", "--stage", "series_a", "-o", out], json.dumps(body))
+        assert rc == 0, err
+        payload = json.loads(stdout)["needs_input"]
+        assert payload["confirmed_stage"] == "series_a"
+        assert "series_a" in payload["context_summary"], (
+            f"the founder-visible summary does not state the stage being confirmed: {payload['context_summary']!r}"
+        )
+
+
+def test_an_unanswered_out_of_scope_question_does_not_become_consent_by_rebuilding() -> None:
+    """The supported sequence: emit the out-of-scope question, never answer it, rebuild to
+    series_a/low anyway, emit a confirmation, answer that. The unanswered question is
+    recorded as superseded and skipped by reduction, so a founder who was never given
+    "Stop review" ends up with a report.
+
+    Reaching series_a/low from an out-of-scope deck is only legitimate BECAUSE the founder
+    said proceed, so the run has to show that they did."""
+    gs = _gs()
+    gate = _asked(
+        "series_a",
+        history=[{"gate_id": "out_of_scope_choice", "run_id": "r1", "superseded": True}],
+    )
+    verdict = gs.authorize(gate, _prof("series_a", "low"), "r1")
+    assert not verdict.permitted, "an unanswered out-of-scope question was rebuilt past"
+    assert "never answered" in verdict.reason or "declin" in verdict.reason, verdict.reason
+
+
+def test_an_answered_out_of_scope_question_permits_the_rebuilt_run() -> None:
+    """The counter-test: once they actually answered, the follow-up confirmation is fine."""
+    gs = _gs()
+    gate = _asked(
+        "series_a",
+        history=[
+            {
+                "gate_id": "out_of_scope_choice",
+                "answer": "Proceed anyway (best-effort)",
+                "answer_source": "founder",
+                "run_id": "r1",
+            }
+        ],
+    )
+    assert gs.authorize(gate, _prof("series_a", "low"), "r1").permitted
+
+
+def test_a_truncated_gate_file_does_not_erase_a_decline() -> None:
+    """Gate writes truncate and rewrite in place, and `_read_existing` treats unparseable
+    JSON as absent — deliberately, so a corrupt file cannot strand a run. Together that is
+    an erasure path: Stop review, truncate, emit fresh, answer, authorized.
+
+    The write is atomic now, so a truncated file is not a state the writer produces; and a
+    record that IS unreadable is no longer silently treated as a clean slate."""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "gate_state.json")
+        oos = {
+            "gate_id": "out_of_scope_choice",
+            "question": "?",
+            "options": list(_CANON_OOS),
+            "context_summary": "x",
+        }
+        _run(["emit", "--run-id", "r1", "--stage", "growth", "-o", path], json.dumps(oos))
+        _run(["answer", "--file", path, "--answer", "Stop review", "--source", "founder"])
+        with open(path, "w") as f:
+            f.write("{ truncated")
+        confirm = {
+            "gate_id": "stage_confirmation",
+            "question": "?",
+            "options": list(_CANON_CONFIRM),
+            "context_summary": "x",
+        }
+        rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", path], json.dumps(confirm))
+        assert rc != 0, "a truncated gate file was emitted over, erasing the decline it held"
+        assert "unreadable" in err.lower() or "corrupt" in err.lower(), err
+
+
+def test_stage_choice_options_must_be_four_distinct_stages() -> None:
+    """Membership plus a length of four accepted four duplicate `Seed`s — a gate that hides
+    every alternative while satisfying every check."""
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "gate_state.json")
+        body = {"gate_id": "stage_choice", "question": "?", "context_summary": "x"}
+        rc, _, err = _run(
+            ["emit", "--run-id", "r1", "--stage", "seed", "-o", out],
+            json.dumps({**body, "options": ["Seed", "Seed", "Seed", "Seed"]}),
+        )
+        assert rc != 0, "four duplicate options were accepted"
+        assert "distinct" in err.lower() or "duplicate" in err.lower(), err
+        rc_ok, _, err_ok = _run(
+            ["emit", "--run-id", "r1", "--stage", "seed", "-o", out],
+            json.dumps({**body, "options": ["Pre-seed", "Seed", "Series A", "Series B"]}),
+        )
+        assert rc_ok == 0, err_ok

@@ -41,6 +41,7 @@ considered, not the gate that runs today.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import pathlib
@@ -138,15 +139,40 @@ _SCALE_WORDS = {"thousand": 1e3, "million": 1e6, "billion": 1e9, "trillion": 1e1
 # `raw="$20MM"` with the correct value 20,000,000 was REJECTED as disagreeing with a raw
 # that "reads as 20", while the wrong value 20 was accepted. One grammar, or the boundary
 # check and the producer it feeds contradict each other.
-_SCALE = {"k": 1e3, "m": 1e6, "mm": 1e6, "mn": 1e6, "b": 1e9, "bn": 1e9, "t": 1e12, "tn": 1e12, **_SCALE_WORDS}
+# `crore` (1e7) and `lakh` (1e5) are the South Asian units decks in that market print, and
+# they were in the QUOTE lexeme without being here — the third instance of the same split,
+# so the list is now shared rather than re-derived per call site.
+_SCALE = {
+    "k": 1e3,
+    "m": 1e6,
+    "mm": 1e6,
+    "mn": 1e6,
+    "b": 1e9,
+    "bn": 1e9,
+    "t": 1e12,
+    "tn": 1e12,
+    "crore": 1e7,
+    "lakh": 1e5,
+    "lac": 1e5,
+    **_SCALE_WORDS,
+}
+# Every scale token, longest first, for both grammars to build their alternations from.
+SCALE_TOKENS: tuple[str, ...] = tuple(sorted(_SCALE, key=len, reverse=True))
 
 _NUM_RE = re.compile(
     r"(?P<int>\d[\d,]*)(?:\.(?P<frac>\d+))?\s*"
     # Longest suffix first, so `MM` is not read as `M` with a stray letter left over, and
     # the not-a-word guard covers every abbreviation rather than only the single letters.
-    r"(?P<suf>thousand|million|billion|trillion|(?:mm|mn|bn|tn|[kmbt])(?![a-zA-Z]))?",
+    # Built from SCALE_TOKENS so this cannot drift from `_SCALE` again: a suffix the lexeme
+    # recognises and the magnitude parser does not is a scale error waiting to be admitted.
+    r"(?P<suf>(?:" + "|".join(SCALE_TOKENS) + r")(?![a-zA-Z]))?"
+    # Scientific notation, so "$20×10⁶" is not read as a bare 20.
+    r"(?:\s*[×xX*·]\s*10\s*\^?\s*(?P<exp>[-+]?[\d\u2070-\u209f]+))?",
     re.I,
 )
+
+# Superscript digits, for exponents written as "10⁶".
+_SUPERSCRIPT_DIGITS = str.maketrans("\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079", "0123456789")
 
 CAP = 0.05
 """Ceiling on relative precision. A CHOICE, not a derivation.
@@ -177,7 +203,16 @@ def _raw_scale(raw: str) -> float:
     if rng and rng.group("suf"):
         return _SCALE.get(rng.group("suf").lower(), 1.0)
     m = _NUM_RE.search(raw or "")
-    return _SCALE.get((m.group("suf") or "").lower(), 1.0) if m else 1.0
+    if not m:
+        return 1.0
+    scale = _SCALE.get((m.group("suf") or "").lower(), 1.0)
+    # Scientific notation is a scale like any other: "$20×10⁶" is twenty million, and
+    # reading it as a bare 20 was the same admit-the-error direction as an unknown suffix.
+    exponent = m.groupdict().get("exp")
+    if exponent:
+        with contextlib.suppress(ValueError):
+            scale *= 10 ** int(exponent.translate(_SUPERSCRIPT_DIGITS))
+    return scale
 
 
 def implied_tolerance(raw: str) -> float:

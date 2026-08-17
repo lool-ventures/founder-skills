@@ -498,7 +498,11 @@ Then return — as your final assistant message — a JSON object the parent age
 }
 ```
 
-`--stage` is the stage token this gate is ASKING about (`pre_seed`/`seed`/`series_a`/`series_b`/`growth`), and it is required. It binds the founder's answer to the profile it confirms: without it, a gate that confirmed Seed authorised a report graded as Series A after the profile was rebuilt, because nothing connected the two. `compose_report.py` refuses when the recorded stage and the composed profile disagree — so after any rebuild, **re-emit the gate with the new stage** rather than reusing the old record.
+The `needs_input` block `emit` prints carries `confirmed_stage` and a `context_summary` with the stage appended. **Present that summary, not your own** — a hand-written one let a founder read "Detected stage: Seed" while the record authorized Series A.
+
+`--stage` is the stage token this gate is ASKING about (`pre_seed`/`seed`/`series_a`/`series_b`/`growth`), and it is required. It binds the founder's answer to the profile it confirms: without it, a gate that confirmed Seed authorised a report graded as Series A after the profile was rebuilt, because nothing connected the two. `compose_report.py` checks the recorded stage against the composed profile as a TRANSITION, not an equality: an `out_of_scope_choice` asked about `growth` and answered `Proceed anyway (best-effort)` is expected to leave a `series_a` profile at low confidence, and is refused if it leaves anything else. For the in-scope gates the stage must be unchanged, so after a `Different stage` rebuild, **re-emit the gate with the new stage** rather than reusing the old record.
+
+`out_of_scope_choice` may only be emitted for `series_b`/`growth`, and `stage_confirmation` only for the in-scope three — the script refuses the other way round, because a `stage_confirmation` about an out-of-scope deck offers no way to decline.
 
 **For out-of-scope stages (series_b, growth):** use `gate_id: "out_of_scope_choice"`, question `"This looks out of scope. What should I do?"`, options `["Stop review", "Different stage", "Proceed anyway (best-effort)"]`.
 

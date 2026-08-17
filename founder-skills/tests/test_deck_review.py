@@ -4695,10 +4695,13 @@ def test_proceed_anyway_requires_the_profile_to_have_been_downgraded() -> None:
                 "reconciliation.json": _VALID_RECONCILIATION,
             }
         )
-        path = _gate_at(d, gate_id, answer, options)
+        # The out-of-scope gate is asked about an out-of-scope stage — that is the only
+        # stage it is emitted for — and its answer is expected to LEAVE series_a/low.
+        asked = "growth" if gate_id == "out_of_scope_choice" else "seed"
+        path = _gate_at(d, gate_id, answer, options, stage=asked)
         rc, _, err = _run_compose(d, ["--gate-state", path])
         assert rc != 0, f"{answer!r} composed without the low-confidence rebuild"
-        assert "confidence" in err.lower(), err
+        assert "confidence" in err.lower() or "resolves to" in err, err
 
         # The out-of-scope branch rebuilds to series_a specifically; the confirmation
         # branch keeps the detected stage. Both at low confidence, both this run.
@@ -4716,7 +4719,7 @@ def test_proceed_anyway_requires_the_profile_to_have_been_downgraded() -> None:
                 "reconciliation.json": _VALID_RECONCILIATION,
             }
         )
-        path2 = _gate_at(d2, gate_id, answer, options, stage=str(low["detected_stage"]))
+        path2 = _gate_at(d2, gate_id, answer, options, stage=asked)
         rc2, _, err2 = _run_compose(d2, ["--gate-state", path2])
         assert rc2 == 0, f"{answer!r} was refused after a correct rebuild: {err2}"
 
@@ -4822,17 +4825,17 @@ def test_out_of_scope_proceed_requires_the_stage_the_contract_names() -> None:
         ],
     )
     assert rc != 0, "an out-of-scope proceed composed against a growth profile"
-    # Refused earlier now, and for a stronger reason: an out-of-scope PROFILE never reaches
-    # a report at all, whatever the gate says. The series_a requirement is still asserted by
-    # the allow-table tests in test_gate_state.py.
-    assert "not a stage this review covers" in err, err
+    # The refusal now names the TRANSITION: proceed-anyway resolves to series_a/low, and
+    # this profile is still growth. (Stated as an equality in round eight, which made the
+    # documented flow impossible — see test_gate_state.py's transition block.)
+    assert "resolves to a 'series_a' profile" in err, err
 
     d_ok = _arts_with(_profile("series_a", "low"))
     rc_ok, _, err_ok = _run_compose(
         d_ok,
         [
             "--gate-state",
-            _gate_at(d_ok, "out_of_scope_choice", "Proceed anyway (best-effort)", options, stage="series_a"),
+            _gate_at(d_ok, "out_of_scope_choice", "Proceed anyway (best-effort)", options, stage="growth"),
         ],
     )
     assert rc_ok == 0, err_ok

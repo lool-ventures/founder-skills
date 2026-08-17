@@ -33,15 +33,29 @@ AUTO_SATISFIABLE_GATE = "stage_confirmation"
 AUTO_SATISFIABLE_ANSWER = "Looks right"
 
 
+class UnreadablePriorGate(Exception):
+    """A gate file exists but cannot be parsed."""
+
+
 def _read_existing(path: str) -> object:
-    """The gate already on disk, or None. Unreadable is treated as absent: this feeds the
-    history carry-forward, and refusing to emit because an old file is corrupt would strand
-    the run with no way to ask the question again."""
+    """The gate already on disk, or None if there is none.
+
+    UNREADABLE IS NOT ABSENT. It used to be, so a run could not be stranded by a corrupt
+    file — but the same tolerance is an erasure path: answer "Stop review", truncate the
+    file, emit a fresh gate, answer that, and the decline is gone. The history carry-forward
+    is exactly what a truncated file destroys.
+
+    Writes are atomic now, so the writer does not produce this state; if it appears anyway,
+    something outside the CLI wrote it and the run must not proceed as though the record had
+    always been empty.
+    """
+    if not os.path.exists(path):
+        return None
     try:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return None
+    except (json.JSONDecodeError, OSError) as e:
+        raise UnreadablePriorGate(str(e)) from e
 
 
 def _as_run_id(gate: dict[str, object]) -> object:
@@ -224,23 +238,48 @@ OUT_OF_SCOPE_STAGE_TOKENS: frozenset[str] = frozenset({"series_b", "growth"})
 KNOWN_GATE_IDS: frozenset[str] = frozenset({"stage_confirmation", "out_of_scope_choice", "stage_choice"})
 IN_SCOPE_STAGE_TOKENS: frozenset[str] = frozenset({"pre_seed", "seed", "series_a"})
 
-# THE COMPLETE SET OF STATES THAT AUTHORIZE A REPORT: (gate_id, answer) -> what the stage
-# profile must look like. Everything absent from this table is refused.
+# THE COMPLETE SET OF TRANSITIONS THAT AUTHORIZE A REPORT.
 #
-# The previous version was refusal-predicates-then-permit, and a probe refuted its claim
-# that an unenumerated case would deny: `gate_id: frobnicate` with the globally-recognised
-# answer "Not sure — proceed anyway" authorized a clean report. Writing the PERMITTED set
-# out is the difference between deny-by-default as a description and as a mechanism.
+# Keyed on the stage the gate ASKED about, because for one of these rows the answer's whole
+# purpose is to CHANGE the stage. The previous version keyed on (gate_id, answer) and then
+# required the asked stage to equal the stage being graded — which made the documented
+# out-of-scope flow impossible: that gate asks about growth, and "Proceed anyway" rebuilds
+# to series_a (SKILL.md:535). I shipped that false refusal, and my own positive tests hid it
+# by fabricating `confirmed_stage: series_a` on an `out_of_scope_choice` gate, a record no
+# writer can produce because that gate is only emitted for out-of-scope stages.
 #
-# Three rows, because that is how many terminal states the gate actually has. `confidence`
-# of None means "not constrained"; `stage` of None means "any in-scope stage".
-TERMINAL_ROWS: dict[tuple[str, str], dict[str, str | None]] = {
-    ("stage_confirmation", "Looks right"): {"confidence": None, "stage": None},
-    # SKILL.md rebuilds at LOW confidence before this one continues.
-    ("stage_confirmation", "Not sure — proceed anyway"): {"confidence": "low", "stage": None},
-    # SKILL.md rebuilds to series_a at low confidence before this one continues.
-    ("out_of_scope_choice", "Proceed anyway (best-effort)"): {"confidence": "low", "stage": "series_a"},
+# A row is (asked-stage class, gate_id, answer) -> what the profile must have become.
+# `resulting_stage` of None means "unchanged from what was asked".
+_ASKED_IN_SCOPE, _ASKED_OUT_OF_SCOPE = "in_scope", "out_of_scope"
+
+TRANSITIONS: dict[tuple[str, str, str], dict[str, str | None]] = {
+    # Confirming an in-scope detection changes nothing.
+    (_ASKED_IN_SCOPE, "stage_confirmation", "Looks right"): {
+        "resulting_stage": None,
+        "confidence": None,
+    },
+    # "Not sure" keeps the stage and downgrades confidence.
+    (_ASKED_IN_SCOPE, "stage_confirmation", "Not sure — proceed anyway"): {
+        "resulting_stage": None,
+        "confidence": "low",
+    },
+    # THE ROW THAT MOVES THE STAGE. Out of scope, the founder says proceed, and SKILL.md
+    # rebuilds to series_a at low confidence. Requiring exactly that is what stops the
+    # rebuild landing somewhere more favourable.
+    (_ASKED_OUT_OF_SCOPE, "out_of_scope_choice", "Proceed anyway (best-effort)"): {
+        "resulting_stage": "series_a",
+        "confidence": "low",
+    },
 }
+
+
+def _asked_class(stage: str) -> str | None:
+    """Which side of the scope line the gate was asked about, or None if unrecognised."""
+    if stage in IN_SCOPE_STAGE_TOKENS:
+        return _ASKED_IN_SCOPE
+    if stage in OUT_OF_SCOPE_STAGE_TOKENS:
+        return _ASKED_OUT_OF_SCOPE
+    return None
 
 
 def _reduce_history(gate: dict[str, object], run_id: str) -> str | None:
@@ -342,53 +381,74 @@ def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization
         # run may do with it. Both are needed.
         return Authorization(False, f"unrecognised gate action {action!r}")
 
-    # --- the deck being graded must be in scope
-    stage = str(profile.get("detected_stage") or "").lower()
-    if stage not in IN_SCOPE_STAGE_TOKENS:
+    # --- the transition. One row must match, or nothing authorizes this.
+    asked = str(gate.get("confirmed_stage") or "").lower()
+    if not asked:
         return Authorization(
             False,
-            f"the profile being composed is {stage!r}, which is not a stage this review covers — an "
-            "out-of-scope deck is either declined or rebuilt to series_a before a report exists",
+            "the gate does not record which stage it asked about, so its answer cannot be checked "
+            "against the profile this report is graded on",
         )
+    asked_class = _asked_class(asked)
+    if asked_class is None:
+        return Authorization(False, f"the gate records an unrecognised stage {asked!r}")
 
-    # --- THE TABLE. One row must match, or nothing authorizes this.
-    row = TERMINAL_ROWS.get((str(gate.get("gate_id")), str(gate.get("answer"))))
+    stage = str(profile.get("detected_stage") or "").lower()
+    row = TRANSITIONS.get((asked_class, str(gate.get("gate_id")), str(gate.get("answer"))))
     if row is None:
         return Authorization(
             False,
-            f"{gate.get('answer')!r} on the {gate.get('gate_id')!r} gate is not a state that authorizes a report",
+            f"{gate.get('answer')!r} on the {gate.get('gate_id')!r} gate, asked about {asked!r}, is not "
+            "a transition that authorizes a report",
         )
+
+    expected_stage = row["resulting_stage"] or asked
+    if stage != expected_stage:
+        return Authorization(
+            False,
+            f"{gate.get('answer')!r} resolves to a {expected_stage!r} profile — the one being composed "
+            f"holds {profile.get('detected_stage')!r}",
+        )
+    # The resulting stage must itself be reviewable. Every row lands in scope, so this is a
+    # backstop against a future row that does not.
+    if stage not in IN_SCOPE_STAGE_TOKENS:
+        return Authorization(
+            False,
+            f"the profile being composed is {stage!r}, which is not a stage this review covers",
+        )
+    # REACHING series_a/low FROM OUT OF SCOPE REQUIRES THE FOUNDER TO HAVE SAID SO. The
+    # transition above verifies the profile is what the answer resolves to, and that is not
+    # enough on its own: emit the out-of-scope question, never answer it, rebuild to
+    # series_a/low anyway, then emit a plain confirmation and answer THAT. Every record is
+    # individually fine and the founder was never offered "Stop review". So a
+    # series_a/low profile carrying a superseded out-of-scope question in its history must
+    # show that question was answered.
+    if asked_class == _ASKED_IN_SCOPE:
+        unanswered_out_of_scope = False
+        answered_out_of_scope = False
+        entries = gate.get("history", [])
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, dict) or entry.get("run_id") != run_id:
+                continue
+            if entry.get("gate_id") != "out_of_scope_choice":
+                continue
+            if isinstance(entry.get("answer"), str) and entry["answer"].strip():
+                answered_out_of_scope = True
+            else:
+                unanswered_out_of_scope = True
+        if unanswered_out_of_scope and not answered_out_of_scope:
+            return Authorization(
+                False,
+                "an out-of-scope question was put to the founder in this run and never answered — "
+                "the deck cannot be reviewed on the strength of a question they did not get to answer",
+            )
+
     required_confidence = row["confidence"]
     if required_confidence is not None and profile.get("confidence") != required_confidence:
         return Authorization(
             False,
             f"{gate.get('answer')!r} continues only against a profile rebuilt at {required_confidence} "
             f"confidence — this one has {profile.get('confidence')!r}",
-        )
-    required_stage = row["stage"]
-    if required_stage is not None and stage != required_stage:
-        return Authorization(
-            False,
-            f"{gate.get('answer')!r} continues only against a {required_stage} profile — this one holds "
-            f"{profile.get('detected_stage')!r}",
-        )
-
-    # --- the gate must have confirmed THE STAGE BEING GRADED
-    # Nothing tied the two together, so confirming Seed, rebuilding the same-run profile to
-    # Series A, and composing against the original Seed gate produced a clean Series A
-    # report. The gate records which stage it was asked about; that has to be this one.
-    confirmed = str(gate.get("confirmed_stage") or "").lower()
-    if not confirmed:
-        return Authorization(
-            False,
-            "the gate does not record which stage it confirmed, so it cannot be checked against the "
-            "profile this report is graded on",
-        )
-    if confirmed != stage:
-        return Authorization(
-            False,
-            f"the gate confirmed {confirmed!r} but the profile being composed is {stage!r} — the stage "
-            "changed after the founder answered",
         )
 
     # --- auto-satisfy: the checkable half of its documented precondition
@@ -450,7 +510,16 @@ def cmd_emit(args: argparse.Namespace) -> int:
     #
     # Append-only, and only within a run: a prior completed review that was declined says
     # nothing about a fresh one (and `setup_run.py --clean` removes the file anyway).
-    prior = _read_existing(args.output)
+    try:
+        prior = _read_existing(args.output)
+    except UnreadablePriorGate as e:
+        print(
+            f"Error: a gate file at {args.output} exists but is unreadable ({e}) — it may hold a "
+            "decision this run already made, so it is not overwritten. Repair or remove it "
+            "deliberately.",
+            file=sys.stderr,
+        )
+        return 1
     if isinstance(prior, dict) and (is_answered(prior) or prior.get("gate_id")):
         history = [h for h in prior.get("history", []) if isinstance(h, dict)]
         entry: dict[str, object] = {
@@ -478,6 +547,25 @@ def cmd_emit(args: argparse.Namespace) -> int:
     data["confirmed_stage"] = args.stage
 
     gate_id = str(data.get("gate_id") or "")
+    # THE GATE AND THE STAGE IT ASKS ABOUT MUST AGREE. `out_of_scope_choice` exists for
+    # series_b/growth, so one emitted about seed asks an out-of-scope question about an
+    # in-scope deck — an incoherent record, and exactly what my own tests fabricated to make
+    # a broken authorization rule look correct.
+    if gate_id == "out_of_scope_choice" and args.stage not in OUT_OF_SCOPE_STAGE_TOKENS:
+        print(
+            f"Error: out_of_scope_choice is for {sorted(OUT_OF_SCOPE_STAGE_TOKENS)}, not {args.stage!r} "
+            "— an in-scope deck gets stage_confirmation",
+            file=sys.stderr,
+        )
+        return 1
+    if gate_id == "stage_confirmation" and args.stage in OUT_OF_SCOPE_STAGE_TOKENS:
+        print(
+            f"Error: {args.stage!r} is out of scope, so the founder must be asked through "
+            "out_of_scope_choice — stage_confirmation offers no way to decline",
+            file=sys.stderr,
+        )
+        return 1
+
     options = data.get("options")
     if isinstance(options, list) and all(isinstance(o, str) for o in options):
         if gate_id in CANONICAL_OPTIONS and tuple(options) != CANONICAL_OPTIONS[gate_id]:
@@ -491,6 +579,13 @@ def cmd_emit(args: argparse.Namespace) -> int:
             outside = [o for o in options if o not in STAGE_CHOICE_OPTIONS]
             if outside:
                 print(f"Error: stage_choice offered {outside!r}, which are not stages", file=sys.stderr)
+                return 1
+            if len(set(options)) != len(options):
+                print(
+                    f"Error: stage_choice offered duplicate options {options!r} — duplicates hide the "
+                    "alternatives the founder is supposed to choose between",
+                    file=sys.stderr,
+                )
                 return 1
             if len(options) != 4:
                 # Four is what AskUserQuestion renders and what SKILL.md offers: the enum
@@ -518,12 +613,20 @@ def cmd_emit(args: argparse.Namespace) -> int:
     # options are enforced on the FILE, and SKILL.md retyped the `needs_input` block by
     # hand -- so a record containing "Stop review" could sit beside a displayed choice that
     # omitted it. Validation then guarantees what was recorded, not what was asked.
+    # THE STAGE IS PART OF WHAT THE FOUNDER IS SHOWN. `--stage` was a hidden token: the
+    # summary was caller-written and the artifact carried something else, so emitting
+    # `--stage series_a` behind "Detected stage: Seed" let a "Looks right" authorize a
+    # Series A report. The producer appends the stage it will authorize, so the sentence the
+    # founder reads and the token that authorizes cannot disagree.
+    summary = str(data.get("context_summary") or "")
+    stated = f"{summary}\n(Confirming stage: {args.stage}.)" if summary else f"Confirming stage: {args.stage}."
     receipt["needs_input"] = {
         "gate_state_path": os.path.abspath(args.output),
         "gate_id": data.get("gate_id"),
         "question": data.get("question"),
         "options": data.get("options"),
-        "context_summary": data.get("context_summary"),
+        "context_summary": stated,
+        "confirmed_stage": args.stage,
     }
     sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     return 0

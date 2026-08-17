@@ -511,3 +511,22 @@ def test_real_date_expressions_including_trailing_punctuation() -> None:
     ):
         rc, _, err = _run({"figures": [_date(raw=raw, value=value, quote=f"as of {raw}")]})
         assert rc == 0, f"{raw!r}/{value} rejected: {err}"
+
+
+def test_the_scale_forms_the_quote_grammar_knows_are_the_ones_the_ledger_validates() -> None:
+    """ "One grammar" was claimed and was still false for three forms.
+
+    The quote lexeme learned `crore`, `lakh` and `×10⁶` so a figure would stop inheriting a
+    larger number's approximation; `_parsed_magnitude` — the authoritative parser the ledger
+    validates against — did not. Measured: `raw="$20 crore"` with the CORRECT value
+    200,000,000 was rejected while the wrong 20 was accepted, and the same for `$20×10⁶`.
+    Every one of those is the direction that admits a scale error.
+    """
+    for raw, correct in (("$20 crore", 200_000_000), ("$2 lakh", 200_000), ("$20×10⁶", 20_000_000)):
+        fig = _fig(value=correct, raw=raw, quote=f"total of {raw}")
+        rc, _, err = _run({"figures": [fig]})
+        assert rc == 0, f"{raw!r} with its correct value {correct} was rejected: {err}"
+
+        wrong = _fig(value=20, raw=raw, quote=f"total of {raw}")
+        rc_wrong, _, _ = _run({"figures": [wrong]})
+        assert rc_wrong != 0, f"{raw!r} accepted a bare mantissa as its value"

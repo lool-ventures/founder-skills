@@ -1639,3 +1639,14 @@ def test_the_presented_gate_payload_comes_from_the_producer() -> None:
     assert "`needs_input` block `gate_state.py emit` printed, verbatim" in text, (
         "SKILL.md does not tell the agent to present the producer's own payload"
     )
+
+
+def test_the_skill_presents_the_producer_summary_including_the_stage() -> None:
+    """`--stage` was a hidden token while the founder read a caller-written summary, so the
+    two could disagree — "Detected stage: Seed" over a record authorizing Series A."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    assert "Present that summary, not your own" in text, (
+        "SKILL.md does not tell the agent to show the producer's summary, which is the only one "
+        "guaranteed to state the stage being confirmed"
+    )
+    assert "confirmed_stage" in text
