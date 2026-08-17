@@ -1550,46 +1550,11 @@ def read_gate_state(path: str | None) -> dict[str, Any] | None:
     if not isinstance(gate, dict):
         raise ValueError(f"gate_state at {path} is not a JSON object")
 
-    # AND IT MUST BE AN ANSWERED GATE. Parsing as an object was the whole check, so a gate
-    # that was emitted and never answered -- the founder asked, no reply -- composed with
-    # exit 0 and no warning, presenting the stage as settled. Same skipped-decision class
-    # as the missing file, one field along. The rules live in `gate_state.py` because three
-    # readers need them and enforcing them at one reader is what produced this.
-    from gate_state import gate_action, is_answered, validate_answered_gate  # noqa: PLC0415
-
-    if not is_answered(gate):
-        raise ValueError(
-            f"gate_state at {path} was emitted but never answered — the stage was not confirmed, "
-            "so there is nothing to compose a report against"
-        )
-    problems = validate_answered_gate(gate)
-    if problems:
-        raise ValueError(f"gate_state at {path} is not a valid answered gate: " + "; ".join(problems))
-
-    # ANSWERED IS NOT AUTHORIZED, and reading it that way produced the worst defect in this
-    # area: `Stop review` — the answer that means DO NOT produce a review — composed a
-    # clean report. `Different stage` and an intermediate `stage_choice` pick did too, each
-    # of which owes a profile rebuild and a re-confirmation before anything downstream is
-    # entitled to run. The transition belongs to `gate_state.gate_action`; compose accepts
-    # only a terminal `continue`.
-    action = gate_action(gate)
-    if action == "stop":
-        raise ValueError(
-            f"gate_state at {path} records the answer {gate.get('answer')!r} — the founder declined "
-            "the review, so no report is to be produced"
-        )
-    if action == "continue_if_rebuilt":
-        # Verified in `compose()`, NOT here: this function has only the gate's path, and
-        # checking `stage_profile.json` beside the GATE let a compliant profile there
-        # authorize an entirely different one under `--dir`. The postcondition has to be
-        # read from the artifacts actually being composed.
-        return gate
-    if action != "continue":
-        raise ValueError(
-            f"gate_state at {path} records {gate.get('answer')!r} on the {gate.get('gate_id')!r} gate, "
-            f"which is an intermediate state ({action}): the stage profile is rebuilt and the gate "
-            "re-asked before a report is composed"
-        )
+    # TRANSPORT ONLY. Whether this gate authorizes a report is decided by
+    # `gate_state.authorize`, called from `compose()` where the artifacts it must agree
+    # with are loaded. This function has the gate's path and nothing else, and deciding
+    # here is what let a compliant profile beside the gate authorize a different one under
+    # `--dir`.
     return gate
 
 
@@ -1620,64 +1585,25 @@ def compose(
     # so reaching this means something upstream did not run or could not delete.
     gate_auto_satisfied = False
     if gate_state is not None:
-        # THE REBUILD IS A POSTCONDITION ON THE ARTIFACTS BEING COMPOSED. Both "proceed
-        # anyway" answers continue only after SKILL.md rebuilds the stage profile at LOW
-        # confidence, and the caller that was supposed to do it is the same one that would
-        # tell us it happened -- so check the result instead. Three things, because
-        # "confidence is low" alone is satisfied by a profile that predates the answer,
-        # belongs to another run, or holds the wrong stage entirely.
-        from gate_state import gate_action as _gate_action  # noqa: PLC0415
+        # ONE CALL, at the reader. The rules used to be spread across `emit`, `answer`,
+        # `gate_action` and here, each added where a reported defect happened to pass, and
+        # the set grew every review round — which is why enumerating writers kept missing
+        # one: there was no single statement of "authorized" to enumerate against.
+        from gate_state import authorize  # noqa: PLC0415
 
-        if _gate_action(gate_state) == "continue_if_rebuilt":
-            profile_art = artifacts.get("stage_profile.json")
-            prof = _as_dict(profile_art) if _usable(profile_art) else {}
-            answer = gate_state.get("answer")
-            confidence = prof.get("confidence")
-            if confidence != "low":
-                raise GateNotAuthorized(
-                    f"the gate records {answer!r}, which continues only after the stage profile is "
-                    f"rebuilt at low confidence — the profile being composed has confidence "
-                    f"{confidence!r}"
-                )
-            prof_run = _as_dict(prof.get("metadata")).get("run_id")
-            gate_run = _as_dict(gate_state.get("metadata")).get("run_id")
-            if prof_run != gate_run:
-                raise GateNotAuthorized(
-                    f"the low-confidence profile is from run {prof_run!r}, not this run {gate_run!r} — "
-                    "a profile left by an earlier review is not evidence that this one rebuilt anything"
-                )
-            # SKILL.md's out-of-scope branch names the target stage explicitly.
-            if gate_state.get("gate_id") == "out_of_scope_choice" and prof.get("detected_stage") != "series_a":
-                raise GateNotAuthorized(
-                    f"an out-of-scope 'proceed anyway' rebuilds to series_a at low confidence — the "
-                    f"profile holds {prof.get('detected_stage')!r}"
-                )
-        artifact_run_ids = [
+        profile_art = artifacts.get("stage_profile.json")
+        gate_profile: dict[str, Any] = _as_dict(profile_art) if _usable(profile_art) else {}
+        run_ids = [
             rid
             for name in REQUIRED_ARTIFACTS
             if _usable(artifacts.get(name))
             and isinstance(rid := _as_dict(_as_dict(artifacts[name]).get("metadata")).get("run_id"), str)
             and rid
         ]
-        gate_run_id = _as_dict(gate_state.get("metadata")).get("run_id")
-        if artifact_run_ids and gate_run_id != artifact_run_ids[0]:
-            # A WARNING IS NOT AN AUTHORIZATION CHECK. This started as medium — "we cannot
-            # state how the gate was answered" — but the gate is also what permits the
-            # report to exist at all, and a gate belonging to another run permits nothing
-            # about this one. Warning and proceeding accepted a foreign authorization.
-            warnings.append(
-                _warn(
-                    "STALE_GATE_STATE",
-                    f"the gate record is from run '{gate_run_id}' but this report is run "
-                    f"'{artifact_run_ids[0]}' — how this run's stage gate was answered is unrecorded",
-                )
-            )
-            raise GateNotAuthorized(
-                f"the gate record is from run {gate_run_id!r} but this report is run "
-                f"{artifact_run_ids[0]!r} — a gate from another run authorises nothing here"
-            )
-        else:
-            gate_auto_satisfied = gate_state.get("answer_source") == "auto_satisfied"
+        verdict = authorize(gate_state, gate_profile, run_ids[0] if run_ids else "")
+        if not verdict.permitted:
+            raise GateNotAuthorized(verdict.reason)
+        gate_auto_satisfied = gate_state.get("answer_source") == "auto_satisfied"
 
     # THIN QUOTES — emitted HERE, before acceptances, and the position is the point.
     # This was appended near the end of compose, after `accepted_warnings` had already been

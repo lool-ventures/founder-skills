@@ -7,6 +7,8 @@ import sys
 import tempfile
 from typing import Any
 
+import pytest
+
 SCRIPT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "skills",
@@ -755,3 +757,245 @@ def test_a_stage_pick_that_puts_the_deck_out_of_scope_is_not_confirmed_in_scope(
     ok = _full_gate(answer="Looks right")
     ok["history"] = [{"gate_id": "stage_choice", "answer": "Seed", "answer_source": "founder", "run_id": "r1"}]
     assert gs.gate_action(ok) == "continue"
+
+
+# ---------------------------------------------------------------------------
+# THE WRITER MATRIX. Six review rounds closed the same class one path at a time —
+# `emit`, then `answer`, then a hand-written file — because each fix was verified against
+# the writer that had just been reported. §0.0 wrote down the remedy ("enumerate every
+# writer and every reader") and the very next round fixed `emit` without checking
+# `cmd_answer`, the only other writer in the same file.
+#
+# This is that enumeration, executable. Every invariant is asserted against every way a
+# gate record can reach disk, and the assertion is always on the READER: whatever wrote
+# the file, `authorize()` must refuse it. A writer-side check is a convenience; the reader
+# is the chokepoint a wrong writer cannot route around.
+# ---------------------------------------------------------------------------
+
+_CANON_CONFIRM = ["Looks right", "Different stage", "Not sure — proceed anyway"]
+_CANON_OOS = ["Stop review", "Different stage", "Proceed anyway (best-effort)"]
+
+
+def _gs() -> Any:
+    import importlib.util
+
+    scripts = os.path.dirname(SCRIPT)
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    spec = importlib.util.spec_from_file_location("_gs_auth", os.path.join(scripts, "gate_state.py"))
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _record(**over: object) -> dict:
+    rec: dict = {
+        "metadata": {"run_id": "r1"},
+        "gate_id": "stage_confirmation",
+        "question": "?",
+        "options": list(_CANON_CONFIRM),
+        "context_summary": "x",
+        "answer": "Looks right",
+        "answer_source": "founder",
+    }
+    rec.update(over)
+    return rec
+
+
+def _profile_for(stage: str = "seed", confidence: str = "high", run_id: str = "r1") -> dict:
+    return {"metadata": {"run_id": run_id}, "detected_stage": stage, "confidence": confidence}
+
+
+def test_authorize_permits_the_ordinary_confirmed_run() -> None:
+    gs = _gs()
+    verdict = gs.authorize(_record(), _profile_for(), "r1")
+    assert verdict.permitted, verdict.reason
+
+
+@pytest.mark.parametrize(
+    ("label", "record", "profile"),
+    [
+        ("never answered", _record(answer=None), _profile_for()),
+        ("answer outside the gate's options", _record(answer="Ship it"), _profile_for()),
+        ("options the gate does not own", _record(options=["Looks right"]), _profile_for()),
+        ("no answer_source", _record(answer_source=None), _profile_for()),
+        (
+            "auto-satisfied on a gate that may not be",
+            _record(
+                gate_id="out_of_scope_choice",
+                options=list(_CANON_OOS),
+                answer="Proceed anyway (best-effort)",
+                answer_source="auto_satisfied",
+            ),
+            _profile_for(),
+        ),
+        (
+            "the founder declined",
+            _record(gate_id="out_of_scope_choice", options=list(_CANON_OOS), answer="Stop review"),
+            _profile_for(),
+        ),
+        (
+            "a decline earlier in this run",
+            _record(
+                history=[
+                    {
+                        "gate_id": "out_of_scope_choice",
+                        "answer": "Stop review",
+                        "answer_source": "founder",
+                        "run_id": "r1",
+                    }
+                ]
+            ),
+            _profile_for(),
+        ),
+        ("an intermediate answer", _record(answer="Different stage"), _profile_for()),
+        (
+            "an intermediate stage pick",
+            _record(gate_id="stage_choice", options=["Pre-seed", "Seed", "Series A", "Series B"], answer="Seed"),
+            _profile_for(),
+        ),
+        (
+            "proceed-anyway without the rebuild",
+            _record(answer="Not sure — proceed anyway"),
+            _profile_for(confidence="high"),
+        ),
+        (
+            "proceed-anyway with a prior run's low profile",
+            _record(answer="Not sure — proceed anyway"),
+            _profile_for(confidence="low", run_id="older"),
+        ),
+        ("a gate from another run", _record(metadata={"run_id": "older"}), _profile_for()),
+        # THE LIVE DEFECT this consolidation was written for: an out-of-scope deck confirmed
+        # through the in-scope gate. `stage_confirmation` never offers "Stop review", so the
+        # founder is told their deck is out of scope by a question giving them no way to
+        # decline — and self-answering it needs no founder at all.
+        ("out-of-scope deck confirmed by the in-scope gate", _record(), _profile_for(stage="growth")),
+        (
+            "out-of-scope deck self-confirmed",
+            _record(answer_source="auto_satisfied"),
+            _profile_for(stage="series_b"),
+        ),
+    ],
+)
+def test_authorize_refuses_every_way_a_gate_can_fail(label: str, record: dict, profile: dict) -> None:
+    gs = _gs()
+    clean = {k: v for k, v in record.items() if v is not None}
+    verdict = gs.authorize(clean, profile, "r1")
+    assert not verdict.permitted, f"authorize permitted a gate that is {label}"
+    assert verdict.reason, f"{label}: refused with no reason"
+
+
+@pytest.mark.parametrize("writer", ["emit_then_answer", "hand_written", "truncated_then_emitted"])
+def test_the_reader_refuses_an_out_of_scope_confirmation_however_it_was_written(writer: str) -> None:
+    """One invariant, every writer. The point is that the answer does not depend on which
+    path produced the file — including a path that bypasses the CLI entirely."""
+    gs = _gs()
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "gate_state.json")
+        body = {
+            "gate_id": "stage_confirmation",
+            "question": "?",
+            "options": list(_CANON_CONFIRM),
+            "context_summary": "Detected: growth",
+        }
+        if writer == "emit_then_answer":
+            _run(["emit", "--run-id", "r1", "-o", path], json.dumps(body))
+            _run(["answer", "--file", path, "--answer", "Looks right", "--source", "auto_satisfied"])
+        elif writer == "hand_written":
+            with open(path, "w") as f:
+                json.dump(
+                    {**body, "metadata": {"run_id": "r1"}, "answer": "Looks right", "answer_source": "founder"}, f
+                )
+        else:
+            with open(path, "w") as f:
+                f.write("{ truncated")
+            _run(["emit", "--run-id", "r1", "-o", path], json.dumps(body))
+            _run(["answer", "--file", path, "--answer", "Looks right", "--source", "founder"])
+
+        with open(path) as f:
+            record = json.load(f)
+        verdict = gs.authorize(record, _profile_for(stage="growth"), "r1")
+        assert not verdict.permitted, (
+            f"a {writer} out-of-scope confirmation was authorized; the founder was never offered a decline"
+        )
+
+
+def test_an_out_of_scope_deck_is_authorized_only_through_its_own_gate() -> None:
+    gs = _gs()
+    declined_properly = _record(
+        gate_id="out_of_scope_choice",
+        options=list(_CANON_OOS),
+        answer="Proceed anyway (best-effort)",
+    )
+    # Still needs the rebuild, so this is refused for THAT reason, not the scope one.
+    refused = gs.authorize(declined_properly, _profile_for(stage="growth", confidence="high"), "r1")
+    assert not refused.permitted
+    assert "confidence" in refused.reason.lower(), refused.reason
+    permitted = gs.authorize(
+        declined_properly, {"metadata": {"run_id": "r1"}, "detected_stage": "series_a", "confidence": "low"}, "r1"
+    )
+    assert permitted.permitted, permitted.reason
+
+
+def test_a_pending_gate_replaced_by_another_emit_leaves_a_trace() -> None:
+    """`emit` carried only ANSWERED priors into history, so a pending out-of-scope question
+    replaced by a different emit vanished without trace. That is the one genuinely log-like
+    property the record lacked: what the founder was ASKED is part of the history, not only
+    what they answered."""
+    gs = _gs()
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "gate_state.json")
+        oos = {
+            "gate_id": "out_of_scope_choice",
+            "question": "This looks out of scope. What should I do?",
+            "options": list(gs.CANONICAL_OPTIONS["out_of_scope_choice"]),
+            "context_summary": "x",
+        }
+        _run(["emit", "--run-id", "r1", "-o", path], json.dumps(oos))
+        confirm = {
+            "gate_id": "stage_confirmation",
+            "question": "?",
+            "options": list(gs.CANONICAL_OPTIONS["stage_confirmation"]),
+            "context_summary": "x",
+        }
+        _run(["emit", "--run-id", "r1", "-o", path], json.dumps(confirm))
+        with open(path) as f:
+            written = json.load(f)
+        history = written.get("history", [])
+        assert len(history) == 1, history
+        assert history[0]["gate_id"] == "out_of_scope_choice"
+        assert history[0].get("answer") is None
+        assert history[0].get("superseded") is True, history[0]
+
+
+def test_auto_satisfy_is_unavailable_on_an_out_of_scope_deck() -> None:
+    """Every worst-case defect in six rounds flowed through self-answering, and the
+    precondition that made it defensible — "the founder already told us, and detection
+    agrees" — was prose only. It cannot hold for a deck detection puts out of scope: there
+    is nothing the founder said in Step 1 that authorizes skipping the question about
+    whether to proceed at all."""
+    gs = _gs()
+    # The case where the fence is REACHABLE, which took a mutation to find: a plain
+    # growth + stage_confirmation record is already refused by the scope binding, so
+    # asserting on that tested nothing. Here the out-of-scope question WAS put (it is in
+    # this run's history), so the scope binding is satisfied — and the follow-up
+    # confirmation is then self-answered while the deck is still out of scope.
+    record = _record(
+        answer_source="auto_satisfied",
+        history=[
+            {
+                "gate_id": "out_of_scope_choice",
+                "answer": "Different stage",
+                "answer_source": "founder",
+                "run_id": "r1",
+            }
+        ],
+    )
+    assert not gs.authorize(record, _profile_for(stage="growth"), "r1").permitted, (
+        "an out-of-scope deck was self-confirmed after the out-of-scope question had been asked"
+    )
+    # The founder answering it themselves is fine, and so is auto-satisfy in scope.
+    founder_answered = dict(record, answer_source="founder")
+    assert gs.authorize(founder_answered, _profile_for(stage="growth"), "r1").permitted
+    assert gs.authorize(_record(answer_source="auto_satisfied"), _profile_for(stage="seed"), "r1").permitted

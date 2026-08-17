@@ -205,15 +205,6 @@ def gate_action(gate: object) -> str:
     answer = str(gate.get("answer"))
     if answer in STOP_ANSWERS:
         return "stop"
-    # A decline earlier in THIS run is still a decline. See the carry-forward in `emit`:
-    # without this the history would be recorded and ignored, which is worse than not
-    # recording it — an audit trail nothing consults reads as a control that exists.
-    this_run = _as_run_id(gate)
-    for entry in gate.get("history", []):
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("answer") in STOP_ANSWERS and entry.get("run_id") == this_run:
-            return "stop"
     if answer in CONTINUE_ANSWERS.get(str(gate.get("gate_id")), frozenset()):
         # THE CHAIN MATTERS, not just this record. Picking an out-of-scope stage at
         # `stage_choice` and then confirming through `stage_confirmation` composed a growth
@@ -229,6 +220,118 @@ def gate_action(gate: object) -> str:
     if answer in CONTINUE_IF_REBUILT_ANSWERS:
         return "continue_if_rebuilt"
     return "rebuild"
+
+
+OUT_OF_SCOPE_STAGE_TOKENS: frozenset[str] = frozenset({"series_b", "growth"})
+
+
+class Authorization:
+    """Whether this gate permits a report, and if not, why not in one sentence."""
+
+    __slots__ = ("permitted", "reason")
+
+    def __init__(self, permitted: bool, reason: str = "") -> None:
+        self.permitted = permitted
+        self.reason = reason
+
+    def __bool__(self) -> bool:  # pragma: no cover - convenience only
+        return self.permitted
+
+
+def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization:
+    """THE ONE PLACE A GATE IS TURNED INTO PERMISSION TO PRODUCE A REPORT.
+
+    Six review rounds closed the same class of defect one path at a time -- a gate never
+    answered, an answer outside its own options, an out-of-scope gate self-answered, a
+    decline erased through `emit` and then through `answer`, an intermediate answer treated
+    as terminal, an out-of-scope stage confirmed by the in-scope gate. Each fix was correct
+    and each was placed wherever the reported case happened to pass: `emit` checked
+    options, `answer` checked the auto-satisfy tuple, `gate_action` checked one chain,
+    `compose` checked one postcondition. The invariant lived in four places and grew a
+    fifth every round, which is why enumerating writers kept failing -- there was no single
+    statement of what "authorized" means to enumerate against.
+
+    This is that statement. Writer-side checks remain (a wrong gate should be refused
+    before a founder sees it), but they are convenience: THIS is the chokepoint, at the
+    reader, on the producer of the deliverable, and a writer that bypasses the CLI cannot
+    route around it.
+
+    Honest boundary, unchanged: none of this proves a founder spoke. The record is written
+    by the same agent that would misuse it, and the medium is a JSON file. What is
+    enforceable is that the RECORD is internally coherent and consistent with the artifacts
+    being composed -- which is every defect actually found.
+    """
+    profile = stage_profile if isinstance(stage_profile, dict) else {}
+    action = gate_action(gate)
+    if not isinstance(gate, dict):
+        return Authorization(False, "gate_state is not a JSON object")
+
+    gate_run = _as_run_id(gate)
+    if gate_run != run_id:
+        return Authorization(False, f"the gate is from run {gate_run!r} but this report is run {run_id!r}")
+
+    if action == "stop":
+        return Authorization(False, "the founder declined the review, so no report is to be produced")
+    if action == "reask":
+        problems = validate_answered_gate(gate) if is_answered(gate) else ["it was never answered"]
+        return Authorization(False, "the gate carries no usable answer: " + "; ".join(problems))
+    if action == "rebuild":
+        return Authorization(
+            False,
+            f"{gate.get('answer')!r} on the {gate.get('gate_id')!r} gate is an intermediate answer — "
+            "the profile is rebuilt and the gate re-asked before a report is composed",
+        )
+
+    # AN OUT-OF-SCOPE DECK MAY ONLY BE AUTHORIZED BY THE GATE THAT OFFERS A DECLINE.
+    # Nothing bound `gate_id` to the detected stage, so emitting `stage_confirmation` for a
+    # growth deck -- and self-answering it -- produced a clean report for a founder who was
+    # never asked whether they wanted one. `stage_confirmation` has no "Stop review".
+    stage = str(profile.get("detected_stage") or "").lower()
+    if stage in OUT_OF_SCOPE_STAGE_TOKENS:
+        answered_out_of_scope = gate.get("gate_id") == "out_of_scope_choice" or any(
+            isinstance(h, dict) and h.get("gate_id") == "out_of_scope_choice" and h.get("run_id") == run_id
+            for h in gate.get("history", [])
+        )
+        if not answered_out_of_scope:
+            return Authorization(
+                False,
+                f"the deck is {stage!r}, which is out of scope — that has to be put to the founder "
+                "through the out-of-scope question, the only one that offers to stop",
+            )
+
+    # AUTO-SATISFY IS UNAVAILABLE OUT OF SCOPE. Its whole rationale is "the founder already
+    # told us the stage in Step 1 and detection agrees" — which authorizes skipping a
+    # confirmation, never the separate question of whether to review an out-of-scope deck
+    # at all. Every worst-case defect across six rounds flowed through self-answering.
+    if stage in OUT_OF_SCOPE_STAGE_TOKENS and gate.get("answer_source") == "auto_satisfied":
+        return Authorization(
+            False,
+            f"the deck is {stage!r} and this gate was self-answered — an out-of-scope deck is the "
+            "founder's call to make, not one to record on their behalf",
+        )
+
+    if action == "continue_if_rebuilt":
+        if profile.get("confidence") != "low":
+            return Authorization(
+                False,
+                f"{gate.get('answer')!r} continues only after the stage profile is rebuilt at low "
+                f"confidence — the profile being composed has confidence {profile.get('confidence')!r}",
+            )
+        prof_run = _as_run_id(profile)
+        if prof_run != run_id:
+            return Authorization(
+                False,
+                f"the low-confidence profile is from run {prof_run!r}, not this run {run_id!r} — a "
+                "profile left by an earlier review is not evidence that this one rebuilt anything",
+            )
+        if gate.get("gate_id") == "out_of_scope_choice" and stage != "series_a":
+            return Authorization(
+                False,
+                f"an out-of-scope 'proceed anyway' rebuilds to series_a at low confidence — the "
+                f"profile holds {profile.get('detected_stage')!r}",
+            )
+
+    return Authorization(True)
 
 
 def _schema_path() -> str:
@@ -280,18 +383,22 @@ def cmd_emit(args: argparse.Namespace) -> int:
     # Append-only, and only within a run: a prior completed review that was declined says
     # nothing about a fresh one (and `setup_run.py --clean` removes the file anyway).
     prior = _read_existing(args.output)
-    if is_answered(prior):
-        assert isinstance(prior, dict)
+    if isinstance(prior, dict) and (is_answered(prior) or prior.get("gate_id")):
         history = [h for h in prior.get("history", []) if isinstance(h, dict)]
-        history.append(
-            {
-                "gate_id": prior.get("gate_id"),
-                "answer": prior.get("answer"),
-                "answer_source": prior.get("answer_source"),
-                "run_id": _as_run_id(prior),
-            }
-        )
-        data["history"] = history
+        entry: dict[str, object] = {
+            "gate_id": prior.get("gate_id"),
+            "answer": prior.get("answer"),
+            "answer_source": prior.get("answer_source"),
+            "run_id": _as_run_id(prior),
+        }
+        if not is_answered(prior):
+            # WHAT THE FOUNDER WAS ASKED IS PART OF THE RECORD, not only what they said.
+            # Only answered priors were carried, so a PENDING out-of-scope question
+            # replaced by a different emit vanished without trace — the run could no longer
+            # show that the question had been put at all.
+            entry = {k: v for k, v in entry.items() if v is not None}
+            entry["superseded"] = True
+        data["history"] = [*history, entry]
     elif isinstance(prior, dict) and prior.get("history"):
         data["history"] = [h for h in prior["history"] if isinstance(h, dict)]
 

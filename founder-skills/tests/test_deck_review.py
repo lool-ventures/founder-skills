@@ -4554,7 +4554,7 @@ def test_a_founder_who_said_stop_does_not_get_a_report() -> None:
     )
     rc, _, err = _run_compose(d, ["--gate-state", path])
     assert rc != 0, "a report was composed for a founder who declined the review"
-    assert "Stop review" in err or "stop" in err.lower()
+    assert "declined the review" in err, err
 
 
 def test_an_intermediate_gate_answer_does_not_authorize_a_report() -> None:
