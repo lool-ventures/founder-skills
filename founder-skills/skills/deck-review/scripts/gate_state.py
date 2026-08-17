@@ -33,6 +33,17 @@ AUTO_SATISFIABLE_GATE = "stage_confirmation"
 AUTO_SATISFIABLE_ANSWER = "Looks right"
 
 
+def _read_existing(path: str) -> object:
+    """The gate already on disk, or None. Unreadable is treated as absent: this feeds the
+    history carry-forward, and refusing to emit because an old file is corrupt would strand
+    the run with no way to ask the question again."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+
 def _as_run_id(gate: dict[str, object]) -> object:
     meta = gate.get("metadata")
     return meta.get("run_id") if isinstance(meta, dict) else None
@@ -180,6 +191,15 @@ def gate_action(gate: object) -> str:
     answer = str(gate.get("answer"))
     if answer in STOP_ANSWERS:
         return "stop"
+    # A decline earlier in THIS run is still a decline. See the carry-forward in `emit`:
+    # without this the history would be recorded and ignored, which is worse than not
+    # recording it — an audit trail nothing consults reads as a control that exists.
+    this_run = _as_run_id(gate)
+    for entry in gate.get("history", []):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("answer") in STOP_ANSWERS and entry.get("run_id") == this_run:
+            return "stop"
     if answer in CONTINUE_ANSWERS.get(str(gate.get("gate_id")), frozenset()):
         return "continue"
     if answer in CONTINUE_IF_REBUILT_ANSWERS:
@@ -226,6 +246,58 @@ def cmd_emit(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
+
+    # THE RUN REMEMBERS. This file was overwritten wholesale on every emit, so a founder's
+    # decision could be erased by asking a different question: answer "Stop review", emit a
+    # fresh stage_confirmation over the top, self-answer it, and compose exits 0. Every
+    # record in that sequence is individually valid, which is why canonical options and
+    # answer validation did not touch it — what was missing is that nothing remembered.
+    #
+    # Append-only, and only within a run: a prior completed review that was declined says
+    # nothing about a fresh one (and `setup_run.py --clean` removes the file anyway).
+    prior = _read_existing(args.output)
+    if is_answered(prior):
+        assert isinstance(prior, dict)
+        history = [h for h in prior.get("history", []) if isinstance(h, dict)]
+        history.append(
+            {
+                "gate_id": prior.get("gate_id"),
+                "answer": prior.get("answer"),
+                "answer_source": prior.get("answer_source"),
+                "run_id": _as_run_id(prior),
+            }
+        )
+        data["history"] = history
+    elif isinstance(prior, dict) and prior.get("history"):
+        data["history"] = [h for h in prior["history"] if isinstance(h, dict)]
+
+    # THE OPTIONS ARE CHECKED WHERE THE QUESTION IS WRITTEN. Validating them only at
+    # ANSWER time meant a rigged gate still reached the founder and was refused afterwards
+    # -- after they had been shown a choice that omitted "Stop review".
+    gate_id = str(data.get("gate_id") or "")
+    options = data.get("options")
+    if isinstance(options, list) and all(isinstance(o, str) for o in options):
+        if gate_id in CANONICAL_OPTIONS and tuple(options) != CANONICAL_OPTIONS[gate_id]:
+            print(
+                f"Error: {gate_id} must offer exactly {list(CANONICAL_OPTIONS[gate_id])!r} — "
+                "the choices a gate presents are not the asker's to pick",
+                file=sys.stderr,
+            )
+            return 1
+        if gate_id == "stage_choice":
+            outside = [o for o in options if o not in STAGE_CHOICE_OPTIONS]
+            if outside:
+                print(f"Error: stage_choice offered {outside!r}, which are not stages", file=sys.stderr)
+                return 1
+            if len(options) != 4:
+                # Four is what AskUserQuestion renders and what SKILL.md offers: the enum
+                # minus the stage just rejected. Fewer hides a stage the founder may want.
+                print(
+                    f"Error: stage_choice must offer exactly 4 stages (the enum minus the one just "
+                    f"rejected), got {len(options)}",
+                    file=sys.stderr,
+                )
+                return 1
 
     schema = load_schema(_schema_path())
     try:

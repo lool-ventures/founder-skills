@@ -637,7 +637,14 @@ SKILL_MD_CEILING: dict[str, int] = {
     # stage_choice, meaningless elsewhere). The five actions are tabulated because a reader who does
     # not know `continue_if_rebuilt` exists will treat "proceed anyway" as terminal, which is the
     # defect this replaced: it authorised a report whose profile may never have been downgraded.
-    "deck-review": 95_586,
+    # deck-review 95,586 -> 97,048 (+1,462): the gate_action table at Step 1 said one thing and the
+    # OPERATIVE section a few hundred lines later still said "branch on that answer" — two
+    # instructions, and the second is the one being read at the point of use. The operative branch
+    # now leads with the five actions, `stop` first. It also fixes a routing hole: picking Series B
+    # or Growth at `stage_choice` was re-confirmed through `stage_confirmation`, which never offers
+    # `Stop review`, so a founder was told their deck is out of scope by a question giving them no
+    # way to decline. Those two stages now re-emit `out_of_scope_choice`.
+    "deck-review": 97_048,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -2203,3 +2210,27 @@ def test_the_paid_opt_in_is_behaviourally_enforced_not_merely_mentioned() -> Non
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+def test_the_authorized_paid_job_supplies_the_opt_in_and_fails_on_skips() -> None:
+    """The local spend guard must not silently disable the release gate.
+
+    Requiring `RUN_PAID_E2E` in both auth predicates protects a developer's machine — and
+    it broke the one job that is SUPPOSED to spend. `skill-quality.yml` passes credentials
+    only, so after that change every tag and manual dispatch selected three lanes, skipped
+    all three, and exited green: the gate the release process waits on could no longer
+    fail. A safety fix that turns its own consumer into a no-op has moved the defect, not
+    removed it.
+
+    Two things are required and both are pinned: the authorized job sets the opt-in, and
+    it fails when a lane skips — otherwise the next credential mishap returns to a silent
+    false green.
+    """
+    workflow = (REPO_ROOT / ".github" / "workflows" / "skill-quality.yml").read_text(encoding="utf-8")
+    assert "RUN_PAID_E2E" in workflow, (
+        "the paid job never sets RUN_PAID_E2E, so every lane skips and the release gate cannot fail"
+    )
+    # A skipped lane must be an error, not a pass.
+    assert "skipped" in workflow.lower(), (
+        "nothing in the paid job notices a SKIPPED lane; a skip and a pass exit the same way"
+    )

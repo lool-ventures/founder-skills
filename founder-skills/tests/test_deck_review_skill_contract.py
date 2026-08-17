@@ -1527,8 +1527,8 @@ def test_resume_detection_has_exactly_one_authority() -> None:
     # replaces.
     assert "### Gate: Confirm Stage and Scope" in text
     assert "gate_state.json" in text
-    assert "`setup_run.py` printed `resume` and `gate_answer`" in text, (
-        "SKILL.md must point at setup_run.py's reported resume as the one authority"
+    assert "`setup_run.py` printed `resume`, `gate_action` and `gate_answer`" in text, (
+        "SKILL.md must point at setup_run.py's reported resume/action as the one authority"
     )
 
     for block in re.findall(r"```bash\n(.*?)```", text, re.DOTALL):
@@ -1603,3 +1603,29 @@ def test_the_skill_branches_on_the_reported_gate_action() -> None:
     for action in ("continue", "continue_if_rebuilt", "rebuild", "stop", "reask"):
         assert f"`{action}`" in text, f"SKILL.md does not say what gate_action {action!r} means"
     assert "gate_id" in text, "SKILL.md never reads gate_id, so it cannot tell which gate it resumed"
+
+
+def test_the_operative_gate_section_branches_on_the_action() -> None:
+    """The table at Step 1 said branch on `gate_action`; the operative section a few
+    hundred lines later still said "branch on that answer". Two instructions, and the
+    second is the one being followed at the point of use."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    anchor = "**After the gate"
+    assert anchor in text
+    section = text[text.index(anchor) : text.index(anchor) + 1200]
+    assert "branch on **`gate_action`**" in section, section[:300]
+    for action in ("stop", "continue_if_rebuilt", "rebuild", "reask"):
+        assert f"**`{action}`**" in section, f"the operative branch table omits {action!r}"
+
+
+def test_an_out_of_scope_stage_pick_is_confirmed_by_the_out_of_scope_gate() -> None:
+    """Picking Series B or Growth puts the deck out of scope, and re-confirming through
+    `stage_confirmation` never offers `Stop review` — the founder is told their deck is out
+    of scope by a question that gives them no way to decline."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    marker = "re-emit the gate the CHOSEN stage calls for"
+    assert marker in text, "SKILL.md still re-emits stage_confirmation for every stage pick"
+    window = text[text.index(marker) : text.index(marker) + 700]
+    assert "out_of_scope_choice" in window
+    for stage in ("series_b", "growth"):
+        assert stage in window, f"the out-of-scope re-emit does not name {stage}"

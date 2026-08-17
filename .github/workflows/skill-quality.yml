@@ -127,7 +127,30 @@ jobs:
             founder-skills/tests/test_e2e_deck_review.py \
             founder-skills/tests/test_e2e_financial_model_review.py \
             founder-skills/tests/test_e2e_market_sizing.py \
-            -v -m e2e --tb=short
+            -v -m e2e --tb=short -rs --junitxml=e2e-results.xml
         env:
+          # THIS is the authorized place to spend, and it has to say so. The paid lanes
+          # require an explicit opt-in because a credential alone once started billed runs
+          # on a developer's Mac; that guard is correct, and it silently disabled THIS job
+          # until the variable was set here. A safety fix that no-ops its own consumer has
+          # moved the defect rather than removed it.
+          RUN_PAID_E2E: "1"
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY_CI }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_CI }}
+      # A SKIPPED LANE MUST NOT LOOK LIKE A PASSING ONE. pytest exits 0 on an all-skipped
+      # run, so the missing opt-in above produced a green release gate that ran nothing.
+      # Whatever the next reason for skipping turns out to be — a rotated secret, a marker
+      # rename — the gate has to notice.
+      - name: Fail if any paid lane was skipped
+        if: always()
+        run: |
+          python3 - <<'CHECK'
+          import sys, xml.etree.ElementTree as ET
+          suite = ET.parse("e2e-results.xml").getroot()
+          cases = suite.iter("testcase")
+          skipped = [c.get("name") for c in cases if c.find("skipped") is not None]
+          if skipped:
+              print(f"::error::paid lanes were SKIPPED, so this gate proved nothing: {skipped}")
+              sys.exit(1)
+          print("all paid lanes executed")
+          CHECK

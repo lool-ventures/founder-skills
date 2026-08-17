@@ -1086,3 +1086,33 @@ def test_a_numeric_prefix_does_not_inherit_the_larger_number_marker() -> None:
     # And the genuine case is untouched: the figure itself, marked, ending the clause.
     assert detect_bound("$20", "revenue", "revenue of ≈$20 last year") == "approximate"
     assert detect_bound("$20B", "market", "market ≈$20B") == "approximate"
+
+
+def test_the_quote_binding_uses_a_maximal_numeric_lexeme() -> None:
+    """A denylist of continuation characters cannot converge, and three rounds proved it.
+
+    Each pass fixed the named examples and left the next separator: a scale word, then
+    grouped thousands, then a hyphenated scale (`≈$20-billion`), a spelled Indian unit
+    (`≈$20 crore`), Arabic-Indic grouping and `≈$20×10^6`. In every one, `raw="$20"` was a
+    PREFIX of a larger number and inherited its approximation — silencing a real
+    contradiction.
+
+    The fix is to ask where the number ENDS rather than which characters may follow it: the
+    match counts only when it spans the whole numeric lexeme at that position.
+    """
+    for quote in (
+        "market ≈$20-billion",
+        "market ≈$20 crore",
+        "market ≈$20 lakh",
+        "≈$20×10^6",
+        "≈$20 000",
+        "≈$20′000",
+        "market ≈$20 billion",
+        "≈$20٬000",
+    ):
+        assert detect_bound("$20", "revenue", quote) is None, quote
+
+    # The genuine bindings all still hold.
+    assert detect_bound("$20", "revenue", "revenue of ≈$20 last year") == "approximate"
+    assert detect_bound("$20B", "market", "market ≈$20B.") == "approximate"
+    assert detect_bound("1,200", "customers", "roughly ~1,200 customers today") == "approximate"

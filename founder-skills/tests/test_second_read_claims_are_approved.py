@@ -74,9 +74,13 @@ APPROVED: list[tuple[str, pathlib.Path, str, str]] = [
         "founder",
     ),
     (
+        # CORRECTED with the renderer: "checked back against the deck's own text" said the
+        # second pass consulted the DECK. It consulted the same extraction the first pass
+        # did, and a founder reading the old sentence believes the figure was looked at
+        # twice on the page.
         "numbers section preamble",
         DECK_REVIEW / "scripts" / "compose_report.py",
-        "had its wording checked back against ",
+        "in the same extracted text by a reader who had not seen the first pass",
         "founder",
     ),
     (
@@ -315,6 +319,11 @@ def test_the_overclaim_sweep_reaches_real_files() -> None:
 # extracted text the ledger agent got. A reader who believes the second pass went back to
 # the file will over-trust every figure it clears.
 _SOURCE_OVERCLAIM_STEMS = (
+    # "against the deck's own text" is the same claim as "against your deck", one synonym
+    # over: it says the second pass consulted the DECK, when it consulted the extraction.
+    # The founder-facing renderer carried it while the ratchet approved the sentence.
+    "against the deck's own text",
+    "checked back against your deck",
     "re-read those slides",
     "transcribe the\nslides listed below from the deck",
     "transcribe the listed slides",

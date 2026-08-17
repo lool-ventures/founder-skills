@@ -2,18 +2,62 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "gate_state",
   "type": "object",
-  "required": ["metadata", "gate_id", "question", "options", "context_summary"],
+  "required": [
+    "metadata",
+    "gate_id",
+    "question",
+    "options",
+    "context_summary"
+  ],
   "properties": {
-    "metadata": {"type": "object", "required": ["run_id"], "properties": {"run_id": {"type": "string"}}},
-    "gate_id": {"type": "string", "enum": ["stage_confirmation", "out_of_scope_choice", "stage_choice"]},
-    "question": {"type": "string"},
-    "options": {"type": "array", "items": {"type": "string"}},
-    "context_summary": {"type": "string"},
-    "answer": {"type": "string"},
+    "metadata": {
+      "type": "object",
+      "required": [
+        "run_id"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string"
+        }
+      }
+    },
+    "gate_id": {
+      "type": "string",
+      "enum": [
+        "stage_confirmation",
+        "out_of_scope_choice",
+        "stage_choice"
+      ]
+    },
+    "question": {
+      "type": "string"
+    },
+    "options": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "context_summary": {
+      "type": "string"
+    },
+    "answer": {
+      "type": "string"
+    },
     "answer_source": {
       "type": "string",
-      "enum": ["founder", "auto_satisfied"],
+      "enum": [
+        "founder",
+        "auto_satisfied"
+      ],
       "description": "Who produced `answer`. Optional here because a gate that has not been answered has no source, and because an artifact written before this field existed is readable rather than invalid. `gate_state.py answer` requires it, and setup_run.py treats an answered gate without it as unauditable and re-asks. Observability, not provenance: the value is supplied by the same model that would self-answer."
+    },
+    "history": {
+      "description": "Answered gates that were superseded within this run, oldest first. Append-only: `emit` carries the prior answered state forward so a decision cannot be erased by asking a different question. A `Stop review` anywhere in this run's history stays decisive.",
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
     }
   }
 }

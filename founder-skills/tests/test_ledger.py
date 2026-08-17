@@ -475,3 +475,39 @@ def test_real_date_syntax_still_parses() -> None:
     ):
         rc, _, err = _run({"figures": [_date(raw=raw, value=value, quote=f"as of {raw}")]})
         assert rc == 0, f"{raw!r}/{value} rejected: {err}"
+
+
+def test_a_date_raw_must_be_a_date_expression_not_prose_containing_one() -> None:
+    """Fourth attempt at this, and the previous three all narrowed examples.
+
+    Substring inference cannot decide what a number MEANS: any isolated 1900-2100 token
+    became a year, so `Headcount 2000` and `Revenue $2000` validated as dates and inflated
+    the verified count. The same boundaries rejected ordinary punctuation (`Founded 2025.`)
+    while accepting `FY25users` and `Q4ever`.
+
+    A `date` raw must therefore BE a date expression, not prose that contains one.
+    """
+    for raw, value in (("Headcount 2000", 2000), ("Revenue $2000", 2000), ("FY25users", 25), ("Q4ever", 4)):
+        rc, _, _ = _run({"figures": [_date(raw=raw, value=value, label="x", quote=raw)]})
+        assert rc != 0, f"{raw!r} validated as a date"
+
+
+def test_real_date_expressions_including_trailing_punctuation() -> None:
+    for raw, value in (
+        ("2025", 2025),
+        ("Founded 2025", 2025),
+        ("Founded 2025.", 2025),
+        ("FY25", 25),
+        ("FY25.", 25),
+        ("Q4 2025", 4),
+        ("Q4 2025", 2025),
+        ("Q4.", 4),
+        ("Q4 '25", 25),
+        ("2024-2030", 2024),
+        ("2024-2030", 2030),
+        ("March 2026", 3),
+        ("March 2026", 2026),
+        ("in Q1 2027", 2027),
+    ):
+        rc, _, err = _run({"figures": [_date(raw=raw, value=value, quote=f"as of {raw}")]})
+        assert rc == 0, f"{raw!r}/{value} rejected: {err}"

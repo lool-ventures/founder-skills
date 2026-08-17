@@ -1189,9 +1189,20 @@ def _coverage_line(reconciliation: dict[str, Any]) -> str:
         bits.append(f"and I ran **{evaluated}** comparisons across them")
     if refused > 0:
         bits.append(f"**{refused}** further comparison{'s' if refused != 1 else ''} could not be made at all")
+    # "The comparisons that DID run held" was UNCONDITIONAL, so a report could say it and
+    # then list a contradiction in the same artifact. Whether they held is a fact about the
+    # verdicts; read it rather than asserting it.
+    verdicts = [str(_as_dict(r).get("verdict")) for r in _as_list(reconciliation.get("relations"))]
+    disagreements = sum(1 for v in verdicts if v == "contradiction")
+    if disagreements:
+        settled = (
+            f". **{disagreements}** of those comparisons disagree with a figure your deck itself "
+            "states, and they are listed below"
+        )
+    else:
+        settled = ". That is what was checked, and the comparisons that ran held"
     tail = (
-        ". That is what was checked. A short list here means the comparisons that DID run "
-        "held — not that every number in the deck has been verified against every other, and "
+        settled + " — not that every number in the deck has been verified against every other, and "
         "not that a careful reader would find nothing more. Treat this as a first pass over "
         "your arithmetic, not a clean bill of health.\n"
     )
@@ -1249,8 +1260,9 @@ def _section_numbers(
 
     lines = ["## What Your Numbers Say About Each Other\n"]
     lines.append(
-        "Every figure below was read off your deck, had its wording checked back against "
-        "the deck's own text, and was then related by arithmetic rather than by eye. "
+        "Every figure below was read off your deck, had its wording looked for a second time "
+        "in the same extracted text by a reader who had not seen the first pass, and was then "
+        "related by arithmetic rather than by eye. "
         "Figures whose wording could not be found again were dropped rather than guessed at.\n"
     )
     if counts:
@@ -1539,18 +1551,10 @@ def read_gate_state(path: str | None) -> dict[str, Any] | None:
             "the review, so no report is to be produced"
         )
     if action == "continue_if_rebuilt":
-        # SKILL.md requires the profile to be rebuilt at LOW confidence before either
-        # "proceed anyway" answer continues. Checked as a POSTCONDITION rather than trusted:
-        # the caller that was supposed to perform the rebuild is the same one telling us it
-        # happened, and a founder who said "not sure" should not get a review graded as
-        # though they had confirmed.
-        profile = _load_artifact(os.path.dirname(os.path.abspath(path)) or ".", "stage_profile.json")
-        confidence = _as_dict(profile).get("confidence") if _usable(profile) else None
-        if confidence != "low":
-            raise ValueError(
-                f"gate_state at {path} records {gate.get('answer')!r}, which continues only after the "
-                f"stage profile is rebuilt at low confidence — its confidence is {confidence!r}"
-            )
+        # Verified in `compose()`, NOT here: this function has only the gate's path, and
+        # checking `stage_profile.json` beside the GATE let a compliant profile there
+        # authorize an entirely different one under `--dir`. The postcondition has to be
+        # read from the artifacts actually being composed.
         return gate
     if action != "continue":
         raise ValueError(
@@ -1588,6 +1592,38 @@ def compose(
     # so reaching this means something upstream did not run or could not delete.
     gate_auto_satisfied = False
     if gate_state is not None:
+        # THE REBUILD IS A POSTCONDITION ON THE ARTIFACTS BEING COMPOSED. Both "proceed
+        # anyway" answers continue only after SKILL.md rebuilds the stage profile at LOW
+        # confidence, and the caller that was supposed to do it is the same one that would
+        # tell us it happened -- so check the result instead. Three things, because
+        # "confidence is low" alone is satisfied by a profile that predates the answer,
+        # belongs to another run, or holds the wrong stage entirely.
+        from gate_state import gate_action as _gate_action  # noqa: PLC0415
+
+        if _gate_action(gate_state) == "continue_if_rebuilt":
+            profile_art = artifacts.get("stage_profile.json")
+            prof = _as_dict(profile_art) if _usable(profile_art) else {}
+            answer = gate_state.get("answer")
+            confidence = prof.get("confidence")
+            if confidence != "low":
+                raise GateNotAuthorized(
+                    f"the gate records {answer!r}, which continues only after the stage profile is "
+                    f"rebuilt at low confidence — the profile being composed has confidence "
+                    f"{confidence!r}"
+                )
+            prof_run = _as_dict(prof.get("metadata")).get("run_id")
+            gate_run = _as_dict(gate_state.get("metadata")).get("run_id")
+            if prof_run != gate_run:
+                raise GateNotAuthorized(
+                    f"the low-confidence profile is from run {prof_run!r}, not this run {gate_run!r} — "
+                    "a profile left by an earlier review is not evidence that this one rebuilt anything"
+                )
+            # SKILL.md's out-of-scope branch names the target stage explicitly.
+            if gate_state.get("gate_id") == "out_of_scope_choice" and prof.get("detected_stage") != "series_a":
+                raise GateNotAuthorized(
+                    f"an out-of-scope 'proceed anyway' rebuilds to series_a at low confidence — the "
+                    f"profile holds {prof.get('detected_stage')!r}"
+                )
         artifact_run_ids = [
             rid
             for name in REQUIRED_ARTIFACTS

@@ -27,7 +27,7 @@ def test_gate_state_emit_writes_validated_artifact() -> None:
         body = {
             "gate_id": "stage_confirmation",
             "question": "Does this stage look right?",
-            "options": ["Looks right", "Different stage"],
+            "options": ["Looks right", "Different stage", "Not sure — proceed anyway"],
             "context_summary": "Detected: Seed",
         }
         rc, _, err = _run(["emit", "--run-id", "r1", "-o", out, "--pretty"], json.dumps(body))
@@ -301,7 +301,7 @@ def test_emit_still_writes_an_ordinary_pending_gate() -> None:
         body = {
             "gate_id": "out_of_scope_choice",
             "question": "?",
-            "options": ["Stop review", "Proceed anyway (best-effort)"],
+            "options": ["Stop review", "Different stage", "Proceed anyway (best-effort)"],
             "context_summary": "x",
         }
         rc, _, err = _run(["emit", "--run-id", "r1", "-o", out], json.dumps(body))
@@ -535,3 +535,116 @@ def test_proceed_anyway_answers_are_conditional_on_the_rebuild() -> None:
     assert gs.gate_action(best_effort) == "continue_if_rebuilt"
     # The unconditional one is unchanged.
     assert gs.gate_action(_full_gate(options=list(gs.CANONICAL_OPTIONS["stage_confirmation"]))) == "continue"
+
+
+# A DECLINE MUST SURVIVE THE NEXT EMIT. The gate was one mutable file with no history, so
+# the sequence below erased it entirely:
+#
+#   founder answers "Stop review" -> emit a fresh stage_confirmation over the top ->
+#   auto-answer "Looks right" -> compose exits 0
+#
+# Canonical options did not touch this: every record in that sequence is individually
+# valid. What was missing is that the run REMEMBERS. `emit` now carries the prior answered
+# state forward, and a stop anywhere in this run's history stays decisive.
+
+
+def test_emitting_over_an_answered_gate_preserves_it_as_history() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "gate_state.json")
+        gs = _import_gate_state()
+        body = {
+            "gate_id": "stage_confirmation",
+            "question": "?",
+            "options": list(gs.CANONICAL_OPTIONS["stage_confirmation"]),
+            "context_summary": "x",
+        }
+        rc, _, err = _run(["emit", "--run-id", "r1", "-o", path], json.dumps(body))
+        assert rc == 0, err
+        rc, _, err = _run(["answer", "--file", path, "--answer", "Different stage", "--source", "founder"])
+        assert rc == 0, err
+
+        rc, _, err = _run(["emit", "--run-id", "r1", "-o", path], json.dumps(body))
+        assert rc == 0, err
+        with open(path) as f:
+            written = json.load(f)
+        assert "answer" not in written, "the re-emitted gate is pending again"
+        assert len(written["history"]) == 1, written.get("history")
+        assert written["history"][0]["answer"] == "Different stage"
+
+
+def test_a_decline_cannot_be_erased_by_emitting_another_gate() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "gate_state.json")
+        gs = _import_gate_state()
+        oos = {
+            "gate_id": "out_of_scope_choice",
+            "question": "?",
+            "options": list(gs.CANONICAL_OPTIONS["out_of_scope_choice"]),
+            "context_summary": "x",
+        }
+        _run(["emit", "--run-id", "r1", "-o", path], json.dumps(oos))
+        _run(["answer", "--file", path, "--answer", "Stop review", "--source", "founder"])
+
+        stage = {
+            "gate_id": "stage_confirmation",
+            "question": "?",
+            "options": list(gs.CANONICAL_OPTIONS["stage_confirmation"]),
+            "context_summary": "x",
+        }
+        _run(["emit", "--run-id", "r1", "-o", path], json.dumps(stage))
+        _run(["answer", "--file", path, "--answer", "Looks right", "--source", "founder"])
+
+        with open(path) as f:
+            written = json.load(f)
+        assert gs.gate_action(written) == "stop", (
+            "a founder's decline was erased by re-emitting a different gate over it"
+        )
+
+
+def test_a_decline_from_a_different_run_does_not_bind_this_one() -> None:
+    """The history is this RUN's. A prior completed review that was declined says nothing
+    about a fresh one, and `setup_run.py --clean` removes that file anyway."""
+    gs = _import_gate_state()
+    gate = _full_gate()
+    gate["history"] = [
+        {"gate_id": "out_of_scope_choice", "answer": "Stop review", "answer_source": "founder", "run_id": "older-run"}
+    ]
+    assert gs.gate_action(gate) == "continue"
+
+
+def test_emit_refuses_a_gate_that_does_not_offer_its_own_options() -> None:
+    """Canonical options were enforced only when ANSWERING, so a rigged gate reached the
+    founder and was refused afterwards — after they had already been shown a choice that
+    omitted "Stop review". The check belongs where the question is written."""
+    gs = _import_gate_state()
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "gate_state.json")
+        rigged = {
+            "gate_id": "out_of_scope_choice",
+            "question": "?",
+            "options": ["Proceed anyway (best-effort)"],
+            "context_summary": "x",
+        }
+        rc, _, err = _run(["emit", "--run-id", "r1", "-o", out], json.dumps(rigged))
+        assert rc != 0, "emit wrote a gate that never offers the option to decline"
+        assert "Stop review" in err or "options" in err
+        assert not os.path.exists(out)
+
+        ok = dict(rigged, options=list(gs.CANONICAL_OPTIONS["out_of_scope_choice"]))
+        rc_ok, _, err_ok = _run(["emit", "--run-id", "r1", "-o", out], json.dumps(ok))
+        assert rc_ok == 0, err_ok
+
+
+def test_emit_holds_stage_choice_to_four_stage_options() -> None:
+    """`AskUserQuestion` renders at most four, and SKILL.md offers exactly four — the enum
+    minus the stage just rejected. Three would hide a stage the founder may want."""
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "gate_state.json")
+        body = {"gate_id": "stage_choice", "question": "?", "context_summary": "x"}
+        rc, _, err = _run(["emit", "--run-id", "r1", "-o", out], json.dumps({**body, "options": ["Seed"]}))
+        assert rc != 0, "a one-option stage_choice was written"
+        rc2, _, err2 = _run(
+            ["emit", "--run-id", "r1", "-o", out],
+            json.dumps({**body, "options": ["Pre-seed", "Seed", "Series A", "Series B"]}),
+        )
+        assert rc2 == 0, err2

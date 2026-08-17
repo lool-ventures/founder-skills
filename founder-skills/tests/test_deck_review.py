@@ -4683,8 +4683,13 @@ def test_proceed_anyway_requires_the_profile_to_have_been_downgraded() -> None:
         assert rc != 0, f"{answer!r} composed without the low-confidence rebuild"
         assert "confidence" in err.lower(), err
 
+        # The out-of-scope branch rebuilds to series_a specifically; the confirmation
+        # branch keeps the detected stage. Both at low confidence, both this run.
         low = json.loads(json.dumps(_VALID_PROFILE))
         low["confidence"] = "low"
+        low["metadata"] = {"run_id": "run-test"}
+        if gate_id == "out_of_scope_choice":
+            low["detected_stage"] = "series_a"
         d2 = _make_artifact_dir(
             {
                 "deck_inventory.json": _VALID_INVENTORY,
@@ -4746,3 +4751,121 @@ def test_comparisons_that_did_run_are_still_reported() -> None:
     assert rc == 0
     assert data is not None
     assert "I ran **2** comparisons" in data["report_markdown"]
+
+
+def _profile(stage: str, confidence: str, run_id: str = "run-test") -> dict:
+    profile: dict = json.loads(json.dumps(_VALID_PROFILE))
+    profile["detected_stage"] = stage
+    profile["confidence"] = confidence
+    profile["metadata"] = {"run_id": run_id}
+    return profile
+
+
+def _arts_with(profile: dict) -> str:
+    return _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": profile,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": _VALID_RECONCILIATION,
+        }
+    )
+
+
+def test_the_rebuild_check_reads_the_profile_being_composed() -> None:
+    """A bug introduced by the rebuild check itself: it loaded `stage_profile.json` from
+    the GATE's directory, not from `--dir`. So a compliant low-confidence profile sitting
+    beside the gate could authorize a report composed from an entirely different,
+    high-confidence one."""
+    d = _arts_with(_profile("seed", "high"))
+    elsewhere = _make_artifact_dir({"stage_profile.json": _profile("seed", "low")})
+    path = _gate_at(
+        elsewhere,
+        "stage_confirmation",
+        "Not sure — proceed anyway",
+        ["Looks right", "Different stage", "Not sure — proceed anyway"],
+    )
+    rc, _, err = _run_compose(d, ["--gate-state", path])
+    assert rc != 0, "a profile beside the gate authorized a different profile under --dir"
+    assert "confidence" in err.lower()
+
+
+def test_out_of_scope_proceed_requires_the_stage_the_contract_names() -> None:
+    """SKILL.md's out-of-scope branch rebuilds to `series_a` at low confidence. A low
+    profile still holding `growth` satisfies "confidence is low" and satisfies nothing the
+    contract actually asked for."""
+    options = ["Stop review", "Different stage", "Proceed anyway (best-effort)"]
+    d_wrong = _arts_with(_profile("growth", "low"))
+    rc, _, err = _run_compose(
+        d_wrong, ["--gate-state", _gate_at(d_wrong, "out_of_scope_choice", "Proceed anyway (best-effort)", options)]
+    )
+    assert rc != 0, "an out-of-scope proceed composed against a growth profile"
+    assert "series_a" in err
+
+    d_ok = _arts_with(_profile("series_a", "low"))
+    rc_ok, _, err_ok = _run_compose(
+        d_ok, ["--gate-state", _gate_at(d_ok, "out_of_scope_choice", "Proceed anyway (best-effort)", options)]
+    )
+    assert rc_ok == 0, err_ok
+
+
+def test_the_rebuilt_profile_must_belong_to_this_run() -> None:
+    """A low-confidence profile left by an earlier run is not evidence that THIS run
+    rebuilt anything."""
+    d = _arts_with(_profile("seed", "low", run_id="an-older-run"))
+    path = _gate_at(
+        d,
+        "stage_confirmation",
+        "Not sure — proceed anyway",
+        ["Looks right", "Different stage", "Not sure — proceed anyway"],
+    )
+    rc, _, err = _run_compose(d, ["--gate-state", path])
+    assert rc != 0, "a prior run's low-confidence profile authorized this run"
+
+
+def test_the_summary_does_not_say_comparisons_held_when_one_contradicts() -> None:
+    """The sentence was unconditional, so a report could state that the comparisons which
+    ran "held" immediately before listing a contradiction in the same artifact."""
+    recon = json.loads(json.dumps(_VALID_RECONCILIATION))
+    recon["relations_proposed"] = 2
+    recon["suppressed"] = {}
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": recon,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    md = data["report_markdown"]
+    assert "contradiction" in json.dumps(recon), "fixture no longer carries a contradiction"
+    assert "comparisons that DID run held" not in md, md[:600]
+    assert "disagree" in md.lower()
+
+
+def test_the_summary_still_says_they_held_when_nothing_contradicts() -> None:
+    """The counter-half. `derived`, not `confirmation`: a set of pure confirmations renders
+    no numbers section at all (`select()` withholds them), so asserting on that case would
+    have passed for the wrong reason — the sentence is absent rather than correct."""
+    recon = json.loads(json.dumps(_VALID_RECONCILIATION))
+    for rel in recon["relations"]:
+        rel["verdict"] = "derived"
+        rel["kind"] = "derived_ratio"
+    d = _make_artifact_dir(
+        {
+            "deck_inventory.json": _VALID_INVENTORY,
+            "stage_profile.json": _VALID_PROFILE,
+            "slide_reviews.json": _VALID_REVIEWS,
+            "checklist.json": _VALID_CHECKLIST,
+            "reconciliation.json": recon,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    assert "the comparisons that ran held" in data["report_markdown"]

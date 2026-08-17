@@ -319,15 +319,33 @@ _APPROX_WORDS = re.compile(r"(\bapprox\w*|\babout\b|\baround\b|\broughly\b|\best
 # Only whitespace may sit between the glyph and the figure it qualifies.
 _QUOTE_APPROX_PREFIX = re.compile(r"[~≈]\s*$")
 
-# Everything that means "the number did not end here": a scale word, grouped thousands
-# behind any common separator (space, thin space, apostrophe, prime), or an exponent.
-# Checked on the text FOLLOWING the match, so it sees more than one character.
-_NUMBER_CONTINUES = re.compile(
-    r"(?:\s*(?:thousand|million|billion|trillion)\b"
-    r"|[\s\u00a0\u202f'\u2019\u2032]\d{3}(?![\d])"
-    r"|[eE][-+]?\d)",
+# WHERE THE NUMBER ENDS, rather than which characters may not follow it. A denylist of
+# continuation characters could not converge: three rounds each fixed the named examples
+# and left the next separator -- a scale word, then grouped thousands, then a hyphenated
+# scale ("≈$20-billion"), a spelled Indian unit ("≈$20 crore"), Arabic-Indic grouping,
+# "≈$20×10^6". In every one, `raw="$20"` was a PREFIX of a bigger number and inherited its
+# approximation, silencing a real contradiction.
+#
+# So match the maximal numeric lexeme at the position instead and require the figure to BE
+# it. `\d` is Unicode-aware, which covers Arabic-Indic digits; the separator class covers
+# the grouping marks decks actually use.
+_NUMERIC_LEXEME = re.compile(
+    r"\d[\d\u0660-\u0669\u06f0-\u06f9]*"
+    # Grouped thousands. A plain SPACE separator is admitted only before exactly three
+    # digits ("20 000"), so it cannot swallow an unrelated number two words later; the
+    # non-space marks are unambiguous and take \d+.
+    r"(?:[.,\u00a0\u202f\u2009'\u2019\u2032\u066c]\d[\d\u0660-\u0669\u06f0-\u06f9]*|\ \d{3}(?!\d))*"
+    r"(?:\s*[×xX*]\s*10\s*[\^]?\s*[-+]?\d+)?"
+    r"(?:[eE][-+]?\d+)?"
+    r"(?:\s*%|\s*[-\u2010-\u2015]?\s*(?:thousand|million|billion|trillion|crore|lakh|k|m|bn|b|tn|t)\b)?",
     re.I,
 )
+
+
+def _numeric_lexeme_end(text: str, start: int) -> int:
+    """Where the number beginning at `start` actually ends."""
+    match = _NUMERIC_LEXEME.match(text, start)
+    return match.end() if match else start
 
 
 def _approx_symbol_marks_this_figure_in_quote(raw: str, quote: str) -> bool:
@@ -372,42 +390,14 @@ def _approx_symbol_marks_this_figure_in_quote(raw: str, quote: str) -> bool:
     start = quote.find(needle)
     while start != -1:
         end = start + len(needle)
-        # A trailing digit or scale suffix means this is a longer number that merely
-        # begins with the needle, not an occurrence of the figure.
-        #
-        # PUNCTUATION IS CONTINUATION ONLY WHEN A DIGIT FOLLOWS IT. Rejecting every
-        # trailing `.` or `,` was a regression, and on the commonest shape there is: a
-        # quote is a SENTENCE and the figure it is about routinely ends it, so
-        # "market ≈$20B." silently lost its marker while "market ≈$20B" kept it. Losing a
-        # bound makes the comparison two-sided again, which manufactures findings -- the
-        # direction this module treats as its worst outcome. `$20.5B` still continues;
-        # `$20B.` does not.
-        #
-        # The emptiness guard is load-bearing and its absence is a live trap: `"" in ".,%"`
-        # is TRUE in Python, so without it an occurrence at the very end of the quote was
-        # discarded outright.
-        tail = quote[end : end + 1]
-        after_tail = quote[end + 1 : end + 2]
-        # THE ONE-CHARACTER TAIL TEST WAS NOT ENOUGH. It caught a trailing digit and a
-        # scale LETTER, and missed every other way a number keeps going: a scale WORD
-        # ("≈$20 billion"), space- or apostrophe-grouped thousands ("≈$20 000",
-        # "≈$20′000"), and exponent notation ("≈$20e6"). In each of those `raw="$20"`
-        # matched a prefix of a number a thousand times its size and inherited its
-        # approximation -- measured end to end, turning a real contradiction into a
-        # suppressed confirmation.
-        if _NUMBER_CONTINUES.match(quote[end:]):
-            start = quote.find(needle, start + 1)
-            continue
-        # `isdecimal()`, NOT `isdigit()`. `str.isdigit()` is True for superscripts and
-        # enclosed forms -- `¹`, `²`, `①` -- so a footnote marker, the commonest thing to
-        # sit immediately after a figure on a slide, read as "this is a longer number" and
-        # the approximation marker vanished. Losing a bound surfaces contradictions, so
-        # this is the manufacturing direction. `isdecimal()` covers 0-9 and other decimal
-        # digit systems and excludes exactly those forms.
-        continues = bool(tail) and (
-            tail.isdecimal() or tail in "kKmMbBtT%" or (tail in ".," and after_tail.isdecimal())
-        )
-        if not continues:
+        # The figure must span the WHOLE numeric lexeme here, not merely start it. See
+        # `_NUMERIC_LEXEME` for why this is a parse rather than a character denylist.
+        digit_at = re.search(r"\d", needle)
+        if digit_at is not None:
+            lex_start = start + digit_at.start()
+            if _numeric_lexeme_end(quote, lex_start) > end:
+                start = quote.find(needle, start + 1)
+                continue
             marked.append(bool(_QUOTE_APPROX_PREFIX.search(quote[:start])))
         start = quote.find(needle, start + 1)
     if not marked:

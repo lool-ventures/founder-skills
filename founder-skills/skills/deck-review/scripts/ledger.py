@@ -115,14 +115,58 @@ def _numeric_tokens(raw: str) -> list[float]:
 #
 # So bind to what the raw string MARKS as a date: a four-digit year, a two-digit year
 # behind FY or an apostrophe, or an ordinal behind a quarter/month marker.
-# A marker only marks a date when it stands as its OWN token. These were substring scans,
-# so ordinary prose produced date components: "Maybe 5 employees" matched the month pattern
-# on the M of "Maybe", "Marching with 3" matched "March", and "Unify25 users" matched FY25.
-# Each bogus DATE row then inflates figures_total, figures_verified and the checked gate.
-_YEAR_4 = re.compile(r"(?<![\d.,])(\d{4})(?![\d.,])")
-_YEAR_2 = re.compile(r"(?:\bFY|')\s?(\d{2})(?![\d.,])", re.I)
-_QUARTER = re.compile(r"(?<![A-Za-z])Q\s?([1-4])(?![\d.,])", re.I)
-_MONTH_NUM = re.compile(r"(?<![A-Za-z])M\s?(1[0-2]|[1-9])(?![\d.,])")
+# A CLOSED DATE GRAMMAR, matched against the WHOLE raw string.
+#
+# Three earlier attempts inferred dates from substrings and each narrowed the example
+# rather than the defect: a value range let a headcount be a year, token boundaries still
+# let any isolated 1900-2100 number be one ("Headcount 2000", "Revenue $2000"), and the
+# boundary characters simultaneously rejected ordinary punctuation ("Founded 2025.") while
+# accepting "FY25users" and "Q4ever". Substring inference cannot decide what a number
+# MEANS, so it is the wrong instrument.
+#
+# The rule instead: a `date` raw must BE a date expression, not prose containing one. A
+# short leading word ("Founded", "in") and trailing punctuation are tolerated because decks
+# print them; anything else fails and the model is told to record the date's own string.
+# Lead words a DATE may carry. Closed and small on purpose: "Headcount 2000" is
+# syntactically identical to "Founded 2025" -- four digits in range behind one short word --
+# so the only thing separating a year from a quantity is which word it is. An allowlist
+# fails safe: an unlisted lead means the model is told to record the date's own string,
+# which is what the field is supposed to hold anyway.
+_DATE_LEAD_WORDS = (
+    "founded",
+    "since",
+    "by",
+    "in",
+    "from",
+    "until",
+    "through",
+    "as",
+    "of",
+    "at",
+    "on",
+    "launch",
+    "launched",
+    "launching",
+    "target",
+    "targeting",
+    "est",
+    "established",
+    "expected",
+    "projected",
+    "starting",
+    "start",
+    "begins",
+    "began",
+    "ends",
+    "ending",
+    "incorporated",
+    "inception",
+    "close",
+    "closing",
+    "closed",
+)
+_DATE_LEAD = rf"(?:(?:{'|'.join(_DATE_LEAD_WORDS)})\s+){{0,2}}"
+_DATE_TRAIL = r"[\s.,;:)\]]*"
 _MONTH_NAMES = (
     "january",
     "february",
@@ -137,40 +181,54 @@ _MONTH_NAMES = (
     "november",
     "december",
 )
-_MONTH_NAME_RE = re.compile(r"\b(" + "|".join(_MONTH_NAMES) + r")\b", re.I)
+_MONTH_ALT = "|".join(_MONTH_NAMES)
+
+# Each alternative captures the components it licenses, named so the value can be bound to
+# one of them rather than to "some number that appeared".
+_DATE_FORMS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # 2024-2030 (a range of two years)
+    (r"(?P<y1>\d{4})\s*[-–—/]\s*(?P<y2>\d{4})", ("y1", "y2")),
+    # Q4 2025 / Q4 '25 / Q4
+    (r"Q\s?(?P<q>[1-4])(?:\s*(?:FY|')?\s?(?P<qy>\d{4}|\d{2}))?", ("q", "qy")),
+    # March 2026 / March
+    (rf"(?P<mon>{_MONTH_ALT})(?:\s+(?P<my>\d{{4}}))?", ("mon", "my")),
+    # FY25 / FY2025 / '25
+    (r"(?:FY|')\s?(?P<fy>\d{4}|\d{2})", ("fy",)),
+    # A bare four-digit year, and nothing else in the string.
+    (r"(?P<y>\d{4})", ("y",)),
+)
+
+_DATE_RES = tuple((re.compile(rf"^{_DATE_LEAD}(?:{body}){_DATE_TRAIL}$", re.I), groups) for body, groups in _DATE_FORMS)
 
 
-_YEAR_RANGE = re.compile(r"(?<![\d.,])\d{4}\s*[-–—/]\s*\d{4}(?![\d.,])")
+def _date_values(raw: str) -> set[float] | None:
+    """The numbers this raw states as date components, or None if it is not a date at all.
 
-
-def _ambiguous_bare_years(text: str) -> bool:
-    """Two unmarked four-digit candidates that are not a range.
-
-    Syntax cannot separate them: in "Founded 2025; 2000 employees" both 2025 and 2000 are
-    well-formed years, and only the surrounding words say one is a headcount. `raw` is
-    supposed to be ONE figure's printed string, so a string naming two plausible years with
-    no marker distinguishing them is not something to guess at — refusing names the repair
-    (record the date's own printed string) where a guess silently accepts a headcount.
+    None and the empty set mean different things: None is "this string is not a date
+    expression" (record the date's own string), while a match with no numeric component
+    -- "March" alone -- yields the month.
     """
-    bare = [m for m in _YEAR_4.finditer(text) if 1900 <= int(m.group(1)) <= 2100]
-    if len(bare) < 2:
-        return False
-    return not _YEAR_RANGE.search(text)
-
-
-def _date_values(raw: str) -> set[float]:
-    """Every number the raw string marks AS a date component."""
-    text = raw or ""
-    # A four-digit token is only a year in a plausible range. Without the bound, "Founded
-    # 2025; 3000 employees" marks 3000 as a date and the headcount validates again — the
-    # shape test alone does not distinguish a year from any other four-digit quantity.
-    values: set[float] = {float(m.group(1)) for m in _YEAR_4.finditer(text) if 1900 <= int(m.group(1)) <= 2100}
-    values |= {float(m.group(1)) for m in _YEAR_2.finditer(text)}
-    values |= {float(m.group(1)) for m in _QUARTER.finditer(text)}
-    values |= {float(m.group(1)) for m in _MONTH_NUM.finditer(text)}
-    # Whole words only: "Marching" contains "march" and names no month.
-    values |= {float(_MONTH_NAMES.index(m.group(1).lower()) + 1) for m in _MONTH_NAME_RE.finditer(text)}
-    return values
+    text = (raw or "").strip()
+    for pattern, groups in _DATE_RES:
+        match = pattern.match(text)
+        if not match:
+            continue
+        values: set[float] = set()
+        for name in groups:
+            captured = match.groupdict().get(name)
+            if captured is None:
+                continue
+            if name == "mon":
+                values.add(float(_MONTH_NAMES.index(captured.lower()) + 1))
+                continue
+            number = int(captured)
+            if name in ("y", "y1", "y2", "my") and not 1900 <= number <= 2100:
+                # A four-digit token outside plausible years is not a year, and this is the
+                # form that let "Headcount 2000" through when the bound was missing.
+                return None
+            values.add(float(number))
+        return values
+    return None
 
 
 _BARE_SUFFIX = re.compile(r"\d\s*[kKmMbBtT]\s*$")
@@ -335,22 +393,14 @@ def validate_ledger(data: dict[str, Any], total_slides: int | None = None) -> tu
             # SIGN IS PRESERVED. The token comparison used abs(value), so -2025 passed as
             # a year. There is no negative date.
             allowed = _date_values(raw)
-            if _ambiguous_bare_years(raw):
+            if allowed is None:
                 errors.append(
-                    f"{where} raw {raw!r} names two four-digit numbers with nothing marking which is "
-                    f"the date — record the date's own printed string"
+                    f"{where} raw {raw!r} is not a date expression — record the date's own printed "
+                    f"string (a year, FY25, Q4 2025, March 2026), not the sentence around it"
                 )
-            elif allowed and value not in allowed:
-                printed = ", ".join(f"{v:g}" for v in sorted(allowed))
-                errors.append(
-                    f"{where} value {value!r} is not a date the raw {raw!r} marks "
-                    f"(it marks {printed}) — a date must be a year or a quarter/month the slide states"
-                )
-            elif not allowed:
-                errors.append(
-                    f"{where} raw {raw!r} marks no date — a date figure needs a year (2025, FY25, '25) "
-                    f"or a quarter/month (Q4, March) in the slide's own string"
-                )
+            elif value not in allowed:
+                printed = ", ".join(f"{v:g}" for v in sorted(allowed)) or "nothing numeric"
+                errors.append(f"{where} value {value!r} is not a date the raw {raw!r} states (it states {printed})")
         elif value is not None and isinstance(raw, str):
             parsed = _parsed_magnitude(raw)
             if parsed == 0:
