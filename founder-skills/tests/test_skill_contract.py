@@ -661,7 +661,15 @@ SKILL_MD_CEILING: dict[str, int] = {
     # out-of-scope deck offers the founder no way to decline. The `needs_input` note is here because
     # a hand-written summary let a founder read "Detected stage: Seed" over a record authorizing
     # Series A.
-    "deck-review": 98_706,
+    # deck-review 98,706 -> 99,503 (+797): the option ORDER on the out-of-scope gate. `gate_state.py`
+    # enforces the exact list in the exact order on the FILE, and a live run then showed a founder that
+    # list REVERSED — `Proceed anyway (best-effort)` in the default slot, `Stop review` last. Every
+    # artifact-based check passed, because the artifact was correct; the only wrong thing was what a
+    # person saw. The existing prose anticipated a SHORTER list ("including one with no way to decline")
+    # and said nothing about order, which is why it did not bind. The parent-side instruction now names
+    # the order and forbids adding a recommendation, and the rationale sits with the option list rather
+    # than in prose a copier skips.
+    "deck-review": 99_503,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

@@ -428,7 +428,7 @@ PROFILE_EOF
 
 ### Gate: Confirm Stage and Scope
 
-**Sub-agent execution model:** sub-agents in Cowork cannot reliably call `AskUserQuestion`. The gate uses a checkpoint-and-resume pattern — the sub-agent writes a `gate_state.json` to disk and emits a structured `needs_input` payload as its final message. The parent (main thread or invoking agent) calls `AskUserQuestion` *if available* — or otherwise asks the founder via plain text — then writes the answer back into `gate_state.json` with `gate_state.py answer` (use exactly this flag shape):
+**Sub-agent execution model:** sub-agents in Cowork cannot reliably call `AskUserQuestion`. The gate uses a checkpoint-and-resume pattern — the sub-agent writes a `gate_state.json` to disk and emits a structured `needs_input` payload as its final message. The parent (main thread or invoking agent) calls `AskUserQuestion` *if available* — **offering the `needs_input` options in the ORDER they appear, first to last, and adding no recommendation of your own** — or otherwise asks the founder via plain text — then writes the answer back into `gate_state.json` with `gate_state.py answer` (use exactly this flag shape):
 
 ```bash
 python3 "$SCRIPTS/gate_state.py" answer \
@@ -505,6 +505,8 @@ The `needs_input` block `emit` prints carries `confirmed_stage` and a `context_s
 `out_of_scope_choice` may only be emitted for `series_b`/`growth`, and `stage_confirmation` only for the in-scope three — the script refuses the other way round, because a `stage_confirmation` about an out-of-scope deck offers no way to decline.
 
 **For out-of-scope stages (series_b, growth):** use `gate_id: "out_of_scope_choice"`, question `"This looks out of scope. What should I do?"`, options `["Stop review", "Different stage", "Proceed anyway (best-effort)"]`.
+
+**THE ORDER OF THOSE OPTIONS IS THE PRODUCT DECISION, not a formatting detail.** Declining leads because a first option reads as the default, and the default for a deck this rubric does not fit is to not grade it. Measured on a live run: the record was written correctly — `gate_state.py` enforces this exact list, in this exact order, on the file — and the founder was then shown it **reversed**, with `Proceed anyway (best-effort)` in the default slot and `Stop review` last. Every artifact-based check passed, because the artifact was right; the only wrong thing was what a person saw. Reorder nothing, mark nothing "recommended", and do not lead with proceeding.
 
 **After the gate (you are resuming on Step 1's `gate_action`, or you just auto-satisfied):** branch on **`gate_action`**, not on the answer string — the same answer means different things on different gates, and the transition was already decided for you:
 

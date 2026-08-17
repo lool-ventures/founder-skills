@@ -1650,3 +1650,37 @@ def test_the_skill_presents_the_producer_summary_including_the_stage() -> None:
         "guaranteed to state the stage being confirmed"
     )
     assert "confirmed_stage" in text
+
+
+def test_skill_md_requires_the_gate_options_be_presented_in_order() -> None:
+    """The parent must offer the gate's options in the order the record carries.
+
+    MEASURED ON A LIVE COWORK RUN (2026-08-17): `gate_state.json` held the canonical
+    `["Stop review", "Different stage", "Proceed anyway (best-effort)"]` — `gate_state.py`
+    enforces that exact list in that exact order on the file — and the founder was shown it
+    REVERSED, with `Proceed anyway (best-effort)` first and `Stop review` last. Every
+    artifact-based assertion passed, because the artifact was right; the only wrong thing was
+    what a person saw.
+
+    Order is the product decision here: a first option reads as the default, and the default
+    for a deck this rubric does not fit is to not grade it. The prose already forbade a
+    hand-written option list, but it anticipated a SHORTER one ("including one with no way to
+    decline") and said nothing about order, so it did not bind.
+
+    This asserts the instruction EXISTS. It cannot assert the agent obeys — only a live run
+    can, which is how the defect was found in the first place.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    lowered = text.lower()
+    assert "in the order they appear" in lowered, (
+        "SKILL.md no longer tells the parent to preserve the gate's option order; a live run "
+        "reversed them and put 'Proceed anyway' in the default slot"
+    )
+    # The rationale has to travel with the option list, not sit in prose a copier skips.
+    idx = text.find('options `["Stop review"')
+    assert idx != -1, "the out-of-scope option list moved; re-anchor this check"
+    following = text[idx : idx + 1400]
+    assert "reversed" in following.lower(), (
+        "the out-of-scope option list no longer carries the why-order-matters note beside it"
+    )
+    assert "recommended" in lowered, "the no-added-recommendation instruction is gone"
