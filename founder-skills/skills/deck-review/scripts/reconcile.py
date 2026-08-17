@@ -1349,7 +1349,16 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         for f in real:
             acc *= as_fraction(f)
         r.computed, r.rendered = acc, " × ".join(f.raw for f in real) + f" = {acc:,.2f}".rstrip("0").rstrip(".")
-        kinds = [f.unit_kind for f in real if f.unit_kind != PERCENT]
+        # A COUNT IS A MULTIPLIER, NOT A DIMENSION -- same as a percent, and for the same
+        # reason. This dropped PERCENT and kept COUNT, so `412 customers x $95/month` typed
+        # as `mixed` and was incomparable to a stated MRR: the engine computed 39,140
+        # against $22K and then declined to say so. The two identities that blocks are the
+        # most common arithmetic in a seed deck -- customers x ARPU = revenue, and target
+        # businesses x contract value = bottom-up TAM -- so a deck could state a revenue its
+        # own customer count and price refute, and the disagreement was filed as a unit
+        # mismatch. An empty survivor list (a product of counts alone) still reads as
+        # `mixed`: a count of things is not a typed quantity and must stay untestable.
+        kinds = [f.unit_kind for f in real if f.unit_kind not in (PERCENT, COUNT)]
         pers = [f.period for f in real if f.period]
         r.computed_unit = (kinds[0] if len(kinds) == 1 else "mixed") + (f":{pers[0]}" if len(pers) == 1 else "")
     elif r.operator == "sum":

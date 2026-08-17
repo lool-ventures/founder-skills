@@ -1195,3 +1195,63 @@ def test_the_scale_agreement_sweep_covers_the_multi_letter_forms() -> None:
     import reconcile  # type: ignore[import-not-found]
 
     assert {"mm", "mn", "bn", "tn", "crore", "lakh", "lac"} <= set(reconcile.SCALE_TOKENS)
+
+
+def test_a_count_is_a_multiplier_in_a_product_not_a_dimension() -> None:
+    """`412 customers x $95/month` is money per month, not an untestable mixture.
+
+    The product's unit algebra dropped PERCENT from the kind list -- correctly, a percent in
+    a product is a multiplier -- but kept COUNT, so two kinds survived and the result typed
+    as `mixed`, which is incomparable to every stated figure. Measured on a deck built to
+    contradict itself: the engine computed 39,140 against a stated MRR of $22K and then
+    refused to compare them, reason "computed is mixed:month, stated is money:month".
+
+    A count is dimensionless in a product by dimensional analysis, and the two identities
+    this blocks are the most common arithmetic in a seed deck: customers x ARPU = revenue,
+    and target businesses x contract value = bottom-up TAM. Neither could ever be
+    contradicted, so a deck could state a revenue its own customer count and price refute
+    and the engine would file it as unit-incomparable.
+    """
+    import reconcile
+
+    customers = fig("412", 412, unit_kind="count", label="paying customers", id="customers")
+    arpu = fig("$95/month", 95, unit_kind="money", label="ARPU", id="arpu", period="month")
+    mrr = fig("$22K", 22000, unit_kind="money", label="MRR", id="mrr", period="month")
+    for f in (customers, arpu, mrr):
+        f.verified = True
+    by = {f.id: f for f in (customers, arpu, mrr)}
+
+    rel = reconcile.compute(
+        {"kind": "derived_product", "operator": "product", "operands": ["customers", "arpu"], "expected_id": "mrr"},
+        by,
+    )
+    assert rel.computed == 39140.0, rel.computed
+    assert rel.computed_unit == "money:month", (
+        f"computed_unit is {rel.computed_unit!r}; a count must not contribute a dimension, or "
+        "customers x ARPU can never be tested against a stated MRR"
+    )
+    assert rel.verdict == "contradiction", (
+        f"verdict {rel.verdict!r} with reasons {rel.reasons} — 39,140 against a stated 22,000 "
+        "is a 78% disagreement and the deck's own numbers establish it"
+    )
+
+
+def test_a_product_of_only_counts_stays_untestable() -> None:
+    """Excluding COUNT must not make a count-only product look like a typed quantity.
+
+    `seats x offices` is a count of things and has no business being compared against a
+    money figure. With COUNT dropped from the kind list the survivor list is EMPTY, and the
+    guard has to read that as untestable rather than indexing into it.
+    """
+    import reconcile
+
+    a = fig("40", 40, unit_kind="count", label="seats", id="a")
+    b = fig("12", 12, unit_kind="count", label="offices", id="b")
+    money = fig("$1.2M", 1_200_000, unit_kind="money", label="revenue", id="rev")
+    for f in (a, b, money):
+        f.verified = True
+    rel = reconcile.compute(
+        {"kind": "derived_product", "operator": "product", "operands": ["a", "b"], "expected_id": "rev"},
+        {f.id: f for f in (a, b, money)},
+    )
+    assert rel.verdict == "incomparable", f"{rel.verdict!r} / unit {rel.computed_unit!r}"
