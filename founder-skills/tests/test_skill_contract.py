@@ -669,12 +669,18 @@ SKILL_MD_CEILING: dict[str, int] = {
     # and said nothing about order, which is why it did not bind. The parent-side instruction now names
     # the order and forbids adding a recommendation, and the rationale sits with the option list rather
     # than in prose a copier skips.
-    # deck-review raised 99_503 -> 99_757 for G2: Step 8 must pass `--gate-state` to
-    # `visualize.py`. The authorization boundary sat only on `compose_report.py`, so a review the
-    # founder DECLINED still produced a complete `report.html` — the surface a founder is most
-    # likely to open, and this skill's own comments say so twice. The flag is the fix, not prose
-    # about the fix; the note beside it was cut to two sentences to keep the raise minimal.
-    "deck-review": 99_757,
+    # deck-review: shrink pass 2026-08-18, 99_757 -> 97_202 (-2_555 B). The file sat EXACTLY
+    # at its ceiling, so every edit tripped this ratchet. Cut in order of value: the narration
+    # guidance and two of its restatements QUOTED THE LEAK PHRASES verbatim immediately before the
+    # densest plumbing sections — under the recorded echo hypothesis (a model reaches for the
+    # vocabulary it is currently reading) that primed the failure it forbade, so cutting bytes and
+    # improving compliance pointed the same way. Then rationale essays whose operative kernel is one
+    # sentence, bash comments compressed to their load-bearing clause, and a 4th restatement of
+    # append-only two lines after the 3rd. Kept: every anchor string, both "Say exactly" markers and
+    # the supplied-line table, all 7 dispatch templates, the fleet-identical delivery block, the
+    # execution checkpoint, and every named observed-failure move. Spent 267 B on a missing failure
+    # branch for Step 3.6, whose artifact the whole numeric chain consumes unconditionally.
+    "deck-review": 97_202,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

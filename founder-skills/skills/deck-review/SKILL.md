@@ -99,7 +99,7 @@ Every review deposits structured JSON artifacts into a working directory. The fi
 - For producer-script artifacts (Steps 2-4, including 3.5 and 3.8), the agent supplies JSON on stdin and the script schema-validates against `references/schemas/<artifact>.schema.json`. Never write artifacts directly via `Write` or `Edit` — always pipe through the producer script so `metadata.run_id` is injected and the schema is enforced.
 - If a step is not applicable, deposit a stub: `{"skipped": true, "reason": "..."}`
 
-Keep the founder informed with brief, plain-language updates at each step. **Narrate the founder-visible OUTCOME, never the internal step.** That is the test to apply, and it catches more than a word list can: the forbidden thing is not a syntax, it is talking about the machinery. Bad — "Gating and piping the extraction through the producer, then staging the coaching hand-off"; good — "I've checked your numbers and I'm writing up what stood out." Bad — "schema-drift warning on `coaching_payload`"; good — nothing, because the founder has no stake in it. **Never name an internal artifact, field, or token** (a payload key, a marker name, an artifact filename, a hand-off dir) even in plain prose with no backticks — a detector keyed on syntax cannot see "gated", "hand-off" or "canonical artifacts", but the founder still reads them and they still mean nothing to them. **The between-step progress lines are the primary leak vector, not the final summary.** They feel internal — you are narrating what you are about to do — but the founder reads every one of them, and this is where the leaks actually appear: *"Now gating the hand-off before piping through the checklist producer"*, *"Gate 1 passes"*, *"Running the final verification gate"*. Rewrite each pipeline transition as the founder-visible outcome: *"Checking your numbers against the 46-point review"*, *"Your inputs look consistent — moving on to unit economics"*, *"Finishing up and putting the report together"*. If a progress line would mean nothing to someone who has never seen this skill's internals, it does not belong in the channel. Also excluded, as before: file/script names, paths, `*.py`, `--flags`, `$vars`, exit codes ("Exit N", "not found"), `W_`/`E_` codes, JSON, and step/route labels ("Lane N", "Context A/B", "Phase N", "structure detection", "the grid", any `ALL_CAPS_TOKEN`). After each analytical step (4–5), share a one-sentence finding before moving on. **The task tracker is founder-visible too — the same rule governs its labels.** "Gate the inputs review handoff", "Validate inputs.json", "resolve agent namespace paths", "Initialize founder context" are leaks even though each names a real step, and even when the prose around them is clean. Label each task by the founder-visible outcome — "Check your inputs", "Score against the review", "Write up what I found" — never by a file, directory, script, or pipeline stage.
+Keep the founder informed with brief, plain-language updates at each step. **Narrate the founder-visible OUTCOME, never the internal step.** That is the test, and it catches more than a word list can: the forbidden thing is not a syntax, it is talking about the machinery. Bad — "Gating and piping the extraction through the producer, then staging the coaching hand-off"; good — "I've checked your numbers and I'm writing up what stood out." **Never name an internal artifact, field, or token** (a payload key, a marker name, an artifact filename, a hand-off dir) even in plain prose with no backticks — a detector keyed on syntax cannot see "gated", "hand-off" or "canonical artifacts", but the founder still reads them and they mean nothing to them. **The between-step progress lines are the primary leak vector, not the final summary.** Say the outcome of each transition: *"Reading your deck slide by slide"*, *"Your figures line up — moving on to the slide review"*, *"Finishing up and putting the report together"*. Also excluded: file/script names, paths, `*.py`, `--flags`, `$vars`, exit codes ("Exit N", "not found"), `W_`/`E_` codes, JSON, and step/route labels ("Lane N", "Context A/B", "Phase N", "structure detection", "the grid", any `ALL_CAPS_TOKEN`). After each analytical step (4–5), share a one-sentence finding before moving on. **The task tracker is founder-visible too — the same rule governs its labels.** "Gate the slide-review handoff" is a leak even though it names a real step, and even when the prose around it is clean. Label each task by the founder-visible outcome — "Check your inputs", "Score against the review", "Write up what I found" — never by a file, directory, script, or pipeline stage.
 
 ## Workflow
 
@@ -112,13 +112,9 @@ Optional, best-effort, and via the **Read tool** (not a shell command): before t
 ```bash
 SCRIPTS="${CLAUDE_PLUGIN_ROOT}/skills/deck-review/scripts"
 if [ ! -d "$SCRIPTS" ]; then
-  # In Cowork, CLAUDE_PLUGIN_ROOT substitutes to a host-side path absent inside
-  # the session VM — self-heal by collecting EVERY candidate mount (a session can
-  # have more than one at once: a stale host-side cache, a test marketplace, even
-  # a symlink into a different session's tree) and handing them to
-  # select_plugin_root.py, which picks ONE deterministically and names the
-  # rejects — never trust `find`'s arbitrary first hit, which can silently mix
-  # scripts across plugin versions mid-pipeline.
+  # In Cowork, CLAUDE_PLUGIN_ROOT is a host path absent inside the VM. Collect EVERY
+  # candidate mount (a session can have several) and let select_plugin_root.py pick one
+  # deterministically — never trust `find`'s first hit, which mixes plugin versions.
   CANDIDATES="$(find /sessions -type d -path '*/skills/deck-review/scripts' 2>/dev/null)"
   [ -n "$CANDIDATES" ] || CANDIDATES="$(find / -type d -path '*/skills/deck-review/scripts' 2>/dev/null)"
   PROVISIONAL_ROOT="$(printf '%s\n' "$CANDIDATES" | head -1)"
@@ -142,10 +138,8 @@ PLUGIN_ROOT="${SCRIPTS%/skills/*}"
 echo "PLUGIN_ROOT=$PLUGIN_ROOT"   # resolved ONCE, here — paste this literal into every later block; never re-run this resolution
 REFS="$PLUGIN_ROOT/skills/deck-review/references"
 SHARED_SCRIPTS="$PLUGIN_ROOT/scripts"
-# Resolve the canonical artifacts root via a SCRIPT, not inline bash. An inline path computation is
-# guidance the agent paraphrases — it lands outputs/ in one run and outputs/artifacts/ in another,
-# desyncing cross-skill find_artifact.py and breaking path-based checks. The script computes the root
-# deterministically (under the promoted outputs/ dir in Cowork, ./artifacts in the CLI) and creates it.
+# Resolve the artifacts root via the SCRIPT, never inline bash: an inline computation gets
+# paraphrased into outputs/ one run and outputs/artifacts/ the next, desyncing find_artifact.py.
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py"   # prints ARTIFACTS_ROOT — use the printed path verbatim as ARTIFACTS_ROOT in every later block (a captured var dies in the next fresh shell)
 
 # RUN_ID — used by Step 1 (founder_context init) before slug-aware setup_run.py
@@ -190,17 +184,14 @@ Read `review_dir`, `run_id`, `resume`, `reuse_checkpoints`, `gate_id`, `gate_act
 Read `gate_id` too when you act on the answer: `"Seed"` means one thing on `stage_choice` and nothing at all on the others, and the answer string alone cannot tell you which gate you are resuming. Substitute `REVIEW_DIR` with the `review_dir` value, `RUN_ID` with the `run_id` value, and `IS_RESUMING` with `1` if `resume` is true, else empty, in every subsequent bash block. Then:
 
 ```bash
-# Context A hand-off dir — PER RUN: sub-agents WRITE their raw output JSON here (the audit trail —
-# raw sub-agent output as returned, before producer validation). Permanent by platform design
-# (outputs/ mounts are write-allowed / delete-denied); nothing in it is ever a canonical artifact.
-# The $RUN_ID segment is load-bearing: it prevents a stale prior-run file from silently passing
-# the hand-off gate when a dispatch fails to write.
+# Context A hand-off dir — PER RUN: sub-agents WRITE their raw output JSON here (audit trail,
+# pre-validation; never a canonical artifact). The $RUN_ID segment is load-bearing — it stops a
+# stale prior-run file passing the hand-off gate when a dispatch fails to write.
 HANDOFF_DIR="$REVIEW_DIR/handoff/$RUN_ID"
 mkdir -p "$HANDOFF_DIR"
 # Sub-agents address the SAME dir by a different path (their file tools are rooted at the outputs
-# mount in Cowork). Resolve the FULL agent-namespace paths via the script — never hand-splice the
-# printed root with a literal skill-name/slug/run-id string yourself (that string-splicing is
-# exactly the non-determinism the resolver script exists to remove):
+# mount in Cowork). Resolve agent-namespace paths via the script — never hand-splice the printed
+# root with a literal skill/slug/run-id string, which is the non-determinism it exists to remove:
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --handoff-dir-agent \
   --dir-name "<basename of REVIEW_DIR>" --run-id "$RUN_ID"   # prints HANDOFF_AGENT verbatim
 HANDOFF_AGENT="<printed value>"   # use verbatim in OUTPUT_PATH lines
@@ -209,8 +200,8 @@ HANDOFF_AGENT="<printed value>"   # use verbatim in OUTPUT_PATH lines
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --analysis-dir-agent \
   --dir-name "<basename of REVIEW_DIR>"   # prints the dir in the agent namespace
 REVIEW_DIR_AGENT="<printed value>"   # e.g. stage_profile.json, deck_inventory.json reads
-# Ad-hoc scratch (NOT sub-agent hand-off) lives OUTSIDE the promoted outputs/ tree, in a temp dir
-# that is safe to both create and reclaim. Use the printed path verbatim in later steps.
+# Ad-hoc scratch (NOT hand-off) lives OUTSIDE the outputs/ tree, where it is safe to create and
+# reclaim. Use the printed path verbatim in later steps.
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/deck-review-${SLUG:-deck}.staging.XXXXXX")"
 ```
 
@@ -309,12 +300,9 @@ case "$DECK_SRC" in
       command -v "$c" >/dev/null 2>&1 && { SOFFICE="$c"; break; }
     done
     if [ -n "$SOFFICE" ]; then
-      # -env:UserInstallation is REQUIRED, not tidiness. LibreOffice builds a user
-      # profile under $HOME on first run; $HOME is read-only in the sandbox, so it
-      # dies with "User installation could not be completed" (exit 77) having
-      # converted nothing. Pointing the profile at writable scratch fixes it.
-      # Errors are NOT suppressed: a silent failure here is indistinguishable from
-      # having no converter at all, and reports the wrong reason to the founder.
+      # -env:UserInstallation is REQUIRED: $HOME is read-only, so profile creation
+      # dies (exit 77) having converted nothing. Do not suppress errors — a silent
+      # failure is indistinguishable from having no converter, and misreports why.
       "$SOFFICE" --headless -env:UserInstallation="file://$STAGING_DIR/.lo" \
         --convert-to pdf --outdir "$STAGING_DIR" "$DECK_SRC" 2>&1 | tail -3
       B="$(basename "$DECK_SRC")"
@@ -545,13 +533,8 @@ The per-answer detail, for the branch `gate_action` sent you to:
 ### Context A hand-off protocol (file transport + gate)
 
 **Say one of these to the founder, verbatim — nothing else, and nothing about the machinery
-in the rest of this section.** Measured across live runs, EVERY founder-facing leak happened
-at one of these transitions and none anywhere else: *"gating the hand-off and piping through
-the producer"*, *"staging the coaching payload"*, *"dispatching the coaching commentary
-sub-agent"*. The reason is mechanical rather than careless — this section is dense with
-*hand-off*, *gate*, *producer*, *payload*, so a model composing its next progress line reaches
-for the words in front of it. A general rule stated hundreds of lines earlier loses to that,
-which is why the line is supplied here instead of left to be written:
+in the rest of this section.** Every founder-facing leak measured in a live run happened at one
+of these transitions and none anywhere else, so the line is supplied rather than composed:
 
 | moment | say exactly |
 |---|---|
@@ -626,10 +609,8 @@ Retries overwrite the same OUTPUT_PATH (the mount is write-allowed / delete-deni
 under `$REVIEW_DIR`). Hand-off files are not canonical artifacts: producers consume them only via
 the explicit pipe, and `compose_report.py` never reads `handoff/`.
 
-Ad-hoc scratch (NOT sub-agent hand-off) still goes to `$STAGING_DIR` in `/tmp` — see the reference
-(`founder-skills/references/skill-execution-model.md`). Hard rule: never stage scratch anywhere under
-the outputs mount (which includes `$REVIEW_DIR`), and never delete anything under it — see the
-append-only rule in Step 0.
+Ad-hoc scratch (NOT sub-agent hand-off) goes to `$STAGING_DIR` in `/tmp`, never anywhere under the
+outputs mount — see `founder-skills/references/skill-execution-model.md`.
 
 ### Step 3.5: Extract the Deck's Numbers -> `ledger.json` (Context A dispatch)
 
@@ -765,6 +746,10 @@ cat "$HANDOFF_DIR/second_read_output.json" | \
     "$RUN_ID" "$REVIEW_DIR/second_read.json"
 ```
 <!-- skill-quality-ci: bash-after-subagent-ok -->
+
+**If this copy fails, treat it as a bad hand-off and repair-dispatch** (same branch as exit 4).
+`reconcile.py` consumes `second_read.json` unconditionally, so a missing or malformed one takes
+down the numeric chain that `slide_reviews.py --reconciliation` gates on.
 
 ### Step 3.7: Propose Which Figures Relate (Context A dispatch)
 
@@ -1131,10 +1116,8 @@ hand anything over.
 ### Step 7: Post-Compose Coaching Commentary (Context B dispatch — POST_COMPOSE_COACHING)
 
 **Say exactly: "Adding the coaching notes."** Then say nothing further until the report is
-delivered. This step produced three of the leaks measured in live runs — *"staging the coaching
-payload"*, *"dispatching the coaching commentary sub-agent"*, *"gating the coaching hand-off"* —
-because the paragraphs below are the densest plumbing in the skill and a model narrating its
-next move mirrors them. One supplied sentence replaces the composition entirely.
+delivered. The paragraphs below are the densest plumbing in the skill, and this step produced
+three measured leaks; the supplied sentence replaces composing your own.
 
 **Dispatch the deck-review sub-agent in Context B.** **Call the `Task` tool with `subagent_type: "founder-skills:deck-review"`** after `compose_report.py` has successfully written both `report.json` and `report.md`.
 
@@ -1155,17 +1138,11 @@ This STAGES the payload as a file and prints only a small receipt.
 shell, so the variable would be unreadable and gone. The sub-agent Reads the staged file from
 the agent namespace; the payload is no longer pasted into the dispatch prompt.
 
-Two reasons it is a file and not an inlined blob:
-
-1. **It gives the dispatch a functionally REQUIRED read in the agent namespace.**
-   A sub-agent that must Read before it can Write cannot silently misresolve its
-   prefix — a wrong prefix fails the Read loudly, before anything is written. The
-   one dispatch that survived a wrong prefix in practice survived for exactly
-   this reason: it had a mandatory under-outputs read first. A read the agent does
-   not need is a read the agent can skip, so the probe has to BE the payload.
-2. **The payload stops passing through the model.** Same principle as the
-   commentary: it leaves the model exactly once, and a re-typed JSON blob can be
-   truncated or re-indented in ways that change its meaning.
+A file, not an inlined blob, for two reasons: it makes the dispatch's first act a REQUIRED read
+in the agent namespace, so a wrong prefix fails loudly before anything is written (a read the
+agent does not need is a read it can skip, so the probe has to BE the payload); and the payload
+leaves the model exactly once, where a re-typed JSON blob can be truncated or re-indented into a
+different meaning.
 
 **Dispatch prompt template** (substitute `<HANDOFF_AGENT>` with the Step-0 agent-namespace value — the same rule as every Context A dispatch; the sub-agent has no shell vars, so paste the printed value):
 
