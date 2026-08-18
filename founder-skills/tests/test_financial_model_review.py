@@ -9017,3 +9017,35 @@ def test_no_warning_puts_a_criterion_id_in_the_founder_facing_report(tmp_path: A
     # and stripping them there would trade one defect for another.
     with open(json_path, encoding="utf-8") as fh:
         assert "CASH_24" in fh.read(), "report.json lost the ids too; they belong on the machine surface"
+
+
+def test_saas_only_metrics_constant_matches_what_is_actually_suppressed() -> None:
+    """J9. `_SAAS_ONLY_METRICS` was defined and referenced NOWHERE — a repo-wide grep returned
+    exactly one hit, the definition. The real suppression is five separate `if saas:` guards, so
+    the constant documented a behaviour it did not implement and was free to drift from it.
+
+    Kept rather than deleted, because the constant turns out to be ACCURATE (checked: all five
+    names are genuinely the metrics the guards suppress — an earlier suspicion that `rule_of_40`
+    and `arr_per_fte` had drifted out of the guarded set is refuted). Deleting an accurate
+    statement of intent is the wrong repair; making it verifiable is the right one.
+
+    So this test derives the suppressed set from BEHAVIOUR — run a non-SaaS model and see what
+    comes back `not_applicable` — and pins it to the constant. Now the constant is a contract:
+    add a sixth SaaS-only metric without its guard, or remove a guard, and this fails.
+    """
+    with open(os.path.join(FMR_SCRIPTS_DIR, "unit_economics.py"), encoding="utf-8") as f:
+        src = f.read()
+    m = re.search(r"_SAAS_ONLY_METRICS\s*=\s*\{([^}]*)\}", src)
+    assert m, "_SAAS_ONLY_METRICS is gone — if it was deleted deliberately, delete this test too"
+    declared = {s.strip().strip('"').strip("'") for s in m.group(1).split(",") if s.strip()}
+
+    payload = copy.deepcopy(_VALID_INPUTS)
+    payload["company"]["revenue_model_type"] = "hardware"
+    rc, data, err = run_script("unit_economics.py", ["--pretty"], stdin_data=json.dumps(payload))
+    assert rc == 0 and data is not None, err
+    suppressed = {mt["id"] for mt in data["metrics"] if mt.get("rating") == "not_applicable"}
+
+    assert declared <= suppressed, (
+        f"_SAAS_ONLY_METRICS names {sorted(declared - suppressed)} as SaaS-only, but a hardware "
+        "model still had them rated — the constant describes a suppression that does not happen"
+    )

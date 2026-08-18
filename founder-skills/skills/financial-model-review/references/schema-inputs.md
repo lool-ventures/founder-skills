@@ -90,12 +90,22 @@ The model's native currency, as an ISO 4217 code (`"USD"`, `"INR"`, `"ILS"`, `"E
 | `model_format` | string | no | One of: `"spreadsheet"`, `"deck"`, `"conversational"`, `"partial"`. Defaults to `"spreadsheet"`. Controls which checklist items are applicable. |
 | `data_confidence` | string | no | One of: `"exact"`, `"estimated"`, `"mixed"`. Indicates reliability of input values. |
 
-**Choosing `revenue_model_type` when the founder just says "B2B SaaS".** The enum has two SaaS variants and
-picking wrong changes which benchmarks apply, silently. Decide on **motion, not product**: a named
-salesperson or AE in the loop, or a stated ACV above ~$25k, or "we do demos/pilots" ⇒ `saas-sales-led`.
-Self-serve signup, free tier, or product-led trial ⇒ `saas-plg`. **No signal either way ⇒
-`saas-sales-led`** (the more conservative CAC-payback band) **and record it in `agent_supplied`** so the
-choice is disclosed rather than invisible.
+**Choosing `revenue_model_type` when the founder just says "B2B SaaS".** Decide on **motion, not
+product**: a named salesperson or AE in the loop, or a stated ACV above ~$25k, or "we do demos/pilots"
+⇒ `saas-sales-led`. Self-serve signup, free tier, or product-led trial ⇒ `saas-plg`. Either way,
+**record the choice in `agent_supplied`** so it is disclosed rather than invisible.
+
+**With no signal either way, the two SaaS variants are interchangeable — do not agonise.** Verified:
+nothing in the fleet distinguishes them. Both sit in `_SAAS_MODEL_TYPES` and `_KNOWN_SAAS_LIKE_TYPES`,
+both map to `"saas"` in `checklist.py`, and CAC payback keys on `acv_tier`, not on model type. This
+paragraph previously said to default to `saas-sales-led` "(the more conservative CAC-payback band)" —
+a band it does not control, between two values no code tells apart.
+
+**What DOES matter is when neither fits.** `revenue_model_type` is required and has no "unknown", so a
+business the enum cannot express — outcome-priced, or deep tech that ships software — falls through to
+a SaaS default and switches on the whole SaaS metric suite (NRR, GRR, magic number, Rule of 40,
+ARR/FTE) plus the SaaS gross-margin table. Prefer the closest NON-SaaS type over a SaaS one you do not
+believe, and say in `agent_supplied` that the taxonomy did not fit.
 
 **Choosing `data_confidence` for conversational input.** A figure the founder stated from memory in chat is
 `estimated`, not `exact`. Reserve `exact` for a value read off a document — a spreadsheet cell, a bank
