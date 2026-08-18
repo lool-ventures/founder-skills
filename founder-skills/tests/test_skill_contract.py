@@ -680,7 +680,17 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the supplied-line table, all 7 dispatch templates, the fleet-identical delivery block, the
     # execution checkpoint, and every named observed-failure move. Spent 267 B on a missing failure
     # branch for Step 3.6, whose artifact the whole numeric chain consumes unconditionally.
-    "deck-review": 97_202,
+    # deck-review: Batch 2 founder-facing corrections, 97_202 -> 99_317. Six defects measured on a
+    # live run, each now pinned by a contract test in test_deck_review_skill_contract.py: A2a the
+    # SLIDE_REVIEWS prompt never said how to ATTRIBUTE a principle, so the model cited the reference
+    # filename it was handed; A2b the token "must be removed" with no HOW, which produced a sed edit
+    # that cleaned report.md and left report.json; A4 a DESCRIBED limit ("at most one plain
+    # sentence") instead of a supplied one; A5 three optional string-only fields that reject null and
+    # accept omission, where only claimed_stage said so; A6 no canonical inlined text for an
+    # image-rendered deck, so the two halves of one corroboration could read different
+    # transcriptions; A7 a missing pointer to the schema that already answers `suppressed`.
+    # Net vs the pre-shrink 99_757: -440 B — Batch 1.5 + Batch 2 together are still a cut.
+    "deck-review": 99_317,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

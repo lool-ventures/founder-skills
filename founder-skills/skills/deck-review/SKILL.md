@@ -276,6 +276,14 @@ run, whatever the transcript says.
 4. **Partial decks:** Deck has fewer than 5 slides or is clearly a subset. Proceed but set `confidence: "low"` in stage_profile and note the limitation. Missing-slides detection still runs normally.
 5. **Wrong file type:** File named `.pdf` but is actually a Word doc or image. If Read fails, try alternate format before asking the founder for a re-upload.
 
+**When the deck is image-rendered, `deck_inventory` IS the canonical text.** For a PDF whose
+slides are images, Read returns page images and there is no extracted text to inline — so build
+the per-slide record here once (headline / `content_summary` / visuals) and inline THAT, verbatim
+and identically, everywhere a dispatch below asks for the deck's text. Do not let each dispatch
+re-transcribe: LEDGER_EXTRACTION and SECOND_READ are the two halves of one corroboration, and
+two different transcriptions make the second read a second read of a different deck — which
+weakens the check silently instead of failing it.
+
 **Find the deck before anything else — do not assume it is missing.** An attached file is
 already on disk under the uploads mount; nothing tells you its name up front, so list it:
 `ls -la "$(dirname "$REVIEW_DIR")"/../uploads 2>/dev/null || ls -la ./mnt/uploads`. Measured:
@@ -367,6 +375,8 @@ Map to `ai_company_status`:
 Record what evidence or claim was found in `ai_evidence` (required for `ai_core` and `ai_claimed_unverified`; brief for `not_ai`).
 
 `claimed_stage` holds the stage token the deck itself states (`pre_seed`, `seed`, `series_a`, `series_b`, `growth`). If the deck never states a stage, **omit the field or set it to `null` — never invent a descriptive placeholder** (a made-up value misfires the stage cross-checks downstream).
+
+**`claimed_raise`, `ai_evidence` and `slides[].visuals` are optional but typed string-only, so `null` is REJECTED and omission is accepted — omit them entirely rather than passing null.** A deck that states no ask is a real and notable finding, not a null: measured, `claimed_raise: null` failed the producer with *"expected ['string'], got NoneType"*.
 
 ```bash
 cat <<'INVENTORY_EOF' | python3 "$SCRIPTS/deck_inventory.py" --run-id "$RUN_ID" -o "$REVIEW_DIR/deck_inventory.json" --pretty
@@ -822,9 +832,16 @@ cat "$HANDOFF_DIR/relations_output.json" | \
 - **`gate_failed`** — too little of the ledger survived the second read. The review
   continues; the numbers section does not appear.
 
+`references/schemas/reconciliation.schema.json` answers what `suppressed` means and which verdicts reach a founder (`contradiction` and `derived` only) — read it rather than inferring from the counts.
+
 Do not report a contradiction to the founder from this step. Step 6 renders them, once,
-from the artifact. What reaches the founder here is at most one plain sentence about
-whether their figures line up.
+from the artifact.
+
+**Say exactly one of these, and nothing more:** with no contradictions, *"Your figures line
+up."* With one or more, *"I found a couple of things in your numbers — I'll detail them in
+the report."* **Name no figure, no count, and no slide before Step 6** — a described limit
+("at most one plain sentence") produced a mid-pipeline line that gave both contradictions
+with their figures, pre-empting the render.
 
 ### Step 3.9: Review the Disagreements Before Showing Them (Context A dispatch)
 
@@ -935,7 +952,9 @@ DECK:
 
 For each slide: identify strengths, weaknesses, and specific recommendations.
 Map to expected framework. Flag missing expected slides. Every critique must
-cite a specific best-practice principle. When you reference deck figures, quote
+cite a specific best-practice principle. **Attribute each principle to its SOURCE
+by name — YC, Sequoia, DocSend, a16z, Carta — never by our reference filename.**
+A filename in `best_practice_refs` reaches the founder's report. When you reference deck figures, quote
 them verbatim from the deck content — do not paraphrase or round numbers,
 percentages, dates, or named metrics.
 
@@ -1107,6 +1126,12 @@ silence: fix it and re-run if the run itself is broken, otherwise say what it me
 for the founder in plain language. A `FOUNDER_TEXT_TOKEN` naming an internal FILE is
 the one to watch — that text is still in `report.md` and must be removed before you
 hand anything over.
+
+**Remove it upstream: re-dispatch the step that produced the text, then re-run compose.**
+Never `sed`, Edit, or otherwise hand-edit a composed file. Compose owns its outputs, and a
+hand-edit fixes only the surface you touched — measured, it cleaned `report.md` and left the
+same 13 occurrences in `report.json`. The token almost always enters in a sub-agent's
+`best_practice_refs`, so the upstream step is SLIDE_REVIEWS.
 
 
 `--strict` counts content findings too, so use it as a pipeline gate only when the checklist outcome is already known-clean.

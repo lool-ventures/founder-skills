@@ -1684,3 +1684,166 @@ def test_skill_md_requires_the_gate_options_be_presented_in_order() -> None:
         "the out-of-scope option list no longer carries the why-order-matters note beside it"
     )
     assert "recommended" in lowered, "the no-added-recommendation instruction is gone"
+
+
+# ---------------------------------------------------------------------------
+# Batch 2 — founder-facing corrections, each a defect measured on a live run.
+#
+# These are PROSE contracts, and what they buy is narrow but real: they stop a
+# guidance line being silently deleted. They do NOT assert the guidance works --
+# this repo has measured three prose approaches to narration that passed their
+# tests and changed nothing. Where a fix is only observable on a particular kind
+# of input, the test says so rather than implying coverage it does not have.
+# ---------------------------------------------------------------------------
+
+
+def test_slide_reviews_forbids_citing_our_reference_filename() -> None:
+    """A2a. The SLIDE_REVIEWS sub-agent cited `checklist-criteria.md` as the SOURCE of a
+    best-practice principle -- 13 times, into `reviews[].best_practice_refs[]`, which then
+    reached `report.json`. The prompt demands "Every critique must cite a specific
+    best-practice principle" and hands over the two reference paths, while never saying how
+    to attribute one, so the model cited the filename it was given.
+
+    Measured: `checklist.json` did NOT leak (0 occurrences) -- only SLIDE_REVIEWS did.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    start = text.find("CONTEXT: SLIDE_REVIEWS")
+    assert start != -1, "SLIDE_REVIEWS dispatch template missing"
+    window = text[start : start + 2200]
+    assert "never by our reference filename" in window.lower() or "never by a reference filename" in window.lower(), (
+        "the SLIDE_REVIEWS prompt must tell the sub-agent how to ATTRIBUTE a principle -- by "
+        "source name (YC, Sequoia, DocSend, a16z), never by our own reference filename. Without "
+        "it the model cites the path it was handed, and the filename reaches report.json."
+    )
+
+
+def test_founder_text_token_names_its_remediation_path() -> None:
+    """A2b. Told the token "must be removed" and not HOW, the agent hand-edited a composed
+    deliverable with `sed` -- violating "compose owns file outputs" -- and cleaned `report.md`
+    while leaving `report.json`, which is how the two artifacts diverged.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    assert "FOUNDER_TEXT_TOKEN" in text, "the warning is no longer named in SKILL.md"
+    idx = text.find("FOUNDER_TEXT_TOKEN")
+    window = text[max(0, idx - 400) : idx + 900]
+
+    # TIGHTENED after this test passed its own mutation. The first version asserted "re-run"
+    # AND ("re-dispatch" or "redispatch") anywhere in the window, plus "sed" or "hand-edit".
+    # All were already satisfied by unrelated pre-existing prose -- "fix it and re-run if the
+    # run itself is broken", and "never re-score, re-dispatch, or otherwise make them
+    # disappear", which is about CONTENT findings, a different subject entirely. Deleting the
+    # remediation sentence left the test green.
+    #
+    # Two generic tokens in a 1,300-char window is not a contract. The contract is that ONE
+    # instruction names both halves of the path, so assert them in proximity.
+    pair = re.search(r"re-?dispatch.{0,160}?compose|compose.{0,160}?re-?dispatch", window, re.I | re.S)
+    assert pair, (
+        "a FOUNDER_TEXT_TOKEN finding must name its remediation path as ONE instruction -- "
+        "re-dispatch the producing step, then re-run compose. Stating only that the token must "
+        "be removed is what produced the sed edit that cleaned report.md and left report.json."
+    )
+    forbid = re.search(r"(never|not).{0,60}(`?sed`?|hand-edit)", window, re.I | re.S)
+    assert forbid, (
+        "the forbidden move must be named and forbidden in the same breath; 'compose owns file "
+        "outputs' stated 600 lines earlier did not reach the agent at the moment it was deciding"
+    )
+
+
+def test_step_3_8_supplies_the_exact_founder_sentence() -> None:
+    """A4. Step 3.8 described a constraint ("at most one plain sentence") and the agent
+    narrated both contradictions with figures, pre-empting the Step 6 render. A supplied
+    string beats a described rule -- the same shape as A3's table.
+
+    NOT COVERED BY ANY LIVE LANE: the defect only manifests when contradictions EXIST.
+    `deck-review-smoke` has zero, and its narration was already near-compliant, so a green
+    run there proves nothing. Only a contradiction-bearing deck can exercise this.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    start = text.find("### Step 3.8")
+    assert start != -1
+    window = text[start : start + 2600]
+    assert "say exactly" in window.lower(), (
+        "Step 3.8 must SUPPLY the allowed sentence, not describe the constraint on it"
+    )
+    assert "before Step 6" in window or "until Step 6" in window, (
+        "the prohibition must name WHEN it lifts (Step 6 renders them, once) -- otherwise the "
+        "agent has no way to distinguish 'never' from 'not yet'"
+    )
+
+
+def test_optional_string_fields_say_omit_not_null() -> None:
+    """A5. Three deck_inventory fields are optional AND typed string-only, so `null` is
+    rejected while omission is accepted. The live deck stated no ask, the agent passed
+    `null` for `claimed_raise`, and the producer refused it. `claimed_stage` already carried
+    the guidance; these three did not.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    schema = json.loads((SCHEMAS_DIR / "deck_inventory.schema.json").read_text(encoding="utf-8"))
+    props, required = schema["properties"], set(schema.get("required", []))
+    slide_props = props["slides"]["items"]["properties"]
+    slide_required = set(props["slides"]["items"].get("required", []))
+
+    # Derived from the schema, not hardcoded: a new optional string-only field joins this set
+    # automatically and fails this test until the guidance covers it.
+    gaps = [k for k, v in props.items() if k not in required and v.get("type") == "string"]
+    gaps += [f"slides[].{k}" for k, v in slide_props.items() if k not in slide_required and v.get("type") == "string"]
+    assert gaps, "schema shape changed -- re-derive this test rather than deleting it"
+
+    # TIGHTENED after a vacuous first pass: a window around `claimed_raise` already contained
+    # "omit" and "null" from claimed_stage's OWN guidance 1,200 chars away, so the original
+    # assertion passed while the defect was untouched. Each gap field must be named in the
+    # same sentence as the instruction.
+    for field in gaps:
+        name = field.split(".")[-1]
+        hits = [m.start() for m in re.finditer(re.escape(name), text)]
+        assert any(
+            "omit" in text[max(0, h - 260) : h + 260].lower() and "null" in text[max(0, h - 260) : h + 260].lower()
+            for h in hits
+        ), (
+            f"{field} is optional and string-only, so `null` is REJECTED and omission accepted, but "
+            f"no instruction near it says to omit rather than pass null. Only claimed_stage carried "
+            f"this guidance; all of {gaps} need it."
+        )
+
+
+def test_image_rendered_decks_have_one_canonical_inlined_text() -> None:
+    """A6. Three dispatches say "inline the deck's full extracted text -- verbatim", but for
+    an image-rendered PDF the Read tool returns page images and there is no such text. Two of
+    those three (LEDGER_EXTRACTION, SECOND_READ) are the halves of the numeric chain's
+    corroboration, so independent re-transcription means the second read reads a DIFFERENT
+    deck -- the corroboration silently weakens rather than failing.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    inline_sites = text.count("inline the deck's full extracted text")
+    assert inline_sites >= 2, f"expected the shared instruction on multiple dispatches, found {inline_sites}"
+    # TIGHTENED after a vacuous first pass: Step 2 already mentions `deck_inventory.json` and
+    # already has an image-only pitfall, so "both strings appear" passed with the defect intact.
+    # The contract is that ONE canonical transcription is named and reused ACROSS dispatches.
+    start = text.find("### Step 2")
+    assert start != -1
+    window = text[start : start + 6000]
+    assert "canonical" in window.lower(), (
+        "Step 2 must name a CANONICAL inlined text -- the word carries the contract that every "
+        "dispatch gets the SAME transcription, which is what keeps the second read a second read "
+        "of the same deck rather than of a differently-transcribed one"
+    )
+    canon = window[window.lower().find("canonical") - 500 : window.lower().find("canonical") + 700]
+    assert "deck_inventory" in canon, "the canonical text must BE the structured deck_inventory"
+    assert "image" in canon.lower(), "and the instruction must be scoped to image-rendered sources"
+
+
+def test_reconciliation_schema_is_cross_linked_from_the_numeric_steps() -> None:
+    """A7. The schema already documents `suppressed` and which verdicts reach a founder; the
+    agent simply never read it, because nothing pointed there. No correctness defect -- a
+    missing pointer.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    assert "reconciliation.schema.json" in text, (
+        "SKILL.md must cross-link references/schemas/reconciliation.schema.json from the "
+        "numeric steps -- it already answers what `suppressed` means and which verdicts reach "
+        "a founder, and the agent had no pointer to follow"
+    )
+    idx = text.find("reconciliation.schema.json")
+    assert "3.7" in text[max(0, idx - 1500) : idx + 1500] or "3.8" in text[max(0, idx - 1500) : idx + 1500], (
+        "the cross-link belongs at Step 3.7/3.8, where the question arises"
+    )
