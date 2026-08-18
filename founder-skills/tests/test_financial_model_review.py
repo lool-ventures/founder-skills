@@ -9049,3 +9049,90 @@ def test_saas_only_metrics_constant_matches_what_is_actually_suppressed() -> Non
         f"_SAAS_ONLY_METRICS names {sorted(declared - suppressed)} as SaaS-only, but a hardware "
         "model still had them rated — the constant describes a suppression that does not happen"
     )
+
+
+# ---------------------------------------------------------------------------
+# J1 — every benchmark carries `as_of` and nothing ever compared it to a date.
+# ---------------------------------------------------------------------------
+
+
+def _ue_with_vintage(as_of: str) -> dict:
+    ue = copy.deepcopy(_VALID_UNIT_ECONOMICS)
+    for m in ue["metrics"]:
+        m["benchmark_as_of"] = as_of
+    return ue
+
+
+def _compose_with_vintage(as_of: str, today: str) -> tuple[int, dict | None, str]:
+    d = _make_fmr_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "checklist.json": _VALID_CHECKLIST,
+            "unit_economics.json": _ue_with_vintage(as_of),
+            "runway.json": _VALID_RUNWAY,
+        }
+    )
+    return _run_compose(d, ["--today", today])
+
+
+def test_a_stale_benchmark_is_disclosed_to_the_founder() -> None:
+    """The corpus states its vintage; the runtime knows the date; nothing subtracted one
+    from the other. So a `2024-Q4` threshold rendered identically at 8 months old and at 8
+    years, and `compose_report.py`'s warning system -- the fleet's established "the founder
+    should know this" channel -- carried nothing about data age.
+
+    Measured at the time of writing: 17 of 20 benchmark entries were `2024-Q4`, i.e. 20
+    months old, and a founder was told a payback figure was "acceptable" with no indication
+    the bar was calibrated on a different market.
+    """
+    rc, data, err = _compose_with_vintage("2024-Q4", "2026-08-18")
+    assert rc == 0, err
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "BENCHMARK_VINTAGE" in codes, f"a 20-month-old benchmark was not disclosed; got {codes}"
+    w = next(w for w in data["validation"]["warnings"] if w["code"] == "BENCHMARK_VINTAGE")
+    assert "20" in w["message"], f"the warning must state the AGE, not merely that one exists: {w['message']}"
+    assert w.get("founder_message"), "the disclosure must reach the founder, not only the run log"
+
+
+def test_a_current_benchmark_is_not_flagged() -> None:
+    """The other direction: disclosure must not become noise on every run."""
+    rc, data, err = _compose_with_vintage("2026-07", "2026-08-18")
+    assert rc == 0, err
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "BENCHMARK_VINTAGE" not in codes, "a one-month-old benchmark was flagged as stale"
+
+
+def test_benchmark_age_parses_both_vintage_spellings() -> None:
+    """The corpus uses two forms -- `2024-Q4` and `2026-01`. A parser that handles one
+    silently treats the other as unknown, which reads exactly like "not stale"."""
+    # TIGHTENED after this test passed its own mutation. Asserting only that BENCHMARK_VINTAGE
+    # fires is satisfied by the UNREADABLE branch, which also fires -- so breaking the quarter
+    # parser left the test green while `2024-Q4` silently became "age unknown". Both spellings
+    # must produce the SAME computed age, which only the correct parser can do.
+    ages = {}
+    for as_of in ("2024-Q4", "2024-12"):
+        rc, data, err = _compose_with_vintage(as_of, "2026-08-18")
+        assert rc == 0, err
+        assert data is not None
+        w = next((w for w in data["validation"]["warnings"] if w["code"] == "BENCHMARK_VINTAGE"), None)
+        assert w is not None, f"{as_of!r} was not recognised as a vintage, so its age was never checked"
+        m = re.search(r"(\d+) months old", w["message"])
+        assert m, f"{as_of!r} produced no computed age -- it fell through to the unreadable branch: {w['message']}"
+        ages[as_of] = int(m.group(1))
+    assert ages["2024-Q4"] == ages["2024-12"] == 20, (
+        f"both spellings name December 2024 and must age identically; got {ages}. A quarter dates to "
+        "its LAST month -- dating Q4 to October would understate the age in the founder's favour."
+    )
+
+
+def test_an_unparseable_vintage_is_not_silently_treated_as_current() -> None:
+    """A vintage the parser cannot read must not read as fresh. Absence of evidence about
+    age is not evidence the bar is current -- that is the same shape as the `no_figures`
+    fuse elsewhere in the fleet."""
+    rc, data, err = _compose_with_vintage("recent", "2026-08-18")
+    assert rc == 0, err
+    assert data is not None
+    codes = [w["code"] for w in data["validation"]["warnings"]]
+    assert "BENCHMARK_VINTAGE" in codes, "an unreadable vintage passed as current"

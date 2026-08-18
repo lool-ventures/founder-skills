@@ -19,6 +19,7 @@ Output: JSON to stdout with report_markdown and validation results.
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import json
 import os
 import re
@@ -46,6 +47,12 @@ WARNING_SEVERITY: dict[str, str] = {
     "STALE_ARTIFACT": "high",
     # Low severity -- informational
     "MISSING_OPTIONAL_ARTIFACT": "low",
+    # The benchmark corpus states its own vintage and nothing ever compared it to a date, so a
+    # 2024-Q4 threshold rendered identically at 8 months old and at 8 years. Medium, not low: an
+    # out-of-date bar changes the VERDICT a founder is given, where FOUNDER_TEXT_TOKEN only
+    # changes wording. Suppressible via accepted_warnings, because "we know, it is the best
+    # available" is a legitimate answer -- what is not legitimate is the founder not being told.
+    "BENCHMARK_VINTAGE": "medium",
     # Medium severity -- include in Warnings section of report
     # Checklist failures are review findings, not data errors — present, don't block
     "CHECKLIST_FAILURES": "medium",
@@ -58,6 +65,44 @@ WARNING_SEVERITY: dict[str, str] = {
     # v0.4.2 Mitigation 2 — informational only (uuid is per-run, won't collide)
     "MARKER_COLLISION": "low",
 }
+
+# How old a benchmark may be before the founder is told. 18 months is a judgement, not a
+# measurement: it is roughly two annual survey cycles, so a bar this old has been superseded at
+# least once by its own source. Deliberately generous -- the point is to disclose staleness, not
+# to red every run.
+BENCHMARK_AGE_WARN_MONTHS = 18
+
+# `--today` override for deterministic tests, in the shape rule_audit.py already uses. A holder
+# rather than a parameter so `validate_artifacts`' signature -- and its existing call sites --
+# stay unchanged; the default is the real date.
+_TODAY: list[_dt.date | None] = [None]
+
+
+def _vintage_age_months(as_of: object, today: _dt.date) -> int | None:
+    """Months between a benchmark's stated vintage and today. None if unreadable.
+
+    Two spellings exist in the corpus and both must parse -- `2024-Q4` and `2026-01`. A parser
+    that handles one silently treats the other as unknown, which reads exactly like "not stale".
+    A quarter is dated to its LAST month: `2024-Q4` is a survey covering through December, and
+    dating it to October would overstate its age by two months in the founder's favour.
+    """
+    if not isinstance(as_of, str) or not as_of.strip():
+        return None
+    text = as_of.strip()
+    m = re.fullmatch(r"(\d{4})-Q([1-4])", text, re.I)
+    if m:
+        year, month = int(m.group(1)), int(m.group(2)) * 3
+    else:
+        m = re.fullmatch(r"(\d{4})-(\d{1,2})", text)
+        if m and 1 <= int(m.group(2)) <= 12:
+            year, month = int(m.group(1)), int(m.group(2))
+        else:
+            m = re.fullmatch(r"(\d{4})", text)
+            if not m:
+                return None
+            year, month = int(m.group(1)), 12
+    return (today.year - year) * 12 + (today.month - month)
+
 
 REQUIRED_ARTIFACTS = ["inputs.json", "checklist.json", "unit_economics.json", "runway.json"]
 OPTIONAL_ARTIFACTS = ["model_data.json", "extraction_corrections.json"]
@@ -474,6 +519,51 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
     unit_economics = artifacts.get("unit_economics.json")
     runway = artifacts.get("runway.json")
     inputs = artifacts.get("inputs.json")
+
+    # 0a. BENCHMARK_VINTAGE -- how old is the bar this founder is being judged against?
+    # Every benchmark entry carries `as_of` and nothing ever compared it to a date, so the
+    # verdict rendered identically at 8 months old and at 8 years. Reported ONCE at the oldest
+    # vintage rather than per metric: a founder needs to know the corpus is dated, not to read
+    # the same sentence eleven times.
+    if _usable(unit_economics):
+        today = _TODAY[0] or _dt.date.today()
+        ages: list[int] = []
+        unreadable: list[str] = []
+        for metric in _as_list(_as_dict(unit_economics).get("metrics")):
+            as_of = _as_dict(metric).get("benchmark_as_of")
+            if as_of in (None, ""):
+                continue
+            age = _vintage_age_months(as_of, today)
+            if age is None:
+                unreadable.append(str(as_of))
+            else:
+                ages.append(age)
+        oldest = max(ages) if ages else None
+        if oldest is not None and oldest >= BENCHMARK_AGE_WARN_MONTHS:
+            warnings.append(
+                _warn(
+                    "BENCHMARK_VINTAGE",
+                    f"the oldest benchmark this review scores against is {oldest} months old",
+                    founder_message=(
+                        f"These benchmarks are up to {oldest} months old. They are the best published "
+                        "figures available, but the bar for your stage may have moved since — treat a "
+                        "borderline rating as a conversation, not a verdict."
+                    ),
+                )
+            )
+        elif unreadable:
+            # An unreadable vintage must not read as fresh: absence of evidence about age is not
+            # evidence the bar is current.
+            warnings.append(
+                _warn(
+                    "BENCHMARK_VINTAGE",
+                    f"benchmark vintage(s) {sorted(set(unreadable))} could not be read, so their age is unknown",
+                    founder_message=(
+                        "Some benchmarks in this review do not state when they were published, so how "
+                        "current they are is unknown."
+                    ),
+                )
+            )
 
     # 0. METRIC_SELF_CONTRADICTION -- two different values for one metric.
     warnings.extend(_check_metric_self_contradiction(unit_economics, checklist))
@@ -1616,6 +1706,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON")
     p.add_argument("-o", "--output", help="Write JSON to file instead of stdout")
     p.add_argument(
+        "--today",
+        help="Override today's date (YYYY-MM-DD) when ageing benchmark vintages. Testing only; "
+        "the default is the real date.",
+    )
+    p.add_argument(
         "--strict", action="store_true", help="Exit 1 on high-severity warnings (CI mode); medium does not block"
     )
     p.add_argument(
@@ -1631,6 +1726,13 @@ def main() -> None:
     if not os.path.isdir(args.dir):
         print(f"Error: directory not found: {args.dir}", file=sys.stderr)
         sys.exit(1)
+
+    if args.today:
+        try:
+            _TODAY[0] = _dt.date.fromisoformat(args.today)
+        except ValueError:
+            print(f"Error: --today must be YYYY-MM-DD, got {args.today!r}", file=sys.stderr)
+            sys.exit(1)
 
     report_path = os.path.abspath(args.write_md) if args.write_md else None
     result = compose(args.dir, report_path=report_path)
