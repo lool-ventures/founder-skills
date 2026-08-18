@@ -1648,3 +1648,98 @@ def test_each_out_of_scope_question_answered_on_its_own_terms_permits() -> None:
         ],
     )
     assert gs.authorize(gate, _prof("series_a", "low"), "r1").permitted
+
+
+# ---------------------------------------------------------------------------
+# The stage-prose guard: it must refuse a summary that NAMES a different stage
+# without refusing ordinary English.
+#
+# The guard exists because a hidden `--stage` token once let "Detected stage: Seed"
+# authorize a Series A report. It was written as a bare substring match over
+# STAGE_LABELS, which refuses correct gates three ways:
+#
+#   * `growth` and `seed` are ordinary English words. A correct Series A summary
+#     saying "~4x YoY growth" was refused -- measured on a live run.
+#   * "seed" is a substring of "pre-seed", so a `pre_seed` gate whose summary
+#     correctly reads "Detected stage: Pre-seed" was refused for naming Seed.
+#     SKILL.md's own template was therefore un-emittable for an in-scope stage.
+#     Word boundaries do NOT fix this: `\bseed\b` matches inside "pre-seed"
+#     because `-` is a word boundary.
+#   * "Seeded in 2019" is not a stage claim.
+#
+# Every case below is a real phrasing, and the file previously had NO coverage of
+# this guard in either direction: all of its emit tests pass `context_summary`
+# values ("x", "Detected: Seed") that cannot exercise it. Both directions are
+# asserted here on purpose -- a careless relaxation loses the refusal, which is
+# the whole reason the guard exists.
+# ---------------------------------------------------------------------------
+
+_CANONICAL_OPTIONS: dict[str, list[str]] = {
+    "stage_confirmation": ["Looks right", "Different stage", "Not sure — proceed anyway"],
+    "out_of_scope_choice": ["Stop review", "Different stage", "Proceed anyway (best-effort)"],
+}
+
+
+def _emit(
+    stage: str, summary: str, gate_id: str = "stage_confirmation", question: str = "Does this look right?"
+) -> tuple[int, str, str]:
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "gate_state.json")
+        body = {
+            "gate_id": gate_id,
+            "question": question,
+            "options": _CANONICAL_OPTIONS[gate_id],
+            "context_summary": summary,
+        }
+        return _run(["emit", "--run-id", "r1", "--stage", stage, "-o", out], json.dumps(body))
+
+
+@pytest.mark.parametrize(
+    "stage,gate_id,summary",
+    [
+        # The live-run case: a correct Series A gate refused for ordinary "growth".
+        ("series_a", "stage_confirmation", "Detected stage: Series A. $3M ARR, ~4x YoY growth, 160% NRR."),
+        # SKILL.md's own template phrasing, per in-scope stage.
+        (
+            "pre_seed",
+            "stage_confirmation",
+            "Detected stage: Pre-seed (high confidence). Pre-revenue, 2 design partners.",
+        ),
+        ("seed", "stage_confirmation", "Detected stage: Seed (high confidence). $4.2M ARR, 3 customers."),
+        ("series_a", "stage_confirmation", "Detected stage: Series A (high confidence). $4.2M ARR."),
+        # Ordinary uses of the two ambiguous words, on stages that do not own them.
+        ("seed", "stage_confirmation", "Detected stage: Seed. ~4x YoY growth."),
+        ("series_a", "stage_confirmation", "Detected stage: Series A. 12 seed customers."),
+        ("series_b", "out_of_scope_choice", "Detected stage: Series B. ~4x YoY growth."),
+        ("growth", "out_of_scope_choice", "Detected stage: Growth. Seeded in 2019."),
+        # A lowercase spelling of the gate's own stage must not trip the mask either.
+        ("pre_seed", "stage_confirmation", "Detected pre-seed stage; no revenue yet."),
+    ],
+)
+def test_emit_accepts_ordinary_english_and_a_stage_naming_itself(stage: str, gate_id: str, summary: str) -> None:
+    rc, _, err = _emit(stage, summary, gate_id)
+    assert rc == 0, f"a correct {stage} summary was refused: {err.strip()}"
+
+
+@pytest.mark.parametrize(
+    "stage,gate_id,summary,named",
+    [
+        # The defect the guard exists for: the founder reads one stage, the token says another.
+        ("series_a", "stage_confirmation", "Detected stage: Seed. $4M ARR.", "Seed"),
+        ("seed", "stage_confirmation", "Detected stage: Series A. $4M ARR.", "Series A"),
+        ("seed", "stage_confirmation", "Detected stage: Growth. $40M ARR.", "Growth"),
+        ("series_a", "stage_confirmation", "This is a Seed-stage company.", "Seed"),
+        ("series_a", "stage_confirmation", "Confirming Growth for this deck.", "Growth"),
+        ("seed", "stage_confirmation", "The deck states a Growth round.", "Growth"),
+        ("series_a", "stage_confirmation", "Detected stage: Pre-seed. Pre-revenue.", "Pre-seed"),
+        # The question field is founder-visible too, and is checked alongside the summary.
+        ("series_a", "stage_confirmation", "$4M ARR.", "Seed"),
+    ],
+)
+def test_emit_still_refuses_prose_that_names_a_different_stage(
+    stage: str, gate_id: str, summary: str, named: str
+) -> None:
+    question = f"Detected stage: {named} — does that look right?" if summary == "$4M ARR." else "Does this look right?"
+    rc, _, err = _emit(stage, summary, gate_id, question=question)
+    assert rc != 0, f"prose naming {named!r} on a {stage} gate must be refused"
+    assert named in err, f"the refusal must name the stage it found; got: {err.strip()}"

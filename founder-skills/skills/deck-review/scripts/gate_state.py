@@ -22,6 +22,7 @@ import contextlib
 import fcntl
 import json
 import os
+import re
 import sys
 
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact
@@ -183,6 +184,59 @@ STAGE_LABELS: dict[str, str] = {
     "series_b": "Series B",
     "growth": "Growth",
 }
+
+# Stage tokens that are ALSO ordinary English words. A bare substring match over
+# STAGE_LABELS refused correct gates because of these two: measured on a live run, a correct
+# Series A summary was rejected for saying "~4x YoY growth". They require a stage-NAMING
+# construction (below); the other three tokens never occur innocently and keep the strict
+# whole-word match, so prose that really names a different stage is still refused.
+_AMBIGUOUS_STAGE_WORDS = frozenset({"seed", "growth"})
+
+# What turns an ordinary word into a STAGE CLAIM. Deliberately adjacency, not a distance
+# window: "Detected stage: Series A. 12 seed customers." puts a cue four words from "seed",
+# so any window wide enough to catch "stage: Seed" also catches that false positive. These
+# patterns allow only non-word characters between cue and stage word.
+_STAGE_CUES = ("stage", "round", "detected", "detect", "confirming", "confirm")
+
+
+def _stage_forms(stage: str) -> tuple[str, ...]:
+    """Every lowercase spelling of one stage: its token and its founder-facing label."""
+    return (stage, STAGE_LABELS[stage].lower())
+
+
+def prose_names_stage(prose: str, stage: str) -> bool:
+    """Does `prose` NAME `stage`, as opposed to merely containing an English word?
+
+    Three rules, each closing a measured false refusal. `prose` must already be lowercase.
+
+    * SUPERSTRING MASKING. "seed" is a substring of "pre-seed", so a `pre_seed` gate whose
+      summary correctly read "Detected stage: Pre-seed" was refused for naming Seed --
+      SKILL.md's own template was un-emittable for an in-scope stage. Longer stage
+      spellings are removed before a shorter one is looked for. Word boundaries do NOT fix
+      this on their own: `\bseed\b` matches inside "pre-seed", because `-` IS a boundary.
+    * WHOLE WORDS. "Seeded in 2019" is not a stage claim.
+    * A NAMING CONSTRUCTION, for the two tokens that are ordinary English. "~4x YoY growth"
+      is prose; "Growth stage", "stage: Growth" and "Confirming Growth" are claims.
+    """
+    longer = [f for other in STAGE_LABELS for f in _stage_forms(other)]
+    for form in _stage_forms(stage):
+        haystack = prose
+        for other in longer:
+            # Strictly longer spellings only -- a form never masks itself.
+            if len(other) > len(form) and form in other:
+                haystack = haystack.replace(other, " ")
+        word = re.escape(form)
+        if form in _AMBIGUOUS_STAGE_WORDS:
+            cues = "|".join(_STAGE_CUES)
+            named = re.search(rf"(?:{cues})\W{{0,3}}{word}\b", haystack) or re.search(
+                rf"\b{word}[\s\-]{{0,3}}(?:stage|round)\b", haystack
+            )
+        else:
+            named = re.search(rf"\b{word}\b", haystack)
+        if named:
+            return True
+    return False
+
 
 # Answers that authorise the rest of the pipeline OUTRIGHT.
 CONTINUE_ANSWERS: dict[str, frozenset[str]] = {
@@ -661,7 +715,7 @@ def cmd_emit(args: argparse.Namespace) -> int:
     for token, label in STAGE_LABELS.items():
         if token == args.stage:
             continue
-        if label.lower() in prose or token in prose:
+        if prose_names_stage(prose, token):
             print(
                 f"Error: this gate confirms {args.stage!r} but its question or summary names "
                 f"{label!r} — a founder cannot be shown one stage and asked to authorize another",
