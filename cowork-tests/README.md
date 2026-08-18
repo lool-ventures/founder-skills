@@ -2,23 +2,47 @@
 
 Token-free **replay** PR gate (`.github/workflows/cowork-replay.yml`) over committed cassettes that
 exercise the founder-skills skills under Claude Cowork's runtime via
-[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (**floor `1.19.0` on the `replay`
-job, tracking forward within `1.x`**; see the note). Recording is **live** (needs the staged agent +
+[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (**floor `1.24.0`, tracking forward
+within `1.x`**; see the note). Recording is **live** (needs the staged agent +
 Docker); replay/verify are **token/agent-free** (stock CI).
 
-> **Current: cowork-harness `1.19.0` (FLOOR, not pin).** A floor is applied **per CLI site**, only where
-> a step depends on a version — the sites are NOT uniform and must not be bumped as a block:
+> **Current: cowork-harness `1.24.0` (FLOOR, not pin).** A floor is applied **per CLI site**, only where
+> a step depends on a version — the sites are NOT uniform and must not be bumped as a block. As of
+> 1.24.0 every site happens to carry the same number, but **for different reasons**; do not collapse
+> them into one rule.
 >
-> - **The four `version:` inputs in the `replay` job carry `^1.19.0`.** They are LINT, PRIVACY,
+> - **The four `version:` inputs in the `replay` job carry `^1.24.0`.** They are LINT, PRIVACY,
 >   STALENESS and REPLAY — enumerate with `grep -n 'version: "' ../.github/workflows/cowork-replay.yml`
 >   rather than from prose. The **email canary is not among them**: it is a bare `run:` step with no
 >   `version:` input, riding the CLI the preceding Action step installed.
-> - **The `skill-static-analysis` job's standalone install stays `npm i -g cowork-harness@^1.17.0`.**
->   It runs `record --dry-run` + `lint`, expands no `${ALLOW[@]}`, and uses no flag newer than 1.17.0.
->   A floor should express a requirement; that step has none. (It resolves to the newest 1.x anyway.)
+> - **The `skill-static-analysis` job's standalone install is now `npm i -g cowork-harness@^1.24.0`.**
+>   It previously said `^1.17.0` here on the reasoning that "a floor should express a requirement;
+>   that step has none" — **that reasoning has expired, and this note contradicted the workflow (which
+>   was already at `^1.20.0`) before it was corrected.** That step runs `record --dry-run`, which is
+>   the **LOADER**, and `deck-review-gate-stop` now asserts `file_absent` + `question_options`
+>   (harness 1.24.0). MEASURED against `npx cowork-harness@1.23.0`: the loader HARD-REJECTS with
+>   `Unrecognized key: "file_absent"`, while `lint` on the same file exits 0 with `0 error(s)`. The
+>   requirement is real, and **`lint` cannot detect it** — the standing "lint is lenient, the loader
+>   is strict" split.
+>
+> **A pinned-below-floor developer gets a RED local suite, not a skip.**
+> `../founder-skills/tests/test_cowork_cassette_replay.py::_require_harness` skips only when the CLI
+> is **absent**. Once a new assertion key is written into a cassette, an older CLI hard-rejects it —
+> and `cassetteVersion` does **not** bump (it stays 10), so the version field gives no warning.
 >
 > `^` **fails loud** below the floor and cannot cross a future `2.0`. Node **22+** as of 1.14.0 (20 is
 > EOL; `doctor` fails on it).
+>
+> **Why 1.24.0.** The scenarios stop loading below it. `deck-review-gate-stop` asserts `file_absent`
+> and `question_options`, both added in 1.24.0, and both are the direct expression of things this lane
+> previously had to fake: its own comments recorded *"it is inverted because the harness has no
+> `file_absent`"*, and the option-reversal defect it documents was unassertable because no key
+> inspected what the founder was **shown**. MEASURED, `npx cowork-harness@1.23.0`: `record --dry-run`
+> → `Unrecognized key: "file_absent"`; `lint` on the same file → `0 error(s)`, exit 0. Note which
+> surface caught it. `file_absent` is LIVE-only (skipped-loud on replay), so it is an addition to the
+> `no_unexpected_files` allowlist and **not** a replacement — swapping would move this lane's only
+> tripwire off the token-free PR gate. Full analysis:
+> `docs/internal/2026-08-18-cowork-harness-1.24.0-adoption-plan.md`.
 >
 > **Why 1.19.0 on the `replay` job.** The privacy gate's floor is load-bearing, not cosmetic. The
 > allowlist no longer passes `--allow-host-inventory`: 1.19.0 exempts a mounted plugin's own

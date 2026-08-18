@@ -53,12 +53,29 @@ name: cowork-replay
 #     (A RANGE in that input is DOCUMENTED as of harness 1.12.0 — `action.yml` now states `version`
 #     accepts an npm range, not only an exact pin. It was already mechanically sound: the value is
 #     interpolated as `cowork-harness@$v` into `npm install --global`.)
-#   * the `skill-static-analysis` job's standalone `npm i -g cowork-harness@^1.20.0` — a floor with a
+#   * the `skill-static-analysis` job's standalone `npm i -g cowork-harness@^1.24.0` — a floor with a
 #     1.x ceiling. `^` (not a bare `>=`) because it FAILS LOUD if nothing >=1.16.0 is published
 #     (upstream SKILL.md: `@latest` can silently fetch an older CLI, and the new commands then fail as
 #     "unknown command"), AND because it cannot cross a future 2.0 the way `@latest` would. `^` is also
 #     shell-safe unquoted, where a bare `@>=1.16.0` would redirect stdout into a file named `=1.16.0`.
-# THE FLOOR IS 1.20.0. Three separate reasons, and they raise the floor for different steps:
+# THE FLOOR IS 1.24.0. Four separate reasons, and they raise the floor for different steps:
+#   (0') 1.24.0 — THE SCENARIOS NO LONGER LOAD BELOW IT, and this is a LOADER requirement, not a
+#       lint one. `deck-review-gate-stop` now asserts `file_absent` and `question_options` (both
+#       added in 1.24.0). MEASURED against `npx cowork-harness@1.23.0`:
+#         * `record --dry-run` (the LOADER — the "Scenario load check" step below) HARD-REJECTS:
+#           `Unrecognized key: "file_absent"`.
+#         * `lint` on the same file reports `0 error(s), 2 warning(s)` and exits 0 — it is the
+#           LENIENT surface and does NOT catch this. So do not read a green lint as proof the
+#           floor is satisfied; that is the standing "lint is lenient, the loader is strict"
+#           split, demonstrated live.
+#       The same applies to REPLAY once the key is written into a cassette: a frozen assertion key
+#       an older CLI does not know is hard-rejected (`cassetteVersion` does NOT bump — it stays 10
+#       — so the version field gives no warning). Consequence beyond CI:
+#       `founder-skills/tests/test_cowork_cassette_replay.py::_require_harness` skips only when the
+#       CLI is ABSENT, so a developer pinned below 1.24.0 gets a RED `pytest -m cowork`, not a skip.
+#       1.24.0 also adds an ERROR-class `file-absent-contradiction` lint rule (gates without
+#       `--strict`) and a pre-spend cassette-portability preflight folded into `record --dry-run`.
+#       See docs/internal/2026-08-18-cowork-harness-1.24.0-adoption-plan.md.
 #   (0) 1.20.0 — RECORDING FIDELITY, and the reason `rerecord.sh` floors here too. Its baseline
 #       (desktop-1.26832.0) pins agent ELF 2.1.222, the only ELF installed on the recording machine. A
 #       1.19.0 CLI (baseline desktop-1.25927.0, pinned 2.1.221) still records, but `doctor --tier
@@ -169,7 +186,7 @@ jobs:
         with:
           command: lint
           path: cowork-tests/scenarios/
-          version: "^1.20.0"
+          version: "^1.24.0"
           # `strict: true` is the Action's first-class input (action.yml `inputs.strict` -> `--strict`),
           # not `extra-args`. WITHOUT it this step CANNOT fail on a WARN-class rule — measured: a WARN
           # finding exits 0 bare and 1 under --strict, while an ERROR (`assert-contradiction`) exits 1
@@ -201,7 +218,7 @@ jobs:
         with:
           command: verify-cassettes
           path: cowork-tests/cassettes/
-          version: "^1.20.0"
+          version: "^1.24.0"
           extra-args: "--skip-staleness --skip-scenario-drift ${{ steps.allow.outputs.args }}"
 
       # Email canary: the SAME allowlist must still FLAG a non-synthetic email. The check asserts an
@@ -229,7 +246,7 @@ jobs:
         with:
           command: verify-cassettes
           path: cowork-tests/cassettes/
-          version: "^1.20.0"
+          version: "^1.24.0"
           extra-args: "--skip-privacy"
 
       # Floored, and NOT for a missing flag. An unknown top-level scenario key inside a frozen
@@ -242,7 +259,7 @@ jobs:
         with:
           command: replay
           path: cowork-tests/cassettes/
-          version: "^1.20.0"
+          version: "^1.24.0"
 
       # `cowork-tests/gate_prefix_check.py` and `delivery_check.py` are implemented and
       # unit-tested (`founder-skills/tests/test_gate_prefix_check.py` /
@@ -347,7 +364,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install cowork-harness (floor ^1.20.0 — see header version policy)
-        run: npm i -g cowork-harness@^1.20.0
+        run: npm i -g cowork-harness@^1.24.0
       # The LOADER is the strict surface, and nothing else in CI reaches it:
       #   * `lint` WARNS on an unknown/too-new top-level key and exits 0 (lenient by design);
       #   * `replay` evaluates the scenario FROZEN in each cassette and never reads the on-disk YAML;

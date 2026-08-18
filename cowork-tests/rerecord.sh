@@ -142,8 +142,8 @@ echo "cowork-harness $ver"
 # themselves are unchanged and still `::warning::`. Parse the JSON envelope instead.
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
 # `-gt 1` first so a future 2.x passes — a bare minor check would FATAL on 2.0.0.
-{ [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 20 ]; }; } \
-  || { echo "FATAL: need >=1.20.0 (have $ver) — see the floor note above"; exit 1; }
+{ [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 24 ]; }; } \
+  || { echo "FATAL: need >=1.24.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi
