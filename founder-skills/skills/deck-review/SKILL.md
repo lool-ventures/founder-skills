@@ -787,6 +787,13 @@ Propose a relation whenever the deck implies one an investor would run:
     take rate; spend over customers vs a stated CAC)
   - a total the deck states AND lists the components of
   - a runway, a multiple, or a per-unit figure the deck states and the inputs to
+  - **two dated magnitudes plus a growth multiple or CAGR between them** — a market
+    slide stating a size now, a size in N years, and a "4X" or a rate is three
+    claims about the same two numbers, so propose `end / start` against the stated
+    multiple. Measured: a deck stated all four, the ledger extracted all four, and
+    zero relations were proposed. This is the slide founders paste third-party
+    research onto and rarely re-check, and every operand is printed rather than
+    inferred.
   - a characterisation the numbers support that the deck never states at all
 
 Where the deck states a figure your relation should reproduce, name it as

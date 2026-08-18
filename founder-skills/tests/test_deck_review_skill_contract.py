@@ -1847,3 +1847,27 @@ def test_reconciliation_schema_is_cross_linked_from_the_numeric_steps() -> None:
     assert "3.7" in text[max(0, idx - 1500) : idx + 1500] or "3.8" in text[max(0, idx - 1500) : idx + 1500], (
         "the cross-link belongs at Step 3.7/3.8, where the question arises"
     )
+
+
+def test_relation_proposal_names_the_market_slide_case() -> None:
+    """N3a. On the live deck the market slide stated two market sizes eight years apart, a
+    growth multiple, and a CAGR — and the ledger extracted ALL FOUR. The engine proposed
+    ZERO relations among them, while `end / start` against a stated multiple is an ordinary
+    `ratio` with an `expected_id`, expressible today with no new capability.
+
+    A proposal-coverage gap, not an engine gap: the prompt lists four shapes to look for and
+    none of them reads as "a stated multiple beside two dated magnitudes". The register calls
+    this the cheapest real win in the numeric section.
+
+    Worth the words because of WHERE it happens: the market slide is where founders paste
+    third-party research and rarely re-check it, every operand is printed rather than
+    inferred, and it is the slide investors most enjoy puncturing.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    start = text.find("CONTEXT: RELATION_PROPOSAL")
+    assert start != -1, "RELATION_PROPOSAL dispatch is gone"
+    window = text[start : start + 2600]
+    assert "multiple" in window.lower() and re.search(r"two\s+dated|dated\s+(magnitudes|figures)", window, re.I), (
+        "the prompt must name the case where a deck states two dated magnitudes AND a growth "
+        "multiple between them — it is an ordinary ratio the model was not told to look for"
+    )

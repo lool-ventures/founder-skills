@@ -706,7 +706,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the pre-coaching text and a raw uuid insertion marker (measured 5,592 B adrift on a live
     # run). Syncing rather than dropping the key, because ~200 test sites across the fleet read
     # report_markdown out of the composed JSON to inspect report content.
-    "deck-review": 99_363,
+    # deck-review +504 B (N3a): the RELATION_PROPOSAL prompt now names the market-slide case — two
+    # dated magnitudes plus a stated growth multiple. Measured: a deck stated all four figures, the
+    # ledger extracted all four, and ZERO relations were proposed, because none of the prompt's four
+    # shapes reads as that. An ordinary ratio with an expected_id, expressible with no new capability.
+    "deck-review": 99_867,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
