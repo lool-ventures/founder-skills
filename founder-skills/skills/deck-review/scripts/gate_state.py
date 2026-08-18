@@ -199,15 +199,34 @@ _AMBIGUOUS_STAGE_WORDS = frozenset({"seed", "growth"})
 _STAGE_CUES = ("stage", "round", "detected", "detect", "confirming", "confirm")
 
 
+def _norm_stage_text(text: str) -> str:
+    """Collapse the separators a stage name is spelled with, so all spellings compare equal.
+
+    "Series A", "Series-A", "series_a" and "Series  A" are ONE claim to a reader, so they must
+    be one string here. Without this, whole-word matching sees "series-a" and "series a" as
+    unrelated -- which LOST a refusal the old bare-substring match caught by accident: "this is
+    a pre seed company" on a series_a gate matched bare "seed", and once matching became
+    whole-word the space-separated spelling slipped through. `-`, `_` and runs of whitespace all
+    become a single space; other punctuation is left alone, because the naming-construction
+    patterns rely on it ("stage: Seed").
+    """
+    return re.sub(r"[-_\s]+", " ", text.lower())
+
+
 def _stage_forms(stage: str) -> tuple[str, ...]:
-    """Every lowercase spelling of one stage: its token and its founder-facing label."""
-    return (stage, STAGE_LABELS[stage].lower())
+    """Every separator-normalised spelling of one stage: its token and its founder label.
+
+    Both collapse to one string for some stages (`pre_seed` and "Pre-seed" both give
+    "pre seed"); de-duplicating keeps the caller's loop from testing the same form twice.
+    """
+    forms = (_norm_stage_text(stage), _norm_stage_text(STAGE_LABELS[stage]))
+    return (forms[0],) if forms[0] == forms[1] else forms
 
 
 def prose_names_stage(prose: str, stage: str) -> bool:
     """Does `prose` NAME `stage`, as opposed to merely containing an English word?
 
-    Three rules, each closing a measured false refusal. `prose` must already be lowercase.
+    Four rules, each closing a measured false result. `prose` is normalised here.
 
     * SUPERSTRING MASKING. "seed" is a substring of "pre-seed", so a `pre_seed` gate whose
       summary correctly read "Detected stage: Pre-seed" was refused for naming Seed --
@@ -217,7 +236,11 @@ def prose_names_stage(prose: str, stage: str) -> bool:
     * WHOLE WORDS. "Seeded in 2019" is not a stage claim.
     * A NAMING CONSTRUCTION, for the two tokens that are ordinary English. "~4x YoY growth"
       is prose; "Growth stage", "stage: Growth" and "Confirming Growth" are claims.
+    * SEPARATOR NORMALISATION (`_norm_stage_text`). "Series-A" and "series_a" are the same
+      claim as "Series A". Without it, whole-word matching lost a refusal the old substring
+      match caught by accident -- see that helper.
     """
+    prose = _norm_stage_text(prose)
     longer = [f for other in STAGE_LABELS for f in _stage_forms(other)]
     for form in _stage_forms(stage):
         haystack = prose

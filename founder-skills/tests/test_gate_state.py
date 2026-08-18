@@ -1714,6 +1714,10 @@ def _emit(
         ("growth", "out_of_scope_choice", "Detected stage: Growth. Seeded in 2019."),
         # A lowercase spelling of the gate's own stage must not trip the mask either.
         ("pre_seed", "stage_confirmation", "Detected pre-seed stage; no revenue yet."),
+        # ...and normalising separators must not make a stage unable to name ITSELF, in any spelling.
+        ("pre_seed", "stage_confirmation", "Detected stage: Pre seed. Pre-revenue."),
+        ("pre_seed", "stage_confirmation", "Detected stage: Pre_seed. Pre-revenue."),
+        ("series_a", "stage_confirmation", "Detected stage: Series-A. $4M ARR."),
     ],
 )
 def test_emit_accepts_ordinary_english_and_a_stage_naming_itself(stage: str, gate_id: str, summary: str) -> None:
@@ -1732,6 +1736,14 @@ def test_emit_accepts_ordinary_english_and_a_stage_naming_itself(stage: str, gat
         ("series_a", "stage_confirmation", "Confirming Growth for this deck.", "Growth"),
         ("seed", "stage_confirmation", "The deck states a Growth round.", "Growth"),
         ("series_a", "stage_confirmation", "Detected stage: Pre-seed. Pre-revenue.", "Pre-seed"),
+        # SEPARATOR VARIANTS. A stage name is one word to a reader however it is punctuated, so
+        # `-`, `_` and a space must all read as the same claim. "pre seed" specifically was a
+        # REGRESSION: the substring match caught it accidentally (via bare "seed"), and
+        # whole-word matching lost it until separators were normalised.
+        ("seed", "stage_confirmation", "Detected stage: Series-A. $4M ARR.", "Series A"),
+        ("seed", "stage_confirmation", "Detected stage: series_a. $4M ARR.", "Series A"),
+        ("series_a", "stage_confirmation", "This is a pre seed company.", "Pre-seed"),
+        ("series_a", "stage_confirmation", "Detected stage: Pre_seed.", "Pre-seed"),
         # The question field is founder-visible too, and is checked alongside the summary.
         ("series_a", "stage_confirmation", "$4M ARR.", "Seed"),
     ],
