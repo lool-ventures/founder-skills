@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -22,6 +23,7 @@ SCRIPTS = os.path.join(
     "scripts",
 )
 SCRIPT = os.path.join(SCRIPTS, "ledger.py")
+SCHEMAS = os.path.join(os.path.dirname(SCRIPTS), "references", "schemas")
 
 
 def _fig(**over: object) -> dict:
@@ -615,3 +617,65 @@ def test_every_numeric_form_the_quote_grammar_knows_is_one_the_ledger_validates(
         bare = _fig(value=20, raw=raw, quote=f"total of {raw}")
         rc_bare, _, _ = _run({"figures": [bare]})
         assert rc_bare != 0, f"{raw!r} accepted a bare mantissa of 20 as its value"
+
+
+# ---------------------------------------------------------------------------
+# Q1a — `period` accepted any string and silently degraded to "no period".
+# ---------------------------------------------------------------------------
+
+
+def test_period_enum_matches_what_the_engine_can_actually_convert() -> None:
+    """The schema typed `period` as bare `{"type": "string"}` while `reconcile.py` recognises
+    exactly five values. So an extractor writing "annual", "per year", "yr" or "FY2024" passed
+    validation, then hit `PERIODS.get(...)` -> None and was treated as having NO period at all
+    -- a figure that clearly states its basis, handled as though it did not.
+
+    The two lists must not drift, so this derives BOTH from source rather than restating
+    either. Adding a period to the engine without adding it to the schema makes it
+    unreachable; adding it to the schema without the engine makes it silently inert.
+    """
+    with open(os.path.join(SCHEMAS, "ledger.schema.json"), encoding="utf-8") as f:
+        schema = json.load(f)
+    declared = schema["properties"]["figures"]["items"]["properties"]["period"].get("enum")
+    assert declared, "`period` has no enum, so any string validates and unknown ones degrade to None"
+
+    with open(os.path.join(SCRIPTS, "reconcile.py"), encoding="utf-8") as f:
+        src = f.read()
+    m = re.search(r"PERIODS\s*=\s*\{([^}]*)\}", src)
+    assert m, "PERIODS is gone from reconcile.py -- re-derive this test rather than deleting it"
+    known = set(re.findall(r'"([a-z]+)"\s*:', m.group(1)))
+    assert known, "PERIODS parsed empty"
+    assert set(declared) == known, (
+        f"schema enum {sorted(declared)} != engine PERIODS {sorted(known)}. A value in one and not "
+        "the other is either unreachable or silently inert."
+    )
+
+
+def test_an_unconvertible_period_is_rejected_not_ignored() -> None:
+    """The behaviour the enum buys: "annual" means the same as "year" to a reader and nothing
+    at all to the engine. Refusing it sends the extractor back with a repair dispatch, which
+    is the documented path; accepting it drops the basis on the floor.
+
+    Runs with `-o`, and that is not incidental: `ledger.py` schema-validates ONLY on the
+    output path (`ledger.py:513`). Without `-o` it runs its hand-written checks and prints,
+    so the enum is never consulted. SKILL.md always pipes with `-o`, so the production path
+    is covered -- but a test written without it measures nothing, which is how the first
+    version of this test passed against an unenforced enum.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "ledger.json")
+        rc, _, err = _run(
+            {"figures": [_fig(), _fig(id="mrr", value=9000, raw="$9K", period="annual")]},
+            ["-o", out],
+        )
+    assert rc != 0, "'annual' was accepted, then silently treated as no period at all"
+    assert "period" in err.lower(), err
+
+
+def test_the_five_convertible_periods_are_all_accepted() -> None:
+    """Both directions: the enum must not refuse a value the engine handles."""
+    for period in ("month", "year", "quarter", "week", "day"):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "ledger.json")
+            rc, _, err = _run({"figures": [_fig(), _fig(id="x", value=9000, raw="$9K", period=period)]}, ["-o", out])
+        assert rc == 0, f"{period!r} is convertible by the engine but refused by the schema: {err}"

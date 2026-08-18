@@ -41,8 +41,15 @@
             "type": "string"
           },
           "period": {
-            "description": "The time basis a rate is quoted over — \"month\", \"year\". A monthly figure summed against an annual one is refused.",
-            "type": "string"
+                    "description": "The time basis a rate is quoted over. ENUM-CONSTRAINED to exactly the values reconcile.py's PERIODS can convert: an unlisted spelling (\"annual\", \"per year\", \"yr\") used to validate and then degrade to None, so a figure that stated its basis was handled as though it had none. A monthly figure summed against an annual one is refused.",
+                    "type": "string",
+                    "enum": [
+                              "month",
+                              "year",
+                              "quarter",
+                              "week",
+                              "day"
+                    ]
           }
         }
       }
