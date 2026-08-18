@@ -1258,8 +1258,11 @@ The gate (`check_handoff.py --format=markdown`) verifies the sub-agent's hand-of
 ### Step 8 (Optional): Generate Visual Report
 
 ```bash
-python3 "$SCRIPTS/visualize.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.html"
+python3 "$SCRIPTS/visualize.py" --dir "$REVIEW_DIR" -o "$REVIEW_DIR/report.html" \
+  --gate-state "$REVIEW_DIR/gate_state.json"
 ```
+
+**`--gate-state` is required here, as in Step 6.** The gate once sat only on compose, so a declined review still produced a complete `report.html` — the file a founder opens. `--ungated` is for fixtures.
 
 **Do not hand this over here** — the Deliver step below is the only place work reaches the founder, and it sends the complete set as files. A path presented here is the partial-delivery bug.
 

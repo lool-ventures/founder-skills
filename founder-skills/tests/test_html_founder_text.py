@@ -101,6 +101,11 @@ def test_generated_html_carries_no_internal_tokens(skill: str, generator: str) -
             argv = [str(script), str(work / "inputs.json"), "--static", str(out)]
         else:
             argv = [str(script), "--dir", str(work), "-o", str(out)]
+            # deck-review's visualize.py sits behind the same authorization boundary as its
+            # compose (see G2). These fixtures carry no gate, which is the legitimate ungated
+            # path -- it just has to be stated rather than spelled as a missing flag.
+            if skill == "deck-review" and generator == "visualize.py":
+                argv.append("--ungated")
         result = subprocess.run([sys.executable, *argv], capture_output=True, text=True)
         assert result.returncode == 0, f"{skill}/{generator} failed: {result.stderr[-400:]}"
         html = out.read_text(encoding="utf-8")

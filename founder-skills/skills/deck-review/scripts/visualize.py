@@ -1371,6 +1371,25 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("-d", "--dir", required=True, help="Directory containing JSON artifacts")
     p.add_argument("--pretty", action="store_true", help="Accepted for compatibility (no-op)")
     p.add_argument("-o", "--output", help="Write HTML to file instead of stdout")
+    # THE SAME TWO FLAGS AS compose_report.py, deliberately. `report.html` is the surface a
+    # founder is most likely to open -- this file's own comments say so twice -- and the
+    # authorization boundary sat only on compose. Measured: an artifact dir with NO
+    # gate_state.json produced a complete 66 KB report.html, exit 0, no warning. So whatever
+    # the gate refused, this renderer produced anyway.
+    #
+    # Mirrored rather than reimplemented: one boundary written twice drifts, and the drift
+    # would be invisible because nobody reads the HTML.
+    p.add_argument(
+        "--ungated",
+        action="store_true",
+        help="Render without a stage gate. Legitimate (fixtures, direct calls) but not the "
+        "production path, and leaving the flag off used to spell both the same way.",
+    )
+    p.add_argument(
+        "--gate-state",
+        help="Path to gate_state.json. An absent file is fatal when named; the record of how the "
+        "gate was answered is what authorizes the report the founder opens.",
+    )
     return p.parse_args()
 
 
@@ -1381,6 +1400,45 @@ def main() -> None:
     if not os.path.isdir(args.dir):
         print(f"Error: directory not found: {args.dir}", file=sys.stderr)
         sys.exit(1)
+
+    if not args.gate_state and not args.ungated:
+        print(
+            "Error: no --gate-state and no --ungated. The stage gate is what authorizes the report "
+            "the founder opens; rendering without one is a deliberate choice and has to be spelled "
+            "as one.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # AUTHORIZE BEFORE RENDERING, so a refusal leaves no file behind. Reusing compose's
+    # reader and gate_state's `authorize` rather than restating either: `read_gate_state`
+    # owns the three-way absent/missing/unreadable distinction, and `authorize` is the one
+    # place a gate becomes permission.
+    if args.gate_state:
+        scripts_dir = os.path.dirname(os.path.abspath(__file__))
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        from compose_report import read_gate_state  # noqa: PLC0415
+        from gate_state import authorize  # noqa: PLC0415
+
+        try:
+            gate_state = read_gate_state(args.gate_state)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        if gate_state is not None:
+            profile = _load_artifact(args.dir, "stage_profile.json") or {}
+            run_id = ""
+            for name in REQUIRED_ARTIFACTS:
+                art = _load_artifact(args.dir, name)
+                rid = _as_dict(_as_dict(art).get("metadata")).get("run_id") if _usable(art) else None
+                if isinstance(rid, str) and rid:
+                    run_id = rid
+                    break
+            verdict = authorize(gate_state, profile, run_id)
+            if not verdict.permitted:
+                print(f"Error: the gate does not authorize this report: {verdict.reason}", file=sys.stderr)
+                sys.exit(1)
 
     html_output = compose_html(args.dir)
     _write_output(html_output, args.output)

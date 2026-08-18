@@ -669,7 +669,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # and said nothing about order, which is why it did not bind. The parent-side instruction now names
     # the order and forbids adding a recommendation, and the rationale sits with the option list rather
     # than in prose a copier skips.
-    "deck-review": 99_503,
+    # deck-review raised 99_503 -> 99_757 for G2: Step 8 must pass `--gate-state` to
+    # `visualize.py`. The authorization boundary sat only on `compose_report.py`, so a review the
+    # founder DECLINED still produced a complete `report.html` — the surface a founder is most
+    # likely to open, and this skill's own comments say so twice. The flag is the fix, not prose
+    # about the fix; the note beside it was cut to two sentences to keep the raise minimal.
+    "deck-review": 99_757,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.

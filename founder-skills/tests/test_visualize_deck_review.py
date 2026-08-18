@@ -239,10 +239,18 @@ def _make_artifact_dir(artifacts: dict[str, Any]) -> str:
 
 
 def _run_viz(artifact_dir: str, extra_args: list[str] | None = None) -> tuple[int, str, str]:
-    """Run visualize.py with given artifact dir."""
+    """Run visualize.py with given artifact dir.
+
+    Defaults to `--ungated`, which is what every case in this file has always been: a
+    fixture dir with no gate. `visualize.py` now requires the choice to be stated (see the
+    G2 block at the end of this file), and stating it once here keeps the ~28 rendering
+    tests testing rendering. A caller that passes its own gate flag overrides this.
+    """
     args = ["--dir", artifact_dir]
     if extra_args:
         args.extend(extra_args)
+    if not any(a in ("--gate-state", "--ungated") for a in args):
+        args.append("--ungated")
     return run_script_raw("visualize.py", args)
 
 
@@ -944,3 +952,100 @@ def test_gated_category_is_not_drawn_as_a_perfect_score() -> None:
     radar = stdout.split("Category Pass Rates")[1] if "Category Pass Rates" in stdout else stdout
     labels = re.findall(r"Design &amp; Readability</text>\s*<text[^>]*>([^<]*)</text>", radar)
     assert not any(lbl.strip() == "100%" for lbl in labels), f"the radar plots the gated category at 100%: {labels}"
+
+
+# ---------------------------------------------------------------------------
+# G2: the authorization boundary sat only on compose_report.py.
+#
+# `visualize.py` contained ZERO references to gate_state / authorize / ungated, while its
+# own comments call report.html "the report the founder actually opens" -- twice. Measured
+# before the fix: a directory holding the review artifacts and NO gate_state.json whatsoever
+# produced a complete 66 KB report.html, exit 0, no warning. So whatever the gate refused,
+# the HTML renderer produced anyway, for the surface a founder is most likely to open.
+#
+# The contract deliberately MIRRORS compose_report.py rather than reimplementing it -- same
+# two flags, same "one of them is required", same `authorize()` call -- because two
+# implementations of one boundary drift.
+# ---------------------------------------------------------------------------
+
+
+def _gated_dir(
+    answer: str = "Looks right",
+    stage: str = "seed",
+    confidence: str = "high",
+    gate_id: str = "stage_confirmation",
+) -> str:
+    """Artifact dir plus a gate_state.json as `emit`+`answer` would leave it.
+
+    `gate_id` matters: "Stop review" exists ONLY on `out_of_scope_choice` (the canonical
+    option map in gate_state.py), so a decline cannot be expressed on a stage_confirmation
+    and asking for one there fails on the option contract instead of the decline.
+    """
+    arts = _all_artifacts()
+    prof = arts.get("stage_profile.json")
+    if isinstance(prof, dict):
+        prof["detected_stage"] = stage
+        prof["confidence"] = confidence
+    d = _make_artifact_dir(arts)
+    run_id = "test-run"
+    for name in ("deck_inventory.json", "stage_profile.json", "checklist.json", "slide_reviews.json"):
+        p = os.path.join(d, name)
+        if not os.path.isfile(p):
+            continue
+        with open(p) as f:
+            art = json.load(f)
+        art.setdefault("metadata", {})["run_id"] = run_id
+        with open(p, "w") as f:
+            json.dump(art, f)
+    with open(os.path.join(d, "gate_state.json"), "w") as f:
+        json.dump(
+            {
+                "metadata": {"run_id": run_id},
+                "gate_id": gate_id,
+                "question": "Does this look right?"
+                if gate_id == "stage_confirmation"
+                else "This looks out of scope. What should I do?",
+                "options": ["Looks right", "Different stage", "Not sure — proceed anyway"]
+                if gate_id == "stage_confirmation"
+                else ["Stop review", "Different stage", "Proceed anyway (best-effort)"],
+                "context_summary": "Evidence.",
+                "confirmed_stage": stage,
+                "answer": answer,
+                "answer_source": "founder",
+            },
+            f,
+        )
+    return d
+
+
+def test_visualize_refuses_without_a_gate_flag() -> None:
+    """Omitting the boundary must not be spellable as silence -- same rule as compose."""
+    # Deliberately bypasses `_run_viz`, which supplies --ungated for the rendering tests.
+    rc, _, err = run_script_raw("visualize.py", ["--dir", _make_artifact_dir(_all_artifacts())])
+    assert rc != 0, "report.html was produced with no statement about authorization at all"
+    assert "--ungated" in err and "--gate-state" in err, err
+
+
+def test_visualize_refuses_a_declined_review() -> None:
+    """The defect this closes. "Stop review" must not yield the file the founder opens."""
+    d = _gated_dir(answer="Stop review", stage="growth", gate_id="out_of_scope_choice")
+    out = os.path.join(d, "report.html")
+    rc, _, err = _run_viz(d, ["--gate-state", os.path.join(d, "gate_state.json"), "-o", out])
+    assert rc != 0, "a declined review still produced report.html"
+    assert "declined" in err.lower(), err
+    assert not os.path.isfile(out), "report.html was written for a review the founder declined"
+
+
+def test_visualize_renders_an_authorized_review() -> None:
+    d = _gated_dir()
+    out = os.path.join(d, "report.html")
+    rc, _, err = _run_viz(d, ["--gate-state", os.path.join(d, "gate_state.json"), "-o", out])
+    assert rc == 0, err
+    assert os.path.isfile(out) and os.path.getsize(out) > 2000
+
+
+def test_visualize_ungated_still_renders() -> None:
+    """The ungated path is legitimate (fixtures, direct calls) and must stay available --
+    it just has to be said out loud."""
+    rc, _, err = _run_viz(_make_artifact_dir(_all_artifacts()), ["--ungated"])
+    assert rc == 0, err
