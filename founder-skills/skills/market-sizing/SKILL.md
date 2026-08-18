@@ -1166,6 +1166,7 @@ SHARED_SCRIPTS="<printed PLUGIN_ROOT>/scripts"
 python3 "$SHARED_SCRIPTS/md_to_commentary.py" "$HANDOFF_DIR/coaching.md" | \
   python3 "$SHARED_SCRIPTS/insert_coaching.py" \
     --report "$ANALYSIS_DIR/report.md" \
+    --report-json "$ANALYSIS_DIR/report.json" \
     --marker '<EXACT insertion_marker string from report.json>' \
     --verify-artifact "$ANALYSIS_DIR/inputs.json" \
     --verify-artifact "$ANALYSIS_DIR/methodology.json" \

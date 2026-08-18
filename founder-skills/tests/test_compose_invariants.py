@@ -1111,3 +1111,101 @@ def test_the_dispatch_fixture_records_the_version_the_script_emits() -> None:
     # Non-vacuity: this must actually reach the skills it claims to cover. Passing because
     # the fixture shape changed and nothing matched is the failure mode it replaces.
     assert checked >= 5, f"only {checked} skills were compared; the fixture shape may have moved"
+
+
+# ---------------------------------------------------------------------------
+# A9 — report.json's `report_markdown` must not be left pre-coaching.
+# ---------------------------------------------------------------------------
+
+
+def test_every_skill_syncs_report_json_when_inserting_coaching() -> None:
+    """`compose_report.py` writes report.md AND report.json with the coaching marker in
+    place; `insert_coaching.py` then writes back to the markdown. Any skill that does not
+    pass `--report-json` ships a report.json WITHOUT the coaching commentary and WITH a raw
+    uuid `COACHING_INSERTION_POINT_<hex>` token — measured 5,592 characters adrift from
+    report.md on a live deck-review run.
+
+    Fleet-wide by construction: the skill list is derived from who calls the script, so a
+    seventh skill adopting the coaching step joins this test automatically rather than
+    silently shipping the defect.
+
+    NOTE the vacuity trap this test was written around: asserting `"--report-json" in text`
+    anywhere would pass on a skill that mentions the flag in prose while its actual bash
+    invocation omits it. The assertion is scoped to the invocation block.
+    """
+    skills_root = Path(__file__).resolve().parents[1] / "skills"
+    callers = sorted(p for p in skills_root.glob("*/SKILL.md") if "insert_coaching.py" in p.read_text(encoding="utf-8"))
+    assert len(callers) >= 5, f"expected the coaching step fleet-wide, found {len(callers)}"
+
+    for skill_md in callers:
+        text = skill_md.read_text(encoding="utf-8")
+        idx = text.find('insert_coaching.py" \\')
+        assert idx != -1, f"{skill_md.parent.name}: no multi-line insert_coaching.py invocation found"
+        block = text[idx : idx + 900]
+        assert "--report-json" in block, (
+            f"{skill_md.parent.name}/SKILL.md calls insert_coaching.py without --report-json, so its "
+            "report.json keeps the pre-coaching text and a raw insertion marker"
+        )
+        # The flag must name report.json, not be a bare mention.
+        assert re.search(r"--report-json\s+\"\$[A-Z_]+/report\.json\"", block), (
+            f"{skill_md.parent.name}: --report-json must be given the composed report.json path"
+        )
+
+
+# ---------------------------------------------------------------------------
+# S3 — one overall-status vocabulary, four implementations, nothing asserting they agree.
+# ---------------------------------------------------------------------------
+
+_BAND_SITES = {
+    "deck-review": ("scripts/_thresholds.py", "constants"),
+    "market-sizing": ("scripts/_thresholds.py", "constants"),
+    "financial-model-review": ("scripts/checklist.py", "inline"),
+    "competitive-positioning": ("scripts/checklist.py", "inline"),
+}
+
+_EXPECTED_BANDS = [(85.0, "strong"), (70.0, "solid"), (50.0, "needs_work")]
+_EXPECTED_FLOOR = "major_revision"
+
+
+def _bands_from(path: Path, kind: str) -> tuple[list[tuple[float, str]], str | None]:
+    """Recover (cut, label) pairs and the floor label from either implementation shape."""
+    src = path.read_text(encoding="utf-8")
+    if kind == "constants":
+        consts = {k: float(v) for k, v in re.findall(r"^(STRONG|SOLID|NEEDS_WORK)\s*=\s*([0-9.]+)", src, re.M)}
+        order = [("STRONG", "strong"), ("SOLID", "solid"), ("NEEDS_WORK", "needs_work")]
+        pairs = [(consts[k], label) for k, label in order if k in consts]
+        floor = re.search(r'^FLOOR_BAND\s*=\s*"([a-z_]+)"', src, re.M)
+        return pairs, floor.group(1) if floor else None
+    hits = re.findall(r'score_pct\s*>=\s*([0-9.]+):\s*\n\s*overall_status\s*=\s*"([a-z_]+)"', src)
+    pairs = [(float(c), label) for c, label in hits]
+    floor = re.search(r'else:\s*\n\s*overall_status\s*=\s*"([a-z_]+)"', src)
+    return pairs, floor.group(1) if floor else None
+
+
+def test_overall_status_bands_agree_across_every_skill_that_has_them() -> None:
+    """S3. Four skills report the same four-name vocabulary on the same cut points through
+    THREE mechanisms — two copies of `_thresholds.py`, and two sets of inline literals — and
+    nothing asserted they agree.
+
+    The defect this closes is not hypothetical: market-sizing once returned
+    `"pass" if fail_count == 0 else "fail"` — binary on failure COUNT, reading `fail` at 99% —
+    so a founder running two skills on one deck saw the BETTER score get the harsher word.
+    That is fixed; the four implementations are what remain, and they can drift silently
+    because each is edited alone.
+
+    Values-only by design: it does not demand one shared module (that is a refactor, and the
+    two inline copies are each three lines), only that the numbers and names match.
+    """
+    skills_root = Path(__file__).resolve().parents[1] / "skills"
+    found: dict[str, tuple[list[tuple[float, str]], str | None]] = {}
+    for skill, (rel, kind) in _BAND_SITES.items():
+        path = skills_root / skill / rel
+        assert path.is_file(), f"{skill}: {rel} is gone — re-derive this test rather than deleting it"
+        found[skill] = _bands_from(path, kind)
+
+    for skill, (pairs, floor) in found.items():
+        assert pairs == _EXPECTED_BANDS, (
+            f"{skill} bands {pairs} != {_EXPECTED_BANDS} — a founder running two skills on one deck "
+            "would see the same score described two different ways"
+        )
+        assert floor == _EXPECTED_FLOOR, f"{skill} floor band {floor!r} != {_EXPECTED_FLOOR!r}"

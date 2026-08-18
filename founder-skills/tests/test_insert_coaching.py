@@ -527,3 +527,127 @@ def test_clean_commentary_reports_no_findings(tmp_path: Path) -> None:
     rc, receipt, err = run_insert(["--report", str(report), "--marker", marker, "--commentary-file", str(payload)])
     assert rc == 0, err
     assert receipt is not None and receipt["founder_text_findings"] == {"enums": [], "filenames": []}
+
+
+# ---------------------------------------------------------------------------
+# A9 — keeping report.json's `report_markdown` in step with report.md.
+#
+# Measured on a live run: the two diverged by 5,592 characters. `compose_report.py`
+# writes both at Step 6 with the coaching marker in place; this script then wrote
+# back to report.md ONLY, so on every run report.json shipped WITHOUT the coaching
+# commentary and WITH a raw uuid-bearing `COACHING_INSERTION_POINT_<hex>` token --
+# exactly the class `_founder_text.py` and `leak_scan.py` exist to catch. The
+# compose-time scan cannot see it, because at compose time the marker is legitimate.
+#
+# WHY SYNC RATHER THAN DROP THE KEY. The obvious fix -- stop serializing
+# `report_markdown` -- was measured to be a ~200-site test-architecture migration:
+# every skill's suite inspects report CONTENT by loading report.json and reading that
+# key (39 sites in market-sizing alone). Syncing is one edit in one shared script,
+# touches no test, and leaves report.json CORRECT rather than silent.
+#
+# The cost of syncing is that two copies still exist and can drift again. That is
+# what these tests are for.
+# ---------------------------------------------------------------------------
+
+
+def make_report_json(tmp_path: Path, markdown: str, run_id: str | None = "r1") -> Path:
+    """report.json as compose writes it: report_markdown plus a coaching_payload."""
+    path = tmp_path / "report.json"
+    data: dict[str, object] = {
+        "report_markdown": markdown,
+        "coaching_payload": {"schema_version": "v1", "insertion_marker": MARKER},
+        "validation": {"status": "valid", "warnings": []},
+    }
+    if run_id is not None:
+        data["metadata"] = {"run_id": run_id}
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return path
+
+
+def test_report_json_is_synced_with_the_inserted_markdown(tmp_path: Path) -> None:
+    """The defect: report.json kept the marker and lost the commentary."""
+    report = make_report(tmp_path, BASE_REPORT)
+    rjson = make_report_json(tmp_path, BASE_REPORT)
+    code, out, err = run_insert(
+        ["--report", str(report), "--report-json", str(rjson), "--marker", MARKER],
+        commentary_stdin(),
+    )
+    assert code == 0, err
+    assert out is not None and out["status"] == "inserted"
+
+    md = report.read_text(encoding="utf-8")
+    data = json.loads(rjson.read_text(encoding="utf-8"))
+    embedded = data["report_markdown"]
+
+    assert MARKER not in embedded, (
+        "report.json still carries the raw uuid insertion marker — a founder-facing internal "
+        "token in a delivered artifact, and the compose-time scan cannot see it"
+    )
+    assert HEADING in embedded, "report.json shipped without the coaching commentary"
+    assert embedded == md, (
+        "report.json's report_markdown must be byte-identical to report.md — they are two "
+        "copies of one document, and a live run had them 5,592 characters apart"
+    )
+    # Everything else in the file must survive untouched.
+    assert data["coaching_payload"]["schema_version"] == "v1"
+    assert data["validation"]["status"] == "valid"
+    assert data["metadata"]["run_id"] == "r1"
+
+
+def test_report_json_sync_is_optional(tmp_path: Path) -> None:
+    """The flag is additive: every existing caller omits it and must keep working."""
+    report = make_report(tmp_path, BASE_REPORT)
+    code, out, err = run_insert(["--report", str(report), "--marker", MARKER], commentary_stdin())
+    assert code == 0, err
+    assert out is not None and out["status"] == "inserted"
+    assert HEADING in report.read_text(encoding="utf-8")
+
+
+def test_already_inserted_resume_also_syncs_report_json(tmp_path: Path) -> None:
+    """A resume must not leave the JSON stale.
+
+    `already_inserted` returns success WITHOUT rewriting report.md, so a naive
+    implementation that syncs only on the write path leaves report.json holding the
+    marker forever — the exact defect, surviving the fix, on the one path most likely
+    to be hit after an interrupted run.
+    """
+    inserted_md = BASE_REPORT.replace(MARKER, f"{HEADING}\n\nSolid TAM story.")
+    report = make_report(tmp_path, inserted_md)
+    rjson = make_report_json(tmp_path, BASE_REPORT)  # JSON still pre-insertion
+    code, out, err = run_insert(
+        ["--report", str(report), "--report-json", str(rjson), "--marker", MARKER],
+        commentary_stdin(),
+    )
+    assert code == 0, err
+    assert out is not None and out["status"] == "already_inserted"
+    embedded = json.loads(rjson.read_text(encoding="utf-8"))["report_markdown"]
+    assert MARKER not in embedded and HEADING in embedded, (
+        "a resume left report.json holding the marker — sync must cover the "
+        "already_inserted path, not only the write path"
+    )
+
+
+def test_a_missing_report_json_fails_BEFORE_report_md_is_touched(tmp_path: Path) -> None:
+    """Named-but-absent is fatal — and it must fail before any write, not during.
+
+    TIGHTENED after this test passed its own mutation. The first version asserted only a
+    non-zero exit and an error mentioning report-json. Both hold WITHOUT the precheck,
+    because `_sync_report_json` raises its own not-readable error afterwards — so deleting
+    the precheck left the test green.
+
+    What the precheck actually buys is that the pair is never left HALF-UPDATED: without it,
+    report.md is rewritten first and the sync fails second, producing exactly the divergence
+    this flag exists to close, reintroduced by the fix's own error path. So assert the
+    markdown is untouched.
+    """
+    report = make_report(tmp_path, BASE_REPORT)
+    code, _, err = run_insert(
+        ["--report", str(report), "--report-json", str(tmp_path / "nope.json"), "--marker", MARKER],
+        commentary_stdin(),
+    )
+    assert code != 0
+    assert "report-json" in err.lower() or "report.json" in err.lower(), err
+    assert report.read_text(encoding="utf-8") == BASE_REPORT, (
+        "report.md was modified before the report.json failure was detected — that is the "
+        "half-updated pair the precheck exists to prevent"
+    )

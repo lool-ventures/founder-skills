@@ -504,7 +504,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # pipeline-only gate — otherwise the split above reads as if it enables one.
     # (c) The Context B payload template gains `overall_status` and `all_pass`. A payload key no
     # prompt surface names is a key the sub-agent never reads.
-    "market-sizing": 92_125,
+    # A9, all six: +1 line each — `insert_coaching.py --report-json`. Without it report.json keeps
+    # the pre-coaching text and a raw uuid insertion marker (measured 5,592 B adrift on a live
+    # run). Syncing rather than dropping the key, because ~200 test sites across the fleet read
+    # report_markdown out of the composed JSON to inspect report content.
+    "market-sizing": 92_173,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -515,12 +519,20 @@ SKILL_MD_CEILING: dict[str, int] = {
     # dispatch is a field it never reads: without this the coach keeps writing "strong" over a
     # score whose denominator silently lost the criteria an unmatched profile field dropped.
     # Deliberate, per this test's own remedy, and the wording was tightened first.
-    "financial-model-review": 79_667,
+    # A9, all six: +1 line each — `insert_coaching.py --report-json`. Without it report.json keeps
+    # the pre-coaching text and a raw uuid insertion marker (measured 5,592 B adrift on a live
+    # run). Syncing rather than dropping the key, because ~200 test sites across the fleet read
+    # report_markdown out of the composed JSON to inspect report content.
+    "financial-model-review": 79_713,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
     # reference into context. The Available References entry now says it is background, not a read.
-    "ic-sim": 89_383,
+    # A9, all six: +1 line each — `insert_coaching.py --report-json`. Without it report.json keeps
+    # the pre-coaching text and a raw uuid insertion marker (measured 5,592 B adrift on a live
+    # run). Syncing rather than dropping the key, because ~200 test sites across the fleet read
+    # report_markdown out of the composed JSON to inspect report content.
+    "ic-sim": 89_426,
     # deck-review +1,165 B: Step 0 carried only a parenthetical fresh-shell mention buried in a code
     # comment, unlike the four skills that mint RUN_ID in a LATER block and so carry the shared banner.
     # deck-review mints RUN_ID INSIDE this re-runnable Step-0 block (like cap-table), so the shared
@@ -690,7 +702,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # image-rendered deck, so the two halves of one corroboration could read different
     # transcriptions; A7 a missing pointer to the schema that already answers `suppressed`.
     # Net vs the pre-shrink 99_757: -440 B — Batch 1.5 + Batch 2 together are still a cut.
-    "deck-review": 99_317,
+    # A9, all six: +1 line each — `insert_coaching.py --report-json`. Without it report.json keeps
+    # the pre-coaching text and a raw uuid insertion marker (measured 5,592 B adrift on a live
+    # run). Syncing rather than dropping the key, because ~200 test sites across the fleet read
+    # report_markdown out of the composed JSON to inspect report content.
+    "deck-review": 99_363,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -725,7 +741,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # positioning.json through score_positioning.py, so a dropped polarity silently reverts a cost
     # axis to higher-is-better — re-inverting the rank on exactly the runs where the founder engaged
     # with the map. scoring_basis already had this carve-out for the identical reason; polarity did not.
-    "competitive-positioning": 120_141,
+    # A9, all six: +1 line each — `insert_coaching.py --report-json`. Without it report.json keeps
+    # the pre-coaching text and a raw uuid insertion marker (measured 5,592 B adrift on a live
+    # run). Syncing rather than dropping the key, because ~200 test sites across the fleet read
+    # report_markdown out of the composed JSON to inspect report content.
+    "competitive-positioning": 120_189,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -747,7 +767,11 @@ SKILL_MD_CEILING: dict[str, int] = {
     # cap-table +96 B: the script catalog claimed extract_cap_table.py emits cap_state.json. It does
     # not — that is cap_state.py's output at Step 4 — and the same file said so correctly two lines
     # earlier, so a model reading the catalog was told to expect an artifact that never appears.
-    "cap-table": 145_472,
+    # A9, all six: +1 line each — `insert_coaching.py --report-json`. Without it report.json keeps
+    # the pre-coaching text and a raw uuid insertion marker (measured 5,592 B adrift on a live
+    # run). Syncing rather than dropping the key, because ~200 test sites across the fleet read
+    # report_markdown out of the composed JSON to inspect report content.
+    "cap-table": 145_518,
 }
 
 
@@ -926,7 +950,12 @@ REFERENCES_CEILING: dict[str, int] = {
     # slightly short". A rubric hole does not read as a hole to the grader — it reads as a judgement
     # call, and the nearest band wins. The rewrite closes 18-24 and >36, and states that hedged
     # evidence is a warn.
-    "financial-model-review": 73_751,
+    # financial-model-review references +787 B (J5): the SaaS-vs-SaaS tiebreak justified itself by a
+    # CAC-payback band it does not control (payback keys on acv_tier), between two values NO code in
+    # the fleet distinguishes — a rule that documented behaviour it did not implement. Replaced with
+    # what actually matters: the case where NEITHER SaaS type fits, where the default silently
+    # switches on the whole SaaS metric suite for a business the taxonomy cannot express.
+    "financial-model-review": 74_538,
     # ic-sim +1446 B: evaluation-criteria.md omitted `to_confirm` from the status table AND from the
     # scoring formula, which excluded only not_applicable. Following it changed the conviction
     # score, since score_dimensions.py excludes both. The >6 coverage cap was undocumented too.

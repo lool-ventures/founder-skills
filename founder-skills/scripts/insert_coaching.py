@@ -166,6 +166,13 @@ def parse_args() -> argparse.Namespace:
         metavar="PATH",
         help="JSON artifact whose metadata.run_id must match all others (repeatable)",
     )
+    p.add_argument(
+        "--report-json",
+        help="Path to report.json. Its `report_markdown` is a SECOND COPY of report.md, and "
+        "writing back to the markdown alone left it holding the pre-insertion text plus a raw "
+        "uuid insertion marker — measured 5,592 characters adrift on a live run. Named-but-absent "
+        "is fatal; omitted is fine (not every caller composes a report.json).",
+    )
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
     p.add_argument("-o", "--output", help="Write receipt to file instead of stdout")
     return p.parse_args()
@@ -209,6 +216,37 @@ def _scan_commentary(commentary: str) -> dict[str, list[str]]:
     return found
 
 
+def _sync_report_json(path: str, markdown: str) -> str | None:
+    """Rewrite report.json's `report_markdown` to match report.md. Error string, or None.
+
+    `report_markdown` is not a derived view — it is the SOURCE `compose_report.py` writes
+    report.md from, and it is also what ~200 test sites across six skills read to inspect
+    report content. So it cannot simply be dropped from the serialized artifact; it has to be
+    kept true. Everything else in the file is preserved byte-for-byte except this one key.
+
+    Rewritten in place with no delete/rename: Cowork's outputs mount is write-allowed and
+    delete-denied, so `os.replace` fails there — the same constraint the markdown write obeys.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except OSError as exc:
+        return f"--report-json named {path} but it is not readable: {exc}"
+    except json.JSONDecodeError as exc:
+        return f"--report-json at {path} is not valid JSON: {exc}"
+    if not isinstance(data, dict):
+        return f"--report-json at {path} is not a JSON object"
+    if "report_markdown" not in data:
+        return f"--report-json at {path} has no `report_markdown` key — is it a composed report.json?"
+    data["report_markdown"] = markdown
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data, indent=2) + "\n")
+    except OSError as exc:
+        return f"write-back to {path} failed: {exc}"
+    return None
+
+
 def main() -> None:
     args = parse_args()
     pretty: bool = args.pretty
@@ -219,6 +257,12 @@ def main() -> None:
             report_text = f.read()
     except OSError as exc:
         sys.exit(_blocked(f"report.md not readable at {args.report}: {exc}", pretty, output))
+
+    # CHECKED BEFORE ANY WRITE. A named-but-unreadable report.json discovered afterwards would
+    # leave report.md inserted and the JSON stale — the exact divergence this flag exists to
+    # close, reintroduced by the fix's own error path.
+    if args.report_json and not os.path.isfile(args.report_json):
+        sys.exit(_blocked(f"--report-json named {args.report_json} but no file is there", pretty, output))
 
     commentary_count = report_text.count(COMMENTARY_HEADING)
     marker_count = report_text.count(args.marker)
@@ -233,6 +277,12 @@ def main() -> None:
 
     already_inserted = commentary_count == 1 and marker_count == 0
     if already_inserted:
+        # The resume path rewrites nothing, so without this the JSON keeps the marker
+        # permanently on exactly the run most likely to follow an interruption.
+        if args.report_json:
+            err = _sync_report_json(args.report_json, report_text)
+            if err is not None:
+                sys.exit(_blocked(err, pretty, output))
         _emit(
             {
                 "status": "already_inserted",
@@ -276,6 +326,11 @@ def main() -> None:
             f.write(new_text)
     except OSError as exc:
         sys.exit(_blocked(f"write-back to {args.report} failed: {exc}", pretty, output))
+
+    if args.report_json:
+        err = _sync_report_json(args.report_json, new_text)
+        if err is not None:
+            sys.exit(_blocked(err, pretty, output))
 
     _emit(
         {
