@@ -50,6 +50,60 @@ def _run(payload: dict, extra: list[str] | None = None) -> tuple[int, str, str]:
     return res.returncode, res.stdout, res.stderr
 
 
+def test_rejects_a_word_number_as_raw() -> None:
+    """`raw` must be the slide's printed string, and a spelled-out count is not one.
+
+    Found by a live run, not by this file: the `deck-review-smoke` fixture said "Two
+    founders", the extractor recorded `raw: "Two"`, and the guard at ledger.py:347 rejected
+    it correctly — costing a repair dispatch that blew the scenario's sub-agent budget. The
+    guard worked; it simply had NO test, so nothing here would have caught its removal.
+
+    The rejection matters beyond tidiness, per the guard's own note: a numeral-free `raw`
+    reads downstream as an approximation and widens tolerance, which once turned a summed
+    108 against a stated 100 from a contradiction into a confirmation.
+
+    The fixture now says "2 co-founders" — the figure is kept, the trap is gone, and this
+    test holds the behaviour instead of a paid run holding it.
+    """
+    rc, _, err = _run(
+        {
+            "figures": [
+                _fig(),
+                _fig(
+                    id="founder_count",
+                    value=2,
+                    raw="Two",
+                    unit_kind="count",
+                    currency=None,
+                    quote="Two founders, ex-Stripe and ex-Notion",
+                ),
+            ]
+        }
+    )
+    assert rc != 0, "a spelled-out count passed as the slide's printed string"
+    assert "contains no number" in err, err
+
+
+def test_accepts_a_digit_count_that_the_slide_actually_prints() -> None:
+    """The other direction: the fix to the fixture must still yield a usable figure."""
+    rc, _, err = _run(
+        {
+            "figures": [
+                _fig(),
+                _fig(
+                    id="founder_count",
+                    value=2,
+                    raw="2",
+                    unit_kind="count",
+                    currency=None,
+                    quote="2 co-founders, ex-Stripe and ex-Notion",
+                ),
+            ]
+        }
+    )
+    assert rc == 0, err
+
+
 def test_accepts_a_well_formed_ledger() -> None:
     rc, out, err = _run({"figures": [_fig(), _fig(id="rev", value=9000, raw="$9K", quote="net revenue of $9K")]})
     assert rc == 0, err
