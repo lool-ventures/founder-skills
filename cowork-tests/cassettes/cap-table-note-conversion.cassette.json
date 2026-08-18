@@ -101,6 +101,30 @@
       },
       {
         "gate_answer_count_min": 1
+      },
+      {
+        "artifact_text": {
+          "artifact": "outputs/Cadence_Cap_Table.md",
+          "not_matches": "(?<!\"_?produced_by\":\\\\s{0,4}\")\\\\b\\\\w+\\\\.py\\\\b"
+        }
+      },
+      {
+        "artifact_text": {
+          "artifact": "outputs/Cadence_Counsel_Packet.md",
+          "not_matches": "(?<!\"_?produced_by\":\\\\s{0,4}\")\\\\b\\\\w+\\\\.py\\\\b"
+        }
+      },
+      {
+        "artifact_text": {
+          "artifact": "outputs/artifacts/cap-table-cadence/counsel_packet.md",
+          "not_matches": "(?<!\"_?produced_by\":\\\\s{0,4}\")\\\\b\\\\w+\\\\.py\\\\b"
+        }
+      },
+      {
+        "artifact_text": {
+          "artifact": "outputs/artifacts/cap-table-cadence/report.md",
+          "not_matches": "(?<!\"_?produced_by\":\\\\s{0,4}\")\\\\b\\\\w+\\\\.py\\\\b"
+        }
       }
     ],
     "skills": [

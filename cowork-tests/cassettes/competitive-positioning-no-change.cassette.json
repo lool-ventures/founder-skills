@@ -80,6 +80,18 @@
           "outputs/artifacts/founder-context-cadence.json",
           "outputs/Cadence_*"
         ]
+      },
+      {
+        "artifact_text": {
+          "artifact": "outputs/Cadence_Competitive_Positioning.md",
+          "not_matches": "(?<!\"_?produced_by\":\\\\s{0,4}\")\\\\b\\\\w+\\\\.py\\\\b"
+        }
+      },
+      {
+        "artifact_text": {
+          "artifact": "outputs/artifacts/competitive-positioning-cadence/report.md",
+          "not_matches": "(?<!\"_?produced_by\":\\\\s{0,4}\")\\\\b\\\\w+\\\\.py\\\\b"
+        }
       }
     ],
     "skills": [

@@ -93,6 +93,12 @@
           "outputs/artifacts/financial-model-review-cadence/**",
           "outputs/artifacts/founder-context-cadence.json"
         ]
+      },
+      {
+        "artifact_text": {
+          "artifact": "outputs/artifacts/financial-model-review-cadence/report.md",
+          "not_matches": "(?<!\"_?produced_by\":\\\\s{0,4}\")\\\\b\\\\w+\\\\.py\\\\b"
+        }
       }
     ],
     "skills": [

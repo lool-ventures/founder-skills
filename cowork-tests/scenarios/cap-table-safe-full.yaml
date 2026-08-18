@@ -125,3 +125,40 @@ assert:
   # deliberately 1, below the count observed at record time: gate firing is model-dependent, and a floor
   # set AT the observed count turns ordinary variance into a red suite.
   - gate_answer_count_min: 1
+
+  # NO INTERNAL FILENAME REACHES A DELIVERED DOCUMENT (harness 1.24.0 `artifact_text`).
+  #
+  # WHY THIS EXISTS. A leak of this class was shipped to a founder: an internal name appeared in
+  # the delivered `report.json` and NOT in `report.md`, so the fix looked complete. The rule that
+  # follows is "scan every delivered surface", which is why there is one entry per document below
+  # rather than one for the report — `artifact` is a LITERAL PATH, not a glob, by design (a glob
+  # would be an exhaustive claim over the manifest's file set, which this key cannot make).
+  #
+  # THE CARVE-OUT IS DELIBERATE AND NARROW. `metadata.produced_by` (and competitive-positioning's
+  # `_produced_by`, hence the `_?`) is a provenance stamp in a machine-read artifact, ruled
+  # legitimate 2026-08-18. Everything else matching `<name>.py` is a leak. The lookbehind is JS
+  # regex — the harness compiles with `new RegExp(pattern, "i")`, so variable-width lookbehind is
+  # available; note Python's `re` REJECTS this pattern, so a reproduce script needs a different form.
+  #
+  # SCOPE, AND WHAT IS DELIBERATELY NOT HERE:
+  #   * `.html` is excluded — the brand theme's CSS custom properties (`--lool-azure`, `--font-body`)
+  #     read as flags to a naive matcher, and the generated HTML bodies run 60-97 KB against the
+  #     64 KiB body cap. `test_html_founder_text.py` scans HTML TEXT NODES structurally instead.
+  #   * `checklist.json` is excluded — it carries a REAL, KNOWN leak of this class, logged at
+  #     docs/internal/2026-08-18-checklist-json-founder-text-leak.md. Asserting here would red the
+  #     lane on a defect that is tracked and deliberately not fixed in this change. Add it when
+  #     that defect closes; until then this guard does NOT cover that surface.
+  # Manifest-class: a body-less capture (over the cap, or a read-only/uploaded input) fails
+  # EVIDENCE-UNAVAILABLE rather than passing, so this cannot green vacuously.
+  - artifact_text:
+      artifact: 'outputs/Cadence_Cap_Table.md'
+      not_matches: '(?<!"_?produced_by":\\s{0,4}")\\b\\w+\\.py\\b'
+  - artifact_text:
+      artifact: 'outputs/Cadence_Counsel_Packet.md'
+      not_matches: '(?<!"_?produced_by":\\s{0,4}")\\b\\w+\\.py\\b'
+  - artifact_text:
+      artifact: 'outputs/artifacts/cap-table-cadence/counsel_packet.md'
+      not_matches: '(?<!"_?produced_by":\\s{0,4}")\\b\\w+\\.py\\b'
+  - artifact_text:
+      artifact: 'outputs/artifacts/cap-table-cadence/report.md'
+      not_matches: '(?<!"_?produced_by":\\s{0,4}")\\b\\w+\\.py\\b'

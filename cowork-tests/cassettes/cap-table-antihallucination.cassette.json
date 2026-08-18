@@ -76,6 +76,18 @@
       },
       {
         "gate_answer_count_min": 1
+      },
+      {
+        "artifact_text": {
+          "artifact": "outputs/Acmecorp_Inc_Term_Sheet_Review.md",
+          "not_matches": "(?<!\"_?produced_by\":\\\\s{0,4}\")\\\\b\\\\w+\\\\.py\\\\b"
+        }
+      },
+      {
+        "artifact_text": {
+          "artifact": "outputs/artifacts/cap-table-acmecorp-inc-extraction/report_extraction_only.md",
+          "not_matches": "(?<!\"_?produced_by\":\\\\s{0,4}\")\\\\b\\\\w+\\\\.py\\\\b"
+        }
       }
     ],
     "skills": [

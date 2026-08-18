@@ -29,6 +29,16 @@
         "gate_answer_count_min": 1
       },
       {
+        "question_options": {
+          "when_question": "out of scope",
+          "equals": [
+            "Stop review",
+            "Different stage",
+            "Proceed anyway (best-effort)"
+          ]
+        }
+      },
+      {
         "no_unexpected_files": [
           "outputs/artifacts/deck-review-testco/gate_state.json",
           "outputs/artifacts/deck-review-testco/gate_state.json.lock",
@@ -36,6 +46,21 @@
           "outputs/artifacts/deck-review-testco/stage_profile.json",
           "outputs/artifacts/founder-context-testco.json"
         ]
+      },
+      {
+        "file_absent": "outputs/artifacts/deck-review-testco/report.md"
+      },
+      {
+        "file_absent": "outputs/artifacts/deck-review-testco/report.json"
+      },
+      {
+        "file_absent": "outputs/artifacts/deck-review-testco/report.html"
+      },
+      {
+        "file_absent": "outputs/artifacts/deck-review-testco/checklist.json"
+      },
+      {
+        "file_absent": "outputs/artifacts/deck-review-testco/slide_reviews.json"
       },
       {
         "dispatch_count_max": 2

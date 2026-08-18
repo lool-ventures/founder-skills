@@ -73,6 +73,18 @@
           "outputs/artifacts/founder-context-cadence.json",
           "outputs/Cadence_IC_Simulation.*"
         ]
+      },
+      {
+        "artifact_text": {
+          "artifact": "outputs/Cadence_IC_Simulation.md",
+          "not_matches": "(?<!\"_?produced_by\":\\\\s{0,4}\")\\\\b\\\\w+\\\\.py\\\\b"
+        }
+      },
+      {
+        "artifact_text": {
+          "artifact": "outputs/artifacts/ic-sim-cadence/report.md",
+          "not_matches": "(?<!\"_?produced_by\":\\\\s{0,4}\")\\\\b\\\\w+\\\\.py\\\\b"
+        }
       }
     ],
     "skills": [

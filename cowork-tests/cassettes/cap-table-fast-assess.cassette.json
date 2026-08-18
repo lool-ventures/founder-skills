@@ -68,6 +68,18 @@
       },
       {
         "gate_answer_count_min": 1
+      },
+      {
+        "artifact_text": {
+          "artifact": "outputs/Cadence_Cap_Table_Fast_Assess.md",
+          "not_matches": "(?<!\"_?produced_by\":\\\\s{0,4}\")\\\\b\\\\w+\\\\.py\\\\b"
+        }
+      },
+      {
+        "artifact_text": {
+          "artifact": "outputs/artifacts/cap-table-cadence-fastassess/report_fast_assess.md",
+          "not_matches": "(?<!\"_?produced_by\":\\\\s{0,4}\")\\\\b\\\\w+\\\\.py\\\\b"
+        }
       }
     ],
     "skills": [

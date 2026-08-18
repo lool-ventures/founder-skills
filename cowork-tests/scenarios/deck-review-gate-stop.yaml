@@ -82,9 +82,49 @@ assert:
   - gate_answers_delivered: true
   - gate_answer_count_min: 1
 
-  # THE LOAD-BEARING ASSERT, and it is inverted because the harness has no `file_absent`. The
-  # allowlist is everything a correct decline may leave behind: the founder-context sidecar, the
-  # two pre-gate artifacts, and the gate record itself. `report.md`, `report.json`,
+  # WHAT THE FOUNDER WAS SHOWN — the half every other gate key is blind to (harness 1.24.0).
+  # `question_asked` matches the question TEXT; nothing before this could assert the OPTIONS.
+  #
+  # THIS IS MEASURED FACT 2 ABOVE, PROMOTED FROM A COMMENT TO A GUARD. The reversal that comment
+  # records — canonical order enforced on the file, but the founder shown "Proceed anyway"
+  # FIRST and "Stop review" LAST — passed every artifact assertion this lane had, because the
+  # artifact was correct. The only wrong thing was what a founder saw. `order: exact` is the
+  # default and is the point: this asserts the ORDER, not just the membership.
+  #
+  # WHY AN EXACT `equals` IS SAFE HERE AND NOWHERE ELSE ON THIS FLEET. Gate labels are normally
+  # model-authored and reword run-to-run, which makes an exact set a re-record-fragility source.
+  # These three are NOT model-authored: they are a canonical constant in `gate_state.py`,
+  # enforced on the file, and the agent is instructed to present them verbatim. A reword here IS
+  # the regression, so redding on it is correct behaviour, not brittleness. Do NOT copy this
+  # pattern onto Step 1's stage/sector/geography gates, whose labels the model composes.
+  #
+  # `when_question` is REQUIRED, not decorative: this run fires more than one sub-question, and
+  # more than one without a selector FAILS as ambiguous rather than silently taking the first —
+  # guessing would make the assertion depend on the gate order it exists to pin. The anchor is
+  # the gate's own distinctive phrase, the same one the `answers:` rule above uses, and it
+  # cannot match Step 1's stage question.
+  #
+  # Evidence is captured when the gate is ASKED, not when it is answered, so this still grades a
+  # gate that was shown and then denied or left unanswered. Replay-evaluable here because this
+  # cassette carries `controlOut`.
+  - question_options:
+      when_question: "out of scope"
+      equals: ["Stop review", "Different stage", "Proceed anyway (best-effort)"]
+
+  # THE LOAD-BEARING ASSERT. It is inverted — an allowlist of what a correct decline MAY leave
+  # behind — and it STAYS that way even though harness 1.24.0 added the direct `file_absent`.
+  #
+  # WHY BOTH, AND WHY THIS ONE IS STILL THE PRIMARY. The two keys sit on opposite sides of the
+  # replay boundary, so swapping would silently downgrade this lane:
+  #   * `no_unexpected_files` IS replay-checkable whenever the cassette carries `artifacts` +
+  #     `preRunPaths` (every recording here does) — so it gates the token-free PR job.
+  #   * `file_absent` is LIVE/verify-run ONLY and is skipped-loud on replay, by design: proving
+  #     absence needs an exhaustive, healthy filesystem walk, and a manifest cannot record walk
+  #     health. Replacing the allowlist with it would move this lane's only tripwire off CI.
+  # So the allowlist remains the gate; `file_absent` below is the ADDITION it cannot express.
+  #
+  # The allowlist is everything a correct decline may leave behind: the founder-context sidecar,
+  # the two pre-gate artifacts, and the gate record itself. `report.md`, `report.json`,
   # `checklist.json`, `slide_reviews.json`, `ledger.json`, `reconciliation.json` and any
   # promoted deliverable are all ABSENT from it, so producing one reds the lane. That is the
   # "a founder who said no got a report" tripwire.
@@ -98,6 +138,25 @@ assert:
       - 'outputs/artifacts/deck-review-testco/deck_inventory.json'
       - 'outputs/artifacts/deck-review-testco/stage_profile.json'
       - 'outputs/artifacts/founder-context-testco.json'
+
+  # WHAT THE ALLOWLIST ABOVE STRUCTURALLY CANNOT SAY (harness 1.24.0). `no_unexpected_files` is
+  # NEW-FILES-ONLY: a `report.md` left over from an earlier review of the same company, in the
+  # same review dir, is invisible to it however tight the allowlist — it was not created by THIS
+  # run. `file_absent` is the direct negative-existence check and has no such blind spot.
+  #
+  # LIVE/verify-run only — skipped-loud on replay (an `::warning::`, not a silent no-op), so
+  # these cannot turn the PR gate red or green. They grade on the next live re-record and on any
+  # kept run via `verify-run`. Do NOT generalise them to `market-sizing-remote-lane`: on
+  # `lane: remote` `file_absent` fails evidence-unavailable, because a filesystem that is not
+  # locally observable makes a missing snapshot indistinguishable from absence.
+  #
+  # One concern per item: a multi-key `assert:` item is an AND, and a mixed-class item would lose
+  # its filesystem half on replay.
+  - file_absent: 'outputs/artifacts/deck-review-testco/report.md'
+  - file_absent: 'outputs/artifacts/deck-review-testco/report.json'
+  - file_absent: 'outputs/artifacts/deck-review-testco/report.html'
+  - file_absent: 'outputs/artifacts/deck-review-testco/checklist.json'
+  - file_absent: 'outputs/artifacts/deck-review-testco/slide_reviews.json'
 
   # A SECOND, INDEPENDENT WITNESS to the same claim, because the file allowlist can only see
   # what was WRITTEN. An agent that dispatches the review sub-agents and then declines to write

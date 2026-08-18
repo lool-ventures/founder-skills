@@ -28,6 +28,12 @@
       },
       {
         "no_delete_in_outputs": true
+      },
+      {
+        "artifact_text": {
+          "artifact": "outputs/artifacts/cap-table-cadence-fastassess/report_fast_assess.md",
+          "not_matches": "(?<!\"_?produced_by\":\\\\s{0,4}\")\\\\b\\\\w+\\\\.py\\\\b"
+        }
       }
     ],
     "skills": [
