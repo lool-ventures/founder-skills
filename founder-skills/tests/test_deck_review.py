@@ -12,6 +12,7 @@ All tests use subprocess to exercise the scripts exactly as the agent does.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -5211,3 +5212,102 @@ def test_composes_own_insertion_marker_is_not_flagged_as_a_leaked_token() -> Non
     # NON-VACUITY: the marker really is present in what was scanned, so the assert above is
     # about the scan excluding it and not about the marker being absent.
     assert "COACHING_INSERTION_POINT_12345678" in result["report_markdown"]
+
+
+# ---------------------------------------------------------------------------
+# S2 / S4 — Batch 4: tell the founder what the artifacts already know.
+# ---------------------------------------------------------------------------
+
+
+def _compose_md(overrides: dict[str, Any]) -> str:
+    arts: dict[str, Any] = {
+        "deck_inventory.json": _VALID_INVENTORY,
+        "stage_profile.json": _VALID_PROFILE,
+        "slide_reviews.json": _VALID_REVIEWS,
+        "checklist.json": _VALID_CHECKLIST,
+    }
+    arts.update(overrides)
+    d = _make_artifact_dir(arts)
+    rc, data, err = _run_compose(d, ["--ungated"])
+    assert rc == 0, err
+    assert data is not None
+    return str(data["report_markdown"])
+
+
+def test_failures_are_reported_as_gaps_not_as_a_count() -> None:
+    """S2. `13 failures` reads as 13 separate problems. It is not: on the live deck the four
+    AI-Company failures were ONE issue (AI claimed, no evidence), and most of the rest traced
+    to missing slides.
+
+    This is the agreed remedy for the S1 decision — the four AI criteria keep scoring, and
+    the fairness objection is answered by making the CONCENTRATION visible rather than by
+    changing the arithmetic. So it is load-bearing, not cosmetic: without it the S1 decision
+    ships its downside and none of its mitigation.
+    """
+    checklist: dict[str, Any] = copy.deepcopy(_VALID_CHECKLIST)
+    summary: dict[str, Any] = checklist["summary"]
+    summary["fail"] = 13
+    summary["by_category"] = {
+        "Slide Content": {"pass": 0, "fail": 3, "warn": 0, "not_applicable": 0},
+        "Stage Fit": {"pass": 0, "fail": 2, "warn": 0, "not_applicable": 0},
+        "Common Mistakes": {"pass": 0, "fail": 1, "warn": 0, "not_applicable": 0},
+        "AI Company": {"pass": 0, "fail": 4, "warn": 0, "not_applicable": 0},
+        "Diligence Readiness": {"pass": 0, "fail": 3, "warn": 0, "not_applicable": 0},
+    }
+    md = _compose_md({"checklist.json": checklist})
+    assert "5 areas" in md or "five areas" in md.lower(), (
+        "the report must say how many distinct AREAS the failures fall into; a bare count "
+        f"reads as that many independent problems. Got:\n{md[:600]}"
+    )
+    assert "AI Company" in md, "the largest single contributor should be named — it is the one to fix first"
+
+
+def test_a_clean_checklist_gets_no_concentration_line() -> None:
+    """The other direction: this must not become boilerplate on a deck with no failures."""
+    checklist: dict[str, Any] = copy.deepcopy(_VALID_CHECKLIST)
+    summary: dict[str, Any] = checklist["summary"]
+    summary["fail"] = 0
+    summary["by_category"] = {
+        "Slide Content": {"pass": 5, "fail": 0, "warn": 0, "not_applicable": 0},
+    }
+    md = _compose_md({"checklist.json": checklist})
+    assert "areas" not in md.split("## ")[0].lower() or "0 fail" in md, (
+        "a deck with no failures should not be told how its failures concentrate"
+    )
+
+
+def test_the_ai_classification_and_its_evidence_reach_the_founder() -> None:
+    """S4. `ai_company_status` is worth 5.3 points — the same deck scores 45.0% as `not_ai`
+    and 39.7% as `ai_claimed_unverified`, because the latter keeps four AI criteria in the
+    denominator and they predictably fail. That call is made once, by a sub-agent, and
+    nothing verifies it: no gate, no warning, no second read.
+
+    Only its CONSEQUENCE was visible to the founder, never the call itself. Rendering the
+    classification with the evidence already captured in `deck_inventory.json` makes a wrong
+    call correctable instead of silent — which is the cheap half of the fix. A verification
+    gate is only worth building if this proves insufficient.
+    """
+    inv: dict[str, Any] = copy.deepcopy(_VALID_INVENTORY)
+    inv["ai_company_status"] = "ai_claimed_unverified"
+    inv["ai_evidence"] = "Deck uses 'agentic' throughout, but AI is described as a threat vector."
+    md = _compose_md({"deck_inventory.json": inv})
+    assert "agentic" in md, "the evidence behind the AI classification never reaches the founder"
+
+    # SCOPED TO THIS NOTE, deliberately. The raw enum DOES still appear elsewhere in the
+    # report -- the UNSUBSTANTIATED_AI_CLAIM warning prints it -- and that is a documented
+    # decision, not an oversight: `_founder_text.py` lists `ai_claimed_unverified` in
+    # DIAGNOSTIC_CODES as KEEP VERBATIM. Overturning it is a product call, not a batch item,
+    # so this test does not assert its absence globally. (It is worth revisiting: that file's
+    # own test is "whether the founder can ACT on the token -- an identifier is a key, an enum
+    # is a password", and this is an enum.)
+    start = md.find("**On the AI criteria:**")
+    assert start != -1, "the AI classification note is missing entirely"
+    # Bounded to the note's own block — slicing to end-of-document would swallow the
+    # warnings section, which is where the pre-existing enum lives.
+    note = md[start : md.find("\n## ", start) if md.find("\n## ", start) != -1 else start + 900]
+    assert "ai_claimed_unverified" not in note.lower(), "this note must not add a raw enum of its own"
+    lowered = md.lower()
+    assert "tell me" in lowered or "let me know" in lowered or "wrong" in lowered, (
+        "the founder must be told the call is CORRECTABLE — otherwise only its consequence is "
+        "visible and a misclassification costs 5.3 points silently"
+    )

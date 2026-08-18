@@ -787,14 +787,70 @@ def _section_executive_summary(
         # strongest company scored among the weakest decks.
         lines.append(f"**Deck-craft score:** {score}% — {status_label}")
         lines.append(f"**Breakdown:** {pass_c} pass, {fail_c} fail, {warn_c} warn, {na_c} N/A")
+
+        # WHERE THE FAILURES CONCENTRATE. A bare count reads as that many independent
+        # problems; measured on a live deck, 13 failures fell into 5 areas and the largest
+        # (4 of 13) was a single issue -- AI claimed without evidence. This is also the
+        # agreed remedy for keeping the four AI criteria in the score: the fairness
+        # objection is answered by making the concentration visible, not by changing the
+        # arithmetic. Suppressed at zero failures so it never becomes boilerplate.
+        by_cat_fails = {
+            str(name): int(_as_dict(stats).get("fail") or 0)
+            for name, stats in _as_dict(summary.get("by_category")).items()
+            if int(_as_dict(stats).get("fail") or 0) > 0
+        }
+        if fail_c and by_cat_fails:
+            top_name, top_n = max(by_cat_fails.items(), key=lambda kv: kv[1])
+            lines.append(
+                f"\n*Those {fail_c} failures fall into {len(by_cat_fails)} areas, not {fail_c} separate "
+                f"problems — the largest is **{top_name}** ({top_n}). Fixing an area usually closes "
+                "several at once.*"
+            )
         lines.append(
             "\n*Score = (pass + half credit per warn) ÷ applicable. Measures conformance to "
             "35 deck-craft criteria, not investability.*"
         )
 
+    lines.extend(_ai_classification_note(inventory))
     lines.extend(_unreviewed_design_note(checklist))
     lines.extend(_scope_note(checklist))
     return "\n".join(lines) + "\n"
+
+
+def _ai_classification_note(inventory: dict[str, Any] | None) -> list[str]:
+    """Show the AI call and its evidence, and say it can be corrected.
+
+    `ai_company_status` decides whether the four AI criteria stay in the denominator, and it
+    is worth 5.3 points: the same deck scores 45.0% as `not_ai` and 39.7% as
+    `ai_claimed_unverified`. That call is made once, by a sub-agent, with no gate, no second
+    read and no warning — and only its CONSEQUENCE reached the founder, never the call.
+
+    So render it. The evidence is already captured; this is disclosure, not new analysis, and
+    it turns a silent misclassification into a correctable one. Never print the raw enum — the
+    founder gets the sentence, not the token.
+    """
+    if not _usable(inventory):
+        return []
+    inv = _as_dict(inventory)
+    status = str(inv.get("ai_company_status") or "")
+    if status != "ai_claimed_unverified":
+        # `not_ai` gates the criteria out and needs no explanation; `ai_core` is the
+        # uncontested case. Only the contested classification costs a founder points on a
+        # judgement they never saw.
+        return []
+    evidence = str(inv.get("ai_evidence") or "").strip()
+    note = [
+        "",
+        "**On the AI criteria:** this deck claims AI without showing AI at its core, so the four "
+        "AI criteria are scored rather than set aside — claiming it invites the bar.",
+    ]
+    if evidence:
+        note.append(f"\n*Why: {evidence}*")
+    note.append(
+        "\n*If that reading is wrong — the product genuinely is AI-native, or the deck never meant "
+        "to claim it — tell me and those four come out of the score.*"
+    )
+    return note
 
 
 def _scope_note(checklist: dict[str, Any] | None = None) -> list[str]:
