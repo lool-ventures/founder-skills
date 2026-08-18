@@ -1599,6 +1599,69 @@ def test_prose_that_agrees_with_the_stage_is_accepted() -> None:
         assert json.loads(stdout)["needs_input"]["confirmed_stage"] == "series_a"
 
 
+# ---------------------------------------------------------------------------
+# G1: history built by the REAL CLI, never by a literal.
+#
+# The two tests below used to hand-write `confirmed_stage` into history entries.
+# `cmd_emit` never wrote that key, so both exercised a shape production cannot
+# produce, passed, and read as proof the per-stage consent guard worked -- while
+# `authorize()` keyed every real entry on "" and an answered question cancelled an
+# abandoned one. That is the third occurrence of the fabricated-record class in this
+# repo, and it recurred one commit after the class was documented in prose.
+#
+# Prose did not prevent it, so the remedy is mechanical: `_history_via_cli` is the
+# only way these tests obtain a history, and it obtains one by running the same
+# `emit`/`answer` commands SKILL.md runs. A shape the CLI cannot emit cannot be
+# tested here by construction.
+# ---------------------------------------------------------------------------
+
+
+def _history_via_cli(steps: list[tuple[str, str, str | None]], run_id: str = "r1") -> dict:
+    """Drive `emit`/`answer` for real and return the final gate_state.
+
+    `steps` is (gate_id, stage, answer-or-None), applied in order against one file, so each
+    emit supersedes the prior into history exactly as a live run does.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "gate_state.json")
+        for gate_id, stage, answer in steps:
+            body = {
+                "gate_id": gate_id,
+                "question": "Does this look right?"
+                if gate_id == "stage_confirmation"
+                else "This looks out of scope. What should I do?",
+                "options": _CANONICAL_OPTIONS[gate_id],
+                "context_summary": "Evidence for the detected stage.",
+            }
+            rc, _, err = _run(["emit", "--run-id", run_id, "--stage", stage, "-o", out], json.dumps(body))
+            assert rc == 0, f"emit {gate_id}/{stage} failed: {err}"
+            if answer is not None:
+                rc, _, err = _run(["answer", "--file", out, "--answer", answer, "--source", "founder"])
+                assert rc == 0, f"answer {answer!r} failed: {err}"
+        with open(out) as f:
+            loaded: dict = json.load(f)
+        return loaded
+
+
+def test_emit_records_which_stage_a_superseded_question_asked_about() -> None:
+    """The half `authorize()` reads. Without it every entry keys on "" and the per-stage
+    consent guard is inert against every real artifact."""
+    gate = _history_via_cli(
+        [
+            ("out_of_scope_choice", "growth", "Proceed anyway (best-effort)"),
+            ("out_of_scope_choice", "series_b", None),
+            ("stage_confirmation", "series_a", "Looks right"),
+        ]
+    )
+    history = gate["history"]
+    assert len(history) == 2, history
+    assert history[0]["confirmed_stage"] == "growth", history[0]
+    assert history[1]["confirmed_stage"] == "series_b", (
+        "a SUPERSEDED entry is the one the guard needs most, and the None-stripping filter "
+        "runs on exactly those entries"
+    )
+
+
 def test_consent_to_one_question_is_not_consent_to_another() -> None:
     """History was reduced to two booleans — "some out-of-scope gate was answered" and
     "some out-of-scope gate was not" — so an ANSWERED question neutralised a later
@@ -1606,20 +1669,16 @@ def test_consent_to_one_question_is_not_consent_to_another() -> None:
     then a series_a confirmation authorized the run.
 
     Consent attaches to the question that was put, so each unanswered out-of-scope question
-    has to be answered on its own terms."""
+    has to be answered on its own terms.
+
+    Built through the CLI, not as a literal -- see `_history_via_cli`."""
     gs = _gs()
-    gate = _asked(
-        "series_a",
-        history=[
-            {
-                "gate_id": "out_of_scope_choice",
-                "confirmed_stage": "growth",
-                "answer": "Proceed anyway (best-effort)",
-                "answer_source": "founder",
-                "run_id": "r1",
-            },
-            {"gate_id": "out_of_scope_choice", "confirmed_stage": "series_b", "run_id": "r1", "superseded": True},
-        ],
+    gate = _history_via_cli(
+        [
+            ("out_of_scope_choice", "growth", "Proceed anyway (best-effort)"),
+            ("out_of_scope_choice", "series_b", None),
+            ("stage_confirmation", "series_a", "Looks right"),
+        ]
     )
     verdict = gs.authorize(gate, _prof("series_a", "low"), "r1")
     assert not verdict.permitted, "consent to the growth question was read as consent to the series_b one"
@@ -1628,26 +1687,62 @@ def test_consent_to_one_question_is_not_consent_to_another() -> None:
 
 def test_each_out_of_scope_question_answered_on_its_own_terms_permits() -> None:
     gs = _gs()
-    gate = _asked(
-        "series_a",
-        history=[
-            {
-                "gate_id": "out_of_scope_choice",
-                "confirmed_stage": "growth",
-                "answer": "Proceed anyway (best-effort)",
-                "answer_source": "founder",
-                "run_id": "r1",
-            },
-            {
-                "gate_id": "out_of_scope_choice",
-                "confirmed_stage": "series_b",
-                "answer": "Proceed anyway (best-effort)",
-                "answer_source": "founder",
-                "run_id": "r1",
-            },
-        ],
+    gate = _history_via_cli(
+        [
+            ("out_of_scope_choice", "growth", "Proceed anyway (best-effort)"),
+            ("out_of_scope_choice", "series_b", "Proceed anyway (best-effort)"),
+            ("stage_confirmation", "series_a", "Looks right"),
+        ]
     )
     assert gs.authorize(gate, _prof("series_a", "low"), "r1").permitted
+
+
+def test_an_outstanding_question_with_no_recorded_stage_is_named_not_rendered_empty() -> None:
+    """The one legitimate literal-history test, and the exemption is the point.
+
+    `_history_via_cli` is the rule because a fabricated shape once made an inert guard look
+    proven. This case is the exception that rule cannot cover: the artifact under test is one
+    written BEFORE `confirmed_stage` was recorded, so the current CLI cannot produce it by
+    construction. Skipping it would leave the empty-token branch untested -- measured:
+    deleting that branch left all 125 other tests green.
+
+    Two properties, and the second is the founder-facing one: an entry with no recorded stage
+    must still count as OUTSTANDING (absence of a stage is not consent), and the reason must
+    not render `repr("")` at a founder as "a question about ''".
+    """
+    gs = _gs()
+    gate = _bound(
+        "series_a",
+        answer="Not sure — proceed anyway",
+        history=[
+            # A pre-`confirmed_stage` superseded entry, exactly as older `emit` wrote it.
+            {"gate_id": "out_of_scope_choice", "run_id": "r1", "superseded": True},
+        ],
+    )
+    verdict = gs.authorize(gate, _prof("series_a", "low"), "r1")
+    assert not verdict.permitted, "an unanswered out-of-scope question is outstanding even unnamed"
+    assert "''" not in verdict.reason, f"empty token rendered to a founder: {verdict.reason}"
+    assert "unrecorded stage" in verdict.reason, verdict.reason
+
+
+def test_a_question_reasked_about_the_SAME_stage_still_authorizes() -> None:
+    """The case a per-stage fix could plausibly break, and a real flow: SKILL.md tells the
+    agent to re-emit the gate on a repeat pass, so one stage can appear in history both
+    unanswered (superseded) and answered. That is consent, not an outstanding question.
+
+    This passes trivially today -- every entry keys on "" so the difference is always empty
+    -- which is exactly why it needs asserting BEFORE the key becomes real."""
+    gs = _gs()
+    gate = _history_via_cli(
+        [
+            ("out_of_scope_choice", "growth", None),
+            ("out_of_scope_choice", "growth", "Proceed anyway (best-effort)"),
+            ("stage_confirmation", "series_a", "Looks right"),
+        ]
+    )
+    assert gs.authorize(gate, _prof("series_a", "low"), "r1").permitted, (
+        "re-asking the same out-of-scope question and answering it is consent to that question"
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -535,9 +535,14 @@ def authorize(gate: object, stage_profile: object, run_id: str) -> Authorization
                 unanswered.add(about)
         outstanding = sorted(unanswered - answered)
         if outstanding:
+            # NAME THE STAGE, OR SAY IT IS NOT RECORDED -- never render an empty token. The
+            # reason string went straight into `repr(about)`, so an entry with no recorded
+            # stage produced "an out-of-scope question about '' was put to the founder".
+            # Pre-`confirmed_stage` files still exist, so the empty case is reachable.
+            named = ", ".join(repr(s) if s else "an unrecorded stage" for s in outstanding)
             return Authorization(
                 False,
-                f"an out-of-scope question about {', '.join(repr(s) for s in outstanding)} was put to "
+                f"an out-of-scope question about {named} was put to "
                 "the founder in this run and never answered — answering a different one does not "
                 "settle it",
             )
@@ -626,6 +631,23 @@ def cmd_emit(args: argparse.Namespace) -> int:
             "answer": prior.get("answer"),
             "answer_source": prior.get("answer_source"),
             "run_id": _as_run_id(prior),
+            # WHICH STAGE THE SUPERSEDED QUESTION ASKED ABOUT. `authorize()` tracks each
+            # unanswered out-of-scope question by this key so answering one cannot settle
+            # another -- and it was never written here, so every real entry keyed on "",
+            # both sets collapsed to {""}, and their difference was always empty. The guard
+            # was inert against every artifact the CLI can produce: growth asked and
+            # answered, series_b asked and abandoned, and the run authorized a full report.
+            #
+            # Read off the PRIOR, not `args.stage`: this entry describes the question being
+            # superseded, while `args.stage` is the stage of the gate replacing it. Taking
+            # the argument would stamp every entry with the wrong stage -- which still
+            # populates the key and still looks fixed.
+            #
+            # Set here, inside the initial dict, because the pending branch below strips
+            # `None` values and those are exactly the abandoned-question entries the guard
+            # needs. An old file with no `confirmed_stage` legitimately yields None and is
+            # stripped; the guard treats a missing stage as unnamed-but-outstanding.
+            "confirmed_stage": prior.get("confirmed_stage"),
         }
         if not is_answered(prior):
             # WHAT THE FOUNDER WAS ASKED IS PART OF THE RECORD, not only what they said.
