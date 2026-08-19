@@ -75,10 +75,26 @@ sys.path.insert(0, str(_REPO_ROOT / "cowork-tests"))
 # skills' own architecture prose supplies the plumbing vocabulary their narration rule forbids. The
 # right fix is to stop the narration, not to choose between a stale fixture and a broken guard.
 #
-# THE OBLIGATION. Next version: fix the narration leak, re-record, and ratchet this back DOWN — below
-# 55, not to it. If that has not happened by the release after next, the correct response is to treat
-# THIS comment as the regression, not the number.
-BASELINE = 59
+# THE OBLIGATION — PARTLY DISCHARGED 2026-08-20, and the measurement corrected two predictions.
+# The narration fix landed (deck-review SKILL.md) and four lanes were re-recorded at harness 1.25.0:
+# 59 -> 57. That is a ratchet DOWN, so the rule is honoured, but it is NOT below 55 and the
+# obligation above therefore still stands.
+#
+# WHAT THE MEASUREMENT REFUTED, because both errors are instructive and were stated confidently:
+#   1. "Re-recording deck-review cannot lower the count, since its lanes are already at 0." True but
+#      irrelevant — deck-review-smoke went 0 -> 1, GAINING a `plumbing_verb` hit ("dispatching the
+#      ledger extraction") in the skill whose narration was supposedly fixed. A prose fix does not
+#      generalise across every phrase in the file.
+#   2. "No lane can fall, because the fix was deck-review-only." False: financial-model-review-smoke
+#      went 5 -> 2 with no narration edit at all. Some of what this scans is run-to-run variance in
+#      how the agent narrates, not a fixed property of the skill text.
+# Net -2 is therefore the sum of a real regression and an unearned improvement, not a clean win.
+# Do not read a falling total as proof the narration rule is working.
+#
+# 12 of the 22 cassettes are still at their pre-fix recordings, and cap-table alone holds 30 of the
+# remaining leaks against a one-line skill change — so the bulk of this number has never been
+# re-measured against fixed narration.
+BASELINE = 57
 
 
 pytestmark = pytest.mark.skipif(

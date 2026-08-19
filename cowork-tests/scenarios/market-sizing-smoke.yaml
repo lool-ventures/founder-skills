@@ -46,6 +46,16 @@ prompt: |
 # DO NOT "fix" this by deleting the assert (it is true and it documents the contract), by loosening
 # `.cowork-redact.json` (it would commit this machine's host paths), or by re-running the record
 # (it will fail identically and cost another paid run — this one already did).
+#
+# IT HAS NOW COST TWO. The 2026-08-20 1.25.0 refresh included this lane in its set without reading
+# this header, and the record failed with the byte-identical refusal quoted above. The other four
+# lanes in that batch recorded fine, so the loss was one lane's spend, not the batch. If you are
+# assembling a re-record set: READ EACH SCENARIO'S OWN HEADER FIRST. A lane can be permanently
+# unrecordable in its current configuration, and this file says so in the file itself.
+#
+# This lane consequently remains the ONLY cassette at harness 1.12.0, and the only one carrying the
+# pre-1.14.0 `present_files` toolset. Neither is fixable by re-recording as configured — both need
+# the fidelity decision below taken first.
 # Resolving it needs a deliberate choice: record this lane at `fidelity: container`, where the
 # delivered path is a sandbox path and not host-redacted, or drop the key in favour of
 # `user_visible_artifact` + delivery_check.py. That decision is not taken here.
