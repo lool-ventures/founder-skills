@@ -651,6 +651,24 @@ Comparing every on-disk `assert:` key against its cassette's frozen `scenario.as
 
 That first row is the quantified form of the vacuous-gate hole this file discusses under `lint`: `gate_answer_count_min` is authored on 12 lanes and evaluated on **zero**. The last row is the mirror hazard and the less obvious one — deleting a wrong assert does not stop CI running it either, so lane3 still asserts in CI the very gate its own header explains the skill correctly never raises.
 
+**THE REMEDY IS FREE BUT NOT SOUND — read this before using it again (added 2026-08-20, verified at
+upstream source).** `--assert-from --write` has exactly one drift protection, the verdict gate
+(`writeReassertedAssertBlock`, `src/run/cassette.ts:4092`), and **`--allow-failing` skips it** with no
+staleness re-check anywhere downstream. You reach for `--allow-failing` *because* the asserts are
+failing — that is why you are re-asserting — so **the flag added for the expected failure silently
+disables the protection the forced drift gate exists to provide.** Measured: **11 of 11 write-back
+lanes show drift today**, so every block `10396cb` persisted was validated against a drifted recording.
+What that commit actually froze is two keys — `gate_answer_count_min` (10 lanes) and
+`gate_answers_delivered` (9) — which now pass against **pre-authorization-change** `controlOut`. **Do
+not cite those greens as evidence about current gate handling**; `deck-review-gate-stop` (recorded
+fresh at 1.23.0) is the evidence. The 11 lanes went from *authored-but-never-evaluated* (CI silent) to
+*evaluated-against-stale-events* (CI green), and for a regression guard **green-against-old-events is
+worse than silence, because silence prompts a re-record and green does not.** A full re-record clears
+it. **Not the same as "the block is meaningless":** the M1 evaluability guard (`:4081-4089`) still
+refuses keys that would freeze as silent no-ops and is NOT skipped by `--allow-failing`, so the written
+asserts do evaluate — they just evaluate against the wrong events. Upstream documents this at the flag
+as of the unreleased `--help`. Full exchange: cowork-harness#118.
+
 **The remedy is FREE, and an earlier version of this note got that wrong — do not re-derive the pessimistic version.** It claimed editing an `assert:` block "buys nothing until a re-record", which would make the 13 lanes above a ~$60 re-record backlog. They are not. `replay <cassette> --assert-from <scenario.yaml> --write --allow-failing` rewrites the frozen block in place, no paid run. Measured 2026-08-15 on a scratch copy of `market-sizing-smoke`: frozen asserts **16 → 19** (`present_files_called`, `gate_answer_count_min`, `gate_answers_delivered` all now present), `environment.harnessVersion` still `1.12.0` (nothing re-recorded), and plain `replay` afterwards correctly **FAILS** on `present_files_called`.
 
 Two limits, both measured across the 13 divergent lanes:
