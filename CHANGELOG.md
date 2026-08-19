@@ -5,6 +5,92 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-08-19 — A review you stopped is a review you do not receive
+
+### Highlights
+
+Five themes.
+
+**If you ask to stop a review, the review stops.** The deck review asks you to confirm what
+stage you are raising at before it grades anything, because every criterion below depends on
+the answer. If the deck looked out of scope, you could say "Stop review" — and then still be
+handed a finished report. Answering the question and authorising the work had quietly become
+the same act, so any answer let the run continue. They are now separate: a stop is a stop, a
+later answer cannot overwrite it, and the visual report is behind the same boundary as the
+written one rather than being generated with no check at all. The choices you are offered are
+also the choices the skill defines, in the order it defines them, rather than whatever the
+question happened to be phrased with.
+
+**A growth claim is no longer contradicted by figures that cannot measure it.** The review
+relates the numbers in your deck to each other and flags the ones that disagree. It was
+flagging a headline growth multiple as contradicted — prominently, as the leading finding —
+by comparing it against two figures that both sat inside a single year. Two points inside one
+year cannot measure a year-over-year rate, so the comparison was never valid and the
+contradiction was never real. Comparisons like that are now refused.
+
+**And when a claim cannot be checked, the report says so.** Refusing a comparison is right,
+but a refusal is invisible: with nothing left to disagree, you were told your figures line up
+— about the one claim an investor probes hardest. There is now a line naming the claim, saying
+it was neither confirmed nor disputed, and saying which figure would make it checkable. It is
+usually one number the deck does not print.
+
+**The report says how it knows, not only what it found.** Six places stated a conclusion
+without its basis. The numbers section now explains what the second read actually establishes
+— that the wording was found again, not that the figure is right — and says that figures whose
+wording could not be found were dropped rather than guessed at. Where a deck claims AI without
+showing AI at its core, the review now shows you that judgement and the evidence behind it,
+because it costs points on four criteria and you could not previously see it had been made, let
+alone correct it. Where a stage was taken as confirmed without being put to you as a question,
+the report says that too.
+
+**Benchmarks now tell you how old they are.** The financial model review scores you against
+published figures with real publication dates, and those dates were invisible. The report now
+states the age of the oldest benchmark it used and says plainly that a borderline rating on
+ageing data is a conversation, not a verdict.
+
+### Added
+
+- Deck review: a line naming any claim the review could not test, why it could not, and what to
+  add so it can be.
+- Deck review: disclosure of the AI classification and its evidence when a deck claims AI
+  without showing it at its core, with a note on how to correct the reading.
+- Deck review: disclosure when a stage was taken as confirmed rather than asked about.
+- Deck review: an explanation, in the numbers section, of what the corroborating read does and
+  does not establish.
+- Financial model review: the age of the oldest benchmark used, and a caution about borderline
+  ratings on ageing data.
+- Market sizing: a graded verdict on the sizing's quality, using the same four bands and the
+  same score thresholds as the other skills, so a grade means the same thing whichever skill
+  you ran. It sits alongside the existing "is anything still outstanding" answer rather than
+  replacing it — a strong sizing can still have one open item.
+
+### Changed
+
+- Deck review: confirming the stage and authorising the review are now separate. A stopped
+  review produces no report on any surface.
+- Deck review: the stage question's options and their order come from the skill, not from the
+  phrasing of the question.
+- Market sizing: warnings are now described by whether re-running can fix them, so a finding
+  about your market is not mistaken for a broken run.
+- Both documents a run produces now carry the same text; the machine-readable copy previously
+  held a snapshot taken before the coaching commentary was added.
+
+### Fixed
+
+- Deck review: a year written as `2024` is no longer treated as a quantity and compared against
+  revenue.
+- Deck review: a headcount multiplied into a product is no longer read as a unit of that
+  product.
+- Deck review: a quotation consisting of nothing but the figure itself no longer counts as
+  having found the figure's wording again.
+- Deck review: figures written with approximation symbols, grouped digits and mixed scale words
+  are read consistently across all four number formats the decks use.
+- Deck review: a comparison withheld for lack of a common basis is now reported as withheld
+  rather than as a pair that could not be compared.
+- Deck review: an ordinary use of the word "growth" is no longer read as a claim about funding
+  stage, and a stage named with any punctuation is recognised as the same stage.
+- Market sizing: 21 of 22 checks passing is no longer reported the same way as 1 of 22.
+
 ## [0.8.0] - 2026-08-15 — Checking the arithmetic, and saying what was not checked
 
 ### Highlights

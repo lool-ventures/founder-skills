@@ -1351,9 +1351,14 @@ def _untested_claims_line(reconciliation: dict[str, Any]) -> str:
     it -- and it is directly actionable, because the fix is usually one figure the deck
     does not print.
 
-    Deliberately says what is missing rather than guessing why: distinguishing "your deck
-    does not state last year" from "we could not read the chart" needs the N2 marker, which
-    does not exist yet. A vaguer true sentence beats a precise invented one.
+    Deliberately says what is missing rather than guessing WHY, and that is permanent rather
+    than provisional. Distinguishing "your deck does not state last year" from "we could not
+    read the chart" would need chart-plotted values to be readable operands, and they are
+    deliberately not: a value plotted without a printed label cannot be corroborated by a
+    second reader against the text, so admitting it would put an unverifiable operand into
+    the one place that must not have them. Both cases are therefore the same case -- the
+    figures needed are not both on the deck in a usable form -- and a vaguer true sentence
+    beats a precise invented one.
     """
     claims = [str(c) for c in _as_list(reconciliation.get("untested_claims")) if str(c).strip()]
     if not claims:
