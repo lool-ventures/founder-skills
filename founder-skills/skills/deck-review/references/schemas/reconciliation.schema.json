@@ -254,6 +254,13 @@
           "type": "string"
         }
       }
+    },
+    "untested_claims": {
+      "description": "Claims the deck makes that this run could NOT test, in the deck's own wording. Distinct from `suppressed`, which counts relations the founder does not see because nothing is wrong: these are relations that establish nothing because the comparison was refused. Without this the founder is told their figures line up about a claim that was never checked.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   }
 }

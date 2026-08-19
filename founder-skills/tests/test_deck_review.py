@@ -5311,3 +5311,80 @@ def test_the_ai_classification_and_its_evidence_reach_the_founder() -> None:
         "the founder must be told the call is CORRECTABLE — otherwise only its consequence is "
         "visible and a misclassification costs 5.3 points silently"
     )
+
+
+def _recon_artifact(**over: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "metadata": {"run_id": "test-run"},
+        "status": "checked",
+        "figures_total": 10,
+        "figures_verified": 10,
+        "relations": [],
+        "relations_proposed": 1,
+        "suppressed": {},
+        "untested_claims": [],
+        "interpretation": {"status": "not_needed", "contradictions_before": 0, "downgraded": []},
+        "validation": {"status": "valid", "errors": [], "warnings": []},
+    }
+    base.update(over)
+    return base
+
+
+def test_a_claim_we_could_not_test_is_said_out_loud() -> None:
+    """N1's other half. The guard stops us calling a within-year step a year-over-year
+    contradiction — but a refused relation is suppressed, and with no surviving
+    contradictions the founder is told, verbatim, "Your figures line up."
+
+    That is the fixed bug pointing the other way: before, a founder was told they were
+    wrong when they were not; after, they are told everything checks out when the claim an
+    investor probes hardest was never checked. The false headline is gone and a false
+    reassurance took its place.
+    """
+    md = _compose_md({"reconciliation.json": _recon_artifact(untested_claims=["~4x (YoY Growth multiple)"])})
+    assert "~4x" in md, (
+        "a claim the run could not test is invisible to the founder, who is told their figures "
+        "line up about the one number an investor will probe"
+    )
+    lowered = md.lower()
+    assert "could not" in lowered or "couldn't" in lowered, (
+        "the report must say the claim was NOT TESTED — naming it without that reads as a finding"
+    )
+
+
+def test_the_untested_line_also_shows_when_there_ARE_other_findings() -> None:
+    """The second render path, and mutation testing is the only reason it is covered.
+
+    `_section_numbers` returns early when no relation survives, and renders the main body
+    when one does. The first test exercises only the early return, so deleting the main-body
+    call changed nothing and the suite stayed green — a deck with a real contradiction AND an
+    unchecked growth claim would have shown the contradiction and silently dropped the claim.
+    """
+    md = _compose_md(
+        {
+            "reconciliation.json": _recon_artifact(
+                untested_claims=["~4x (YoY Growth multiple)"],
+                relations=[
+                    {
+                        "kind": "derived_ratio",
+                        "operator": "ratio",
+                        "operands": ["f1", "f2"],
+                        "expected_id": "e",
+                        "verdict": "contradiction",
+                        "computed": 167000.0,
+                        "rendered": "$3M ÷ 18 = $167K — but the deck states $160K",
+                        "confidence": "high",
+                        "reasons": [],
+                    }
+                ],
+                relations_proposed=2,
+            )
+        }
+    )
+    assert "167K" in md or "contradiction" in md.lower(), "the surviving finding vanished"
+    assert "~4x" in md, "the unchecked claim was dropped whenever another finding existed"
+
+
+def test_no_untested_claims_adds_no_line() -> None:
+    """It must not become boilerplate on every deck."""
+    md = _compose_md({"reconciliation.json": _recon_artifact()})
+    assert "could not check" not in md.lower(), "a deck with nothing untested was told something was"

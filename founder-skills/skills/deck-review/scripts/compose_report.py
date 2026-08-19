@@ -1337,6 +1337,38 @@ def _coverage_line(reconciliation: dict[str, Any]) -> str:
     return ", ".join(bits) + tail
 
 
+def _untested_claims_line(reconciliation: dict[str, Any]) -> str:
+    """Claims the deck makes that this run could not test.
+
+    THE COMPANION TO THE COVERAGE LINE, and it exists for the same reason. A refused
+    relation is suppressed -- correctly, it establishes nothing -- but suppression is
+    invisible, so with no surviving contradictions the founder is told "Your figures line
+    up" about the one claim an investor probes hardest.
+
+    That is the N1 bug pointing the other way. Before, a founder was told their numbers
+    disagreed when they did not; after, they are told everything checks out when the claim
+    was never checked. Saying so is an ADDITION to the report's claim, not a retreat from
+    it -- and it is directly actionable, because the fix is usually one figure the deck
+    does not print.
+
+    Deliberately says what is missing rather than guessing why: distinguishing "your deck
+    does not state last year" from "we could not read the chart" needs the N2 marker, which
+    does not exist yet. A vaguer true sentence beats a precise invented one.
+    """
+    claims = [str(c) for c in _as_list(reconciliation.get("untested_claims")) if str(c).strip()]
+    if not claims:
+        return ""
+    listed = "; ".join(claims)
+    plural = "claims" if len(claims) > 1 else "claim"
+    return (
+        f"**One thing this review could not check.** Your deck states {listed}, and the figures "
+        f"needed to test that {plural} are not both on the deck — a growth rate needs two points "
+        f"in time, and the ones here sit inside a single year. So this {plural} is neither "
+        f"confirmed nor disputed below. If an investor asks, that is the number they will ask "
+        f"about; adding the earlier figure makes it checkable.\n"
+    )
+
+
 def _section_numbers(
     reconciliation: dict[str, Any] | None,
     checklist: dict[str, Any] | None,
@@ -1371,8 +1403,12 @@ def _section_numbers(
     # checked". Saying how much was looked at is an ADDITION to the claim, not a retreat
     # from it: the founder can tell a clean bill of health from a thin one.
     counts = _coverage_line(reconciliation)
+    untested = _untested_claims_line(reconciliation)
     if not relations:
-        return "## What Your Numbers Say About Each Other\n\n" + counts if counts else ""
+        # BOTH branches must carry it, and this one matters most: with no surviving relations
+        # the founder is at maximum risk of reading silence as a clean bill of health.
+        body = "\n".join(x for x in (counts, untested) if x)
+        return "## What Your Numbers Say About Each Other\n\n" + body if body else ""
 
     # Split on VERDICT, not `kind`. `kind` is what the model PROPOSED the relation was;
     # `verdict` is what the engine computed it to be, and they routinely differ — the
@@ -1396,6 +1432,8 @@ def _section_numbers(
     )
     if counts:
         lines.append(counts)
+    if untested:
+        lines.append(untested)
 
     if contradictions:
         lines.append("### Figures that disagree\n")

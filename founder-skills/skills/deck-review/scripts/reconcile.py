@@ -118,6 +118,12 @@ class Relation:
     expected_id: str | None = None
     expected_value: float | None = None
     verdict: str = "derived"  # contradiction | confirmation | derived | restatement
+    # A CLAIM THE DECK MAKES THAT THIS RUN COULD NOT TEST. Set when the time guard refuses a
+    # rate-over-time binding. Suppression alone is invisible -- `suppressed` carries counts by
+    # verdict and nothing else -- so without this the founder is told "your figures line up"
+    # about the one claim an investor will probe hardest. Carries the claim's own wording, so
+    # a renderer can name it rather than gesture at it.
+    untested_claim: str = ""
 
 
 # A single-letter suffix must not be the first letter of a WORD. Without this guard
@@ -1550,6 +1556,7 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
             "year (one current, one end-of-year) — a within-year step cannot measure it, so "
             "no disagreement is established"
         )
+        r.untested_claim = f"{exp.raw}{f' ({exp.label})' if exp.label else ''}"
         exp_id = None
     if exp_id and (exp := by_id.get(str(exp_id))) is not None and r.computed is not None:
         r.expected_id, r.expected_value = exp.id, exp.value
@@ -2042,6 +2049,16 @@ def build(
         key = "dropped" if rel.dropped else rel.verdict
         suppressed[key] = suppressed.get(key, 0) + 1
 
+    # WHAT THE DECK CLAIMS AND THIS RUN COULD NOT TEST. Collected from every computed
+    # relation, selected or not: the refused ones are exactly the ones that carry this, and
+    # they are suppressed by design because they establish nothing. Suppressing the RELATION
+    # is right; suppressing the FACT told a founder "your figures line up" about the claim an
+    # investor probes hardest.
+    #
+    # A statement ALONGSIDE `select()`'s decision, never a way around it — the same shape as
+    # the coverage line, which exists because silence reads as "your numbers are fine".
+    untested_claims = sorted({rel.untested_claim for rel in computed if rel.untested_claim})
+
     return {
         "status": status,
         "figures_total": len(figures),
@@ -2087,6 +2104,7 @@ def build(
             for r in selected
         ],
         "suppressed": suppressed,
+        "untested_claims": untested_claims,
         "relations_proposed": len(rel_specs),
         # not_needed = nothing to interpret. not_run = contradictions survived and no
         # interpretation pass was supplied, so the founder is seeing the un-reviewed set.

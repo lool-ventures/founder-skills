@@ -40,6 +40,7 @@ from reconcile import (  # type: ignore[import-not-found]  # noqa: E402
     operand_tolerance,
     parse_range,
     quote_is_identifying,
+    select,
 )
 
 
@@ -1401,3 +1402,144 @@ def test_a_three_operand_relation_is_not_time_checked() -> None:
         {"f1": a, "f2": b, "f3": c, "e": exp},
     )
     assert r.expected_id == "e", "a three-operand sum was time-checked as if it were a two-point rate"
+
+
+# ---------------------------------------------------------------------------
+# N1's other half: refusing to test a claim is not the same as having nothing to say.
+#
+# The guard above correctly stops calling a within-year step a year-over-year
+# contradiction. But a refused relation is SUPPRESSED, and suppression is invisible --
+# `suppressed` carries counts by verdict and nothing else. So the artifact recorded
+# `{"derived": 1}` and no trace that a growth claim had gone untested.
+#
+# With no surviving contradictions the founder is then told, verbatim, "Your figures line
+# up." That is the fixed bug pointing the other way: before, a founder was told they were
+# wrong when they were not; now they are told everything checks out when the one claim an
+# investor will probe was never checked. The false headline is gone and a false
+# reassurance took its place.
+#
+# `select()` stays the only thing that decides what a founder SEES. This is a separate,
+# additive statement of what could NOT be tested -- the same shape as the coverage line,
+# which exists because "silence reads as your numbers are fine".
+# ---------------------------------------------------------------------------
+
+
+def test_a_refused_growth_claim_is_recorded_not_merely_suppressed() -> None:
+    """The artifact must carry the fact, or no renderer can ever surface it."""
+    now = fig("$3M", 3_000_000, id="f1", label="Current ARR", quote="Current ARR of $3M")
+    eoy = fig("$4.5M", 4_500_000, id="f2", label="ARR forecast EOY", quote="$4.5M exiting the year")
+    exp = fig("~4x", 4.0, unit_kind="multiple", id="e", label="YoY Growth multiple")
+    r = compute(_YOY, {"f1": eoy, "f2": now, "e": exp})
+    assert r.untested_claim, (
+        "the relation knows it refused a growth claim but records nothing a renderer can read — "
+        "so the founder is told 'your figures line up' about a claim that was never tested"
+    )
+    assert "~4x" in r.untested_claim, f"the record must name the CLAIM, not just its absence: {r.untested_claim!r}"
+
+
+def test_an_ordinary_relation_records_no_untested_claim() -> None:
+    """The other direction: this must not become a line on every deck."""
+    arr = fig("$3M", 3_000_000, id="f1", label="ARR")
+    heads = fig("18", 18, unit_kind="count", id="f2", label="Employees")
+    exp = fig("$160K", 160_000, id="e", label="ARR per employee")
+    r = compute({**_YOY, "expected_id": "e"}, {"f1": arr, "f2": heads, "e": exp})
+    assert not r.untested_claim, "a relation that WAS tested must not report an untested claim"
+
+
+def test_untested_claims_survive_into_the_artifact_even_though_the_relation_does_not() -> None:
+    """The whole point: the RELATION is suppressed, the FACT must not be.
+
+    `select()` correctly drops a refused relation — it establishes nothing and must not
+    reach the founder as a finding. But the artifact is the only channel to the renderer,
+    so a fact that lives solely on a dropped object is a fact nobody can report. Collected
+    at the top level, beside `suppressed`, as a statement of what could not be tested.
+    """
+    now = fig("$3M", 3_000_000, id="f1", label="Current ARR", quote="Current ARR of $3M")
+    eoy = fig("$4.5M", 4_500_000, id="f2", label="ARR forecast EOY", quote="$4.5M exiting the year")
+    exp = fig("~4x", 4.0, unit_kind="multiple", id="e", label="YoY Growth multiple")
+    r = compute(_YOY, {"f1": eoy, "f2": now, "e": exp})
+    selected = select([r])
+    assert r not in selected, "a refused relation must still be suppressed — it establishes nothing"
+    assert r.untested_claim, "and the fact must survive on it for the artifact to collect"
+
+    # THROUGH THE REAL CLI, not just the object. Mutation testing caught this: asserting on
+    # the Relation alone passed while `untested_claims` was emptied at the collection site, so
+    # the fact died between the object and the artifact — which is the only channel a renderer
+    # has. The gap was invisible because the object-level assertion looked like coverage.
+    import json as _json
+    import subprocess as _sp
+    import tempfile as _tf
+
+    with _tf.TemporaryDirectory() as d:
+        led = pathlib.Path(d) / "ledger.json"
+        sec = pathlib.Path(d) / "second_read.json"
+        out = pathlib.Path(d) / "rec.json"
+        figs = [
+            {
+                "id": "f1",
+                "value": 3_000_000,
+                "raw": "$3M",
+                "unit_kind": "money",
+                "label": "Current ARR",
+                "slide": 4,
+                "quote": "Current ARR of $3M",
+                "currency": "USD",
+            },
+            {
+                "id": "f2",
+                "value": 4_500_000,
+                "raw": "$4.5M",
+                "unit_kind": "money",
+                "label": "ARR forecast EOY",
+                "slide": 4,
+                "quote": "$4.5M exiting the year",
+                "currency": "USD",
+            },
+            {
+                "id": "e",
+                "value": 4.0,
+                "raw": "~4x",
+                "unit_kind": "multiple",
+                "label": "YoY Growth multiple",
+                "slide": 4,
+                "quote": "~4x YoY Growth",
+            },
+        ]
+        led.write_text(_json.dumps({"figures": figs, "figures_total": 3}), encoding="utf-8")
+        sec.write_text(
+            _json.dumps(
+                {"transcript": "Current ARR of $3M. $4.5M exiting the year. ~4x YoY Growth.", "slides_transcribed": [4]}
+            ),
+            encoding="utf-8",
+        )
+        proposal = _json.dumps(
+            {
+                "relations": [
+                    {"kind": "derived_ratio", "operator": "ratio", "operands": ["f2", "f1"], "expected_id": "e"}
+                ]
+            }
+        )
+        _sp.run(
+            [
+                sys.executable,
+                str(pathlib.Path(SCRIPTS) / "reconcile.py"),
+                "--ledger",
+                str(led),
+                "--second-read",
+                str(sec),
+                "--run-id",
+                "r1",
+                "-o",
+                str(out),
+            ],
+            input=proposal,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        artifact = _json.loads(out.read_text(encoding="utf-8"))
+    assert artifact.get("untested_claims"), (
+        "the refused claim never reached the artifact — a renderer has no other channel, so the "
+        "founder is told their figures line up about a claim that was never checked"
+    )
+    assert any("4x" in c for c in artifact["untested_claims"]), artifact["untested_claims"]
