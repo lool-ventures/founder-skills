@@ -207,27 +207,41 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 > - Upstream `docs/scenario.md` and `SKILL.md` stated, in 1.15.0 only, *"A key from a newer harness
 >   fails LOUD on an older CLI — it is never silently reinterpreted."* That was **true of the loader and
 >   false of replay**, and was corrected in 1.16.0. Do not propagate the 1.15.0 sentence.
-> - **`--assert-from` on a lane-bearing scenario:** `lane` is not covered by the drift guard until
->   1.16.0, so lane equality is the caller's responsibility. We do not use `--assert-from` anywhere —
->   keep it that way on lane-bearing scenarios until the floor is 1.16.0.
+> - ~~**`--assert-from` on a lane-bearing scenario:** `lane` is not covered by the drift guard until
+>   1.16.0.~~ **SPENT — the floor is `>=1.24.0`** (`rerecord.sh:145`), well past the version that closed
+>   this, so lane equality is no longer the caller's problem. The bullet's other half — *"we do not use
+>   `--assert-from` anywhere"* — was true of AUTOMATION and is misleading as written: it is a documented
+>   MANUAL step (run it before paying for a re-record), and `--assert-from --write --allow-failing` is
+>   how most divergent lanes got their edited assert blocks persisted for free. **What remains true, and
+>   is the load-bearing part: no automation of ours passes `--assert-from`.** CI runs plain `replay`,
+>   `lint` and two `verify-cassettes` steps; the only replay JSON we parse is `rerecord.sh`'s, on plain
+>   `replay`, keyed on `ok` + `results[].result`.
 >
-> **`--reassert` failures are EXPECTED right now, and CI is unaffected.** Plain `replay` (what CI runs)
-> evaluates the assertions **frozen in each cassette** and is green across the committed set (21 as of
-> 2026-08-06; re-derive rather than inheriting that number). `replay --reassert` re-checks the
-> **on-disk** `assert:` blocks instead, and those deliberately describe the behaviour the skills have TODAY,
-> which the 2026-07-07 cassettes predate. The current set, all of one class — assert-now, record-later:
+> **`--reassert` failures are EXPECTED, and CI is unaffected. Re-measured 2026-08-20 — the old list here
+> was 15 failures and the real number is ONE.** Plain `replay` (what CI runs) evaluates the assertions
+> **frozen in each cassette** and is green across the committed set: **22 cassettes, rc=0**. `replay
+> --reassert` re-checks the **on-disk** `assert:` blocks instead, and those describe the behaviour the
+> skills have TODAY.
 >
-> - `input_unmodified: 'uploads/**'` × 5 (the genuine upload lanes) — pre-0.29 cassettes captured no
->   uploads input root, so there is nothing to diff against yet.
-> - `subagent_file_write: path_suffix: coaching.md` × 5 — the hand-off was
->   `coaching_commentary_output.json` when these were recorded.
-> - `subagent_dispatch_healthy` × 5 — newly added; needs a fresh record to have evidence.
+> Measured across all 22, non-drift failures only:
+>
+> - **`present_files_called` on `market-sizing-smoke` — and that is the whole list.** The three classes
+>   this block used to enumerate (`input_unmodified: 'uploads/**'` × 5, `subagent_file_write:
+>   path_suffix: coaching.md` × 5, `subagent_dispatch_healthy` × 5) are **all cleared** — by the free
+>   `--reassert --write` remedy, not by a re-record. Do not re-derive work from that list; it is gone.
+> - **Two lanes REFUSE outright (rc=2)** rather than reporting asserts at all, and the write-back is
+>   unavailable to them: **`cap-table-acquisition`** (*"answers drifted from the recording"*) and
+>   **`deck-review-smoke`** (*"prompt drifted"*). Both need the paid record.
+>
+> **This block previously named `cap-table-safe-full` as the refusing lane. That was wrong** —
+> `cap-table-safe-full` re-asserts normally (rc=1, drift only). The two names above are measured, not
+> inherited. **Re-derive all of this** rather than trusting the counts; the one-liner is a loop of
+> `replay <cassette> --reassert` filtering out `drift` lines.
 >
 > Ratchet expectation: after the next re-record, `--reassert` should be clean. Use
 > `cowork-harness replay <cassette> --reassert` (token-free) as the pre-flight BEFORE paying for a record —
 > and `--reassert --write` to persist a re-validated assert block with no re-record at all, when only the
-> assert block changed. `cap-table-safe-full` cannot take that path (its `answers:` drifted from the
-> recording, so `--reassert` refuses it outright) and needs the paid record.
+> assert block changed.
 >
 > **Note what `subagent_file_write` can and cannot catch.** It matches the sub-agent's RAW write path —
 > the relative string from the dispatch prompt — which is byte-identical whether the prefix resolves
