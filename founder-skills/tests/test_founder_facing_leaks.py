@@ -1,5 +1,12 @@
 """Regression ratchet for founder-facing "internal plumbing" leaks.
 
+"LEAK" HERE IS A WORDING DEFECT, NOT A CONFIDENTIALITY BREACH -- founder-visible
+text showing internal vocabulary (a script name, a payload key, a pipeline step)
+where plain language belonged. Nothing confidential moves. The serious sense of the
+word lives in `scripts/privacy_guard.py` and the PII gate; conflating the two
+devalues it where it counts. The name stays only because it is referenced across
+CI and ~68 files. See `cowork-tests/leak_scan.py`'s header for the full note.
+
 The 6 SKILL.md files carry a class-based communication rule ("never surface
 file/script names, `*.py`, `--flags`, `$vars`, exit codes, `W_`/`E_` codes, JSON,
 or step/route labels — narrate in the founder's own words"). This test measures

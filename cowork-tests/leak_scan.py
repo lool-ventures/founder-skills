@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
 """Founder-facing "internal plumbing" leak detector.
 
+"LEAK" HERE IS NOT A CONFIDENTIALITY BREACH, and the distinction is worth stating
+because this repo uses the same word for one. What this scans for is founder-visible
+text showing INTERNAL VOCABULARY -- a script or reference filename, a payload key, a
+pipeline step -- where plain language belonged. Nothing confidential moves; a founder
+reads a word that means nothing to them. It is a wording defect.
+
+The serious sense of the word lives in `scripts/privacy_guard.py` and the PII gate,
+which guard a real founder's name or deal terms escaping into a public repo. Using one
+word for both devalues it where it counts, so prose in this repo should say "internal
+wording in founder-facing text" and reserve "leak" for the privacy sense. The name of
+this script stays only because it is referenced across ~68 files and CI.
+
 Scans the founder-visible assistant narration in cowork-harness cassettes (or
 any events.jsonl transcript) for developer-facing tokens that should never reach
 a founder: code spans, script/flag/var syntax, exit codes, W_/E_ warning codes,
