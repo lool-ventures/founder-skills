@@ -1145,6 +1145,80 @@ def _immaterial_percent(computed: float, exp: Figure) -> bool:
     return abs(computed - exp.value) / abs(exp.value) < MATERIALITY_PCT
 
 
+# A claim about a RATE OVER TIME, read off the STATED figure's own words. Deliberately the
+# label/raw and never `unit_kind`: a bare multiple is not a growth claim, and the recorded
+# corpus carries a non-temporal "100x" urgency multiple that keying on the unit would refuse.
+_RATE_OVER_TIME = re.compile(
+    r"\b(?:yoy|y/y|year[- ]over[- ]year|cagr|mom|m/m|month[- ]over[- ]month|"
+    r"annual(?:i[sz]ed)?\s+growth|growth\s+rate)\b",
+    re.I,
+)
+
+# A time anchor a PARSER can resolve, read off the figure's own strings. Unanchored sibling
+# of ledger.py's ^-anchored _DATE_FORMS, which match a whole date-valued figure; here the
+# token sits inside prose ("ARR of $4M in FY2025").
+_TIME_ANCHOR = re.compile(r"\b(?:FY\s?\d{2,4}|Q[1-4]\s?(?:FY|')?\s?\d{0,4}|20\d{2}|'\d{2})\b", re.I)
+
+
+# WITHIN-YEAR DEIXIS: words placing a figure inside the CURRENT year. Two operands both
+# carrying these are a within-year pair, whatever else the deck prints.
+_NOW_WORDS = re.compile(r"\b(?:current(?:ly)?|today|to date|YTD|run[- ]rate|so far)\b", re.I)
+_EOY_WORDS = re.compile(
+    r"\b(?:EOY|end[- ]of[- ]year|year[- ]end|exiting(?: the year)?|"
+    r"by year[- ]end|by the end of the year|forecast(?:ed)? (?:for )?(?:the )?year)\b",
+    re.I,
+)
+
+
+def _blob(f: Figure) -> str:
+    return " ".join(str(x or "") for x in (f.raw, f.quote, f.label))
+
+
+def _time_anchored(f: Figure) -> bool:
+    """Can this figure's point in time be established from what the deck printed?
+
+    MEASURED (census 2026-08-19, two real ledgers): only 26% of money/count operands carry
+    such a token. That is why there is no `as_of` schema field -- and also why ABSENCE of one
+    cannot be the trigger. See `_within_year_pair`.
+    """
+    return bool(_TIME_ANCHOR.search(_blob(f)))
+
+
+def _within_year_pair(figs: list[Figure]) -> bool:
+    """Do these two operands sit inside ONE year, by the deck's own words?
+
+    THE TRIGGER IS POSITIVE EVIDENCE, NOT ABSENCE, and that inversion was forced by a
+    pre-existing test rather than foreseen. The first version of this guard refused any
+    rate-over-time claim whose operands carried no date token -- but the census says 68% of
+    operands carry none, so it suppressed `$19m vs 15,614` against a stated "ARR growth
+    rate", which is a GENUINE finding (`test_growth_convention_is_not_a_contradiction`).
+    A guard that kills most real growth findings to stop one false one is a bad trade.
+
+    What actually characterises the defect is not missing anchors but PRESENT, CONFLICTING
+    ones: the deck stated revenue "current" AND a forecast "exiting the year" -- both inside
+    the same year -- and that pair was divided against a YoY claim. Two figures a reader can
+    see are months apart cannot measure a year-over-year rate.
+
+    Requires one of each: a pair that is merely undated stays comparable, which is what keeps
+    the 68% working.
+    """
+    if len(figs) != 2:
+        # A rate over time is a two-point claim. Three operands are some other shape, and
+        # guessing which pair to time-check would be inventing a reading the model did not
+        # propose.
+        return False
+    blobs = [_blob(f) for f in figs]
+    if not (any(_NOW_WORDS.search(b) for b in blobs) and any(_EOY_WORDS.search(b) for b in blobs)):
+        return False
+    # A REAL DATE OUTRANKS DEIXIS, but only when the dates DISAGREE. The first version escaped
+    # on any date token at all, which is wrong in the one case that matters: a deck writing
+    # "current ARR (FY2025)" and "$Xm by year end FY2025" is still a within-year pair, and the
+    # escape would have handed the false contradiction straight back. Two DIFFERENT years is a
+    # genuine span and comparison should run.
+    years = [set(_TIME_ANCHOR.findall(b)) for b in blobs]
+    return not (years[0] and years[1] and years[0] != years[1])
+
+
 def _stated(exp: Figure) -> str:
     """Render the stated side in the SAME number space as the computed side.
 
@@ -1454,6 +1528,28 @@ def compute(rel_spec: dict[str, Any], by_id: dict[str, Figure]) -> Relation:
         # finding: it suppresses, never manufactures, which is what lets this be a silent
         # guard rather than a new failure mode.
         r.reasons.append("the stated figure was not corroborated by the second read")
+        exp_id = None
+    # A RATE OVER TIME NEEDS OPERANDS COMMENSURABLE IN TIME. The engine guarded units, scale
+    # and RATE BASIS (`PERIODS`: per-month vs per-year) but had no concept of when a figure is
+    # AS OF -- so a deck stating revenue now and a forecast for the end of the SAME year had
+    # them divided (~1.5x) against a stated "~4x YoY" and reported as a contradiction. It
+    # shipped as the headline of a real review. A within-year step is not a year-over-year
+    # rate; nothing was contradicted.
+    #
+    # Refuses the BINDING, not the relation -- the same shape as the corroboration guard
+    # directly above. The relation survives as a derived reading; it just stops being a
+    # finding against a claim it cannot actually test. Suppresses, never manufactures.
+    if (
+        exp_id
+        and (exp := by_id.get(str(exp_id))) is not None
+        and _RATE_OVER_TIME.search(f"{exp.label or ''} {exp.raw or ''}")
+        and _within_year_pair(real)
+    ):
+        r.reasons.append(
+            f"{exp.raw} is a year-over-year rate, but these two figures are both inside one "
+            "year (one current, one end-of-year) — a within-year step cannot measure it, so "
+            "no disagreement is established"
+        )
         exp_id = None
     if exp_id and (exp := by_id.get(str(exp_id))) is not None and r.computed is not None:
         r.expected_id, r.expected_value = exp.id, exp.value

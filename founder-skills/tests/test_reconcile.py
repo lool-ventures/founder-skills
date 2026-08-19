@@ -53,7 +53,9 @@ def fig(raw: str, value: float, unit_kind: str = "money", label: str = "", **kw:
         unit_kind=unit_kind,
         label=label,
         slide=1,
-        quote="",
+        # Overridable: the N1 time guard reads a figure's own quote for a date token, so a
+        # test for it cannot use a fixed empty string.
+        quote=kw.pop("quote", ""),
         bound=kw.pop("bound", detect_bound(raw, label)),
         **(dict(zip(("lo", "hi"), lo_hi, strict=True)) if lo_hi else {}),
         **kw,
@@ -1255,3 +1257,147 @@ def test_a_product_of_only_counts_stays_untestable() -> None:
         {f.id: f for f in (a, b, money)},
     )
     assert rel.verdict == "incomparable", f"{rel.verdict!r} / unit {rel.computed_unit!r}"
+
+
+# ---------------------------------------------------------------------------
+# N1 — a rate-over-time claim needs operands that are commensurable IN TIME.
+#
+# THE DEFECT, reproduced offline from a real recorded ledger before this was written:
+# a deck's traction tile stated revenue NOW and a forecast for the END OF THE SAME YEAR,
+# and separately a growth claim on a tile labelled "YoY Growth". The engine divided
+# forecast / current, got ~1.5x, compared it to the stated ~4x, and reported a
+# CONTRADICTION -- which the coaching commentary then made the headline of the review.
+# Nothing was contradicted: a within-year step is not a year-over-year rate.
+#
+# The engine guards units (`unit_kind`), scale (`_raw_scale`) and RATE BASIS (`PERIODS`,
+# "per month" vs "per year"). It had no concept of WHEN a figure is as of, so two money
+# figures with no rate basis looked freely divisible.
+#
+# WHY THERE IS NO NEW SCHEMA FIELD. An anchor-derivability census (2026-08-19, script at
+# docs/internal/) measured how often a growth operand carries a date token in its own
+# raw/quote/label: 26% across two real ledgers. And the operands of THIS defect carry
+# none and never will -- the deck says "current" and "end of year", which is how founders
+# write. So no `as_of` field, required or optional, would have been populated here: there
+# is nothing on the slide to populate it from. A required one would have forced the
+# extractor to invent a date, manufacturing the very contradictions this removes.
+#
+# So the guard triggers on ABSENCE rather than demanding presence, and lives at the
+# comparison site beside the currency and unit refusals.
+# ---------------------------------------------------------------------------
+
+_YOY = {"operator": "ratio", "operands": ["f1", "f2"], "kind": "derived_ratio", "expected_id": "e"}
+
+
+def test_a_yoy_claim_is_refused_when_both_operands_sit_inside_one_year() -> None:
+    """The live defect. Both operands are deixis ("current", "EOY") — a reader resolves
+    them, a parser cannot — so no span can be established and no contradiction is."""
+    now = fig("$3M", 3_000_000, id="f1", label="Current ARR", quote="Current ARR of $3M")
+    eoy = fig("$4.5M", 4_500_000, id="f2", label="ARR forecast EOY", quote="$4.5M exiting the year")
+    exp = fig("~4x", 4.0, unit_kind="multiple", id="e", label="YoY Growth multiple")
+    r = compute(_YOY, {"f1": eoy, "f2": now, "e": exp})
+
+    # THE ASSERTION IS "NOT A CONTRADICTION", NOT "== incomparable", and the difference is a
+    # deliberate deviation from the plan. The guard refuses the BINDING (`expected_id`), which
+    # is the shape of the corroboration guard four lines above it in `reconcile.py` — so the
+    # relation survives as a `derived` READING of a division that is arithmetically fine, and
+    # only stops being a FINDING against a claim it cannot test. Forcing `incomparable` would
+    # discard a true reading to match a word chosen before the code was explored.
+    #
+    # Either way the founder sees nothing here: this lands at `medium` confidence and
+    # `select()` admits only high-confidence derived (`reconcile.py:1725`). What matters is
+    # that no FALSE DISAGREEMENT is asserted.
+    assert r.verdict != "contradiction", (
+        "a within-year step was compared against a year-over-year rate and called a "
+        "contradiction — this shipped as the headline of a real review"
+    )
+    assert r.expected_id is None, "the binding to the YoY claim must be refused, not merely re-verdicted"
+    assert any("year-over-year" in x.lower() and "inside one year" in x.lower() for x in r.reasons), (
+        f"the refusal must say WHY, or a reader cannot tell it from a unit mismatch: {r.reasons}"
+    )
+
+
+def test_a_genuine_same_period_contradiction_still_fires() -> None:
+    """THE OVER-REFUSAL GUARD, and the reason this test file matters more than the fix.
+
+    A guard that suppresses the false positive by suppressing everything would pass a
+    single-assertion test. On the same recorded deck, a per-employee ratio really was ~4%
+    off its stated figure, and it must survive: neither side is a rate over time, so the
+    time guard has no business touching it."""
+    arr = fig("$3M", 3_000_000, id="f1", label="ARR")
+    heads = fig("18", 18, unit_kind="count", id="f2", label="Employees")
+    exp = fig("$160K", 160_000, id="e", label="ARR per employee")
+    r = compute({**_YOY, "expected_id": "e"}, {"f1": arr, "f2": heads, "e": exp})
+    assert r.verdict == "contradiction", f"a real disagreement was suppressed as {r.verdict!r}"
+
+
+def test_a_bare_multiple_is_not_a_growth_claim() -> None:
+    """Keying on `unit_kind == multiple` over-refuses. The same recorded ledger carries a
+    non-temporal "100x" urgency multiple, and LTV:CAC is a bare multiple by design — the
+    trigger is the expected figure's LABEL naming a rate over time, nothing else."""
+    ltv = fig("$60K", 60_000, id="f1", label="LTV")
+    cac = fig("$15K", 15_000, id="f2", label="CAC")
+    exp = fig("4x", 4.0, unit_kind="multiple", id="e", label="LTV to CAC ratio")
+    r = compute({**_YOY, "expected_id": "e"}, {"f1": ltv, "f2": cac, "e": exp})
+    assert r.verdict != "incomparable", "a bare multiple was refused as if it were a growth claim"
+
+
+def test_a_yoy_claim_between_two_DATED_figures_is_still_compared() -> None:
+    """The 26% that CAN be anchored must still work, or the guard deletes the findings it
+    exists to make trustworthy. Also N3a's shape: two dated magnitudes and a stated
+    multiple — that relation spans eight years, so the span must be claim-relative rather
+    than a hard-coded one period."""
+    fy24 = fig("$1M", 1_000_000, id="f1", label="ARR FY2024", quote="ARR of $1M in FY2024")
+    fy25 = fig("$4M", 4_000_000, id="f2", label="ARR FY2025", quote="ARR of $4M in FY2025")
+    exp = fig("4x", 4.0, unit_kind="multiple", id="e", label="YoY Growth")
+    r = compute({**_YOY, "expected_id": "e"}, {"f1": fy25, "f2": fy24, "e": exp})
+    assert r.verdict != "incomparable", (
+        f"two dated figures one year apart ARE commensurable; got {r.verdict!r} with {r.reasons}"
+    )
+
+
+def test_deixis_plus_the_SAME_year_is_still_a_within_year_pair() -> None:
+    """The escape hatch's own failure mode, found by mutation testing.
+
+    The first version let ANY date token cancel the deixis check. But a deck writing "current
+    ARR (FY2025)" and "$4.5M by year end FY2025" is still two points inside one year — the
+    escape would have handed the false contradiction straight back, dressed as a dated
+    comparison. Two DIFFERENT years is a genuine span; the same year twice is not.
+    """
+    now = fig("$3M", 3_000_000, id="f1", label="Current ARR", quote="Current ARR of $3M in FY2025")
+    eoy = fig("$4.5M", 4_500_000, id="f2", label="ARR", quote="$4.5M by year end FY2025")
+    exp = fig("~4x", 4.0, unit_kind="multiple", id="e", label="YoY Growth multiple")
+    r = compute(_YOY, {"f1": eoy, "f2": now, "e": exp})
+    assert r.verdict != "contradiction", "two points inside FY2025 were compared as a year-over-year rate"
+    assert r.expected_id is None
+
+
+def test_deixis_across_two_DIFFERENT_years_is_a_real_span() -> None:
+    """The escape's permissive direction, which nothing covered until mutation testing asked.
+
+    A deck can write both: "current ARR of $1M in FY2024" and "$4M by year end FY2025". The
+    deixis words are present, so the within-year check trips — but the years DISAGREE, which
+    is a genuine year-over-year span and must still be compared. Refusing here would delete
+    exactly the findings this guard exists to keep trustworthy."""
+    fy24 = fig("$1M", 1_000_000, id="f1", label="ARR", quote="current ARR of $1M in FY2024")
+    fy25 = fig("$4M", 4_000_000, id="f2", label="ARR", quote="$4M by year end FY2025")
+    exp = fig("4x", 4.0, unit_kind="multiple", id="e", label="YoY Growth")
+    r = compute(_YOY, {"f1": fy25, "f2": fy24, "e": exp})
+    assert r.expected_id == "e", "two different years were refused as if they were one"
+
+
+def test_a_three_operand_relation_is_not_time_checked() -> None:
+    """A rate over time is a TWO-point claim. With three operands there is no pair to check
+    without inventing a reading the model never proposed, so the guard stands down rather
+    than guessing — and the ordinary comparison runs."""
+    # Labels deliberately carry NO "Q1"/"Q2" — those match the quarter pattern in
+    # `_TIME_ANCHOR`, so an earlier draft of this test passed because the pair read as a
+    # dated span and never reached the length guard at all. Caught by mutation testing.
+    a = fig("$1M", 1_000_000, id="f1", label="first slice", quote="$1M current")
+    b = fig("$2M", 2_000_000, id="f2", label="second slice", quote="$2M by year end")
+    c = fig("$3M", 3_000_000, id="f3", label="third slice")
+    exp = fig("$6M", 6_000_000, id="e", label="Total ARR growth rate")
+    r = compute(
+        {"operator": "sum", "operands": ["f1", "f2", "f3"], "kind": "derived_ratio", "expected_id": "e"},
+        {"f1": a, "f2": b, "f3": c, "e": exp},
+    )
+    assert r.expected_id == "e", "a three-operand sum was time-checked as if it were a two-point rate"
