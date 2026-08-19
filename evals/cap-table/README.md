@@ -135,6 +135,23 @@ uv run python run_reliability_bench.py \
   --repeats 10 --min-pass-rate 0.9 --max-budget-usd 25 --out harness-repeat.json
 ```
 
+> **New rollup fields in cowork-harness 1.25.0 — additive, nothing here breaks.** Two things now
+> appear on a `--repeat` rollup, and both matter when reading a result you did not launch yourself:
+>
+> - **The verdict line names the ARM.** `--ablate-skill --repeat N` produces N *control* runs and
+>   **zero treatment runs** — correct for a one-armed flag, but it used to summarize as
+>   `repeat "<skill>": PASS — 5/5 passed (100%)`, which reads as a finished A/B. It now reads
+>   `PASS [ABLATED — control arm]`, and a mixed batch reads `[MIXED ARMS: 2/3 ablated]`. A normal
+>   batch carries no tag. **If you are running a tier acceptance, an `[ABLATED]` tag means you
+>   measured the no-skill baseline, not the tier.**
+> - **An aggregate `provenance:` row**, reporting models and skill states as **SETS** — so a batch
+>   silently spanning two models is visible rather than collapsed to the first run. That is the whole
+>   point for this bench: a tier-acceptance number computed across two tiers is not a tier-acceptance
+>   number.
+>
+> `run_reliability_bench.py` reads `rollups[]` defensively (`passRate` with a `pass_rate` fallback),
+> so neither field required a code change.
+
 `--stop-on-diverge` stops the loop the moment both a pass and a fail are seen (that
 batch always fails — divergence *is* the flakiness signal). `--max-budget-usd` caps
 cumulative spend (a clean early stop is a warning, not a failure). Kept run dirs still

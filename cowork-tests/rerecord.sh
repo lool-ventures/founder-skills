@@ -31,7 +31,25 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# FLOOR: >=1.20.0 with no upper bound. Recording is the one operation where the harness version is
+# FLOOR: >=1.25.0 with no upper bound. Recording is the one operation where the harness version is
+#   NOTE THE HEADER HAS BEEN STALE BEFORE: this line read ">=1.20.0" while the gate below required
+#   1.24 — two minors adrift, in the note whose job is to explain the gate. The numeric gate and its
+#   FATAL message are ADJACENT LINES (grep -n 'minor.*-ge'); this header is ~110 lines above them.
+#   Edit all THREE, then re-read all three.
+#   * 1.25.0 is required for the RECORDING ITSELF. Its baseline (desktop-1.32885.1, agent ELF
+#     2.1.234) is the first to repoint `spawn.subagentAppendHostLoop` at a re-derived asset: the
+#     host-loop SUB-AGENT system-prompt append gained a paragraph telling the model that shell
+#     commands start at the VM session root and that anything written outside `<root>/mnt/` — `/tmp`
+#     included — never reaches the user and is invisible to its own file tools. That is a SYSTEM
+#     PROMPT change at the tier this fleet records at, hence a re-record trigger by this repo's own
+#     rule, and it is the split-filesystem fact underneath our whole hand-off design. Baselines
+#     resolve by `baseline: latest` = highest-versioned file in the INSTALLED package (not by harness
+#     version), and 1.24.0 does not ship desktop-1.32885.1.json — so a 1.24.0 recording is pinned to
+#     desktop-1.32352.0 and the previous Desktop family's sub-agent prompt. Exhaustive recursive leaf
+#     diff 1.32352.0 -> 1.32885.1: 0 added, 0 removed, 17 changed — 12 provenance/identity, 4
+#     `network.allowDomains` ORDER-ONLY (compare as a SET; this trap has fired four times), and the
+#     one pointer. spawn.tools / allowedTools / env / promptTemplate / subagentAppend(vm) / hooks /
+#     effortDefault / settings / guest / platform / mountLayout are byte-identical.
 #   * 1.20.0 is required for the RECORDING ITSELF, unlike the 1.19.0 bump below. Its baseline
 #     (desktop-1.26832.0) pins agent ELF 2.1.222 — the only ELF installed on this machine. On a
 #     1.19.0 CLI (baseline desktop-1.25927.0, pinned 2.1.221) `doctor --tier hostloop` reports the
@@ -142,8 +160,8 @@ echo "cowork-harness $ver"
 # themselves are unchanged and still `::warning::`. Parse the JSON envelope instead.
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
 # `-gt 1` first so a future 2.x passes — a bare minor check would FATAL on 2.0.0.
-{ [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 24 ]; }; } \
-  || { echo "FATAL: need >=1.24.0 (have $ver) — see the floor note above"; exit 1; }
+{ [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 25 ]; }; } \
+  || { echo "FATAL: need >=1.25.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi

@@ -324,6 +324,13 @@ Measured workarounds, current through **1.15.0**. Full detail in
   `models` as run provenance (this touches the skill-latency methodology).
 - **`--ablate-skill` is ONE arm, not a paired experiment.** Composed with `--repeat N` it produces N
   *ablated* runs and zero treatment runs. Run the prompt again without the flag for the other arm.
+  **As of 1.25.0 the tool enforces this rather than leaving it to the reader:** the rollup verdict
+  reads `repeat "<skill>": PASS [ABLATED — control arm] — 5/5 passed (100%)`, a hand-assembled mixed
+  batch reads `[MIXED ARMS: 2/3 ablated]`, and a normal batch carries no tag. **This lands on a
+  surface we DO read** — `evals/cap-table/run_reliability_bench.py` shells `run --repeat N
+  --output-format json` and parses `rollups[]`, and the release process makes that bench mandatory for
+  a model-tier change. Both the arm label and the new aggregate `provenance:` row are additive, and
+  the bench reads defensively, so nothing breaks.
 - **A recorded cassette is NOT relocatable.** It rewrites `scenario.session` and `scenarioSource`
   relative to its OWN directory at record time, so any move — a different `--out`, a `git mv`, a copy
   into another repo — leaves them unresolvable and `verify-cassettes` reports `unverifiable-skill`
@@ -357,6 +364,17 @@ Measured workarounds, current through **1.15.0**. Full detail in
   artifact-watching cannot tell you. The run prints `[status] <outDir>` to stderr at startup — **except
   under `--compact`/`--demo`**, which withhold it deliberately (it is a raw host path). `status.json` is
   written either way, and `cowork-harness status` also accepts the run-dir root.
+- **`[provenance]` (1.25.0) answers "which experiment actually ran?" for free — and `model` is the
+  part that is new to us.** Every run verdict, passing or failing, replay lane included, now prints
+  `[provenance] model=… skill=offered,invoked ablated=…`, and the same object rides
+  `results[].provenance` in the JSON envelope. **Measured across all 22 committed cassettes:
+  `claude-sonnet-4-6` and `offered,invoked`, uniform.** Record that: a corpus silently spanning two
+  models is a real hazard here (the model-tier acceptance rule exists because tier changes
+  correctness), and nothing checked it before. **Do NOT read `skill=…invoked` as proof the skill under
+  test ran** — `provenance.ts:52-57` says it is deliberately "was the Skill channel used at all" and
+  that identity belongs to `skill_triggered`, which this fleet already asserts on **22/22** cassettes.
+  `offered,unknown`/`unknown` mean evidence-UNAVAILABLE, never "no". `--compact`/`--demo` suppress the
+  line, matching `[status]`.
 - **A green run is no longer silent — read the verdict footer.** As of 1.14.0 it prints `warn`-severity
   signals on pass and fail alike, prefixed `·` (`undelivered_deliverables`, `ended_with_question`,
   `scan_unavailable`, `exec_infra_error`, `prompt_asset_missing`). Before that, every warn on a passing
@@ -428,16 +446,26 @@ Measured workarounds, current through **1.15.0**. Full detail in
   18 findings. If a re-record ever reds this gate en masse on our own namespace, the cause is a missing
   `plugins[]` declaration, not a leak; do not re-add an allow.
   **New axis (1.19.0): `skills[]`**, same two exemptions (the agent's built-ins — currently just
-  `deep-research` — plus a declared plugin's own). All 21 cassettes carry a populated `skills[]`; 7
-  names, 0 flagged. **That zero is structural, not earned**: the axis targets the `protocol` tier, where
+  `deep-research` — plus a declared plugin's own). All **22** cassettes carry a populated `skills[]`; 7
+  names, 0 flagged (re-measured 2026-08-20 — the count was 21 when written).
+  **Where to look, because this has now cost one wrong finding:** the array is inside the `system`
+  init frame in `events[]`, and **`events[]` entries are JSON-ENCODED STRINGS**. A recursive walk that
+  does not `json.loads` every string leaf finds nothing and will conclude the axis does not exist —
+  an adoption-plan draft did exactly that, then mistook `scenario.skills` (the per-cassette
+  single-element STALENESS-SCOPING key, corpus union 6) for this axis and proposed rewriting this
+  paragraph as false. It is not false. **That zero is structural, not earned**: the axis targets the `protocol` tier, where
   the harness keeps the operator's real `CLAUDE_CONFIG_DIR`; we record at hostloop, which does not. A
   population count does NOT prove the axis works — every name we carry is exempt by construction, so a
   no-op would produce the same zero. Non-vacuity was confirmed by **probe**: inject a foreign skill name
   into a cassette copy and it fires. Note the scan is tier-gated, so `skills[]` is *present* in 21/21 but
-  *read* in 20/21 (`host-path-canary` records at `container`).
+  *read* in 21/22 (`host-path-canary` records at `container`).
+  **1.25.0 fixed the built-in roster** — it held one name (`deep-research`) while the agent had grown
+  fourteen more, so a fresh `protocol` recording reported 14 false host-inventory findings, the exact
+  push toward a blanket `--allow-host-inventory`. **Measured impact on us: 0 → 0**, because our one
+  bare name was already in the old roster. It would matter the moment we record at `protocol`.
   The three predicates that would mean a **real** leak — `mcp_servers[].name`,
   `account.email`/`.organization`/`.subscriptionType`, and a `mcp__<server>__…` tool naming a foreign
-  server — return **NONE** across all 21. Not covered by the class (upstream's `docs/cassette.md`): the
+  server — return **NONE** across all 22. Not covered by the class (upstream's `docs/cassette.md`): the
   **command and plugin** catalogs and command descriptions. (The *skill* catalog used to be on that list
   and no longer is — see the new axis above. `plugins[].name` is deliberately not an axis: it is the
   harness's own declaration channel.) A green is a backstop, not proof.
