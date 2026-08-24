@@ -140,7 +140,7 @@ assert:
   # Manifest-class: a body-less capture (over the cap, or a read-only/uploaded input) fails
   # EVIDENCE-UNAVAILABLE rather than passing, so this cannot green vacuously.
   - artifact_text:
-      artifact: 'outputs/Acmecorp_Inc_Term_Sheet_Review.md'
+      artifact: 'outputs/Acmecorp_Inc_Instrument_Terms.md'
       not_matches: '(?<!"_?produced_by":\\s{0,4}")\\b\\w+\\.py\\b'
   - artifact_text:
       artifact: 'outputs/artifacts/cap-table-acmecorp-inc-extraction/report_extraction_only.md'

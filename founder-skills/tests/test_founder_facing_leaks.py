@@ -94,7 +94,7 @@ sys.path.insert(0, str(_REPO_ROOT / "cowork-tests"))
 # 12 of the 22 cassettes are still at their pre-fix recordings, and cap-table alone holds 30 of the
 # remaining leaks against a one-line skill change — so the bulk of this number has never been
 # re-measured against fixed narration.
-BASELINE = 57
+BASELINE = 20
 
 
 pytestmark = pytest.mark.skipif(

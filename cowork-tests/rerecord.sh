@@ -31,7 +31,7 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# FLOOR: >=1.25.0 with no upper bound. Recording is the one operation where the harness version is
+# FLOOR: >=2.1.0 with no upper bound. Recording is the one operation where the harness version is
 #   NOTE THE HEADER HAS BEEN STALE BEFORE: this line read ">=1.20.0" while the gate below required
 #   1.24 — two minors adrift, in the note whose job is to explain the gate. The numeric gate and its
 #   FATAL message are ADJACENT LINES (grep -n 'minor.*-ge'); this header is ~110 lines above them.
@@ -160,8 +160,8 @@ echo "cowork-harness $ver"
 # themselves are unchanged and still `::warning::`. Parse the JSON envelope instead.
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
 # `-gt 1` first so a future 2.x passes — a bare minor check would FATAL on 2.0.0.
-{ [ "$major" -gt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -ge 25 ]; }; } \
-  || { echo "FATAL: need >=1.25.0 (have $ver) — see the floor note above"; exit 1; }
+{ [ "$major" -gt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -ge 1 ]; }; } \
+  || { echo "FATAL: need >=2.1.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi
@@ -183,7 +183,7 @@ echo "runs root: ${COWORK_HARNESS_RUNS_DIR:-~/.cowork-harness/runs (harness defa
 # already have one. This is a structural guard, not tidiness: scenarios/ can legitimately carry a
 # scenario whose cassette is still pending a live record, and the record loop below is `xargs -P`,
 # which returns non-zero if ANY child fails — so one never-validated scenario would abort the batch
-# and the documented remedy (`git checkout -- cassettes/`) would throw away every good re-record in
+# and the documented remedy (`git stash push -- cassettes/`) would set aside every good re-record in
 # it. Authoring a genuinely NEW cassette is the explicit-name form, after the live-decider flow
 # below has settled its gates.
 scns=()
@@ -311,7 +311,7 @@ record_one() {
 }
 export -f record_one
 printf '%s\n' "${scns[@]}" | xargs -P "$CONC" -I{} bash -c 'record_one "$@"' _ {} \
-  || { echo "FATAL: at least one record failed — revert partials with 'git checkout -- cowork-tests/cassettes/' and re-run"; exit 1; }
+  || { echo "FATAL: at least one record failed — set aside partials with 'git stash push -- cowork-tests/cassettes/' (NOT 'git checkout --': this tree is permanently dirty by design and checkout has destroyed uncommitted work here) and re-run"; exit 1; }
 recorded=()
 for n in "${scns[@]}"; do recorded+=("cassettes/$n.cassette.json"); done
 

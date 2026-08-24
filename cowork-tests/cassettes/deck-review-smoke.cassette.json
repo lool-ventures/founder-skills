@@ -1,7 +1,7 @@
 {
-  "$schema": "https://raw.githubusercontent.com/yaniv-golan/cowork-harness/main/schema/cassette.v10.json",
+  "$schema": "https://raw.githubusercontent.com/yaniv-golan/cowork-harness/main/schema/cassette.v12.json",
   "generator": "cowork-harness",
-  "cassetteVersion": 10,
+  "cassetteVersion": 12,
   "scenario": {
     "name": "deck-review-smoke",
     "baseline": "latest",
@@ -776,9 +776,9 @@
   "scenarioSource": "../scenarios/deck-review-smoke.yaml",
   "fingerprint": {
     "baseline": "1.32885.1",
-    "skillHash": "95eef0f7ac9fde4eec638a51a6a60462793b3dd73a4b031785e86b85656494a2",
+    "skillHash": "2d139d34a1a756ba25fce6e84a6d84e0c7609fb6a8b20bcdf49cf23c03a98d00",
     "promptAssetsHash": "491afe2862dc67ea",
-    "contentSig": "bd51f6bbb4fedfba974dd25a2e50f4608a456432f88c17515c3435ca0875959f",
+    "contentSig": "99cebc3997779068a1e95f000ff71707c6dc3264a9ff3b9ce07baee28b5f17ea",
     "skillSources": [
       "../../founder-skills"
     ],
@@ -786,7 +786,7 @@
     "fileSigs": [
       [
         ".claude-plugin/plugin.json",
-        "abb03866de661f7c12ade6457a2eeb7e6c0d21b1b592c6acb432cee423bfe171"
+        "dfc6fec3ff7da0534385c4d57750936359fefdb78132da44a523469b77232a19"
       ],
       [
         "LICENSE",
@@ -1024,7 +1024,7 @@
     "skillScope": [
       "deck-review"
     ],
-    "sharedHash": "132fc5d9df08230543b63a7628a947aa91f1ddc203bf39ffdda0d798492312c1",
+    "sharedHash": "e266b21770c013a759088fc837bfcc79604073c422fdc3d9f039ebe6cd26ea56",
     "labelProvenance": [
       {
         "file": "agents/cap-table.md",
@@ -1286,7 +1286,8 @@
           "Pre-seed"
         ]
       }
-    ]
+    ],
+    "hashFormat": "jcs1"
   },
   "authoring": {
     "nonDeterministic": true

@@ -95,6 +95,146 @@ _NO_CASSETTE_ALLOWLIST: dict[str, str] = {
         "not yet recorded (paid; pending the next rerecord.sh batch — see "
         "cowork-tests/rerecord.sh's cumulative cost pre-flight comment for the current count)"
     ),
+    "cap-table-acquisition": (
+        "DELIBERATELY UN-CASSETTED as of 2026-08-24 — the cassette was deleted, the scenario kept. Rationale for "
+        "the whole batch: a cassette replays FROZEN events and re-evaluates frozen assertions against them, so it "
+        "cannot detect a skill-behaviour regression — measured, 18 of the then-22 cassettes were recorded against "
+        "since-changed skills and all 22 still replayed green. The corpus therefore bought a per-skill staleness "
+        "tripwire, analyzer fixtures, and documentation of a past paid run, at $86.36 per hash-format epoch. Full "
+        "analysis, including what each deletion gives up: "
+        "docs/internal/2026-08-24-cassette-corpus-value-analysis.md. Re-record on purpose with `rerecord.sh "
+        "<name>` (the bare form only refreshes scenarios that already have a cassette). Its assert-KEY set is a "
+        "verified strict subset of cap-table-safe-full's, same default.yaml session, no distinct delivery shape. "
+        "~$2.88."
+    ),
+    "cap-table-carta": (
+        "DELIBERATELY UN-CASSETTED as of 2026-08-24 — the cassette was deleted, the scenario kept. Rationale for "
+        "the whole batch: a cassette replays FROZEN events and re-evaluates frozen assertions against them, so it "
+        "cannot detect a skill-behaviour regression — measured, 18 of the then-22 cassettes were recorded against "
+        "since-changed skills and all 22 still replayed green. The corpus therefore bought a per-skill staleness "
+        "tripwire, analyzer fixtures, and documentation of a past paid run, at $86.36 per hash-format epoch. Full "
+        "analysis, including what each deletion gives up: "
+        "docs/internal/2026-08-24-cassette-corpus-value-analysis.md. Re-record on purpose with `rerecord.sh "
+        "<name>` (the bare form only refreshes scenarios that already have a cassette). Carta-XLSX upload lane. "
+        "Session (carta.yaml) and fixture both retained; the frozen record of one past extraction is what goes. "
+        "~$2.49."
+    ),
+    "cap-table-extract-safe": (
+        "DELIBERATELY UN-CASSETTED as of 2026-08-24 — the cassette was deleted, the scenario kept. Rationale for "
+        "the whole batch: a cassette replays FROZEN events and re-evaluates frozen assertions against them, so it "
+        "cannot detect a skill-behaviour regression — measured, 18 of the then-22 cassettes were recorded against "
+        "since-changed skills and all 22 still replayed green. The corpus therefore bought a per-skill staleness "
+        "tripwire, analyzer fixtures, and documentation of a past paid run, at $86.36 per hash-format epoch. Full "
+        "analysis, including what each deletion gives up: "
+        "docs/internal/2026-08-24-cassette-corpus-value-analysis.md. Re-record on purpose with `rerecord.sh "
+        "<name>` (the bare form only refreshes scenarios that already have a cassette). SAFE-PDF upload lane. "
+        "Session (safe-cap-discount.yaml) and fixture retained. ~$3.16."
+    ),
+    "cap-table-fast-assess": (
+        "DELIBERATELY UN-CASSETTED as of 2026-08-24 — the cassette was deleted, the scenario kept. Rationale for "
+        "the whole batch: a cassette replays FROZEN events and re-evaluates frozen assertions against them, so it "
+        "cannot detect a skill-behaviour regression — measured, 18 of the then-22 cassettes were recorded against "
+        "since-changed skills and all 22 still replayed green. The corpus therefore bought a per-skill staleness "
+        "tripwire, analyzer fixtures, and documentation of a past paid run, at $86.36 per hash-format epoch. Full "
+        "analysis, including what each deletion gives up: "
+        "docs/internal/2026-08-24-cassette-corpus-value-analysis.md. Re-record on purpose with `rerecord.sh "
+        "<name>` (the bare form only refreshes scenarios that already have a cassette). The lightweight/concise "
+        "answer path. Cheapest carrier of computer_links_resolve_if_present, which has three other carriers. "
+        "~$0.98."
+    ),
+    "cap-table-lane3-freeform": (
+        "DELIBERATELY UN-CASSETTED as of 2026-08-24 — the cassette was deleted, the scenario kept. Rationale for "
+        "the whole batch: a cassette replays FROZEN events and re-evaluates frozen assertions against them, so it "
+        "cannot detect a skill-behaviour regression — measured, 18 of the then-22 cassettes were recorded against "
+        "since-changed skills and all 22 still replayed green. The corpus therefore bought a per-skill staleness "
+        "tripwire, analyzer fixtures, and documentation of a past paid run, at $86.36 per hash-format epoch. Full "
+        "analysis, including what each deletion gives up: "
+        "docs/internal/2026-08-24-cassette-corpus-value-analysis.md. Re-record on purpose with `rerecord.sh "
+        "<name>` (the bare form only refreshes scenarios that already have a cassette). Freeform-spreadsheet "
+        "lane. Session (lane3-freeform.yaml) and gen_lane3_fixture.py retained. ~$3.16."
+    ),
+    "cap-table-note-conversion": (
+        "DELIBERATELY UN-CASSETTED as of 2026-08-24 — the cassette was deleted, the scenario kept. Rationale for "
+        "the whole batch: a cassette replays FROZEN events and re-evaluates frozen assertions against them, so it "
+        "cannot detect a skill-behaviour regression — measured, 18 of the then-22 cassettes were recorded against "
+        "since-changed skills and all 22 still replayed green. The corpus therefore bought a per-skill staleness "
+        "tripwire, analyzer fixtures, and documentation of a past paid run, at $86.36 per hash-format epoch. Full "
+        "analysis, including what each deletion gives up: "
+        "docs/internal/2026-08-24-cassette-corpus-value-analysis.md. Re-record on purpose with `rerecord.sh "
+        "<name>` (the bare form only refreshes scenarios that already have a cassette). Assert-key subset of "
+        "cap-table-safe-full (tied on item count, subset on keys). ~$2.54."
+    ),
+    "cap-table-priced-ad": (
+        "DELIBERATELY UN-CASSETTED as of 2026-08-24 — the cassette was deleted, the scenario kept. Rationale for "
+        "the whole batch: a cassette replays FROZEN events and re-evaluates frozen assertions against them, so it "
+        "cannot detect a skill-behaviour regression — measured, 18 of the then-22 cassettes were recorded against "
+        "since-changed skills and all 22 still replayed green. The corpus therefore bought a per-skill staleness "
+        "tripwire, analyzer fixtures, and documentation of a past paid run, at $86.36 per hash-format epoch. Full "
+        "analysis, including what each deletion gives up: "
+        "docs/internal/2026-08-24-cassette-corpus-value-analysis.md. Re-record on purpose with `rerecord.sh "
+        "<name>` (the bare form only refreshes scenarios that already have a cassette). Assert-key subset of "
+        "cap-table-safe-full. ~$2.62."
+    ),
+    "competitive-positioning-false-positive": (
+        "DELIBERATELY UN-CASSETTED as of 2026-08-24 — the cassette was deleted, the scenario kept. Rationale for "
+        "the whole batch: a cassette replays FROZEN events and re-evaluates frozen assertions against them, so it "
+        "cannot detect a skill-behaviour regression — measured, 18 of the then-22 cassettes were recorded against "
+        "since-changed skills and all 22 still replayed green. The corpus therefore bought a per-skill staleness "
+        "tripwire, analyzer fixtures, and documentation of a past paid run, at $86.36 per hash-format epoch. Full "
+        "analysis, including what each deletion gives up: "
+        "docs/internal/2026-08-24-cassette-corpus-value-analysis.md. Re-record on purpose with `rerecord.sh "
+        "<name>` (the bare form only refreshes scenarios that already have a cassette). Half of the adversarial "
+        "verification A/B. Deleting one half destroys the comparison, so both halves went together. ~$7.39."
+    ),
+    "competitive-positioning-genuine-control": (
+        "DELIBERATELY UN-CASSETTED as of 2026-08-24 — the cassette was deleted, the scenario kept. Rationale for "
+        "the whole batch: a cassette replays FROZEN events and re-evaluates frozen assertions against them, so it "
+        "cannot detect a skill-behaviour regression — measured, 18 of the then-22 cassettes were recorded against "
+        "since-changed skills and all 22 still replayed green. The corpus therefore bought a per-skill staleness "
+        "tripwire, analyzer fixtures, and documentation of a past paid run, at $86.36 per hash-format epoch. Full "
+        "analysis, including what each deletion gives up: "
+        "docs/internal/2026-08-24-cassette-corpus-value-analysis.md. Re-record on purpose with `rerecord.sh "
+        "<name>` (the bare form only refreshes scenarios that already have a cassette). The other half of that "
+        "A/B pair, and the corpus's thinnest cost sample (n=1). ~$7.22."
+    ),
+    "competitive-positioning-no-change": (
+        "DELIBERATELY UN-CASSETTED as of 2026-08-24 — the cassette was deleted, the scenario kept. Rationale for "
+        "the whole batch: a cassette replays FROZEN events and re-evaluates frozen assertions against them, so it "
+        "cannot detect a skill-behaviour regression — measured, 18 of the then-22 cassettes were recorded against "
+        "since-changed skills and all 22 still replayed green. The corpus therefore bought a per-skill staleness "
+        "tripwire, analyzer fixtures, and documentation of a past paid run, at $86.36 per hash-format epoch. Full "
+        "analysis, including what each deletion gives up: "
+        "docs/internal/2026-08-24-cassette-corpus-value-analysis.md. Re-record on purpose with `rerecord.sh "
+        "<name>` (the bare form only refreshes scenarios that already have a cassette). The closest call on the "
+        "list: its header names it the runtime verification of the reserved 'No changes — ' prefix and the mirror "
+        "of the recall-adoption lane. Deleted because competitive-positioning-smoke (kept) carries MORE "
+        "occurrences of that prefix and also selects the no-change branch at every gate, and check_substance() "
+        "takes a run dir, never a cassette. ~$8.05."
+    ),
+    "ic-sim-contested": (
+        "DELIBERATELY UN-CASSETTED as of 2026-08-24 — the cassette was deleted, the scenario kept. Rationale for "
+        "the whole batch: a cassette replays FROZEN events and re-evaluates frozen assertions against them, so it "
+        "cannot detect a skill-behaviour regression — measured, 18 of the then-22 cassettes were recorded against "
+        "since-changed skills and all 22 still replayed green. The corpus therefore bought a per-skill staleness "
+        "tripwire, analyzer fixtures, and documentation of a past paid run, at $86.36 per hash-format epoch. Full "
+        "analysis, including what each deletion gives up: "
+        "docs/internal/2026-08-24-cassette-corpus-value-analysis.md. Re-record on purpose with `rerecord.sh "
+        "<name>` (the bare form only refreshes scenarios that already have a cassette). The contested-debate "
+        "path, distinct from ic-sim-smoke's consensus path. ic-sim keeps its tripwire via -smoke. ~$5.40."
+    ),
+    "market-sizing-smoke": (
+        "DELIBERATELY UN-CASSETTED as of 2026-08-24 — the cassette was deleted, the scenario kept. Rationale for "
+        "the whole batch: a cassette replays FROZEN events and re-evaluates frozen assertions against them, so it "
+        "cannot detect a skill-behaviour regression — measured, 18 of the then-22 cassettes were recorded against "
+        "since-changed skills and all 22 still replayed green. The corpus therefore bought a per-skill staleness "
+        "tripwire, analyzer fixtures, and documentation of a past paid run, at $86.36 per hash-format epoch. Full "
+        "analysis, including what each deletion gives up: "
+        "docs/internal/2026-08-24-cassette-corpus-value-analysis.md. Re-record on purpose with `rerecord.sh "
+        "<name>` (the bare form only refreshes scenarios that already have a cassette). Superseded by "
+        "market-sizing-remote-lane for the tripwire. Deleting it is net positive: it removes one of three "
+        "documented delivery_check WARN cases and closes the long-standing 'present_files_called authored but "
+        "never evaluated' item — a cassette-less lane has nothing frozen to diverge from. ~$4.05."
+    ),
 }
 
 # The floor is load-bearing on THIS path, and not because of a missing feature.
@@ -105,7 +245,7 @@ _NO_CASSETTE_ALLOWLIST: dict[str, str] = {
 # *assertions* are validated and hard-reject, so this is not "replay validates
 # nothing"; only the scenario object is passthrough. `lane:` is the first key we
 # use that behaves this way.
-_MIN_HARNESS = (1, 16, 0)
+_MIN_HARNESS = (2, 1, 0)
 
 
 def _installed_version(cli: str) -> tuple[int, ...] | None:

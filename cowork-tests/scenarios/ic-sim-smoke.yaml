@@ -20,9 +20,22 @@ prompt: |
 
 assert:
   - result: success
-  # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
-  # the deliverable but stranded steps, which result:success alone misses.
-  - all_tasks_completed: true
+  # DROPPED 2026-08-24 — `all_tasks_completed` asserts agent behaviour nothing requires, so it is
+  # FLAKY on re-record. Measured on two runs of THIS scenario, minutes apart, same harness (2.1.0):
+  #   run local_7jv20swlkg -> result.json tasks = []            -> record fail-closed, refused to freeze
+  #   run local_2wqeiby9ve -> result.json tasks = 6, all "completed" -> recorded clean
+  # Creating a TaskCreate/TaskUpdate list is model discretion — ic-sim/SKILL.md never asks for one — so
+  # whether this assert can be satisfied is a coin flip per run, and a losing flip BLOCKS the paid
+  # re-record rather than reporting a defect. `result: success` plus the file_exists/artifact_json
+  # asserts below cover "the deliverable exists and the run finished". The stranded-step case the old
+  # comment claimed to catch needs a contract first: mandate a task list in SKILL.md, then assert
+  # `task_count_min: 1` ALONGSIDE this one so a task-free run fails loudly as a skill defect instead of
+  # as an unverifiable assert.
+  # The harness is CORRECT here and its message says what to do ("assert task_count_min for presence,
+  # or drop this"). An earlier version of this comment claimed a replay/record asymmetry in the
+  # harness; that was WRONG — see docs/internal/2026-08-24-cassette-corpus-value-analysis.md §12.2.
+  # FLEET NOTE: 25 of 26 scenarios still carry this assert and NONE carries `task_count_min`, so any of
+  # them can lose the same coin flip on a future re-record. Tracked separately, not bundled here.
   - file_exists: outputs/artifacts/ic-sim-cadence/report.json
   # artifact_json reads the artifact BODY, which the cassette truncates above 64KB. ic-sim's report.json
   # runs ~44KB (closest of the fleet to the cap; verbosity drifts upward), so assert a SMALL bounded

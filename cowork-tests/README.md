@@ -81,7 +81,9 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 > `verify-cassettes` steps, which is why they no longer ride the Action's default `latest`. The stamp is
 > **conditional and value-aware**: `lane: local`/omitted still writes v10, so every other cassette was
 > untouched (verified at the time against the then-16-cassette set: `rehash --dry-run` reported "already
-> at v10" for all of them). That still holds at the current size — 2026-08-06: 20 of 21 at v10, with
+> at v10" for all of them). The corpus is uniform at `v12`/`jcs1`; derive the split with
+> `python cowork-tests/cassette_inventory.py` rather than trusting a count restated here. For the
+> mechanism, an earlier mixed state — 20 of 21 at v10, with
 > `market-sizing-remote-lane` the sole v11.
 >
 > Two floors that bite for their own reasons: the **`Scenario load check`** step (`record <dir>
@@ -219,11 +221,12 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 >
 > **`--reassert` failures are EXPECTED, and CI is unaffected. Re-measured 2026-08-20 — the old list here
 > was 15 failures and the real number is ONE.** Plain `replay` (what CI runs) evaluates the assertions
-> **frozen in each cassette** and is green across the committed set: **22 cassettes, rc=0**. `replay
+> **frozen in each cassette** and is green across the committed set (size via
+> `cassette_inventory.py`). `replay
 > --reassert` re-checks the **on-disk** `assert:` blocks instead, and those describe the behaviour the
 > skills have TODAY.
 >
-> Measured across all 22, non-drift failures only:
+> Measured across a 22-cassette corpus, non-drift failures only:
 >
 > - **`present_files_called` on `market-sizing-smoke` — and that is the whole list.** The three classes
 >   this block used to enumerate (`input_unmodified: 'uploads/**'` × 5, `subagent_file_write:
@@ -256,7 +259,10 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 > would freeze our runs against a future production gate flip. Set one only to test a specific gate
 > state on purpose.
 >
-> **`scenarios/` and `cassettes/` are not 1:1.** As of 2026-08-06: 24 scenarios, 21 cassettes, 3
+> **`scenarios/` and `cassettes/` are deliberately not 1:1.** A cassette is a cache of one execution
+> of a scenario, not the scenario; lanes whose value is a live run rather than a frozen one carry no
+> cassette. Every gap carries its reason in `_NO_CASSETTE_ALLOWLIST` — read those, and get the counts
+> from `cassette_inventory.py`. Earlier shape, for the mechanism — 24 scenarios, 21 cassettes, 3
 > deliberately un-cassetted. Do not inherit those numbers — the authoritative, always-current list is
 > `_NO_CASSETTE_ALLOWLIST` in `founder-skills/tests/test_cowork_cassette_replay.py`, whose parity test
 > fails if a scenario lands with neither a cassette nor a written reason. (This line previously said

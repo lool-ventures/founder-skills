@@ -1,7 +1,7 @@
 {
-  "$schema": "https://raw.githubusercontent.com/yaniv-golan/cowork-harness/main/schema/cassette.v11.json",
+  "$schema": "https://raw.githubusercontent.com/yaniv-golan/cowork-harness/main/schema/cassette.v12.json",
   "generator": "cowork-harness",
-  "cassetteVersion": 11,
+  "cassetteVersion": 12,
   "scenario": {
     "name": "market-sizing-remote-lane",
     "baseline": "latest",
@@ -745,9 +745,9 @@
   "scenarioSource": "../scenarios/market-sizing-remote-lane.yaml",
   "fingerprint": {
     "baseline": "1.32885.1",
-    "skillHash": "b31c245d43ba22cfa48024de3c4c1f6dcd45b131afe95d36eb7f3a3778e5379a",
+    "skillHash": "9c5a7d146d59e363d31dad883d5d9695ae4aa95333b879e17739b6dcb3588cca",
     "promptAssetsHash": "491afe2862dc67ea",
-    "contentSig": "2d98b31b250539fd428dcd4ce0b238ad480dd1070564f64238e79d819afcfc58",
+    "contentSig": "3abf8c821aa5ca06911ae79fac3b4765fa5a1069949784ee212a3da48376bb1c",
     "skillSources": [
       "../../founder-skills"
     ],
@@ -755,7 +755,7 @@
     "fileSigs": [
       [
         ".claude-plugin/plugin.json",
-        "abb03866de661f7c12ade6457a2eeb7e6c0d21b1b592c6acb432cee423bfe171"
+        "dfc6fec3ff7da0534385c4d57750936359fefdb78132da44a523469b77232a19"
       ],
       [
         "LICENSE",
@@ -929,7 +929,8 @@
     "skillScope": [
       "market-sizing"
     ],
-    "sharedHash": "132fc5d9df08230543b63a7628a947aa91f1ddc203bf39ffdda0d798492312c1"
+    "sharedHash": "e266b21770c013a759088fc837bfcc79604073c422fdc3d9f039ebe6cd26ea56",
+    "hashFormat": "jcs1"
   },
   "timeline": [
     {

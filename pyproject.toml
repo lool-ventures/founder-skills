@@ -71,5 +71,5 @@ python_files = "test_*.py"
 pythonpath = ["founder-skills/tests"]
 markers = [
     "e2e: end-to-end tests that invoke real LLMs (any of ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN / local `claude /login`; ~5-20 min wall time per run; ~$5-15 on API; subscription rate limits change — check Anthropic policy before using subscription for CI)",
-    "cowork: token-free cowork-harness cassette replay via the shipped pytest helper (needs `npm i -g cowork-harness@^1.25.0`; no Docker/token — deterministic replay only). Auto-skips when the CLI is absent. Run with `uv run pytest -m cowork`.",
+    "cowork: token-free cowork-harness cassette replay via the shipped pytest helper (needs `npm i -g cowork-harness@^2.1.0`; no Docker/token — deterministic replay only). Auto-skips when the CLI is absent. Run with `uv run pytest -m cowork`.",
 ]
