@@ -729,10 +729,9 @@ And **a green CI replay is evidence about the *recorded* scenario**: read the fr
 4. `git push`
 5. `git tag vX.Y.Z && git push --tags`
 6. **Wait for `deck-review-e2e-smoke` green** in the GitHub Actions UI
-   - Tag failure: `git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z`, fix, retag — no user impact yet (sync hasn't happened)
+   - Tag failure: `git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z`, fix, retag — no user impact yet (no Release exists, so nothing advertises the tag)
    - LLM-variance flake: re-run the job from the Actions UI (free retry, same SHA)
-7. **Only after green:** `./scripts/sync-test-repo.sh`
-8. **Create the GitHub Release** — `git push --tags` does NOT do this, and forgetting it is invisible from the terminal:
+7. **Create the GitHub Release** — `git push --tags` does NOT do this, and forgetting it is invisible from the terminal:
 
    ```bash
    # notes = that version's CHANGELOG section; title = the section's own "— <title>" text
@@ -748,17 +747,21 @@ And **a green CI replay is evidence about the *recorded* scenario**: read the fr
    install from the marketplace clone tracking `main`, so `plugin.json#version` there is what they get)
    — the cost is entirely perception, which is why nothing failed and it drifted for four releases.
 
+   **The release ENDS here.** `sync-test-repo.sh` is deliberately NOT a release step — see below.
+
    Two mechanics worth knowing: `--verify-tag` aborts if the tag isn't on the remote (catches a
    forgotten `git push --tags`), and **"Latest" is computed, not chronological** — when backfilling
    several, create them oldest-first with `--latest=false` and pass `--latest` only on the newest, or
    the badge lands on whichever GitHub decides. Reversible: a Release can be deleted without touching
    the tag.
 
-`sync-test-repo.sh` is a local, untracked TESTING step — it pushes the working tree to the private test repo (`yaniv-golan/founderskills-test`) so the release can be exercised in Cowork before users see it. It is NOT the user-facing distribution event: users install from the marketplace clone that tracks `main`, so `plugin.json#version` on `main` is what they actually pick up (see VERSIONING.md). Run the test sync only after the release gate is green — syncing a broken build means the test pass exercises a build you'd never ship.
+**`sync-test-repo.sh` RUNS ONLY WHEN EXPLICITLY ASKED FOR. It is not part of shipping, and "ship vX.Y.Z" is not a request for it.** It is a local, untracked TESTING convenience: it rsyncs `founder-skills/` into a SEPARATE and PUBLIC repo (`yaniv-golan/founderskills-test`) and pushes, so a build can be exercised in Cowork by hand. Nothing in the release depends on it and no user is waiting on it — users install from the marketplace clone that tracks `main`, so `plugin.json#version` on `main` is what they actually pick up (see VERSIONING.md).
+
+It used to be numbered step 7 of the release, which read as "do this to finish shipping" and is wrong twice over: it publishes the working tree — not the tag — into a second public history, and it is a push to a repo the release process has no business touching unattended. If you do run it, run it only after the release gate is green: syncing a broken build means the manual test pass exercises a build you would never ship.
 
 **Model-tier acceptance:** when adopting or recommending a new model tier, run the cap-table reliability bench (`evals/cap-table/run_reliability_bench.py`, see its `README.md`) and record the per-tier correctness; Sonnet 4.6 is the support floor. (The bench lives at repo-root `evals/` — outside the distributed `founder-skills/` plugin — so it isn't shipped to users, mounted into cowork runs, or folded into the cassette staleness hash.)
 
-**Already-distributed retag pitfall:** if `sync-test-repo.sh` ran before you noticed the bug, **bump to the next patch version instead of retagging** — Cowork caches by `plugin.json#version`, so retagging the same version will not refresh user caches (`cpd refresh ... --force-fetch -y` is the manual recovery, not always coordinatable across users).
+**Already-distributed retag pitfall:** if you had separately run `sync-test-repo.sh` before noticing the bug, **bump to the next patch version instead of retagging** — Cowork caches by `plugin.json#version`, so retagging the same version will not refresh user caches (`cpd refresh ... --force-fetch -y` is the manual recovery, not always coordinatable across users).
 
 ### When to manually dispatch e2e on a PR
 
