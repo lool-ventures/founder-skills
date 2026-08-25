@@ -2061,3 +2061,74 @@ def test_no_disagreement_sentence_when_the_deck_agrees(tmp_path: Any) -> None:
     rc, stdout, err = _emit_ok(out)
     assert rc == 0, err
     assert "The deck states" not in json.loads(stdout)["needs_input"]["question"]
+
+
+def _emit_then(out: str, stage: str = "pre_seed", run_id: str = "RID") -> None:
+    body = {
+        "gate_id": "stage_confirmation",
+        "question": "Does this stage detection look right?",
+        "context_summary": "No revenue, no paying customers, four months in.",
+        "options": _CANONICAL_OPTIONS["stage_confirmation"],
+    }
+    rc, _, err = _run(["emit", "--run-id", run_id, "--stage", stage, "-o", out], json.dumps(body))
+    assert rc == 0, err
+
+
+def test_auto_satisfy_is_refused_when_the_deck_disagrees(tmp_path: Any) -> None:
+    """The auto-satisfy rationale is a TWO-way match and the deck was never in it.
+
+    "The founder named the stage in Step 1 and detection agrees, so re-asking reads as not
+    listening" — true, and silent about the deck's own claim. When the deck states a different
+    stage that is a third disagreement of exactly the kind the gate exists to surface, and
+    self-answering means the founder is never told. Measured on a live run: the deck's title slide
+    read "Seed round open", the review graded pre-seed, the gate auto-satisfied, and nothing asked
+    or told the founder.
+    """
+    out = _inventory(tmp_path, "seed")  # deck claims seed
+    _emit_then(out, stage="pre_seed")  # review reads pre-seed
+    rc, _, err = _run(["answer", "--file", out, "--answer", "Looks right", "--source", "auto_satisfied"], "")
+    assert rc != 0, "auto-satisfy must be refused when the deck contradicts the confirmed stage"
+    assert "deck states" in err and "auto_satisfied" in err, err
+    with open(out, encoding="utf-8") as f:
+        assert json.load(f).get("answer") is None, "the refused answer must not be recorded"
+
+
+def test_the_founder_may_still_answer_that_same_gate(tmp_path: Any) -> None:
+    """Refusing the SOURCE is not refusing the gate — it forces the question to be put."""
+    out = _inventory(tmp_path, "seed")
+    _emit_then(out, stage="pre_seed")
+    rc, _, err = _run(["answer", "--file", out, "--answer", "Looks right", "--source", "founder"], "")
+    assert rc == 0, err
+    with open(out, encoding="utf-8") as f:
+        gate = json.load(f)
+    assert gate["answer"] == "Looks right" and gate["answer_source"] == "founder"
+
+
+def test_auto_satisfy_still_works_when_the_deck_agrees(tmp_path: Any) -> None:
+    """The branch it exists for is untouched: re-asking a founder who just answered is the defect
+    it was written to prevent."""
+    out = _inventory(tmp_path, "pre_seed")
+    _emit_then(out, stage="pre_seed")
+    rc, _, err = _run(["answer", "--file", out, "--answer", "Looks right", "--source", "auto_satisfied"], "")
+    assert rc == 0, err
+
+
+def test_auto_satisfy_fails_OPEN_on_absent_or_stale_evidence(tmp_path: Any) -> None:
+    """Absence of evidence that the deck disagrees is not evidence that it does.
+
+    The emit-side check fails CLOSED (no claim rendered without proof). This one must fail OPEN,
+    or every deck that states no stage — most of them — would lose a branch that exists to avoid
+    re-asking a founder who just answered.
+    """
+    # no inventory at all
+    out = os.path.join(str(tmp_path), "gate_state.json")
+    _emit_then(out, stage="pre_seed")
+    rc, _, err = _run(["answer", "--file", out, "--answer", "Looks right", "--source", "auto_satisfied"], "")
+    assert rc == 0, f"no inventory must not block auto-satisfy: {err}"
+    # a stale inventory belongs to a different review of the same company
+    for claimed, run_id in ((None, "RID"), ("pre-revenue", "RID"), ("seed", "OTHER_RUN")):
+        os.remove(out)
+        out = _inventory(tmp_path, claimed, run_id=run_id)
+        _emit_then(out, stage="pre_seed")
+        rc, _, err = _run(["answer", "--file", out, "--answer", "Looks right", "--source", "auto_satisfied"], "")
+        assert rc == 0, f"claimed={claimed!r} run_id={run_id!r} must not block auto-satisfy: {err}"

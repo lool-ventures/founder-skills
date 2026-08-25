@@ -455,12 +455,19 @@ Three conditions, all required, and none is optional:
 
 - **It must MATCH.** If Step 1 says seed and detection says Series A, that disagreement is exactly what
   the gate exists to surface — emit it normally and let the founder adjudicate.
+- **The DECK must agree too.** The match above is two-way — what the founder said, and what you
+  detected — and the deck's own claim is a third party to it. If `deck_inventory.claimed_stage`
+  names a different stage from the one being confirmed, ask: a founder naming their stage from
+  memory may not know their own deck contradicts it, and this gate is the moment that matters.
+  `gate_state.py answer` refuses `--source auto_satisfied` here, so this is enforced rather than
+  requested; answer it `--source founder` once they have been asked.
 - **There must BE a Step 1 answer.** A form the founder skipped, dismissed, or left on its default is
   not an answer, and neither is a stage you inferred while Step 1 ran. In each case this branch is
   unavailable — emit the gate normally. The ask need not have been a structured form; a plain-text
   question they answered counts. What is required is that a founder actually said it.
 - **Say that you did it.** The founder must see "you told me seed, and the deck agrees — proceeding on
-  that" rather than the step silently vanishing. A gate that self-answers invisibly is indistinguishable
+  that" rather than the step silently vanishing. That sentence is only true when the deck does agree,
+  which is why it cannot be reached otherwise. A gate that self-answers invisibly is indistinguishable
   from a gate that was skipped.
 
 Anything other than a clean match — no Step 1 answer, a mismatch, or low-confidence detection — takes the

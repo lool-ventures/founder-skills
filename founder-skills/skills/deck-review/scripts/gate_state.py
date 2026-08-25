@@ -982,6 +982,33 @@ def _answer_locked(args: argparse.Namespace, gate_path: str) -> int:
                 file=sys.stderr,
             )
             return 1
+        # AND THE DECK MUST AGREE TOO. The rationale above is a TWO-way match -- the founder named
+        # the stage in Step 1 and detection agrees -- and the deck's own claim was never in it.
+        # When the deck states a different stage, that is a third disagreement of exactly the kind
+        # SKILL.md says the gate exists to surface ("If Step 1 says seed and detection says Series
+        # A ... emit it normally and let the founder adjudicate"), and self-answering means the
+        # founder is never told. A founder naming their stage from memory may not know their own
+        # deck contradicts it; the gate is the moment that matters, and `STAGE_MISMATCH` in the
+        # report afterwards is later and quieter.
+        #
+        # Measured: a live run auto-satisfied on a deck whose title slide read "Seed round open"
+        # while the review graded pre-seed, and nothing asked or told the founder.
+        #
+        # Read from the inventory here rather than taken from the gate, for the same reason
+        # `cmd_emit` reads it: the caller must not be able to choose this answer. Fails closed --
+        # no inventory, stale run_id or an unrecognised token all leave auto-satisfy permitted,
+        # because absence of evidence that the deck disagrees is not evidence that it does.
+        claimed = _deck_claimed_stage(gate_path, str(_as_run_id(gate) or ""))
+        confirmed = str(gate.get("confirmed_stage") or "").lower()
+        if claimed and confirmed and claimed != confirmed:
+            print(
+                f"Error: --source auto_satisfied is not available here: the deck states "
+                f"{STAGE_LABELS[claimed]!r} and this gate confirms {STAGE_LABELS[confirmed]!r}. "
+                "The founder has not been told their deck disagrees, so the gate must be put to "
+                "them -- answer it with --source founder once they have.",
+                file=sys.stderr,
+            )
+            return 1
 
     gate["answer"] = args.answer
     gate["answer_source"] = args.source

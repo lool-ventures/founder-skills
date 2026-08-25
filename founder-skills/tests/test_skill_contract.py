@@ -722,8 +722,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # dropped rather than delegated. The optional-field paragraph also had to change with the
     # producer: it told the author `null` is REJECTED, which stopped being true once
     # deck_inventory.py normalised null to absence, and a SKILL.md that contradicts its producer
-    # is worse than either state.
-    "deck-review": 100_292,
+    # is worse than either state. +652 B more: auto-satisfy's conditions listed a two-way match
+    # (what the founder said, what you detected) and left the deck's own claim out, so a live run
+    # self-answered a gate on a deck whose title slide contradicted the stage being graded and the
+    # founder was never told. The producer refuses that source now; the condition has to be stated
+    # where the branch is, or the refusal reads as a bug.
+    "deck-review": 100_944,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
