@@ -175,3 +175,44 @@ def validate(data: Any, schema: dict[str, Any], path: str = "") -> list[str]:
                 errors.extend(validate(item, item_schema, sub_path))
 
     return errors
+
+
+def drop_nulls_on_optional_strings(data: Any, schema: dict[str, Any]) -> Any:
+    """Treat an explicit `null` as absence on any field the schema types as an OPTIONAL bare string.
+
+    A field typed `"string"` and absent from `required` accepts omission and REJECTS `null` -- a
+    distinction invisible to whoever writes the payload. "This company has no incorporation date on
+    record" is naturally written `incorporated_date: null`, and that is a type error, while simply
+    leaving the key out is fine. The same schema also carries genuinely nullable fields
+    (`["string", "null"]`), so one document teaches both spellings at once and neither is signposted.
+
+    Driven BY THE SCHEMA rather than a hand-maintained field list, so it cannot drift out of step
+    with it: a field that becomes required, or gains an explicit `"null"` in its type union, changes
+    behaviour here automatically. A hardcoded list is the version of this that rots.
+
+    Only ever removes keys whose value is exactly `None`, and only where the schema says absence is
+    valid, so it can never turn an invalid document into a passing one -- a required field set to
+    null is left in place to fail validation as it should.
+    """
+    if isinstance(data, list):
+        items = schema.get("items")
+        if isinstance(items, dict):
+            for entry in data:
+                drop_nulls_on_optional_strings(entry, items)
+        return data
+    if not isinstance(data, dict):
+        return data
+
+    props = schema.get("properties")
+    if not isinstance(props, dict):
+        return data
+    required = set(schema.get("required") or [])
+    for key, subschema in props.items():
+        if not isinstance(subschema, dict) or key not in data:
+            continue
+        if data[key] is None:
+            if subschema.get("type") == "string" and key not in required:
+                del data[key]
+            continue
+        drop_nulls_on_optional_strings(data[key], subschema)
+    return data

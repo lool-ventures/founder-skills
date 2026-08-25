@@ -4266,6 +4266,59 @@ class TestEvidenceVerifierIntegration:
         assert receipt["evidence_verification"]["rejection"]["rejected"] is True
         assert "post_money_valuation_cap" in receipt["evidence_verification"]["rejection"]["failed_fields"]
 
+    def test_blocking_gate_leaves_instruments_json_untouched(
+        self, basic_instruments_path: Any, safe_doc_text: Any
+    ) -> None:
+        """A BLOCKING evidence-verification refusal must not persist the extraction.
+
+        The gates used to run AFTER `write_artifact`, so a refusal exited 1 with the
+        hallucinated `instruments.json` already on disk -- and the math producers read that
+        file. The gate existed to stop exactly that. Asserting the exit code alone (which is
+        what the sibling test above does) cannot see the defect: the old code exited 1 too.
+        """
+        before = basic_instruments_path.read_text(encoding="utf-8")
+        extraction = {
+            "instrument_type": "safe",
+            "fields": {
+                **_SAFE_BASIC,
+                "form": "cap_plus_discount",
+                "post_money_valuation_cap": 99_000_000,  # FAKE — not in the source doc
+                "discount_multiplier": 0.80,
+            },
+            "confidence": {
+                "post_money_valuation_cap": {
+                    "level": "high",
+                    "evidence_quote": 'The "Post-Money Valuation Cap" is $99,000,000.',
+                },
+            },
+            "ambiguities": [],
+        }
+        rc, out, err = _run(
+            "extract_instrument.py",
+            [
+                "--instruments",
+                str(basic_instruments_path),
+                "--run-id",
+                "test_blocking_gate_no_clobber",
+                "--verify",
+                "--verify-blocking",
+                "--source-doc",
+                str(safe_doc_text),
+            ],
+            stdin_data=json.dumps(extraction),
+        )
+        assert rc == 1, f"blocking mode should refuse; stderr={err!r}"
+        assert basic_instruments_path.read_text(encoding="utf-8") == before, (
+            "a blocking anti-hallucination refusal wrote the hallucinated extraction to the "
+            "canonical instruments.json anyway"
+        )
+        assert "left unchanged" in err, "the refusal must say the canonical path was not touched"
+        # The retry_hint re-dispatch lane (SKILL.md) reads these off stdout; keep them flat.
+        diagnostic = json.loads(out)
+        assert diagnostic["ok"] is False
+        assert diagnostic["evidence_verification"]["rejection"]["rejected"] is True
+        assert diagnostic["evidence_verification"]["rejection"]["retry_hint"]
+
     def test_verify_skips_synthesized_fields(self, basic_instruments_path: Any, safe_doc_text: Any) -> None:
         """Form enum, jurisdiction, mfn_provision are synthesized — verifier
         should mark them skipped_synthesized, not fail them."""
@@ -13520,3 +13573,83 @@ def test_counsel_packet_summary_humanizes_the_domain_like_its_heading() -> None:
     assert cp._domain_label("delaware_cross_border") == "Delaware Cross Border"
     # Rule ids and source ids are NOT routed through this — counsel cites them verbatim.
     assert "_" not in cp._domain_label("safe_terms")
+
+
+class TestOptionalStringNullNormalization:
+    """`null` and omission mean the same thing on an optional bare-string field.
+
+    Same class as deck-review's `claimed_raise`, and confirmed present here: `inputs.schema.json`
+    carries 17 optional bare-`"string"` fields alongside genuinely nullable `["string","null"]`
+    ones, so one document teaches both spellings and neither is signposted. Normalised from the
+    SCHEMA rather than a hand-kept field list, so it cannot drift out of step with it.
+    """
+
+    def test_optional_string_null_is_treated_as_absence(self) -> None:
+        from _cap_table_schema_validator import drop_nulls_on_optional_strings, validate
+
+        schema = {
+            "type": "object",
+            "required": ["company_name"],
+            "properties": {
+                "company_name": {"type": "string"},
+                "jurisdiction": {
+                    "type": "object",
+                    "properties": {"incorporated_date": {"type": "string"}},
+                },
+                "common_batches": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["shares"],
+                        "properties": {
+                            "shares": {"type": "integer"},
+                            "issuance_date": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        }
+        data: dict[str, Any] = {
+            "company_name": "TestCo",
+            "jurisdiction": {"incorporated_date": None},
+            "common_batches": [{"shares": 100, "issuance_date": None}],
+        }
+        assert validate(data, schema), "precondition: null on an optional string is a type error"
+        drop_nulls_on_optional_strings(data, schema)
+        assert "incorporated_date" not in data["jurisdiction"]
+        assert "issuance_date" not in data["common_batches"][0]
+        assert validate(data, schema) == []
+
+    def test_a_required_null_is_left_to_fail(self) -> None:
+        """Normalisation may never turn an invalid document into a passing one."""
+        from _cap_table_schema_validator import drop_nulls_on_optional_strings, validate
+
+        schema = {"type": "object", "required": ["company_name"], "properties": {"company_name": {"type": "string"}}}
+        data: dict[str, Any] = {"company_name": None}
+        drop_nulls_on_optional_strings(data, schema)
+        assert "company_name" in data, "a required field set to null must stay and fail validation"
+        assert validate(data, schema)
+
+    def test_a_genuinely_nullable_field_keeps_its_null(self) -> None:
+        """`["string","null"]` means null is MEANINGFUL there — never strip it."""
+        from _cap_table_schema_validator import drop_nulls_on_optional_strings, validate
+
+        schema = {"type": "object", "properties": {"note": {"type": ["string", "null"]}}}
+        data: dict[str, Any] = {"note": None}
+        drop_nulls_on_optional_strings(data, schema)
+        assert data["note"] is None
+        assert validate(data, schema) == []
+
+    def test_the_lane4_validate_gate_accepts_a_null_optional_string(self, tmp_path: Any) -> None:
+        """End-to-end through the gate a heredoc'd inputs.json actually passes through."""
+        inputs = {
+            "company_name": "TestCo",
+            "analysis_date": "2026-08-25",
+            "mode": "standard",
+            "jurisdiction": {"country": "US", "incorporated_date": None},
+            "metadata": {"run_id": "RID", "schema_version": "v0.5.0-inputs"},
+        }
+        (tmp_path / "inputs.json").write_text(json.dumps(inputs), encoding="utf-8")
+        rc, out, err = _run("extract_cap_table.py", ["--mode=validate", "--dir", str(tmp_path)])
+        assert "incorporated_date" not in err, f"null on an optional string must not be an error: {err}"
+        assert rc == 0, err

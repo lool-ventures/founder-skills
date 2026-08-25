@@ -38,6 +38,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _cap_table_schema_validator import (  # type: ignore[import-not-found]  # noqa: E402
     check_misplaced_top_level_keys as _check_misplaced_top_level_keys,
 )
+from _cap_table_schema_validator import (  # type: ignore[import-not-found]  # noqa: E402
+    drop_nulls_on_optional_strings as _drop_nulls_on_optional_strings,
+)
 from _cap_table_schema_validator import validate as _validate_schema  # type: ignore[import-not-found]  # noqa: E402
 
 _SCHEMA_DIR = os.path.join(
@@ -326,6 +329,9 @@ def load_inputs(
         _check_schema_version(data, INPUTS_SCHEMA_VERSION, "inputs.json", path)
     if validate_schema:
         schema = _load_schema("inputs.schema.json")
+        # See drop_nulls_on_optional_strings: `null` on an optional bare-string field is a type
+        # error while omission is fine, and nothing signposts the difference to whoever wrote it.
+        _drop_nulls_on_optional_strings(data, schema)
         errors = _validate_schema(data, schema)
         if errors:
             raise ArtifactIOError(

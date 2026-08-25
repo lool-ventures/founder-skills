@@ -44,7 +44,11 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _artifact_writer import load_schema  # noqa: E402
-from _cap_table_schema_validator import check_misplaced_top_level_keys, validate  # noqa: E402
+from _cap_table_schema_validator import (  # noqa: E402
+    check_misplaced_top_level_keys,
+    drop_nulls_on_optional_strings,
+    validate,
+)
 
 
 class CartaFingerprintMismatchError(ValueError):
@@ -119,6 +123,9 @@ def _validate_file(path: str, schema_path: str) -> list[str]:
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     schema = load_schema(schema_path)
+    # `null` and omission mean the same thing on an optional bare-string field; normalise before
+    # validating so a payload is not rejected for a spelling the schema never signposted.
+    drop_nulls_on_optional_strings(data, schema)
     errors = validate(data, schema)
     errors.extend(check_misplaced_top_level_keys(data, os.path.basename(path)))
     return errors

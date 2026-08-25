@@ -494,6 +494,36 @@ def confirm_required(confidence: dict[str, Any]) -> list[str]:
     return low
 
 
+def _gate_refusal(gates: dict[str, Any], args: argparse.Namespace, code: str) -> int:
+    """A BLOCKING anti-hallucination gate refused. Emit loudly; write no canonical artifact.
+
+    Matches the fleet's producer-refusal contract (diagnostic to stdout, a line to stderr,
+    the canonical path left untouched, exit non-zero) -- the same shape as `_fail_invalid`
+    in market-sizing's `market_sizing.py`.
+
+    The gates that call this are default-ON and they used to run AFTER `write_artifact`, so a
+    refusal exited 1 with a hallucinated `instruments.json` already on disk. Downstream math
+    producers read that file; the gate exists precisely to stop them. Refusing before the
+    write is what makes the gate mean anything.
+
+    Returns the diagnostic on stdout rather than a receipt: there is no receipt, because
+    nothing was written. `--output` (the receipt path) is likewise left untouched.
+    """
+    # FLAT, not nested under a "gates" key: SKILL.md:416 documents a `retry_hint` re-dispatch
+    # lane that reads `evidence_verification.rejection.retry_hint` off this payload, and
+    # `test_cap_table.py::test_verify_blocking_exits_nonzero_on_hallucination` pins it. The
+    # refusal markers are added alongside, so a reader can tell a refusal from a receipt
+    # (`ok: false` + `error`) without the gate findings moving.
+    diagnostic: dict[str, Any] = {"ok": False, "error": code, **gates}
+    print(json.dumps(diagnostic, indent=2 if args.pretty else None))
+    print(
+        f"Error: {code} - extraction rejected by a blocking gate; no instruments.json written.",
+        file=sys.stderr,
+    )
+    print(f"Error: {os.path.abspath(args.instruments)} was left unchanged.", file=sys.stderr)
+    return 1
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--instruments", required=True, help="Path to existing instruments.json (will be updated)")
@@ -819,36 +849,13 @@ def main() -> int:
     # itype == "non_instrument": classified-as-non-extractable; do not append to
     # any instrument array. The receipt below surfaces the classification.
 
-    schema = load_schema(os.path.join(_SCHEMA_DIR, "instruments.schema.json"))
-    try:
-        receipt = write_artifact(
-            data=instruments,
-            schema=schema,
-            run_id=args.run_id,
-            output_path=args.instruments,
-            pretty=args.pretty,
-            schema_version="v0.5.0-instruments",
-        )
-    except ArtifactValidationError as e:
-        sys.stderr.write(f"extract_instrument.py: instruments.json schema validation failed: {e}\n")
-        return 1
-    receipt["warnings"] = warnings
-    receipt["ambiguities"] = ambiguities
-    receipt["low_confidence_fields"] = low_confidence
-    receipt["classified_doc_type"] = itype
-    if itype in NON_EXTRACTABLE_ITYPES:
-        # Surface so downstream consumers know to skip math producers for this doc
-        receipt["classified_as_non_extractable"] = True
-    elif itype in TERMS_DOC_ITYPES:
-        # Content lives in the receipt (never a math array). Strip synthesized stamps so the renderer's
-        # flat table shows only real extracted fields (M1: extraction_confidence is stamped at ~:637).
-        _synth = {"extraction_confidence", "completeness", "missing_required_fields", "to_confirm"}
-        receipt["classified_as_terms_doc"] = True
-        receipt["terms_doc"] = {
-            "fields": {k: v for k, v in fields.items() if k not in _synth},
-            "confidence": confidence,
-        }
-
+    # ---- ANTI-HALLUCINATION GATES RUN BEFORE THE ARTIFACT IS WRITTEN ----
+    # These gates are default-ON and BLOCKING, and they used to run AFTER write_artifact: a
+    # blocking refusal exited 1 with a hallucinated instruments.json already on disk for the
+    # math producers to consume, which inverts the point of an anti-hallucination gate. They
+    # now populate `gates` (a plain dict merged into the receipt after a successful write) and
+    # never touch the canonical path, so a refusal leaves --instruments untouched.
+    gates: dict[str, Any] = {}
     # Evidence verification. --verify-blocking exits non-zero on failure (default ON).
     if args.verify:
         if not args.source_doc:
@@ -856,7 +863,7 @@ def main() -> int:
             return 1
         if itype in NON_EXTRACTABLE_ITYPES:
             # Non-extractable classifications have no fields to verify.
-            receipt["evidence_verification"] = {
+            gates["evidence_verification"] = {
                 "overall_status": "skipped_non_instrument",
                 "reason": f"doc classified as {itype}; no fields to verify",
             }
@@ -868,21 +875,20 @@ def main() -> int:
             except MissingDependencyError as _e:
                 # Blocking gate must fail loudly on a missing parser, not
                 # silently degrade to 'unverifiable_doc' (which would pass).
-                receipt["evidence_verification"] = {
+                gates["evidence_verification"] = {
                     "overall_status": "error",
                     "error": "E_MISSING_DEPENDENCY",
                     "dependency": _e.dependency,
                     "detail": str(_e),
                 }
                 sys.stderr.write(str(_e) + "\n")
-                print(json.dumps(receipt, indent=2 if args.pretty else None))
-                return 1
+                return _gate_refusal(gates, args, "E_MISSING_DEPENDENCY")
             verifier_input = build_verifier_input(fields, confidence)
             verification_report = verify_extraction(verifier_input, doc_text)
             raw_report = report_to_dict(verification_report)
             absent_fields = documented_absent_fields(fields, confidence)
             filtered = filter_verifier_report(raw_report, absent_fields, no_quote_soft=itype in TERMS_DOC_ITYPES)
-            receipt["evidence_verification"] = filtered
+            gates["evidence_verification"] = filtered
 
             # Structured rejection contract: when there are real value_in_doc
             # failures, surface a re-prompt hint that the dispatching agent
@@ -893,10 +899,10 @@ def main() -> int:
                 if r["status"] == "fail" and "value_in_doc failed" in " ".join(r.get("reasons", []))
             ]
             if real_failures:
-                # Terms docs never block on a finding: the receipt records the rejection (so a
+                # Terms docs never block on a finding: the gate record keeps the rejection (so a
                 # dispatcher may still repair) and the renderer marks the rows; only exit 1 otherwise.
                 _blocks = args.verify_blocking and itype not in TERMS_DOC_ITYPES
-                receipt["evidence_verification"]["rejection"] = {
+                gates["evidence_verification"]["rejection"] = {
                     "rejected": _blocks,
                     "reason": "value_in_doc_failures",
                     "failed_fields": [r["field"] for r in real_failures],
@@ -912,8 +918,7 @@ def main() -> int:
                         "extract_instrument.py: evidence verification failed (blocking mode). "
                         "Fields with value_in_doc failures: " + ", ".join(r["field"] for r in real_failures) + "\n"
                     )
-                    print(json.dumps(receipt, indent=2 if args.pretty else None))
-                    return 1
+                    return _gate_refusal(gates, args, "E_EVIDENCE_VERIFICATION_FAILED")
 
     # Invariant checking. Default ON via --invariants. Hard math invariants
     # block (e.g. options_granted > total_authorized); soft bounds violations
@@ -923,7 +928,7 @@ def main() -> int:
         # only adapts to the evidence-verifier shape.
         invariant_input = {"instrument_type": itype, "fields": fields}
         inv_report = _invariant_check(invariant_input)
-        receipt["invariant_check"] = _invariant_report_to_dict(inv_report)
+        gates["invariant_check"] = _invariant_report_to_dict(inv_report)
         # Terms docs never block on an invariant FINDING: it is recorded + surfaced in
         # attention_needed_fields + marked by the renderer (a false-positive-prone cross-field check on
         # display-only content must not empty the deliverable). Other itypes still block.
@@ -933,8 +938,7 @@ def main() -> int:
                 + "; ".join(v.reason for v in inv_report.violations if v.stake == "hard")
                 + "\n"
             )
-            print(json.dumps(receipt, indent=2 if args.pretty else None))
-            return 1
+            return _gate_refusal(gates, args, "E_INVARIANT_VIOLATION")
 
     # Cross-check: run deterministic backstop extractors against the source doc
     # and demote sub-agent confidence on disagreement. Default ON for SAFEs.
@@ -989,7 +993,7 @@ def main() -> int:
                     per_field_cross.append(cc_result)
                     if cc_result["disagreement"]:
                         n_demotions += 1
-            receipt["cross_check"] = {
+            gates["cross_check"] = {
                 "n_demotions": n_demotions,
                 "per_field": per_field_cross,
             }
@@ -1000,22 +1004,55 @@ def main() -> int:
     # + unverifiable evidence fields.
     attention_fields = set(low_confidence)
     _is_terms_doc = itype in TERMS_DOC_ITYPES
-    if "invariant_check" in receipt:
-        for v in receipt["invariant_check"]["violations"]:
+    if "invariant_check" in gates:
+        for v in gates["invariant_check"]["violations"]:
             # soft always; for terms docs the hard violations no longer block, so surface them here.
             if v["stake"] == "soft" or (_is_terms_doc and v["stake"] == "hard"):
                 attention_fields.add(v["field"])
-    if "evidence_verification" in receipt:
-        per_field = receipt["evidence_verification"].get("per_field", [])
+    if "evidence_verification" in gates:
+        per_field = gates["evidence_verification"].get("per_field", [])
         for r in per_field:
             # unverifiable always; for terms docs the non-blocking value_in_doc fails surface here too.
             if r.get("status") == "unverifiable" or (_is_terms_doc and r.get("status") == "fail"):
                 attention_fields.add(r["field"])
-    if "cross_check" in receipt:
-        for r in receipt["cross_check"]["per_field"]:
+    if "cross_check" in gates:
+        for r in gates["cross_check"]["per_field"]:
             if r.get("disagreement"):
                 attention_fields.add(r["field_name"])
-    receipt["attention_needed_fields"] = sorted(attention_fields)
+    gates["attention_needed_fields"] = sorted(attention_fields)
+
+    schema = load_schema(os.path.join(_SCHEMA_DIR, "instruments.schema.json"))
+    try:
+        receipt = write_artifact(
+            data=instruments,
+            schema=schema,
+            run_id=args.run_id,
+            output_path=args.instruments,
+            pretty=args.pretty,
+            schema_version="v0.5.0-instruments",
+        )
+    except ArtifactValidationError as e:
+        sys.stderr.write(f"extract_instrument.py: instruments.json schema validation failed: {e}\n")
+        return 1
+    receipt["warnings"] = warnings
+    receipt["ambiguities"] = ambiguities
+    receipt["low_confidence_fields"] = low_confidence
+    receipt["classified_doc_type"] = itype
+    if itype in NON_EXTRACTABLE_ITYPES:
+        # Surface so downstream consumers know to skip math producers for this doc
+        receipt["classified_as_non_extractable"] = True
+    elif itype in TERMS_DOC_ITYPES:
+        # Content lives in the receipt (never a math array). Strip synthesized stamps so the renderer's
+        # flat table shows only real extracted fields (M1: extraction_confidence is stamped at ~:637).
+        _synth = {"extraction_confidence", "completeness", "missing_required_fields", "to_confirm"}
+        receipt["classified_as_terms_doc"] = True
+        receipt["terms_doc"] = {
+            "fields": {k: v for k, v in fields.items() if k not in _synth},
+            "confidence": confidence,
+        }
+
+    # Gate findings computed BEFORE the write (see the banner above) are merged in here.
+    receipt.update(gates)
 
     if args.output:
         with open(args.output, "w", encoding="utf-8") as _fh:
