@@ -5388,3 +5388,66 @@ def test_no_untested_claims_adds_no_line() -> None:
     """It must not become boilerplate on every deck."""
     md = _compose_md({"reconciliation.json": _recon_artifact()})
     assert "could not check" not in md.lower(), "a deck with nothing untested was told something was"
+
+
+def test_deck_inventory_treats_null_on_optional_string_fields_as_absence(tmp_path: Path) -> None:
+    """`null` on an optional bare-`"string"` field must normalise away, not fail the producer.
+
+    Measured: a deck that states no ask is naturally written `claimed_raise: null`, and that
+    failed with "expected ['string'], got NoneType" -- while `claimed_stage` in the SAME schema is
+    `["string", "null"]`, so one schema taught both spellings at once. Normalised in the producer
+    rather than loosened in the schema, so no downstream reader learns null-vs-absent.
+    """
+    import subprocess as _sp
+
+    script = os.path.join(DECK_REVIEW_DIR, "deck_inventory.py")
+    payload = {
+        "company_name": "TestCo",
+        "review_date": "2026-06-01",
+        "input_format": "pdf",
+        "input_quality": "good",
+        "total_slides": 1,
+        "ai_company_status": "not_ai",
+        "claimed_raise": None,
+        "ai_evidence": None,
+        "slides": [
+            {"number": 1, "headline": "h", "content_summary": "s", "visuals": None},
+        ],
+    }
+    out_path = str(tmp_path / "deck_inventory.json")
+    result = _sp.run(
+        [sys.executable, script, "--run-id", "r1", "-o", out_path],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"null on an optional field must not be a type error: {result.stderr}"
+    written = json.loads(Path(out_path).read_text(encoding="utf-8"))
+    assert "claimed_raise" not in written, "a null optional field must be normalised to absence"
+    assert "ai_evidence" not in written
+    assert "visuals" not in written["slides"][0]
+
+
+def test_deck_inventory_still_rejects_null_on_a_required_field(tmp_path: Path) -> None:
+    """The counter-test: normalisation is scoped to the known-optional set, not blanket."""
+    import subprocess as _sp
+
+    script = os.path.join(DECK_REVIEW_DIR, "deck_inventory.py")
+    payload = {
+        "company_name": None,
+        "review_date": "2026-06-01",
+        "input_format": "pdf",
+        "input_quality": "good",
+        "total_slides": 1,
+        "ai_company_status": "not_ai",
+        "slides": [{"number": 1, "headline": "h", "content_summary": "s"}],
+    }
+    out_path = str(tmp_path / "deck_inventory.json")
+    result = _sp.run(
+        [sys.executable, script, "--run-id", "r1", "-o", out_path],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0, "a required field set to null must still be rejected"
+    assert not os.path.exists(out_path)

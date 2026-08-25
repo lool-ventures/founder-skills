@@ -17,8 +17,37 @@ import argparse
 import json
 import os
 import sys
+from typing import Any
 
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact
+
+# Optional fields typed bare `"string"` in the schema, so `null` is a TYPE ERROR while omission
+# is fine. That distinction is invisible to the sub-agent producing this payload -- "the deck
+# states no ask" is naturally written `claimed_raise: null`, and it failed the producer with
+# "expected ['string'], got NoneType", costing a round-trip. `claimed_stage` in the same schema is
+# `["string", "null"]`, so one schema taught both spellings at once.
+#
+# Normalized here rather than loosened in the schema: the schema stays strict for every other
+# reader, and no downstream consumer has to learn null-vs-absent. Note the same shape exists in
+# cap-table (`jurisdiction.incorporated_date`, `common_batches[].issuance_date` are optional and
+# bare `"string"`), so this is a class, not a one-off -- survey before calling it settled.
+_NULLABLE_AS_ABSENT = ("claimed_raise", "ai_evidence")
+_NULLABLE_AS_ABSENT_PER_SLIDE = ("visuals", "word_count_estimate", "visual_evidence_captured")
+
+
+def _drop_nulls_from_optional_fields(data: dict[str, Any]) -> None:
+    """Treat an explicit `null` on an optional string field as absence. Mutates in place."""
+    for field in _NULLABLE_AS_ABSENT:
+        if data.get(field, "") is None:
+            del data[field]
+    slides = data.get("slides")
+    if isinstance(slides, list):
+        for slide in slides:
+            if not isinstance(slide, dict):
+                continue
+            for field in _NULLABLE_AS_ABSENT_PER_SLIDE:
+                if slide.get(field, "") is None:
+                    del slide[field]
 
 
 def main() -> int:
@@ -38,6 +67,8 @@ def main() -> int:
     if not isinstance(data, dict):
         print(f"Error: stdin must be a JSON object, got {type(data).__name__}", file=sys.stderr)
         return 1
+
+    _drop_nulls_from_optional_fields(data)
 
     schema_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),

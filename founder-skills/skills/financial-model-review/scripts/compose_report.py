@@ -39,8 +39,16 @@ WARNING_SEVERITY: dict[str, str] = {
     "FOUNDER_TEXT_TOKEN": "low",
     # High severity -- agent must fix before presenting report
     # A producer rejected its input, so this artifact carries no analysis. High because the
-    # alternative signals are all MEDIUM (hence suppressible via accepted_warnings) and all
-    # name a symptom rather than the cause: an empty section reads as "nothing to report".
+    # alternative signals are all MEDIUM and all name a symptom rather than the cause: an empty
+    # section reads as "nothing to report".
+    #
+    # This comment used to say the medium alternatives were "suppressible via accepted_warnings".
+    # They are not, and this skill has no such mechanism -- `accepted_warnings` is four other
+    # skills' key. What this skill has is `inputs.metadata.warning_overrides`, which lives in
+    # `validate_inputs.py` (structural check at :243-282, functional use in `_is_overridden`),
+    # operates on the INPUT-VALIDATION code namespace (ARPU_INCONSISTENT, BURN_SIGN_ERROR, ...),
+    # and suppresses `has_critical_warnings` there. It does not reach the compose-report codes
+    # named here, whose namespaces are disjoint. Nothing post-compose can downgrade these.
     "ARTIFACT_INVALID": "high",
     "CORRUPT_ARTIFACT": "high",
     "MISSING_ARTIFACT": "high",
@@ -50,8 +58,15 @@ WARNING_SEVERITY: dict[str, str] = {
     # The benchmark corpus states its own vintage and nothing ever compared it to a date, so a
     # 2024-Q4 threshold rendered identically at 8 months old and at 8 years. Medium, not low: an
     # out-of-date bar changes the VERDICT a founder is given, where FOUNDER_TEXT_TOKEN only
-    # changes wording. Suppressible via accepted_warnings, because "we know, it is the best
-    # available" is a legitimate answer -- what is not legitimate is the founder not being told.
+    # changes wording.
+    #
+    # NOT currently suppressible. This comment used to justify the medium grade by saying it was
+    # "suppressible via accepted_warnings, because 'we know, it is the best available' is a
+    # legitimate answer". That reasoning still holds and the mechanism does not exist here -- see
+    # ARTIFACT_INVALID above. If it is ever wanted, it needs its own instance-scoped acceptance
+    # contract (code + match + reason, medium-only), not a reuse of `warning_overrides`, whose
+    # code namespace is the input validator's and whose field/snapshot scoping does not apply.
+    # Either way the founder is told, which is the part that was never in question.
     "BENCHMARK_VINTAGE": "medium",
     # Medium severity -- include in Warnings section of report
     # Checklist failures are review findings, not data errors — present, don't block
@@ -1368,6 +1383,10 @@ def _section_warnings(warnings: list[dict[str, str]]) -> str:
     if not warnings:
         return ""
 
+    # "acknowledged" is RESERVED AND UNASSIGNED: nothing in this skill sets that severity (see
+    # the ARTIFACT_INVALID/BENCHMARK_VINTAGE notes above -- there is no post-compose acceptance
+    # mechanism here). Kept so the map stays complete if one is ever added; do not read its
+    # presence as evidence that acceptance works today.
     sev_icons = {"high": "!!!", "medium": "!!", "acknowledged": "~", "low": "i", "info": "~"}
     lines = ["## Validation Warnings\n"]
     for w in warnings:

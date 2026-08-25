@@ -508,7 +508,12 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the pre-coaching text and a raw uuid insertion marker (measured 5,592 B adrift on a live
     # run). Syncing rather than dropping the key, because ~200 test sites across the fleet read
     # report_markdown out of the composed JSON to inspect report content.
-    "market-sizing": 92_173,
+    # market-sizing +649 B: the SENSITIVITY_TEST dispatch now states the `sourced` tier split by the
+    # assumption's own `confidence`. The old text made omission the default branch for every `sourced`
+    # figure ("or omit the parameter"), and sources almost never state a range -- so the tier meant "never
+    # stress-tested", silently, for a figure that may be corroborated but imprecise. Nothing downstream
+    # could see the omission either. The rule has to be where the sub-agent reads it.
+    "market-sizing": 92_822,
     # fmr raised for two founder-facing-correctness items measured in a live run: the CHECKLIST
     # dispatch now forbids citing our artifact filenames in evidence (that run put `inputs.json` in 10
     # items' evidence, printed verbatim into the founder's report), and the producer pipe passes
@@ -710,7 +715,15 @@ SKILL_MD_CEILING: dict[str, int] = {
     # dated magnitudes plus a stated growth multiple. Measured: a deck stated all four figures, the
     # ledger extracted all four, and ZERO relations were proposed, because none of the prompt's four
     # shapes reads as that. An ordinary ratio with an expected_id, expressible with no new capability.
-    "deck-review": 99_867,
+    # deck-review +410 B: the gate-emit step now states that `context_summary` may not name another
+    # stage (including quoting the deck's claim) and that the producer renders the deck/review
+    # disagreement itself from `deck_inventory.claimed_stage`. Without it the author has no way to know
+    # why an accurate summary is refused, and the most decision-relevant sentence at that gate gets
+    # dropped rather than delegated. The optional-field paragraph also had to change with the
+    # producer: it told the author `null` is REJECTED, which stopped being true once
+    # deck_inventory.py normalised null to absence, and a SKILL.md that contradicts its producer
+    # is worse than either state.
+    "deck-review": 100_292,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -749,7 +762,10 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the pre-coaching text and a raw uuid insertion marker (measured 5,592 B adrift on a live
     # run). Syncing rather than dropping the key, because ~200 test sites across the fleet read
     # report_markdown out of the composed JSON to inspect report content.
-    "competitive-positioning": 120_189,
+    # competitive-positioning -36 B: Gate 1 now reads `summary.challenge_slugs` instead of re-deriving
+    # it from `flagged_slugs`, and renders `possible_overlap_with` on recall-gap lines. Net shrink --
+    # deleting a prose re-derivation paid for both.
+    "competitive-positioning": 120_153,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -2133,8 +2149,17 @@ def test_plugin_root_block_pipes_candidates_on_stdin_with_expected_version(skill
 # knowledge, and a generic one (`{}`) is accepted by some of these scripts.
 # ---------------------------------------------------------------------------
 
-# (skill, script, extra argv, a payload that script MUST reject)
-_REJECTING_PAYLOADS: list[tuple[str, str, list[str], str]] = [
+# (skill, script, extra argv, a payload that script MUST reject[, canonical-path flag])
+#
+# The 5th element is OPTIONAL and defaults to "-o". It exists because the canonical artifact
+# is not always written through `-o`: cap-table's `extract_instrument.py` writes the receipt
+# there and its canonical `instruments.json` through `--instruments`. Hardcoding `-o` for that
+# entry would have (a) failed argparse for the missing required flag, exiting non-zero and
+# FALSE-GREENING this test for entirely the wrong reason, and (b) guarded the receipt file
+# rather than the artifact the fleet rule is about.
+# tuple[skill, script, extra argv, rejecting payload] plus an OPTIONAL 5th element naming the
+# canonical-path flag when it is not `-o` (see the header comment above).
+_REJECTING_PAYLOADS: list[tuple[str, str, list[str], str] | tuple[str, str, list[str], str, str]] = [
     ("market-sizing", "market_sizing.py", ["--stdin"], '{"approach":"top_down","industry_total":-5}'),
     ("market-sizing", "sensitivity.py", [], '{"approach":"bottom_up","base":{},"ranges":{}}'),
     ("market-sizing", "checklist.py", [], '{"notitems":1}'),
@@ -2159,18 +2184,59 @@ _REJECTING_PAYLOADS: list[tuple[str, str, list[str], str]] = [
         ["--run-id", "RID", "--ledger", "/nonexistent/ledger.json", "--second-read", "/nonexistent/second.json"],
         '{"relations":[]}',
     ),
+    # THE GATE THAT AUTHORIZES A REPORT. `emit` wrote gate_state.json and only then checked
+    # whether the prose named a different stage, so a refused gate sat on disk and `answer` --
+    # which only checks that a file exists -- answered it with `{"ok":true}`. `authorize()`
+    # never re-checks prose, so the run proceeded on a gate the producer had rejected.
+    (
+        "deck-review",
+        "gate_state.py",
+        ["emit", "--run-id", "RID", "--stage", "pre_seed"],
+        '{"gate_id":"stage_confirmation","question":"Does this look right?",'
+        '"context_summary":"The deck footer reads Seed round open.",'
+        '"options":["Looks right","Different stage","Not sure \u2014 proceed anyway"]}',
+    ),
+    # cap-table had NO entry here at all, which is why the fleet's worst instance of this class
+    # went unseen. Note the 5th element: the canonical path is `--instruments`; `-o` writes only
+    # the receipt, so a hardcoded `-o` would have failed argparse, exited non-zero, and
+    # FALSE-GREENED this test while guarding the wrong file.
+    #
+    # SCOPE, stated honestly: this entry covers the FIELD-VALIDATION refusal. It does NOT reach
+    # the default-ON evidence/invariant gates -- those need a well-formed instruments.json as the
+    # starting artifact, and this harness deliberately seeds a `{"sentinel": true}` stub. The gate
+    # path (which is where the real defect was: gates ran AFTER `write_artifact`, so a blocking
+    # refusal left the hallucinated extraction on disk) is covered by
+    # `test_cap_table.py::test_blocking_gate_leaves_instruments_json_untouched`, which was
+    # verified to fail against the pre-fix script. Do not delete that test on the belief that
+    # this registry entry subsumes it.
+    (
+        "cap-table",
+        "extract_instrument.py",
+        ["--run-id", "RID", "--no-verify", "--no-invariants", "--no-cross-check"],
+        '{"instrument_type":"safe","fields":{"id":"safe_001"},"confidence":{},"ambiguities":[]}',
+        "--instruments",
+    ),
+    # A validator that used to write its artifact unconditionally ("audit trail even on
+    # validation error"), destroying a prior good artifact on a run that produced nothing usable.
+    (
+        "competitive-positioning",
+        "verify_competitors.py",
+        ["--run-id", "RID"],
+        '{"startup_characterization":{},"verdicts":[{"slug":"x","verdict":"not_a_competitor"}]}',
+        "--output",
+    ),
 ]
 
 
-@pytest.mark.parametrize(("skill", "script", "extra", "payload"), _REJECTING_PAYLOADS)
-def test_producer_rejects_loudly_without_clobbering(
-    skill: str, script: str, extra: list[str], payload: str, tmp_path: Path
-) -> None:
+@pytest.mark.parametrize("entry", _REJECTING_PAYLOADS, ids=lambda e: f"{e[0]}/{e[1]}")
+def test_producer_rejects_loudly_without_clobbering(entry: tuple, tmp_path: Path) -> None:
     """A rejected input must exit non-zero AND leave the canonical artifact untouched."""
+    skill, script, extra, payload = entry[0], entry[1], entry[2], entry[3]
+    canonical_flag = entry[4] if len(entry) > 4 else "-o"
     out = tmp_path / "artifact.json"
     out.write_text('{"sentinel": true}', encoding="utf-8")
     proc = subprocess.run(
-        [sys.executable, str(SKILLS_ROOT / skill / "scripts" / script), *extra, "-o", str(out)],
+        [sys.executable, str(SKILLS_ROOT / skill / "scripts" / script), *extra, canonical_flag, str(out)],
         input=payload,
         capture_output=True,
         text=True,
