@@ -332,7 +332,10 @@ def run_sensitivity(
         low_pct = range_spec["low_pct"]
         high_pct = range_spec["high_pct"]
 
-        # Confidence-based range widening
+        # Confidence-based range widening.
+        #
+        # `confidence_source` records WHERE the tier came from, because "no widening happened"
+        # and "no widening was called for" were previously indistinguishable in the artifact.
         raw_confidence = range_spec.get("confidence")
         if raw_confidence is None:
             xref_confidence = validation_confidence.get(param_name)
@@ -343,11 +346,40 @@ def run_sensitivity(
                     file=sys.stderr,
                 )
                 confidence = xref_confidence
+                confidence_source = "validation"
             else:
                 print(f"Warning: '{param_name}' missing confidence level, defaulting to 'sourced'", file=sys.stderr)
                 confidence = "sourced"
+                confidence_source = "default"
         else:
             confidence = str(raw_confidence)
+            confidence_source = "range"
+
+        # RECONCILE, DO NOT DEFER. The range's own `confidence` used to be absolute: the
+        # cross-reference map was consulted only when the range omitted one. That deferred to the
+        # caller on the single field the caller has an incentive to understate -- tag a parameter
+        # `sourced` and it is never widened, whatever the validation step concluded about it. The
+        # instruction to tier honestly then lived only in prose, unenforced AND invisible, since
+        # an explicit `confidence` also made this look like a deliberate choice rather than a
+        # default.
+        #
+        # So a stricter cross-referenced tier now wins over a laxer declared one. It can only ever
+        # WIDEN a range (the tiers are ordered by `CONFIDENCE_MIN_RANGE`), which is the safe
+        # direction: the failure this closes is an uncertain input going unstressed.
+        xref = validation_confidence.get(param_name)
+        if (
+            confidence_source == "range"
+            and xref is not None
+            and CONFIDENCE_MIN_RANGE.get(xref, 0) > CONFIDENCE_MIN_RANGE.get(confidence, 0)
+        ):
+            print(
+                f"Note: '{param_name}' declared confidence '{confidence}' but validation graded it "
+                f"'{xref}'; using the stricter tier (a declared tier cannot narrow a validated one)",
+                file=sys.stderr,
+            )
+            confidence = xref
+            confidence_source = "reconciled"
+
         min_range = CONFIDENCE_MIN_RANGE[confidence]
         original_low_pct = low_pct
         original_high_pct = high_pct
@@ -397,6 +429,11 @@ def run_sensitivity(
         scenario = {
             "parameter": param_name,
             "confidence": confidence,
+            # Where the tier came from: "range" (declared), "validation" (cross-referenced),
+            # "reconciled" (declared, but validation graded it stricter), "default" (nothing
+            # said, fell back to the tier that widens nothing). Without this, an unwidened
+            # range and an untiered one are indistinguishable downstream.
+            "confidence_source": confidence_source,
             "original_range": {"low_pct": original_low_pct, "high_pct": original_high_pct},
             "effective_range": {"low_pct": low_pct, "high_pct": high_pct},
             "range_widened": (low_pct != original_low_pct or high_pct != original_high_pct),

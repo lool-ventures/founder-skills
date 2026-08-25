@@ -353,7 +353,7 @@ Its purpose is enforcement, not documentation: `compose_report.py` compares thes
 the sizing math actually consumed and raises `FOUNDER_VALUE_OVERRIDDEN` if they diverge by more than
 0.5%. A better-sourced researched figure may be **presented as a cross-check** — it must never
 silently replace what the founder said. If the founder reviews the discrepancy and agrees to the
-researched figure, update this field and record the reason via `accepted_warnings`, so the change is
+researched figure, update this field and record the reason via `accepted_warnings` **in `methodology.json`**, so the change is
 disclosed rather than invisible. (A unit normalization — `"18k"` → `18000` — is within tolerance and
 does not trip it.)
 
@@ -847,9 +847,9 @@ Read:
   into a range would silently size a different market.
 
 Construct sensitivity input with confidence-based ranges. Tag each parameter
-with confidence from validation: `sourced` (**range stands — do NOT widen it, and do not invent one; a sourced figure's range is whatever the source states, or omit the parameter**), `derived`
-(min +/-30%), `agent_estimate` (min +/-50%). Include EVERY `agent_estimate`
-parameter — compose_report.py flags missing ones as UNSOURCED_ASSUMPTIONS.
+with confidence from validation: `sourced`, `derived` (min +/-30%), `agent_estimate`
+(min +/-50%). Include EVERY `agent_estimate` parameter — compose_report.py flags
+missing ones as UNSOURCED_ASSUMPTIONS.
 
 Use your Write tool to write to OUTPUT_PATH exactly the shape expected by
 sensitivity.py. Each range MUST include a `confidence` of `sourced`,
@@ -864,6 +864,16 @@ fires:
   },
   "validation_confidence": {"<parameter>": "sourced|derived|agent_estimate"}
 }
+**`sourced` splits on the assumption's own `confidence`; omission is the narrow case, not the default.**
+Source states a range → `sourced`. `sourced` + `confidence: high` + no stated range → omitting is
+acceptable. **`sourced` + `confidence` medium or low → include at `derived` (±30%)**: `sourced` means
+corroborated, not precise, and that cell is often the least certain input in the model. Any consumed
+parameter with no range is reported as `SENSITIVITY_OMITS_PARAM` unless it is `sourced`/`high`.
+
+**A declared `confidence` cannot narrow a validated one.** `sensitivity.py` applies whichever of the
+range's `confidence` and `validation_confidence` is stricter, so tagging a medium-confidence parameter
+`sourced` does not avoid widening. Tag honestly.
+
 `validation_confidence` mirrors each parameter's `category` from validation.json
 and is the BACKSTOP: if you omit a range's own `confidence`, sensitivity.py reads
 the tier from here instead of silently falling back to `sourced` (which widens

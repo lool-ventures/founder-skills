@@ -71,6 +71,16 @@ WARNING_SEVERITY: dict[str, str] = {
     # failures than `solid` allows still cannot (see CHECKLIST_FAILURES_CRITICAL above).
     "CHECKLIST_FAILURES": "medium",
     "UNSOURCED_ASSUMPTIONS": "medium",
+    # A parameter the sizing math CONSUMED but the sensitivity pass never varied. Medium, so it
+    # is acceptable via accepted_warnings ("the source states no range and we accept that" is a
+    # legitimate answer) -- what is not legitimate is the founder never being told.
+    "SENSITIVITY_OMITS_PARAM": "medium",
+    # A parameter that IS in the sensitivity pass but whose tier came from nowhere: no `confidence`
+    # on the range, none in `validation_confidence`. sensitivity.py falls back to `sourced`, which
+    # widens nothing, so the parameter is listed as stress-tested while carrying whatever band the
+    # caller happened to write. Distinct from SENSITIVITY_OMITS_PARAM (not tested at all) because
+    # the remedy differs: there, add a range; here, grade the assumption.
+    "SENSITIVITY_DEFAULTED_CONFIDENCE": "medium",
     "APPROACH_MISMATCH": "medium",
     "TAM_DISCREPANCY": "medium",
     "SAM_DISCREPANCY": "medium",
@@ -198,6 +208,8 @@ WARNING_LABELS: dict[str, str] = {
     "UNVALIDATED_CLAIMS": "Unvalidated Claims",
     "MISSING_OPTIONAL_ARTIFACT": "Missing Optional Artifact",
     "UNSOURCED_ASSUMPTIONS": "Unsourced Assumptions",
+    "SENSITIVITY_OMITS_PARAM": "Parameter Not Stress-Tested",
+    "SENSITIVITY_DEFAULTED_CONFIDENCE": "Ungraded Sensitivity Parameter",
     "APPROACH_MISMATCH": "Approach Mismatch",
     "TAM_DISCREPANCY": "TAM Discrepancy",
     "SAM_DISCREPANCY": "SAM Discrepancy",
@@ -931,6 +943,95 @@ def validate_artifacts(artifacts: dict[str, dict[str, Any] | None]) -> list[dict
                     "UNSOURCED_ASSUMPTIONS",
                     "Agent-estimate assumptions not stress-tested in sensitivity: "
                     f"{[_humanize_param(p) for p in sorted(unsourced)]}",
+                )
+            )
+
+    # 3b. SENSITIVITY_OMITS_PARAM — a consumed parameter the sensitivity pass never varied.
+    #
+    # NOTHING could see this before. UNSOURCED_ASSUMPTIONS (above) checks only assumptions whose
+    # category is `agent_estimate`; FEW_SENSITIVITY_PARAMS fires below 3 scenarios. So a `sourced`
+    # parameter dropped from `ranges` entirely was invisible in every output -- measured on a real
+    # run, `arpu` (the single most commercially uncertain input in that model, and the only one
+    # the analyst had flagged as unconfirmable against any published price list) was omitted, and
+    # the delivered report carried ten warnings, none about it.
+    #
+    # The dispatch contract permits omission for a `sourced` figure whose source states no range.
+    # That exemption is honoured ONLY at `confidence: high`: the measured case was `sourced` with
+    # `confidence: medium`, i.e. corroborated-but-imprecise, which is exactly the input a buyer
+    # pushes hardest on. Note the tier system reads `category` and never `confidence`, which is
+    # how a medium-confidence assumption reached zero stress-testing in the first place.
+    #
+    # Ground truth for "consumed" is sizing.json's per-figure `inputs` — the values the math
+    # actually used — not inputs.json, which may carry figures no approach consumed.
+    # SCOPED TO THE APPROACH THE SENSITIVITY PASS ACTUALLY RAN. A `both` sizing paired with a
+    # single-approach sensitivity run is legitimate -- `sensitivity.py` itself drops the other
+    # approach's parameters as irrelevant -- so comparing against every consumed parameter would
+    # flag three untestable ones on every such run. Only the blocks the sensitivity pass covered
+    # are eligible.
+    if _usable(sizing) and _usable(sensitivity):
+        sens_approach = str(sensitivity.get("approach") or "both")
+        eligible_blocks = ("top_down", "bottom_up") if sens_approach == "both" else (sens_approach,)
+        consumed: set[str] = set()
+        for approach_key in eligible_blocks:
+            block = sizing.get(approach_key)
+            if not isinstance(block, dict):
+                continue
+            for figure in block.values():
+                if isinstance(figure, dict) and isinstance(figure.get("inputs"), dict):
+                    consumed |= {k for k in figure["inputs"] if k in QUANTITATIVE_PARAMS}
+
+        varied = {
+            s.get("parameter")
+            for s in _as_list(sensitivity.get("scenarios"))
+            if isinstance(s, dict) and s.get("parameter")
+        }
+
+        grades: dict[str, dict[str, Any]] = {}
+        if _usable(validation):
+            for assumption in _as_list(validation.get("assumptions")):
+                if isinstance(assumption, dict) and assumption.get("name"):
+                    grades[str(assumption["name"])] = assumption
+
+        for param in sorted(consumed - varied):
+            grade = grades.get(param, {})
+            category = grade.get("category")
+            confidence = grade.get("confidence")
+            if category == "sourced" and confidence == "high":
+                continue  # a high-confidence sourced figure whose source states no range
+            detail = f"graded {category or 'ungraded'}"
+            if confidence:
+                detail += f"/{confidence} confidence"
+            warnings.append(
+                _warn(
+                    "SENSITIVITY_OMITS_PARAM",
+                    f"{_humanize_param(param)} is used by the sizing math but was never "
+                    f"stress-tested ({detail}) — it carries no range in the sensitivity analysis",
+                )
+            )
+
+    # 3c. SENSITIVITY_DEFAULTED_CONFIDENCE — a scenario whose tier came from neither source.
+    #
+    # `sensitivity.py` stamps `confidence_source` precisely so this is visible: "no widening
+    # happened" and "no widening was called for" were the same artifact before. A `default` source
+    # means nothing graded the parameter and the fallback tier (`sourced`) widens nothing, so the
+    # founder sees it listed among the stress-tested parameters at a band the caller chose freely.
+    # Reported, never silently corrected: the fix is to grade the assumption, which only the
+    # validation step can do.
+    if _usable(sensitivity):
+        ungraded = sorted(
+            {
+                str(s.get("parameter"))
+                for s in _as_list(sensitivity.get("scenarios"))
+                if isinstance(s, dict) and s.get("confidence_source") == "default" and s.get("parameter")
+            }
+        )
+        if ungraded:
+            warnings.append(
+                _warn(
+                    "SENSITIVITY_DEFAULTED_CONFIDENCE",
+                    f"{', '.join(_humanize_param(p) for p in ungraded)} carries no confidence grade in "
+                    "either the range or validation — the fallback tier widens nothing, so the range "
+                    "shown is whatever was supplied rather than one the grade justifies",
                 )
             )
 

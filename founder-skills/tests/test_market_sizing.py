@@ -1148,8 +1148,15 @@ def test_compose_severity_map_complete() -> None:
         # The unacceptable half of the checklist split: more failures than the sizing can
         # score as solid with, which is a statement about the run rather than about items.
         "CHECKLIST_FAILURES_CRITICAL",
+        # A parameter the sizing math consumed that the sensitivity pass never varied. Nothing
+        # could see this class before: UNSOURCED_ASSUMPTIONS covers only `agent_estimate`
+        # assumptions and FEW_SENSITIVITY_PARAMS fires below 3 scenarios.
+        "SENSITIVITY_OMITS_PARAM",
+        # The sibling: the parameter IS stress-tested, but at a tier nothing graded, so the
+        # fallback (`sourced`) widens nothing and the band shown is the caller's own.
+        "SENSITIVITY_DEFAULTED_CONFIDENCE",
     ]
-    assert len(sev_map) == 32, f"expected 32 codes, got {len(sev_map)}"
+    assert len(sev_map) == 34, f"expected 34 codes, got {len(sev_map)}"
     for code in expected_codes:
         assert code in sev_map, f"{code} missing from severity map"
     # All values are "high", "medium", or "low"
@@ -1448,9 +1455,19 @@ def test_sensitivity_validation_confidence_agent_estimate_widened() -> None:
     assert s["effective_range"]["high_pct"] == 50
 
 
-def test_sensitivity_validation_confidence_never_overrides_explicit_range_confidence() -> None:
-    """A range's own explicit 'confidence' always wins over validation_confidence,
-    even when they disagree — the range is authoritative when present at all."""
+def test_a_declared_confidence_cannot_narrow_a_validated_one() -> None:
+    """REVERSED DELIBERATELY, and the old rule is the reason.
+
+    This test used to assert that a range's own `confidence` "always wins over
+    validation_confidence, even when they disagree -- the range is authoritative when present at
+    all". That deferred to the caller on the one field the caller has an incentive to understate:
+    tag a parameter `sourced` and it is never widened, whatever the validation step concluded.
+    The payload below IS the exploit -- declared `sourced`, validated `agent_estimate`, zero
+    stress-testing -- and it was pinned as correct.
+
+    The tiers are ordered by `CONFIDENCE_MIN_RANGE`, so reconciliation can only ever WIDEN, which
+    is the safe direction: the failure being closed is an uncertain input going unstressed.
+    """
     payload = json.dumps(
         {
             "approach": "bottom_up",
@@ -1463,10 +1480,45 @@ def test_sensitivity_validation_confidence_never_overrides_explicit_range_confid
     assert rc == 0
     assert data is not None
     s = data["scenarios"][0]
-    assert s["confidence"] == "sourced"
-    assert s["range_widened"] is False
-    assert s["effective_range"]["low_pct"] == -10
-    assert s["effective_range"]["high_pct"] == 10
+    assert s["confidence"] == "agent_estimate", "the stricter validated tier must win"
+    assert s["confidence_source"] == "reconciled"
+    assert s["range_widened"] is True
+    assert s["effective_range"]["low_pct"] == -50
+    assert s["effective_range"]["high_pct"] == 50
+
+
+def test_a_declared_confidence_is_kept_when_it_is_already_the_stricter_one() -> None:
+    """Reconciliation only widens. A declared tier stricter than the validated one stands."""
+    payload = json.dumps(
+        {
+            "approach": "bottom_up",
+            "base": {"customer_count": 1000000, "arpu": 500, "serviceable_pct": 20, "target_pct": 2},
+            "ranges": {"arpu": {"low_pct": -60, "high_pct": 60, "confidence": "agent_estimate"}},
+            "validation_confidence": {"arpu": "sourced"},
+        }
+    )
+    rc, data, _ = run_script("sensitivity.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0
+    assert data is not None
+    s = data["scenarios"][0]
+    assert s["confidence"] == "agent_estimate"
+    assert s["confidence_source"] == "range"
+    assert s["effective_range"]["high_pct"] == 60
+
+
+def test_confidence_source_distinguishes_a_default_from_a_choice() -> None:
+    """ "No widening happened" and "no widening was called for" were indistinguishable."""
+    base = {"customer_count": 1000000, "arpu": 500, "serviceable_pct": 20, "target_pct": 2}
+    cases = {
+        "range": ({"arpu": {"low_pct": -10, "high_pct": 10, "confidence": "sourced"}}, {}),
+        "validation": ({"arpu": {"low_pct": -10, "high_pct": 10}}, {"arpu": "sourced"}),
+        "default": ({"arpu": {"low_pct": -10, "high_pct": 10}}, {}),
+    }
+    for expected, (ranges, xref) in cases.items():
+        payload = json.dumps({"approach": "bottom_up", "base": base, "ranges": ranges, "validation_confidence": xref})
+        rc, data, _ = run_script("sensitivity.py", ["--pretty"], stdin_data=payload)
+        assert rc == 0 and data is not None
+        assert data["scenarios"][0]["confidence_source"] == expected, expected
 
 
 def test_sensitivity_validation_confidence_missing_param_falls_back_to_default() -> None:
@@ -6380,3 +6432,160 @@ def test_not_applicable_items_do_not_count_against_the_band() -> None:
     codes = _codes(data)
     assert "CHECKLIST_FAILURES" in codes, f"a solid sizing lost its acceptable warning: {codes}"
     assert "CHECKLIST_FAILURES_CRITICAL" not in codes, f"N/A items were counted as failures against the band: {codes}"
+
+
+def test_compose_flags_a_consumed_parameter_the_sensitivity_pass_never_varied() -> None:
+    """The measured defect: `arpu` consumed by the math, absent from `ranges`, invisible everywhere.
+
+    Nothing could see this class. UNSOURCED_ASSUMPTIONS checks only `agent_estimate` assumptions;
+    FEW_SENSITIVITY_PARAMS fires below 3 scenarios and the real run had 6. The delivered report
+    carried ten warnings and none about the single most commercially uncertain input in the model
+    -- it was found by hand-diffing the base and ranges key sets.
+
+    The grading detail is load-bearing: `arpu` was `category: sourced` with `confidence: medium`,
+    and the tier system reads `category` and never `confidence`, which is how a corroborated-but-
+    imprecise figure reached zero stress-testing.
+    """
+    sizing = json.loads(json.dumps(_VALID_SIZING))
+    sensitivity = json.loads(json.dumps(_VALID_SENSITIVITY))
+    sensitivity["approach"] = "bottom_up"
+    sensitivity["scenarios"] = [s for s in sensitivity["scenarios"] if s["parameter"] != "arpu"]
+    validation = json.loads(json.dumps(_VALID_VALIDATION))
+    validation["assumptions"] = [
+        {"name": "customer_count", "value": 4500000, "category": "sourced", "confidence": "high"},
+        {"name": "arpu", "value": 15000, "category": "sourced", "confidence": "medium"},
+    ]
+    d = _make_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "methodology.json": _VALID_METHODOLOGY,
+            "validation.json": validation,
+            "sizing.json": sizing,
+            "checklist.json": _VALID_CHECKLIST,
+            "sensitivity.json": sensitivity,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0
+    assert data is not None
+    omitted = [w for w in data["validation"]["warnings"] if w["code"] == "SENSITIVITY_OMITS_PARAM"]
+    assert len(omitted) == 1, [w["message"] for w in data["validation"]["warnings"]]
+    assert "ARPU" in omitted[0]["message"]
+    assert omitted[0]["severity"] == "medium", "must stay acceptable via accepted_warnings"
+
+
+def test_compose_exempts_only_a_high_confidence_sourced_omission() -> None:
+    """The dispatch contract permits omitting a `sourced` figure whose source states no range.
+
+    Honoured ONLY at `confidence: high`. No artifact records whether the source actually stated a
+    range, so a blanket `sourced` exemption would have silently excused the very case this exists
+    to catch -- the measured one was `sourced` at MEDIUM confidence.
+    """
+    for confidence, expect_warning in (("high", False), ("medium", True), ("low", True), (None, True)):
+        sensitivity = json.loads(json.dumps(_VALID_SENSITIVITY))
+        sensitivity["approach"] = "bottom_up"
+        sensitivity["scenarios"] = [s for s in sensitivity["scenarios"] if s["parameter"] != "arpu"]
+        assumption: dict[str, Any] = {"name": "arpu", "value": 15000, "category": "sourced"}
+        if confidence is not None:
+            assumption["confidence"] = confidence
+        validation = json.loads(json.dumps(_VALID_VALIDATION))
+        validation["assumptions"] = [assumption]
+        d = _make_artifact_dir(
+            {
+                "inputs.json": _VALID_INPUTS,
+                "methodology.json": _VALID_METHODOLOGY,
+                "validation.json": validation,
+                "sizing.json": _VALID_SIZING,
+                "checklist.json": _VALID_CHECKLIST,
+                "sensitivity.json": sensitivity,
+            }
+        )
+        rc, data, _ = _run_compose(d)
+        assert rc == 0 and data is not None
+        fired = any(w["code"] == "SENSITIVITY_OMITS_PARAM" for w in data["validation"]["warnings"])
+        assert fired is expect_warning, f"confidence={confidence!r} expected fired={expect_warning}"
+
+
+def test_compose_does_not_flag_the_other_approachs_parameters() -> None:
+    """A `both` sizing with a single-approach sensitivity run is legitimate.
+
+    `sensitivity.py` drops the other approach's parameters as irrelevant, so comparing against
+    every consumed parameter would flag three untestable ones on every such run -- a false
+    positive this detector hit on its first draft, caught by the existing fixtures.
+    """
+    sensitivity = json.loads(json.dumps(_VALID_SENSITIVITY))
+    sensitivity["approach"] = "bottom_up"
+    d = _make_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "methodology.json": _VALID_METHODOLOGY,
+            "validation.json": _VALID_VALIDATION,
+            "sizing.json": _VALID_SIZING,  # approach "both"
+            "checklist.json": _VALID_CHECKLIST,
+            "sensitivity.json": sensitivity,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0 and data is not None
+    flagged = [w["message"] for w in data["validation"]["warnings"] if w["code"] == "SENSITIVITY_OMITS_PARAM"]
+    for td_param in ("Industry Total", "Segment", "Share"):
+        assert not any(td_param in m for m in flagged), flagged
+
+
+def test_compose_flags_a_scenario_whose_confidence_came_from_nowhere() -> None:
+    """A parameter can be listed as stress-tested while nothing graded it.
+
+    `sensitivity.py` falls back to `sourced` when neither the range nor `validation_confidence`
+    supplies a tier, and `sourced` widens nothing — so the band the founder sees is whatever the
+    caller wrote, presented alongside parameters whose bands a grade justifies. `confidence_source`
+    exists to make the two distinguishable; this is the warning that uses it.
+    """
+    base = {"customer_count": 1000000, "arpu": 500, "serviceable_pct": 20, "target_pct": 2}
+    payload = json.dumps(
+        {
+            "approach": "bottom_up",
+            "base": base,
+            "ranges": {
+                "arpu": {"low_pct": -2, "high_pct": 2},  # no confidence, and none cross-referenced
+                "customer_count": {"low_pct": -30, "high_pct": 30, "confidence": "derived"},
+                "serviceable_pct": {"low_pct": -30, "high_pct": 30, "confidence": "derived"},
+            },
+        }
+    )
+    rc, sens, _ = run_script("sensitivity.py", ["--pretty"], stdin_data=payload)
+    assert rc == 0 and sens is not None
+    assert {s["parameter"]: s["confidence_source"] for s in sens["scenarios"]}["arpu"] == "default"
+
+    d = _make_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "methodology.json": _VALID_METHODOLOGY,
+            "validation.json": _VALID_VALIDATION,
+            "sizing.json": _VALID_SIZING,
+            "checklist.json": _VALID_CHECKLIST,
+            "sensitivity.json": sens,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0 and data is not None
+    ungraded = [w for w in data["validation"]["warnings"] if w["code"] == "SENSITIVITY_DEFAULTED_CONFIDENCE"]
+    assert len(ungraded) == 1, [w["message"] for w in data["validation"]["warnings"]]
+    assert "ARPU" in ungraded[0]["message"]
+    assert ungraded[0]["severity"] == "medium"
+
+
+def test_compose_is_silent_when_every_scenario_is_graded() -> None:
+    """The counter-test: a fully graded sensitivity pass must produce no ungraded warning."""
+    d = _make_artifact_dir(
+        {
+            "inputs.json": _VALID_INPUTS,
+            "methodology.json": _VALID_METHODOLOGY,
+            "validation.json": _VALID_VALIDATION,
+            "sizing.json": _VALID_SIZING,
+            "checklist.json": _VALID_CHECKLIST,
+            "sensitivity.json": _VALID_SENSITIVITY,
+        }
+    )
+    rc, data, _ = _run_compose(d)
+    assert rc == 0 and data is not None
+    assert not [w for w in data["validation"]["warnings"] if w["code"] == "SENSITIVITY_DEFAULTED_CONFIDENCE"]
