@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import subprocess
 import sys
 import tempfile
@@ -923,8 +924,24 @@ def test_the_reader_refuses_an_out_of_scope_confirmation_however_it_was_written(
             "context_summary": "Detected: growth",
         }
         if writer == "emit_then_answer":
-            _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", path], json.dumps(body))
-            _run(["answer", "--file", path, "--answer", "Looks right", "--source", "auto_satisfied"])
+            # THIS ARM USED TO RIDE ON A BUG. `emit` refuses this body (the summary names
+            # Growth on a seed gate) -- but the refusal ran AFTER `write_artifact`, so the
+            # file existed anyway and `answer` happily answered it. The arm then read that
+            # record back and asserted the reader refused it. Once the ordering was fixed,
+            # nothing was written and the test errored on a missing file.
+            #
+            # The honest property, and a stronger one: this record is UNREACHABLE through the
+            # CLI. `emit` refuses the prose, and a `stage_confirmation` naming an out-of-scope
+            # stage directly is refused too, so the writer cannot manufacture it at all. The
+            # two bypass arms below are what carry the reader assertion -- which is exactly
+            # what the docstring means by "a path that bypasses the CLI entirely".
+            rc, _, err = _run(["emit", "--run-id", "r1", "--stage", "seed", "-o", path], json.dumps(body))
+            assert rc != 0, "emit must refuse a seed gate whose summary names Growth"
+            assert not os.path.exists(path), "a refused emit must leave no gate_state.json"
+            rc, _, _ = _run(["emit", "--run-id", "r1", "--stage", "growth", "-o", path], json.dumps(body))
+            assert rc != 0, "emit must refuse a stage_confirmation asked about an out-of-scope stage"
+            assert not os.path.exists(path), "a refused emit must leave no gate_state.json"
+            return
         elif writer == "hand_written":
             with open(path, "w") as f:
                 json.dump(
@@ -1850,3 +1867,155 @@ def test_emit_still_refuses_prose_that_names_a_different_stage(
     rc, _, err = _emit(stage, summary, gate_id, question=question)
     assert rc != 0, f"prose naming {named!r} on a {stage} gate must be refused"
     assert named in err, f"the refusal must name the stage it found; got: {err.strip()}"
+
+
+def test_refused_emit_writes_no_gate_file(tmp_path: Any) -> None:
+    """A refused emit must leave NO gate_state.json -- the exit code alone is not the property.
+
+    The prose check ran after `write_artifact`, so the refused gate landed on disk anyway and
+    `gate_state.py answer` -- which only checks `os.path.isfile` -- answered it, printed
+    `{"ok": true}`, and produced a valid authorization record. `authorize()` never re-checks
+    prose, so nothing downstream could catch it. Asserting only `rc != 0` cannot see this: the
+    broken version exited 1 too.
+    """
+    out = os.path.join(str(tmp_path), "gate_state.json")
+    body = {
+        "gate_id": "stage_confirmation",
+        "question": "Does this look right?",
+        "context_summary": "The deck footer reads Seed round open, but the traction is pre-seed.",
+        "options": _CANONICAL_OPTIONS["stage_confirmation"],
+    }
+    rc, _, _ = _run(["emit", "--run-id", "RID", "--stage", "pre_seed", "-o", out], json.dumps(body))
+    assert rc != 0, "prose naming Seed on a pre_seed gate must be refused"
+    assert not os.path.exists(out), (
+        "a refused emit left gate_state.json on disk -- `answer` would accept it and the run "
+        "would proceed on a gate the producer rejected"
+    )
+
+
+def test_refused_emit_does_not_clobber_a_prior_gate(tmp_path: Any) -> None:
+    """A refused emit must not destroy an existing gate record either.
+
+    The write was atomic, which prevented a TORN file and did nothing about this: the prior
+    record -- which may hold a founder's decision plus the history carrying it forward -- was
+    replaced before the refusal was decided.
+    """
+    out = os.path.join(str(tmp_path), "gate_state.json")
+    ok_body = {
+        "gate_id": "stage_confirmation",
+        "question": "Does this look right?",
+        "context_summary": "Detected stage: Pre-seed.",
+        "options": _CANONICAL_OPTIONS["stage_confirmation"],
+    }
+    rc, _, err = _run(["emit", "--run-id", "RID", "--stage", "pre_seed", "-o", out], json.dumps(ok_body))
+    assert rc == 0, err
+    before = pathlib.Path(out).read_text(encoding="utf-8")
+    bad_body = dict(ok_body, context_summary="The deck footer reads Seed round open.")
+    rc, _, _ = _run(["emit", "--run-id", "RID", "--stage", "pre_seed", "-o", out], json.dumps(bad_body))
+    assert rc != 0
+    assert pathlib.Path(out).read_text(encoding="utf-8") == before, "a refused emit overwrote the prior gate record"
+
+
+def _inventory(tmp: Any, claimed: Any, run_id: str = "RID") -> str:
+    """Write a deck_inventory.json beside the gate file and return the gate path."""
+    d = str(tmp)
+    with open(os.path.join(d, "deck_inventory.json"), "w", encoding="utf-8") as f:
+        json.dump({"claimed_stage": claimed, "metadata": {"run_id": run_id}}, f)
+    return os.path.join(d, "gate_state.json")
+
+
+def _emit_ok(out: str, run_id: str = "RID", stage: str = "series_a") -> tuple[int, str, str]:
+    body = {
+        "gate_id": "stage_confirmation",
+        "question": "Does this look right?",
+        "context_summary": "Traction and team read Series A.",
+        "options": _CANONICAL_OPTIONS["stage_confirmation"],
+    }
+    return _run(["emit", "--run-id", run_id, "--stage", stage, "-o", out], json.dumps(body))
+
+
+def test_producer_renders_the_decks_claimed_stage(tmp_path: Any) -> None:
+    """The deck/review disagreement is the point of this gate, and it must reach the founder.
+
+    It was un-sayable before: `prose_names_stage` refuses a summary naming another stage, so an
+    accurate context summary ("the deck says Seed, the signals say Series A") could not be
+    emitted at all, and the most decision-relevant sentence had to be dropped.
+    """
+    out = _inventory(tmp_path, "seed")
+    rc, stdout, err = _emit_ok(out)
+    assert rc == 0, err
+    shown = json.loads(stdout)["needs_input"]["context_summary"]
+    assert "The deck states: Seed" in shown, shown
+    assert "Confirming stage: series_a" in shown, shown
+
+
+def test_the_caller_still_may_not_name_another_stage(tmp_path: Any) -> None:
+    """The exemption is NOT extended to caller prose -- that would reopen the deception.
+
+    A caller-supplied `--claimed-stage` flag, or a derived-token exemption applied to the
+    caller's own words, both let "Detected stage: Seed" through on a series_a gate: a bare
+    assertion in the producer's own phrasing, with the hidden token deciding. That is the exact
+    measured defect the prose rule closes. Only the PRODUCER may name the deck's claim.
+    """
+    out = _inventory(tmp_path, "seed")
+    body = {
+        "gate_id": "stage_confirmation",
+        "question": "Does this look right?",
+        "context_summary": "Detected stage: Seed.",
+        "options": _CANONICAL_OPTIONS["stage_confirmation"],
+    }
+    rc, _, err = _run(["emit", "--run-id", "RID", "--stage", "series_a", "-o", out], json.dumps(body))
+    assert rc != 0, "caller prose naming Seed must still be refused even when the deck claims Seed"
+    assert "Seed" in err
+    assert not os.path.exists(out)
+
+
+def test_no_claim_is_rendered_without_a_parity_matching_inventory(tmp_path: Any) -> None:
+    """Fails closed on every uncertainty: absent, stale, malformed, null, or unknown."""
+    # absent
+    out = os.path.join(str(tmp_path), "gate_state.json")
+    rc, stdout, err = _emit_ok(out)
+    assert rc == 0, err
+    assert "The deck states" not in json.loads(stdout)["needs_input"]["context_summary"]
+    # stale run_id -- a prior review of the same company says nothing about this one
+    os.remove(out)
+    out = _inventory(tmp_path, "seed", run_id="OTHER_RUN")
+    rc, stdout, err = _emit_ok(out)
+    assert rc == 0, err
+    assert "The deck states" not in json.loads(stdout)["needs_input"]["context_summary"]
+    # explicit null (the schema allows it) and an unrecognised token
+    for claimed in (None, "pre-revenue", ""):
+        os.remove(out)
+        out = _inventory(tmp_path, claimed)
+        rc, stdout, err = _emit_ok(out)
+        assert rc == 0, err
+        assert "The deck states" not in json.loads(stdout)["needs_input"]["context_summary"], claimed
+
+
+def test_no_claim_is_rendered_when_the_deck_agrees(tmp_path: Any) -> None:
+    """Nothing to disclose when the deck's claim and the confirmed stage are the same."""
+    out = _inventory(tmp_path, "series_a")
+    rc, stdout, err = _emit_ok(out)
+    assert rc == 0, err
+    shown = json.loads(stdout)["needs_input"]["context_summary"]
+    assert "The deck states" not in shown, shown
+
+
+def test_no_claimed_stage_flag_exists(tmp_path: Any) -> None:
+    """A caller-supplied claim would be a bypass: the same agent authors the summary.
+
+    Pinned as a contract, not a detail -- this was the first proposed design and it is wrong.
+    """
+    out = _inventory(tmp_path, "seed")
+    rc, _, err = _run(
+        ["emit", "--run-id", "RID", "--stage", "series_a", "--claimed-stage", "growth", "-o", out],
+        json.dumps(
+            {
+                "gate_id": "stage_confirmation",
+                "question": "?",
+                "context_summary": "x",
+                "options": _CANONICAL_OPTIONS["stage_confirmation"],
+            }
+        ),
+    )
+    assert rc != 0 and "unrecognized arguments" in err.lower(), err

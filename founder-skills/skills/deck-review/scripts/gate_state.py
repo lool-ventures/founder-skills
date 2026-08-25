@@ -575,6 +575,40 @@ def _schema_path() -> str:
     )
 
 
+def _deck_claimed_stage(output_path: str, run_id: str) -> str | None:
+    """The stage THE DECK STATES, read from the canonical inventory beside the gate file.
+
+    Read, never accepted as an argument. The agent that authors the gate summary is the same
+    agent that would pass a `--claimed-stage` flag, so a flag would let it exempt any stage it
+    liked by naming another valid token -- which is precisely the deception `prose_names_stage`
+    exists to close. Deriving it from `deck_inventory.json` puts the fact outside the caller's
+    reach.
+
+    Fails closed on every uncertainty: no inventory, unreadable inventory, a run_id that does
+    not match this run, or a null/unknown `claimed_stage` all return None and nothing is
+    rendered. A stale inventory is a different review of the same company, and its claimed
+    stage says nothing about this one.
+
+    `deck_inventory.json` sits in REVIEW_DIR, the same directory `setup_run.py` writes
+    `gate_state.json` into, so the gate's own output path locates it.
+    """
+    path = os.path.join(os.path.dirname(os.path.abspath(output_path)), "deck_inventory.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            inventory = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(inventory, dict):
+        return None
+    if _as_run_id(inventory) != run_id:
+        return None
+    claimed = inventory.get("claimed_stage")
+    if not isinstance(claimed, str):
+        return None
+    claimed = claimed.strip().lower()
+    return claimed if claimed in STAGE_LABELS else None
+
+
 def cmd_emit(args: argparse.Namespace) -> int:
     raw = sys.stdin.read()
     try:
@@ -731,6 +765,29 @@ def cmd_emit(args: argparse.Namespace) -> int:
                 )
                 return 1
 
+    # VALIDATED BEFORE THE ARTIFACT IS WRITTEN. This ran AFTER `write_artifact`, so a refused
+    # emit exited 1 with gate_state.json already on disk -- and `answer` only checks that a file
+    # exists, so the very next command could answer the gate this producer had just rejected, and
+    # report `{"ok":true}`. `authorize()` never re-checks prose, so that answered record then
+    # authorized a full report. Measured end to end; an agent reading "exit 1, then exit 0" as
+    # net-success carries a refused gate forward.
+    # Nothing in this check needs the receipt, so there was never a reason for it to run second.
+    # THE PROSE MAY NOT NAME A DIFFERENT STAGE. Appending the structured stage left both in
+    # the payload — "Detected stage: Seed" beside "(Confirming stage: series_a.)" — with the
+    # hidden token deciding. A founder reading the first sentence has been told something
+    # the record contradicts.
+    prose = f"{data.get('question') or ''} {data.get('context_summary') or ''}".lower()
+    for token, label in STAGE_LABELS.items():
+        if token == args.stage:
+            continue
+        if prose_names_stage(prose, token):
+            print(
+                f"Error: this gate confirms {args.stage!r} but its question or summary names "
+                f"{label!r} — a founder cannot be shown one stage and asked to authorize another",
+                file=sys.stderr,
+            )
+            return 1
+
     schema = load_schema(_schema_path())
     try:
         receipt = write_artifact(
@@ -752,24 +809,24 @@ def cmd_emit(args: argparse.Namespace) -> int:
     # `--stage series_a` behind "Detected stage: Seed" let a "Looks right" authorize a
     # Series A report. The producer appends the stage it will authorize, so the sentence the
     # founder reads and the token that authorizes cannot disagree.
-    # THE PROSE MAY NOT NAME A DIFFERENT STAGE. Appending the structured stage left both in
-    # the payload — "Detected stage: Seed" beside "(Confirming stage: series_a.)" — with the
-    # hidden token deciding. A founder reading the first sentence has been told something
-    # the record contradicts.
-    prose = f"{data.get('question') or ''} {data.get('context_summary') or ''}".lower()
-    for token, label in STAGE_LABELS.items():
-        if token == args.stage:
-            continue
-        if prose_names_stage(prose, token):
-            print(
-                f"Error: this gate confirms {args.stage!r} but its question or summary names "
-                f"{label!r} — a founder cannot be shown one stage and asked to authorize another",
-                file=sys.stderr,
-            )
-            return 1
-
+    # THE DECK'S OWN CLAIM IS RENDERED BY THE PRODUCER, NOT QUOTED BY THE CALLER. When the deck
+    # states a stage and the review disagrees, that disagreement is the single most
+    # decision-relevant thing at this gate -- and it was un-sayable: `prose_names_stage` refuses
+    # a summary naming another stage, correctly, because it cannot tell "the deck claims Seed"
+    # from "this is Seed". Exempting the caller's prose (by flag OR by derived token) would
+    # reopen the hidden-token deception, since "Detected stage: Seed" would then pass.
+    #
+    # So the caller's prose stays fully validated and the producer states the claim itself, in
+    # its own labelled sentence, from `deck_inventory.claimed_stage`. Same reasoning as the
+    # `(Confirming stage: ...)` line below: what the founder reads is written by the code that
+    # validated it.
     summary = str(data.get("context_summary") or "")
-    stated = f"{summary}\n(Confirming stage: {args.stage}.)" if summary else f"Confirming stage: {args.stage}."
+    claimed = _deck_claimed_stage(args.output, args.run_id)
+    parts = [summary] if summary else []
+    if claimed and claimed != args.stage:
+        parts.append(f"(The deck states: {STAGE_LABELS[claimed]}. This review reads it as {STAGE_LABELS[args.stage]}.)")
+    parts.append(f"(Confirming stage: {args.stage}.)")
+    stated = "\n".join(parts)
     receipt["needs_input"] = {
         "gate_state_path": os.path.abspath(args.output),
         "gate_id": data.get("gate_id"),
@@ -777,6 +834,7 @@ def cmd_emit(args: argparse.Namespace) -> int:
         "options": data.get("options"),
         "context_summary": stated,
         "confirmed_stage": args.stage,
+        "deck_claimed_stage": claimed,
     }
     sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     return 0

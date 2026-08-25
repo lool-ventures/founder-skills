@@ -193,12 +193,12 @@ mkdir -p "$HANDOFF_DIR"
 # mount in Cowork). Resolve agent-namespace paths via the script — never hand-splice the printed
 # root with a literal skill/slug/run-id string, which is the non-determinism it exists to remove:
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --handoff-dir-agent \
-  --dir-name "<basename of REVIEW_DIR>" --run-id "$RUN_ID"   # prints HANDOFF_AGENT verbatim
+  --dir-name "deck-review-${SLUG}" --run-id "$RUN_ID"   # prints HANDOFF_AGENT verbatim
 HANDOFF_AGENT="<printed value>"   # use verbatim in OUTPUT_PATH lines
 # Sub-agent READ paths for under-outputs artifacts use the SAME agent namespace (relative — the
 # sub-agent's file-tool cwd IS the outputs mount on host-loop; an absolute /sessions/... read is denied):
 python3 "$SHARED_SCRIPTS/resolve_artifacts_root.py" --analysis-dir-agent \
-  --dir-name "<basename of REVIEW_DIR>"   # prints the dir in the agent namespace
+  --dir-name "deck-review-${SLUG}"   # prints the dir in the agent namespace
 REVIEW_DIR_AGENT="<printed value>"   # e.g. stage_profile.json, deck_inventory.json reads
 # Ad-hoc scratch (NOT hand-off) lives OUTSIDE the outputs/ tree, where it is safe to create and
 # reclaim. Use the printed path verbatim in later steps.
@@ -376,7 +376,7 @@ Record what evidence or claim was found in `ai_evidence` (required for `ai_core`
 
 `claimed_stage` holds the stage token the deck itself states (`pre_seed`, `seed`, `series_a`, `series_b`, `growth`). If the deck never states a stage, **omit the field or set it to `null` — never invent a descriptive placeholder** (a made-up value misfires the stage cross-checks downstream).
 
-**`claimed_raise`, `ai_evidence` and `slides[].visuals` are optional but typed string-only, so `null` is REJECTED and omission is accepted — omit them entirely rather than passing null.** A deck that states no ask is a real and notable finding, not a null: measured, `claimed_raise: null` failed the producer with *"expected ['string'], got NoneType"*.
+**`claimed_raise`, `ai_evidence` and `slides[].visuals` are optional: `null` and omission mean the same thing** — the producer normalises an explicit `null` away before validating, so either spelling is accepted. Prefer omission. A deck that states no ask is a real and notable finding, so say so in the review rather than treating the empty field as the whole story.
 
 ```bash
 cat <<'INVENTORY_EOF' | python3 "$SCRIPTS/deck_inventory.py" --run-id "$RUN_ID" -o "$REVIEW_DIR/deck_inventory.json" --pretty
@@ -479,7 +479,9 @@ cat <<'GATE_EOF' | python3 "$SCRIPTS/gate_state.py" emit --run-id "$RUN_ID" --st
 GATE_EOF
 ```
 
-The script schema-validates the body and injects `metadata.run_id`. **Never write `gate_state.json` directly via heredoc.**
+The script schema-validates the body and injects `metadata.run_id`. **Never write `gate_state.json` directly via heredoc.** A refused emit writes nothing: on a non-zero exit, fix the body and re-emit.
+
+**`context_summary` must not name any stage other than `--stage`** — including quoting the deck's own claim. The producer refuses it, and states the disagreement itself: it reads `claimed_stage` from `deck_inventory.json` and appends `(The deck states: X. This review reads it as Y.)`. Write the evidence; let the producer name the stages.
 
 Then return — as your final assistant message — a JSON object the parent agent can act on. **Use the `needs_input` block `gate_state.py emit` printed, verbatim.** Do not retype the question or the options: the canonical options are enforced on the FILE, so a hand-written payload can show the founder a shorter list than the one that was recorded — including one with no way to decline. The shape it returns is:
 
