@@ -13653,3 +13653,85 @@ class TestOptionalStringNullNormalization:
         rc, out, err = _run("extract_cap_table.py", ["--mode=validate", "--dir", str(tmp_path)])
         assert "incorporated_date" not in err, f"null on an optional string must not be an error: {err}"
         assert rc == 0, err
+
+
+class TestInstrumentsFilePrecondition:
+    """`--instruments` naming an unusable file must refuse cleanly, not traceback.
+
+    This script APPENDS, so the file may hold instruments from earlier documents in the same
+    engagement — overwriting it on a guess is unrecoverable. The schema cannot stand in for the
+    check: the validator ignores `additionalProperties`, so every foreign key from a wrong file
+    passes, and schema-validity certifies "has the five keys", never "is the right file".
+    """
+
+    _VALID = {
+        "instrument_type": "safe",
+        "fields": {**_SAFE_BASIC},
+        "confidence": {},
+        "ambiguities": [],
+    }
+
+    def _run_against(self, tmp_path: Any, body: str) -> tuple[int, str, str, str]:
+        target = tmp_path / "instruments.json"
+        target.write_text(body, encoding="utf-8")
+        rc, out, err = _run(
+            "extract_instrument.py",
+            [
+                "--instruments",
+                str(target),
+                "--run-id",
+                "r1",
+                "--no-verify",
+                "--no-invariants",
+                "--no-cross-check",
+            ],
+            stdin_data=json.dumps(self._VALID),
+        )
+        return rc, out, err, target.read_text(encoding="utf-8")
+
+    @pytest.mark.parametrize(
+        ("label", "body"),
+        [
+            ("malformed JSON", "{ truncated"),
+            # The case that matters most, because it looks innocent: a path that is simply the
+            # wrong file. Filling in the arrays and writing would rewrite schema_version to
+            # v0.5.0-instruments and leave a hybrid no consumer can read — on a ZERO exit.
+            (
+                "the wrong file entirely",
+                '{"company_name":"RealCo","founders":[],"metadata":{"schema_version":"v0.5.0-inputs"}}',
+            ),
+            ("a JSON array, not an object", "[]"),
+            (
+                "an array key that is not a list",
+                '{"safes":"nope","convertible_notes":[],"warrants":[],"option_grants":[]}',
+            ),
+            # The ONLY pre-existing path that exited 0 AND mutated: write_artifact replaces a
+            # non-dict metadata wholesale, so continuing discards it silently on success.
+            (
+                "metadata present but not an object",
+                '{"safes":[],"convertible_notes":[],"warrants":[],"option_grants":[],"metadata":"NOTE"}',
+            ),
+        ],
+    )
+    def test_an_unusable_instruments_file_is_refused_cleanly(self, tmp_path: Any, label: str, body: str) -> None:
+        rc, out, err, after = self._run_against(tmp_path, body)
+        assert rc != 0, f"{label}: must refuse"
+        assert "Traceback" not in err, f"{label}: refused with a traceback instead of a diagnostic"
+        assert json.loads(out)["error"] == "E_INSTRUMENTS_FILE_UNUSABLE", label
+        assert "left unchanged" in err, label
+        assert after == body, f"{label}: the canonical path was modified"
+
+    def test_an_incomplete_instruments_file_is_completed_not_refused(self, tmp_path: Any) -> None:
+        """At least one array proves the file's identity, so the rest being absent is an
+        incomplete instruments.json rather than the wrong one.
+
+        Without this the operator got a write-time schema error naming `option_grants`, a field
+        they never supplied.
+        """
+        rc, out, err, after = self._run_against(tmp_path, '{"safes":[],"metadata":{"run_id":"r0"}}')
+        assert rc == 0, err
+        written = json.loads(after)
+        assert len(written["safes"]) == 1
+        assert written["option_grants"] == []
+        assert written["convertible_notes"] == []
+        assert written["warrants"] == []

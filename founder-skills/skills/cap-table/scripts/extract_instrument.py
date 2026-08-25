@@ -494,6 +494,34 @@ def confirm_required(confidence: dict[str, Any]) -> list[str]:
     return low
 
 
+def _instruments_refusal(path: str, detail: str) -> int:
+    """`--instruments` points at something this script cannot safely append to.
+
+    Same four properties as `_gate_refusal` and the fleet contract behind it -- diagnostic to
+    stdout, a line to stderr, the canonical path untouched, exit non-zero -- but a different
+    cause, so a different function and a different code. This is a PRECONDITION on a file the
+    operator named, not a rejection of the extraction on stdin.
+
+    Refusing rather than repairing is the whole point. This script APPENDS: the file may hold
+    instruments extracted from earlier documents in the same engagement, so overwriting it on a
+    guess is unrecoverable. The most valuable case is the one that looks most innocent -- a path
+    that is simply the wrong file. `inputs.json` passed here is a JSON object with none of the
+    instrument arrays; filling them in and writing would rewrite its `schema_version` to
+    `v0.5.0-instruments` and leave a hybrid that no consumer can read, on a ZERO exit. The schema
+    cannot catch that: the validator ignores `additionalProperties`, so every foreign key from the
+    wrong file passes, and schema-validity only ever certifies "has the five keys", never "is the
+    right file".
+    """
+    diagnostic = {"ok": False, "error": "E_INSTRUMENTS_FILE_UNUSABLE", "path": path, "detail": detail}
+    print(json.dumps(diagnostic, indent=2))
+    print(f"Error: E_INSTRUMENTS_FILE_UNUSABLE - {detail}", file=sys.stderr)
+    print(f"Error: {os.path.abspath(path)} was left unchanged.", file=sys.stderr)
+    return 1
+
+
+_INSTRUMENT_ARRAYS = ("safes", "convertible_notes", "warrants", "option_grants")
+
+
 def _gate_refusal(gates: dict[str, Any], args: argparse.Namespace, code: str) -> int:
     """A BLOCKING anti-hallucination gate refused. Emit loudly; write no canonical artifact.
 
@@ -673,10 +701,56 @@ def main() -> int:
         )
         return 1
 
-    # Load existing instruments.json and append
+    # Load existing instruments.json and append.
+    #
+    # Every branch below that refuses used to raise instead: a malformed file tracebacked out of
+    # `json.load`, and a JSON object of the wrong shape reached `len(instruments["safes"])` and
+    # died on a KeyError. Neither clobbered anything, so this is not the write-before-validate
+    # class -- it is the other half of the same contract, failing loudly AND cleanly. The
+    # `metadata` branch is the exception and the reason this is worth doing: a non-dict `metadata`
+    # is silently discarded by `write_artifact`, so today that path exits 0 having overwritten
+    # whatever was there.
     if os.path.exists(args.instruments):
-        with open(args.instruments, encoding="utf-8") as f:
-            instruments = json.load(f)
+        try:
+            with open(args.instruments, encoding="utf-8") as f:
+                instruments = json.load(f)
+        except json.JSONDecodeError as e:
+            return _instruments_refusal(args.instruments, f"file is not valid JSON: {e}")
+        except OSError as e:
+            return _instruments_refusal(args.instruments, f"file could not be read: {e}")
+        if not isinstance(instruments, dict):
+            return _instruments_refusal(
+                args.instruments, f"file holds a JSON {type(instruments).__name__}, not an object"
+            )
+        present = [k for k in _INSTRUMENT_ARRAYS if k in instruments]
+        if not present:
+            # NOT the forgiving case, and treating it as one was the first design here. A JSON
+            # object carrying none of the four arrays is evidence the path is wrong, not evidence
+            # of an incomplete file -- and every writer of a real one emits all four
+            # (`freeform_mapper`, and the hand-authoring skeleton SKILL.md documents).
+            return _instruments_refusal(
+                args.instruments,
+                "file is a JSON object but carries none of "
+                f"{', '.join(_INSTRUMENT_ARRAYS)} — it does not look like an instruments.json",
+            )
+        bad = [k for k in present if not isinstance(instruments[k], list)]
+        if bad:
+            return _instruments_refusal(
+                args.instruments, f"expected a list for {', '.join(bad)} — appending is not possible"
+            )
+        if "metadata" in instruments and not isinstance(instruments["metadata"], dict):
+            # write_artifact replaces a non-dict `metadata` wholesale, so continuing here means
+            # discarding it silently on a successful exit.
+            return _instruments_refusal(
+                args.instruments,
+                f"metadata is a {type(instruments['metadata']).__name__}, not an object — continuing would discard it",
+            )
+        # Forgiving only now: at least one array proves the file's identity, so the rest being
+        # absent is an incomplete instruments.json rather than the wrong one. `write_artifact`
+        # requires all four, and without this the operator got a schema error naming a field they
+        # never supplied.
+        for key in _INSTRUMENT_ARRAYS:
+            instruments.setdefault(key, [])
     else:
         instruments = {
             "safes": [],

@@ -732,8 +732,25 @@ def main() -> int:
     landscape_categories: dict[str, str] | None = None
     landscape_competitors: list[dict[str, Any]] = []
     if args.landscape:
-        with open(args.landscape, encoding="utf-8") as f:
-            land = json.load(f)
+        # Guarded to match --blind-set immediately below, which has always been. An unreadable or
+        # malformed --landscape tracebacked out of json.load, so the operator got a stack trace
+        # where the sibling flag two lines down gives a sentence -- and a producer that dies
+        # untidily is the other half of the contract that says it must refuse loudly.
+        try:
+            with open(args.landscape, encoding="utf-8") as f:
+                land = json.load(f)
+        except OSError as e:
+            print(f"Error: cannot read --landscape file {args.landscape!r}: {e}", file=sys.stderr)
+            return 1
+        except json.JSONDecodeError as e:
+            print(f"Error: --landscape file {args.landscape!r} is not valid JSON: {e}", file=sys.stderr)
+            return 1
+        if not isinstance(land, dict):
+            print(
+                f"Error: --landscape file {args.landscape!r} holds a JSON {type(land).__name__}, not an object",
+                file=sys.stderr,
+            )
+            return 1
         landscape_competitors = [c for c in land.get("competitors", []) if isinstance(c, dict)]
         landscape_slugs = [str(c.get("slug")) for c in landscape_competitors if c.get("slug")]
         landscape_categories = {

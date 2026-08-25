@@ -1005,3 +1005,18 @@ def test_stopword_relief_must_not_admit_permutations() -> None:
     ):
         assert not vc._slugs_are_variants(a, b), f"{a} / {b} is a permutation, not a spelling variant"
         assert not vc._slugs_are_variants(b, a), f"{b} / {a} — the test must hold in both directions"
+
+
+def test_an_unusable_landscape_file_is_refused_cleanly(tmp_path: pathlib.Path) -> None:
+    """`--landscape` was unguarded while its sibling `--blind-set` two lines down was not.
+
+    A producer that dies with a stack trace is the other half of the contract that says it must
+    refuse loudly — the operator gets a traceback where the adjacent flag gives them a sentence.
+    """
+    for label, body in (("malformed JSON", "{ truncated"), ("a JSON array, not an object", "[]")):
+        land = tmp_path / "landscape.json"
+        land.write_text(body, encoding="utf-8")
+        proc = _run(_base(), "--landscape", str(land))
+        assert proc.returncode != 0, label
+        assert "Traceback" not in proc.stderr, f"{label}: refused with a traceback"
+        assert "--landscape" in proc.stderr, label
