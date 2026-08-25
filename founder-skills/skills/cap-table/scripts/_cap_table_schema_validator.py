@@ -177,6 +177,25 @@ def validate(data: Any, schema: dict[str, Any], path: str = "") -> list[str]:
     return errors
 
 
+def _optional_scalar_rejects_null(subschema: dict[str, Any]) -> bool:
+    """Would this subschema reject `null` while accepting absence?
+
+    Two spellings, and only the first was covered at first. A bare `{"type": "string"}` is the
+    obvious one. A bare `{"enum": [...]}` with no `type` is the SAME trap and is the more common
+    shape in these schemas -- `inputs.schema.json` alone carries 14 of them against 17 bare
+    strings. `metadata.stage: null` ("we do not know the stage") is the natural spelling and was
+    rejected with `value None not in enum [...]`, a worse-shaped diagnostic than the type error it
+    replaced.
+
+    An enum that LISTS null means null is meaningful there, so it is left alone -- same reasoning
+    as a `["string", "null"]` type union.
+    """
+    if subschema.get("type") == "string":
+        return True
+    enum = subschema.get("enum")
+    return "type" not in subschema and isinstance(enum, list) and None not in enum
+
+
 def drop_nulls_on_optional_strings(data: Any, schema: dict[str, Any]) -> Any:
     """Treat an explicit `null` as absence on any field the schema types as an OPTIONAL bare string.
 
@@ -211,7 +230,7 @@ def drop_nulls_on_optional_strings(data: Any, schema: dict[str, Any]) -> Any:
         if not isinstance(subschema, dict) or key not in data:
             continue
         if data[key] is None:
-            if subschema.get("type") == "string" and key not in required:
+            if key not in required and _optional_scalar_rejects_null(subschema):
                 del data[key]
             continue
         drop_nulls_on_optional_strings(data[key], subschema)

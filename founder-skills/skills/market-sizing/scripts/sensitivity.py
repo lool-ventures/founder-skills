@@ -23,12 +23,20 @@ Usage:
 
 Optional top-level key ``validation_confidence``: a ``{parameter_name:
 confidence_tier}`` map, typically built from validation.json's
-``assumptions[].category``. It is consulted only when a range omits its own
-``confidence`` key, so a parameter tagged 'derived'/'agent_estimate' there
-still gets its auto-widening floor even if the range didn't repeat the tag.
-It never overrides a range's explicit ``confidence``, and omitting it
-entirely preserves the pre-existing 'sourced' default (with a stderr
-warning) for a range with no confidence anywhere.
+``assumptions[].category``. It is consulted when a range omits its own ``confidence``, so a
+parameter tagged 'derived'/'agent_estimate' there still gets its auto-widening floor even if the
+range didn't repeat the tag.
+
+It also RECONCILES against a range's explicit ``confidence``, and the stricter tier wins. The
+range used to be absolute, which deferred to the caller on the one field the caller has an
+incentive to understate: tag a medium-confidence parameter 'sourced' and it was never widened,
+whatever validation concluded. Reconciling can only ever WIDEN (the tiers are ordered by
+``CONFIDENCE_MIN_RANGE``), which is the safe direction. ``confidence_source`` on each scenario
+records where the tier came from: range | validation | reconciled | default.
+
+Omitting the map entirely preserves the 'sourced' default (with a stderr warning) for a range
+with no confidence anywhere — reported as ``confidence_source: "default"``, because "no widening
+happened" and "no widening was called for" are not the same statement.
 
 Output: JSON with scenario table and sensitivity ranking.
 """
@@ -253,8 +261,8 @@ def _validate_config(
 
     # Validate optional 'validation_confidence' cross-reference map. Malformed
     # entries are dropped (not fatal) so a caller's typo in one param doesn't
-    # block the whole run — the per-range 'confidence' key is still authoritative
-    # and unaffected by problems here.
+    # block the whole run — the per-range 'confidence' key still applies, reconciled against
+    # whatever survives here, and is unaffected by problems in a sibling entry.
     validation_confidence: dict[str, str] = {}
     raw_validation_confidence = data.get("validation_confidence", {})
     if raw_validation_confidence and not isinstance(raw_validation_confidence, dict):
@@ -283,7 +291,8 @@ def run_sensitivity(
     Assumes inputs are pre-validated by _validate_config().
 
     ``validation_confidence`` (optional): a ``{parameter_name: confidence_tier}``
-    fallback map, cross-referenced when a range omits its own ``confidence`` key.
+    map cross-referenced when a range omits its own ``confidence`` key, and reconciled
+    against it when both are present (the stricter tier wins; see the module docstring).
     Intended to be built by the caller from ``validation.json``'s
     ``assumptions[].category``, so a parameter tagged 'derived' or 'agent_estimate'
     there doesn't silently lose its auto-widening floor just because the range
