@@ -23,22 +23,19 @@ prompt: |
 
 assert:
   - result: success
-  # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
-  # the deliverable but stranded steps, which result:success alone misses.
   # No `all_tasks_completed` here: nothing in this skill asks the agent for a task list, so the
   # assert is satisfiable only by chance and a losing run blocks a paid record rather than
   # reporting a defect. To assert it, mandate a tracker in SKILL.md first, then pair it with
   # `task_count_min: 1` — see financial-model-review-smoke.yaml.
+  # The verification artifact was produced and it flagged at least one company.
   - file_exists: outputs/artifacts/competitive-positioning-cadence/competitor_verification.json
   - artifact_json:
       artifact: outputs/artifacts/competitive-positioning-cadence/competitor_verification.json
       path: summary.flagged
       gt: 0
-  # `challenge_slugs` is what Gate 1 now reads. It is a SUBSET of flagged_slugs -- a flagged entry
-  # whose verdict endorses the draft (a draft-adjacent entry confirmed adjacent, or the role
-  # categories `emerging`/`do_nothing`) is deliberately excluded. Calendly is a planted
-  # not_a_competitor, so it must survive that filter: this pins that the endorsement exclusion did
-  # not swallow a genuine challenge, which is the regression risk in narrowing the set.
+  # `challenge_slugs` is what Gate 1 reads: a SUBSET of flagged_slugs, excluding a flagged entry
+  # whose verdict ENDORSES the draft. Calendly is a planted not_a_competitor, so it must survive
+  # that filter — this pins that the endorsement exclusion cannot swallow a genuine challenge.
   - artifact_json:
       artifact: outputs/artifacts/competitive-positioning-cadence/competitor_verification.json
       path: summary.challenge_slugs.0

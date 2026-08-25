@@ -48,12 +48,11 @@ answers:
 
 assert:
   - result: success
-  # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
-  # the deliverable but stranded steps, which result:success alone misses.
   # No `all_tasks_completed` here: nothing in this skill asks the agent for a task list, so the
   # assert is satisfiable only by chance and a losing run blocks a paid record rather than
   # reporting a defect. To assert it, mandate a tracker in SKILL.md first, then pair it with
   # `task_count_min: 1` — see financial-model-review-smoke.yaml.
+  # P1-b — the SAFE terms were extracted from the doc (cap $20M, 20% discount → multiplier 0.8).
   - artifact_json:
       artifact: outputs/artifacts/cap-table-acmecorp-inc/instruments.json
       path: safes.0.post_money_valuation_cap

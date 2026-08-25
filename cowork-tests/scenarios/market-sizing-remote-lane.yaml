@@ -92,6 +92,8 @@ assert:
   # assert is satisfiable only by chance and a losing run blocks a paid record rather than
   # reporting a defect. To assert it, mandate a tracker in SKILL.md first, then pair it with
   # `task_count_min: 1` — see financial-model-review-smoke.yaml.
+  # The deliverable is still PRODUCED at the contracted path. On lane: remote this asserts production
+  # only; it deliberately makes no delivery claim, which is the whole distinction under test.
   - file_exists: outputs/artifacts/market-sizing-cadence/report.json
   # Entered through the Skill tool (prefix-tolerant).
   - skill_triggered: '(founder-skills:)?market-sizing$'
