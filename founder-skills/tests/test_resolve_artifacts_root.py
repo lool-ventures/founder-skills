@@ -314,3 +314,38 @@ def test_cli_json_omits_agent_paths_when_dir_name_absent(tmp_path: Path) -> None
     assert rc == 0, err
     data = json.loads(out)
     assert set(data.keys()) == {"artifacts_root", "agent_artifacts_root"}
+
+
+def test_cli_warns_when_dir_name_has_no_canonical_mirror(tmp_path: Path) -> None:
+    """A mistyped --dir-name is otherwise silent, and its symptom points the wrong way.
+
+    `build_agent_paths` is string concatenation with no validation, so any string yields a
+    plausible path. Measured cause of a near-miss: deck-review's SKILL.md said
+    `--dir-name "<basename of REVIEW_DIR>"` where every sibling skill states a literal, the slug
+    was passed instead, and the resulting path was well-formed and wrong. The shell-side
+    HANDOFF_DIR stays correct, so sub-agents write one place and `check_handoff.py` reads another:
+    exit 3 on every dispatch, which the state machine reads as a fabricated receipt rather than a
+    bad path, and answers by spending the retry budget on redo-dispatches that cannot succeed.
+    """
+    root = tmp_path / "artifacts"
+    (root / "deck-review-acme").mkdir(parents=True)
+    rc, out, err = _run_cli(
+        ["--analysis-dir-agent", "--dir-name", "acme"],  # the slug, not the dir basename
+        {"COWORK_ARTIFACTS_ROOT": str(root)},
+    )
+    assert rc == 0, "a warning, never an error — an agent-root override legitimately decouples the two"
+    assert out.strip() == os.path.join(str(root), "acme"), "the path is still emitted"
+    assert "Warning:" in err and "acme" in err
+    assert "check_handoff" in err, "the warning must name the symptom, which points the wrong way"
+
+
+def test_cli_is_silent_when_the_mirror_exists(tmp_path: Path) -> None:
+    """The counter-test: a correct --dir-name must not produce noise on every run."""
+    root = tmp_path / "artifacts"
+    (root / "deck-review-acme").mkdir(parents=True)
+    rc, out, err = _run_cli(
+        ["--analysis-dir-agent", "--dir-name", "deck-review-acme"],
+        {"COWORK_ARTIFACTS_ROOT": str(root)},
+    )
+    assert rc == 0
+    assert "Warning:" not in err, err

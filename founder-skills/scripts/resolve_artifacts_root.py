@@ -200,6 +200,28 @@ def main() -> int:
 
     agent_paths = build_agent_paths(agent_root, args.dir_name, args.run_id) if args.dir_name else {}
 
+    # A MISTYPED --dir-name IS OTHERWISE SILENT, AND ITS SYMPTOM POINTS THE WRONG WAY.
+    # `build_agent_paths` is string concatenation with no validation, so any string yields a
+    # plausible-looking path. The shell-side HANDOFF_DIR is derived separately from REVIEW_DIR and
+    # stays correct, so sub-agents write to one place while `check_handoff.py` reads another: exit
+    # 3 on every dispatch, which the state machine reads as fabricated receipts and answers by
+    # burning the retry budget on redo-dispatches that cannot succeed. One warning here turns a
+    # whole-run failure into a one-line diagnosis at Step 0.
+    #
+    # WARNING, never an error. An agent-root override can legitimately decouple the two
+    # namespaces, and on a first run the canonical directory may not exist yet -- failing closed
+    # would break working callers to catch a typo.
+    if args.dir_name:
+        mirror = os.path.join(root, args.dir_name)
+        if not os.path.isdir(mirror):
+            sys.stderr.write(
+                f"Warning: no directory named {args.dir_name!r} under the canonical artifacts root "
+                f"({root}). If that name is a typo, the agent-namespace path below is still well-formed "
+                f"and every hand-off will fail check_handoff.py with exit 3 (which reads as a fabricated "
+                f"receipt, not a bad path). Expected the basename of the analysis dir, e.g. "
+                f"'<skill>-<slug>'.\n"
+            )
+
     if args.handoff_dir_agent:
         sys.stdout.write(agent_paths["handoff_dir_agent"] + "\n")
     elif args.analysis_dir_agent:
