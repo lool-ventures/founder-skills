@@ -146,3 +146,20 @@ assert:
   - artifact_text:
       artifact: 'outputs/artifacts/cap-table-acmecorp-inc-extraction/report_extraction_only.md'
       not_matches: '(?<!"_?produced_by":\\s{0,4}")\\b\\w+\\.py\\b'
+  # Delivery: the skill HANDED the deliverable over via `present_files`, not merely wrote it and named
+  # a path.
+  #
+  # Requires harness >= 2.2.0: presence is the count of `present_files` invocations carrying a
+  # well-formed `file_path`, read from the tool_use input's shape, so the host-path redaction policy
+  # in cowork-tests/.cowork-redact.json cannot turn a real delivery into "never called". Below that
+  # floor this key reads the classified `presentedFiles` list, which drops a redacted (non-absolute)
+  # path, and reds on this cassette.
+  #
+  # NOT CI-ENFORCED YET. `replay` evaluates the assert block frozen in the cassette, never this file,
+  # and the committed cassette predates this line; it freezes at the next re-record. Until then only
+  # `replay --assert-from` checks it.
+  #
+  # KNOW WHAT IT DOES NOT CATCH: it is satisfied by the FIRST successful delivery call — no count, no
+  # per-file match — so a PARTIAL delivery still passes. cowork-tests/delivery_check.py is the net for
+  # that class; it reconciles tool_use against tool_result by id.
+  - present_files_called: true

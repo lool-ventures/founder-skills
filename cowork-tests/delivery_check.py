@@ -11,9 +11,10 @@ PRODUCED.
 
 **Why this is not a scenario assert.** It would be better as one, and it cannot
 be: `present_files_called: true` asserts that *at least one* file was presented
-— "no count, no per-file match" (`dist/types.js`, re-verified against the
-installed cowork-harness 1.17.0: still `z.literal(true)` describing "at least
-one file was actually delivered ... (presentedFiles is non-empty)"). So it is
+— `z.literal(true)` in `dist/types.js`, with no count and no per-file match.
+(`RunResult` *does* carry a count, `presentFilesCalls`, which is what the
+assertion reads for presence; the assertion vocabulary still cannot express
+"these N specific files".) So it is
 green both before and after a
 partial-delivery fix, which is precisely the defect the fleet delivery
 instruction exists to close. Until the assertion vocabulary can express a

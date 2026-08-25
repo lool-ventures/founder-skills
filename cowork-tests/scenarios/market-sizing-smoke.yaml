@@ -19,46 +19,20 @@ prompt: |
   where you would cite an external market source, label it clearly.
 
 # ─────────────────────────────────────────────────────────────────────────────
-# WHY SOME ASSERTS BELOW ARE AUTHORED BUT NOT FROZEN INTO THE CASSETTE
-# (measured 2026-08-18; a re-record was attempted, paid for, and REFUSED)
+# THIS LANE HAS NO CASSETTE, BY CHOICE. See `_NO_CASSETTE_ALLOWLIST` in
+# founder-skills/tests/test_cowork_cassette_replay.py for the reason. Consequently every assert
+# below is authored but gates nothing: `replay` evaluates the block frozen in a cassette, and there
+# is none. Only `replay --assert-from` reads this file.
 #
-# `present_files_called` CANNOT be recorded on this lane as it is currently configured, and the
-# reason is structural rather than a skill defect. Measured on a real hostloop record:
-#
-#   1. The live run PASSED — `present_files` was called 3x and the run's own verdict was
-#      pre-redaction pass=true. The skill delivers correctly.
-#   2. At hostloop the `present_files` `file_path` is a REAL HOST PATH:
-#        /Users/<user>/.cowork-harness/runs/<scenario>/<session>/work/session/mnt/outputs/<file>
-#   3. `.cowork-redact.json` (this dir) rewrites every `/Users/...` prefix at record time — which is
-#      exactly what it is for, and what keeps host paths out of committed cassettes.
-#   4. The redacted path no longer resolves, so `present_files_called` flips true -> false, and
-#      `record` REFUSES to write:
-#        "redaction changed assertion failures: pre-redaction pass=true -> redacted pass=false;
-#         failing assertions: [] -> [present_files_called] ... refusing to write a cassette whose
-#         verdict was manufactured by redaction."
-#      That refusal is CORRECT. A cassette that froze the redacted verdict would assert something
-#      false forever.
-#
-# So host-path redaction and `present_files_called` are MUTUALLY EXCLUSIVE at hostloop fidelity.
-# The assert stays on disk because it is TRUE and worth stating; it is simply not CI-enforced here.
-# Delivery is independently witnessed in CI by `cowork-tests/delivery_check.py`.
-#
-# DO NOT "fix" this by deleting the assert (it is true and it documents the contract), by loosening
-# `.cowork-redact.json` (it would commit this machine's host paths), or by re-running the record
-# (it will fail identically and cost another paid run — this one already did).
-#
-# IT HAS NOW COST TWO. The 2026-08-20 1.25.0 refresh included this lane in its set without reading
-# this header, and the record failed with the byte-identical refusal quoted above. The other four
-# lanes in that batch recorded fine, so the loss was one lane's spend, not the batch. If you are
-# assembling a re-record set: READ EACH SCENARIO'S OWN HEADER FIRST. A lane can be permanently
-# unrecordable in its current configuration, and this file says so in the file itself.
-#
-# This lane consequently remains the ONLY cassette at harness 1.12.0, and the only one carrying the
-# pre-1.14.0 `present_files` toolset. Neither is fixable by re-recording as configured — both need
-# the fidelity decision below taken first.
-# Resolving it needs a deliberate choice: record this lane at `fidelity: container`, where the
-# delivered path is a sandbox path and not host-redacted, or drop the key in favour of
-# `user_visible_artifact` + delivery_check.py. That decision is not taken here.
+# IF IT IS EVER RECORDED, two constraints bind:
+#   * harness >= 2.2.0. `present_files_called` takes presence from the count of `present_files`
+#     invocations carrying a well-formed `file_path`, read from the tool_use input's shape. Below
+#     that floor it reads the CLASSIFIED `presentedFiles` list instead, which drops a non-absolute
+#     path — and at hostloop every presented path is a host path that
+#     cowork-tests/.cowork-redact.json rewrites, so the assert flips false under redaction and
+#     `record` refuses to write a cassette whose verdict redaction manufactured.
+#   * Do NOT loosen .cowork-redact.json to work around that. It is what keeps this machine's host
+#     paths out of committed cassettes, and at >= 2.2.0 there is nothing to work around.
 # ─────────────────────────────────────────────────────────────────────────────
 
 assert:
@@ -122,13 +96,14 @@ assert:
   # `delivery_check.py` in the post-batch sweep, which reconciles tool_use against tool_result by id
   # and reports an errored call separately. Do not treat this key as covering it.
   #
-  # AND KNOW THAT IT IS NOT RUNNING. This key postdates the committed 1.12.0 cassette, and `replay`
-  # evaluates the scenario FROZEN in the cassette, never this file -- the frozen block carries 16
-  # asserts and this is not one of them. So CI's replay of this lane is green without ever checking
-  # delivery; only `replay --assert-from` reads the block you are looking at, and there it FAILS
-  # ("no file was delivered via present_files"). Everything the comment above says is true of what
-  # this key WILL catch once the lane is re-recorded, and true of nothing today. Do not read the
-  # green as coverage, and do not tighten the wording here expecting CI to notice.
+  # AND KNOW THAT IT IS NOT RUNNING. This lane has NO cassette (deleted 2026-08-24 in the corpus cut;
+  # the scenario was kept). `replay` evaluates the scenario FROZEN in a cassette, never this file, so
+  # with no cassette there is nothing for CI to replay and this key gates nothing. Only
+  # `replay --assert-from` reads the block you are looking at. Everything the comment above says is
+  # true of what this key WILL catch if the lane is ever recorded, and true of nothing today. Do not
+  # read a green elsewhere as coverage here, and do not tighten the wording expecting CI to notice.
+  # (The header at the top of this file explains why recording it was impossible before harness
+  # 2.2.0 and is not any more.)
   - present_files_called: true
   # Dispatch contract: sub-agents declare no Bash (agents/*.md) — regression tripwire.
   - subagent_tool_absent: 'Bash'

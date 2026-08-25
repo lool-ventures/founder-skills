@@ -159,9 +159,9 @@ echo "cowork-harness $ver"
 # replay now collapses it to one `N/M cassette(s) - <reason> [kind]` line. The `cassette stale:` lines
 # themselves are unchanged and still `::warning::`. Parse the JSON envelope instead.
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
-# `-gt 1` first so a future 2.x passes — a bare minor check would FATAL on 2.0.0.
-{ [ "$major" -gt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -ge 1 ]; }; } \
-  || { echo "FATAL: need >=2.1.0 (have $ver) — see the floor note above"; exit 1; }
+# `-gt 2` first so a future 3.x passes — a bare minor check would FATAL on 3.0.0.
+{ [ "$major" -gt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -ge 2 ]; }; } \
+  || { echo "FATAL: need >=2.2.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi

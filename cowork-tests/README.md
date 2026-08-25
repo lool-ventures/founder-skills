@@ -2,38 +2,55 @@
 
 Token-free **replay** PR gate (`.github/workflows/cowork-replay.yml`) over committed cassettes that
 exercise the founder-skills skills under Claude Cowork's runtime via
-[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (**floor `1.24.0`, tracking forward
-within `1.x`**; see the note). Recording is **live** (needs the staged agent +
+[`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (**floors are per-CLI-site; see the
+note**). Recording is **live** (needs the staged agent +
 Docker); replay/verify are **token/agent-free** (stock CI).
 
-> **Current: cowork-harness `1.24.0` (FLOOR, not pin).** A floor is applied **per CLI site**, only where
-> a step depends on a version — the sites are NOT uniform and must not be bumped as a block. As of
-> 1.24.0 every site happens to carry the same number, but **for different reasons**; do not collapse
-> them into one rule.
+> **Floors are per CLI SITE, not one number.** A floor is applied only where a step depends on a
+> version, and the sites are NOT uniform — do not bump them as a block. Enumerate them, never count
+> them from prose:
 >
-> - **The four `version:` inputs in the `replay` job carry `^1.24.0`.** They are LINT, PRIVACY,
->   STALENESS and REPLAY — enumerate with `grep -n 'version: "' ../.github/workflows/cowork-replay.yml`
->   rather than from prose. The **email canary is not among them**: it is a bare `run:` step with no
->   `version:` input, riding the CLI the preceding Action step installed.
-> - **The `skill-static-analysis` job's standalone install is now `npm i -g cowork-harness@^1.24.0`.**
->   It previously said `^1.17.0` here on the reasoning that "a floor should express a requirement;
->   that step has none" — **that reasoning has expired, and this note contradicted the workflow (which
->   was already at `^1.20.0`) before it was corrected.** That step runs `record --dry-run`, which is
->   the **LOADER**, and `deck-review-gate-stop` now asserts `file_absent` + `question_options`
->   (harness 1.24.0). MEASURED against `npx cowork-harness@1.23.0`: the loader HARD-REJECTS with
->   `Unrecognized key: "file_absent"`, while `lint` on the same file exits 0 with `0 error(s)`. The
->   requirement is real, and **`lint` cannot detect it** — the standing "lint is lenient, the loader
->   is strict" split.
+> - **`cowork-tests/rerecord.sh` — `>= 2.2.0`.** The only site with a live requirement. Recording bakes
+>   the harness version into the artifact, and a lane asserting `present_files_called` at hostloop
+>   cannot be recorded below 2.2.0: presence there comes from the count of `present_files` invocations
+>   (input shape), whereas below that floor it comes from the classified `presentedFiles` list, which
+>   drops the non-absolute path that host-path redaction produces — so the assert flips under redaction
+>   and `record` refuses to write. The numeric gate and its FATAL message are ADJACENT lines; edit both
+>   (`grep -n 'minor.*-ge' rerecord.sh`).
+> - **The four `version:` inputs in the `replay` job — `^2.1.0`.** LINT, PRIVACY, STALENESS and REPLAY.
+>   Enumerate with `grep -n 'version: "' ../.github/workflows/cowork-replay.yml`. The **email canary is
+>   not among them**: it is a bare `run:` step riding the CLI the preceding Action step installed.
+> - **The `skill-static-analysis` job's standalone `npm i -g` — `^2.1.0`.** That step runs
+>   `record --dry-run`, i.e. the LOADER, which is the strict surface `lint` cannot substitute for.
+> - **`test_cowork_cassette_replay.py::_MIN_HARNESS` — `(2, 1, 0)`.**
 >
-> **A pinned-below-floor developer gets a RED local suite, not a skip.**
-> `../founder-skills/tests/test_cowork_cassette_replay.py::_require_harness` skips only when the CLI
-> is **absent**. Once a new assertion key is written into a cassette, an older CLI hard-rejects it —
-> and `cassetteVersion` does **not** bump (it stays 10), so the version field gives no warning.
+> **`uses:` pins the ACTION; `version:` pins the CLI.** They move independently, so a workflow on
+> `@v1` can be installing a 2.x CLI. Keep the `uses:` major and the `version:` major in step.
 >
-> `^` **fails loud** below the floor and cannot cross a future `2.0`. Node **22+** as of 1.14.0 (20 is
-> EOL; `doctor` fails on it).
+> **A pinned-below-floor developer gets a SKIP, not a red.** `_require_harness` calls `pytest.skip`
+> both when the CLI is absent and when it is below `_MIN_HARNESS`, so a below-floor local suite reports
+> green-with-skips and the floor is not self-enforcing there. CI installs its floor explicitly instead.
+> This is also why raising `_MIN_HARNESS` is not free: it converts a loud red into a silent skip for
+> exactly the developer it is meant to warn.
 >
-> **Why 1.24.0.** The scenarios stop loading below it. `deck-review-gate-stop` asserts `file_absent`
+> **Cassette format.** Every cassette in `cassettes/` is `cassetteVersion` **12**;
+> `MIN_SUPPORTED_CASSETTE_VERSION` is **9**. `canary/email-canary.cassette.json` is deliberately **v10**
+> — hand-authored, never re-recorded, hand-bumped only at a `MIN_SUPPORTED_CASSETTE_VERSION` raise.
+> A cassette NEWER than the reading CLI has its unknown assertion keys warn-and-tolerated (dropped from
+> evaluation); a cassette at or below it hard-rejects them. So a too-old CLI can green by omission.
+>
+> **Corpus size is derived, never restated here.** Run `python cowork-tests/cassette_inventory.py`.
+> `test_cowork_harness_floors.py` pins the counts against the tree so prose cannot drift from it.
+>
+> Node **22+** as of 1.14.0 (20 is EOL; `doctor` fails on it).
+>
+> **Why not below 2.2.0 for RECORDING.** `present_files_called` at hostloop is unrecordable below it
+> (see the floor list above). Adopting 2.2.0 changed nothing else here: measured against a pinned
+> 2.1.0, every token-free surface on this repo is byte-identical — `replay` ×10, `verify-cassettes`,
+> `lint`, `record --dry-run`, `analyze-skill`, `lint-skill` — and `baselines/` is byte-identical
+> between the two, so no fidelity input moved.
+>
+> **Why not below 1.24.0.** The scenarios stop loading below it. `deck-review-gate-stop` asserts `file_absent`
 > and `question_options`, both added in 1.24.0, and both are the direct expression of things this lane
 > previously had to fake: its own comments recorded *"it is inverted because the harness has no
 > `file_absent`"*, and the option-reversal defect it documents was unassertable because no key
@@ -90,9 +107,11 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 > --dry-run`) needs >=1.14.0 now that a `lane:` scenario exists, because an older **loader** exits 2 on
 > the whole directory; and its `--quiet` needs >=1.16.0 to do anything. The **`lint`** step's floor
 > stays documentary — it resolves no baseline and emits no staleness.
-> Do not reason about them as a way to keep CI and local in sync — they are not. Since the `1.0.0` stable release, SPEC.md §12 freezes the covered surfaces, so within `1.x`
-> bumps are additive / no cassette-format change and the committed cassettes keep replaying. **On each
-> new `1.x`, confirm the token-free gate is green** (`uv run pytest -m cowork`, `analyze-skill
+> Do not reason about them as a way to keep CI and local in sync — they are not. SPEC.md §12 freezes the
+> covered surfaces, so within a major, bumps are additive and the committed cassettes keep replaying —
+> `2.2.0` was measured as exactly that (every token-free surface byte-identical to `2.1.0` on this
+> repo). A MAJOR bump carries no such guarantee. **On each new release, confirm the token-free gate is
+> green** (`uv run pytest -m cowork`, `analyze-skill
 > founder-skills/ --strict`, `lint cowork-tests/scenarios/`) — verify with a **version-confirmed** binary
 > (`npm install cowork-harness@<v>` then check `--version`; `npx …@<v>` is non-deterministic and can
 > silently run a stale global; and if a linked dev checkout of the harness is in the global npm tree,
@@ -210,7 +229,8 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 >   fails LOUD on an older CLI — it is never silently reinterpreted."* That was **true of the loader and
 >   false of replay**, and was corrected in 1.16.0. Do not propagate the 1.15.0 sentence.
 > - ~~**`--assert-from` on a lane-bearing scenario:** `lane` is not covered by the drift guard until
->   1.16.0.~~ **SPENT — the floor is `>=1.24.0`** (`rerecord.sh:145`), well past the version that closed
+>   1.16.0.~~ **SPENT — the recording floor is `>=2.2.0`** (the gate in `rerecord.sh`; locate it with
+>   `grep -n 'minor.*-ge'`, never by line number), well past the version that closed
 >   this, so lane equality is no longer the caller's problem. The bullet's other half — *"we do not use
 >   `--assert-from` anywhere"* — was true of AUTOMATION and is misleading as written: it is a documented
 >   MANUAL step (run it before paying for a re-record), and `--assert-from --write --allow-failing` is

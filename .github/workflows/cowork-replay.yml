@@ -84,7 +84,9 @@ name: cowork-replay
 #       an older CLI does not know is hard-rejected (`cassetteVersion` does NOT bump — it stays 10
 #       — so the version field gives no warning). Consequence beyond CI:
 #       `founder-skills/tests/test_cowork_cassette_replay.py::_require_harness` skips only when the
-#       CLI is ABSENT, so a developer pinned below 1.24.0 gets a RED `pytest -m cowork`, not a skip.
+#       CLI is ABSENT. A developer pinned BELOW the floor gets a SKIP, not a red — `_require_harness`
+#       calls `pytest.skip`. So a below-floor local suite reports green-with-skips, and the floor is
+#       not self-enforcing there; CI installs the floor explicitly instead.
 #       1.24.0 also adds an ERROR-class `file-absent-contradiction` lint rule (gates without
 #       `--strict`) and a pre-spend cassette-portability preflight folded into `record --dry-run`.
 #       See docs/internal/2026-08-18-cowork-harness-1.24.0-adoption-plan.md.
@@ -194,7 +196,7 @@ jobs:
       # CLI hard-fails (exit 2, "unrecognized arguments"), so this step cannot ride the Action's default
       # `latest`. See the header's version policy.
       - name: Lint scenarios (no silent false-greens)
-        uses: yaniv-golan/cowork-harness@v1
+        uses: yaniv-golan/cowork-harness@v2
         with:
           command: lint
           path: cowork-tests/scenarios/
@@ -226,7 +228,7 @@ jobs:
       # `--skip-scenario-drift`. Scenario-drift, like staleness, is only fixable by re-recording, which
       # CI can't do; it surfaces (WARN) in the staleness step below instead of reddening this gate.
       - name: Privacy gate (HARD)
-        uses: yaniv-golan/cowork-harness@v1
+        uses: yaniv-golan/cowork-harness@v2
         with:
           command: verify-cassettes
           path: cowork-tests/cassettes/
@@ -254,7 +256,7 @@ jobs:
 
       - name: Staleness gate (WARN — does not fail the job; CI cannot re-record)
         continue-on-error: true
-        uses: yaniv-golan/cowork-harness@v1
+        uses: yaniv-golan/cowork-harness@v2
         with:
           command: verify-cassettes
           path: cowork-tests/cassettes/
@@ -267,7 +269,7 @@ jobs:
       # it can return the OPPOSITE verdict with no signal. Frozen assertions ARE validated and
       # hard-reject, so this is not "replay validates nothing"; only the scenario object is loose.
       - name: Replay content + manifest-backed assertions (token-free)
-        uses: yaniv-golan/cowork-harness@v1
+        uses: yaniv-golan/cowork-harness@v2
         with:
           command: replay
           path: cowork-tests/cassettes/
