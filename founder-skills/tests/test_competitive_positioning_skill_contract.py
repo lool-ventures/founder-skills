@@ -1767,3 +1767,42 @@ def test_moat_definitions_documents_a_distribution_custom_type() -> None:
     """
     text = (CP_DIR / "references" / "moat-definitions.md").read_text(encoding="utf-8")
     assert re.search(r"custom_distribution", text), "no custom moat type covers distribution/channel defensibility"
+
+
+def test_gate1_reads_challenge_slugs_and_does_not_rederive_it() -> None:
+    """Gate 1 must consume the producer's judgement, not re-compute it in prose.
+
+    It used to select challenges "for each slug in `summary.flagged_slugs` whose verdict does NOT
+    match its draft category" -- a literal token comparison between two DISJOINT vocabularies
+    (verdicts are genuine/adjacent/not_a_competitor; draft categories are
+    direct/adjacent/emerging/do_nothing/custom), so `adjacent` was the only value that could ever
+    match. Measured: a competitor drafted `emerging` and verified `adjacent`, whose own reasoning
+    endorsed the draft, was presented to the founder as "I don't think this genuinely competes".
+
+    `verify_competitors.py` owns this judgement because it is the only place that records why
+    `emerging`/`do_nothing` are excluded (role, not degree of overlap). Two copies of a semantic
+    rule in two languages is how it drifted the first time.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    assert "summary.challenge_slugs" in text or "`challenge_slugs`" in text, (
+        "Gate 1 must read challenge_slugs from the producer"
+    )
+    assert "whose verdict does NOT match its draft category" not in text, (
+        "the prose re-derivation is back — Gate 1 must not recompute what the producer decided"
+    )
+
+
+def test_gate1_renders_the_possible_overlap_annotation() -> None:
+    """A computed founder-decision hint must reach the founder AT the decision.
+
+    `possible_overlap_with` is set by `verify_competitors.py` and rendered by `compose_report.py`
+    into the final report -- but Gate 1, where the founder actually decides whether to add a
+    recall candidate, listed every entry identically. Measured: four of seven entries in that
+    block were competitors already in the draft.
+    """
+    text = SKILL_MD.read_text(encoding="utf-8")
+    assert "possible_overlap_with" in text, (
+        "Gate 1's recall-gap block must render possible_overlap_with — it is computed, and the "
+        "gate is the one place it changes a decision"
+    )
+    assert "may already be covered by" in text

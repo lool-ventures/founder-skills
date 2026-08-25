@@ -60,6 +60,41 @@ _DISAGREEMENT_DIRECTIONS = {
     ("adjacent", "direct"): "downgrade",
 }
 
+# Draft categories on which a NON-genuine verdict ENDORSES the draft rather than challenging it.
+# `flagged_slugs` means only "the verdict was not `genuine`", which is not the same question, and
+# the Gate 1 presentation rule used to re-derive the difference in prose as literal token equality
+# between verdict and draft category. Those are DISJOINT vocabularies -- verdicts are
+# {genuine, adjacent, not_a_competitor}, categories are {direct, adjacent, emerging, do_nothing,
+# custom} -- so `adjacent` is the only value that can ever literally match. Every draft-`direct`
+# entry "did not match" by construction (a verdict is never `direct`), which happened to give the
+# right answer for the wrong reason, while `emerging`/`do_nothing` gave the wrong one outright:
+# measured, a competitor drafted `emerging` and verified `adjacent`, whose own reasoning read
+# "'adjacent' is right and the draft's 'emerging' framing is fair", was presented to the founder
+# as "I don't think this genuinely competes".
+#
+# `adjacent` is endorsement in the plain sense. `emerging` and `do_nothing` are excluded for the
+# same reason they are excluded from `_DISAGREEMENT_DIRECTIONS` above: they encode market ROLE
+# (convergence risk, status-quo alternative), not DEGREE of overlap, so an `adjacent` verdict
+# landing on either is not evidence the draft got anything wrong.
+#
+# `custom` is deliberately NOT here. Its semantics are caller-defined, which means UNKNOWN, not
+# endorsed -- and silently dropping a flag on an unknown category would assert a judgement this
+# producer cannot make. Unknown routes to the founder, which is the safe direction.
+_ENDORSED_BY_ADJACENT = frozenset({"adjacent", "emerging", "do_nothing"})
+
+
+def _is_challenge(verdict: str, draft_category: str | None) -> bool:
+    """Does this flagged verdict actually CHALLENGE the draft, or endorse it?
+
+    The single place this judgement is made. It used to be re-derived in SKILL.md prose, which is
+    how it drifted -- see `_ENDORSED_BY_ADJACENT` above.
+    """
+    if verdict == "not_a_competitor":
+        return True
+    if verdict == "adjacent":
+        return draft_category not in _ENDORSED_BY_ADJACENT
+    return False
+
 
 def _nonempty(v: Any) -> bool:
     return isinstance(v, str) and v.strip() != ""
@@ -159,6 +194,24 @@ def _slug_tokens(slug: str) -> list[str]:
     return [t for t in slug.split("-") if t]
 
 
+# Function words a blind agent's verbose product name carries and a terse draft slug does not.
+# Closed and tiny on purpose: it exists to stop `_slugs_are_variants`' equal-token-count test
+# rejecting a pair whose every real token matches exactly. Measured,
+# `ibm-watsonx-assistant-for-z` vs `ibm-watsonx-assistant-z` differ by the single word "for".
+_SLUG_STOPWORDS = frozenset({"for", "of", "and", "the", "a", "an"})
+
+
+def _significant_tokens(slug: str) -> list[str]:
+    """Slug tokens minus function words -- but never ALL of them.
+
+    A slug that is nothing but stopwords keeps its tokens rather than becoming empty, so the
+    equal-count test still has something to compare and cannot match everything against nothing.
+    """
+    tokens = _slug_tokens(slug)
+    significant = [t for t in tokens if t not in _SLUG_STOPWORDS]
+    return significant or tokens
+
+
 def _token_match_kind(a: str, b: str) -> str | None:
     """ "exact" | "prefix" | None for a single token pair.
 
@@ -202,8 +255,8 @@ def _slugs_are_variants(norm_a: str, norm_b: str) -> bool:
     maximum matchings, the search preferentially lands on one containing an
     exact pair whenever one exists.
     """
-    a_tokens = _slug_tokens(norm_a)
-    b_tokens = _slug_tokens(norm_b)
+    a_tokens = _significant_tokens(norm_a)
+    b_tokens = _significant_tokens(norm_b)
     n = len(a_tokens)
     if n == 0 or n != len(b_tokens):
         return False
@@ -240,6 +293,94 @@ def _draft_text_blob(comp: dict[str, Any]) -> str:
     if isinstance(kd, list):
         parts.append(" ".join(str(x) for x in kd if _nonempty(x)))
     return " ".join(parts).lower()
+
+
+# Phrases that are generic AS A WHOLE. Distinct from `_GENERIC_TEXT_WORDS`, which filters single
+# tokens: "status quo" is a specific competitor identity in a market where the incumbent IS the
+# status quo, even though "status" and "quo" are each generic alone. A per-token filter cannot
+# express that -- an earlier draft of the bigram rule below tested every shared token against
+# `_GENERIC_TEXT_WORDS` and so could not catch the one pair it was written for, since that set
+# contains both "status" and "quo".
+_GENERIC_TEXT_PHRASES = frozenset(
+    {
+        "point solution",
+        "point solutions",
+        "in house",
+        "open source",
+        "do nothing",
+        "manual process",
+        "manual processes",
+        "spreadsheet based",
+    }
+)
+
+
+def _subset_overlap(candidate_norm_slug: str, draft_norm_to_raw: dict[str, str]) -> str | None:
+    """ANNOTATION rule: is a draft slug wholly contained in the candidate's tokens?
+
+    A blind agent slugs from its own verbose product name ("BMC AMI Ops (incl. AMI Ops Insight)"
+    -> `bmc-ami-ops`), which almost never yields the equal token count `_slugs_are_variants`
+    requires -- so that rule is structurally near-inert on this input class, not merely strict.
+    Subset containment is the shape that actually occurs.
+
+    Deliberately narrow, because this must not resurrect the measured false positives recorded on
+    `_slugs_are_variants` (`square`/`squarespace`, `chart`/`chartio`):
+
+    * EXACT token matches only -- no prefix pairs. Both recorded FPs are prefix relations.
+    * The shorter slug needs >= 2 tokens, which excludes single-token slugs entirely (again,
+      both recorded FPs).
+    * Annotation only. Nothing is removed from `unmatched`, so a wrong hit costs a hint, never a
+      hidden gap -- the asymmetry the whole pass is built on.
+    """
+    cand = _significant_tokens(candidate_norm_slug)
+    if len(cand) < 2:
+        return None
+    for draft_n, draft_raw in draft_norm_to_raw.items():
+        draft_tokens = _significant_tokens(draft_n)
+        if len(draft_tokens) < 2 or len(draft_tokens) > len(cand):
+            continue
+        pool = list(cand)
+        if all(tok in pool and not pool.remove(tok) for tok in draft_tokens):  # type: ignore[func-returns-value]
+            return draft_raw
+    return None
+
+
+# WHERE LEXICAL MATCHING STOPS, AND WHY A SIXTH RULE IS NOT THE ANSWER.
+# The three rules above (stopword-insensitive variants, exact-subset, shared bigram) cover the
+# shapes a blind agent's verbose product name actually produces against a terse draft slug. They do
+# NOT cover a pair that shares only a vendor token and no phrase -- e.g. a `broadcom-mainframe-aiops`
+# candidate against a `broadcom-watchtower` draft entry, which are the same company's competing
+# product lines under different brand names. No defensible lexical rule reaches that: the only
+# shared token is the vendor, and matching on a lone vendor token is exactly the false
+# "already covered" hint that `_find_possible_overlap`'s docstring records as costing real gaps.
+#
+# That case is handled by PRESENTATION, not by matching: Gate 1 renders `possible_overlap_with`
+# beside each candidate and the founder adjudicates, which is the one place a human can see that
+# two brand names belong to one vendor. Do not loosen these rules to chase it.
+def _shared_phrase_overlap(candidate_norm_slug: str, draft_norm_to_raw: dict[str, str]) -> str | None:
+    """ANNOTATION rule: do the two slugs share a distinctive consecutive token run?
+
+    Catches the cohort/status-quo shape that neither variant nor subset matching reaches:
+    `in-house-rexx-runbooks-status-quo` and `status-quo-smes` share "status quo" and nothing else.
+
+    A BIGRAM minimum is what keeps this safe. A single shared token would annotate `ibm-x` against
+    `ibm-y` and every other same-vendor pair -- the false-"already covered" hint the module's own
+    history says costs real gaps. The joined phrase is additionally tested against
+    `_GENERIC_TEXT_PHRASES`, not token-by-token against `_GENERIC_TEXT_WORDS`; see that set.
+    """
+    cand = _slug_tokens(candidate_norm_slug)
+    for draft_n, draft_raw in draft_norm_to_raw.items():
+        draft_tokens = _slug_tokens(draft_n)
+        for size in range(len(cand), 1, -1):
+            for i in range(len(cand) - size + 1):
+                run = cand[i : i + size]
+                phrase = " ".join(run)
+                if phrase in _GENERIC_TEXT_PHRASES:
+                    continue
+                for j in range(len(draft_tokens) - size + 1):
+                    if draft_tokens[j : j + size] == run:
+                        return draft_raw
+    return None
 
 
 def _find_possible_overlap(candidate_norm_slug: str, text_blobs: list[tuple[str, str]]) -> str | None:
@@ -406,11 +547,18 @@ def diff_recall_gaps(blind_payload: Any, draft_competitors: list[dict[str, Any]]
             still_remaining[n] = entry
     remaining = still_remaining
 
-    # --- Task 3: cohort-suspicion text annotation (never demotes) ---
+    # --- Task 3: cohort-suspicion annotation (NEVER demotes) ---
+    # Three rules, tried in descending order of how much they claim, all annotation-only. The
+    # text rule speaks first because a cohort naming the candidate verbatim in its own prose is
+    # the strongest evidence available; the two slug-shape rules catch what it cannot see.
     unmatched: list[dict[str, Any]] = []
     for n in sorted(remaining):
         entry = dict(remaining[n])
-        overlap = _find_possible_overlap(entry["slug"], text_blobs)
+        overlap = (
+            _find_possible_overlap(entry["slug"], text_blobs)
+            or _subset_overlap(entry["slug"], draft_norm_to_raw)
+            or _shared_phrase_overlap(entry["slug"], draft_norm_to_raw)
+        )
         if overlap is not None:
             entry["possible_overlap_with"] = overlap
         unmatched.append(entry)
@@ -447,6 +595,7 @@ def validate(
     seen: list[str] = []
     counts = {"genuine": 0, "adjacent": 0, "not_a_competitor": 0}
     flagged_slugs: list[str] = []
+    challenge_slugs: list[str] = []
     syw_violations: list[str] = []
     category_disagreements: list[dict[str, str]] = []
 
@@ -484,6 +633,8 @@ def validate(
         # --- show-your-work gate: a flag must prove it understood the company ---
         if verdict != "genuine":
             flagged_slugs.append(slug)
+            if _is_challenge(verdict, draft_category):
+                challenge_slugs.append(slug)
             if not _nonempty(v.get("reasoning")):
                 syw_violations.append(slug)
                 errors.append(f"{slug}: flagged verdict requires non-empty reasoning")
@@ -517,6 +668,10 @@ def validate(
         "not_a_competitor": counts["not_a_competitor"],
         "flagged": len(flagged_slugs),
         "flagged_slugs": flagged_slugs,
+        # The subset of `flagged_slugs` that actually challenges the draft. `flagged_slugs`
+        # keeps its exact prior meaning ("the verdict was not genuine") -- tests pin it and
+        # other readers depend on it.
+        "challenge_slugs": challenge_slugs,
         "show_your_work_violations": sorted(set(syw_violations)),
         "category_disagreements": category_disagreements,
     }
@@ -596,17 +751,36 @@ def main() -> int:
             print(f"Error: refusing to write to {args.output!r}", file=sys.stderr)
             return 1
         os.makedirs(parent, exist_ok=True)
-        # Always write the artifact (audit trail) even on validation error; the
-        # nonzero exit below halts the producer pipe.
-        with open(abs_path, "w", encoding="utf-8") as f:
-            f.write(text)
-        receipt = {
-            "ok": not errors,
-            "path": abs_path,
-            "flagged": validated["summary"]["flagged"],
-            "status": validated["validation"]["status"],
-        }
-        sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
+        # A REJECTED INPUT DOES NOT TOUCH THE CANONICAL PATH. This used to write the artifact
+        # unconditionally -- "always write (audit trail) even on validation error" -- which kept
+        # the audit trail at the cost of the fleet's producer contract (CLAUDE.md: a producer that
+        # rejects its input leaves `-o` untouched and exits non-zero). Two costs, both real: the
+        # prior good artifact was destroyed by a run that produced nothing usable, and a reader
+        # could not tell an accepted artifact from a rejected one without parsing
+        # `validation.status` -- so a downstream consumer that only checked existence read a
+        # rejected verification as a completed one.
+        #
+        # The audit trail did not require clobbering. On rejection the same bytes go to a
+        # `.rejected.json` sidecar, so nothing is lost and nothing is overwritten.
+        if errors:
+            rejected_path = f"{abs_path}.rejected.json"
+            with open(rejected_path, "w", encoding="utf-8") as f:
+                f.write(text)
+            print(
+                f"Error: input rejected, {abs_path} left unchanged; the rejected artifact was kept at {rejected_path}",
+                file=sys.stderr,
+            )
+            sys.stdout.write(text + "\n")
+        else:
+            with open(abs_path, "w", encoding="utf-8") as f:
+                f.write(text)
+            receipt = {
+                "ok": True,
+                "path": abs_path,
+                "flagged": validated["summary"]["flagged"],
+                "status": validated["validation"]["status"],
+            }
+            sys.stdout.write(json.dumps(receipt, separators=(",", ":")) + "\n")
     else:
         sys.stdout.write(text + "\n")
 

@@ -5,8 +5,21 @@ import json
 import pathlib
 import subprocess
 import sys
+from typing import Any
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "skills/competitive-positioning/scripts/verify_competitors.py"
+
+
+def _vc() -> Any:
+    """Load verify_competitors as a module. The rest of this file drives the CLI; the matcher
+    rules are pure functions and unit-testing them directly is both cheaper and more precise."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("verify_competitors_under_test", SCRIPT)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _run(payload: dict, *args: str) -> "subprocess.CompletedProcess[str]":
@@ -746,3 +759,223 @@ def test_overlap_annotation_fires_on_a_verbatim_cohort_member(tmp_path: pathlib.
     assert gaps["probable_duplicates"] == [], "a text hint must never demote"
     assert [u["slug"] for u in gaps["unmatched"]] == ["sunamp"]
     assert gaps["unmatched"][0].get("possible_overlap_with") == "pcm-tes-entrants"
+
+
+def test_rejected_input_leaves_the_canonical_artifact_untouched(tmp_path: pathlib.Path) -> None:
+    """A validation error must not overwrite competitor_verification.json.
+
+    This producer used to write the artifact unconditionally -- "always write (audit trail) even
+    on validation error" -- which destroyed a prior good artifact on a run that produced nothing
+    usable, and left a reader unable to tell an accepted artifact from a rejected one without
+    parsing `validation.status`. The audit trail never required clobbering: on rejection the same
+    bytes go to a `.rejected.json` sidecar.
+    """
+    out = tmp_path / "competitor_verification.json"
+    out.write_text('{"sentinel": true}', encoding="utf-8")
+
+    payload = _base()
+    # A flagged verdict with no reasoning trips the show-your-work gate.
+    payload["verdicts"][0]["verdict"] = "not_a_competitor"
+    payload["verdicts"][0]["reasoning"] = ""
+
+    proc = _run(payload, "--output", str(out))
+    assert proc.returncode != 0, f"a show-your-work violation must exit non-zero; stderr={proc.stderr!r}"
+    assert out.read_text(encoding="utf-8") == '{"sentinel": true}', (
+        "a rejected input overwrote the canonical competitor_verification.json"
+    )
+    sidecar = tmp_path / "competitor_verification.json.rejected.json"
+    assert sidecar.exists(), "the rejected artifact must still be kept for audit"
+    assert json.loads(sidecar.read_text(encoding="utf-8"))["validation"]["status"] != "valid"
+    assert "left unchanged" in proc.stderr
+
+
+def test_accepted_input_still_writes_the_artifact_and_a_receipt(tmp_path: pathlib.Path) -> None:
+    """The counter-test: a clean run is unchanged -- artifact written, `ok:true` receipt on stdout."""
+    out = tmp_path / "competitor_verification.json"
+    proc = _run(_base(), "--output", str(out))
+    assert proc.returncode == 0, proc.stderr
+    assert out.exists()
+    receipt = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert receipt["ok"] is True
+    assert receipt["path"] == str(out)
+    assert not (tmp_path / "competitor_verification.json.rejected.json").exists()
+
+
+def _verdict(slug: str, verdict: str, action: str = "keep") -> dict:
+    return {
+        "slug": slug,
+        "verdict": verdict,
+        "independent_characterization": {
+            "buyer": "field-service SMBs",
+            "job_to_be_done": "dispatch techs",
+            "category": "FSM",
+            "monetization": "SaaS",
+            "evidence_source": "researched",
+        },
+        "overlap": {"buyer": True, "job_to_be_done": False, "category": True},
+        "reasoning": "real overlap, different centre of gravity",
+        "confidence": "high",
+        "recommended_action": action,
+    }
+
+
+def _categorized_landscape(tmp: pathlib.Path, slug: str, category: str) -> str:
+    path = tmp / "landscape_draft.json"
+    path.write_text(json.dumps({"competitors": [{"slug": slug, "category": category}]}), encoding="utf-8")
+    return str(path)
+
+
+def _summary_for(tmp: pathlib.Path, verdict: str, draft_category: str) -> dict:
+    payload = _base()
+    payload["verdicts"] = [_verdict("acme", verdict, "reclassify_adjacent")]
+    proc = _run(payload, "--landscape", _categorized_landscape(tmp, "acme", draft_category))
+    assert proc.returncode == 0, proc.stderr
+    summary: dict = json.loads(proc.stdout)["summary"]
+    return summary
+
+
+def test_adjacent_verdict_on_an_emerging_draft_is_not_a_challenge(tmp_path: pathlib.Path) -> None:
+    """The measured case. A competitor drafted `emerging`, verified `adjacent`, whose own
+    reasoning endorsed the draft, was presented to the founder as "I don't think this genuinely
+    competes" -- because the Gate 1 rule compared verdict and draft category as literal tokens
+    and `emerging` != `adjacent`."""
+    s = _summary_for(tmp_path, "adjacent", "emerging")
+    assert s["flagged_slugs"] == ["acme"], "flagged keeps its meaning: the verdict was not genuine"
+    assert s["challenge_slugs"] == [], "an endorsement must not reach the founder as a challenge"
+    assert s["category_disagreements"] == [], "emerging is excluded from disagreements by design"
+
+
+def test_adjacent_verdict_on_an_adjacent_draft_is_not_a_challenge(tmp_path: pathlib.Path) -> None:
+    assert _summary_for(tmp_path, "adjacent", "adjacent")["challenge_slugs"] == []
+
+
+def test_adjacent_verdict_on_a_do_nothing_draft_is_not_a_challenge(tmp_path: pathlib.Path) -> None:
+    """Role, not degree -- same exclusion as `emerging`."""
+    assert _summary_for(tmp_path, "adjacent", "do_nothing")["challenge_slugs"] == []
+
+
+def test_adjacent_verdict_on_a_direct_draft_is_a_challenge(tmp_path: pathlib.Path) -> None:
+    """The genuine downgrade: drafted as a head-on competitor, verified as adjacent."""
+    s = _summary_for(tmp_path, "adjacent", "direct")
+    assert s["challenge_slugs"] == ["acme"]
+    assert s["category_disagreements"][0]["direction"] == "downgrade"
+
+
+def test_adjacent_verdict_on_a_custom_draft_IS_a_challenge(tmp_path: pathlib.Path) -> None:
+    """`custom` is caller-defined, i.e. UNKNOWN -- not endorsed.
+
+    Silently dropping the flag would assert a judgement the producer cannot make, so an unknown
+    category routes to the founder. Deliberate asymmetry with `_DISAGREEMENT_DIRECTIONS`, which
+    excludes `custom` because no verdict is *expected* for it.
+    """
+    assert _summary_for(tmp_path, "adjacent", "custom")["challenge_slugs"] == ["acme"]
+
+
+def test_not_a_competitor_is_always_a_challenge(tmp_path: pathlib.Path) -> None:
+    for category in ("direct", "adjacent", "emerging", "do_nothing", "custom"):
+        payload = _base()
+        payload["verdicts"] = [_verdict("acme", "not_a_competitor", "challenge_removal")]
+        proc = _run(payload, "--landscape", _categorized_landscape(tmp_path, "acme", category))
+        assert proc.returncode == 0, proc.stderr
+        assert json.loads(proc.stdout)["summary"]["challenge_slugs"] == ["acme"], category
+
+
+def test_challenge_slugs_is_a_subset_of_flagged_slugs(tmp_path: pathlib.Path) -> None:
+    """The invariant that keeps the two readable together."""
+    for verdict in ("adjacent", "not_a_competitor"):
+        for category in ("direct", "adjacent", "emerging", "do_nothing", "custom"):
+            s = _summary_for(tmp_path, verdict, category)
+            assert set(s["challenge_slugs"]) <= set(s["flagged_slugs"])
+
+
+# --- G4: duplicate detection against the real blind-recall run that exposed it ----------------
+# The draft at recall time, and the eight candidates a blind agent returned. Four of the seven
+# unmatched entries were competitors already in the draft, and the pass reported
+# `probable_duplicates: []` -- so 57% of the founder-facing "companies you may be missing" block
+# was noise. Real slugs, because the failure was a property of how a blind agent slugs verbose
+# product names, and synthetic ones would not reproduce it.
+_REAL_DRAFT = {
+    "bmc-ami": "bmc-ami",
+    "ibm-watsonx-assistant-z": "ibm-watsonx-assistant-z",
+    "broadcom-watchtower": "broadcom-watchtower",
+    "geniez-ai": "geniez-ai",
+    "rocket-eva": "rocket-eva",
+    "hypercubic": "hypercubic",
+    "status-quo-smes": "status-quo-smes",
+}
+
+
+def _annotation(candidate: str) -> str | None:
+    vc = _vc()
+    result: str | None = vc._subset_overlap(candidate, _REAL_DRAFT) or vc._shared_phrase_overlap(candidate, _REAL_DRAFT)
+    return result
+
+
+def _is_variant_of_any(candidate: str) -> str | None:
+    vc = _vc()
+
+    return next((raw for norm, raw in _REAL_DRAFT.items() if vc._slugs_are_variants(candidate, norm)), None)
+
+
+def test_stopword_only_difference_is_a_real_duplicate() -> None:
+    """`ibm-watsonx-assistant-for-z` vs `ibm-watsonx-assistant-z`: every token matches exactly and
+    the pair was rejected on the single function word "for", because the variant test compares raw
+    token COUNTS. That is a demotion, not a hint."""
+    assert _is_variant_of_any("ibm-watsonx-assistant-for-z") == "ibm-watsonx-assistant-z"
+
+
+def test_subset_containment_is_annotated() -> None:
+    """`bmc-ami` is wholly contained in `bmc-ami-ops` -- the shape a verbose blind name actually
+    produces, and one the equal-count variant test can never see."""
+    assert _annotation("bmc-ami-ops") == "bmc-ami"
+
+
+def test_shared_distinctive_bigram_is_annotated() -> None:
+    """`status quo` is shared and distinctive.
+
+    This is the case a per-token generic filter CANNOT catch: `_GENERIC_TEXT_WORDS` contains both
+    "status" and "quo", so a rule requiring every shared token to be non-generic annotates nothing
+    here. The phrase is tested as a whole instead.
+    """
+    assert _annotation("in-house-rexx-runbooks-status-quo") == "status-quo-smes"
+
+
+def test_the_lexical_ceiling_is_real_and_recorded() -> None:
+    """`broadcom-mainframe-aiops` vs `broadcom-watchtower` share one token and no phrase.
+
+    No defensible lexical rule catches this, and pinning it stops a sixth patch being attempted.
+    Its remedy is Gate 1 rendering `possible_overlap_with` beside the candidate so the founder
+    adjudicates -- not a looser matcher.
+    """
+    assert _is_variant_of_any("broadcom-mainframe-aiops") is None
+    assert _annotation("broadcom-mainframe-aiops") is None
+
+
+def test_the_real_gaps_are_neither_demoted_nor_annotated() -> None:
+    """The property that matters most: the pass is demote-only because hiding a real gap is worse
+    than the duplicate it prevents. All three genuine gaps from that run stayed clean -- a false
+    annotation tells the founder a real gap is already covered."""
+    for gap in ("ca-ops-mvs-event-automation", "kyndryl-mainframe-ai-services", "precisely-ironstream"):
+        assert _is_variant_of_any(gap) is None, gap
+        assert _annotation(gap) is None, gap
+
+
+def test_recorded_false_positives_stay_excluded() -> None:
+    """The brand-prefix FPs the variant test's docstring records, re-asserted against all three
+    rules. Every loosening here has to clear these."""
+    vc = _vc()
+
+    for short, long_ in (("square", "squarespace"), ("chart", "chartio")):
+        pair = {short: short}
+        assert not vc._slugs_are_variants(long_, short)
+        assert vc._subset_overlap(long_, pair) is None, f"{long_}/{short} single-token subset"
+        assert vc._shared_phrase_overlap(long_, pair) is None
+
+
+def test_same_vendor_different_product_is_not_annotated() -> None:
+    """A single shared token must never annotate: `ibm-x` and `ibm-y` are not the same company's
+    entry, and a false "already covered" hint is exactly what costs a real gap."""
+    vc = _vc()
+
+    assert vc._shared_phrase_overlap("ibm-watsonx-orchestrate", {"ibm-zos-connect": "ibm-zos-connect"}) is None
+    assert vc._subset_overlap("ibm-watsonx-orchestrate", {"ibm-zos-connect": "ibm-zos-connect"}) is None
