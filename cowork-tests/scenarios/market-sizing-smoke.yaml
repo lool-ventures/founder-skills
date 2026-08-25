@@ -68,6 +68,15 @@ assert:
   # reporting a defect. To assert it, mandate a tracker in SKILL.md first, then pair it with
   # `task_count_min: 1` — see financial-model-review-smoke.yaml.
   - file_exists: outputs/artifacts/market-sizing-cadence/report.json
+  # WHERE EACH SENSITIVITY TIER CAME FROM. `confidence_source` is stamped per scenario --
+  # range | validation | reconciled | default -- because "no widening happened" and "no widening
+  # was called for" were previously the same artifact. Asserting it EXISTS proves the tiering path
+  # ran at all; the tier itself is model-authored, so pinning a value here would be a
+  # re-record-fragility source rather than a guard.
+  - artifact_json:
+      artifact: outputs/artifacts/market-sizing-cadence/sensitivity.json
+      path: scenarios.0.confidence_source
+      exists: true
   - artifact_json:
       artifact: outputs/artifacts/market-sizing-cadence/report.json
       path: coaching_payload.schema_version

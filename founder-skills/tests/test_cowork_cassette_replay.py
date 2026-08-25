@@ -65,6 +65,16 @@ SCENARIOS_DIR = Path(__file__).resolve().parents[2] / "cowork-tests" / "scenario
 # quietly matching nothing (a directory glob finding zero new scenarios is not evidence
 # anything is fine — see leak_scan.py's own docstring on that exact failure mode).
 _NO_CASSETTE_ALLOWLIST: dict[str, str] = {
+    "deck-review-stage-disagreement": (
+        "deliberately un-cassetted, same reasoning as the deck-no-slide lane below: this is the LIVE "
+        "verification lane for the stage-disagreement fix, and the half that needs verifying is PROSE "
+        "— whether the author stops writing the deck's claimed stage into the gate summary now that "
+        "the producer states it. A cassette freezes one past agent's behaviour and re-asserts it, "
+        "which is the opposite of what this lane is for. It is also the only deck in the corpus that "
+        "contradicts itself about its own stage: the smoke deck says seed and reads seed, and the "
+        "gate-stop deck is out of scope on both counts. Record it only if it is ever wanted as a "
+        "frozen regression gate."
+    ),
     "deck-review-numeric-chain": (
         "deliberately un-cassetted: the LIVE verification lane for the numeric chain (Steps 3.5-3.9). "
         "Most of what it verifies is PROSE — three dispatch templates asking a sub-agent to extract a "

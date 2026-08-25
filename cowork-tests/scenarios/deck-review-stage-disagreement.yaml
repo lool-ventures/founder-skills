@@ -1,0 +1,80 @@
+name: deck-review-stage-disagreement
+session: ../sessions/default.yaml
+fidelity: cowork
+skills: [deck-review]
+
+# THE DECK CLAIMS ONE STAGE AND THE SIGNALS SAY ANOTHER, and the founder has to be told both.
+#
+# The confirmation gate refuses a summary naming any stage other than the one it confirms —
+# correctly, because a founder shown one stage while a different one is authorised cannot give
+# informed consent. But that rule also made an ACCURATE summary un-emittable in the one case where
+# the disagreement is the most decision-relevant thing on the screen: the deck says Seed, the
+# traction reads pre-seed, and the review has to grade against one of them. The sentence had to be
+# dropped to get the gate out.
+#
+# It is no longer the author's to write. The producer reads the deck's claimed stage from the
+# extracted inventory, requires run-id parity, and appends its own labelled sentence to the payload
+# the founder is shown. The author's prose stays fully subject to the naming check.
+#
+# WHY THIS LANE AND NOT AN ASSERT ON AN EXISTING ONE: no other deck in the corpus contradicts
+# itself about its own stage. The smoke deck says seed and reads seed; the gate-stop deck is
+# out-of-scope on both counts. This is the only shape that exercises the branch.
+#
+# on_unanswered: first — the confirmation gate's option 1 is "Looks right", which is the proceed
+# path and is paraphrase-proof (it is a canonical constant, not model-authored).
+on_unanswered: first
+
+prompt: |
+  I'm the founder of Northwind. Please use the deck-review skill to review my pitch deck. Here
+  is the full slide text — use 'northwind' as the slug:
+
+  SLIDE 1: TITLE
+  Northwind — automated compliance evidence for regulated SaaS
+  Seed round open
+
+  SLIDE 2: PROBLEM
+  Compliance teams rebuild the same evidence pack for every audit, by hand, every quarter.
+
+  SLIDE 3: SOLUTION
+  Northwind watches your cloud accounts and assembles the evidence pack continuously.
+
+  SLIDE 4: TRACTION
+  3 design partners, none paying yet. First pilot signed last month.
+  No revenue to date.
+
+  SLIDE 5: TEAM
+  Two technical co-founders, full-time for four months.
+
+  SLIDE 6: ASK
+  Raising $1.5M.
+
+assert:
+  - result: success
+  # No `all_tasks_completed` here: nothing in this skill asks the agent for a task list, so the
+  # assert is satisfiable only by chance and a losing run blocks a paid record rather than
+  # reporting a defect. To assert it, mandate a tracker in SKILL.md first, then pair it with
+  # `task_count_min: 1` — see financial-model-review-smoke.yaml.
+
+  # The deck's own claim was extracted. Without this the lane could pass on a deck the inventory
+  # read as stating nothing, which is the same evidence as the branch never firing.
+  - artifact_json:
+      artifact: outputs/artifacts/deck-review-northwind/deck_inventory.json
+      path: claimed_stage
+      equals: seed
+
+  # THE SIGNATURE ASSERT. The producer's own labelled sentence reached the founder. Matched on the
+  # producer-authored prefix, which is a constant in the script rather than model prose — the two
+  # stage names around it are substituted, so only the frame is pinned.
+  - transcript_matches: 'The deck states:'
+
+  # And the gate still fired and was answered, so the sentence was shown AT a decision rather than
+  # narrated afterwards.
+  - gate_answers_delivered: true
+  - gate_answer_count_min: 1
+
+  - skill_triggered: '(founder-skills:)?deck-review$'
+  - subagent_dispatched: 'deck-review'
+  - subagent_tool_absent: 'Bash'
+  - no_delete_in_outputs: true
+  - computer_links_resolve_if_present: true
+  - allow_stall: true
