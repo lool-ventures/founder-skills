@@ -66,14 +66,17 @@ SCENARIOS_DIR = Path(__file__).resolve().parents[2] / "cowork-tests" / "scenario
 # anything is fine — see leak_scan.py's own docstring on that exact failure mode).
 _NO_CASSETTE_ALLOWLIST: dict[str, str] = {
     "deck-review-stage-disagreement": (
-        "deliberately un-cassetted, same reasoning as the deck-no-slide lane below: this is the LIVE "
-        "verification lane for the stage-disagreement fix, and the half that needs verifying is PROSE "
-        "— whether the author stops writing the deck's claimed stage into the gate summary now that "
-        "the producer states it. A cassette freezes one past agent's behaviour and re-asserts it, "
-        "which is the opposite of what this lane is for. It is also the only deck in the corpus that "
-        "contradicts itself about its own stage: the smoke deck says seed and reads seed, and the "
-        "gate-stop deck is out of scope on both counts. Record it only if it is ever wanted as a "
-        "frozen regression gate."
+        "un-cassetted because it CANNOT record green: it is measuring a real defect. Three paid "
+        "recordings, three different behaviours — the producer's sentence reached the founder "
+        "verbatim in the gate question, then paraphrased, then not at all. The producer emits it "
+        "only in its stdout receipt, so whether the founder ever sees it depends on the agent "
+        "relaying it, which SKILL.md asks for in prose and prose does not enforce. The lane is "
+        "correct and the fix is not yet, so this stays red rather than being loosened until it "
+        "passes. Do not record it, and do not relax the assert to make it green — the assert is "
+        "already matched on the property (the deck's claim is NAMED beside the confirmed stage) "
+        "rather than on any wording. It is also the only deck in the corpus that contradicts "
+        "itself about its own stage: the smoke deck says seed and reads seed, and the gate-stop "
+        "deck is out of scope on both counts."
     ),
     "deck-review-numeric-chain": (
         "deliberately un-cassetted: the LIVE verification lane for the numeric chain (Steps 3.5-3.9). "
@@ -231,19 +234,6 @@ _NO_CASSETTE_ALLOWLIST: dict[str, str] = {
         "docs/internal/2026-08-24-cassette-corpus-value-analysis.md. Re-record on purpose with `rerecord.sh "
         "<name>` (the bare form only refreshes scenarios that already have a cassette). The contested-debate "
         "path, distinct from ic-sim-smoke's consensus path. ic-sim keeps its tripwire via -smoke. ~$5.40."
-    ),
-    "market-sizing-smoke": (
-        "DELIBERATELY UN-CASSETTED as of 2026-08-24 — the cassette was deleted, the scenario kept. Rationale for "
-        "the whole batch: a cassette replays FROZEN events and re-evaluates frozen assertions against them, so it "
-        "cannot detect a skill-behaviour regression — measured, 18 of the then-22 cassettes were recorded against "
-        "since-changed skills and all 22 still replayed green. The corpus therefore bought a per-skill staleness "
-        "tripwire, analyzer fixtures, and documentation of a past paid run, at $86.36 per hash-format epoch. Full "
-        "analysis, including what each deletion gives up: "
-        "docs/internal/2026-08-24-cassette-corpus-value-analysis.md. Re-record on purpose with `rerecord.sh "
-        "<name>` (the bare form only refreshes scenarios that already have a cassette). Superseded by "
-        "market-sizing-remote-lane for the tripwire. Deleting it is net positive: it removes one of three "
-        "documented delivery_check WARN cases and closes the long-standing 'present_files_called authored but "
-        "never evaluated' item — a cassette-less lane has nothing frozen to diverge from. ~$4.05."
     ),
 }
 

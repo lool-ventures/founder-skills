@@ -57,9 +57,6 @@ recognise. They now say what is wrong with the file and leave it alone.
 
 - A confidence grade you supply for a market-sizing assumption can no longer be narrower than the
   grade the validation step arrived at. The wider of the two is used.
-- Deck review states the stage your deck claims, when the deck states one and the review reads it
-  differently. That disagreement is often the most decision-relevant thing at the confirmation
-  question, and it previously had to be left out.
 - A leftover empty field is accepted wherever it means "nothing to report", instead of being
   rejected as a formatting error in some places and accepted in others.
 
