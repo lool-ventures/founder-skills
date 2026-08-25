@@ -88,9 +88,10 @@ assert:
   # The skill still WORKS on this lane — what the lane changes is whether its output counts as
   # delivered, not whether the pipeline runs.
   - result: success
-  - all_tasks_completed: true
-  # The deliverable is still PRODUCED at the contracted path. On lane: remote this asserts production
-  # only; it deliberately makes no delivery claim, which is the whole distinction under test.
+  # No `all_tasks_completed` here: nothing in this skill asks the agent for a task list, so the
+  # assert is satisfiable only by chance and a losing run blocks a paid record rather than
+  # reporting a defect. To assert it, mandate a tracker in SKILL.md first, then pair it with
+  # `task_count_min: 1` — see financial-model-review-smoke.yaml.
   - file_exists: outputs/artifacts/market-sizing-cadence/report.json
   # Entered through the Skill tool (prefix-tolerant).
   - skill_triggered: '(founder-skills:)?market-sizing$'

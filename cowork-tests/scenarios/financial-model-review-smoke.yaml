@@ -46,7 +46,12 @@ assert:
   - result: success
   # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
   # the deliverable but stranded steps, which result:success alone misses.
+  # Paired because financial-model-review/SKILL.md mandates a task tracker. Unpaired,
+  # `all_tasks_completed` passes vacuously on a task-free run ("no tasks were created — cannot
+  # verify completion"); paired, such a run fails as the skill defect it is. Do not copy this pair
+  # to a skill that does not mandate a tracker — there it is a coin flip, not a check.
   - all_tasks_completed: true
+  - task_count_min: 1
   - file_exists: outputs/artifacts/financial-model-review-cadence/report.json
   - artifact_json:
       artifact: outputs/artifacts/financial-model-review-cadence/report.json

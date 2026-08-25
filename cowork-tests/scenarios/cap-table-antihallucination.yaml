@@ -50,14 +50,10 @@ assert:
   - result: success
   # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
   # the deliverable but stranded steps, which result:success alone misses.
-  - all_tasks_completed: true
-  # The signature negative, asserted POSITIVELY: the skill must explicitly flag the exclusivity field
-  # as blank/absent — proving it recognized the absence instead of fabricating a value. (A
-  # transcript_not_matches on "45" is too brittle: the skill legitimately COACHES "negotiate 30-45
-  # days" once a value is filled in, which is correct advice, not a hallucinated extraction.)
-  # Phrasing varies run-to-run ("___ days", "nothing filled in", "the number of days is blank",
-  # "not specified"), so the alternation is broad and the window wide — the skill ALWAYS flags the blank;
-  # only the wording moves.
+  # No `all_tasks_completed` here: nothing in this skill asks the agent for a task list, so the
+  # assert is satisfiable only by chance and a losing run blocks a paid record rather than
+  # reporting a defect. To assert it, mandate a tracker in SKILL.md first, then pair it with
+  # `task_count_min: 1` — see financial-model-review-smoke.yaml.
   - transcript_matches: 'exclusivit[\s\S]{0,150}(blank|___|nothing (is )?(filled|specified)|(not|nothing) filled|filled in|no (number|value|duration|days)|missing|not (specified|stated|provided|given)|empty|left blank|unspecified)'
   # Uploaded input is read-only — the extractor must READ the uploaded term sheet, never mutate it. Guard
   # the upload's content hash (0.29.0 captures uploads as a read-only input root, so input_unmodified now

@@ -35,8 +35,10 @@ assert:
   - result: success
   # Every step the skill planned (TaskCreate/TaskUpdate) ran to completion — catches a run that
   # produced the deliverable but stranded steps (a truncation/recovery smell result:success misses).
-  - all_tasks_completed: true
-  # Fast-assess sentinel proves Phase O ran (path confirmed at discovery; -fastassess slug dir).
+  # No `all_tasks_completed` here: nothing in this skill asks the agent for a task list, so the
+  # assert is satisfiable only by chance and a losing run blocks a paid record rather than
+  # reporting a defect. To assert it, mandate a tracker in SKILL.md first, then pair it with
+  # `task_count_min: 1` — see financial-model-review-smoke.yaml.
   - file_exists: outputs/artifacts/cap-table-cadence-fastassess/fast_assess_only.json
   # Full pipeline skipped: no analytical sub-agent dispatch in fast-assess.
   - dispatch_count_max: 0

@@ -38,7 +38,10 @@ assert:
   - result: success
   # Every planned step (TaskCreate/TaskUpdate) ran to completion — catches a run that produced
   # the deliverable but stranded steps, which result:success alone misses.
-  - all_tasks_completed: true
+  # No `all_tasks_completed` here: nothing in this skill asks the agent for a task list, so the
+  # assert is satisfiable only by chance and a losing run blocks a paid record rather than
+  # reporting a defect. To assert it, mandate a tracker in SKILL.md first, then pair it with
+  # `task_count_min: 1` — see financial-model-review-smoke.yaml.
   - file_exists: outputs/artifacts/cap-table-cadence/instruments.json
   # Uploaded input is read-only — the skill must READ the uploaded Carta export, never mutate it. Guard
   # the upload's content hash (0.29.0 captures uploads as a read-only input root, so input_unmodified now

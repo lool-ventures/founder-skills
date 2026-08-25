@@ -35,7 +35,10 @@ prompt: |
 
 assert:
   - result: success
-  - all_tasks_completed: true
+  # No `all_tasks_completed` here: nothing in this skill asks the agent for a task list, so the
+  # assert is satisfiable only by chance and a losing run blocks a paid record rather than
+  # reporting a defect. To assert it, mandate a tracker in SKILL.md first, then pair it with
+  # `task_count_min: 1` — see financial-model-review-smoke.yaml.
   - file_exists: outputs/artifacts/market-sizing-meridian/report.json
 
   # --- the point of this lane ---------------------------------------------------------------
