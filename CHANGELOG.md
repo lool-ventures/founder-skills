@@ -5,6 +5,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Highlights
+
+**A check that refuses no longer leaves its answer behind.** Three of the steps that inspect
+your documents wrote their result to disk *before* they had finished checking it. So a check
+could reject what it found and still leave the rejected version sitting there as though it had
+been accepted. In the cap-table skill this was the anti-hallucination check itself: it exists to
+stop an invented figure reaching the arithmetic, and on a refusal the invented figure was already
+written down for the arithmetic to read. In the deck review, a stage-confirmation question the
+skill had refused to ask you could still be recorded as answered — and then authorise the whole
+review. Nothing is written now until the checking is done.
+
+**The competitor set you are asked about is the one the analysis actually disputes.** When the
+skill verifies your competitor list, some entries come back flagged for a second look — and a
+flag can mean two opposite things: "this does not really compete" or "your own framing of it was
+right". Those were being shown to you identically, so a competitor whose verification *agreed*
+with you was presented as one to challenge. The verification now says which it means, and the
+question you are asked reflects that.
+
+**"Companies you may be missing" no longer buries the real gaps.** The blind second search looks
+for competitors your list omits. Several of the things it returned were companies already on your
+list under a different name, listed indistinguishably from genuinely new ones — on one run, four
+of seven. Near-duplicates are now recognised and marked, and where one is only *possibly* the same
+company you are told so at the moment you decide, rather than in the report afterwards. Nothing is
+ever hidden on suspicion: a candidate that might be a duplicate is still shown to you.
+
+**A market input that was never stress-tested now says so.** Market sizing widens uncertain
+assumptions and reports how much each one moves the answer. A figure marked as sourced was allowed
+to skip that entirely — and "sourced" often means corroborated rather than precise, so the input a
+sceptical investor pushes hardest on could be the one input never tested. On a real run that was
+the per-unit price, the one figure the analysis itself had flagged as unconfirmable. Any figure the
+maths uses that carries no range is now reported, and a figure nothing has graded is reported
+separately.
+
+**A tool pointed at the wrong file says so, instead of crashing.** Several steps that read a file
+you name would fail with a stack trace, and one could silently discard part of a file it did not
+recognise. They now say what is wrong with the file and leave it alone.
+
+### Added
+
+- Market sizing reports any figure the calculation consumed that was never stress-tested, and
+  separately reports a figure that carries no confidence grade at all.
+- Competitive positioning tells you, at the point you decide, when a suggested missing competitor
+  may already be on your list under another name.
+- Competitive positioning reports when the competitor-set verification ran and was refused, rather
+  than presenting an unverified set exactly as it presents a verified one.
+
+### Changed
+
+- A confidence grade you supply for a market-sizing assumption can no longer be narrower than the
+  grade the validation step arrived at. The wider of the two is used.
+- Deck review states the stage your deck claims, when the deck states one and the review reads it
+  differently. That disagreement is often the most decision-relevant thing at the confirmation
+  question, and it previously had to be left out.
+- A leftover empty field is accepted wherever it means "nothing to report", instead of being
+  rejected as a formatting error in some places and accepted in others.
+
+### Fixed
+
+- A step whose result was rejected can no longer be recorded as accepted, in three places where it
+  could be.
+- A competitor whose verification agreed with your own framing is no longer presented to you as one
+  to challenge.
+- Near-duplicate competitor names are recognised, so the missing-competitor list is not padded with
+  companies you already listed. Genuinely different companies whose names share the same words are
+  not merged.
+- Reading a file that is missing, malformed, or simply the wrong file now produces an explanation
+  rather than a stack trace.
+
 ## [0.9.0] - 2026-08-19 — A review you stopped is a review you do not receive
 
 ### Highlights
