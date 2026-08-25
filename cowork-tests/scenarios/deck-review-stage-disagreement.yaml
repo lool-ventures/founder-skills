@@ -66,18 +66,17 @@ assert:
   # question itself. Matched on the producer-authored prefix, a constant in the script rather than
   # model prose — the two stage names around it are substituted, so only the frame is pinned.
   #
-  # `question_asked`, NOT `transcript_matches`: the latter reads top-level assistant text only, and
-  # a gate question lives in a tool_use, so no phrasing of it could ever have matched. Measured --
-  # the first recording fail-closed on exactly that while the behaviour was demonstrably correct.
+  # `question_asked`, NOT `transcript_matches`: the latter reads top-level assistant text only,
+  # and a gate question lives in a tool_use, so no phrasing of it could ever have matched.
   #
-  # MATCHED ON THE PROPERTY, NOT THE PRODUCER'S WORDING. The producer appends a fixed sentence to
-  # the payload, and SKILL.md tells the agent to use that payload verbatim -- but measured across
-  # two recordings the agent does not always: run 1 gave "The deck states: Seed. This review reads
-  # it as Pre-seed", run 2 gave "The deck says Seed; the evidence points to Pre-seed". Both inform
-  # the founder correctly, so pinning either spelling would red on model variance rather than on a
-  # regression. What must hold is that the deck's claim is NAMED to the founder beside the stage
-  # being confirmed; that is what this matches.
-  - question_asked: 'deck\s+(states|says)\W{0,3}seed'
+  # MATCHED ON THE PRODUCER'S CONSTANT, which it can only be because the producer now appends the
+  # sentence to `needs_input.question`. It previously lived only in `context_summary`, and
+  # `AskUserQuestion` has no summary field — so the mapping was unspecified and each run improvised
+  # it. Measured over three live runs: appended to the question, reworded into the question, and
+  # verbatim inside the PROCEED option's `description`. That third placement is invisible to every
+  # assert the harness offers (it reads question strings, and option LABELS only), which is why
+  # this lane redded on a run that had in fact informed the founder twice.
+  - question_asked: 'The deck states: Seed\. This review reads it as Pre-seed\.'
 
   # And the gate still fired and was answered, so the sentence was shown AT a decision rather than
   # narrated afterwards.

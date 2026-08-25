@@ -79,17 +79,16 @@ _NO_CASSETTE_ALLOWLIST: dict[str, str] = {
         "never evaluated' item — a cassette-less lane has nothing frozen to diverge from. ~$4.05."
     ),
     "deck-review-stage-disagreement": (
-        "un-cassetted because it CANNOT record green: it is measuring a real defect. Three paid "
-        "recordings, three different behaviours — the producer's sentence reached the founder "
-        "verbatim in the gate question, then paraphrased, then not at all. The producer emits it "
-        "only in its stdout receipt, so whether the founder ever sees it depends on the agent "
-        "relaying it, which SKILL.md asks for in prose and prose does not enforce. The lane is "
-        "correct and the fix is not yet, so this stays red rather than being loosened until it "
-        "passes. Do not record it, and do not relax the assert to make it green — the assert is "
-        "already matched on the property (the deck's claim is NAMED beside the confirmed stage) "
-        "rather than on any wording. It is also the only deck in the corpus that contradicts "
-        "itself about its own stage: the smoke deck says seed and reads seed, and the gate-stop "
-        "deck is out of scope on both counts."
+        "the LIVE verification lane for the stage-disagreement fix. Un-cassetted for the reason "
+        "the three sibling live lanes give: the half that needs verifying is prose, and a cassette "
+        "freezes one past agent's behaviour and re-asserts it. It is also the only deck in the "
+        "corpus that contradicts itself about its own stage — the smoke deck says seed and reads "
+        "seed, the gate-stop deck is out of scope on both counts. Three paid recordings bought the "
+        "root cause: the producer fired every time and the sentence was relayed every time, into "
+        "three different fields, because `AskUserQuestion` has no summary slot and the mapping was "
+        "unspecified. The producer now appends it to `needs_input.question`, the one field "
+        "measured to survive the hop verbatim, so the assert pins a producer constant rather than "
+        "model prose."
     ),
     "deck-review-numeric-chain": (
         "deliberately un-cassetted: the LIVE verification lane for the numeric chain (Steps 3.5-3.9). "

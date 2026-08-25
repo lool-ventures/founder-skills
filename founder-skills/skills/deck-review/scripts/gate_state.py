@@ -841,10 +841,30 @@ def cmd_emit(args: argparse.Namespace) -> int:
         parts.append(f"(The deck states: {STAGE_LABELS[claimed]}. This review reads it as {STAGE_LABELS[args.stage]}.)")
     parts.append(f"(Confirming stage: {args.stage}.)")
     stated = "\n".join(parts)
+    # THE DISAGREEMENT RIDES ON `question`, NOT ONLY `context_summary`, because only one of
+    # those has a field to land in. `AskUserQuestion` takes a question, a header, and option
+    # labels/descriptions -- there is no summary slot -- so the mapping from `context_summary`
+    # to the tool is unspecified and each run improvises it. Measured across three live runs, all
+    # three relayed the sentence, into three different places: appended to the question, reworded
+    # into the question, and verbatim inside the proceed option's `description`. The last is
+    # invisible to every assert surface the harness offers (it reads question strings, and option
+    # LABELS only), and it puts the disagreement under the option that proceeds.
+    #
+    # `question` survived the hop verbatim 3/3 over the same runs, so it is the field with a
+    # demonstrated path. Appending here makes the founder-visible string a producer constant
+    # rather than model prose -- which is also what makes it assertable.
+    asked = str(data.get("question") or "")
+    if claimed and claimed != args.stage:
+        disagreement = f"The deck states: {STAGE_LABELS[claimed]}. This review reads it as {STAGE_LABELS[args.stage]}."
+        asked = f"{asked} {disagreement}".strip()
     receipt["needs_input"] = {
         "gate_state_path": os.path.abspath(args.output),
         "gate_id": data.get("gate_id"),
-        "question": data.get("question"),
+        # NOTE the artifact's own `question` is deliberately left as the caller wrote it. Only the
+        # payload the founder is shown carries the appended sentence, so nothing on disk can be
+        # copied back into a later `emit` body and refused by `prose_names_stage` for naming the
+        # other stage. See SKILL.md's re-emit note on the rebuild branch.
+        "question": asked,
         "options": data.get("options"),
         "context_summary": stated,
         "confirmed_stage": args.stage,

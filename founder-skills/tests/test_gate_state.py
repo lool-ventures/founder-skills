@@ -2019,3 +2019,45 @@ def test_no_claimed_stage_flag_exists(tmp_path: Any) -> None:
         ),
     )
     assert rc != 0 and "unrecognized arguments" in err.lower(), err
+
+
+def test_the_disagreement_rides_on_the_question_not_only_the_summary(tmp_path: Any) -> None:
+    """`AskUserQuestion` has no summary field, so `context_summary` has no guaranteed landing place.
+
+    Measured across three live runs: all three relayed the producer's sentence, into three
+    different places — appended to the question, reworded into the question, and verbatim inside
+    the proceed option's `description`. The last is invisible to every assert surface the harness
+    offers and puts the disagreement under the option that proceeds. `question` survived verbatim
+    in all three, so that is the field with a demonstrated path.
+    """
+    out = _inventory(tmp_path, "seed")
+    rc, stdout, err = _emit_ok(out)
+    assert rc == 0, err
+    ni = json.loads(stdout)["needs_input"]
+    assert "The deck states: Seed. This review reads it as Series A." in ni["question"], ni["question"]
+    # still in the summary too — a caller that renders only that is not made worse off
+    assert "The deck states: Seed" in ni["context_summary"]
+
+
+def test_the_artifact_question_stays_the_callers_own(tmp_path: Any) -> None:
+    """Only the shown payload carries the appended sentence; the file must not.
+
+    An artifact whose `question` named the other stage could be copied back into a later `emit`
+    body — the natural move on the rebuild branch — and `prose_names_stage` would refuse it for
+    naming a stage other than the one being confirmed. The producer must not write prose its own
+    validator rejects on round-trip.
+    """
+    out = _inventory(tmp_path, "seed")
+    rc, _, err = _emit_ok(out)
+    assert rc == 0, err
+    with open(out, encoding="utf-8") as f:
+        written = json.load(f)
+    assert written["question"] == "Does this look right?", written["question"]
+    assert "The deck states" not in json.dumps(written)
+
+
+def test_no_disagreement_sentence_when_the_deck_agrees(tmp_path: Any) -> None:
+    out = _inventory(tmp_path, "series_a")
+    rc, stdout, err = _emit_ok(out)
+    assert rc == 0, err
+    assert "The deck states" not in json.loads(stdout)["needs_input"]["question"]
