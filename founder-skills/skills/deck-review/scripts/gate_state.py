@@ -196,7 +196,7 @@ _AMBIGUOUS_STAGE_WORDS = frozenset({"seed", "growth"})
 # window: "Detected stage: Series A. 12 seed customers." puts a cue four words from "seed",
 # so any window wide enough to catch "stage: Seed" also catches that false positive. These
 # patterns allow only non-word characters between cue and stage word.
-_STAGE_CUES = ("stage", "round", "detected", "detect", "confirming", "confirm")
+_STAGE_CUES = ("stage", "round", "detected", "detect", "confirming", "confirm", "reads", "says", "states")
 
 
 def _norm_stage_text(text: str) -> str:
@@ -210,7 +210,11 @@ def _norm_stage_text(text: str) -> str:
     become a single space; other punctuation is left alone, because the naming-construction
     patterns rely on it ("stage: Seed").
     """
-    return re.sub(r"[-_\s]+", " ", text.lower())
+    # `*`, backtick, `"` and `'` are EMPHASIS AND QUOTING, not separators a reader sees: "**Seed**
+    # round open" renders to the founder as "Seed round open" and named the stage just as plainly,
+    # while slipping past a class of only `-_\s`. `:` and `,` are here for the same reason -- "the
+    # deck reads: Seed." is a stage claim with no cue word between the punctuation and the name.
+    return re.sub(r"[-_*`\"\':,\s]+", " ", text.lower())
 
 
 def _stage_forms(stage: str) -> tuple[str, ...]:
@@ -239,6 +243,16 @@ def prose_names_stage(prose: str, stage: str) -> bool:
     * SEPARATOR NORMALISATION (`_norm_stage_text`). "Series-A" and "series_a" are the same
       claim as "Series A". Without it, whole-word matching lost a refusal the old substring
       match caught by accident -- see that helper.
+
+    KNOWN INCOMPLETE, and callers must not claim otherwise. This is a heuristic over prose, and
+    the ambiguous-word rule in particular refuses only a naming CONSTRUCTION. "The deck says its
+    seed funding is closing" names a stage to any reader and passes here, because no cue sits
+    adjacent to the word and no `stage`/`round` follows it. Widening further trades against the
+    measured false positives above ("~4x YoY growth", "12 seed customers"), which is why the
+    remedy for a summary that legitimately needs to name another stage is STRUCTURE -- the
+    producer reads `deck_inventory.claimed_stage` and renders its own labelled sentence -- and not
+    a further loosening here. Do not describe the caller's prose as "fully validated"; it is
+    subject to this check, which has holes of exactly this shape.
     """
     prose = _norm_stage_text(prose)
     longer = [f for other in STAGE_LABELS for f in _stage_forms(other)]
