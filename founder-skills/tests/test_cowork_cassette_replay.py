@@ -65,6 +65,19 @@ SCENARIOS_DIR = Path(__file__).resolve().parents[2] / "cowork-tests" / "scenario
 # quietly matching nothing (a directory glob finding zero new scenarios is not evidence
 # anything is fine — see leak_scan.py's own docstring on that exact failure mode).
 _NO_CASSETTE_ALLOWLIST: dict[str, str] = {
+    "market-sizing-smoke": (
+        "DELIBERATELY UN-CASSETTED as of 2026-08-24 — the cassette was deleted, the scenario kept. Rationale for "
+        "the whole batch: a cassette replays FROZEN events and re-evaluates frozen assertions against them, so it "
+        "cannot detect a skill-behaviour regression — measured, 18 of the then-22 cassettes were recorded against "
+        "since-changed skills and all 22 still replayed green. The corpus therefore bought a per-skill staleness "
+        "tripwire, analyzer fixtures, and documentation of a past paid run, at $86.36 per hash-format epoch. Full "
+        "analysis, including what each deletion gives up: "
+        "docs/internal/2026-08-24-cassette-corpus-value-analysis.md. Re-record on purpose with `rerecord.sh "
+        "<name>` (the bare form only refreshes scenarios that already have a cassette). Superseded by "
+        "market-sizing-remote-lane for the tripwire. Deleting it is net positive: it removes one of three "
+        "documented delivery_check WARN cases and closes the long-standing 'present_files_called authored but "
+        "never evaluated' item — a cassette-less lane has nothing frozen to diverge from. ~$4.05."
+    ),
     "deck-review-stage-disagreement": (
         "un-cassetted because it CANNOT record green: it is measuring a real defect. Three paid "
         "recordings, three different behaviours — the producer's sentence reached the founder "
