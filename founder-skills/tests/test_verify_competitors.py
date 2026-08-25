@@ -979,3 +979,29 @@ def test_same_vendor_different_product_is_not_annotated() -> None:
 
     assert vc._shared_phrase_overlap("ibm-watsonx-orchestrate", {"ibm-zos-connect": "ibm-zos-connect"}) is None
     assert vc._subset_overlap("ibm-watsonx-orchestrate", {"ibm-zos-connect": "ibm-zos-connect"}) is None
+
+
+def test_stopword_relief_must_not_admit_permutations() -> None:
+    """Stopword relief applies to the DEMOTION rule, which removes an entry from `unmatched`.
+
+    That is the gap-hiding direction, and the matcher below it is deliberately order-INDEPENDENT
+    (max bipartite matching, so token order cannot change the result). Comparing stopword-stripped
+    token MULTISETS therefore pulls permutations into range that the raw count test kept out --
+    `bank-of-the-west` would demote against `west-bank`. Those are different entities, and
+    silently demoting one hides a real gap, which is the one thing this pass must never do.
+
+    Relief is granted only when the significant tokens agree IN ORDER: the property a dropped
+    function word has, and a permutation does not.
+    """
+    vc = _vc()
+    assert vc._slugs_are_variants("ibm-watsonx-assistant-for-z", "ibm-watsonx-assistant-z"), (
+        "a single dropped function word, every other token exact, must still demote"
+    )
+    for a, b in (
+        ("bank-of-the-west", "west-bank"),
+        ("voice-of-customer", "customer-voice"),
+        ("art-of-war", "war-art"),
+        ("chamber-of-commerce", "commerce-chamber"),
+    ):
+        assert not vc._slugs_are_variants(a, b), f"{a} / {b} is a permutation, not a spelling variant"
+        assert not vc._slugs_are_variants(b, a), f"{b} / {a} — the test must hold in both directions"

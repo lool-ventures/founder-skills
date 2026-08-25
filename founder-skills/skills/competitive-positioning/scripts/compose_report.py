@@ -52,6 +52,13 @@ WARNING_SEVERITY: dict[str, str] = {
     "SHALLOW_COMPETITOR_PROFILE": "medium",
     "VANITY_AXIS_WARNING": "medium",
     "MOAT_WITHOUT_EVIDENCE": "medium",
+    # A verification run that was REJECTED, not skipped. The producer leaves the canonical path
+    # untouched on refusal and keeps the rejected artifact in a `.rejected.json` sidecar -- which
+    # made an absent competitor_verification.json ambiguous: "the run legitimately skipped
+    # verification" and "verification ran and was refused" became the same evidence, and the second
+    # is a defect the founder must be told about. HIGH, because the deliverable then presents an
+    # unverified competitor set as a verified one and no other signal names the cause.
+    "VERIFICATION_REJECTED": "high",
     "MISSING_DO_NOTHING": "medium",
     "RESEARCH_DEPTH_LOW": "medium",
     "MISSING_CANONICAL_MOAT": "medium",
@@ -103,6 +110,7 @@ WARNING_LABELS: dict[str, str] = {
     "SHALLOW_COMPETITOR_PROFILE": "Shallow Competitor Profile",
     "VANITY_AXIS_WARNING": "Vanity Axis Warning",
     "MOAT_WITHOUT_EVIDENCE": "Moat Without Evidence",
+    "VERIFICATION_REJECTED": "Competitor Verification Rejected",
     "MISSING_DO_NOTHING": "Missing Do-Nothing Alternative",
     "RESEARCH_DEPTH_LOW": "Research Depth Low",
     "MISSING_CANONICAL_MOAT": "Missing Canonical Moat",
@@ -575,8 +583,14 @@ def _points_by_slug(points: list[Any]) -> dict[str, tuple[float, float]]:
 
 def validate_artifacts(
     artifacts: dict[str, dict[str, Any] | None],
+    artifacts_dir: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Run validation checks across artifacts. Returns list of warnings."""
+    """Run validation checks across artifacts. Returns list of warnings.
+
+    `artifacts_dir` is optional and used only to look for a producer's rejection sidecar, which is
+    evidence that exists on disk rather than inside any artifact. Callers that omit it lose only
+    that one check.
+    """
     warnings: list[dict[str, Any]] = []
 
     landscape = artifacts.get("landscape.json")
@@ -639,6 +653,26 @@ def validate_artifacts(
         elif data is None:
             code = MISSING_CODES.get(name, "CORRUPT_ARTIFACT")
             warnings.append(_warn(code, f"Required artifact missing: {name}"))
+
+    # 1b. VERIFICATION_REJECTED — the sidecar the producer leaves when it refuses its input.
+    #
+    # `competitor_verification.json` is optional because a run may legitimately skip the
+    # verification dispatch, so its absence carries no warning. Once the producer stopped writing
+    # the canonical file on rejection (it keeps the audit copy beside it instead), "skipped" and
+    # "ran and was refused" became indistinguishable from the artifact list alone -- and the second
+    # ships a competitor set the report presents as verified when nothing verified it. The sidecar
+    # is the evidence that tells them apart.
+    if artifacts_dir:
+        rejected = os.path.join(artifacts_dir, "competitor_verification.json.rejected.json")
+        if os.path.exists(rejected) and not _usable(artifacts.get("competitor_verification.json")):
+            warnings.append(
+                _warn(
+                    "VERIFICATION_REJECTED",
+                    "The competitor-set verification was run and REJECTED — the competitor set in "
+                    "this report has not been independently checked. Re-dispatch the verification "
+                    "and re-run the producer before treating the set as verified.",
+                )
+            )
 
     # 2. STALE_ARTIFACT — run_id consistency
     run_ids: dict[str, str] = {}
@@ -1730,7 +1764,7 @@ def compose(dir_path: str, report_path: str | None = None) -> dict[str, Any]:
     artifacts_loaded = [n for n in all_names if artifacts[n] is not None and artifacts[n] is not _CORRUPT]
 
     # Run validation
-    warnings = validate_artifacts(artifacts)
+    warnings = validate_artifacts(artifacts, dir_path)
 
     # Apply accepted_warnings from positioning.json (medium-severity only)
     positioning = artifacts.get("positioning.json")

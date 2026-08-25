@@ -6031,3 +6031,62 @@ class TestValidateLandscapeDeferredCarryAndDerive:
         assert rc == 0, stderr
         assert data is not None
         assert data["deferred_recall_candidates"] == []
+
+
+def _cp_compose() -> Any:
+    """Load competitive-positioning's compose_report by PATH, under a unique module name.
+
+    Six skills ship a `compose_report.py`, so a bare `import compose_report` resolves to whichever
+    one a earlier-imported test module put on sys.path first -- it passes in isolation and fails in
+    the suite. Same hazard the repo documents for running mypy per-directory.
+    """
+    import importlib.util
+
+    path = os.path.join(
+        os.path.dirname(SCRIPT_DIR), "skills", "competitive-positioning", "scripts", "compose_report.py"
+    )
+    spec = importlib.util.spec_from_file_location("cp_compose_report_under_test", path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_a_rejected_verification_is_not_read_as_a_skipped_one(tmp_path: Any) -> None:
+    """ "Skipped verification" and "verification refused" must not look the same.
+
+    `competitor_verification.json` is optional, so its absence carries no warning — correct, a run
+    may legitimately skip the dispatch. Once the producer stopped writing the canonical file on
+    rejection (it keeps the audit copy in a `.rejected.json` sidecar instead), the two states
+    became indistinguishable from the artifact list, and the second ships a competitor set the
+    report presents as verified when nothing verified it. High severity: no other signal names the
+    cause, and `--strict` must block on it.
+    """
+    cr = _cp_compose()
+
+    artifacts: dict[str, Any] = {"competitor_verification.json": None}
+
+    # Absent and no sidecar -> genuinely skipped, no warning.
+    codes = {w["code"] for w in cr.validate_artifacts(dict(artifacts), str(tmp_path))}
+    assert "VERIFICATION_REJECTED" not in codes
+
+    # Absent WITH a sidecar -> the producer ran and refused.
+    (tmp_path / "competitor_verification.json.rejected.json").write_text("{}", encoding="utf-8")
+    rejected = [
+        w for w in cr.validate_artifacts(dict(artifacts), str(tmp_path)) if w["code"] == "VERIFICATION_REJECTED"
+    ]
+    assert len(rejected) == 1, "a refused verification must be reported"
+    assert rejected[0]["severity"] == "high"
+    assert "not been independently checked" in rejected[0]["message"]
+
+
+def test_a_present_verification_silences_the_rejection_warning(tmp_path: Any) -> None:
+    """A later successful re-run leaves the stale sidecar behind; the artifact is what counts."""
+    cr = _cp_compose()
+
+    (tmp_path / "competitor_verification.json.rejected.json").write_text("{}", encoding="utf-8")
+    artifacts: dict[str, Any] = {
+        "competitor_verification.json": {"summary": {"flagged": 0}, "metadata": {"run_id": "R"}}
+    }
+    codes = {w["code"] for w in cr.validate_artifacts(artifacts, str(tmp_path))}
+    assert "VERIFICATION_REJECTED" not in codes

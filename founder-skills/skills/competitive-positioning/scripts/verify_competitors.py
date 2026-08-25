@@ -255,8 +255,24 @@ def _slugs_are_variants(norm_a: str, norm_b: str) -> bool:
     maximum matchings, the search preferentially lands on one containing an
     exact pair whenever one exists.
     """
-    a_tokens = _significant_tokens(norm_a)
-    b_tokens = _significant_tokens(norm_b)
+    a_tokens = _slug_tokens(norm_a)
+    b_tokens = _slug_tokens(norm_b)
+    if len(a_tokens) != len(b_tokens):
+        # STOPWORD RELIEF, AND IT MUST PRESERVE ORDER. Dropping function words lets
+        # `ibm-watsonx-assistant-for-z` reach `ibm-watsonx-assistant-z`, whose every real token
+        # matches exactly. But this rule DEMOTES -- it removes the entry from `unmatched`, which is
+        # the gap-hiding direction -- and the matching below is deliberately order-INDEPENDENT, so
+        # comparing stripped token MULTISETS pulls permutations into range that the raw count test
+        # kept out: `bank-of-the-west` would match `west-bank`, `voice-of-customer` would match
+        # `customer-voice`. Those are different entities, and silently demoting one hides a real
+        # gap -- exactly what this pass exists not to do.
+        #
+        # So relief is granted only when the significant tokens agree IN ORDER, which is the
+        # property a dropped function word actually has and a permutation does not. Falling through
+        # with the raw (unequal) lists then fails the count test below, as before.
+        sig_a, sig_b = _significant_tokens(norm_a), _significant_tokens(norm_b)
+        if sig_a == sig_b and sig_a:
+            a_tokens, b_tokens = sig_a, sig_b
     n = len(a_tokens)
     if n == 0 or n != len(b_tokens):
         return False
