@@ -6090,3 +6090,28 @@ def test_a_present_verification_silences_the_rejection_warning(tmp_path: Any) ->
     }
     codes = {w["code"] for w in cr.validate_artifacts(artifacts, str(tmp_path))}
     assert "VERIFICATION_REJECTED" not in codes
+
+
+def test_a_prior_good_verification_does_not_silence_a_fresh_rejection(tmp_path: Any) -> None:
+    """Keying only on "the artifact is absent" left a second way for a refusal to disappear.
+
+    Re-run verification in a REVIEW_DIR that still holds an earlier run's file, have it refused,
+    and the report composes on the STALE verification with nothing saying so — collapsing
+    "refused" into "stale but present" exactly as the original defect collapsed it into "skipped".
+    Run-id parity separates them. STALE_ARTIFACT is not a substitute: it is medium and names a
+    symptom rather than the cause.
+    """
+    cr = _cp_compose()
+    (tmp_path / "competitor_verification.json.rejected.json").write_text(
+        json.dumps({"metadata": {"run_id": "RUN_2"}}), encoding="utf-8"
+    )
+    artifacts: dict[str, Any] = {
+        "competitor_verification.json": {"summary": {"flagged": 0}, "metadata": {"run_id": "RUN_1"}}
+    }
+    codes = {w["code"] for w in cr.validate_artifacts(dict(artifacts), str(tmp_path))}
+    assert "VERIFICATION_REJECTED" in codes, "a fresh refusal beside a stale artifact must be reported"
+
+    # Same run: the sidecar is this run's own leftover from a since-succeeded re-pipe. Silent.
+    artifacts["competitor_verification.json"]["metadata"]["run_id"] = "RUN_2"
+    codes = {w["code"] for w in cr.validate_artifacts(dict(artifacts), str(tmp_path))}
+    assert "VERIFICATION_REJECTED" not in codes

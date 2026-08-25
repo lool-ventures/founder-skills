@@ -23,12 +23,26 @@ WHERE EACH IS COVERED
   C  coaching commentary                   insert_coaching.py reports findings on insert
   A  upstream half, fleet-wide             test_dispatch_schema_drift.py (a field nobody consumes)
   A  downstream half, TWO SKILLS ONLY      verify_positioning.py, verify_review.py
+  A  downstream half, ONE SKILL, WEAK      test_competitive_positioning_skill_contract.py — asserts a
+                                          named computed field appears in the Gate 1 template. NOT a
+                                          gate and does NOT narrow the gap below: it cannot fail a
+                                          run, and it is a string assertion over SKILL.md prose, so
+                                          it survives any rewording that keeps the token. It catches
+                                          deletion, nothing subtler.
   D  competitive-positioning               checklist fingerprint vs the scored map it graded
   D  financial-model-review                output fingerprints vs current inputs.json
 
 THE KNOWN GAP: class A's downstream half — "this artifact field was computed and no delivery surface
 shows it" — is enforced only for competitive-positioning and financial-model-review. ic-sim,
-market-sizing, deck-review and cap-table have no such gate.
+market-sizing, deck-review and cap-table have no such gate. The contract-test row above does not
+change that count: a gate can fail a run, a string assertion cannot.
+
+NOT class A, recorded here because it was found alongside one and is easy to file wrongly: a
+presentation layer RE-DERIVING a judgement the producer already made. competitive-positioning's
+Gate 1 selected challenges by comparing a verdict to a draft category as literal tokens, across two
+DISJOINT vocabularies, so exactly one value could ever match. That is the test_dispatch_schema_drift
+shape — two ends of one contract drifting — not "computed but never shown", and its remedy differs
+too: the judgement moved into the producer and the prose was deleted rather than corrected.
 
 Deliberate, for a reason worth keeping: a fixture-driven detector for it is blind by construction.
 Fixtures are schema-correct, so scanning one answers "does the renderer behave on good input", which is
@@ -84,6 +98,35 @@ def test_the_ungated_skills_are_still_ungated() -> None:
         f"these skills now have a gate-shaped script: {unexpected}. If it is a real pre-delivery gate, "
         f"move the skill into _GATED_SKILLS and update the module docstring's coverage map."
     )
+
+
+def test_the_gate1_render_contract_is_enforced_by_a_live_test() -> None:
+    """The WEAK row above must name tests that exist AND still assert.
+
+    Imported and CALLED, not grepped. This module's own precedent is that a name-presence check
+    survives the thing being gutted: `test_skill_contract.py`'s paid-lane guard records that its
+    grep version "stayed green with the gate gone" and had to switch to calling. A row in a
+    coverage map is a claim, and the cheapest way for it to become false is for the test it names
+    to be emptied while keeping its name.
+
+    Calling does not make the row strong -- an emptied body still passes, which is exactly why the
+    row says WEAK. It makes the row TRUE.
+    """
+    import importlib.util
+
+    path = TESTS_DIR / "test_competitive_positioning_skill_contract.py"
+    assert path.is_file(), "the coverage map names a contract test file that does not exist"
+    spec = importlib.util.spec_from_file_location("cp_skill_contract_under_test", path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    for name in (
+        "test_gate1_renders_the_possible_overlap_annotation",
+        "test_gate1_reads_challenge_slugs_and_does_not_rederive_it",
+    ):
+        fn = getattr(mod, name, None)
+        assert callable(fn), f"{name} is named in the coverage map but is not a callable test"
+        fn()
 
 
 @pytest.mark.parametrize(

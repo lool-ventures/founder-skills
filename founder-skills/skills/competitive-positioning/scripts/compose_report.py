@@ -664,7 +664,24 @@ def validate_artifacts(
     # is the evidence that tells them apart.
     if artifacts_dir:
         rejected = os.path.join(artifacts_dir, "competitor_verification.json.rejected.json")
-        if os.path.exists(rejected) and not _usable(artifacts.get("competitor_verification.json")):
+        current = artifacts.get("competitor_verification.json")
+        # A PRIOR GOOD ARTIFACT MUST NOT SILENCE THIS. Keying only on "the artifact is absent"
+        # left a second way for a refusal to disappear: re-run verification in a REVIEW_DIR that
+        # still holds an earlier run's file, have it refused, and the report composes on the STALE
+        # verification with nothing saying so. That collapses "refused" into "stale but present"
+        # the same way the original defect collapsed "refused" into "skipped". Run-id parity is
+        # what tells them apart, and STALE_ARTIFACT is not a substitute -- it is medium and names
+        # a symptom.
+        stale_or_absent = not _usable(current)
+        if not stale_or_absent:
+            rid = _as_dict(_as_dict(current).get("metadata")).get("run_id")
+            try:
+                with open(rejected, encoding="utf-8") as f:
+                    rejected_rid = _as_dict(_as_dict(json.load(f)).get("metadata")).get("run_id")
+            except (OSError, json.JSONDecodeError, ValueError):
+                rejected_rid = None
+            stale_or_absent = bool(rejected_rid) and rejected_rid != rid
+        if os.path.exists(rejected) and stale_or_absent:
             warnings.append(
                 _warn(
                     "VERIFICATION_REJECTED",
