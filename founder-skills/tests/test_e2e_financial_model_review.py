@@ -70,12 +70,39 @@ def test_financial_model_review_smoke(tmp_path: Path) -> None:
     # No criterion ids: this reaches a founder through the commentary.
     assert "CASH_" not in json.dumps(coverage), "score_coverage leaks criterion ids to the coach"
 
-    # The profile in the fixture is fully resolvable (israel / saas-sales-led / seed), so
-    # a real run must report complete coverage. If this fails, either the normalization
-    # tables moved or the model mis-read the profile — both worth knowing.
-    assert coverage["complete"] is True, (
-        f"the fixture's profile is resolvable, so nothing should have dropped: {coverage}. Inspect {review_dir}"
-    )
+    # The profile in the fixture is fully resolvable (israel / saas-sales-led / seed), so a real
+    # run must report complete coverage. THREE causes, not the two this comment used to name:
+    # the normalization tables moved, the model mis-read the profile, or -- the one measured on
+    # 2026-08-26 -- the model returned `not_applicable` for a criterion the profile says APPLIES
+    # and that criterion is not on checklist.py's `_JUDGEMENT_NOT_APPLICABLE` allowlist. The
+    # third is distinguishable: `unmatched_profile_fields` is EMPTY for it and non-empty for the
+    # others, because self-gating is a judgement call rather than a resolution failure.
+    #
+    # NAME THE CRITERION. `score_coverage` deliberately carries no ids (it reaches a founder via
+    # commentary), so a bare count plus a run-dir path is undiagnosable the moment the workspace
+    # is gone -- which is exactly what happened: the same failure reproduced byte-identically on
+    # two CI runs, passed locally, and the criterion could not be recovered from either. The ids
+    # DO exist, on the machine surface built for this: report.json's CHECKLIST_SELF_GATED
+    # warning puts them in `message` while the founder gets labels in `founder_message`.
+    if coverage["complete"] is not True:
+        gated = ""
+        try:
+            rj = json.loads((review_dir / "report.json").read_text(encoding="utf-8"))
+            for w in rj.get("warnings") or []:
+                if isinstance(w, dict) and w.get("code") == "CHECKLIST_SELF_GATED":
+                    gated = f" CHECKLIST_SELF_GATED: {w.get('message')}"
+                    break
+            if not gated:
+                gated = (
+                    " (no CHECKLIST_SELF_GATED warning — the drop is a profile-resolution"
+                    " failure, not a judgement call)"
+                )
+        except Exception as exc:  # noqa: BLE001 - diagnostic only; never mask the real assert
+            gated = f" (could not read report.json for the criterion ids: {exc})"
+        raise AssertionError(
+            f"the fixture's profile is resolvable, so nothing should have dropped: {coverage}.{gated} "
+            f"Inspect {review_dir}"
+        )
 
     summary = payload["summary"]
     assert isinstance(summary.get("score_pct"), (int, float)), f"no score_pct in {summary}"
