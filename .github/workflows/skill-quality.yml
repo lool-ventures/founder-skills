@@ -32,7 +32,12 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      verify_release_notes_for:
+        description: "Rehearse release-note extraction for this tag (e.g. v0.10.0). Publishes NOTHING."
+        required: false
+        type: string
 
 jobs:
   contract-tests:
@@ -224,23 +229,14 @@ jobs:
       - name: Extract this version's CHANGELOG section
         id: notes
         run: |
-          python3 - "$GITHUB_REF_NAME" > release-notes.md <<'PY'
-          import re, sys, pathlib
-          tag = sys.argv[1]
-          ver = tag.lstrip("v")
-          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
-          # Section runs to the next `## [` heading, so the last release in the file also matches.
-          m = re.search(rf"^## \[{re.escape(ver)}\][^\n]*\n(.*?)(?=^## \[|\Z)", text, re.S | re.M)
-          if not m:
-              sys.exit(f"::error::no CHANGELOG section for {ver} — refusing to publish empty notes")
-          body = m.group(1).strip()
-          if not body:
-              sys.exit(f"::error::CHANGELOG section for {ver} is empty — refusing to publish it")
-          sys.stdout.write(body + "\n")
-          PY
-          title=$(grep -m1 -F "## [${GITHUB_REF_NAME#v}]" CHANGELOG.md | sed 's/^## //')
-          [ -n "$title" ] || { echo "::error::no CHANGELOG heading for $GITHUB_REF_NAME"; exit 1; }
-          echo "title=$title" >> "$GITHUB_OUTPUT"
+          # Same script the rehearsal job runs — one copy, so the rehearsal cannot drift from
+          # the thing it is rehearsing. It exits non-zero on a missing or empty section.
+          python3 .github/scripts/changelog-notes.py "$GITHUB_REF_NAME" > release-notes.md
+          {
+            echo "title<<EOF"
+            python3 .github/scripts/changelog-notes.py "$GITHUB_REF_NAME" --title
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       - name: Create the Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -252,3 +248,29 @@ jobs:
             --verify-tag --latest \
             --title "${{ steps.notes.outputs.title }}" \
             -F release-notes.md
+
+  verify-release-notes:
+    # REHEARSE THE RELEASE PATH WITHOUT A TAG. `publish-release` first executes at the moment of a
+    # release, which is the worst time to discover the extractor is wrong. This runs the SAME
+    # script on demand and prints what would be published.
+    #
+    # It cannot publish, by construction and not by discipline: it inherits the file's top-level
+    # `contents: read`, declares no elevation, and contains no `gh release` call. So a mistake here
+    # cannot become an accidental Release.
+    name: Rehearse release notes (publishes nothing)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.verify_release_notes_for != ''
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract and show
+        run: |
+          tag='${{ inputs.verify_release_notes_for }}'
+          title=$(python3 .github/scripts/changelog-notes.py "$tag" --title)
+          python3 .github/scripts/changelog-notes.py "$tag" > notes.md
+          {
+            echo "## Would publish for \`$tag\`"
+            echo "**Title:** $title"
+            echo "**Notes:** $(wc -c < notes.md | tr -d ' ') bytes"
+            echo '---'
+            cat notes.md
+          } >> "$GITHUB_STEP_SUMMARY"
