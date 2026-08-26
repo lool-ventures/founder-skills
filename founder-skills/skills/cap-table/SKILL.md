@@ -1087,8 +1087,10 @@ Copy deliverables to the **workspace root — `$ARTIFACTS_ROOT/..`, the promoted
 NOT `$ARTIFACTS_ROOT` and NOT `$REVIEW_DIR`**: that is the level the founder sees as deliverable cards.
 `dirname "$ARTIFACTS_ROOT"` is the answer; a bare relative target is not (it lands in the shell's cwd).
 
-**Copy only what your route produced.** The full pipeline makes four files; each lightweight route
-makes ONE, under its own name, and extraction-only writes to a different directory.
+**Copy only what your route produced, by RUNNING its line — never by retyping the name.** The full
+pipeline makes four files; each lightweight route makes ONE, and extraction-only reads a different
+directory. While the lightweight routes were `#` comments, one deliverable arrived under three
+different names in three runs; the executable routes never drifted. `SLUG_TITLE` derives it.
 
 ```bash
 SLUG_TITLE="$(echo $SLUG | sed 's/-/_/g' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2)} 1')"
@@ -1098,10 +1100,13 @@ cp "$REVIEW_DIR/report.md"         "$OUT/${SLUG_TITLE}_Cap_Table.md"
 cp "$REVIEW_DIR/report.html"       "$OUT/${SLUG_TITLE}_Cap_Table.html"
 cp "$REVIEW_DIR/explorer.html"     "$OUT/${SLUG_TITLE}_Cap_Table_Explorer.html"
 cp "$REVIEW_DIR/counsel_packet.md" "$OUT/${SLUG_TITLE}_Counsel_Packet.md"
-# FAST-ASSESS instead: report_fast_assess.md      -> ${SLUG_TITLE}_Cap_Table_Fast_Assess.md
-# CONCISE instead:     report_concise.md          -> ${SLUG_TITLE}_Cap_Table_Summary.md
-# EXTRACTION-ONLY:     $ARTIFACTS_ROOT/cap-table-$SLUG-extraction/report_extraction_only.md
-#                                                 -> ${SLUG_TITLE}_Instrument_Terms.md
+# FAST-ASSESS instead — run this line, do not retype the name:
+cp "$REVIEW_DIR/report_fast_assess.md" "$OUT/${SLUG_TITLE}_Cap_Table_Fast_Assess.md"
+# CONCISE instead:
+cp "$REVIEW_DIR/report_concise.md"     "$OUT/${SLUG_TITLE}_Cap_Table_Summary.md"
+# EXTRACTION-ONLY instead (note the different SOURCE dir — it is not $REVIEW_DIR):
+cp "$ARTIFACTS_ROOT/cap-table-$SLUG-extraction/report_extraction_only.md" \
+   "$OUT/${SLUG_TITLE}_Instrument_Terms.md"
 ```
 
 **Send the finished work to the founder — the complete set, as files.** Not a path, and not a subset.
