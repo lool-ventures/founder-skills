@@ -74,6 +74,10 @@ recognise. They now say what is wrong with the file and leave it alone.
 - The check that stops a stage question showing you one stage while confirming another now catches
   the name inside emphasis, quotes, or a phrase like "the deck reads: Seed" — spellings that read
   identically to you and previously slipped past it.
+- Cap-table deliverables are named correctly when your company's name is more than one word. The
+  file you receive was capitalising only the first word — "Acmecorp_inc_Cap_Table.md" rather than
+  "Acmecorp_Inc_Cap_Table.md" — on every cap-table document. A single-word company name was
+  unaffected, which is why it went unnoticed.
 - A competitor whose verification agreed with your own framing is no longer presented to you as one
   to challenge.
 - Near-duplicate competitor names are recognised, so the missing-competitor list is not padded with
