@@ -31,7 +31,21 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# FLOOR: >=2.1.0 with no upper bound. Recording is the one operation where the harness version is
+# FLOOR: >=2.3.0 with no upper bound. Recording is the one operation where the harness version is
+#   THIS HEADER WAS ONE MINOR BEHIND THE GATE when 2.3.0 was adopted (header said 2.1.0, gate required
+#   2.2) — the exact drift the next paragraph warns about, sitting unfixed in the file that warns about
+#   it. If you are here to change the floor, change all FOUR sites: this header, the numeric gate, its
+#   FATAL message, and `_RECORDING_FLOOR` in founder-skills/tests/test_cowork_harness_floors.py.
+#   * 2.3.0 is required for the RECORDING ITSELF. Its baseline (desktop-1.37937.1, agent ELF 2.1.246)
+#     is the first to PIN two spawn-env keys — CLAUDE_CODE_PROMPT_CACHE_TTL=1h and
+#     CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=5m — plus a new opaque env spread site
+#     (spawnEnvSpreadCount 31 -> 32). A spawn-env change is a re-record trigger by this repo's own
+#     rule. At 2.2.0 `baseline: latest` resolves to desktop-1.34493.1, which carries NEITHER key
+#     (verified), so a 2.2.0 recording freezes the pre-pin spawn env. Tool surface and BOTH sub-agent
+#     prompt appends are byte-identical across the move — unlike the 1.25.0 trigger, this is not a
+#     system-prompt change. Diff the baselines as SETS: `spawnEnvKeys` shows 27 index "changes" that
+#     are pure alphabetical shift from inserting two keys. Full analysis:
+#     docs/internal/2026-08-26-cowork-harness-2.3.0-adoption-plan.md.
 #   NOTE THE HEADER HAS BEEN STALE BEFORE: this line read ">=1.20.0" while the gate below required
 #   1.24 — two minors adrift, in the note whose job is to explain the gate. The numeric gate and its
 #   FATAL message are ADJACENT LINES (grep -n 'minor.*-ge'); this header is ~110 lines above them.
@@ -160,8 +174,8 @@ echo "cowork-harness $ver"
 # themselves are unchanged and still `::warning::`. Parse the JSON envelope instead.
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
 # `-gt 2` first so a future 3.x passes — a bare minor check would FATAL on 3.0.0.
-{ [ "$major" -gt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -ge 2 ]; }; } \
-  || { echo "FATAL: need >=2.2.0 (have $ver) — see the floor note above"; exit 1; }
+{ [ "$major" -gt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -ge 3 ]; }; } \
+  || { echo "FATAL: need >=2.3.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi

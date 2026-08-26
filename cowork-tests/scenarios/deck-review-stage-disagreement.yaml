@@ -62,21 +62,37 @@ assert:
       path: claimed_stage
       equals: seed
 
-  # THE SIGNATURE ASSERT. The producer's own labelled sentence reached the founder, in the gate
-  # question itself. Matched on the producer-authored prefix, a constant in the script rather than
-  # model prose — the two stage names around it are substituted, so only the frame is pinned.
+  # THE SIGNATURE ASSERT. The producer's own labelled sentence reached the founder AT the gate.
+  # Matched on the producer-authored prefix, a constant in the script rather than model prose — the
+  # two stage names around it are substituted, so only the frame is pinned.
   #
-  # `question_asked`, NOT `transcript_matches`: the latter reads top-level assistant text only,
-  # and a gate question lives in a tool_use, so no phrasing of it could ever have matched.
+  # NOT `transcript_matches`: that reads top-level assistant text only, and a gate question lives in
+  # a tool_use, so no phrasing of it could ever have matched.
   #
-  # MATCHED ON THE PRODUCER'S CONSTANT, which it can only be because the producer now appends the
-  # sentence to `needs_input.question`. It previously lived only in `context_summary`, and
-  # `AskUserQuestion` has no summary field — so the mapping was unspecified and each run improvised
-  # it. Measured over three live runs: appended to the question, reworded into the question, and
-  # verbatim inside the PROCEED option's `description`. That third placement is invisible to every
-  # assert the harness offers (it reads question strings, and option LABELS only), which is why
-  # this lane redded on a run that had in fact informed the founder twice.
-  - question_asked: 'The deck states: Seed\. This review reads it as Pre-seed\.'
+  # `question_context`, NOT `question_asked` — REPLACED 2026-08-26, and the distinction is the whole
+  # point of this lane. `AskUserQuestion` has no summary field, so the mapping from the producer's
+  # `needs_input.context_summary` is unspecified and each run improvises it. Measured over three live
+  # runs the sentence landed in three different places: appended to the question, reworded into the
+  # question, and verbatim inside the PROCEED option's `description`. `question_asked` reads the
+  # question string only, so it was blind to the third — this lane redded on a run that had in fact
+  # informed the founder. `question_context` (harness 2.3.0) tests the regex against the gate's
+  # founder-visible payload FIELD BY FIELD: the question label, every option label, and every option
+  # description. All three placements now pass.
+  #
+  # WHY REPLACED RATHER THAN ADDED ALONGSIDE: assertions AND, and the evaluator returns on the FIRST
+  # failing key (`src/assert.ts:2713`), so a passing `question_context` cannot rescue a failing
+  # `question_asked` sibling — keeping both would have left the lane red on exactly the placement the
+  # new key was adopted for, while reading as a fix.
+  #
+  # WHAT THIS GIVES UP, stated so it is a decision and not a drift: the lane no longer asserts the
+  # sentence was in the QUESTION specifically, only that it was somewhere the founder could see. That
+  # is deliberate — the producer does not guarantee the stronger property (it held on two runs of
+  # three), and asserting a property the code does not guarantee is what made this lane flaky.
+  #
+  # Per-field matching means a regex spanning two fields never matches. Keep this pattern to a single
+  # sentence; do not "simplify" it into something straddling the question and an option.
+  - question_context:
+      matches: 'The deck states: Seed\. This review reads it as Pre-seed\.'
 
   # And the gate still fired and was answered, so the sentence was shown AT a decision rather than
   # narrated afterwards.

@@ -39,7 +39,7 @@ CASSETTE_DIR = REPO_ROOT / "cowork-tests" / "cassettes"
 CANARY = REPO_ROOT / "cowork-tests" / "canary" / "email-canary.cassette.json"
 
 # The declared floor per site, with the reason it differs where it does.
-_RECORDING_FLOOR = "2.2.0"
+_RECORDING_FLOOR = "2.3.0"
 _REPLAY_FLOOR = "2.1.0"
 _FLOORS: dict[str, str] = {
     # Recording bakes the harness version into the artifact, and a lane asserting
