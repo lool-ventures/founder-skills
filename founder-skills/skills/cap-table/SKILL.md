@@ -1087,7 +1087,7 @@ Copy deliverables to the **workspace root — `$ARTIFACTS_ROOT/..`, the promoted
 NOT `$ARTIFACTS_ROOT` and NOT `$REVIEW_DIR`**: that is the level the founder sees as deliverable cards.
 `dirname "$ARTIFACTS_ROOT"` is the answer; a bare relative target is not (it lands in the shell's cwd).
 
-**Copy only what your route produced, by RUNNING its line — never by retyping the name.** The full
+**Copy only what your route produced, and take the name as written, never compose one.** The full
 pipeline makes four files; each lightweight route makes ONE, and extraction-only reads a different
 directory.
 

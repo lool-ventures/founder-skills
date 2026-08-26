@@ -444,17 +444,24 @@ LEGACY_REFERENCES_CAP = 8 * 1024  # historical; references now ship whole
 # check of anything: it asserts a link the skill never asked for. The rule names each deliverable by
 # what it IS and links it, and states that this does not license naming internal files (the founder
 # reads the label, never the path) so it cannot be read as loosening the founder-text rules.
-# cap-table 145,518 -> 145,847 (+329 B) on 2026-08-26, for TWO fixes in the promote block.
+# cap-table 145,518 -> 145,844 (+326 B) on 2026-08-26, for TWO fixes in the promote block.
 # 1. `SLUG_TITLE` was BROKEN for every multi-word company. It ran `sed 's/-/_/g'` and then capitalised
 #    per awk FIELD — but after the join `acmecorp_inc` is ONE field, so only the leading letter was
 #    raised: `Acmecorp_inc`. Correct for a one-word slug (`cadence` -> `Cadence`) and wrong for all
 #    others. Every fixture company but one is single-word, which is why the corpus never caught it.
 #    Now splits on `-` into words, capitalises each, joins with `_`: acmecorp-inc -> Acmecorp_Inc.
-# 2. Three of four promote routes were `#` comments, so on those routes the model had no command to
-#    run and named the file itself. Measured across three runs of one extraction-only scenario the
-#    same deliverable arrived as Acmecorp_Inc_..., AcmecorpInc_... and Acmecorp_Term_Sheet_Review.md.
-# The two are ONE defect: making a wrong command executable would have shipped `Acmecorp_inc_...` to
-# a founder. An earlier attempt did exactly that and was reverted — fix the command, then run it.
+# 2. Three of four promote routes were `#` comments; they are now written as `cp` lines FOR LEGIBILITY
+#    ONLY. This does NOT make them execute, and an earlier version of this note claimed it did: a
+#    fenced ```bash block in a skill body is inert text the model may run, ignore or paraphrase, and
+#    the two forms that DO execute are force-disabled under Cowork. Measured across four runs of one
+#    extraction-only scenario, the suffix still drifted (_Instrument_Terms vs _Term_Sheet_Review)
+#    AFTER the change, while the SLUG_TITLE half held — the model reproduces a derivation it has no
+#    view on and substitutes its own judgement where it has one.
+# The two shipped together because making a WRONG snippet more prominent is worse than leaving it
+# commented: had the model followed it, `Acmecorp_inc_...` would have reached a founder.
+# The durable fix is a PRODUCER writing the promoted file, so there is no name to retype — filed
+# rather than done here, because "do four routes need four names" is a design question.
+#    See docs/internal/2026-08-26-cap-table-deliverable-naming.md.
 SKILL_MD_CEILING: dict[str, int] = {
     # market-sizing raised to pin subagent_type on both fenced Task( calls: the prose above them already
     # instructed it, and the pseudocode four lines below omitted it on both — a type-less dispatch resolves
@@ -806,7 +813,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the pre-coaching text and a raw uuid insertion marker (measured 5,592 B adrift on a live
     # run). Syncing rather than dropping the key, because ~200 test sites across the fleet read
     # report_markdown out of the composed JSON to inspect report content.
-    "cap-table": 145_847,
+    "cap-table": 145_844,
 }
 
 
