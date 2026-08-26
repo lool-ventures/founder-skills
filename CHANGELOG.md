@@ -67,6 +67,13 @@ recognise. They now say what is wrong with the file and leave it alone.
 
 - A step whose result was rejected can no longer be recorded as accepted, in three places where it
   could be.
+- Deck review can no longer skip past the stage question when your deck's own claim disagrees with
+  the stage it is about to grade against. That case used to answer itself silently, on the grounds
+  that you had already named a stage — but a founder naming one from memory may not know their deck
+  says otherwise, so it is now put to you.
+- The check that stops a stage question showing you one stage while confirming another now catches
+  the name inside emphasis, quotes, or a phrase like "the deck reads: Seed" — spellings that read
+  identically to you and previously slipped past it.
 - A competitor whose verification agreed with your own framing is no longer presented to you as one
   to challenge.
 - Near-duplicate competitor names are recognised, so the missing-competitor list is not padded with
