@@ -150,6 +150,14 @@ name: cowork-replay
 # The LIVE lane (recording cassettes) needs the staged Cowork agent binaries (not redistributable,
 # not on hosted runners) → self-hosted/local only. See cowork-tests/README.md + rerecord.sh.
 
+# LEAST PRIVILEGE. Without this block every job here inherits the repository default, which
+# is `write` across ALL scopes (`gh api repos/:owner/:repo/actions/permissions/workflow`).
+# Nothing in this file needs to write anything; GitHub's own default for new repositories has
+# been read-only since 2023 and this repo predates that. A job that genuinely needs more
+# declares it itself — see `publish-release` in skill-quality.yml.
+permissions:
+  contents: read
+
 on:
   pull_request:
     paths:
