@@ -444,19 +444,17 @@ LEGACY_REFERENCES_CAP = 8 * 1024  # historical; references now ship whole
 # check of anything: it asserts a link the skill never asked for. The rule names each deliverable by
 # what it IS and links it, and states that this does not license naming internal files (the founder
 # reads the label, never the path) so it cannot be read as loosening the founder-text rules.
-# cap-table raised 145,518 -> 145,819 (+301 B, ~0.2%) on 2026-08-26, for EXECUTABLE ROUTES.
-# Three of the four promote routes were `#` comments describing a source -> destination mapping; only
-# the full pipeline carried real `cp` lines. On a commented route the model had nothing to run and
-# improvised the destination: measured across three runs of ONE extraction-only scenario, the same
-# deliverable arrived as Acmecorp_Inc_Instrument_Terms.md, AcmecorpInc_Instrument_Terms.md and
-# Acmecorp_Term_Sheet_Review.md. The last is a name a previous fix had concluded was retired.
-# `SLUG_TITLE` exists so the name is DERIVED; a comment does not run it. The three routes are now
-# commands, and a command is unavoidably longer than the comment it replaces — the growth IS the fix.
-# Prose was cut first: the explanatory paragraph was folded into the block's existing lead sentence,
-# which absorbed ~460 B of the ~760 B the commands cost. The residue is the commands themselves.
-# Set to the MEASURED size, not a round number: the ratchet is bidirectional and fails on a shrink
-# too, so a ceiling above the true size is itself a failure the moment anything is trimmed.
-# Only cap-table has per-route promote lines, so this does not generalise to the other five.
+# cap-table 145,518 -> 145,847 (+329 B) on 2026-08-26, for TWO fixes in the promote block.
+# 1. `SLUG_TITLE` was BROKEN for every multi-word company. It ran `sed 's/-/_/g'` and then capitalised
+#    per awk FIELD — but after the join `acmecorp_inc` is ONE field, so only the leading letter was
+#    raised: `Acmecorp_inc`. Correct for a one-word slug (`cadence` -> `Cadence`) and wrong for all
+#    others. Every fixture company but one is single-word, which is why the corpus never caught it.
+#    Now splits on `-` into words, capitalises each, joins with `_`: acmecorp-inc -> Acmecorp_Inc.
+# 2. Three of four promote routes were `#` comments, so on those routes the model had no command to
+#    run and named the file itself. Measured across three runs of one extraction-only scenario the
+#    same deliverable arrived as Acmecorp_Inc_..., AcmecorpInc_... and Acmecorp_Term_Sheet_Review.md.
+# The two are ONE defect: making a wrong command executable would have shipped `Acmecorp_inc_...` to
+# a founder. An earlier attempt did exactly that and was reverted — fix the command, then run it.
 SKILL_MD_CEILING: dict[str, int] = {
     # market-sizing raised to pin subagent_type on both fenced Task( calls: the prose above them already
     # instructed it, and the pseudocode four lines below omitted it on both — a type-less dispatch resolves
@@ -808,7 +806,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the pre-coaching text and a raw uuid insertion marker (measured 5,592 B adrift on a live
     # run). Syncing rather than dropping the key, because ~200 test sites across the fleet read
     # report_markdown out of the composed JSON to inspect report content.
-    "cap-table": 145_819,
+    "cap-table": 145_847,
 }
 
 
