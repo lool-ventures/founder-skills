@@ -185,3 +185,62 @@ jobs:
               sys.exit(1)
           print(f"all {len(EXPECTED)} paid lanes executed")
           CHECK
+
+  publish-release:
+    # THE STEP FOUR RELEASES SILENTLY SKIPPED. A tag and a Release are different objects:
+    # `git push --tags` creates only the tag, and nothing else here created the Release. So
+    # v0.3.1, v0.6.0, v0.7.0 and v0.7.1 shipped with none, and the repo's "Latest" badge sat on
+    # v0.4.7 for two months while the project kept shipping. Backfilled 2026-08-07; the MECHANISM
+    # was never fixed, and CLAUDE.md documenting the step in full did not stop it recurring.
+    name: Create the GitHub Release (tag runs only)
+    runs-on: ubuntu-latest
+    # ONLY a real tag push. `workflow_dispatch` can run on any ref, and `github.ref_name` would
+    # then be a branch — publishing `main` as a version.
+    if: startsWith(github.ref, 'refs/tags/v')
+    # The Release must not exist before the paid gate is green. This is the ordering the manual
+    # process encoded by hand.
+    #
+    # KNOWN TRADE, recorded rather than discovered later: that gate is measured as a coin flip
+    # (docs/internal/2026-08-26-e2e-gate-is-a-coin-flip.md — fmr failed 2 of 4 runs on the same
+    # fixture). Gating on it converts "someone forgot to publish" into "a flaky red withheld the
+    # Release and nobody looked". That is the better failure — it is visible in the Actions tab and
+    # a re-run fixes it — but it is a trade, not a free win, and fixing the flake is the real fix.
+    needs: deck-review-e2e-smoke
+    permissions:
+      # NOT an escalation. The repo default is already `write` across ALL scopes
+      # (`gh api repos/:owner/:repo/actions/permissions/workflow` -> "write"), and a job with no
+      # block inherits that. Naming one scope here REDUCES this job's token.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract this version's CHANGELOG section
+        id: notes
+        run: |
+          python3 - "$GITHUB_REF_NAME" > release-notes.md <<'PY'
+          import re, sys, pathlib
+          tag = sys.argv[1]
+          ver = tag.lstrip("v")
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          # Section runs to the next `## [` heading, so the last release in the file also matches.
+          m = re.search(rf"^## \[{re.escape(ver)}\][^\n]*\n(.*?)(?=^## \[|\Z)", text, re.S | re.M)
+          if not m:
+              sys.exit(f"::error::no CHANGELOG section for {ver} — refusing to publish empty notes")
+          body = m.group(1).strip()
+          if not body:
+              sys.exit(f"::error::CHANGELOG section for {ver} is empty — refusing to publish it")
+          sys.stdout.write(body + "\n")
+          PY
+          title=$(grep -m1 -F "## [${GITHUB_REF_NAME#v}]" CHANGELOG.md | sed 's/^## //')
+          [ -n "$title" ] || { echo "::error::no CHANGELOG heading for $GITHUB_REF_NAME"; exit 1; }
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+      - name: Create the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # --verify-tag: abort if the tag is not on the remote, which is what a forgotten
+          # `git push --tags` looks like. --latest is explicit because "Latest" is computed, not
+          # chronological; correct here because this only ever runs on the tag just pushed.
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag --latest \
+            --title "${{ steps.notes.outputs.title }}" \
+            -F release-notes.md
