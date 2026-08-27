@@ -286,10 +286,17 @@ weakens the check silently instead of failing it.
 
 **Find the deck before anything else — do not assume it is missing.** An attached file is
 already on disk under the uploads mount; nothing tells you its name up front, so list it:
-`ls -la "$(dirname "$REVIEW_DIR")"/../uploads 2>/dev/null || ls -la ./mnt/uploads`. Measured:
-on one run the agent never looked, replied "I don't see a pitch deck attached", and stopped —
-with the deck sitting in the uploads mount the whole time. Only ask the founder to upload
-after that listing actually comes back empty. Set `DECK_SRC` to the file you find.
+
+```bash
+python3 "<printed PLUGIN_ROOT>/scripts/resolve_artifacts_root.py" --uploads   # prints UPLOADS_DIR
+```
+
+Then `ls -la <printed UPLOADS_DIR>`. Measured: on one run the agent never looked, replied "I don't
+see a pitch deck attached", and stopped — with the deck sitting in the uploads mount the whole
+time. Only ask the founder to upload after that listing actually comes back empty. Set `DECK_SRC`
+to the file you find. Exit 3 means there is no uploads mount at all (not an empty one): ask for a
+path rather than reporting the deck missing. Never hand-build this path — a relative `./mnt/uploads`
+resolves against the shell's cwd, which has already moved once underneath us.
 
 **Convert a PowerPoint deck to PDF before reading it.** Design & Readability are scored from
 what a reader SEES, and only a rendered page gives you that. Today `.pptx`/`.ppt` are binary

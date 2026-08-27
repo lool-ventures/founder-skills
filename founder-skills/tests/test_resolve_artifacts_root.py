@@ -35,7 +35,10 @@ resolve_roots = _mod.resolve_roots
 
 
 # ---------------------------------------------------------------------------
-# Host-loop: the workspace-shell cwd is somewhere inside /sessions/<id>/mnt/...
+# Host-loop (PRODUCTION): the workspace-shell cwd is the BARE SESSION ROOT
+# /sessions/<id> — measured upstream 2026-08-27, pinned in cowork-harness >=2.4.0
+# (`hostLoopCwds`). The `/sessions/<id>/mnt/...` shapes below are the VM-loop tiers
+# and any pre-2.4.0 recording; both are still exercised on purpose.
 # The resolver anchors UNCONDITIONALLY on <session>/mnt/outputs, and the agent
 # namespace is the mount-relative "artifacts" (the sub-agent's cwd IS that mount).
 # ---------------------------------------------------------------------------
@@ -112,7 +115,8 @@ def test_agent_root_resolves_under_outputs_wherever_the_shell_sits() -> None:
     """Regression: the doubled-prefix defect. Every Cowork cwd shape must yield an
     agent root that resolves to the SAME dir as the absolute root."""
     for cwd in (
-        "/sessions/abc",  # shell AT the session root — the shape that regressed
+        "/sessions/abc",  # shell AT the session root — PRODUCTION host-loop as of harness
+        #                   2.4.0, and separately the shape whose agent root once regressed
         "/sessions/abc/mnt",
         "/sessions/abc/mnt/outputs",
         "/sessions/abc/mnt/SomeConnectedFolder",
@@ -307,13 +311,45 @@ def test_cli_json_includes_agent_paths_when_dir_name_given(tmp_path: Path) -> No
 
 
 def test_cli_json_omits_agent_paths_when_dir_name_absent(tmp_path: Path) -> None:
-    """Back-compat: existing callers that never pass --dir-name see the exact same
-    {"artifacts_root", "agent_artifacts_root"} shape as before this change."""
+    """Without --dir-name the agent-PATH keys are absent, and the base payload is pinned.
+
+    `uploads_dir` joined the base set on 2026-08-27. It is additive — no consumer reads
+    this payload by exact key set (verified: nothing in the fleet parses `--json` at all;
+    SKILL.mds use the bare/--agent/--handoff-dir-agent forms) — but the set stays pinned
+    so a future key cannot arrive unnoticed.
+    """
     root = str(tmp_path / "artifacts")
     rc, out, err = _run_cli(["--json"], {"COWORK_ARTIFACTS_ROOT": root})
     assert rc == 0, err
     data = json.loads(out)
-    assert set(data.keys()) == {"artifacts_root", "agent_artifacts_root"}
+    assert set(data.keys()) == {"artifacts_root", "agent_artifacts_root", "uploads_dir"}
+    assert "analysis_dir_agent" not in data and "handoff_dir_agent" not in data
+
+
+def test_cli_json_uploads_is_null_not_absent_off_a_session_tree(tmp_path: Path) -> None:
+    """An omitted key read as "" builds `/uploads` and lists the host root. Force the branch."""
+    root = str(tmp_path / "artifacts")
+    rc, out, err = _run_cli(["--json"], {"COWORK_ARTIFACTS_ROOT": root})
+    assert rc == 0, err
+    data = json.loads(out)
+    assert "uploads_dir" in data and data["uploads_dir"] is None
+
+
+def test_cli_uploads_flag_exits_3_off_a_session_tree(tmp_path: Path) -> None:
+    """Exit 3, not 0-with-empty-stdout: "no uploads mount" must be distinguishable from
+    "the mount is empty", or a skill tells the founder their attachment is missing."""
+    root = str(tmp_path / "artifacts")
+    rc, out, err = _run_cli(["--uploads"], {"COWORK_ARTIFACTS_ROOT": root})
+    assert rc == 3, (rc, out, err)
+    assert out.strip() == ""
+    assert "uploads mount" in err
+
+
+def test_cli_uploads_flag_prints_the_declared_override(tmp_path: Path) -> None:
+    up = str(tmp_path / "up")
+    rc, out, err = _run_cli(["--uploads"], {"COWORK_UPLOADS_DIR": up})
+    assert rc == 0, err
+    assert out.strip() == up
 
 
 def test_cli_warns_when_dir_name_has_no_canonical_mirror(tmp_path: Path) -> None:
@@ -349,3 +385,63 @@ def test_cli_is_silent_when_the_mirror_exists(tmp_path: Path) -> None:
     )
     assert rc == 0
     assert "Warning:" not in err, err
+
+
+# ---------------------------------------------------------------------------
+# Uploads mount (`--uploads` / resolve_uploads_dir).
+#
+# WHY THESE EXIST: deck-review located attached files with
+#   ls -la "$(dirname "$REVIEW_DIR")"/../uploads 2>/dev/null || ls -la ./mnt/uploads
+# Both arms were wrong, and the SECOND one's meaning MOVED when cowork-harness 2.4.0
+# corrected the workspace-shell cwd. That is the whole point of resolving it here:
+# a path that is correct only on one harness version is not a path.
+# ---------------------------------------------------------------------------
+
+resolve_uploads_dir = _mod.resolve_uploads_dir
+
+
+def test_uploads_is_identical_across_every_cowork_cwd_shape() -> None:
+    """The uploads mount is a property of the SESSION TREE, not of where the shell
+    happens to stand. If this ever varies by cwd, the 2.4.0 class of bug is back."""
+    seen = {
+        resolve_uploads_dir(cwd, {})
+        for cwd in (
+            "/sessions/abc",  # production host-loop (harness >=2.4.0)
+            "/sessions/abc/mnt",
+            "/sessions/abc/mnt/outputs",  # what host-loop looked like pre-2.4.0
+            "/sessions/abc/mnt/SomeConnectedFolder",
+        )
+    }
+    assert seen == {"/sessions/abc/mnt/uploads"}, f"uploads varies with shell cwd: {seen}"
+
+
+def test_uploads_is_none_on_the_plain_cli_never_a_guessed_path() -> None:
+    """None, not './uploads'. A fabricated path would `ls` clean-empty and be reported
+    to the founder as 'you attached nothing' — the exact failure this replaced."""
+    assert resolve_uploads_dir("/home/dev/project", {}) is None
+
+
+def test_uploads_is_not_derived_from_the_artifacts_root_override() -> None:
+    """$COWORK_ARTIFACTS_ROOT may point anywhere; uploads must not follow it."""
+    env = {"COWORK_ARTIFACTS_ROOT": "/tmp/elsewhere/artifacts"}
+    assert resolve_uploads_dir("/sessions/abc", env) == "/sessions/abc/mnt/uploads"
+
+
+def test_uploads_honors_an_explicit_declaration() -> None:
+    env = {"COWORK_UPLOADS_DIR": "/tmp/up"}
+    assert resolve_uploads_dir("/sessions/abc", env) == "/tmp/up"
+    assert resolve_uploads_dir("/home/dev/project", env) == "/tmp/up"
+
+
+def test_the_replaced_relative_path_would_have_moved_between_harness_versions() -> None:
+    """Pins the defect itself, so nobody reintroduces a cwd-relative uploads path.
+
+    `./mnt/uploads` resolved against the workspace shell's cwd. Under the pre-2.4.0
+    cwd it pointed at a directory that never existed; under the corrected cwd it
+    happens to be right. Same string, two meanings — which is why it is gone.
+    """
+    old_cwd, new_cwd = "/sessions/abc/mnt/outputs", "/sessions/abc"
+    relative = os.path.normpath(os.path.join(old_cwd, "mnt/uploads"))
+    assert relative == "/sessions/abc/mnt/outputs/mnt/uploads"
+    assert relative != resolve_uploads_dir(old_cwd, {})
+    assert os.path.normpath(os.path.join(new_cwd, "mnt/uploads")) == resolve_uploads_dir(new_cwd, {})

@@ -546,7 +546,19 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the pre-coaching text and a raw uuid insertion marker (measured 5,592 B adrift on a live
     # run). Syncing rather than dropping the key, because ~200 test sites across the fleet read
     # report_markdown out of the composed JSON to inspect report content.
-    "financial-model-review": 79_713,
+    # All three raised for the cowork-harness 2.4.0 cwd fix, which turned three cwd-relative shell
+    # paths from benign into silently wrong. 2.4.0 moves the workspace shell's cwd to the BARE SESSION
+    # ROOT; `./artifacts` used to resolve to the canonical root and now lands in `/sessions/<id>/`,
+    # outside `mnt/`, where nothing is delivered and nothing reports it. cp/fmr: the self-heal branch
+    # said `mkdir -p ./artifacts` (market-sizing and ic-sim already said `"$ARTIFACTS_ROOT"` — this was
+    # drift, fixed in 2 of 6). deck-review: the uploads listing was `... || ls -la ./mnt/uploads`, whose
+    # MEANING moved with the cwd (it pointed at a path that never existed before 2.4.0 and at the real
+    # mount after), so it now calls `resolve_artifacts_root.py --uploads` — one opaque command, per that
+    # module's own rationale. Each sentence was tightened before raising, and deck-review NET SHRANK
+    # from its first draft by rewriting a captured-variable form that violated
+    # test_no_shell_variable_capture_of_python_output. Analysis:
+    # docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md SS3.2.
+    "financial-model-review": 79_867,
     # ic-sim SHRANK: the REQUIRED ic-dynamics.md read at Step 7 is deleted. Step 7 is a pure producer
     # pipe — compose_discussion.py derives discussion.json from the partners' own files and nothing
     # is authored by the main thread — so the read informed no decision while pulling a whole
@@ -745,7 +757,19 @@ SKILL_MD_CEILING: dict[str, int] = {
     # self-answered a gate on a deck whose title slide contradicted the stage being graded and the
     # founder was never told. The producer refuses that source now; the condition has to be stated
     # where the branch is, or the refusal reads as a bug.
-    "deck-review": 100_944,
+    # All three raised for the cowork-harness 2.4.0 cwd fix, which turned three cwd-relative shell
+    # paths from benign into silently wrong. 2.4.0 moves the workspace shell's cwd to the BARE SESSION
+    # ROOT; `./artifacts` used to resolve to the canonical root and now lands in `/sessions/<id>/`,
+    # outside `mnt/`, where nothing is delivered and nothing reports it. cp/fmr: the self-heal branch
+    # said `mkdir -p ./artifacts` (market-sizing and ic-sim already said `"$ARTIFACTS_ROOT"` — this was
+    # drift, fixed in 2 of 6). deck-review: the uploads listing was `... || ls -la ./mnt/uploads`, whose
+    # MEANING moved with the cwd (it pointed at a path that never existed before 2.4.0 and at the real
+    # mount after), so it now calls `resolve_artifacts_root.py --uploads` — one opaque command, per that
+    # module's own rationale. Each sentence was tightened before raising, and deck-review NET SHRANK
+    # from its first draft by rewriting a captured-variable form that violated
+    # test_no_shell_variable_capture_of_python_output. Analysis:
+    # docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md SS3.2.
+    "deck-review": 101_267,
     # competitive-positioning: + the merge step's "positioning_scores.json is aggregates only" claim
     # corrected. It is false — score_positioning.py passes points[] straight through — and that false
     # premise is plausibly why the merge was never cross-checked. Compose now checks it.
@@ -787,7 +811,19 @@ SKILL_MD_CEILING: dict[str, int] = {
     # competitive-positioning -36 B: Gate 1 now reads `summary.challenge_slugs` instead of re-deriving
     # it from `flagged_slugs`, and renders `possible_overlap_with` on recall-gap lines. Net shrink --
     # deleting a prose re-derivation paid for both.
-    "competitive-positioning": 120_153,
+    # All three raised for the cowork-harness 2.4.0 cwd fix, which turned three cwd-relative shell
+    # paths from benign into silently wrong. 2.4.0 moves the workspace shell's cwd to the BARE SESSION
+    # ROOT; `./artifacts` used to resolve to the canonical root and now lands in `/sessions/<id>/`,
+    # outside `mnt/`, where nothing is delivered and nothing reports it. cp/fmr: the self-heal branch
+    # said `mkdir -p ./artifacts` (market-sizing and ic-sim already said `"$ARTIFACTS_ROOT"` — this was
+    # drift, fixed in 2 of 6). deck-review: the uploads listing was `... || ls -la ./mnt/uploads`, whose
+    # MEANING moved with the cwd (it pointed at a path that never existed before 2.4.0 and at the real
+    # mount after), so it now calls `resolve_artifacts_root.py --uploads` — one opaque command, per that
+    # module's own rationale. Each sentence was tightened before raising, and deck-review NET SHRANK
+    # from its first draft by rewriting a captured-variable form that violated
+    # test_no_shell_variable_capture_of_python_output. Analysis:
+    # docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md SS3.2.
+    "competitive-positioning": 120_307,
     # cap-table, the largest raise (+2,383 B) and the one with the most founder-visible payoff:
     #   * Main-Thread Return named THREE of the four files Step 12 copies; a live run delivered exactly
     #     three and dropped `{Company}_Cap_Table.html`. All four are now named explicitly.
@@ -2429,4 +2465,93 @@ def test_the_release_path_runs_the_whole_free_suite() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "skill-quality.yml").read_text(encoding="utf-8")
     assert "pytest founder-skills/tests/ -q" in workflow, (
         "the job the release tag depends on does not run the full free suite"
+    )
+
+
+# ---------------------------------------------------------------------------
+# No cwd-relative path may address the Cowork session layout
+# ---------------------------------------------------------------------------
+
+# Directory names that only mean anything relative to the SESSION TREE. A relative path naming one
+# of these is resolved against the workspace shell's cwd, which is a path space we do not control
+# and which HAS ALREADY MOVED underneath us once.
+_SESSION_LAYOUT_DIRS = ("artifacts", "mnt", "outputs", "uploads", "handoff")
+
+# Two shapes, and BOTH are required — an earlier version demanded a trailing slash and therefore
+# missed `mkdir -p ./artifacts`, the very defect this test was written for. It passed its own
+# mutation probe only after this was split:
+#   (a) an explicit `./` or `../` prefix, with or without a trailing slash  -> ./artifacts, ./mnt/
+#   (b) a bare layout dir that is clearly a PATH because it has a trailing slash -> outputs/foo
+# A bare word like `artifacts` with neither marker is deliberately NOT matched: it appears
+# constantly in prose, and this must fire on commands, not sentences.
+_DIRS = "|".join(_SESSION_LAYOUT_DIRS)
+_RELATIVE_LAYOUT_PATH = re.compile(
+    r"(?:^|[\s\"'=(])(?:" + rf"(?:\./|\.\./)(?:{_DIRS})(?:/|\b)" + r"|" + rf"(?:{_DIRS})/" + r")",
+)
+
+# A command line is exempt when the layout name is reached through a variable or an absolute anchor.
+_ANCHORED = re.compile(r"\$\{?[A-Z_]+\}?|\$\(pwd\)|/sessions/|<printed |<[A-Z_]+>|\$\(python")
+
+
+def _command_lines(text: str) -> list[tuple[int, str]]:
+    """Every line inside a fenced ```bash block, plus inline-code spans that look like commands.
+
+    BOTH surfaces are required. The defect this guards against lived in an INLINE span
+    (`ls -la ./mnt/uploads` inside a prose sentence), not in a fenced block — a fenced-only scan
+    reports clean on the exact case that motivated the test.
+    """
+    out: list[tuple[int, str]] = []
+    for block in re.findall(r"```bash\n(.*?)```", text, re.DOTALL):
+        start = text.index(block)
+        base = text[:start].count("\n") + 1
+        for i, line in enumerate(block.splitlines()):
+            # A shell COMMENT is prose that happens to sit inside a fence. These skills explain the
+            # outputs/ layout in comments constantly ("outputs/ mounts are write-allowed"), and
+            # flagging those trains the reader to ignore the test. Strip to the command.
+            code = line.split("#", 1)[0]
+            if code.strip():
+                out.append((base + i, code))
+    for m in re.finditer(r"`([^`\n]+)`", text):
+        span = m.group(1)
+        if re.match(r"^\s*(mkdir|ls|cp|mv|cat|python3?|rm|touch|test|\[)\b", span):
+            out.append((text[: m.start()].count("\n") + 1, span))
+    return out
+
+
+@pytest.mark.parametrize("skill", sorted(SKILL_MD_CEILING))
+def test_no_cwd_relative_path_addresses_the_session_layout(skill: str) -> None:
+    """A relative path naming artifacts/mnt/outputs/uploads/handoff is a latent relocation bug.
+
+    WHY THIS EXISTS, and why an instance fix was not enough. cowork-harness 2.4.0 corrected the
+    workspace shell's cwd at hostloop from `<session>/mnt/<first-folder-else-outputs>` to the bare
+    session root — upstream measured production and found the old derivation reproduced a prompt
+    claim, not a behaviour. Every relative path in a skill body silently changed meaning:
+
+      * `mkdir -p ./artifacts` resolved to the canonical artifacts root, and now resolves to
+        `/sessions/<id>/artifacts` — OUTSIDE `mnt/`, where nothing is delivered and nothing says so.
+      * `ls -la ./mnt/uploads` pointed at a path that never existed, and now points at the real
+        uploads mount. Correct today BY ACCIDENT; a skill that only works on one harness version is
+        not fixed.
+
+    Four of six skills said `"$ARTIFACTS_ROOT"` and two said `./artifacts` — so this class had
+    ALREADY been fixed once and drifted back. That is the argument for a detector over a patch:
+    the fix does not hold itself.
+
+    The remedy is always the same: resolve the path with `resolve_artifacts_root.py` (`--uploads`
+    for the uploads mount) and address the printed value, per that module's opening rationale — a
+    computed path in a skill body is the thing the model paraphrases away.
+    """
+    text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
+    offenders = [
+        f"  {skill}/SKILL.md:{line_no}: {line.strip()}"
+        for line_no, line in _command_lines(text)
+        if _RELATIVE_LAYOUT_PATH.search(line) and not _ANCHORED.search(line)
+    ]
+    assert not offenders, (
+        f"{skill}/SKILL.md has {len(offenders)} cwd-relative path(s) addressing the session layout. "
+        "These resolve against the workspace shell's cwd, which moved in cowork-harness 2.4.0 and "
+        "can move again — one of these silently relocates deliverables outside the outputs mount.\n"
+        + "\n".join(offenders)
+        + "\n  Fix: derive the path from resolve_artifacts_root.py (--uploads for the uploads mount) "
+        "and address the printed value, or anchor it on an already-resolved $VAR."
     )

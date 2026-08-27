@@ -111,6 +111,29 @@ def find_artifact(
     return 2, "\n".join(msg_lines)
 
 
+def _default_artifacts_root() -> str:
+    """The artifacts root to use when --artifacts-root is not passed.
+
+    NOT `os.getcwd()/artifacts`. On a Cowork session tree the workspace shell's cwd is the BARE
+    SESSION ROOT (cowork-harness >=2.4.0, measured against production 2026-08-27), so that guess
+    resolves to `/sessions/<id>/artifacts` -- OUTSIDE `mnt/`, where a write is never delivered and
+    nothing reports it. Every SKILL.md passes the flag explicitly, but "the flag is always passed"
+    is a property of PROSE the agent paraphrases, which is the whole reason the resolver exists.
+
+    Falls back to the old guess if the sibling import fails, so this stays a standalone script:
+    a wrong default is strictly better than an unrunnable one, and on the plain CLI the two agree.
+    """
+    try:
+        shared = os.path.dirname(os.path.abspath(__file__))
+        if shared not in sys.path:
+            sys.path.insert(0, shared)
+        import resolve_artifacts_root  # type: ignore[import-not-found]
+
+        return str(resolve_artifacts_root.resolve_artifacts_root(os.getcwd(), dict(os.environ)))
+    except Exception:
+        return os.path.join(os.getcwd(), "artifacts")
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Resolve artifact paths")
     p.add_argument("--skill", required=True, help="Skill name (e.g., market-sizing)")
@@ -120,8 +143,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--prefer", choices=["newest"], help="When multiple matches, prefer newest")
     p.add_argument(
         "--artifacts-root",
-        default=os.path.join(os.getcwd(), "artifacts"),
-        help="Override artifacts directory (default: ./artifacts)",
+        default=_default_artifacts_root(),
+        help="Override artifacts directory (default: the resolved canonical root)",
     )
     p.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
     p.add_argument("-o", "--output", help="Write output to file instead of stdout")

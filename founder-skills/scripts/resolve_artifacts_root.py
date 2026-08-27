@@ -18,9 +18,24 @@ AND resolvable by find_artifact.py), nested in an `artifacts/` subdir so the out
 for user-facing deliverables. In the CLI (no session tree) they live at `./artifacts`.
 
 TOPOLOGY IS DETECTED FROM THE cwd STRING SHAPE, NOT FROM THE FILESYSTEM. This resolver runs in the
-main-thread workspace shell. On Cowork host-loop that shell's cwd is somewhere inside the session tree
-`/sessions/<id>/mnt/<first-connected-folder-else-outputs>` (Ch35/L122 "first-folder-else-outputs") —
-NOT necessarily the outputs mount. Probing the filesystem for a sibling `outputs/` mis-anchors: if a
+main-thread workspace shell, whose cwd is a DIFFERENT path space from the file tools'. On Cowork
+host-loop — the production topology — that shell starts at the BARE SESSION ROOT `/sessions/<id>`
+(branch 3 below), while the agent process, and so the file tools, sit at the outputs dir. Measured
+upstream against desktop-local Cowork 2026-08-27 and pinned in cowork-harness >=2.4.0
+(`hostLoopCwds`: `{agentProcessCwd: hostOutputsDir, workspaceBashCwd: sessionRoot}`).
+
+An earlier version of this note asserted the shell sits inside `/sessions/<id>/mnt/<first-connected-
+folder-else-outputs>`, citing the asar's "first-folder-else-outputs". That derivation came from a
+`cwd:` spawn argument which is NOT load-bearing on the cowork path, so it described a prompt claim
+rather than an observed behaviour; harness <2.4.0 emulated it, which is why branch 2 was the one
+production appeared to take. Branch 2 is still REQUIRED — it serves the VM-loop tiers and any
+pre-2.4.0 recording — but it is no longer the production shape.
+
+**Branches 2 and 3 return IDENTICAL roots, and that convergence is the invariant that made the move
+harmless.** Do not "simplify" either away, and do not let them diverge: a change that makes them
+disagree silently relocates every artifact the moment the shell's cwd moves again.
+
+The shell's cwd is NOT necessarily the outputs mount. Probing the filesystem for a sibling `outputs/` mis-anchors: if a
 connected folder contains its own `outputs/`, an `isdir(cwd/outputs)` branch would point artifacts
 INSIDE the user's real project while a sub-agent's host-native file tools (whose cwd IS the session
 outputs dir) resolve the returned relative root against the outputs mount — write and gate then address
@@ -38,7 +53,17 @@ Resolution (first match wins; pure string logic, no FS probe except the CLI mkdi
   $COWORK_AGENT_ARTIFACTS_ROOT overrides ONLY the agent-namespace half (see below).
 
 Prints the absolute artifacts root on stdout (one line). With --json, prints
-{"artifacts_root": ..., "agent_artifacts_root": ...}. Creates the dir unless --no-create.
+{"artifacts_root": ..., "agent_artifacts_root": ..., "uploads_dir": ...}. Creates the dir unless
+--no-create. `--uploads` prints the uploads mount alone (exit 3 when there is no session tree) —
+see `resolve_uploads_dir`.
+
+THREE CONSUMERS READ THE SHELL cwd, NOT ONE. Beyond this module, `find_artifact.py` and
+`founder_context.py` both default `--artifacts-root` to `os.path.join(os.getcwd(), "artifacts")`.
+Every SKILL.md passes the flag explicitly, so those defaults are latent — but "the flag is always
+passed" is a property of PROSE the agent paraphrases (see WHY THIS EXISTS above), and the cost of a
+dropped flag changed with the harness 2.4.0 cwd move: it used to land on the correct root and now
+lands at `/sessions/<id>/artifacts`, outside `mnt/`, where nothing is ever delivered and nothing
+reports it. If you add a fourth consumer, pass the root in — do not re-derive it from `getcwd()`.
 
 AGENT NAMESPACE (branch C hand-off): in Cowork a sub-agent's native file tools are rooted at the
 outputs mount itself (its cwd IS the outputs dir), so the same file has two addresses — the main
@@ -141,6 +166,39 @@ def resolve_artifacts_root(cwd: str, env: dict[str, str]) -> str:
     return resolve_roots(cwd, env)[0]
 
 
+def resolve_uploads_dir(cwd: str, env: dict[str, str]) -> str | None:
+    """Return the absolute uploads mount, or None when there is no session tree (plain CLI).
+
+    WHY THIS IS A SCRIPT FLAG AND NOT SHELL IN A SKILL.md: an attached file lands under
+    `<session>/mnt/uploads`, and a skill that cannot list that dir tells the founder their upload is
+    missing while it sits there. deck-review carried
+    `ls -la "$(dirname "$REVIEW_DIR")"/../uploads 2>/dev/null || ls -la ./mnt/uploads` — two arms, both
+    keyed off something other than the session root. The second resolved against the WORKSPACE SHELL's
+    cwd, so its meaning moved when cowork-harness 2.4.0 corrected that cwd from
+    `<session>/mnt/<first-folder-else-outputs>` to the bare session root: before, `./mnt/uploads` pointed
+    at `<session>/mnt/outputs/mnt/uploads` (never existed); after, at the real mount. A path whose
+    correctness depends on the harness version is not a path — hence one opaque command, per this
+    module's opening rationale.
+
+    NOT derived from the artifacts root: `$COWORK_ARTIFACTS_ROOT` may point anywhere, and uploads is a
+    property of the session tree, not of where artifacts were redirected. Keyed on the cwd shape only,
+    with `$COWORK_UPLOADS_DIR` as the explicit override (same escape-hatch posture as the agent root:
+    declared, never guessed).
+    """
+    override = env.get("COWORK_UPLOADS_DIR")
+    if override:
+        return os.path.abspath(override)
+
+    m = _SESSION_TREE.match(cwd)
+    if m:
+        return os.path.join(m.group(1), "mnt", "uploads")
+    if _SESSION_ROOT.match(cwd):
+        return os.path.join(cwd, "mnt", "uploads")
+    # Plain CLI: no session tree, so no uploads mount. None, never a fabricated path — a guessed
+    # `./uploads` would `ls` clean-empty and read as "the founder attached nothing".
+    return None
+
+
 def build_agent_paths(agent_root: str, dir_name: str, run_id: str | None = None) -> dict[str, str]:
     """Build the FULL agent-namespace paths a Context-A dispatch needs, from the agent-namespace
     artifacts root plus the per-run/per-company directory name (e.g. `competitive-positioning-acme-corp`).
@@ -169,6 +227,13 @@ def main() -> int:
         " (plus analysis_dir_agent/handoff_dir_agent when --dir-name is given)",
     )
     p.add_argument("--agent", action="store_true", help="Print the agent-namespace root instead")
+    p.add_argument(
+        "--uploads",
+        action="store_true",
+        help="Print the absolute uploads mount (where attached files land). Exits 3 with a stderr "
+        "note when there is no session tree (plain CLI), so an absent mount is distinguishable "
+        "from an empty one",
+    )
     p.add_argument("--no-create", action="store_true", help="Do not mkdir the resolved root")
     p.add_argument(
         "--dir-name",
@@ -222,12 +287,32 @@ def main() -> int:
                 f"'<skill>-<slug>'.\n"
             )
 
+    uploads = resolve_uploads_dir(os.getcwd(), dict(os.environ))
+
+    if args.uploads:
+        if uploads is None:
+            sys.stderr.write(
+                "No uploads mount: this is not a Cowork session tree, so nothing was attached "
+                "through one. Ask the founder for a path instead of reporting the file missing. "
+                "Set $COWORK_UPLOADS_DIR to override.\n"
+            )
+            return 3
+        sys.stdout.write(uploads + "\n")
+        return 0
+
     if args.handoff_dir_agent:
         sys.stdout.write(agent_paths["handoff_dir_agent"] + "\n")
     elif args.analysis_dir_agent:
         sys.stdout.write(agent_paths["analysis_dir_agent"] + "\n")
     elif args.json:
-        payload = {"artifacts_root": root, "agent_artifacts_root": agent_root, **agent_paths}
+        # `null` rather than an omitted key: a consumer that reads a missing key as "" builds
+        # `/uploads` and lists the host root. An explicit null forces the branch.
+        payload: dict[str, str | None] = {
+            "artifacts_root": root,
+            "agent_artifacts_root": agent_root,
+            **agent_paths,
+            "uploads_dir": uploads,
+        }
         sys.stdout.write(json.dumps(payload) + "\n")
     elif args.agent:
         sys.stdout.write(agent_root + "\n")
