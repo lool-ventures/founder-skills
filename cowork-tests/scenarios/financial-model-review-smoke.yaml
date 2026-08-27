@@ -89,6 +89,16 @@ assert:
   # What actually proves it: a `--workspace` server is &-backgrounded and would HANG the record, so
   # `result: success` above is the evidence, and `file_exists` below is the positive proof the static
   # branch ran instead. Both are asserted; the removed line added nothing.
+  #
+  # THE FROZEN COPY OUTLIVES THIS DELETION, AND THAT IS ACCEPTED. A cassette freezes the assert BLOCK
+  # as well as the events, and `replay` evaluates the frozen copy — never this file — so CI still runs
+  # the deleted assert until this lane is re-recorded. Harmless: the assert is vacuous, so the verdict
+  # is identical either way, and every replay prints a `::notice::` that the two blocks differ.
+  # Do NOT "fix" it with `replay --assert-from --write`: that path currently fails on skill-source
+  # drift (measured 2026-08-27 — two drift failures, zero assertion failures), so writing needs
+  # `--allow-failing`, which skips the write-back's only drift protection and would freeze this block
+  # against a recording that no longer matches the skill. A real re-record clears it; nothing else
+  # should.
   - file_exists: outputs/artifacts/financial-model-review-cadence/review.html
   # The emitted review.html must carry NO write-back that is lost under Cowork: its /api/check +
   # /api/feedback fetches are guarded by the build-time IS_STATIC flag (dead in the static/Cowork

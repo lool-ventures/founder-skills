@@ -14,9 +14,10 @@ name: cowork-replay
 #   4. replay          — content + manifest-backed file_exists/artifact_json across the whole dir.
 # No model tokens, no Docker, no staged agent binary → runs on a stock GitHub-hosted runner.
 #
-# Version policy: FLOOR, NOT PIN — track the newest 1.x harness, but never something older than the
-# floor. There are TWO independent CLI sources here, and a floor is applied per-site, only where a step
-# actually depends on a version:
+# Version policy: **PINNED EXACTLY at 2.4.0 as of 2026-08-27** — see the block at the `npm i -g` site
+# below for why the caret was retired. The paragraphs that follow are the FLOOR-ERA history, kept
+# because each explains why a given step depends on a version at all; read every `^1.x` in them as a
+# historical reason, NOT as the current value. There are TWO independent CLI sources here:
 #   * the `replay` job's `uses: ...@v1` steps — the CLI comes from the packaged Action, which installs
 #     it from its own `version:` input (default `latest`). **Every step in this job now carries the
 #     floor.** The two verify-cassettes steps used to ride `latest` because they worked on any 1.x;
@@ -25,7 +26,8 @@ name: cowork-replay
 #     an older, unrelated reason: it passes
 #     `--min-severity`, which needs >=1.11.0. Without that floor a
 #     `latest` that resolved older would not degrade — it hard-fails, exit 2, "unrecognized arguments".
-#     ALL FOUR now carry `^1.20.0`, and each for its own reason — this is not a blanket bump. NOTE the
+#     ALL FOUR carried `^1.20.0` at the time, each for its own reason — this is not a blanket bump;
+#     all four are now the exact `2.4.0`. NOTE the
 #     four sites are LINT / PRIVACY / STALENESS / REPLAY. The email canary is NOT one of them: it is a
 #     bare `run:` step with no `version:` input, riding whatever CLI the preceding Action step
 #     installed. Enumerate with `grep -n 'version: "' ` before editing this list — a plan-stage draft
@@ -79,7 +81,8 @@ name: cowork-replay
 #   docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md §7.4-7.5.
 #   (A RANGE is still accepted in the Action's `version` input — documented since harness 1.12.0 —
 #   so reverting to a caret is mechanically possible; it is a posture decision, not a limitation.)
-# THE FLOOR IS 1.25.0. Five reasons, and they raise the floor for different steps:
+# THE FLOOR WAS 1.25.0 (historical — the sites are now PINNED at 2.4.0). Five reasons, and they
+# raised the floor for different steps:
 #   (0'') 1.25.0 — CI HYGIENE ONLY, deliberately. `^1.24.0` already resolves to 1.25.0, so CI was
 #       running it before this pin moved; nothing CI executes reads a surface 1.25.0 changed.
 #       MEASURED: no new assertion keys (`git diff v1.24.0..v1.25.0 -- src/assert.ts` is EMPTY; the

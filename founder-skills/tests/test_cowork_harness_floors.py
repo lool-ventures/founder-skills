@@ -35,6 +35,7 @@ RERECORD = REPO_ROOT / "cowork-tests" / "rerecord.sh"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 CONTRIBUTING = REPO_ROOT / "CONTRIBUTING.md"
 CLAUDE_MD = REPO_ROOT / "CLAUDE.md"
+COWORK_README = REPO_ROOT / "cowork-tests" / "README.md"
 REPLAY_TEST = REPO_ROOT / "founder-skills" / "tests" / "test_cowork_cassette_replay.py"
 CASSETTE_DIR = REPO_ROOT / "cowork-tests" / "cassettes"
 CANARY = REPO_ROOT / "cowork-tests" / "canary" / "email-canary.cassette.json"
@@ -60,6 +61,11 @@ _CI_PINS: dict[str, str] = {
     # CLAUDE.md was an UNGATED pin site until 2026-08-27 -- it carried the same install line and no
     # test read it, so it could drift silently whatever value it held. Gated now.
     "CLAUDE.md": _CI_PIN,
+    # So was test_cowork_cassette_replay.py's SKIP MESSAGE, which told a developer to install
+    # `@^2.1.0` at the exact moment they install -- putting them on a different CLI from CI, which is
+    # the skew the pin exists to remove. The message is an instruction site; `_MIN_HARNESS` in the
+    # same file is a floor and is asserted separately below.
+    "replay-test skip message": _CI_PIN,
 }
 
 _FLOORS: dict[str, str] = {
@@ -67,12 +73,15 @@ _FLOORS: dict[str, str] = {
     # `present_files_called` at hostloop cannot be recorded below 2.2.0 (presence there comes from the
     # invocation count; below it, from the classified `presentedFiles` list, which drops the
     # non-absolute path host-path redaction produces — so the assert flips and `record` refuses).
-    "rerecord.sh": _RECORDING_FLOOR,
     # The replay path has no measured requirement above 2.1.0, and raising `_MIN_HARNESS` would
     # convert a below-floor developer's red into a SILENT SKIP (`_require_harness` calls
     # `pytest.skip`) -- for exactly the developer it is meant to warn. Held deliberately, and it is
     # NOT a selector: it gates whether the replay test runs, not which CLI CI installs.
     "_MIN_HARNESS": _REPLAY_FLOOR,
+    # NOTE there is no "rerecord.sh" entry. There was one, and it was DEAD: nothing read it (the
+    # recording-floor test compares against `_RECORDING_FLOOR` directly), so setting it to "9.9.9"
+    # left the suite green. A registry entry that reads as gating and gates nothing is the exact
+    # failure this module exists to prevent, so it is removed rather than wired up twice.
 }
 
 # Cassette-format facts, derived from the tree by the assertions below.
@@ -114,6 +123,17 @@ def test_ci_selector_pins_match_the_registry_and_carry_no_range() -> None:
 
     installs = _found(re.findall(r"npm i -g cowork-harness@([^\s`]+)", wf), "workflow npm i -g")
     assert set(installs) == {_CI_PINS["workflow npm i -g"]}, f"workflow npm installs are {sorted(set(installs))}"
+
+    skip_msgs = _found(
+        re.findall(r"cowork-harness@\{_CI_PIN\}", REPLAY_TEST.read_text(encoding="utf-8")),
+        "replay-test skip message",
+    )
+    assert len(skip_msgs) == 2, f"expected 2 pinned install hints in the replay test, found {len(skip_msgs)}"
+    pin_const = _found(
+        re.findall(r'^_CI_PIN\s*=\s*"([^"]+)"', REPLAY_TEST.read_text(encoding="utf-8"), re.M),
+        "replay-test _CI_PIN",
+    )
+    assert pin_const[0] == _CI_PINS["replay-test skip message"], f"replay-test _CI_PIN is {pin_const[0]}"
 
     for label, path in (
         ("pyproject marker", PYPROJECT),
@@ -179,4 +199,43 @@ def test_cassette_format_facts_are_what_prose_may_state() -> None:
     assert canary == _CANARY_CASSETTE_VERSION, (
         f"email canary is v{canary}, expected v{_CANARY_CASSETTE_VERSION}. It is hand-authored and must "
         f"never be re-recorded; hand-bump it only at a MIN_SUPPORTED_CASSETTE_VERSION raise"
+    )
+
+
+def test_rerecord_floor_header_agrees_with_its_own_gate() -> None:
+    """The header is the FOURTH floor site, and it is the one that has actually drifted.
+
+    `rerecord.sh` itself says to change all four (header, gate, FATAL message, `_RECORDING_FLOOR`)
+    and records that this header "WAS ONE MINOR BEHIND THE GATE when 2.3.0 was adopted". The test
+    that exists to stop that read the gate and the message and NOT the header — so the one site with
+    a documented drift history was the one nothing checked.
+    """
+    header = _found(
+        re.findall(r"^# FLOOR: >=(\d+\.\d+\.\d+)", RERECORD.read_text(encoding="utf-8"), re.M),
+        "rerecord.sh FLOOR: header",
+    )
+    assert header[0] == _RECORDING_FLOOR, (
+        f"rerecord.sh's `# FLOOR: >=` header says {header[0]}, the declared recording floor is "
+        f"{_RECORDING_FLOOR} — this header has drifted behind its own gate before"
+    )
+
+
+def test_cowork_readme_floor_list_matches_the_registry() -> None:
+    """cowork-tests/README.md IS the repo's floor-list document, and nothing read it.
+
+    The 2.4.0 adoption updated the code and left this file describing a `>= 2.2.0` recording floor
+    and `^2.1.0` CI carets — the precise "prose a major behind" failure the module's docstring claims
+    to prevent. Assert the two numbers it must carry rather than its wording, so it can be rewritten
+    freely but cannot state a stale version.
+    """
+    text = COWORK_README.read_text(encoding="utf-8")
+    assert f">= {_RECORDING_FLOOR}" in text or f">={_RECORDING_FLOOR}" in text, (
+        f"cowork-tests/README.md never states the recording floor {_RECORDING_FLOOR}"
+    )
+    assert f"`{_CI_PIN}`" in text, f"cowork-tests/README.md never states the CI pin {_CI_PIN}"
+    stale = re.findall(r"\^\d+\.\d+\.\d+", text)
+    allowed = {f"^{_REPLAY_FLOOR}"}
+    assert not (set(stale) - allowed), (
+        f"cowork-tests/README.md still describes CI selectors as caret ranges: "
+        f"{sorted(set(stale) - allowed)} — they are pinned exactly at {_CI_PIN}"
     )

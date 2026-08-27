@@ -257,6 +257,12 @@ _NO_CASSETTE_ALLOWLIST: dict[str, str] = {
 # *assertions* are validated and hard-reject, so this is not "replay validates
 # nothing"; only the scenario object is passthrough. `lane:` is the first key we
 # use that behaves this way.
+# What a developer is told to INSTALL: the exact version CI runs. Distinct from _MIN_HARNESS
+# below, which is the FLOOR at which this test still means something. Telling a developer to
+# install `@^2.1.0` handed them whatever npm's newest 2.x was and put them on a different CLI
+# from CI — the skew the exact pin exists to remove, pointing the other way.
+_CI_PIN = "2.4.0"
+
 _MIN_HARNESS = (2, 1, 0)
 
 
@@ -324,7 +330,7 @@ def _require_harness() -> str:
     cli = _resolve_cli()
     if cli is None:
         floor = ".".join(str(n) for n in _MIN_HARNESS)
-        pytest.skip(f"cowork-harness not installed (npm i -g cowork-harness@^{floor})")
+        pytest.skip(f"cowork-harness not installed (npm i -g cowork-harness@{_CI_PIN})")
 
     version = _installed_version(cli)
     if version is None or version < _MIN_HARNESS:
@@ -334,7 +340,7 @@ def _require_harness() -> str:
             f"cowork-harness {found} is below the {floor} replay floor — skipping rather than "
             f"replaying, because a cassette carrying a scenario key this CLI does not know is "
             f"replayed as if the key were absent and can return the opposite verdict silently. "
-            f"Upgrade: npm i -g cowork-harness@^{floor}"
+            f"Upgrade: npm i -g cowork-harness@{_CI_PIN}"
         )
     return cli
 

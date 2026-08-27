@@ -10,19 +10,24 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 > version, and the sites are NOT uniform — do not bump them as a block. Enumerate them, never count
 > them from prose:
 >
-> - **`cowork-tests/rerecord.sh` — `>= 2.2.0`.** The only site with a live requirement. Recording bakes
+> - **`cowork-tests/rerecord.sh` — `>= 2.4.0` (a FLOOR).** Recording bakes
 >   the harness version into the artifact, and a lane asserting `present_files_called` at hostloop
 >   cannot be recorded below 2.2.0: presence there comes from the count of `present_files` invocations
 >   (input shape), whereas below that floor it comes from the classified `presentedFiles` list, which
 >   drops the non-absolute path that host-path redaction produces — so the assert flips under redaction
 >   and `record` refuses to write. The numeric gate and its FATAL message are ADJACENT lines; edit both
 >   (`grep -n 'minor.*-ge' rerecord.sh`).
-> - **The four `version:` inputs in the `replay` job — `^2.1.0`.** LINT, PRIVACY, STALENESS and REPLAY.
+> - **The four `version:` inputs in the `replay` job — PINNED EXACTLY at `2.4.0`.** LINT, PRIVACY,
+>   STALENESS and REPLAY. Exact, not a floor, since 2026-08-27: a caret auto-adopted every upstream
+>   release into CI with nobody choosing it, and five CI steps red on rules the harness adds.
 >   Enumerate with `grep -n 'version: "' ../.github/workflows/cowork-replay.yml`. The **email canary is
 >   not among them**: it is a bare `run:` step riding the CLI the preceding Action step installed.
-> - **The `skill-static-analysis` job's standalone `npm i -g` — `^2.1.0`.** That step runs
+> - **The `skill-static-analysis` job's standalone `npm i -g` — PINNED EXACTLY at `2.4.0`.** That step runs
 >   `record --dry-run`, i.e. the LOADER, which is the strict surface `lint` cannot substitute for.
-> - **`test_cowork_cassette_replay.py::_MIN_HARNESS` — `(2, 1, 0)`.**
+> - **`test_cowork_cassette_replay.py::_MIN_HARNESS` — `(2, 1, 0)`, and it STAYS A FLOOR.** It is a
+>   skip guard, not a selector: raising it turns a below-floor developer's red into a silent skip.
+> - **Install instructions — `CONTRIBUTING.md`, `CLAUDE.md`, `pyproject.toml`'s marker text.** These
+>   track the CI pin so a local `pytest -m cowork` green means what CI's green means.
 >
 > **`uses:` pins the ACTION; `version:` pins the CLI.** They move independently, so a workflow on
 > `@v1` can be installing a 2.x CLI. Keep the `uses:` major and the `version:` major in step.
@@ -40,11 +45,14 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 > evaluation); a cassette at or below it hard-rejects them. So a too-old CLI can green by omission.
 >
 > **Corpus size is derived, never restated here.** Run `python cowork-tests/cassette_inventory.py`.
-> `test_cowork_harness_floors.py` pins the counts against the tree so prose cannot drift from it.
+> `test_cowork_harness_floors.py` pins the cassette-format facts and every version site — including
+> this file — against the tree, so prose cannot drift from it. It asserts no COUNTS; derive those with
+> `python cowork-tests/cassette_inventory.py`.
 >
 > Node **22+** as of 1.14.0 (20 is EOL; `doctor` fails on it).
 >
-> **Why not below 2.2.0 for RECORDING.** `present_files_called` at hostloop is unrecordable below it
+> **Why not below 2.2.0 for RECORDING (the original reason; the floor is now 2.4.0 — see above).**
+> `present_files_called` at hostloop is unrecordable below it
 > (see the floor list above). Adopting 2.2.0 changed nothing else here: measured against a pinned
 > 2.1.0, every token-free surface on this repo is byte-identical — `replay` ×10, `verify-cassettes`,
 > `lint`, `record --dry-run`, `analyze-skill`, `lint-skill` — and `baselines/` is byte-identical
