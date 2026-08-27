@@ -53,11 +53,32 @@ name: cowork-replay
 #     (A RANGE in that input is DOCUMENTED as of harness 1.12.0 — `action.yml` now states `version`
 #     accepts an npm range, not only an exact pin. It was already mechanically sound: the value is
 #     interpolated as `cowork-harness@$v` into `npm install --global`.)
-#   * the `skill-static-analysis` job's standalone `npm i -g cowork-harness@^2.1.0` — a floor with a
-#     1.x ceiling. `^` (not a bare `>=`) because it FAILS LOUD if nothing >=1.16.0 is published
-#     (upstream SKILL.md: `@latest` can silently fetch an older CLI, and the new commands then fail as
-#     "unknown command"), AND because it cannot cross a future 2.0 the way `@latest` would. `^` is also
-#     shell-safe unquoted, where a bare `@>=1.16.0` would redirect stdout into a file named `=1.16.0`.
+#   * the `skill-static-analysis` job's standalone `npm i -g cowork-harness@2.4.0`.
+#
+#   PINNED EXACTLY AS OF 2026-08-27 — these five sites are SELECTORS (they decide which CLI runs a
+#   gate), and they were carets until 2.4.0. The caret auto-adopted every upstream release into CI
+#   with nobody choosing it: 2.4.0 was running in these gates before the adoption plan describing it
+#   was written. Five steps here are gates that red on a rule the harness ADDED — `lint --strict`,
+#   `analyze-skill --strict`, `lint-skill --strict`, the `record --dry-run` loader, and the PII
+#   `verify-cassettes` — so an unrelated PR could go red with nothing in its diff to explain it.
+#   2.4.0 is the existence proof: it added a `fidelity-defaulted` lint rule and a `replaced-builtin`
+#   note class, and we were compliant BY LUCK (27 of 27 scenarios already named a tier).
+#   Replay is the sharper edge: the scenario object is passthrough, so a mismatched CLI "can return
+#   the OPPOSITE verdict with no signal" (test_cowork_cassette_replay.py's own words) — and a floor
+#   cannot cap that in the newer direction. Upstream agrees: `action.yml` says the `latest` default
+#   exists so copy-paste recipes track the release, and "for reproducible CI, pin an exact version".
+#   Cost is ~zero: the recording floor already moves nearly every release, so this is one more line
+#   in a commit that was happening anyway.
+#
+#   RAISE THESE DELIBERATELY, as part of an adoption pass — never to chase a red.
+#   WHAT IS **NOT** PINNED, and must stay a floor: `_MIN_HARNESS` in
+#   founder-skills/tests/test_cowork_cassette_replay.py (raising it converts a below-floor
+#   developer's RED into a silent SKIP) and `rerecord.sh`'s recording floor. Those answer a
+#   different question — "is this CLI new enough for the check to mean anything" — than a selector's
+#   "which CLI runs". Collapsing the two is the error. See
+#   docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md §7.4-7.5.
+#   (A RANGE is still accepted in the Action's `version` input — documented since harness 1.12.0 —
+#   so reverting to a caret is mechanically possible; it is a posture decision, not a limitation.)
 # THE FLOOR IS 1.25.0. Five reasons, and they raise the floor for different steps:
 #   (0'') 1.25.0 — CI HYGIENE ONLY, deliberately. `^1.24.0` already resolves to 1.25.0, so CI was
 #       running it before this pin moved; nothing CI executes reads a surface 1.25.0 changed.
@@ -208,7 +229,7 @@ jobs:
         with:
           command: lint
           path: cowork-tests/scenarios/
-          version: "^2.1.0"
+          version: "2.4.0"
           # `strict: true` is the Action's first-class input (action.yml `inputs.strict` -> `--strict`),
           # not `extra-args`. WITHOUT it this step CANNOT fail on a WARN-class rule — measured: a WARN
           # finding exits 0 bare and 1 under --strict, while an ERROR (`assert-contradiction`) exits 1
@@ -240,7 +261,7 @@ jobs:
         with:
           command: verify-cassettes
           path: cowork-tests/cassettes/
-          version: "^2.1.0"
+          version: "2.4.0"
           extra-args: "--skip-staleness --skip-scenario-drift ${{ steps.allow.outputs.args }}"
 
       # Email canary: the SAME allowlist must still FLAG a non-synthetic email. The check asserts an
@@ -268,7 +289,7 @@ jobs:
         with:
           command: verify-cassettes
           path: cowork-tests/cassettes/
-          version: "^2.1.0"
+          version: "2.4.0"
           extra-args: "--skip-privacy"
 
       # Floored, and NOT for a missing flag. An unknown top-level scenario key inside a frozen
@@ -281,7 +302,7 @@ jobs:
         with:
           command: replay
           path: cowork-tests/cassettes/
-          version: "^2.1.0"
+          version: "2.4.0"
 
       # `cowork-tests/gate_prefix_check.py` and `delivery_check.py` are implemented and
       # unit-tested (`founder-skills/tests/test_gate_prefix_check.py` /
@@ -385,8 +406,8 @@ jobs:
       - uses: actions/setup-python@v5   # lint-skill bundles scenario.py (needs python3)
         with:
           python-version: '3.12'
-      - name: Install cowork-harness (floor ^2.1.0 — see header version policy)
-        run: npm i -g cowork-harness@^2.1.0
+      - name: Install cowork-harness (pinned 2.4.0 — see header version policy)
+        run: npm i -g cowork-harness@2.4.0
       # The LOADER is the strict surface, and nothing else in CI reaches it:
       #   * `lint` WARNS on an unknown/too-new top-level key and exits 0 (lenient by design);
       #   * `replay` evaluates the scenario FROZEN in each cassette and never reads the on-disk YAML;

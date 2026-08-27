@@ -34,25 +34,44 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "cowork-replay.yml"
 RERECORD = REPO_ROOT / "cowork-tests" / "rerecord.sh"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 CONTRIBUTING = REPO_ROOT / "CONTRIBUTING.md"
+CLAUDE_MD = REPO_ROOT / "CLAUDE.md"
 REPLAY_TEST = REPO_ROOT / "founder-skills" / "tests" / "test_cowork_cassette_replay.py"
 CASSETTE_DIR = REPO_ROOT / "cowork-tests" / "cassettes"
 CANARY = REPO_ROOT / "cowork-tests" / "canary" / "email-canary.cassette.json"
 
+# CI SELECTORS are PINNED EXACTLY (2026-08-27); FLOORS stay floors. The two answer different
+# questions -- "which CLI runs this gate" vs "is this CLI new enough for the check to mean anything"
+# -- and collapsing them is the error this split exists to prevent. Rationale:
+# docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md SS7.4-7.5.
+_CI_PIN = "2.4.0"
+
 # The declared floor per site, with the reason it differs where it does.
-_RECORDING_FLOOR = "2.3.0"
+_RECORDING_FLOOR = "2.4.0"
 _REPLAY_FLOOR = "2.1.0"
+
+# Sites that SELECT the CLI a gate runs. Exact, never a range: a caret auto-adopted every upstream
+# release into CI with nobody choosing it (2.4.0 was live in these gates before its adoption plan was
+# written), and five of the gates red on rules the harness adds.
+_CI_PINS: dict[str, str] = {
+    "workflow version: inputs": _CI_PIN,
+    "workflow npm i -g": _CI_PIN,
+    "pyproject marker": _CI_PIN,
+    "CONTRIBUTING": _CI_PIN,
+    # CLAUDE.md was an UNGATED pin site until 2026-08-27 -- it carried the same install line and no
+    # test read it, so it could drift silently whatever value it held. Gated now.
+    "CLAUDE.md": _CI_PIN,
+}
+
 _FLOORS: dict[str, str] = {
     # Recording bakes the harness version into the artifact, and a lane asserting
     # `present_files_called` at hostloop cannot be recorded below 2.2.0 (presence there comes from the
     # invocation count; below it, from the classified `presentedFiles` list, which drops the
     # non-absolute path host-path redaction produces — so the assert flips and `record` refuses).
     "rerecord.sh": _RECORDING_FLOOR,
-    # The replay path has no measured requirement for 2.2.0, and raising `_MIN_HARNESS` would convert a
-    # below-floor developer's red into a silent skip. Held deliberately.
-    "workflow version: inputs": _REPLAY_FLOOR,
-    "workflow npm i -g": _REPLAY_FLOOR,
-    "pyproject marker": _REPLAY_FLOOR,
-    "CONTRIBUTING": _REPLAY_FLOOR,
+    # The replay path has no measured requirement above 2.1.0, and raising `_MIN_HARNESS` would
+    # convert a below-floor developer's red into a SILENT SKIP (`_require_harness` calls
+    # `pytest.skip`) -- for exactly the developer it is meant to warn. Held deliberately, and it is
+    # NOT a selector: it gates whether the replay test runs, not which CLI CI installs.
     "_MIN_HARNESS": _REPLAY_FLOOR,
 }
 
@@ -82,32 +101,49 @@ def test_rerecord_gate_and_message_agree_on_the_recording_floor() -> None:
     )
 
 
-def test_replay_path_floors_match_the_registry() -> None:
+def test_ci_selector_pins_match_the_registry_and_carry_no_range() -> None:
+    """Every site that decides WHICH CLI a gate runs is an exact version.
+
+    The `[^^~>=]` guard is the load-bearing half: re-introducing a caret is the regression this
+    replaced, and a pattern that only checked the NUMBER would pass on `^2.4.0`.
+    """
     wf = WORKFLOW.read_text(encoding="utf-8")
 
-    inputs = _found(re.findall(r'^\s*version: "\^(\d+\.\d+\.\d+)"', wf, re.M), "workflow version: inputs")
-    assert set(inputs) == {_FLOORS["workflow version: inputs"]}, f"workflow version: inputs are {sorted(set(inputs))}"
+    inputs = _found(re.findall(r'^\s*version: "([^"]+)"', wf, re.M), "workflow version: inputs")
+    assert set(inputs) == {_CI_PINS["workflow version: inputs"]}, f"workflow version: inputs are {sorted(set(inputs))}"
 
-    installs = _found(re.findall(r"npm i -g cowork-harness@\^(\d+\.\d+\.\d+)", wf), "workflow npm i -g")
-    assert set(installs) == {_FLOORS["workflow npm i -g"]}, f"workflow npm installs are {sorted(set(installs))}"
+    installs = _found(re.findall(r"npm i -g cowork-harness@([^\s`]+)", wf), "workflow npm i -g")
+    assert set(installs) == {_CI_PINS["workflow npm i -g"]}, f"workflow npm installs are {sorted(set(installs))}"
 
-    pj = _found(
-        re.findall(r"npm i -g cowork-harness@\^(\d+\.\d+\.\d+)", PYPROJECT.read_text(encoding="utf-8")),
-        "pyproject marker text",
-    )
-    assert set(pj) == {_FLOORS["pyproject marker"]}, f"pyproject marker states {sorted(set(pj))}"
+    for label, path in (
+        ("pyproject marker", PYPROJECT),
+        ("CONTRIBUTING", CONTRIBUTING),
+        ("CLAUDE.md", CLAUDE_MD),
+    ):
+        found = _found(
+            re.findall(r"npm i -g cowork-harness@([^\s`]+)", path.read_text(encoding="utf-8")),
+            label,
+        )
+        assert set(found) == {_CI_PINS[label]}, f"{label} states {sorted(set(found))}, want {_CI_PINS[label]}"
 
-    contrib = _found(
-        re.findall(r"npm i -g cowork-harness@\^(\d+\.\d+\.\d+)", CONTRIBUTING.read_text(encoding="utf-8")),
-        "CONTRIBUTING",
-    )
-    assert set(contrib) == {_FLOORS["CONTRIBUTING"]}, f"CONTRIBUTING states {sorted(set(contrib))}"
+    every = set(inputs) | set(installs)
+    for v in every:
+        assert not v.startswith(("^", "~", ">", "=")), (
+            f"CI selector {v!r} carries a RANGE. A caret auto-adopts upstream releases into CI with "
+            f"nobody choosing it -- the posture retired 2026-08-27. Raise the pin deliberately instead."
+        )
 
+
+def test_replay_floor_matches_the_registry_and_stays_a_floor() -> None:
     mins = _found(
         re.findall(r"_MIN_HARNESS\s*=\s*\((\d+),\s*(\d+),\s*(\d+)\)", REPLAY_TEST.read_text(encoding="utf-8")),
         "_MIN_HARNESS",
     )
     assert ".".join(mins[0]) == _FLOORS["_MIN_HARNESS"], f"_MIN_HARNESS is {mins[0]}"
+    assert _FLOORS["_MIN_HARNESS"] != _CI_PIN, (
+        "_MIN_HARNESS was raised to the CI pin. It is a SKIP GUARD, not a selector: raising it turns a "
+        "below-floor developer's red into a silent skip. Pin CI, floor this."
+    )
 
 
 def test_action_ref_major_matches_the_cli_major_it_installs() -> None:
@@ -117,7 +153,7 @@ def test_action_ref_major_matches_the_cli_major_it_installs() -> None:
     """
     wf = WORKFLOW.read_text(encoding="utf-8")
     refs = _found(re.findall(r"uses: yaniv-golan/cowork-harness@v(\d+)", wf), "action uses: refs")
-    versions = _found(re.findall(r'^\s*version: "\^(\d+)\.', wf, re.M), "action version: inputs")
+    versions = _found(re.findall(r'^\s*version: "\^?(\d+)\.', wf, re.M), "action version: inputs")
 
     assert len(refs) == len(versions), (
         f"{len(refs)} action step(s) but {len(versions)} version: input(s) — every step must pin the "

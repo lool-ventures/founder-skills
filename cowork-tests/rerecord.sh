@@ -31,11 +31,22 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# FLOOR: >=2.3.0 with no upper bound. Recording is the one operation where the harness version is
+# FLOOR: >=2.4.0 with no upper bound. Recording is the one operation where the harness version is
 #   THIS HEADER WAS ONE MINOR BEHIND THE GATE when 2.3.0 was adopted (header said 2.1.0, gate required
 #   2.2) — the exact drift the next paragraph warns about, sitting unfixed in the file that warns about
 #   it. If you are here to change the floor, change all FOUR sites: this header, the numeric gate, its
 #   FATAL message, and `_RECORDING_FLOOR` in founder-skills/tests/test_cowork_harness_floors.py.
+#   * 2.4.0 is required because it CHANGES WHAT A HOSTLOOP RECORDING RECORDS. The workspace bash
+#     tool's cwd moves from `<session>/mnt/<first-folder-else-outputs>` to the bare session root
+#     (`hostLoopCwds`), which upstream measured against desktop-local Cowork on 2026-08-27; the
+#     replaced derivation reproduced a prompt claim, not an observed behaviour. Recording below this
+#     freezes an emulated cwd production does not use — the emulated-tool-surface trigger in this
+#     repo's own re-record rule. Separately, `container` stops offering the built-in `WebFetch`
+#     (aliased to `mcp__workspace__web_fetch`), so a sub-2.4.0 recording at that tier freezes a tool
+#     inventory production no longer has. The BASELINE did not move (`baselines/` is byte-identical
+#     v2.3.0..v2.4.0), so this is an emulation trigger, not a baseline one — the distinction matters
+#     because a baseline diff shows nothing. Full analysis:
+#     docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md.
 #   * 2.3.0 is required for the RECORDING ITSELF. Its baseline (desktop-1.37937.1, agent ELF 2.1.246)
 #     is the first to PIN two spawn-env keys — CLAUDE_CODE_PROMPT_CACHE_TTL=1h and
 #     CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=5m — plus a new opaque env spread site
@@ -174,8 +185,8 @@ echo "cowork-harness $ver"
 # themselves are unchanged and still `::warning::`. Parse the JSON envelope instead.
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
 # `-gt 2` first so a future 3.x passes — a bare minor check would FATAL on 3.0.0.
-{ [ "$major" -gt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -ge 3 ]; }; } \
-  || { echo "FATAL: need >=2.3.0 (have $ver) — see the floor note above"; exit 1; }
+{ [ "$major" -gt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -ge 4 ]; }; } \
+  || { echo "FATAL: need >=2.4.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi
@@ -233,6 +244,20 @@ echo "re-recording: ${scns[*]}"
 #     getting historically more expensive (more scenarios, pricier skills) — before you pay for it.
 #   * It is BLIND to scenarios with no priced history: they contribute $0, are named in a ::warning::,
 #     and make the printed total a LOWER BOUND until each has run once.
+# RE-DERIVED 2026-08-27 (cowork-harness 2.4.0, 27 scenarios, ALL PRICED — 131 prior runs on this
+# machine, thinnest scenario has 1):
+#     estimated batch cost: $118.8390    against the $120 default cap
+# ** THAT IS $1.16 OF HEADROOM, AND THE GATE IS SCOPE-BLIND. ** Measured by bisection today:
+# --max-budget-usd 120/119 -> rc=0, 118 -> rc=2 ("refused before spending"). The preflight runs over
+# the WHOLE scenarios/ dir by design (a deliberate superset), so it compares the all-27 estimate
+# REGARDLESS of how many cassettes you are refreshing — "I'm only refreshing 10" does not shrink it.
+# One added scenario, or the +/-25% variance noted below, trips it, and the FATAL reads like a broken
+# preflight rather than a cap that needs raising. Before any refresh: re-run the one-liner in the
+# FATAL message, and raise COWORK_RERECORD_MAX_USD deliberately if the estimate has grown.
+# The 2026-08-01 derivation below is KEPT because its METHOD is right (worst-observed per scenario,
+# summed, matching the harness's own statistic) — but every NUMBER in it is stale: it was taken at 22
+# scenarios / 4 unpriced against a 22-cassette corpus, and the corpus was cut to 10 on 2026-08-24.
+#
 # SIZING THE DEFAULT — re-derived 2026-08-01 at 22 scenarios / 4 unpriced, from the per-scenario
 # worst-observed costs in ~/.cowork-harness/runs/index.jsonl (the same statistic the harness's own
 # pre-flight sums).
