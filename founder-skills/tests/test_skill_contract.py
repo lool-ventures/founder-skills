@@ -2477,45 +2477,111 @@ def test_the_release_path_runs_the_whole_free_suite() -> None:
 # and which HAS ALREADY MOVED underneath us once.
 _SESSION_LAYOUT_DIRS = ("artifacts", "mnt", "outputs", "uploads", "handoff")
 
-# Two shapes, and BOTH are required — an earlier version demanded a trailing slash and therefore
-# missed `mkdir -p ./artifacts`, the very defect this test was written for. It passed its own
-# mutation probe only after this was split:
-#   (a) an explicit `./` or `../` prefix, with or without a trailing slash  -> ./artifacts, ./mnt/
-#   (b) a bare layout dir that is clearly a PATH because it has a trailing slash -> outputs/foo
-# A bare word like `artifacts` with neither marker is deliberately NOT matched: it appears
-# constantly in prose, and this must fire on commands, not sentences.
+# Three shapes. Each was added because the previous set MISSED a real defect — this pattern has now
+# been wrong twice, so the shapes are enumerated with the case that forced each:
+#   (a) explicit `./`/`../` prefix, slash optional  -> `./artifacts`, `./mnt/uploads`
+#       (the slash was once required, which missed `mkdir -p ./artifacts` — the motivating defect)
+#   (b) a bare layout dir that is clearly a PATH because it carries a trailing slash -> `outputs/foo`
+#   (c) a bare layout WORD as the argument of a path-taking command -> `mkdir -p artifacts`, `cd outputs`
+#       (dropping the `./` is one keystroke and is exactly as broken; without (c) the test's own
+#        remedy text can be "satisfied" by deleting two characters)
+# A bare word outside (c) is deliberately unmatched: it appears constantly in prose.
 _DIRS = "|".join(_SESSION_LAYOUT_DIRS)
 _RELATIVE_LAYOUT_PATH = re.compile(
-    r"(?:^|[\s\"'=(])(?:" + rf"(?:\./|\.\./)(?:{_DIRS})(?:/|\b)" + r"|" + rf"(?:{_DIRS})/" + r")",
+    r"(?:^|[\s\"'=(>])(?:" + rf"(?:\./|\.\./)(?:{_DIRS})(?:/|\b)" + r"|" + rf"(?:{_DIRS})/" + r")"
 )
+_BARE_LAYOUT_ARG = re.compile(rf"\b(?:mkdir|cd|rmdir|pushd)\s+(?:-\S+\s+)*(?:{_DIRS})\b")
 
-# A command line is exempt when the layout name is reached through a variable or an absolute anchor.
-_ANCHORED = re.compile(r"\$\{?[A-Z_]+\}?|\$\(pwd\)|/sessions/|<printed |<[A-Z_]+>|\$\(python")
+# A path is exempt when it is reached through a variable or an absolute anchor.
+#
+# APPLIED PER SEGMENT, NEVER PER LINE. Applying it to the whole line is how this test shipped
+# blind to the defect it was written for: the real deck-review line was
+#   ls -la "$(dirname "$REVIEW_DIR")"/../uploads 2>/dev/null || ls -la ./mnt/uploads
+# where `$REVIEW_DIR` in the FIRST command exempted the bare `./mnt/uploads` in the second. Measured
+# at the time: 61% of all command lines in the fleet contained some `$VAR`, so a line-wide exemption
+# blinded the majority of the surface. A mutation probe missed it too, because the probe injected a
+# simplified `ls -la ./mnt/uploads` with no variable rather than the line that actually shipped —
+# a probe against a strawman is not a probe.
+_ANCHORED = re.compile(r"\$\{?[A-Z_]+\}?|\$\(pwd\)|\$PWD|/sessions/|<printed |<[A-Z_]+>|\$\(python")
+
+# Shell segment separators. Anchoring is decided independently within each.
+_SEGMENT = re.compile(r"\|\||&&|[;|]")
+
+# `#` starts a comment only at line start or after whitespace — `--marker '#uuid'` is an argument,
+# and splitting on it would blind the rest of a line this fleet really does write.
+_COMMENT = re.compile(r"(?:^|\s)#")
+
+# Heredoc opener; the body is DATA, not commands. 13 bash blocks in the fleet carry one, and a
+# dispatch template mentioning `outputs/` inside one is not a path.
+_HEREDOC = re.compile(r"<<-?\s*[\"']?(\w+)[\"']?")
+
+
+def _strip_comment(line: str) -> str:
+    m = _COMMENT.search(line)
+    return line[: m.start()] if m else line
 
 
 def _command_lines(text: str) -> list[tuple[int, str]]:
-    """Every line inside a fenced ```bash block, plus inline-code spans that look like commands.
+    """Every command line inside a fenced ```bash block, plus inline-code spans that look like commands.
 
     BOTH surfaces are required. The defect this guards against lived in an INLINE span
     (`ls -la ./mnt/uploads` inside a prose sentence), not in a fenced block — a fenced-only scan
     reports clean on the exact case that motivated the test.
     """
     out: list[tuple[int, str]] = []
+    cursor = 0
     for block in re.findall(r"```bash\n(.*?)```", text, re.DOTALL):
-        start = text.index(block)
+        # Scan forward: two byte-identical blocks must not both report the first one's line numbers.
+        start = text.index(block, cursor)
+        cursor = start + len(block)
         base = text[:start].count("\n") + 1
+        delim: str | None = None
         for i, line in enumerate(block.splitlines()):
-            # A shell COMMENT is prose that happens to sit inside a fence. These skills explain the
-            # outputs/ layout in comments constantly ("outputs/ mounts are write-allowed"), and
-            # flagging those trains the reader to ignore the test. Strip to the command.
-            code = line.split("#", 1)[0]
+            if delim is not None:
+                if line.strip() == delim:
+                    delim = None
+                continue
+            code = _strip_comment(line)
             if code.strip():
                 out.append((base + i, code))
+            opener = _HEREDOC.search(code)
+            if opener:
+                delim = opener.group(1)
     for m in re.finditer(r"`([^`\n]+)`", text):
         span = m.group(1)
-        if re.match(r"^\s*(mkdir|ls|cp|mv|cat|python3?|rm|touch|test|\[)\b", span):
-            out.append((text[: m.start()].count("\n") + 1, span))
+        # Verb list, not a whitelist of two: `cd`/`find`/`sed`/`head`/`grep` were all unscanned.
+        # `\[` is matched separately because `[ -d x ]` has a SPACE after the bracket, so a `\b`
+        # after it can never fire — the alternative was dead code.
+        if re.match(
+            r"^\s*(?:\[|(?:mkdir|ls|cp|mv|cat|cd|find|sed|head|tail|grep|echo|python3?|rm|rmdir|touch|test)\b)", span
+        ):
+            out.append((text[: m.start()].count("\n") + 1, _strip_comment(span)))
     return out
+
+
+def _offending_segments(line: str) -> list[str]:
+    """Segments of one command line that name a layout dir relatively and are not anchored.
+
+    ANCHORING IS DECIDED PER TOKEN, not per line and not per segment. Both coarser scopes have
+    already shipped blind:
+      * per LINE missed `... "$REVIEW_DIR" ... || ls -la ./mnt/uploads` — one variable anywhere
+        exempted every path on the line, and 61% of fleet command lines contain a variable.
+      * per SEGMENT still missed `python3 "$SCRIPTS/foo.py" --out ./artifacts/x.json`, where the
+        anchored token and the relative one share a single segment.
+    A path is its own whitespace-delimited token, so that is the unit that decides.
+    """
+    bad = []
+    for seg in _SEGMENT.split(line):
+        if not seg.strip():
+            continue
+        # (c) the bare-word rule needs the COMMAND, so it is judged on the whole segment.
+        if _BARE_LAYOUT_ARG.search(seg) and not _ANCHORED.search(seg):
+            bad.append(seg.strip())
+            continue
+        for token in seg.split():
+            if _RELATIVE_LAYOUT_PATH.search(f" {token}") and not _ANCHORED.search(token):
+                bad.append(token)
+    return bad
 
 
 @pytest.mark.parametrize("skill", sorted(SKILL_MD_CEILING))
@@ -2543,9 +2609,9 @@ def test_no_cwd_relative_path_addresses_the_session_layout(skill: str) -> None:
     """
     text = (SKILLS_ROOT / skill / "SKILL.md").read_text(encoding="utf-8")
     offenders = [
-        f"  {skill}/SKILL.md:{line_no}: {line.strip()}"
+        f"  {skill}/SKILL.md:{line_no}: {seg}"
         for line_no, line in _command_lines(text)
-        if _RELATIVE_LAYOUT_PATH.search(line) and not _ANCHORED.search(line)
+        for seg in _offending_segments(line)
     ]
     assert not offenders, (
         f"{skill}/SKILL.md has {len(offenders)} cwd-relative path(s) addressing the session layout. "

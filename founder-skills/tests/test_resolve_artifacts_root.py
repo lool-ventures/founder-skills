@@ -445,3 +445,69 @@ def test_the_replaced_relative_path_would_have_moved_between_harness_versions() 
     assert relative == "/sessions/abc/mnt/outputs/mnt/uploads"
     assert relative != resolve_uploads_dir(old_cwd, {})
     assert os.path.normpath(os.path.join(new_cwd, "mnt/uploads")) == resolve_uploads_dir(new_cwd, {})
+
+
+# ---------------------------------------------------------------------------
+# `_default_artifacts_root` — the duplicated helper, and the fallback it hides
+#
+# It exists in find_artifact.py AND founder_context.py because skill/shared scripts are standalone
+# and cannot be packaged. The fleet's precedent for a duplicated helper is a SYNC TEST
+# (test_theme_sync.py for _theme.py, test_quote_match_sync.py for _quote_match.py); this had none,
+# and no test exercised the default at all — mutating either copy to return a constant left the
+# whole suite green.
+# ---------------------------------------------------------------------------
+
+_SCRIPTS_DIR = _SCRIPT.parent
+_HELPER_HOSTS = ("find_artifact.py", "founder_context.py")
+
+
+def _load_host(name: str) -> types.ModuleType:
+    spec = importlib.util.spec_from_file_location(name[:-3], _SCRIPTS_DIR / name)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _helper_body(name: str) -> str:
+    text = (_SCRIPTS_DIR / name).read_text(encoding="utf-8")
+    start = text.index("def _default_artifacts_root")
+    return text[start : text.index("\n\n\n", start)]
+
+
+def test_default_artifacts_root_copies_do_not_drift() -> None:
+    """Edit one, re-copy to the other — the same contract as _theme.py."""
+    bodies = {name: _helper_body(name) for name in _HELPER_HOSTS}
+    assert len(set(bodies.values())) == 1, (
+        "_default_artifacts_root has drifted between "
+        + " and ".join(_HELPER_HOSTS)
+        + ". These are copies of one helper; edit one and re-copy to the other."
+    )
+
+
+def _root_at(host: str, cwd: str) -> str:
+    mod = _load_host(host)
+    real = mod.os.getcwd
+    mod.os.getcwd = lambda: cwd
+    try:
+        return str(mod._default_artifacts_root())
+    finally:
+        mod.os.getcwd = real
+
+
+def test_default_artifacts_root_resolves_the_session_tree() -> None:
+    """The point of the helper: on a session tree it must NOT return $PWD/artifacts.
+
+    Without this, mutating either copy to `os.path.join(os.getcwd(), "artifacts")` — i.e. reverting
+    the fix — left all 5,001 tests in the repo green.
+    """
+    for host in _HELPER_HOSTS:
+        got = _root_at(host, "/sessions/abc123")
+        assert got == "/sessions/abc123/mnt/outputs/artifacts", f"{host}: {got}"
+
+
+def test_default_artifacts_root_matches_the_cli_case() -> None:
+    """Off a session tree it must agree with the old behaviour, or the change was a regression."""
+    for host in _HELPER_HOSTS:
+        got = _root_at(host, "/home/dev/project")
+        assert got == "/home/dev/project/artifacts", f"{host}: {got}"

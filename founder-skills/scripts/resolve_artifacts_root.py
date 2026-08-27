@@ -254,6 +254,34 @@ def main() -> int:
     )
     args = p.parse_args()
 
+    # ANSWERED FIRST, BEFORE ANY SIDE EFFECT OR UNRELATED VALIDATION. `--uploads` is a pure query
+    # about the SESSION TREE: it needs no artifacts root, no --dir-name mirror, and no filesystem
+    # access at all. Answering it after `os.makedirs(root)` meant a question about the uploads mount
+    # CREATED the artifacts dir as a side effect (measured: an empty cwd gained `artifacts/` even on
+    # the exit-3 "there is no session tree" path), and made the flag die with an uncaught
+    # PermissionError in a read-only cwd — a third exit state the callers' prose does not document.
+    if args.uploads:
+        # A caller who typed `--uploads --json | jq` used to get a bare path and
+        # `Expecting value: line 1 column 1` — the exact silent-format-mismatch class CLAUDE.md
+        # already records for `critique --out` without `--output-format json`. Refuse instead.
+        conflicting = [
+            f"--{name.replace('_', '-')}"
+            for name in ("json", "agent", "analysis_dir_agent", "handoff_dir_agent")
+            if getattr(args, name)
+        ]
+        if conflicting:
+            p.error("--uploads cannot be combined with " + ", ".join(conflicting))
+        uploads_dir = resolve_uploads_dir(os.getcwd(), dict(os.environ))
+        if uploads_dir is None:
+            sys.stderr.write(
+                "No uploads mount: this is not a Cowork session tree, so nothing was attached "
+                "through one. Ask the founder for a path instead of reporting the file missing. "
+                "Set $COWORK_UPLOADS_DIR to override.\n"
+            )
+            return 3
+        sys.stdout.write(uploads_dir + "\n")
+        return 0
+
     if args.handoff_dir_agent and not args.run_id:
         p.error("--handoff-dir-agent requires --run-id")
     if (args.analysis_dir_agent or args.handoff_dir_agent) and not args.dir_name:
@@ -288,17 +316,6 @@ def main() -> int:
             )
 
     uploads = resolve_uploads_dir(os.getcwd(), dict(os.environ))
-
-    if args.uploads:
-        if uploads is None:
-            sys.stderr.write(
-                "No uploads mount: this is not a Cowork session tree, so nothing was attached "
-                "through one. Ask the founder for a path instead of reporting the file missing. "
-                "Set $COWORK_UPLOADS_DIR to override.\n"
-            )
-            return 3
-        sys.stdout.write(uploads + "\n")
-        return 0
 
     if args.handoff_dir_agent:
         sys.stdout.write(agent_paths["handoff_dir_agent"] + "\n")

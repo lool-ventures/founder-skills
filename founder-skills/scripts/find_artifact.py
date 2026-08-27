@@ -130,7 +130,16 @@ def _default_artifacts_root() -> str:
         import resolve_artifacts_root  # type: ignore[import-not-found]
 
         return str(resolve_artifacts_root.resolve_artifacts_root(os.getcwd(), dict(os.environ)))
-    except Exception:
+    except ImportError:
+        # NARROW, and LOUD. A bare `except Exception` here swallowed any failure and returned the
+        # very path this function exists to avoid -- on a session tree that is
+        # `/sessions/<id>/artifacts`, outside `mnt/`, undelivered and unreported. The fallback keeps
+        # the script standalone, but it must never be silent.
+        sys.stderr.write(
+            "warning: could not import resolve_artifacts_root; falling back to $PWD/artifacts. "
+            "On a Cowork session tree that is OUTSIDE the outputs mount and nothing written there "
+            "is delivered. Pass --artifacts-root explicitly.\n"
+        )
         return os.path.join(os.getcwd(), "artifacts")
 
 
