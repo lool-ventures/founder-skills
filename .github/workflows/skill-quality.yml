@@ -80,7 +80,12 @@ jobs:
     # `pull_request` is excluded entirely by this guard, which also makes
     # forks structurally safe (they cannot push tags to upstream and lack
     # write access to dispatch this workflow).
-    if: github.event_name != 'pull_request'
+    # `inputs.verify_release_notes_for == ''` keeps the FREE release-notes rehearsal free.
+    # Without it, `gh workflow run skill-quality.yml -f verify_release_notes_for=vX.Y.Z`
+    # also satisfied this guard and spent $15-45 on the paid e2e job — the rehearsal is sold
+    # two screens down as a cheap safety net, which was true of publishing and false of cost.
+    # (On a `push` the `inputs` context is null, and null == '' in an Actions expression.)
+    if: github.event_name != 'pull_request' && inputs.verify_release_notes_for == ''
     needs: contract-tests
     # Tag-push: never cancel in-flight authoritative tag run if a quick
     # re-tag follows. workflow_dispatch on the same ref will queue the
@@ -209,7 +214,12 @@ jobs:
     runs-on: ubuntu-latest
     # ONLY a real tag push. `workflow_dispatch` can run on any ref, and `github.ref_name` would
     # then be a branch — publishing `main` as a version.
-    if: startsWith(github.ref, 'refs/tags/v')
+    #
+    # THE EVENT CHECK IS LOAD-BEARING AND WAS MISSING. `startsWith(github.ref, 'refs/tags/v')` is
+    # satisfied by `gh workflow run ... --ref v0.11.0`, which is exactly how CLAUDE.md teaches
+    # dispatch — so a dispatch on a tag ref published a real Release, and dispatching the *rehearsal*
+    # that way published too. The comment above described the intent; only this line enforces it.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     # The Release must not exist before the paid gate is green. This is the ordering the manual
     # process encoded by hand.
     #
@@ -240,13 +250,17 @@ jobs:
       - name: Create the Release
         env:
           GH_TOKEN: ${{ github.token }}
+          # Via env, never interpolated into the `run:` string: a CHANGELOG heading containing a
+          # quote or a backtick would otherwise break or inject at release time — the one moment
+          # nobody wants to debug shell quoting.
+          RELEASE_TITLE: ${{ steps.notes.outputs.title }}
         run: |
           # --verify-tag: abort if the tag is not on the remote, which is what a forgotten
           # `git push --tags` looks like. --latest is explicit because "Latest" is computed, not
           # chronological; correct here because this only ever runs on the tag just pushed.
           gh release create "$GITHUB_REF_NAME" \
             --verify-tag --latest \
-            --title "${{ steps.notes.outputs.title }}" \
+            --title "$RELEASE_TITLE" \
             -F release-notes.md
 
   verify-release-notes:
@@ -263,8 +277,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Extract and show
+        env:
+          # Via env, never interpolated into the `run:` string — a dispatch input containing a
+          # quote would otherwise break out of the shell command with the job token in hand.
+          VERIFY_TAG: ${{ inputs.verify_release_notes_for }}
         run: |
-          tag='${{ inputs.verify_release_notes_for }}'
+          tag="$VERIFY_TAG"
           title=$(python3 .github/scripts/changelog-notes.py "$tag" --title)
           python3 .github/scripts/changelog-notes.py "$tag" > notes.md
           {

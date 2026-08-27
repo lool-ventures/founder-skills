@@ -50,11 +50,30 @@ def main() -> int:
         return 1
 
     if args.title:
-        # "## [0.10.0] - 2026-08-26 — A check that refuses writes nothing down"
-        sys.stdout.write(f"[{version}]{m.group(1)}\n".strip() + "\n")
+        # MUST MATCH THE EIGHT RELEASES ALREADY PUBLISHED BY HAND: `vX.Y.Z — <title>`.
+        # This emitted `[0.10.0] - 2026-08-26 — <title>` — bracketed, no `v`, with the changelog's
+        # date pasted into the public "Latest" badge — because it echoed the heading verbatim. The
+        # heading tail is ` - <date> — <title>`; keep only the em-dash clause, and fall back to a
+        # bare `vX.Y.Z` for an older heading that carries no title at all.
+        tail = m.group(1)
+        suffix = ""
+        if "—" in tail:
+            suffix = " — " + tail.split("—", 1)[1].strip()
+        sys.stdout.write(f"v{version}{suffix}\n")
         return 0
 
     body = m.group(2).strip()
+    # A `## [` INSIDE the body — a heading quoted in a fenced block — ends the lookahead early and
+    # publishes a SILENTLY TRUNCATED note with exit 0. That is worse than the empty note this script
+    # exists to prevent, because nothing looks wrong. The precise signature is an UNCLOSED fence:
+    # cutting inside one leaves an odd number of ``` markers. Latent today; the guard is one count.
+    if body.count("```") % 2:
+        print(
+            f"::error::CHANGELOG section for {version} ends inside an unclosed ``` fence — it was "
+            "probably truncated by a '## [' quoted in the body; refusing to publish a partial note",
+            file=sys.stderr,
+        )
+        return 1
     if not body:
         print(f"::error::CHANGELOG section for {version} is empty — refusing to publish it", file=sys.stderr)
         return 1

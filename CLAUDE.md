@@ -800,13 +800,25 @@ And **a green CI replay is evidence about the *recorded* scenario**: read the fr
 6. **Wait for `deck-review-e2e-smoke` green** in the GitHub Actions UI
    - Tag failure: `git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z`, fix, retag — no user impact yet (no Release exists, so nothing advertises the tag)
    - LLM-variance flake: re-run the job from the Actions UI (free retry, same SHA)
-7. **Create the GitHub Release** — `git push --tags` does NOT do this, and forgetting it is invisible from the terminal:
+7. **The GitHub Release is now created FOR you — do not run `gh release create` by hand.**
+   `publish-release` in `skill-quality.yml` fires on a tag PUSH (and only a push — a
+   `workflow_dispatch` on a tag ref is excluded, or dispatching the rehearsal would publish), after
+   the paid gate is green. It builds the notes and the title from `CHANGELOG.md` via
+   `.github/scripts/changelog-notes.py`, which emits exactly `vX.Y.Z — <title>` to match the
+   releases published by hand before it existed.
+
+   **Running it manually now races the workflow**; whichever loses reds on "release already exists"
+   (there is no `--clobber` and no existence check). If you need to publish by hand — the automation
+   failed, or you are backfilling an old tag — this is the command it replaces:
 
    ```bash
    # notes = that version's CHANGELOG section; title = the section's own "— <title>" text
    gh release create vX.Y.Z --verify-tag --latest \
-     --title "vX.Y.Z — <changelog title>" -F <(<extract the section>)
+     --title "vX.Y.Z — <changelog title>" -F <(python3 .github/scripts/changelog-notes.py vX.Y.Z)
    ```
+
+   **Rehearse the notes without tagging** (free, publishes nothing):
+   `gh workflow run skill-quality.yml -f verify_release_notes_for=vX.Y.Z`.
 
    A **tag** and a **Release** are different objects: a Release is created only by `gh release create`
    or the web UI. Because this step was never written down, **four tags shipped with no Release**
