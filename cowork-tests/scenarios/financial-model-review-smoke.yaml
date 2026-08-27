@@ -76,9 +76,20 @@ assert:
   #    the --workspace branch serves it live instead). The `--static` flag lives in the bash tool-call
   #    input, not the model's prose, so a positive transcript_matches on it is unreliable — file_exists
   #    is the robust proof.
-  #  - --workspace must NOT appear → the &-backgrounded HTTP server (which would hang the record) never ran.
+  #
+  # THE `--workspace` ASSERT WAS REMOVED 2026-08-27 AS VACUOUS — do not re-add it.
+  # It read `transcript_not_matches: '--workspace'`, intending "the &-backgrounded HTTP server never
+  # ran". `transcript_not_matches` sees top-level assistant_text ONLY and excludes every
+  # tool_use/tool_result (harness 2.3.0 made this an enforced property of `TOOL_USE_BLIND_KEYS`;
+  # `assertions --list` states it on the key). `--workspace` is a BASH FLAG — it lives in the tool_use
+  # input and can never appear in the judged corpus, so the assert could not fail at any phrasing and
+  # passed whether or not the server ran. The comment four lines above already had the mechanism right
+  # for the POSITIVE direction and this line then relied on the same blindness for the negative.
+  # No replacement key exists: `tool_called`/`tool_not_called` glob the tool NAME, not its input.
+  # What actually proves it: a `--workspace` server is &-backgrounded and would HANG the record, so
+  # `result: success` above is the evidence, and `file_exists` below is the positive proof the static
+  # branch ran instead. Both are asserted; the removed line added nothing.
   - file_exists: outputs/artifacts/financial-model-review-cadence/review.html
-  - transcript_not_matches: '--workspace'
   # The emitted review.html must carry NO write-back that is lost under Cowork: its /api/check +
   # /api/feedback fetches are guarded by the build-time IS_STATIC flag (dead in the static/Cowork
   # build) and the download path is the primary flow — so the static analyzer must find nothing
