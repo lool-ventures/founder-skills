@@ -147,10 +147,16 @@ jobs:
           # roughly $15-45 and 15-60 min for the three, against $5-15 for one.
           # They run sequentially; -x is deliberately NOT set, so one flaky lane
           # still reports the other two.
+          # test_e2e_cap_table.py is COLLECTED but not gated on: it carries its own
+          # RUN_PAID_E2E_CAP_TABLE opt-in and is named in ALLOWED_SKIPS below, so a tag
+          # does not pay for a fourth document. Collecting it anyway is the point — its
+          # skip becomes VISIBLE in the XML, so "we have a cap-table lane" cannot quietly
+          # become false the way an uncollected file would.
           uv run pytest \
             founder-skills/tests/test_e2e_deck_review.py \
             founder-skills/tests/test_e2e_financial_model_review.py \
             founder-skills/tests/test_e2e_market_sizing.py \
+            founder-skills/tests/test_e2e_cap_table.py \
             -v -m e2e --tb=short -rs --junitxml=e2e-results.xml
         env:
           # THIS is the authorized place to spend, and it has to say so. The paid lanes
@@ -188,6 +194,13 @@ jobs:
           # is a visible decision to stop gating on it rather than a silent omission.
           ALLOWED_SKIPS = {
               "test_deck_review_contradiction_lane",
+              # cap-table's lane, same precedent: its own RUN_PAID_E2E_CAP_TABLE opt-in, run
+              # on demand rather than per tag. It exists to answer a question a tag does not
+              # ask — does the reliance boundary hold, and does a SKILL.md edit move
+              # behaviour — and the release gate is already a measured coin-flip, so adding a
+              # fourth billed document to it would trade reliability for coverage it does not
+              # need. Naming it here keeps an UNEXPECTED skip red.
+              "test_cap_table_smoke",
           }
           suite = ET.parse("e2e-results.xml").getroot()
           cases = list(suite.iter("testcase"))

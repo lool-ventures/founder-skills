@@ -2346,8 +2346,12 @@ def test_every_paid_lane_gates_on_the_opt_in() -> None:
     """
     import importlib.util
 
+    # FOUR since 2026-08-28: `test_e2e_cap_table.py` joined the three release lanes. It is NOT
+    # gated on by a tag (it carries its own RUN_PAID_E2E_CAP_TABLE and is named in the workflow's
+    # ALLOWED_SKIPS), but it is still a paid lane, so it must satisfy the same opt-in gate — which
+    # is precisely what this test exists to enforce across lanes that do not share a harness.
     lanes = sorted((REPO_ROOT / "founder-skills" / "tests").glob("test_e2e_*.py"))
-    assert len(lanes) == 3, [p.name for p in lanes]
+    assert len(lanes) == 4, [p.name for p in lanes]
 
     saved = {k: os.environ.get(k) for k in ("RUN_PAID_E2E", "ANTHROPIC_API_KEY")}
     try:
@@ -2446,7 +2450,12 @@ def test_the_authorized_paid_job_supplies_the_opt_in_and_fails_on_skips() -> Non
     lane_names = set()
     for lane in sorted((REPO_ROOT / "founder-skills" / "tests").glob("test_e2e_*.py")):
         lane_names |= set(re.findall(r"^def (test_\w+_smoke)\(", lane.read_text(encoding="utf-8"), re.M))
-    assert len(lane_names) == 3, f"expected three paid lane tests, found {sorted(lane_names)}"
+    # FOUR since 2026-08-28. Three are in the workflow's EXPECTED set (gated on by a tag); the
+    # fourth, `test_cap_table_smoke`, is in ALLOWED_SKIPS instead. The equality below still holds
+    # and is still the property worth having: every lane that exists must be NAMED in the workflow,
+    # whether it is gated on or deliberately skipped. A lane in neither set is the silent omission
+    # this check was written to catch.
+    assert len(lane_names) == 4, f"expected four paid lane tests, found {sorted(lane_names)}"
     # Quoted, not substring: renaming the workflow's entry to `test_market_sizing_smoke_2`
     # leaves the real name as a substring of it, and a bare `in` check passes while the
     # list has drifted. Mutation caught exactly that.
