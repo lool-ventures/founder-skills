@@ -628,30 +628,48 @@ Run manually: `uv run python scripts/privacy_guard.py --staged` (or `--tree`). T
 Verified against the Claude Code v2.1.120 skill runtime contract and Desktop v1.6259.1 architecture:
 
 - **Skill re-attachment after auto-compaction has TWO budgets, and the second one deletes silently.**
-  Verified first-party against the **2.1.248** bundle, 2026-08-28. **Cap 1 — 5,000 TOKENS per skill.**
-  The gate is a token check; the "19,900 characters" figure circulating in tooling is a *derivation*
-  (`5000*4 − 100`, the marker length), not the constant, so measuring with `wc -m` is an approximation
-  whose error tracks the file's chars-per-token ratio. Truncation IS written back destructively for the
-  session, **but it is self-healing**: the disk file is untouched and an in-band marker tells the model
-  to `Read` the skill path. All six of our SKILL.mds are 4–7× over this cap (cap-table ~36k tokens, the
-  smallest ~20k), so every one truncates on re-attach. **Cap 2 — 25,000 TOKENS combined across all
-  skills, and over budget it sets the stored content to `""` permanently.** No marker, nothing to notice
-  its absence against — so a "re-read if something looks missing" instruction works for truncation and
-  **structurally cannot fire** for zeroing. It is consumed by *post-truncation* sizes (so each of ours
-  contributes its capped 5,000), iterates **most-recently-invoked first** (the skill that vanishes is the
-  least recently used, not the biggest), and is **per-agent** (sub-agent fan-out does not spend the main
-  thread's budget). **Six skills co-invoked = 30,000 > 25,000 → one is silently zeroed.** Five fit
-  exactly; four fit comfortably. Measured exposure today is a COMPOUND rarity, not a live bug: 1
-  compaction in 453 historical runs, and 141 of 141 founder-skills runs invoked exactly ONE distinct
-  skill — the harness is single-skill by construction, so a real Cowork session running several analyses
-  is the reachable case (one such session did four of six). **The mitigation is quantified:**
-  `references/*.md` reached via `Read` is exempt from BOTH caps (the budget reads a dedicated
-  `invokedSkills` registry and never scans messages or tool results), so moving prose out of SKILL.md
-  genuinely removes it from the budget — target under ~5,000 tokens each. Trade-off: relocated content is
-  then subject to ordinary compaction with **no marker** when it goes. **This does not conflict with the
-  retired "never move prose into `references/`" rule below** — that retirement was decided on
-  *critique-corpus* grounds (512 KiB whole-content packaging), a different budget entirely. **Pin values,
-  never identifier names:** every symbol rotated 2.1.246 → 2.1.248 while no value moved.
+  Values verified first-party across 2.1.246→2.1.250 and independently re-derived by a second reader.
+  **Cite VALUES and behaviour, never minified identifiers** — every symbol rotates each release and one
+  collides destructively: `_On` means **25,000 in 2.1.248 and 5,000 in 2.1.250**. (This machine runs
+  **2.1.250**; an earlier version of this note said 2.1.248, which was never the running binary.)
+  **Cap 1 — 5,000 tokens per skill, and the token gate IS a character gate.** The estimator is
+  `Math.round(len/4)`, not a tokenizer, so the two units are exactly interconvertible and a `wc -m`
+  check measures the RIGHT unit with **zero** conversion error. (An earlier version of this note claimed
+  the char check was an approximation whose error tracks chars-per-token. That was wrong — refuted on
+  the estimator's own source.) The exact numbers: truncation triggers at **len ≥ 20,002 chars**, so the
+  last safe length is **20,001** — not 19,900, which is merely what survives (`slice(0,19900)` + a
+  100-char marker = exactly 20,000). All six of our SKILL.mds are far over, so **every one truncates on
+  every compaction, discarding 75–86% of its body.** That is not a tail risk; it is certain.
+  **Cap 1 is NOT reliably self-healing — do not rely on the marker.** The disk file is untouched, but
+  three things defeat recovery: the marker says *"use Read on the skill path"* while the registered
+  `skillPath` is **not a filesystem path** (it is `<source>:<name>`, e.g. `plugin:cap-table`), so a
+  literal Read fails; the attachment's own preamble tells the model *"Do NOT re-execute these skills…
+  shown here for context only"*, actively discouraging the recovery; and the truncation is written back
+  into session state, so the session's copy stays truncated from the first compaction onward.
+  **Cap 2 — 25,000 tokens combined across all skills; over budget the stored content is set to `""`
+  permanently.** No marker, nothing to notice its absence against — so a "re-read if something looks
+  missing" instruction works for truncation and **structurally cannot fire** for zeroing. Consumed by
+  *post-truncation* sizes (each of ours contributes exactly 5,000); iterates **most-recently-invoked
+  first**, so the skill that vanishes is the least recently used, not the biggest; **per-agent**, so our
+  heavy sub-agent dispatch materially reduces main-thread pressure. Six co-invoked = 30,000 > 25,000 →
+  five fit at exactly 25,000 (the comparison is strict `>`) and the sixth is zeroed. A third silent path
+  exists: a skill still visible in a retained **attachment** is skipped entirely and consumes no budget.
+  **Frequency — do not repeat the underestimate.** An earlier version called the whole thing a "compound
+  rarity" off 1 compaction in 453 cowork-harness run dirs. That number is a **floor for the wrong
+  population**: it scanned only `compact_boundary` and missed `microcompact_boundary`, and harness runs
+  are short and single-skill by construction. Measured on this machine's real Claude Code transcripts:
+  **380 files with `compact_boundary`, 27 with `microcompact_boundary`.** Compaction is ordinary. Only
+  the *zeroing* is rare; the truncation is not.
+  **Mitigations, in increasing cost.** (a) **Front-load** — truncation is a blind `slice(0,19900)`, so
+  reordering a SKILL.md to put operational instructions before reference prose preserves them verbatim,
+  with no restructuring. (b) **Relocate prose to `references/`** — exempt from both caps above (the
+  budget reads a dedicated invoked-skills registry and never scans messages or tool results), target
+  ≤20,001 chars of rendered prompt. But this is **not free**: a Read-ed file competes in a separate
+  post-compaction file-restore budget — the **5 most recently read files**, 5,000 tokens each, 50,000
+  combined. Relocation moves content into a different, larger, 5-slot budget rather than out of every
+  budget. **Neither conflicts with the retired "never move prose into `references/`" rule below** —
+  that retirement was decided on *critique-corpus* grounds (512 KiB whole-content packaging), a
+  different budget entirely.
 - **Env vars in skill bodies:** Use `${CLAUDE_PLUGIN_ROOT}` (braced form) — the plugin content expander substitutes it at load time. Bare `$CLAUDE_PLUGIN_ROOT` only resolves at Bash subprocess time and depends on `CLAUDE_ENV_FILE` being sourced; the gist flags this as unconfirmed for skill subprocesses. The braced form is the contract.
 - **Frontmatter keys** must come from the documented set: `name`, `description`, `when_to_use`, `allowed-tools`, `argument-hint`, `arguments`, `context`, `agent`, `model`, `effort`, `user-invocable`, `disable-model-invocation`, `paths`, `hooks`, `shell`, `created_by`. (`version` is parsed but tagged "[Undocumented] Informational only" in gist 1 — don't rely on it.) Custom keys are silently dropped — put human-readable metadata in a `## Skill Metadata` body section instead. **Avoid undocumented nested structures** (e.g. don't add a custom `metadata: {…}` block). The documented fields that *do* take structured values (`shell.interpreter`, `hooks.PreToolUse`, `paths` list, `arguments` list) are fine — they're explicitly specified.
 - **Two parsers, two discovery outcomes (important):**
