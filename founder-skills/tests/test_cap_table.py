@@ -23,9 +23,9 @@ SCRIPTS = os.path.join(_REPO, "founder-skills", "skills", "cap-table", "scripts"
 sys.path.insert(0, SCRIPTS)
 
 # Import library APIs once for in-process tests (faster than subprocess for math).
+import _coverage_registry as coverage_mod  # type: ignore[import-not-found]  # noqa: E402
 import anti_dilution  # type: ignore[import-not-found]  # noqa: E402
 import cap_state as cap_state_mod  # type: ignore[import-not-found]  # noqa: E402
-import coverage as coverage_mod  # type: ignore[import-not-found]  # noqa: E402
 import detect_structure  # type: ignore[import-not-found]  # noqa: E402
 import extract_cap_table  # type: ignore[import-not-found]  # noqa: E402
 import flip_scenario  # type: ignore[import-not-found]  # noqa: E402
@@ -13794,3 +13794,100 @@ class TestInstrumentsFilePrecondition:
         assert written["option_grants"] == []
         assert written["convertible_notes"] == []
         assert written["warrants"] == []
+
+
+class TestCrossPathAgreement:
+    """Two implementations of one quantity must agree.
+
+    THIS IS THE TEST THAT WOULD HAVE CAUGHT THE CAP-IMPLIED DEFECT, and it did not exist.
+
+    `convert_safes_cap_implied` and `solve_priced_round` both convert a SAFE at its cap. They
+    disagreed by 11% for over a year -- 800,000 shares vs 888,888 for the same instrument, rendered
+    into the same report -- and no test crossed the boundary between them. Every assertion lived
+    inside one function's own frame of reference, so a disagreement between two functions was
+    invisible by construction.
+
+    `test_cap_implied_set_couples_every_safe` claims in its docstring that its values were
+    "cross-checked against solve_priced_round at the same inputs". That check was done by hand, once,
+    by a human. It is not encoded, so if `priced_round.py` drifts nothing fails. This encodes it.
+    """
+
+    @staticmethod
+    def _cap_state(pre_fd: int) -> dict:
+        """Build via the real producer, not a hand-rolled stub.
+
+        A stub would let this test drift from the shape the pipeline actually feeds the solver --
+        which is the same "asserted against my own construction" problem this class exists to close.
+        """
+        inputs = {
+            "company_name": "CrossPath",
+            "founders": [{"founder_id": "f1", "name": "F", "common_shares": pre_fd}],
+            "metadata": {"run_id": "t", "schema_version": "v0.5.0-inputs"},
+        }
+        built: dict = cap_state_mod.build_cap_state(inputs, {"safes": [], "convertible_notes": []})
+        return built
+
+    def test_cap_implied_and_priced_round_agree_on_the_same_safe(self) -> None:
+        """At a cap-limited conversion the two paths must return the same price and shares."""
+        pre_fd = 8_000_000
+        safe = {
+            "id": "s1",
+            "form": "yc_postmoney_cap",
+            "purchase_amount": 500_000,
+            "post_money_valuation_cap": 5_000_000,
+        }
+
+        snapshot = safe_conversion.convert_safes_cap_implied([safe], pre_financing_fd=pre_fd)
+        assert snapshot["branch"] == "cap_implied_set"
+        snap = snapshot["per_safe"]["s1"]
+
+        priced = priced_round.solve_priced_round(
+            cap_state=self._cap_state(pre_fd),
+            safes=[safe],
+            notes=[],
+            pre_money=12_000_000,
+            new_money=3_000_000,
+        )
+        per = (priced.get("per_safe") or {}).get("s1") or {}
+        priced_shares = per.get("conversion_shares")
+        priced_price = per.get("conversion_price")
+        assert priced_shares, f"priced round returned no conversion_shares for the SAFE: {priced}"
+        assert priced_price is not None, f"priced round returned no conversion_price: {priced}"
+
+        assert math.isclose(snap["safe_price"], priced_price, rel_tol=1e-9), (
+            f"cap-implied says ${snap['safe_price']:.6f}/share, priced round says ${priced_price:.6f} "
+            "for the same SAFE at the same cap. One report renders both, so a founder sees two "
+            "answers to one question"
+        )
+        assert math.isclose(snap["cap_implied_shares"], priced_shares, rel_tol=1e-9), (
+            f"cap-implied says {snap['cap_implied_shares']:,.0f} shares, priced round says "
+            f"{priced_shares:,.0f} for the same SAFE"
+        )
+
+    def test_cross_path_agreement_holds_for_stacked_safes(self) -> None:
+        """The coupling case: each SAFE is in every other SAFE's denominator on BOTH paths."""
+        pre_fd = 8_000_000
+        safes = [
+            {"id": "s1", "form": "yc_postmoney_cap", "purchase_amount": 500_000, "post_money_valuation_cap": 5_000_000},
+            {
+                "id": "s2",
+                "form": "yc_postmoney_cap",
+                "purchase_amount": 1_000_000,
+                "post_money_valuation_cap": 10_000_000,
+            },
+        ]
+        snapshot = safe_conversion.convert_safes_cap_implied(safes, pre_financing_fd=pre_fd)
+        priced = priced_round.solve_priced_round(
+            cap_state=self._cap_state(pre_fd),
+            safes=safes,
+            notes=[],
+            pre_money=12_000_000,
+            new_money=3_000_000,
+        )
+        for sid in ("s1", "s2"):
+            snap = snapshot["per_safe"][sid]
+            per = (priced.get("per_safe") or {}).get(sid) or {}
+            assert per.get("conversion_shares"), f"priced round returned no shares for {sid}"
+            assert math.isclose(snap["cap_implied_shares"], per["conversion_shares"], rel_tol=1e-9), (
+                f"{sid}: cap-implied {snap['cap_implied_shares']:,.0f} vs priced {per['conversion_shares']:,.0f}"
+            )

@@ -19,7 +19,7 @@ import sys
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import coverage as coverage_mod  # type: ignore[import-not-found]  # noqa: E402
+import _coverage_registry as coverage_mod  # noqa: E402
 
 
 def detect(
