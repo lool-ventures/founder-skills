@@ -660,6 +660,20 @@ Verified against the Claude Code v2.1.120 skill runtime contract and Desktop v1.
   counterexample: `bundled:verify` carries one (1/1), while `bundled:artifact-design` (0/5),
   `bundled:artifact-diagramming` (0/2), `bundled:fewer-permission-prompts` (0/4) and `builtin:init`
   (0/12) do not. Directory ownership predicts recoverability; the source prefix does not.
+  **Refinement: the predicate is directory DURABILITY, and the recovery path can die on a plugin
+  upgrade.** Three states, not two — (1) durable owned directory (installed `SKILL.md`), recovery works;
+  (2) no directory at all (single-file command), recovery cannot fire but nothing misleads; (3) **a
+  directory that evaporates**, which is *worse than (2)* because the model is handed an absolute path,
+  burns a turn on a `Read`, and gets an error that looks like a real lead. Bundled skills are state 3
+  (extracted to a random per-run temp dir). **We ship none — but state 3 is NOT bundled-only.**
+  **Measured here: 46 of 52 distinct plugin-cache base directories are DEAD**, because the cache path is
+  version-stamped and the old version dir is removed on upgrade (`…/superpowers/6.1.1/…` dead, `6.3.0`
+  present). **Scope this correctly — it does NOT mean recovery is broken.** Inside a live run the path
+  names the currently-mounted version and resolves; every dead one above was alive when written. The
+  exposure is **resume**: a session resumed after a plugin upgrade re-registers the stored content
+  verbatim, so its recovery path points at a removed version dir. **INFERENCE, not observation** — the
+  path-death is measured, the failing resume `Read` is not. Applies to our six skills in Cowork (mounted
+  from the version-stamped cache), never in the harness (working tree).
   The narrower fact that misled me is still true and still worth knowing: the `skills[].path` field is a
   source-qualified identifier (`<source>:<name>`, e.g. `plugin:cap-table`), **not** a file location — so
   a recovery attempt keyed on `path` fails, while one keyed on the content's first line succeeds. The
