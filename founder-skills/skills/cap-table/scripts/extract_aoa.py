@@ -380,7 +380,10 @@ def merge_into_inputs(
         inputs["aoa_findings"] = existing_findings
         # v0.4.10 → v0.5.0: pay_to_play_detected lives under aoa_findings;
         # the top-level alias is still emitted for v0.4.10-cache compatibility
-        # but loaders rewrite via the soft-carve-out in _artifact_io.load_inputs.
+        # NOTE: nothing rewrites this in production. An earlier comment here said the loaders
+        # do, via a soft carve-out in _artifact_io.load_inputs -- but no producer imports that
+        # module, so the rewrite never runs. rule_audit.py reads BOTH shapes, which is why this
+        # has never surfaced as a bug.
         if aoa_findings.get("pay_to_play_detected") is True:
             inputs["pay_to_play_detected"] = True
 

@@ -17,6 +17,7 @@ theatre and does not belong here.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -175,3 +176,113 @@ def test_error_code_assertion_ratchet() -> None:
             f"good. Lower UNASSERTED_CODE_BASELINE to {len(unasserted)} to lock the win in. "
             f"Remaining: {unasserted!r}"
         )
+
+
+# ---------------------------------------------------------------------------------------------
+# Rule-level assertion ratchet, and the predicates that gate rules a founder must act on.
+#
+# The five predicates a plan originally hand-picked here were the wrong unit. Two were redundant
+# emitters of rules another producer already emits with tested both-directions coverage; one gated
+# three `counsel_review: false` solver diagnostics ("Aitken acceleration engaged") that this repo's
+# own founder-text policy says must never reach a founder. Hand-picking cannot see that.
+#
+# The enumerable version is objective and self-selecting, and it found something worse than any of
+# them: of the rule pack's 85 rule_ids, 56 are named in no test anywhere, and 23 of those carry
+# `counsel_review: true` -- "take this to your lawyer" obligations with nothing asserting they fire.
+# ---------------------------------------------------------------------------------------------
+
+RULE_PACK = CAP_TABLE / "data" / "cap-table-rules.json"
+
+
+def _rule_pack() -> dict[str, bool]:
+    """rule_id -> counsel_review flag, for every rule in the pack."""
+    rules: dict[str, bool] = {}
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            rid = node.get("rule_id")
+            if isinstance(rid, str):
+                rules[rid] = bool(node.get("counsel_review"))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(json.loads(RULE_PACK.read_text(encoding="utf-8")))
+    return rules
+
+
+def _unasserted_rules() -> tuple[list[str], list[str]]:
+    suite = "\n".join(p.read_text(encoding="utf-8") for p in Path(__file__).resolve().parent.glob("test_*.py"))
+    rules = _rule_pack()
+    unasserted = sorted(r for r in rules if r not in suite)
+    return unasserted, sorted(r for r in unasserted if rules[r])
+
+
+# Measured baselines. RATCHETS: they may only shrink. The counsel figure is tracked separately because
+# a counsel-review rule is an obligation a founder is told to take to a lawyer -- a silently-suppressed
+# one is the most expensive thing this skill can get wrong.
+UNASSERTED_RULE_BASELINE = 56
+UNASSERTED_COUNSEL_RULE_BASELINE = 23
+
+
+def test_rule_assertion_ratchet() -> None:
+    """How many rule_ids can be deleted from the pack without failing a test?
+
+    Coverage says a predicate executed. This says whether anyone would notice if the rule it gates
+    stopped firing -- which for a counsel-review item is the difference between a founder being told
+    to consult counsel and not being told.
+    """
+    unasserted, counsel = _unasserted_rules()
+    assert len(unasserted) <= UNASSERTED_RULE_BASELINE, (
+        f"{len(unasserted)} rule_ids have no assertion (baseline {UNASSERTED_RULE_BASELINE}); "
+        f"a new unguarded rule shipped: {sorted(set(unasserted))[:8]}"
+    )
+    assert len(counsel) <= UNASSERTED_COUNSEL_RULE_BASELINE, (
+        f"{len(counsel)} COUNSEL-REVIEW rules have no assertion (baseline "
+        f"{UNASSERTED_COUNSEL_RULE_BASELINE}): {counsel[:8]}"
+    )
+    if len(unasserted) < UNASSERTED_RULE_BASELINE or len(counsel) < UNASSERTED_COUNSEL_RULE_BASELINE:
+        pytest.fail(
+            f"unasserted rules down to {len(unasserted)} (baseline {UNASSERTED_RULE_BASELINE}) and "
+            f"counsel-review to {len(counsel)} (baseline {UNASSERTED_COUNSEL_RULE_BASELINE}) -- good. "
+            "Lower the baselines to lock the win in."
+        )
+
+
+class TestRuleApplicabilityPredicates:
+    """`_evaluate_freshness` — the one hand-picked predicate that survived review.
+
+    The four others originally proposed were dropped: two are redundant emitters of rules
+    `flip_scenario.py` already emits with tested both-directions coverage, one gates three
+    `counsel_review: false` solver diagnostics that must never reach a founder anyway, and
+    `_any_warrant_event_with` is a nested closure with no importable surface — a unit test of it
+    could not be written, only a test of its caller.
+
+    Both directions, because a one-directional test passes against a predicate hardcoded to the value
+    it asserts. Mutation-verified: `return "fresh"` unconditionally fails this.
+    """
+
+    def test_stale_and_fresh_benchmarks_are_distinguished(self) -> None:
+        from datetime import date
+
+        import rule_audit  # type: ignore[import-not-found]
+
+        window_start, window_end = date(2026, 1, 1), date(2026, 2, 1)
+        fresh = rule_audit._evaluate_freshness(date(2026, 1, 15), window_start, window_end)
+        stale = rule_audit._evaluate_freshness(date(2019, 1, 1), window_start, window_end)
+        assert fresh != stale, (
+            f"a benchmark dated inside the freshness window scores {fresh!r} and a seven-year-old one "
+            f"scores {stale!r}. If they agree, a stale benchmark is presented to a founder as current."
+        )
+
+    def test_absent_benchmark_reference_is_its_own_state(self) -> None:
+        """Unknown must not silently collapse into fresh — the failure that reads as a clean result."""
+        from datetime import date
+
+        import rule_audit  # type: ignore[import-not-found]
+
+        unknown = rule_audit._evaluate_freshness(None, date(2026, 1, 1), date(2026, 2, 1))
+        fresh = rule_audit._evaluate_freshness(date(2026, 1, 15), date(2026, 1, 1), date(2026, 2, 1))
+        assert unknown != fresh, f"a benchmark with no reference date scores {unknown!r}, same as fresh"

@@ -1,7 +1,16 @@
 """Typed loader for cap-table artifacts (cap-table-data-contract §4.5b).
 
-This is the v0.5.0 single-point-of-truth for reading cap-table artifacts.
-Every consumer (per §3.5 read-allowlist) goes through one of the load_*
+A STRICT READER for cap-table artifacts. It is NOT on any production path.
+
+Measured 2026-08-28: zero producers import this module; 32 cap-table scripts `json.load`
+directly, and SKILL.md never mentions a §3.5 read-allowlist. Its only caller is
+tests/test_chain_integration_v050.py, where 4 of 13 tests drive it. An earlier version of
+this docstring claimed "every consumer goes through one of the load_* functions", which was
+false and had already misled a reader into believing a rewrite here reached production.
+
+Keep it for the invariants it enforces on read (schema version, mirror drift, and the
+semantic checks below), and use it deliberately -- but do not cite it as a mandatory path.
+The load_*
 functions. The loader:
 
 1. Validates the artifact against its declared JSON schema.

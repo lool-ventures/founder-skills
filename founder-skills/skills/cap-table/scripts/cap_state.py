@@ -920,7 +920,20 @@ def main() -> int:
     try:
         cap_state = build_cap_state(inputs, instruments, currency=args.currency)
     except CapStateInvariantError as e:
+        # The loud-failure contract (CLAUDE.md, Script Conventions) is FOUR properties, and this
+        # producer met three: exit non-zero, a line on stderr, `-o` left untouched. The missing one
+        # was the machine-readable diagnostic on STDOUT. Emitting it costs nothing and makes the
+        # rejection legible to a caller that reads stdout rather than the terminal.
+        #
+        # Deliberately NOT registered in test_skill_contract.py::_REJECTING_PAYLOADS: that harness
+        # pipes its payload on stdin and this producer takes argv, so every encoding of it exits on
+        # argparse or a missing file and satisfies all three of the registry's assertions WITHOUT
+        # running the producer -- a false green. Reaching argv-driven producers needs a harness
+        # change (seed inputs, assert a stdout marker), which is its own work.
+        sys.stdout.write(json.dumps({"validation": {"status": "invalid", "errors": [str(e)]}}) + "\n")
         sys.stderr.write(f"cap_state.py: invariant violation: {e}\n")
+        if args.output:
+            sys.stderr.write(f"cap_state.py: {os.path.abspath(args.output)} was left unchanged.\n")
         return 1
 
     schema = load_schema(os.path.join(_SCHEMA_DIR, "cap_state.schema.json"))
@@ -935,7 +948,10 @@ def main() -> int:
             schema_version=CAP_STATE_SCHEMA_VERSION,
         )
     except ArtifactValidationError as e:
+        sys.stdout.write(json.dumps({"validation": {"status": "invalid", "errors": [str(e)]}}) + "\n")
         sys.stderr.write(f"cap_state.py: schema validation failed: {e}\n")
+        if args.output:
+            sys.stderr.write(f"cap_state.py: {os.path.abspath(args.output)} was left unchanged.\n")
         return 1
 
     print(json.dumps(receipt, indent=2 if args.pretty else None))
