@@ -155,5 +155,14 @@ def test_cap_table_smoke(tmp_path: Path) -> None:
     ownership = payload.get("ownership_range_across_scenarios")
     assert ownership, "coaching_payload has no ownership_range_across_scenarios to reason from"
 
+    # The math is its OWN artifact; `report.json` composes a summary and never carries a `scenarios`
+    # key. The first version of this lane asserted `report["scenarios"]` and failed a run in which
+    # everything actually worked — a shape assumed rather than measured, which is the error this file's
+    # own non-vacuity guard exists to prevent one layer up. Assert the artifact that holds the math,
+    # then assert the math reached the founder-facing surface, which is the property that matters.
+    scenarios = json.loads((review_dir / "scenarios.json").read_text(encoding="utf-8"))
+    assert scenarios.get("scenarios"), "scenarios.json carries no scenarios — the math did not run"
+
     report = json.loads((review_dir / "report.json").read_text(encoding="utf-8"))
-    assert report.get("scenarios"), "report.json carries no scenarios — the math did not reach the report"
+    assert report.get("report_markdown"), "report.json carries no report_markdown"
+    assert isinstance(report.get("validation"), dict), "report.json carries no validation block"
