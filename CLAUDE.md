@@ -641,11 +641,15 @@ Verified against the Claude Code v2.1.120 skill runtime contract and Desktop v1.
   100-char marker = exactly 20,000). All six of our SKILL.mds are far over, so **every one truncates on
   every compaction, discarding 75–86% of its body.** That is not a tail risk; it is certain.
   **Cap 1 is NOT reliably self-healing — do not rely on the marker.** The disk file is untouched, but
-  three things defeat recovery: the marker says *"use Read on the skill path"* while the registered
-  `skillPath` is **not a filesystem path** (it is `<source>:<name>`, e.g. `plugin:cap-table`), so a
-  literal Read fails; the attachment's own preamble tells the model *"Do NOT re-execute these skills…
-  shown here for context only"*, actively discouraging the recovery; and the truncation is written back
-  into session state, so the session's copy stays truncated from the first compaction onward.
+  three things defeat recovery: the marker says *"use Read on the skill path"* while the path is **not a
+  filesystem path** (it is `<source>:<name>`), so a literal Read fails; the attachment's own preamble
+  tells the model *"Do NOT re-execute these skills… shown here for context only"*, actively discouraging
+  the recovery; and the truncation is written back into session state, so the session's copy stays
+  truncated from the first compaction onward. **Measured on this machine, 651 entries across 31 distinct
+  paths: ZERO look like a filesystem path** — prefixes are `plugin` (25), `bundled` (4),
+  `projectSettings` (1), `builtin` (1). Verify it with `"type":"invoked_skills"` and the `skills[].path`
+  field: the registry's internal name is `skillPath`, but the attachment builder **renames it to `path`
+  on the way out**, so grepping transcripts for `skillPath` finds nothing and reads as "absent".
   **Cap 2 — 25,000 tokens combined across all skills; over budget the stored content is set to `""`
   permanently.** No marker, nothing to notice its absence against — so a "re-read if something looks
   missing" instruction works for truncation and **structurally cannot fire** for zeroing. Consumed by
@@ -667,7 +671,12 @@ Verified against the Claude Code v2.1.120 skill runtime contract and Desktop v1.
   ≤20,001 chars of rendered prompt. But this is **not free**: a Read-ed file competes in a separate
   post-compaction file-restore budget — the **5 most recently read files**, 5,000 tokens each, 50,000
   combined. Relocation moves content into a different, larger, 5-slot budget rather than out of every
-  budget. **Neither conflicts with the retired "never move prose into `references/`" rule below** —
+  budget. **That budget is per-agent too**, so it does NOT weaken under our heavy sub-agent fan-out: a
+  plain Task/agent dispatch starts with a FRESH empty file cache, a `context: fork` dispatch starts with
+  a COPY of the parent's, and a child's reads never propagate back. The `fork` sharing caveat does not
+  apply to us — **measured: no `context: fork` in any of the six SKILL.mds or six agent bodies.** If one
+  is ever added, re-check this. (`gOn=5` is the slice applied at restore time, not the cache size; the
+  backing store is 5,000 entries / 25 MiB.) **Neither conflicts with the retired "never move prose into `references/`" rule below** —
   that retirement was decided on *critique-corpus* grounds (512 KiB whole-content packaging), a
   different budget entirely.
 - **Env vars in skill bodies:** Use `${CLAUDE_PLUGIN_ROOT}` (braced form) — the plugin content expander substitutes it at load time. Bare `$CLAUDE_PLUGIN_ROOT` only resolves at Bash subprocess time and depends on `CLAUDE_ENV_FILE` being sourced; the gist flags this as unconfirmed for skill subprocesses. The braced form is the contract.
