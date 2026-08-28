@@ -89,7 +89,7 @@ assert:
   - skill_triggered: '(founder-skills:)?competitive-positioning$'
   - computer_links_resolve: true
   - no_delete_in_outputs: true
-  - subagent_tool_absent: 'Bash'
+  - subagent_tool_absent: 'mcp__workspace__bash'
   # One more gate than the smoke lane (the additions sub-prompt), plus headroom.
   - questions_count_max: 8
   # The smoke lane measured 6 dispatches / 65 tools. Adoption adds a scoped re-dispatch of

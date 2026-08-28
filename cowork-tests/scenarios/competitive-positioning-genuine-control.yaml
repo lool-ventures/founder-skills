@@ -40,7 +40,7 @@ assert:
   # zero links). Deliverables are covered by the artifact/file asserts above.
   - computer_links_resolve_if_present: true
   - no_delete_in_outputs: true
-  - subagent_tool_absent: 'Bash'
+  - subagent_tool_absent: 'mcp__workspace__bash'
   - allow_stall: true
   - questions_count_max: 8
   - dispatch_count_max: 12

@@ -174,7 +174,7 @@ assert:
   - no_delete_in_outputs: true
 
   # Sub-agents declare no Bash — fleet regression tripwire, same as every other lane.
-  - subagent_tool_absent: 'Bash'
+  - subagent_tool_absent: 'mcp__workspace__bash'
 
   # The pipeline entered through the Skill tool, and did not mis-route to a sibling.
   - skill_triggered: '(founder-skills:)?deck-review$'

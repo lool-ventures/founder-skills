@@ -90,7 +90,7 @@ assert:
   - skill_triggered: '(founder-skills:)?ic-sim$'
   - computer_links_resolve: true
   - no_delete_in_outputs: true
-  - subagent_tool_absent: 'Bash'
+  - subagent_tool_absent: 'mcp__workspace__bash'
   - questions_count_max: 8
   # Budgets: ic-sim-smoke measured 8 dispatches / 60 turns / 52 tools on the same pipeline shape.
   # Headroom over that, not a tightened floor — a contested deal reasons longer, and this lane is

@@ -52,7 +52,7 @@
 - `founder-skills/tests/compose_invocations.py` — Per-skill compose-script invocation registry (skill-quality CI)
 - `founder-skills/tests/test_cowork_async_subagent_filter.py` — Helper unit tests
 - `founder-skills/tests/test_cowork_invariants.py` — Per-agent persistence + dangerous-tool declaration invariants
-- `founder-skills/tests/test_cowork_harness_floors.py` — Drift guards for the cowork-harness version surface: the per-site registry splitting CI SELECTORS (pinned exactly, `2.4.0`) from FLOORS (recording `>=2.4.0`, replay `^2.1.0`) — three postures, deliberately different, `uses:`-vs-`version:` major agreement (the action ref and the CLI move independently), and the derived cassette-format facts prose keeps restating wrongly. Every extraction asserts its own pattern matched, so a rotted regex reds instead of greening.
+- `founder-skills/tests/test_cowork_harness_floors.py` — Drift guards for the cowork-harness version surface: the per-site registry splitting CI SELECTORS (pinned exactly, `2.5.0`) from FLOORS (recording `>=2.5.0`, replay `^2.1.0`) — three postures, deliberately different, `uses:`-vs-`version:` major agreement (the action ref and the CLI move independently), and the derived cassette-format facts prose keeps restating wrongly. Every extraction asserts its own pattern matched, so a rotted regex reds instead of greening.
 - `founder-skills/tests/test_skill_orchestration.py` — Per-SKILL.md frontmatter + sub-agent-cue-then-bash regression detector
 - `founder-skills/tests/test_compose_invariants.py` — `coaching_payload` shape + `STALE_ARTIFACT` regression
 - `founder-skills/tests/test_insert_coaching.py` — `insert_coaching.py` suite (6-state idempotency matrix, run_id parity, single-pass write-back, adversarial commentary)
@@ -273,6 +273,20 @@ Measured workarounds, current through **1.15.0**. Full detail in
   **inlined into `agents/ic-sim.md`**, and `partner-archetypes.md` is fund-specific-mode only. Do not
   "fix" it by adding reads. Treat the flag as a prompt to check whether the skill's references are
   documentation or operative — for ic-sim the answer is documented at `SKILL.md:73-75`.
+  **ITS PREDICATE CHANGED IN 2.5.0 — "Read no file" is no longer what it means.** The signal is now keyed
+  on the **wide** `unionReferenceAccesses` (Read ∪ Grep ∪ a Bash command naming the path, main agent ∪
+  sub-agents), not on `Read` calls alone, and it gained a third state — `referenceAccessUnobservable`,
+  for a run that recorded no observable tool stream, which must never be read as "none". The evaluator's
+  evidence section was split into wide + narrow, and the grading prompt now forbids a finding whose only
+  support is a path missing from that list. **Measured blast radius for us: nil, but fragile —** our
+  SKILL.mds invoke scripts via `"$SCRIPTS/…"` / `"$SHARED_SCRIPTS/…"`, and 2.5.0 documents a
+  `$VAR`-built path as an **accepted detector miss**, so the bash channel does not see them today. One
+  SKILL.md switching to a literal path flips the signal. The new `reference_read` /
+  `no_observed_reference_access` assertion keys gate the same thing deliberately — they are content keys
+  and evaluate on replay (verified: a 2.5.0 replay of the existing `ic-sim-smoke` cassette reconstructs
+  `referencesAccessed` = `references/artifact-schemas.md` via `read`, sub-agents `[]`). **Not adopted
+  yet**: a scenario key cannot reach replay without a re-record, and freezing one raises the replay floor
+  to 2.5.0. Queue it for the next re-record pass.
 - **Pre-upgrade critique reports: keep them.** Per-item verdicts are not comparable across the
   whole-content change, but aggregate counts are — the `not-adjudicable` count on identical prompts is the
   measure, and archived reports are the only "before" that exists. Report **per-skill, not
@@ -438,7 +452,7 @@ Measured workarounds, current through **1.15.0**. Full detail in
   **deleted**, not kept: a suppression that suppresses nothing invites misreading the gate.
   **This makes the CLI floor load-bearing** — on 1.18.0 the current allowlist reds on 240 non-findings
   (measured, `npx cowork-harness@1.18.0`: exactly 240, exit 1). Floor every consumer of
-  `privacy-allowlist.sh` at `>=1.19.0` — though the **replay floor is `^2.1.0`, the RECORDING floor `>=2.4.0`, and the CI selectors are PINNED EXACTLY at `2.4.0`** — see the 2.x section below. 1.24.0 was an earlier repo-wide floor, raised because the
+  `privacy-allowlist.sh` at `>=1.19.0` — though the **replay floor is `^2.1.0`, the RECORDING floor `>=2.5.0`, and the CI selectors are PINNED EXACTLY at `2.5.0`** — see the 2.x section below. 1.24.0 was an earlier repo-wide floor, raised because the
   scenarios stop LOADING below it (`deck-review-gate-stop` asserts `file_absent` + `question_options`;
   measured, a 1.23.0 `record --dry-run` reports `Unrecognized key`, while `lint` on the same file exits
   0 — the loader catches it and lint does not). See the 1.24.0 adoption plan. Keep both numbers: 1.19.0 is what
@@ -534,7 +548,7 @@ Measured workarounds, current through **1.15.0**. Full detail in
 uv run pytest                                       # all tests (e2e auto-skips without auth; cowork auto-skips without the harness CLI)
 uv run pytest founder-skills/tests/ -v              # verbose
 uv run pytest founder-skills/tests/ -v -m "not e2e" # explicitly skip the LLM-driven e2e (free, fast)
-uv run pytest -m cowork                             # token-free cowork-harness cassette replay (needs `npm i -g cowork-harness@2.4.0` — exact, matching CI; no Docker/token)
+uv run pytest -m cowork                             # token-free cowork-harness cassette replay (needs `npm i -g cowork-harness@2.5.0` — exact, matching CI; no Docker/token)
 ```
 
 **A skill's own test file is not what guards it.** `test_<skill>.py` covers the producers;
@@ -636,13 +650,13 @@ Tag-push triggers `deck-review-e2e-smoke` in `.github/workflows/skill-quality.ym
 **CURRENT STATE (2.x). Read this before any per-release note below it — those are floor history and several of their numbers are superseded here.**
 
 * **Three postures, per site, not one number — and two of them are no longer floors at all.**
-  **CI selectors are PINNED EXACTLY at `2.4.0`** (the four workflow `version:` inputs, the
+  **CI selectors are PINNED EXACTLY at `2.5.0`** (the four workflow `version:` inputs, the
   `skill-static-analysis` `npm i -g`, and the three install instructions in `CONTRIBUTING.md`,
   `CLAUDE.md` and `pyproject.toml`). Carets auto-adopted every upstream release into CI with nobody
   choosing it — 2.4.0 was live in our gates before its adoption plan was written — and five CI steps
   red on rules the harness adds. Raise them deliberately, in an adoption pass, never to chase a red.
   `test_cowork_harness_floors.py` gates all of them, `CLAUDE.md` included (it was ungated until
-  2026-08-27). Recording: **`>= 2.4.0`** (`rerecord.sh`'s gate — the numeric
+  2026-08-27). Recording: **`>= 2.5.0`** (`rerecord.sh`'s gate — the numeric
   test and its FATAL message are ADJACENT lines; find them with `grep -n 'minor.*-ge'`, never by line
   number, which has been wrong here before). Replay floor: **`^2.1.0` at exactly ONE site now** —
   `test_cowork_cassette_replay.py::_MIN_HARNESS`. The other sites this line used to name (the four
@@ -660,6 +674,37 @@ Tag-push triggers `deck-review-e2e-smoke` in `.github/workflows/skill-quality.ym
   **12**; `MIN_SUPPORTED_CASSETTE_VERSION` is **9**; the hand-authored email canary is deliberately
   **v10**. Any count in prose elsewhere in this file is stale by construction — the corpus was cut on
   2026-08-24 and prose has been wrong about it repeatedly.
+* **`2.5.0` adds NO fidelity debt, and BLOCKS RECORDING until 24 scenarios are fixed. Read the second
+  half before the next re-record.** The blocker: 2.5.0 refuses, at scenario load and **pre-spend**, a
+  `tool_not_called`/`subagent_tool_absent` naming a tool the tier provably does not serve. All 26
+  non-canary scenarios are `fidelity: cowork` → **hostloop**, where the built-in shell is aliased to
+  `mcp__workspace__bash` — so the 24 that asserted `subagent_tool_absent: 'Bash'` were **vacuous, always**.
+  Fixed 2026-08-28 to `'mcp__workspace__bash'`. **Do not overstate that fix**: our own Context A agents
+  declare no shell tool of *any* name (measured across all 10 cassettes, sub-agent tool use is exactly
+  `{Read, Write, WebSearch}`), and two lanes dispatch zero sub-agents, so the assert stays unviolatable
+  for agents we wrote. Its live value is a dispatch we did NOT write — a `Task` with no `subagent_type`
+  falls back to `general-purpose` with a wildcard tool surface including workspace bash.
+  `test_cowork_invariants.py`'s per-agent tool declarations remain the primary enforcement.
+  **NONE of our three pre-flight gates catches this class**, and that is the durable trap: `lint`, the
+  bundled `scenario.py lint`, and `record --dry-run` all exit 0. The two linters' tier table has no
+  `cowork` row (they are offline and cannot resolve the baseline gate — proven by probe: the same file
+  with `fidelity: hostloop` WARNs), and the refusal lives in `executeScenario`, which `--dry-run`
+  returns before reaching. So CI stays green while `rerecord.sh` aborts on scenario 1.
+  **The 8 cassettes freezing `'Bash'` stay green-and-vacuous** until a re-record: `replay --assert-from`
+  hard-fails on skill-source drift on 10/10 (`--allow-failing` waives the drift gate wholesale — do not),
+  and 2.5.0's new cassette-satisfiability guard covers `tool_not_called` **only**, explicitly excluding
+  `subagent_tool_absent`, and lives in upstream's test suite rather than any CLI surface. Nothing will
+  ever flag them.
+  **Why no fidelity debt — and why `baselines/` byte-identity is NOT the argument.** That inference was
+  wrong at 2.4.0 (baseline identical, emulation moved), so do not repeat it: the sufficient evidence is
+  that `git diff --name-only v2.4.0..v2.5.0 | grep -E '^src/(runtime|hostloop|staging|agent|egress|sync)/'`
+  is **empty**, and `CASSETTE_VERSION` stays 12 / `MIN_SUPPORTED` stays 9. The recording floor moved to
+  `>=2.5.0` anyway, as a **new kind of floor**: an authoring guard, not a fidelity guard.
+  Also in 2.5.0, inert for us but worth not rediscovering: `tool_called: "Task"` could never pass and
+  `tool_not_called: "Task"` always did (now alias-aware `Task`↔`Agent`; we assert neither), and
+  `subagent_declared_but_unused` is documented near-always-vacuous (**0 of 1091** real dispatches carry
+  a declared tool list — a green means "not applicable", never "no fabrication"). Full analysis:
+  `docs/internal/2026-08-28-cowork-harness-2.5.0-adoption-plan.md`.
 * **`2.4.0` moves NO baseline leaf, but DOES add re-record debt — the two are different things.**
   `baselines/` is byte-identical `v2.3.0..v2.4.0`, so a baseline diff shows nothing. The change is in
   the harness's own EMULATION code, which the baseline does not describe: (a) hostloop's workspace

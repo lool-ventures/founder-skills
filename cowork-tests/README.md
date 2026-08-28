@@ -10,19 +10,27 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 > version, and the sites are NOT uniform — do not bump them as a block. Enumerate them, never count
 > them from prose:
 >
-> - **`cowork-tests/rerecord.sh` — `>= 2.4.0` (a FLOOR).** Recording bakes
+> - **`cowork-tests/rerecord.sh` — `>= 2.5.0` (a FLOOR).** Recording bakes
 >   the harness version into the artifact, and a lane asserting `present_files_called` at hostloop
 >   cannot be recorded below 2.2.0: presence there comes from the count of `present_files` invocations
 >   (input shape), whereas below that floor it comes from the classified `presentedFiles` list, which
 >   drops the non-absolute path that host-path redaction produces — so the assert flips under redaction
 >   and `record` refuses to write. The numeric gate and its FATAL message are ADJACENT lines; edit both
 >   (`grep -n 'minor.*-ge' rerecord.sh`).
-> - **The four `version:` inputs in the `replay` job — PINNED EXACTLY at `2.4.0`.** LINT, PRIVACY,
+>   **2.5.0 raised it for a DIFFERENT KIND of reason, and the difference matters.** Every floor before
+>   it exists because recording bakes the harness version into the artifact. 2.5.0 bakes nothing —
+>   no baseline move, `cassetteVersion` still 12, and no emulation directory changed at all. It is an
+>   **authoring guard**: 2.5.0 refuses at scenario load, pre-spend, a negative tool assertion naming a
+>   tool the tier provably does not serve. Below it, a re-introduced `subagent_tool_absent: 'Bash'`
+>   records silently and freezes a vacuous assert into a paid cassette — and nothing downstream will
+>   ever flag it (the new cassette-satisfiability guard covers `tool_not_called` only, and lives in
+>   upstream's test suite, not a CLI surface). See the dispatch-contract bullet below.
+> - **The four `version:` inputs in the `replay` job — PINNED EXACTLY at `2.5.0`.** LINT, PRIVACY,
 >   STALENESS and REPLAY. Exact, not a floor, since 2026-08-27: a caret auto-adopted every upstream
 >   release into CI with nobody choosing it, and five CI steps red on rules the harness adds.
 >   Enumerate with `grep -n 'version: "' ../.github/workflows/cowork-replay.yml`. The **email canary is
 >   not among them**: it is a bare `run:` step riding the CLI the preceding Action step installed.
-> - **The `skill-static-analysis` job's standalone `npm i -g` — PINNED EXACTLY at `2.4.0`.** That step runs
+> - **The `skill-static-analysis` job's standalone `npm i -g` — PINNED EXACTLY at `2.5.0`.** That step runs
 >   `record --dry-run`, i.e. the LOADER, which is the strict surface `lint` cannot substitute for.
 > - **`test_cowork_cassette_replay.py::_MIN_HARNESS` — `(2, 1, 0)`, and it STAYS A FLOOR.** It is a
 >   skip guard, not a selector: raising it turns a below-floor developer's red into a silent skip.
@@ -51,7 +59,7 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 >
 > Node **22+** as of 1.14.0 (20 is EOL; `doctor` fails on it).
 >
-> **Why not below 2.2.0 for RECORDING (the original reason; the floor is now 2.4.0 — see above).**
+> **Why not below 2.2.0 for RECORDING (the original reason; the floor is now 2.5.0 — see above).**
 > `present_files_called` at hostloop is unrecordable below it
 > (see the floor list above). Adopting 2.2.0 changed nothing else here: measured against a pinned
 > 2.1.0, every token-free surface on this repo is byte-identical — `replay` ×10, `verify-cassettes`,
@@ -386,8 +394,19 @@ scenario now carries a fleet contract surface — none of which duplicates pytes
   (new files stay within a per-scenario allowlist — the artifact namespace incl. `…/handoff/**`, the
   founder-context sidecar, and the promoted deliverables; the stray-file / fabricated-artifact guard,
   paired with the producer `_produced_by` stamp for the overwrite-in-place case it can't see).
-- **Dispatch contract:** `subagent_tool_absent: 'Bash'` turns each agent's "No Bash required" prose
-  contract into a regression test.
+- **Dispatch contract:** `subagent_tool_absent: 'mcp__workspace__bash'` turns each agent's "No Bash
+  required" prose contract into a regression test. **The tool name is tier-specific and is not
+  cosmetic.** These scenarios run at `fidelity: cowork` → `hostloop`, where the built-in shell is
+  disallowed and aliased to `mcp__workspace__bash`; naming `'Bash'` there asserts a tool the tier never
+  serves, so it can never be violated. cowork-harness 2.5.0 refuses that at scenario load (exit 2,
+  pre-spend) — before then it passed vacuously on all 24 scenarios, which is what it had always done.
+  Two limits worth knowing rather than rediscovering: our own Context A agents declare no shell tool of
+  *any* name, so this assert is still unviolatable for them — its live value is catching a dispatch we
+  did **not** write (a `Task` with no `subagent_type` falls back to `general-purpose` with a wildcard
+  tool surface that includes workspace bash). And a lane that dispatches no sub-agents at all passes it
+  trivially. The per-agent tool declarations in `test_cowork_invariants.py` remain the primary
+  enforcement. Do not "fix" a future container-tier refusal of this name with a glob — that restores the
+  silent vacuity this replaced.
 - **Budgets:** `questions_count_max` (usability — gates asked before value), `dispatch_count_max`
   (author-chosen — production imposes *no* Task-fan-out cap; this is an efficiency tripwire, not a
   platform mirror), and `max_turns` / `tool_calls_max`. **Budgets are generous regression ceilings, not

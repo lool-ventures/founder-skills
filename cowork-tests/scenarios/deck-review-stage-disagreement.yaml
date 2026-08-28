@@ -101,7 +101,7 @@ assert:
 
   - skill_triggered: '(founder-skills:)?deck-review$'
   - subagent_dispatched: 'deck-review'
-  - subagent_tool_absent: 'Bash'
+  - subagent_tool_absent: 'mcp__workspace__bash'
   - no_delete_in_outputs: true
   - computer_links_resolve_if_present: true
   - allow_stall: true

@@ -80,7 +80,7 @@ assert:
   # No delete under outputs/ (live-lane key; replay skips it loudly).
   - no_delete_in_outputs: true
   # Dispatch contract: sub-agents declare no Bash (agents/*.md) — regression tripwire.
-  - subagent_tool_absent: 'Bash'
+  - subagent_tool_absent: 'mcp__workspace__bash'
   # Usability budget: gates asked before value (observed + headroom, from discovery).
   - questions_count_max: 8
   # Author-chosen dispatch budget (production has NO Task-fan-out cap; this is an

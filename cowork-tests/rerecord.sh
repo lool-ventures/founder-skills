@@ -31,11 +31,28 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# FLOOR: >=2.4.0 with no upper bound. Recording is the one operation where the harness version is
+# FLOOR: >=2.5.0 with no upper bound. Recording is the one operation where the harness version is
 #   THIS HEADER WAS ONE MINOR BEHIND THE GATE when 2.3.0 was adopted (header said 2.1.0, gate required
 #   2.2) — the exact drift the next paragraph warns about, sitting unfixed in the file that warns about
 #   it. If you are here to change the floor, change all FOUR sites: this header, the numeric gate, its
 #   FATAL message, and `_RECORDING_FLOOR` in founder-skills/tests/test_cowork_harness_floors.py.
+#   * 2.5.0 is required for a DIFFERENT REASON FROM EVERY FLOOR BELOW IT, and the difference is the
+#     point. Every earlier floor exists because recording bakes the harness version into the artifact.
+#     2.5.0 bakes NOTHING: no baseline move, `CASSETTE_VERSION` stays 12, `MIN_SUPPORTED` stays 9, and
+#     no emulation directory changed at all (`git diff --name-only v2.4.0..v2.5.0 | grep -E
+#     '^src/(runtime|hostloop|staging|agent|egress|sync)/'` is empty). This floor is an AUTHORING GUARD:
+#     2.5.0 refuses, at scenario load and pre-spend, a `tool_not_called`/`subagent_tool_absent` naming a
+#     tool the tier provably does not serve. All 24 scenarios carrying `subagent_tool_absent: 'Bash'`
+#     were vacuous at hostloop, always — the tier aliases the built-in shell to `mcp__workspace__bash`,
+#     so the run could never have called `Bash`. Below this floor a re-introduced `'Bash'` records
+#     SILENTLY and freezes a vacuous assert into a paid cassette that nothing will ever flag: 2.5.0's
+#     new cassette-satisfiability guard covers `tool_not_called` only and explicitly excludes
+#     `subagent_tool_absent`, and it lives in upstream's test suite, not in any CLI surface. Neither
+#     `lint`, nor the bundled `scenario.py lint`, nor `record --dry-run` catches the class for us — the
+#     linters' tier table has no `cowork` row (they are offline and cannot resolve the baseline gate),
+#     and the refusal lives in `executeScenario`, which `--dry-run` returns before reaching. This gate
+#     is therefore the only thing standing between us and a repeat. Full analysis:
+#     docs/internal/2026-08-28-cowork-harness-2.5.0-adoption-plan.md.
 #   * 2.4.0 is required because it CHANGES WHAT A HOSTLOOP RECORDING RECORDS. The workspace bash
 #     tool's cwd moves from `<session>/mnt/<first-folder-else-outputs>` to the bare session root
 #     (`hostLoopCwds`), which upstream measured against desktop-local Cowork on 2026-08-27; the
@@ -185,8 +202,8 @@ echo "cowork-harness $ver"
 # themselves are unchanged and still `::warning::`. Parse the JSON envelope instead.
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
 # `-gt 2` first so a future 3.x passes — a bare minor check would FATAL on 3.0.0.
-{ [ "$major" -gt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -ge 4 ]; }; } \
-  || { echo "FATAL: need >=2.4.0 (have $ver) — see the floor note above"; exit 1; }
+{ [ "$major" -gt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -ge 5 ]; }; } \
+  || { echo "FATAL: need >=2.5.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi

@@ -79,7 +79,7 @@ assert:
   # No delete under outputs/ (live-lane key; replay skips it loudly).
   - no_delete_in_outputs: true
   # Dispatch contract: sub-agents declare no Bash (agents/*.md) — regression tripwire.
-  - subagent_tool_absent: 'Bash'
+  - subagent_tool_absent: 'mcp__workspace__bash'
   # NO gate assertion here, deliberately — this lane is GATE-CLEAN BY DESIGN (see the header note).
   # `gate_answers_delivered` was removed rather than paired with a presence companion. This no longer
   # argues against the linter: harness 1.20.0 rewrote `vacuous-gate-assert` (Gotcha 19), which now
