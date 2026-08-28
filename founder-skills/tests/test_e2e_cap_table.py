@@ -271,7 +271,14 @@ def assert_pool_basis_commentary_matches_inputs(review_dir: Path) -> None:
     #   - a sentence naming BOTH bases is contrasting them, which is legitimate advice.
     claims = []
     for sentence in re.split(r"(?<=[.!?])\s+", body):
-        if re.search(r"post[- ]money\s+pool", sentence, re.IGNORECASE):
+        # A sentence naming BOTH bases is contrasting or asking, never asserting this deal's basis.
+        # That covers the legitimate forms this skill actually writes: the general explainer
+        # ("Pre-money pool sizing lands the dilution on existing shareholders; post-money spreads
+        # it…"), the question ("is it sized pre-money or post-money?"), and the correct verdict
+        # ("On these numbers the pool is post-money"). An earlier version excluded only the narrower
+        # `post-money pool` bigram and false-flagged the explainer, which says "post-money spreads"
+        # — a false positive in a paid lane, which is worse than no assertion at all.
+        if re.search(r"pre[- ]money", sentence, re.IGNORECASE) and re.search(r"post[- ]money", sentence, re.IGNORECASE):
             continue
         hit = re.search(r"pool\W{0,12}(?:\*\*\s*)?pre[- ]money|pre[- ]money\s+pool", sentence, re.IGNORECASE)
         if hit:
