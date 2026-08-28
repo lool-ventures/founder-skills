@@ -640,16 +640,24 @@ Verified against the Claude Code v2.1.120 skill runtime contract and Desktop v1.
   last safe length is **20,001** — not 19,900, which is merely what survives (`slice(0,19900)` + a
   100-char marker = exactly 20,000). All six of our SKILL.mds are far over, so **every one truncates on
   every compaction, discarding 75–86% of its body.** That is not a tail risk; it is certain.
-  **Cap 1 is NOT reliably self-healing — do not rely on the marker.** The disk file is untouched, but
-  three things defeat recovery: the marker says *"use Read on the skill path"* while the path is **not a
-  filesystem path** (it is `<source>:<name>`), so a literal Read fails; the attachment's own preamble
-  tells the model *"Do NOT re-execute these skills… shown here for context only"*, actively discouraging
-  the recovery; and the truncation is written back into session state, so the session's copy stays
-  truncated from the first compaction onward. **Measured on this machine, 651 entries across 31 distinct
-  paths: ZERO look like a filesystem path** — prefixes are `plugin` (25), `bundled` (4),
-  `projectSettings` (1), `builtin` (1). Verify it with `"type":"invoked_skills"` and the `skills[].path`
-  field: the registry's internal name is `skillPath`, but the attachment builder **renames it to `path`
-  on the way out**, so grepping transcripts for `skillPath` finds nothing and reads as "absent".
+  **Cap 1 IS recoverable in practice — an earlier version of this note said otherwise and was wrong.**
+  The stored content is prefixed with `Base directory for this skill: <ABSOLUTE PATH>`, and truncation
+  is head-preserving (`slice(0,19900)` + marker), so **that line survives truncation by construction**.
+  The marker's "use Read on the skill path" is therefore directly executable. **Measured here, 651
+  attached entries: 586 (90.0%) carry the absolute base directory, and 99 of 101 TRUNCATED entries
+  (98.0%) carry it.** The two that do not are single-file `commands/*.md` (a non-`SKILL.md` file has no
+  base dir); **all six of our skills ship as `SKILL.md` in their own directory, so they are outside that
+  exception** — only `commands/feedback.md` is a single-file command.
+  The narrower fact that misled me is still true and still worth knowing: the `skills[].path` field is a
+  source-qualified identifier (`<source>:<name>`, e.g. `plugin:cap-table`), **not** a file location — so
+  a recovery attempt keyed on `path` fails, while one keyed on the content's first line succeeds. The
+  registry's internal field is `skillPath` but the attachment builder renames it to `path` on the way
+  out, so grepping transcripts for `skillPath` finds nothing and reads as "absent".
+  **What remains true regardless of recovery:** truncation is certain on every compaction, discards
+  75–86% of each body, and is written back to session state — so recovery depends on the model noticing
+  and spending a Read, which is a real cost and not guaranteed. The preamble's "Do NOT re-execute these
+  skills… shown here for context only" discourages it, though re-*reading* a file is not re-*executing*
+  a skill, so that pressure is weaker than it first appears.
   **Cap 2 — 25,000 tokens combined across all skills; over budget the stored content is set to `""`
   permanently.** No marker, nothing to notice its absence against — so a "re-read if something looks
   missing" instruction works for truncation and **structurally cannot fire** for zeroing. Consumed by
