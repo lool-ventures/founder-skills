@@ -297,19 +297,78 @@ class TestCapState:
 
 class TestSafeConversion:
     def test_cap_implied_basic(self) -> None:
-        # $500k @ $8M cap, 11.5M company cap → 6.25% cap-implied ownership
+        """The three outputs must AGREE, which the previous version never checked.
+
+        It asserted each field against the formula that produced it -- ownership against
+        `purchase/cap`, price against `cap/pre_fd`, shares against `purchase/price` -- and so could
+        not see that the resulting shares delivered 5.88% while the stated ownership was 6.25%. The
+        denominator was the pre-financing count; for a post-money SAFE the document's Company
+        Capitalization includes the converting SAFE itself.
+        """
+        pre_fd = 11_500_000
         r = safe_conversion.convert_safe_cap_implied(
             purchase_amount=500_000,
             post_money_valuation_cap=8_000_000,
-            company_capitalization=11_500_000,
+            company_capitalization=pre_fd,
         )
         assert r["branch"] == "cap_implied"
         assert math.isclose(r["cap_implied_ownership"], 0.0625, rel_tol=1e-6)
-        # safe_price = 8M / 11.5M
-        assert math.isclose(r["safe_price"], 8_000_000 / 11_500_000, rel_tol=1e-6)
-        # shares = 500k / safe_price
-        expected_shares = 500_000 / (8_000_000 / 11_500_000)
-        assert math.isclose(r["cap_implied_shares"], expected_shares, rel_tol=1e-6)
+
+        # THE CROSS-CHECK: the stated ownership is the ownership the stated shares deliver.
+        total = pre_fd + r["cap_implied_shares"]
+        assert math.isclose(r["cap_implied_shares"] / total, r["cap_implied_ownership"], rel_tol=1e-9)
+        assert math.isclose(r["safe_price"], 8_000_000 / total, rel_tol=1e-9)
+        # Closed form: total = pre_fd / (1 - purchase/cap).
+        assert math.isclose(total, pre_fd / (1 - 0.0625), rel_tol=1e-9)
+
+    def test_cap_implied_set_couples_every_safe(self) -> None:
+        """Every converting SAFE is in every OTHER SAFE's denominator.
+
+        The per-instrument caller computed each SAFE as if it were the only one, so this case was
+        wrong in a second way that the single-SAFE case cannot show. Values cross-checked against
+        `solve_priced_round` at the same inputs.
+        """
+        r = safe_conversion.convert_safes_cap_implied(
+            [
+                {"id": "s1", "purchase_amount": 500_000, "post_money_valuation_cap": 5_000_000},
+                {"id": "s2", "purchase_amount": 1_000_000, "post_money_valuation_cap": 10_000_000},
+            ],
+            pre_financing_fd=8_000_000,
+        )
+        assert r["branch"] == "cap_implied_set"
+        assert math.isclose(r["company_capitalization"], 10_000_000, rel_tol=1e-9)
+        for sid in ("s1", "s2"):
+            per = r["per_safe"][sid]
+            assert math.isclose(per["cap_implied_shares"], 1_000_000, rel_tol=1e-9)
+            assert math.isclose(
+                per["cap_implied_shares"] / r["company_capitalization"],
+                per["cap_implied_ownership"],
+                rel_tol=1e-9,
+            )
+
+    def test_cap_implied_set_rejects_infeasible_aggregate(self) -> None:
+        """Stacked caps reserving >= 100% are blocked, per safe.stacked_post_money_caps."""
+        r = safe_conversion.convert_safes_cap_implied(
+            [
+                {"id": "s1", "purchase_amount": 3_000_000, "post_money_valuation_cap": 5_000_000},
+                {"id": "s2", "purchase_amount": 2_000_000, "post_money_valuation_cap": 5_000_000},
+            ],
+            pre_financing_fd=8_000_000,
+        )
+        assert r["branch"] == "rejected"
+        assert r["error"] == safe_conversion.E_SAFE_AGGREGATE_CAP_OWNERSHIP_INFEASIBLE
+
+    def test_cap_implied_set_is_all_or_nothing(self) -> None:
+        """One unpriceable SAFE blocks the set: dropping it would inflate the others."""
+        r = safe_conversion.convert_safes_cap_implied(
+            [
+                {"id": "s1", "purchase_amount": 500_000, "post_money_valuation_cap": 5_000_000},
+                {"id": "s2", "purchase_amount": 250_000, "post_money_valuation_cap": None},
+            ],
+            pre_financing_fd=8_000_000,
+        )
+        assert r["branch"] == "rejected"
+        assert r["error"] == safe_conversion.E_SAFE_REQUIRES_CONVERSION_EVENT
 
     def test_cap_implied_rejects_zero_cap(self) -> None:
         r = safe_conversion.convert_safe_cap_implied(

@@ -36,7 +36,7 @@ from note_conversion import (  # noqa: E402
 )
 from priced_round import solve_priced_round  # noqa: E402
 from safe_conversion import (  # noqa: E402
-    convert_safe_cap_implied,
+    convert_safes_cap_implied,
     detect_mfn_cycles,
     safe_has_usable_purchase_amount,
 )
@@ -135,7 +135,7 @@ def run_safe_conversion_scenario(
     per_safe: dict[str, dict[str, Any]] = {}
     if priced_pre is None or priced_new is None:
         # Cap-implied path only. MFN elections need a priced round to resolve against
-        # (convert_safe_cap_implied has no election path) — surface a blocker once rather
+        # (the cap-implied path has no election path) — surface a blocker once rather
         # than silently dropping the param.
         if params.get("mfn_elections"):
             blockers.append(
@@ -146,32 +146,56 @@ def run_safe_conversion_scenario(
                     "priced_round_new_money); the cap-implied path cannot resolve an MFN election.",
                 }
             )
-        for s in safes:
-            r = convert_safe_cap_implied(
-                purchase_amount=s["purchase_amount"],
-                post_money_valuation_cap=s.get("post_money_valuation_cap"),
-                company_capitalization=pre_fd,
+        # A convertible note is a CONVERTING SECURITY, so it belongs in the post-money SAFE's
+        # Company Capitalization (rule `safe.company_capitalization_yc_post_money`) — the priced path
+        # counts it (`priced_round.py`: `adj_pre_fd + safe_shares + note_shares`). This path cannot:
+        # a note has no conversion price without a round, so its share count is undefined here.
+        # Refuse rather than silently omit it, which would understate the denominator and overstate
+        # every SAFE's cap-implied ownership.
+        notes = instruments.get("convertible_notes") or []
+        if notes:
+            blockers.append(
+                {
+                    "code": "E_CAP_IMPLIED_NOTES_PRESENT",
+                    "instance_id": None,
+                    "remedy": (
+                        f"{len(notes)} convertible note(s) are outstanding. A note converts only "
+                        "against a priced round, but it counts in the post-money SAFE denominator, so "
+                        "a cap-implied snapshot would overstate SAFE ownership. Model a priced round "
+                        "(priced_round_pre_money / priced_round_new_money) to see conversion."
+                    ),
+                }
             )
-            per_safe[s["id"]] = r
-            if r.get("branch") == "rejected":
+
+        company_capitalization: float | None = None
+        if not blockers:
+            solved = convert_safes_cap_implied(safes, pre_financing_fd=pre_fd)
+            if solved["branch"] == "rejected":
                 blockers.append(
                     {
-                        "code": r.get("error", "E_UNKNOWN"),
-                        "instance_id": s["id"],
-                        "remedy": r.get("reason", "unspecified"),
+                        "code": solved.get("error", "E_UNKNOWN"),
+                        "instance_id": None,
+                        "remedy": solved.get("reason", "unspecified"),
                     }
                 )
+            else:
+                per_safe = solved["per_safe"]
+                company_capitalization = solved["company_capitalization"]
 
         outputs: dict[str, Any] = {
             "completeness": "structural_only",
             "cap_implied_only": True,
             "blockers": blockers,
             "per_safe": per_safe,
+            # The denominator the percentages are measured against. Emitted so a reader (and the e2e
+            # lane's self-consistency check) can verify `shares / company_capitalization` equals the
+            # stated ownership, rather than re-deriving a base and getting a different answer.
+            "company_capitalization": company_capitalization,
             "math_provenance": [
                 {
                     "output_field": "cap_implied_outputs",
                     "source_type": "rule",
-                    "rule_id": "safe.post_money_cap_conversion",
+                    "rule_id": "safe.stacked_post_money_caps",
                     "rule_pack_version": RULE_PACK_VERSION,
                     "source_ref": None,
                 }

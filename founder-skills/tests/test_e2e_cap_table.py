@@ -189,25 +189,50 @@ def assert_cap_implied_self_consistent(review_dir: Path) -> None:
     against the formula that produced it and never against the others.
     """
     scenarios = json.loads((review_dir / "scenarios.json").read_text(encoding="utf-8"))
-    cap_state = json.loads((review_dir / "cap_state.json").read_text(encoding="utf-8"))
-    pre_fd = (cap_state.get("as_converted_totals") or {}).get("fully_diluted_shares")
-    if not pre_fd:
-        return  # no denominator recorded; nothing to cross-check
 
     for scenario in scenarios.get("scenarios") or []:
-        for safe_id, out in ((scenario.get("computed_outputs") or {}).get("per_safe") or {}).items():
-            if out.get("branch") != "cap_implied":
-                continue
+        outputs = scenario.get("computed_outputs") or {}
+        per_safe = outputs.get("per_safe") or {}
+        cap_implied = {k: v for k, v in per_safe.items() if v.get("branch") == "cap_implied"}
+        if not cap_implied:
+            continue
+
+        # Divide by the SET's Company Capitalization, not by `pre_fd + this SAFE's shares`. Under the
+        # post-money definition every converting SAFE sits in every other SAFE's denominator, so a
+        # per-instrument base is only right when there is exactly one SAFE. A first version of this
+        # check used that base and would have failed a CORRECT two-SAFE run: at $500k/$5M and
+        # $1M/$10M against 8M shares, each SAFE holds 10% of a 10,000,000 total, but
+        # 1,000,000 / (8,000,000 + 1,000,000) reads as 11.1%.
+        total = outputs.get("company_capitalization")
+        assert total, (
+            "cap-implied outputs carry no company_capitalization — without the denominator the "
+            "stated percentages cannot be checked against the stated share counts"
+        )
+
+        for safe_id, out in cap_implied.items():
             stated = out.get("cap_implied_ownership")
             shares = out.get("cap_implied_shares")
             if stated is None or not shares:
                 continue
-            realised = shares / (pre_fd + shares)
+            realised = shares / total
             assert abs(realised - stated) < 1e-6, (
                 f"{safe_id}: report states {stated:.2%} cap-implied ownership but the {shares:,.0f} "
-                f"shares it also states deliver {realised:.2%} against a {pre_fd:,.0f}-share base. "
-                "A founder reading the percentage and a founder reading the share count get "
-                "different answers from one table"
+                f"shares it also states deliver {realised:.2%} of the {total:,.0f}-share Company "
+                "Capitalization. A founder reading the percentage and a founder reading the share "
+                "count get different answers from one table"
+            )
+
+        # The fixed point must have closed: the denominator is the pre-financing base PLUS the shares
+        # it produced. This is the check with content -- `shares/total == ownership` is a tautology
+        # once shares are derived from total, which is the same "asserted against the formula that
+        # produced it" blindness that let the original defect ship.
+        cap_state = json.loads((review_dir / "cap_state.json").read_text(encoding="utf-8"))
+        pre_fd = (cap_state.get("as_converted_totals") or {}).get("fully_diluted_shares")
+        if pre_fd:
+            closed = pre_fd + sum(v["cap_implied_shares"] for v in cap_implied.values())
+            assert abs(closed - total) < 1e-6 * max(1.0, total), (
+                f"the cap-implied denominator did not close: company_capitalization is {total:,.0f} "
+                f"but the pre-financing base plus converting shares is {closed:,.0f}"
             )
 
 

@@ -45,6 +45,11 @@ from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 # Typed error codes (mirror design doc §5.1)
 E_SAFE_REQUIRES_CONVERSION_EVENT = "E_SAFE_REQUIRES_CONVERSION_EVENT"
 E_SAFE_CAP_MISSING_DENOMINATOR = "E_SAFE_CAP_MISSING_DENOMINATOR"
+# Stacked post-money SAFEs reserving >= 100% of the company. The rule pack authorises the refusal
+# directly: `safe.stacked_post_money_caps` -> "Block or escalate when aggregate SAFE ownership is
+# greater than or equal to 100 percent." Distinct from the priced path's E_SOLVER_* codes, which
+# describe an iteration that failed to converge; here the infeasibility is closed-form and exact.
+E_SAFE_AGGREGATE_CAP_OWNERSHIP_INFEASIBLE = "E_SAFE_AGGREGATE_CAP_OWNERSHIP_INFEASIBLE"
 E_SAFE_CIRCULAR_MFN = "E_SAFE_CIRCULAR_MFN"
 E_SAFE_INVALID_PRICE_INPUT = "E_SAFE_INVALID_PRICE_INPUT"
 E_UNKNOWN_SAFE_FORM = "E_UNKNOWN_SAFE_FORM"
@@ -59,67 +64,153 @@ def safe_has_usable_purchase_amount(safe: dict[str, Any]) -> bool:
     return isinstance(amt, (int, float)) and not isinstance(amt, bool) and amt > 0
 
 
+def convert_safes_cap_implied(
+    safes: list[dict[str, Any]],
+    *,
+    pre_financing_fd: int | float,
+) -> dict[str, Any]:
+    """Cap-implied output for a SET of post-money SAFEs (standalone; no priced round).
+
+    WHY THIS IS SET-LEVEL AND NOT PER-INSTRUMENT — the shape of the bug it fixes.
+
+    The YC post-money SAFE's "Company Capitalization" is SELF-INCLUSIVE: it counts the shares
+    issuable on conversion of the SAFEs themselves (rule `safe.company_capitalization_yc_post_money`
+    — "including … converting securities"). That is the defining property of the post-money form and
+    the reason an investor's percentage is locked against dilution from other SAFEs.
+
+    The previous per-instrument version divided the cap by the PRE-financing FD count, which omits
+    the converting SAFEs, and it was called once per SAFE with that same base. Two consequences, both
+    shipped to founders:
+      * the three outputs disagreed with each other — a $500k SAFE at a $5M post cap against 8,000,000
+        shares rendered as "10.0% cap-implied (800,000 shares)", and 800,000 shares is 9.09%;
+      * the priced-round path, which solves the fixed point, returned 888,889 shares for the SAME
+        instrument, so one report converted one SAFE two ways.
+
+    The denominator is a fixed point, and the rule pack already states its closed form
+    (`safe.stacked_post_money_caps`, which no producer implemented until now):
+
+        pct_i  = purchase_i / cap_i
+        total  = pre_financing_fd / (1 - Σ pct_i)
+        price_i = cap_i / total
+        shares_i = purchase_i / price_i          ( = pct_i × total )
+
+    `pre_financing_fd` is the PRE-financing fully-diluted count — the name is deliberate. It already
+    includes options outstanding, the available pool and vested warrants (`cap_state.py`), which the
+    rule also requires. It is NOT the Company Capitalization; this function derives that (`total`)
+    from it. The identically-named parameter on `convert_safe_priced_round` means the post-money CC,
+    and conflating the two is how this defect happened.
+
+    ALL-OR-NOTHING BY DESIGN: if any SAFE in the set cannot be priced, the whole set is rejected. A
+    dropped member would be missing from `total` while still being a converting security, silently
+    inflating every other SAFE's share count.
+    """
+    if pre_financing_fd is None or pre_financing_fd <= 0:
+        return {
+            "branch": "rejected",
+            "error": E_SAFE_CAP_MISSING_DENOMINATOR,
+            "reason": "pre_financing_fd must be > 0 (pre-financing FD share count)",
+        }
+
+    priced: dict[str, float] = {}
+    for safe in safes:
+        cap = safe.get("post_money_valuation_cap")
+        if cap is None or cap <= 0:
+            return {
+                "branch": "rejected",
+                "error": E_SAFE_REQUIRES_CONVERSION_EVENT,
+                "reason": (
+                    f"cap-implied path requires a non-null post_money_valuation_cap; {safe.get('id')!r} "
+                    "has none. The whole set is rejected rather than priced without it: an unpriced "
+                    "SAFE is still a converting security, so omitting it from the denominator would "
+                    "overstate every other SAFE's ownership."
+                ),
+            }
+        priced[safe["id"]] = safe["purchase_amount"] / cap
+
+    aggregate = sum(priced.values())
+    if aggregate >= 1.0:
+        return {
+            "branch": "rejected",
+            "error": E_SAFE_AGGREGATE_CAP_OWNERSHIP_INFEASIBLE,
+            "reason": (
+                f"stacked post-money SAFEs reserve {aggregate:.1%} of the company, which is not "
+                "feasible (rule safe.stacked_post_money_caps: block at or above 100%). Confirm each "
+                "cap and purchase amount against the signed documents."
+            ),
+        }
+
+    total = pre_financing_fd / (1.0 - aggregate)
+
+    per_safe: dict[str, Any] = {}
+    for safe in safes:
+        cap = safe["post_money_valuation_cap"]
+        safe_price = cap / total
+        shares = safe["purchase_amount"] / safe_price
+        per_safe[safe["id"]] = {
+            "branch": "cap_implied",
+            "cap_implied_ownership": priced[safe["id"]],
+            "safe_price": safe_price,
+            "cap_implied_shares": shares,
+            "math_provenance": [
+                {
+                    "output_field": field,
+                    "source_type": "rule",
+                    # The stacked rule governs the denominator; the per-SAFE percentage is still the
+                    # post-money cap conversion. Citing both is the honest provenance.
+                    "rule_id": rule_id,
+                    "rule_pack_version": RULE_PACK_VERSION,
+                    "source_ref": None,
+                }
+                for field, rule_id in (
+                    ("cap_implied_ownership", "safe.post_money_cap_conversion"),
+                    ("safe_price", "safe.stacked_post_money_caps"),
+                    ("cap_implied_shares", "safe.stacked_post_money_caps"),
+                )
+            ],
+        }
+
+    # THE INVARIANT THAT HAS CONTENT. Asserting `shares/total == ownership` would be a tautology --
+    # `shares` is derived from `total` -- which is the same "checked against the formula that produced
+    # it" failure that let the original defect ship. This checks the FIXED POINT actually closed: the
+    # denominator must equal the pre-financing base plus the shares it produced.
+    closed = pre_financing_fd + sum(v["cap_implied_shares"] for v in per_safe.values())
+    if abs(closed - total) > 1e-6 * max(1.0, total):
+        return {
+            "branch": "rejected",
+            "error": E_SAFE_CAP_MISSING_DENOMINATOR,
+            "reason": (
+                f"cap-implied denominator did not close: total {total:,.4f} but pre-financing base "
+                f"plus converting shares is {closed:,.4f}"
+            ),
+        }
+
+    return {"branch": "cap_implied_set", "company_capitalization": total, "per_safe": per_safe}
+
+
 def convert_safe_cap_implied(
     *,
     purchase_amount: float,
     post_money_valuation_cap: float | None,
     company_capitalization: int | float,
 ) -> dict[str, Any]:
-    """Cap-implied output set (standalone; no priced round needed).
+    """SINGLE-SAFE cap-implied conversion. Thin wrapper over the set solver.
 
-    Returns:
-        cap_implied_ownership: purchase_amount / cap
-        safe_price: cap / company_capitalization
-        cap_implied_shares: purchase_amount / safe_price
+    Kept for the CLI subcommand and single-instrument callers. `company_capitalization` here is the
+    PRE-financing FD count (the parameter name predates the fix and is retained for compatibility;
+    `convert_safes_cap_implied` names it `pre_financing_fd`, which is what it is).
 
-    Math provenance: safe.post_money_cap_conversion (cap-only path).
+    A single SAFE is the special case in which the set coupling is invisible — which is exactly why
+    the per-instrument shape hid the defect. Prefer the set solver for anything reading real
+    instruments.
     """
-    if post_money_valuation_cap is None or post_money_valuation_cap <= 0:
-        return {
-            "branch": "rejected",
-            "error": E_SAFE_REQUIRES_CONVERSION_EVENT,
-            "reason": "cap-implied path requires a non-null post_money_valuation_cap",
-        }
-    if company_capitalization is None or company_capitalization <= 0:
-        return {
-            "branch": "rejected",
-            "error": E_SAFE_CAP_MISSING_DENOMINATOR,
-            "reason": "company_capitalization must be > 0 (pre-financing FD share count)",
-        }
-
-    cap_implied_ownership = purchase_amount / post_money_valuation_cap
-    safe_price = post_money_valuation_cap / company_capitalization
-    cap_implied_shares = purchase_amount / safe_price
-
-    return {
-        "branch": "cap_implied",
-        "cap_implied_ownership": cap_implied_ownership,
-        "safe_price": safe_price,
-        "cap_implied_shares": cap_implied_shares,
-        "math_provenance": [
-            {
-                "output_field": "safe_price",
-                "source_type": "rule",
-                "rule_id": "safe.post_money_cap_conversion",
-                "rule_pack_version": RULE_PACK_VERSION,
-                "source_ref": None,
-            },
-            {
-                "output_field": "cap_implied_ownership",
-                "source_type": "rule",
-                "rule_id": "safe.post_money_cap_conversion",
-                "rule_pack_version": RULE_PACK_VERSION,
-                "source_ref": None,
-            },
-            {
-                "output_field": "cap_implied_shares",
-                "source_type": "rule",
-                "rule_id": "safe.post_money_cap_conversion",
-                "rule_pack_version": RULE_PACK_VERSION,
-                "source_ref": None,
-            },
-        ],
-    }
+    result = convert_safes_cap_implied(
+        [{"id": "_single", "purchase_amount": purchase_amount, "post_money_valuation_cap": post_money_valuation_cap}],
+        pre_financing_fd=company_capitalization,
+    )
+    if result["branch"] != "cap_implied_set":
+        return result
+    single: dict[str, Any] = result["per_safe"]["_single"]
+    return single
 
 
 # Form classification for denominator routing.

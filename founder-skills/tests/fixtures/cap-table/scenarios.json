@@ -14,10 +14,34 @@
           "safe_001": {
             "branch": "cap_implied",
             "cap_implied_ownership": 0.05,
-            "safe_price": 0.4545,
-            "cap_implied_shares": 550000
+            "safe_price": 0.43181818181818177,
+            "cap_implied_shares": 578947.3684210527,
+            "math_provenance": [
+              {
+                "output_field": "cap_implied_ownership",
+                "source_type": "rule",
+                "rule_id": "safe.post_money_cap_conversion",
+                "rule_pack_version": "0.4.1",
+                "source_ref": null
+              },
+              {
+                "output_field": "safe_price",
+                "source_type": "rule",
+                "rule_id": "safe.stacked_post_money_caps",
+                "rule_pack_version": "0.4.1",
+                "source_ref": null
+              },
+              {
+                "output_field": "cap_implied_shares",
+                "source_type": "rule",
+                "rule_id": "safe.stacked_post_money_caps",
+                "rule_pack_version": "0.4.1",
+                "source_ref": null
+              }
+            ]
           }
-        }
+        },
+        "company_capitalization": 11578947.368421054
       }
     }
   ],
