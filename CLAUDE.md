@@ -645,9 +645,21 @@ Verified against the Claude Code v2.1.120 skill runtime contract and Desktop v1.
   is head-preserving (`slice(0,19900)` + marker), so **that line survives truncation by construction**.
   The marker's "use Read on the skill path" is therefore directly executable. **Measured here, 651
   attached entries: 586 (90.0%) carry the absolute base directory, and 99 of 101 TRUNCATED entries
-  (98.0%) carry it.** The two that do not are single-file `commands/*.md` (a non-`SKILL.md` file has no
-  base dir); **all six of our skills ship as `SKILL.md` in their own directory, so they are outside that
-  exception** — only `commands/feedback.md` is a single-file command.
+  (98.0%) carry it.**
+  **The rule for anything we ship: a skill that OWNS A DIRECTORY is recoverable; a single-file command
+  is not.** Verified by the cleanest available test — one plugin ships both sides:
+  `plugin:superpowers:brainstorming` (a `SKILL.md` owning its folder) carries the base directory
+  **81/81**; `plugin:superpowers:brainstorm` (the single-file command beside it) **0/17**. Same plugin,
+  same sessions, opposite behaviour, and **no path in the corpus ever appears both ways** — the
+  classification is clean, not statistical. **All six of our skills own their directory and are
+  recoverable.** Our only single-file command is `commands/feedback.md` at 2,737 chars — 13.7% of the
+  20,001 limit, so it cannot truncate today, but if it ever grew past the limit it would truncate with
+  **no recovery path at all**. That is the class to watch, and it is easy to miss precisely because
+  commands rarely approach the cap.
+  Do NOT record the wider generalization "bundled and builtin skills have no base directory" — measured
+  counterexample: `bundled:verify` carries one (1/1), while `bundled:artifact-design` (0/5),
+  `bundled:artifact-diagramming` (0/2), `bundled:fewer-permission-prompts` (0/4) and `builtin:init`
+  (0/12) do not. Directory ownership predicts recoverability; the source prefix does not.
   The narrower fact that misled me is still true and still worth knowing: the `skills[].path` field is a
   source-qualified identifier (`<source>:<name>`, e.g. `plugin:cap-table`), **not** a file location — so
   a recovery attempt keyed on `path` fails, while one keyed on the content's first line succeeds. The
