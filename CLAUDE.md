@@ -698,9 +698,21 @@ Verified against the Claude Code v2.1.120 skill runtime contract and Desktop v1.
   are short and single-skill by construction. Measured on this machine's real Claude Code transcripts:
   **380 files with `compact_boundary`, 27 with `microcompact_boundary`.** Compaction is ordinary. Only
   the *zeroing* is rare; the truncation is not.
-  **Mitigations, in increasing cost.** (a) **Front-load** — truncation is a blind `slice(0,19900)`, so
-  reordering a SKILL.md to put operational instructions before reference prose preserves them verbatim,
-  with no restructuring. (b) **Relocate prose to `references/`** — exempt from both caps above (the
+  **Mitigations, in increasing cost.** (a) **Front-loading is WITHDRAWN — do not re-propose the additive
+  form.** `slice(0,19900)` is a **fixed-size window**, so prepending a "survival core" **evicts exactly
+  as much from the tail as it adds**; measured, a 2,500-char core would have evicted the `STAGING_DIR`
+  definitions and outputs-mount guards — the very invariants it was written to state. "Additive"
+  described the diff, not the effect. Two further corrections from that pass: the stored attachment is
+  the `Base directory…` prefix **+ body with YAML frontmatter STRIPPED** (prefix 101–240 chars,
+  install-dependent), so raw `wc -m` against 19,900 is the wrong basis — corrected, only **2 of 6**
+  skills keep Step 0 whole (deck-review 146 chars of headroom, ic-sim 1,327); and reordering is NOT
+  invisible to tests, `test_ic_sim_skill_contract.py:1354` asserts step order. The **subtractive** form
+  is the right shape but it simply IS (b), and there is no cheap duplicate to harvest — the per-skill
+  `## Skill Execution Model` sections overlap the shared `references/skill-execution-model.md` by only
+  20.6–28.0%. Any future attempt must be gated on an **e2e A/B (~$10)**: contract tests cannot see
+  behavioural change, and a size-ratchet test (`test_skill_md_does_not_grow`) requires a justified
+  ceiling raise per skill. Full record: `docs/internal/2026-08-28-skill-frontloading-plan.md` rev 2.
+  (b) **Relocate prose to `references/`** — exempt from both caps above (the
   budget reads a dedicated invoked-skills registry and never scans messages or tool results), target
   ≤20,001 chars of rendered prompt. But this is **not free**: a Read-ed file competes in a separate
   post-compaction file-restore budget — the **5 most recently read files**, 5,000 tokens each, 50,000
