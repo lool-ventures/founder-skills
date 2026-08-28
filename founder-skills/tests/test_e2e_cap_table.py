@@ -166,3 +166,93 @@ def test_cap_table_smoke(tmp_path: Path) -> None:
     report = json.loads((review_dir / "report.json").read_text(encoding="utf-8"))
     assert report.get("report_markdown"), "report.json carries no report_markdown"
     assert isinstance(report.get("validation"), dict), "report.json carries no validation block"
+
+    # ---------------------------------------------------------------- substance, not shape
+    # Everything above this line is STRUCTURAL — a key exists, a list is a list, a phrase is
+    # absent. The first two green runs of this lane delivered a report containing an arithmetic
+    # inconsistency and a false statement about the founder's own term sheet, and passed. These two
+    # checks are the difference between "the pipeline ran" and "the answer is right".
+
+    assert_cap_implied_self_consistent(review_dir)
+    assert_pool_basis_commentary_matches_inputs(review_dir)
+
+
+def assert_cap_implied_self_consistent(review_dir: Path) -> None:
+    """A SAFE's stated ownership must be the ownership its stated share count delivers.
+
+    `convert_safe_cap_implied` derives three numbers from two different denominators:
+    `cap_implied_ownership = purchase / cap`, but `safe_price = cap / company_capitalization` where
+    the caller passes the PRE-SAFE fully-diluted count. For a YC post-money SAFE the document's
+    Company Capitalization is self-inclusive, so those disagree, and the priced-round path — which
+    solves the fixed point — returns a different share count for the SAME instrument in the SAME
+    report. This asserts the three agree; the unit test does not, because it checks each field
+    against the formula that produced it and never against the others.
+    """
+    scenarios = json.loads((review_dir / "scenarios.json").read_text(encoding="utf-8"))
+    cap_state = json.loads((review_dir / "cap_state.json").read_text(encoding="utf-8"))
+    pre_fd = (cap_state.get("as_converted_totals") or {}).get("fully_diluted_shares")
+    if not pre_fd:
+        return  # no denominator recorded; nothing to cross-check
+
+    for scenario in scenarios.get("scenarios") or []:
+        for safe_id, out in ((scenario.get("computed_outputs") or {}).get("per_safe") or {}).items():
+            if out.get("branch") != "cap_implied":
+                continue
+            stated = out.get("cap_implied_ownership")
+            shares = out.get("cap_implied_shares")
+            if stated is None or not shares:
+                continue
+            realised = shares / (pre_fd + shares)
+            assert abs(realised - stated) < 1e-6, (
+                f"{safe_id}: report states {stated:.2%} cap-implied ownership but the {shares:,.0f} "
+                f"shares it also states deliver {realised:.2%} against a {pre_fd:,.0f}-share base. "
+                "A founder reading the percentage and a founder reading the share count get "
+                "different answers from one table"
+            )
+
+
+def assert_pool_basis_commentary_matches_inputs(review_dir: Path) -> None:
+    """The coaching prose must not contradict the option-pool basis the math actually used.
+
+    A run whose `target_basis` was `post_money` was told its pool was sized *pre-money*, given the
+    dilution consequence that only follows from pre-money, and advised to negotiate FOR post-money
+    — which it already had. Structural assertions cannot see this: the payload key was present and
+    the commentary was non-empty.
+    """
+    requests_path = review_dir / "scenario_requests.json"
+    if not requests_path.is_file():
+        return
+    requests = json.loads(requests_path.read_text(encoding="utf-8"))
+    bases = {
+        (r.get("parameters") or {}).get("target_basis")
+        for r in requests
+        if (r.get("parameters") or {}).get("target_basis")
+    }
+    if bases != {"post_money"}:
+        return  # mixed or pre-money bases: the contradiction below is not well-defined
+
+    md = (review_dir / "report.md").read_text(encoding="utf-8")
+    commentary = md.split("## Coaching Commentary", 1)
+    if len(commentary) < 2:
+        return
+    body = commentary[1]
+
+    # SENTENCE-SCOPED, and narrow on purpose. "pre-money" is the correct word for the VALUATION in
+    # this same commentary ("raising $3M at $12M pre-money, with the pool topped up to 10%
+    # post-money"), so a document-wide `pool … pre-money` proximity match flags a true sentence. A
+    # first draft of this check did exactly that. Two exclusions carry the precision:
+    #   - only `pool` → `pre-money` adjacency counts, never `pre-money` → `pool` (that ordering is
+    #     the valuation reading);
+    #   - a sentence naming BOTH bases is contrasting them, which is legitimate advice.
+    claims = []
+    for sentence in re.split(r"(?<=[.!?])\s+", body):
+        if re.search(r"post[- ]money\s+pool", sentence, re.IGNORECASE):
+            continue
+        hit = re.search(r"pool\W{0,12}(?:\*\*\s*)?pre[- ]money|pre[- ]money\s+pool", sentence, re.IGNORECASE)
+        if hit:
+            claims.append(" ".join(sentence.split())[:160])
+    assert not claims, (
+        "the pool was sized post_money but the commentary asserts a pre-money pool basis: "
+        f"{claims!r} — it states the wrong basis, draws the dilution consequence that only follows "
+        "from the wrong basis, and advises negotiating for what the founder already has"
+    )
