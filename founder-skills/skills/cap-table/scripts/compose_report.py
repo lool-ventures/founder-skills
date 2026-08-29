@@ -177,7 +177,7 @@ def validate_run_id_parity(artifacts: dict[str, dict[str, Any]]) -> list[dict[st
                 {
                     "code": "MISSING_METADATA",
                     "severity": "high",
-                    "message": f"{name} has no metadata.run_id",
+                    "message": f"{name} carries no run identifier, so it cannot be checked against this run",
                     "artifact": name,
                 }
             )

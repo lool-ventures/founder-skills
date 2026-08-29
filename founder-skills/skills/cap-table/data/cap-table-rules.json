@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "version": "0.4.6",
+    "version": "0.4.7",
     "generated_date": "2026-05-21",
     "purpose": "Verified source-backed rule pack for the cap-table skill: SAFE conversion, convertible-note math, option-pool top-up, anti-dilution (including coupled-AD priced-round variants), Israeli equity-tax + AoA gotchas, Delaware cross-border / flip mechanics, and founder benchmarks. Every rule cites a primary or near-primary source (NVCA Model Certificate of Incorporation, Y Combinator SAFE primer / documents, Cooley GO down-round article, Israeli Companies Law / Income Tax Ordinance, Carta benchmarks, etc.). Version history lives in CHANGELOG.md.",
     "source_policy": "Rules cite original quotable legal documents, issuer documents, official agency pages, law-firm publications, and benchmark datasets. AI research notes and intermediate consolidated files are excluded from final references."
@@ -519,7 +519,7 @@
         "source_basis": "primary",
         "counsel_review": false,
         "jurisdiction": "US startup market; document-specific",
-        "applies_when": "Use for YC pre-money SAFE valuation-cap forms (yc_premoney_cap_only and pre_money_cap_and_discount_legacy). These SAFEs were the YC default from May 2014 to October 2018; they continue to appear on cap tables of older companies.",
+        "applies_when": "Use for YC pre-money SAFE valuation-cap forms — the cap-only form and the legacy cap-and-discount form. These SAFEs were the YC default from May 2014 to October 2018 and still appear on the cap tables of older companies.",
         "inputs": [
           {
             "name": "purchase_amount",
@@ -1394,7 +1394,7 @@
         "source_basis": "mixed",
         "counsel_review": false,
         "jurisdiction": "US startup market; document-specific",
-        "applies_when": "Use within priced_round solver when a preferred series has anti_dilution_protection=broad_based_weighted_average and the new round PPS is below the trigger threshold.",
+        "applies_when": "Use inside the coupled round solver when a preferred series carries broad-based weighted-average anti-dilution and the new round's price per share is below the trigger threshold.",
         "warnings": [
           "Freezes CP1 at iter 0 to avoid ratchet-on-ratchet across multiple rounds (a future extension).",
           "Consideration = new_money only (NVCA-default carve-outs); custom carve-out lists deferred to a future extension."
@@ -1415,7 +1415,7 @@
         "source_basis": "mixed",
         "counsel_review": false,
         "jurisdiction": "US startup market; document-specific",
-        "applies_when": "Use within priced_round solver when a preferred series has anti_dilution_protection=narrow_based_weighted_average."
+        "applies_when": "Use inside the coupled round solver when a preferred series carries narrow-based weighted-average anti-dilution."
       },
       {
         "rule_id": "anti_dilution.full_ratchet_coupled",
@@ -1432,7 +1432,7 @@
         "source_basis": "mixed",
         "counsel_review": false,
         "jurisdiction": "US startup market; document-specific",
-        "applies_when": "Use within priced_round solver when a preferred series has anti_dilution_protection=full_ratchet."
+        "applies_when": "Use inside the coupled round solver when a preferred series carries full-ratchet anti-dilution."
       },
       {
         "rule_id": "anti_dilution.trigger_basis_original_issue_price",
@@ -1480,7 +1480,7 @@
         "domain": "anti_dilution",
         "behavior_target": "validation_rule",
         "title": "Broad-based A denominator components (NVCA §4.4.4 core + market broad variant)",
-        "summary": "This implementation's the broad-based denominator A = common stock outstanding + preferred stock outstanding (as-converted) + options and warrants outstanding + shares reserved but unissued under equity plans (the option pool). The NVCA Model COI §4.4.4 A definition includes 'shares of Common Stock outstanding immediately prior' treating as outstanding all shares issuable upon exercise of 'Options outstanding' (where Option is defined to include warrants) and upon conversion of 'Convertible Securities (including the Series A Preferred Stock) outstanding'. A NVCA §4.4.4 footnote describes including 'all shares reserved under stock plans, whether or not subject to outstanding options' as 'an even broader formula' beyond the model text. This implementation adopts the footnote's broader variant by including the unallocated pool. Default when anti_dilution_protection=broad_based_weighted_average.",
+        "summary": "The broad-based denominator A counts common stock outstanding, preferred stock outstanding on an as-converted basis, options and warrants outstanding, and shares reserved but unissued under equity plans (the option pool). The NVCA Model COI §4.4.4 A definition includes 'shares of Common Stock outstanding immediately prior' treating as outstanding all shares issuable upon exercise of 'Options outstanding' (where Option is defined to include warrants) and upon conversion of 'Convertible Securities (including the Series A Preferred Stock) outstanding'. A NVCA §4.4.4 footnote describes including 'all shares reserved under stock plans, whether or not subject to outstanding options' as 'an even broader formula' beyond the model text. This implementation adopts the footnote's broader variant by including the unallocated pool. Default when anti_dilution_protection=broad_based_weighted_average.",
         "implementation_action": "parameterize",
         "confidence": "high",
         "source_ids": [
@@ -1496,7 +1496,7 @@
         "domain": "anti_dilution",
         "behavior_target": "validation_rule",
         "title": "Narrow-based A denominator components (NVCA footnote narrow variant)",
-        "summary": "This implementation's the narrow-based denominator A = common stock outstanding + preferred stock outstanding (as-converted) only. Excludes options, warrants, and reserved-pool shares. The NVCA §4.4.4 footnote describes a 'narrower formula' that 'might include…only those shares of Common Stock that are actually outstanding (i.e., excluding shares…issuable on conversion of options, warrants and, potentially, even the Preferred Stock itself)'. This implementation includes as-converted preferred (a moderate narrow variant that excludes options and warrants). Default when anti_dilution_protection=narrow_based_weighted_average.",
+        "summary": "The narrow-based denominator A counts common stock outstanding and preferred stock outstanding on an as-converted basis only, excluding options, warrants and reserved pool shares. Excludes options, warrants, and reserved-pool shares. The NVCA §4.4.4 footnote describes a 'narrower formula' that 'might include…only those shares of Common Stock that are actually outstanding (i.e., excluding shares…issuable on conversion of options, warrants and, potentially, even the Preferred Stock itself)'. This implementation includes as-converted preferred (a moderate narrow variant that excludes options and warrants). Default when anti_dilution_protection=narrow_based_weighted_average.",
         "implementation_action": "parameterize",
         "confidence": "medium",
         "source_ids": [
