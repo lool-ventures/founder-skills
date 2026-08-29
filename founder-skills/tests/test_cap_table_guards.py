@@ -972,7 +972,21 @@ class TestCharterFloorIsExtractable:
                 "surface that never names it cannot supply it, and the stale-price warning that "
                 "depends on it goes back to being unfirable."
             )
-        assert "cap_table_history" in extractor, "extract_aoa.py does not validate cap_table_history"
+        # Behaviour, not a substring: the previous form was satisfied by a COMMENT mentioning the
+        # field, with the entire validation block deleted.
+        import extract_aoa  # type: ignore[import-not-found]
+
+        errs = extract_aoa.validate_aoa_extraction(
+            {
+                "extraction_type": "articles_of_association",
+                "cap_table_history": [{"event_type": "MADE_UP", "series_id": "s1"}],
+                "fields": {"preferred_series": []},
+            }
+        )
+        assert any("event_type" in e for e in errs), (
+            "extract_aoa.py does not validate cap_table_history. A field a sub-agent is told to "
+            f"produce, with nothing checking its shape, is a hallucination surface. Got: {errs}"
+        )
 
 
 class TestClampedMagnitudeReachesTheFounder:
@@ -1124,6 +1138,50 @@ class TestStaleCcpReachesCounselToo:
             ],
         }
 
+    def test_the_counsel_ITEM_is_produced_not_just_the_gate(self) -> None:
+        """Assert the DELIVERABLE, not an intermediate.
+
+        The first version of this class asserted `_runtime_event_predicate` returned True — and
+        passed while the counsel packet stayed empty, because items are AND-gated on a separate
+        static matcher that still required anti-dilution protection. Testing the gate instead of the
+        item is the "computed, not rendered" defect this repo has a coverage map for.
+        """
+        import json as _json
+
+        import cap_state as cap_state_mod  # type: ignore[import-not-found]
+        import rule_audit  # type: ignore[import-not-found]
+
+        rules = _json.loads((CAP_TABLE / "data" / "cap-table-rules.json").read_text(encoding="utf-8"))
+        inputs = {
+            "company_name": "T",
+            "founders": [{"founder_id": "f1", "name": "A", "common_shares": 8_000_000}],
+            "preferred_series": [
+                {
+                    "series_id": "series_seed",
+                    "series_name": "Seed",
+                    "shares": 2_000_000,
+                    "issuance_date": "2024-01-01",
+                    "original_issue_price": 1.0,
+                    "original_conversion_price": 1.0,
+                    "current_conversion_price": 1.0,
+                    # UNPROTECTED — the case the whole relocation was for.
+                    "anti_dilution_protection": "none",
+                }
+            ],
+            "cap_table_history": [
+                {"event_type": "anti_dilution_applied", "series_id": "series_seed", "previous_ccp": 1.0, "new_ccp": 0.8}
+            ],
+            "metadata": {"run_id": "t", "schema_version": "v0.5.0-inputs"},
+        }
+        instruments: dict = {"safes": [], "convertible_notes": []}
+        state = cap_state_mod.build_cap_state(inputs, instruments)
+        gating = rule_audit.build_gating_block(rules, inputs=inputs, instruments=instruments, cap_state=state)
+        items = rule_audit.build_counsel_review_items(gating, rules, {"scenarios": []}, inputs)
+        assert any(i["rule_id"] == "anti_dilution.stale_ccp_detected" for i in items), (
+            "the founder is warned and the counsel packet is empty. Both halves of the AND-gate have "
+            f"to ask the same question. Got: {[i['rule_id'] for i in items]}"
+        )
+
     def test_counsel_gate_opens_on_a_stale_price_with_no_solver_warning(self) -> None:
         import rule_audit  # type: ignore[import-not-found]
 
@@ -1154,12 +1212,25 @@ class TestStaleCcpReachesCounselToo:
         import cap_state as cap_state_mod  # type: ignore[import-not-found]
         import priced_round  # type: ignore[import-not-found]
 
-        for mod in (cap_state_mod, priced_round):
-            src = Path(mod.__file__).read_text(encoding="utf-8")
-            assert "_artifact_io.s" in src or "_artifact_io.series_has_prior_ad_event" in src, (
-                f"{Path(mod.__file__).name} does not use the shared stale-CCP predicate"
-            )
+        # Count the DEFINING literal, not a prefix. `"_artifact_io.s"` matched
+        # `_artifact_io.stale_ccp_warning` too, so a verbatim second copy of the predicate beside the
+        # shared call passed this test -- the exact defect it names.
         assert callable(_artifact_io.stale_ccp_series_ids)
+        for mod, call in (
+            (cap_state_mod, "_artifact_io.stale_ccp_series_ids"),
+            (priced_round, "_artifact_io.series_has_prior_ad_event"),
+        ):
+            src = Path(mod.__file__).read_text(encoding="utf-8")
+            assert call in src, f"{Path(mod.__file__).name} does not call {call}"
+            assert '"anti_dilution_applied"' not in src, (
+                f"{Path(mod.__file__).name} names the event type itself — that is a second copy of "
+                "the predicate, which is how the last three copies of a derivation drifted apart."
+            )
+        rule_audit_src = (SCRIPTS / "rule_audit.py").read_text(encoding="utf-8")
+        assert "_artifact_io.stale_ccp_series_ids" in rule_audit_src, (
+            "rule_audit's static matcher must ask the same question as the runtime gate; when it did "
+            "not, the counsel item stayed shut for the unprotected series the check was moved for"
+        )
 
 
 class TestPriorAdEventsAreValidated:
@@ -1203,3 +1274,58 @@ class TestPriorAdEventsAreValidated:
 
     def test_rejects_an_event_with_no_series(self) -> None:
         assert any("series_id" in e for e in self._v([{"event_type": "anti_dilution_applied"}]))
+
+
+# Measured. RATCHET: may only shrink.
+DOTTED_PATH_BASELINE = 18
+
+
+def test_delivered_rule_prose_is_english_not_paths() -> None:
+    """Rule `summary` / `applies_when` are delivered verbatim to a founder's lawyer.
+
+    `_founder_text.scan` cannot see this class: a snake_case token preceded by a `.` is invisible to
+    both the scanner and the substituter, so `state.founders[*].voting_rights_multiple` reports CLEAN
+    while shipping. That blind spot let a token-level rewording pass leave "warning warning" and
+    "any the cap-table state.preferred_series[*].the unknown-pricing flag" in text addressed to a
+    lawyer -- a regex over token NAMES cannot preserve a SENTENCE.
+
+    Checks the shapes a scanner-based guard structurally cannot: dotted paths, index subscripts,
+    duplicated words, and script filenames.
+    """
+    import json as _json
+    import re as _re
+
+    pack = _json.loads((CAP_TABLE / "data" / "cap-table-rules.json").read_text(encoding="utf-8"))
+    problems: list[str] = []
+    for rules in pack["domains"].values():
+        for r in rules:
+            for field in ("summary", "applies_when"):
+                v = str(r.get(field) or "")
+                probe = v.replace("e.g.", "").replace("i.e.", "")
+                if "[*]" in v or _re.search(r"\[[a-z]\]", v):
+                    problems.append(f"{r['rule_id']}.{field}: index subscript")
+                if _re.search(r"\b\w+\.\w+\.\w+\b", probe):
+                    problems.append(f"{r['rule_id']}.{field}: dotted path")
+                if _re.search(r"\.py\b", v):
+                    problems.append(f"{r['rule_id']}.{field}: script filename")
+                if _re.search(r"\b(\w+) \1\b", v):
+                    problems.append(f"{r['rule_id']}.{field}: duplicated word")
+    hard = [x for x in problems if not x.endswith("dotted path")]
+    assert hard == [], (
+        "rule prose delivered to counsel is not English: " + "; ".join(hard[:8]) + ". These classes "
+        "are zero-tolerance: an index subscript, a script filename or a duplicated word is a broken "
+        "sentence, not a style preference, and every one seen so far was produced by a token-level "
+        "rewrite of prose."
+    )
+
+    # Dotted paths are PRE-EXISTING debt across the pack, not something one commit introduced, so they
+    # are ratcheted rather than hard-failed. They matter because `_founder_text` is structurally blind
+    # to them -- a snake_case token preceded by `.` is invisible to the scanner AND the substituter --
+    # so this count is the only measure of a class every other guard reports as clean.
+    dotted = [x for x in problems if x.endswith("dotted path")]
+    assert len(dotted) <= DOTTED_PATH_BASELINE, (
+        f"{len(dotted)} rule fields carry an internal dotted path (baseline {DOTTED_PATH_BASELINE}); "
+        f"a new one shipped: {dotted[:5]}"
+    )
+    if len(dotted) < DOTTED_PATH_BASELINE:
+        pytest.fail(f"dotted paths down to {len(dotted)} — lower DOTTED_PATH_BASELINE to lock it in.")

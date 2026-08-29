@@ -691,9 +691,13 @@ def build_cap_state(
             "participation_cap_multiple": s.get("participation_cap_multiple"),
             "anti_dilution_protection": s.get("anti_dilution_protection", "none"),
             "ad_trigger_basis": s.get("ad_trigger_basis", "original_issue_price"),
-            "ad_a_denominator_basis": s.get(
-                "ad_a_denominator_basis",
-                "nvca_broad" if s.get("anti_dilution_protection") == "broad_based_weighted_average" else "nvca_narrow",
+            # `or` not `.get(k, default)`: an explicitly-null value must mean "not specified",
+            # exactly like an absent key. The authoring skeleton writes `null` for every optional
+            # field a founder has not filled in, so a present null is the COMMON case, and treating
+            # it as a supplied value shipped a schema-invalid cap state from the documented template.
+            "ad_a_denominator_basis": s.get("ad_a_denominator_basis")
+            or (
+                "nvca_narrow" if s.get("anti_dilution_protection") == "narrow_based_weighted_average" else "nvca_broad"
             ),
             "ad_cp2_floor": s.get("ad_cp2_floor"),
             "ad_carve_outs": _normalize_ad_carve_outs(s),

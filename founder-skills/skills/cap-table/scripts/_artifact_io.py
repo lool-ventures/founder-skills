@@ -314,21 +314,12 @@ def load_cap_state(
             )
     if validate_invariants:
         _check_semantic_invariants_cap_state(data, path)
-        # Stale-conversion-price backstop. `cap_state.py` emits this at BUILD time, which covers every
-        # state built from an inputs.json. It does not cover one authored by hand or produced by
-        # another tool, and those reach the same downstream math. Appended rather than raised: the
-        # contradiction means a number is probably wrong, not that the file is unloadable, and
-        # refusing to load would take away the founder's report instead of annotating it.
-        _warns = data.setdefault("warnings", [])
-        if isinstance(_warns, list):
-            for _sid in stale_ccp_series_ids(data.get("preferred_series") or [], data.get("cap_table_history") or []):
-                if not any(
-                    isinstance(w, str) and w.startswith(f"W_STALE_CCP_SUSPECTED: series {_sid} ") for w in _warns
-                ):
-                    _s: dict[str, Any] = next((x for x in data["preferred_series"] if x.get("series_id") == _sid), {})
-                    _warns.append(
-                        stale_ccp_warning(_sid, _s.get("current_conversion_price"), _s.get("original_conversion_price"))
-                    )
+        # NOTE: no stale-conversion-price backstop here. One was added and removed: `load_cap_state`
+        # has ZERO production callers (every consumer reads cap_state.json with a bare `json.load`),
+        # so it annotated nothing a founder would ever see, while reading as a live safety net. A
+        # dead guard is worse than an absent one, because the next reader trusts it. The check lives
+        # in `cap_state.py`, on the path that actually runs. Wire this loader up first if you want a
+        # load-time net.
     if validate_mirror:
         instr_path = Path(workspace_dir) / "instruments.json"
         if instr_path.exists():

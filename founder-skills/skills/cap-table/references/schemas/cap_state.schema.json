@@ -57,7 +57,7 @@
           "participation_cap_multiple": {"type": ["number", "null"]},
           "anti_dilution_protection": {"enum": ["none", "broad_based_weighted_average", "narrow_based_weighted_average", "full_ratchet"]},
           "ad_trigger_basis": {"enum": ["original_issue_price", "current_conversion_price"], "description": "Soft-default per §10.2.5: 'original_issue_price' (NVCA default)."},
-          "ad_a_denominator_basis": {"enum": ["nvca_broad", "nvca_narrow"], "description": "Soft-default per §10.2.5: derived from anti_dilution_protection."},
+          "ad_a_denominator_basis": {"enum": ["nvca_broad", "nvca_narrow", null], "description": "Soft-default per §10.2.5: derived from anti_dilution_protection."},
           "ad_cp2_floor": {"type": ["number", "null"]},
           "ad_carve_outs": {"enum": ["nvca_default"]},
           "pro_rata_rights": {"type": "boolean"},

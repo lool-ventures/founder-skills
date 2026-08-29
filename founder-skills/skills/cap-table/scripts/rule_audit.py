@@ -585,8 +585,12 @@ _RULE_MATCHERS: dict[str, Any] = {
     "anti_dilution.cp2_floor_applied": lambda i, inst, cs: any(
         s.get("ad_cp2_floor") is not None for s in (cs.get("preferred_series") or [])
     ),
-    "anti_dilution.stale_ccp_detected": lambda i, inst, cs: any(
-        s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])
+    # Counsel items are AND-gated: static matcher AND runtime event. Fixing only the runtime half
+    # left this rule shut for the very case it exists for -- an unprotected series carrying the
+    # contradiction, which is where the check was moved TO. Both halves now ask the same question,
+    # via the same predicate, so they cannot disagree again.
+    "anti_dilution.stale_ccp_detected": lambda i, inst, cs: bool(
+        _artifact_io.stale_ccp_series_ids(cs.get("preferred_series") or [], cs.get("cap_table_history") or [])
     ),
     "anti_dilution.solver_diverged": lambda i, inst, cs: any(
         s.get("anti_dilution_protection", "none") != "none" for s in (cs.get("preferred_series") or [])

@@ -84,7 +84,7 @@
           "participation_cap_multiple": {"type": ["number", "null"]},
           "anti_dilution_protection": {"enum": ["none", "broad_based_weighted_average", "narrow_based_weighted_average", "full_ratchet"]},
           "ad_trigger_basis": {"enum": ["original_issue_price", "current_conversion_price"]},
-          "ad_a_denominator_basis": {"enum": ["nvca_broad", "nvca_narrow"]},
+          "ad_a_denominator_basis": {"enum": ["nvca_broad", "nvca_narrow", null]},
           "ad_cp2_floor": {"type": ["number", "null"]},
           "ad_carve_outs": {
             "enum": ["nvca_default", [], ["nvca_default"]],

@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "version": "0.4.4",
+    "version": "0.4.5",
     "generated_date": "2026-05-21",
     "purpose": "Verified source-backed rule pack for the cap-table skill: SAFE conversion, convertible-note math, option-pool top-up, anti-dilution (including coupled-AD priced-round variants), Israeli equity-tax + AoA gotchas, Delaware cross-border / flip mechanics, and founder benchmarks. Every rule cites a primary or near-primary source (NVCA Model Certificate of Incorporation, Y Combinator SAFE primer / documents, Cooley GO down-round article, Israeli Companies Law / Income Tax Ordinance, Carta benchmarks, etc.). Version history lives in CHANGELOG.md.",
     "source_policy": "Rules cite original quotable legal documents, issuer documents, official agency pages, law-firm publications, and benchmark datasets. AI research notes and intermediate consolidated files are excluded from final references."
@@ -1384,7 +1384,7 @@
         "domain": "anti_dilution",
         "behavior_target": "script_formula",
         "title": "BBWA applied within the coupled priced-round solver",
-        "summary": "Same BBWA formula as anti_dilution.broad_based_weighted_average, but applied per-iteration inside the priced_round.solve_priced_round fixed-point solver. CP1 is frozen at iter 0 (the original CCP); the new price per share moves through the iteration; the AD adjustment mutates current_conversion_price on the preferred series and the orchestrator recomputes the as-converted totals so subsequent stages see AD-adjusted preferred-as-converted in total_FD.",
+        "summary": "The broad-based weighted-average adjustment, applied inside the coupled round solver so that the adjustment and the round price settle together rather than in sequence.",
         "implementation_action": "hardcode",
         "confidence": "high",
         "source_ids": [
@@ -1405,7 +1405,7 @@
         "domain": "anti_dilution",
         "behavior_target": "script_formula",
         "title": "Narrow-based weighted-average applied within the coupled priced-round solver",
-        "summary": "Same NBWA formula as the BBWA variant but with the A denominator restricted to common + preferred-as-converted only (excludes options outstanding and reserved). Per NVCA §4.4.4 the broad vs narrow scope is a charter-level election. Applied per-iteration inside priced_round.solve_priced_round with CP1 frozen at iter 0.",
+        "summary": "The narrow-based weighted-average adjustment, applied inside the coupled round solver. The denominator counts only common plus preferred-as-converted, excluding the option pool and other convertibles, which adjusts further than the broad-based form.",
         "implementation_action": "hardcode",
         "confidence": "high",
         "source_ids": [
@@ -1422,7 +1422,7 @@
         "domain": "anti_dilution",
         "behavior_target": "script_formula",
         "title": "Full-ratchet applied within the coupled priced-round solver",
-        "summary": "Full-ratchet sets CP2 = new_issue_price when the trigger fires. Applied per-iteration inside priced_round.solve_priced_round with CP1 frozen at iter 0. The empirical contraction constant on full-ratchet single-series scenarios is ~0.40 (see TestCoupledSolverGolden/test_golden_2_full_ratchet).",
+        "summary": "Full ratchet resets the conversion price to the new round's price whenever a lower-priced issuance triggers it, applied inside the coupled round solver.",
         "implementation_action": "hardcode",
         "confidence": "high",
         "source_ids": [
@@ -1554,7 +1554,7 @@
         "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "US startup market; charter-specific",
-        "applies_when": "Use when the solver emits the conversion-price-floor warning warning."
+        "applies_when": "Use when the round math reports that a charter floor limited how far the anti-dilution adjustment could reduce the conversion price."
       },
       {
         "rule_id": "anti_dilution.stale_ccp_detected",
@@ -1570,14 +1570,14 @@
         "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "US startup market; data-integrity check",
-        "applies_when": "Use when the solver emits the stale-conversion-price warning warning."
+        "applies_when": "Use when the cap table records an earlier anti-dilution adjustment for a series whose conversion price still equals its original — the two cannot both be right."
       },
       {
         "rule_id": "anti_dilution.solver_diverged",
         "domain": "anti_dilution",
         "behavior_target": "warning_rule",
         "title": "Coupled solver did not converge within max_iterations",
-        "summary": "Runtime event emitted when priced_round.solve_priced_round hits its iteration cap without satisfying |Δp/p| < 1e-6 AND |Δp| < 1e-9. this is a math/convergence event that the script CAN conclude on (does not require counsel review). Investigation paths: check for pathological contraction (multi-series full-ratchet + heavy preferred stacking), coupled SAFE conversion at sub-CP1 cap, or post-money pool target.",
+        "summary": "Runtime event: the round solver reached its iteration cap without settling on a price. The figures are not converged and must not be relied on. This is a convergence problem in the modelling, not a legal question.",
         "implementation_action": "warn",
         "confidence": "high",
         "source_ids": [
@@ -2003,7 +2003,7 @@
         "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "Israel",
-        "applies_when": "Use when an Israeli AoA defines a drag-along right with a threshold strictly less than 75% (i.e., < 0.75 of issued share capital + relevant class consents). Detected via the the Articles-of-Association reader validator from the AoA's drag-along provision.",
+        "applies_when": "Use when an Israeli AoA defines a drag-along right with a threshold strictly less than 75% (i.e., < 0.75 of issued share capital + relevant class consents). Detected via the Articles-of-Association reader validator from the AoA's drag-along provision.",
         "warnings": [
           "75% is the Israeli market norm; sub-75% thresholds may be unenforceable in fiduciary-duty disputes per Israeli Companies Law §341.",
           "Confirm drag-along structure with Israeli counsel before signing or relying on the provision."
@@ -2470,7 +2470,7 @@
           "cap_table_adjacent_counsel"
         ],
         "jurisdiction": "Delaware and Israel",
-        "applies_when": "Use when any the cap-table state.preferred_series[*].the unknown-pricing flag is true. Does not fire when every preferred series has confirmed pricing.",
+        "applies_when": "Use when the price of at least one preferred series is unknown. Does not fire when every series has a known price.",
         "warnings": [
           "Anti-dilution and liquidation preference are not modeled for a pricing-unknown series — the $1.00 sentinel price cannot support that math.",
           "Conversion ratio is assumed 1:1 (no historical pricing) for a pricing-unknown series; a real down-round adjustment (current_conversion_price < original_conversion_price) would not be reflected until the actual terms are confirmed."
@@ -2497,7 +2497,7 @@
           "cap_table_adjacent_counsel"
         ],
         "jurisdiction": "Delaware (NVCA model); applies generally where dual-class structures are used",
-        "applies_when": "Use when any the cap-table state.founders[*].voting_rights_multiple or the cap-table state.common_batches[*].voting_rights_multiple is not equal to 1.0.",
+        "applies_when": "Use when any founder or common holder carries a voting multiple above one vote per share.",
         "warnings": [
           "Series A+ investors typically negotiate sunset provisions or carve-outs on super-voting common; confirm the term sheet does not unwind the structure.",
           "IPO-readiness: most major exchanges accept dual-class but require disclosure; some institutional investors will not participate in dual-class IPOs without sunsets.",
@@ -2545,7 +2545,7 @@
           "cap_table_core"
         ],
         "jurisdiction": "Delaware and Israeli startup market",
-        "applies_when": "Use when any the cap-table state.outstanding_warrants[i].vested_flag is false.",
+        "applies_when": "Use when any outstanding warrant is still unvested.",
         "warnings": []
       },
       {
@@ -2566,7 +2566,7 @@
           "cap_table_core"
         ],
         "jurisdiction": "Delaware",
-        "applies_when": "Use when any instruments.warrants[i].anti_dilution_clause is non-null.",
+        "applies_when": "Use when any warrant carries its own anti-dilution clause.",
         "warnings": []
       },
       {
@@ -2586,7 +2586,7 @@
           "cap_table_core"
         ],
         "jurisdiction": "Delaware market practice",
-        "applies_when": "Use when scenarios[*].computed_outputs.warrant_exercise_events[*].fmv_approximation_used is true.",
+        "applies_when": "Use when a warrant was net-share settled and fair market value had to be approximated.",
         "warnings": []
       },
       {
@@ -2606,7 +2606,7 @@
           "cap_table_core"
         ],
         "jurisdiction": "Delaware and Israeli market practice",
-        "applies_when": "Use when scenarios[*].computed_outputs.warrant_exercise_events is non-empty.",
+        "applies_when": "Use when any warrant was exercised in the modelled scenario.",
         "warnings": []
       }
     ],

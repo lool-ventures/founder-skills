@@ -105,7 +105,13 @@ def validate_aoa_extraction(extraction: dict[str, Any]) -> list[str]:
     # checked -- a field a sub-agent is told to produce and nothing validates is how a malformed
     # event reaches inputs.json and, from there, three solver sites. Optional: most charters recite
     # no prior adjustment, and absence must stay a reading of the document rather than a failure.
-    history = fields.get("cap_table_history")
+    # BOTH locations. The agent contract describes this as a top-level array (it is not a per-series
+    # field), while every other validated key lives under `fields`. A validator reading one location
+    # accepts arbitrary garbage at the other -- measured: a malformed event under `fields` was caught
+    # and the identical event at the root passed as "validated".
+    history = extraction.get("cap_table_history")
+    if history is None:
+        history = fields.get("cap_table_history")
     if history is not None:
         if not isinstance(history, list):
             errors.append("cap_table_history must be an array")
@@ -366,6 +372,7 @@ def merge_into_inputs(
     inputs_path: str,
     preferred_series: list[dict[str, Any]],
     source_doc: str | None,
+    cap_table_history: list[dict[str, Any]] | None = None,
     extraction_confidence_per_series: dict[str, str] | None = None,
     aoa_findings: dict[str, Any] | None = None,
     replace_existing: bool = False,
@@ -457,6 +464,37 @@ def merge_into_inputs(
         if aoa_findings.get("pay_to_play_detected") is True:
             inputs["pay_to_play_detected"] = True
 
+    # Prior anti-dilution events. Without this the AoA route is INERT: the extractor validated the
+    # array and then dropped it, so `cap_state.py` never saw it, the stale-price warning could never
+    # fire on the one document type that recites a prior adjustment, and the receipt still said
+    # "merged". Silent data loss in a producer is exactly what this repo forbids.
+    #
+    # Appended and de-duplicated rather than replaced: a second AoA for the same company must not
+    # erase the first one's history, and re-running the same extraction must not double it.
+    history_added = 0
+    if cap_table_history:
+        existing_history = inputs.setdefault("cap_table_history", [])
+        seen = {
+            (h.get("event_type"), h.get("series_id"), h.get("applied_at"), h.get("previous_ccp"), h.get("new_ccp"))
+            for h in existing_history
+            if isinstance(h, dict)
+        }
+        for ev in cap_table_history:
+            if not isinstance(ev, dict):
+                continue
+            key = (
+                ev.get("event_type"),
+                ev.get("series_id"),
+                ev.get("applied_at"),
+                ev.get("previous_ccp"),
+                ev.get("new_ccp"),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            existing_history.append(ev)
+            history_added += 1
+
     # v0.5.0: stamp schema_version on inputs.json so the typed loader catches
     # stale AoA-merged inputs against a newer skill version (§10.4).
     inputs.setdefault("metadata", {})
@@ -475,6 +513,7 @@ def merge_into_inputs(
         "total_preferred_series_after_merge": len(existing_series),
         "inputs_path": os.path.abspath(inputs_path),
         "aoa_findings_persisted": bool(aoa_findings),
+        "cap_table_history_added": history_added,
     }
 
 
@@ -540,6 +579,8 @@ def _cli() -> int:
         merge_result = merge_into_inputs(
             args.inputs,
             preferred_series,
+            # Read from BOTH locations for the same reason the validator does.
+            cap_table_history=(extraction.get("cap_table_history") or fields.get("cap_table_history") or []),
             source_doc=args.source_doc,
             extraction_confidence_per_series=series_conf,
             aoa_findings=aoa_findings_to_persist,
