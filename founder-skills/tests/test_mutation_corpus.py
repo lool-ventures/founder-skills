@@ -142,18 +142,41 @@ def test_no_mutant_payload_lives_in_this_scanned_test_file() -> None:
     Measured, not theorised: the first draft of this corpus lived in one file and dropped
     `test_error_code_assertion_ratchet` below its baseline on exactly one code.
     """
-    text = (REPO_ROOT / "founder-skills" / "tests" / "test_mutation_corpus.py").read_text(encoding="utf-8")
-    leaked = sorted(
-        {
-            mutant.id
-            for mutant in (NO_OP, *_ALL)
-            for payload in (mutant.find, mutant.replace)
+    # SCANS EVERY `test_*.py`, not just this one. Keying the guard on a single filename would let
+    # the registry be moved to `test_mutation_registry.py` with the guard still green -- the
+    # property is "no payload sits in the namespace the ratchets glob", and the ratchets glob all
+    # of them. The only signal would otherwise be the ratchet's own "good news, lower the baseline"
+    # message, and following that instruction produces exactly the contradiction described above.
+    leaked: list[str] = []
+    for path in sorted((REPO_ROOT / "founder-skills" / "tests").glob("test_*.py")):
+        text = path.read_text(encoding="utf-8")
+        for mutant in (NO_OP, *_ALL):
             # An empty `replace` (a deletion mutant) is a substring of everything; it carries no
             # vocabulary and cannot pollute anything.
-            if payload and payload in text
-        }
-    )
+            for payload in (mutant.find, mutant.replace):
+                if payload and payload in text:
+                    leaked.append(f"{mutant.id} -> {path.name}")
     assert not leaked, (
         "these mutant payloads are inside a file the guards ratchets scan, which makes them read as "
-        f"assertions: {leaked}. Keep the registry in mutation_corpus.py."
+        f"assertions: {sorted(set(leaked))}. Keep the registry in mutation_corpus.py."
+    )
+
+
+def test_noop_control_still_passes_after_every_mutant(harness: _Harness) -> None:
+    """Re-establish the instrument AFTER the verdicts, not only before them.
+
+    The module-scoped fixture proves the harness worked when it was built. Nothing proved it still
+    worked when the last verdict was read, and every mechanism that could degrade it mid-run --
+    a revert that silently no-ops, state the child leaves in the sandbox, a file handle -- degrades
+    it in the direction that makes `MUST_KILL` entries pass and survivors look guarded.
+
+    Definition order is load-bearing: this must run last, which holds because pytest collects a
+    module in definition order and no shuffling plugin is installed (`pytest-randomly` is absent --
+    if one is ever added, this needs an explicit ordering).
+    """
+    verdict = harness.verdict(NO_OP)
+    assert not verdict.killed, (
+        "the no-op control passed before the corpus ran and fails after it. Every verdict above was "
+        "read from an instrument that stopped working at some point during the run, so none of them "
+        f"can be trusted.\n{verdict.tail}"
     )

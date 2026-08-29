@@ -104,14 +104,19 @@ _SELECTION = tuple(
 #
 # `test_error_code_assertion_ratchet` counts how many `E_*`/`W_*` constants the producers can emit
 # that no test names. A mutant that RENAMES a code changes the membership of that set -- so the
-# ratchet can red on a mutant while noticing nothing about the defect, and can equally stay green
-# while the defect ships. `test_rule_assertion_ratchet` has the identical shape over rule_ids.
+# ratchet could red on a mutant while noticing nothing about the defect, and could equally stay
+# green while the defect ships. `test_rule_assertion_ratchet` has the identical shape over rule_ids.
 # Neither is weakened by this: they run in the ordinary suite, where they belong.
 #
-# It also removes a false alarm the corpus would otherwise raise constantly. Both ratchets red the
-# moment their count drifts by one -- an ordinary state for a dirty working tree mid-edit -- and a
-# red anywhere in the selection trips the no-op control, which then reports "the harness is broken"
-# about a harness that is fine.
+# BE PRECISE ABOUT WHICH HALF OF THIS IS MEASURED, because an earlier version of this comment was
+# not. The false-KILL hazard above is PROPHYLAXIS: recomputing both ratchets' quantities under all
+# 14 entries gives (29, 55, 22) for every one of them, identical to baseline, so nothing in today's
+# corpus would move either ratchet -- the one rename entry swaps an unasserted code for another
+# unasserted code. It is a hazard the next entry can trip, not one this one did.
+#
+# The false-ALARM half WAS observed, twice. Both ratchets red the moment their count drifts by one
+# -- an ordinary state for a working tree mid-edit -- and a red anywhere in the selection trips the
+# no-op control, which then reports "the harness is broken" about a harness that is fine.
 _DESELECT = (
     "founder-skills/tests/test_cap_table_guards.py::test_error_code_assertion_ratchet",
     "founder-skills/tests/test_cap_table_guards.py::test_rule_assertion_ratchet",
@@ -340,11 +345,16 @@ KNOWN_SURVIVORS: tuple[Mutant, ...] = (
         find='E_SAFE_CAP_MISSING_DENOMINATOR = "E_SAFE_CAP_MISSING_DENOMINATOR"',
         replace='E_SAFE_CAP_MISSING_DENOMINATOR = "E_SAFE_CAP_MISSING_DENOMINATOR_RENAMED"',
         rationale=(
-            "Renames a founder-visible diagnostic emitted at four sites, all of them executed by the "
-            "suite. Nothing asserts the STRING, so the rejection still happens and the code it "
-            "reports is one no downstream consumer or founder-facing surface knows. This is the "
-            "error-code half of `UNASSERTED_CODE_BASELINE` in `test_cap_table_guards.py`, shown "
-            "concretely rather than as a count."
+            "Renames a founder-visible diagnostic emitted at four sites. It is the error-code half "
+            "of `UNASSERTED_CODE_BASELINE` in `test_cap_table_guards.py`, shown concretely rather "
+            "than as a count.\n"
+            "WHY IT SURVIVES IS WORSE THAN 'NOTHING ASSERTS THE STRING', and an earlier version of "
+            "this rationale asserted the opposite as measured fact. Measured with coverage over the "
+            "FULL free suite (5,064 tests): only the constant DEFINITION at `safe_conversion.py:47` "
+            "executes. All four emit sites -- :110, :180, :373, :429 -- are dead. So this survives "
+            "because the code never runs, not because the code runs unwatched. The module docstring "
+            "makes that distinction load-bearing, and the flagship survivor was on the wrong side "
+            "of it. Fixing it needs a test that REACHES a rejection, not one that names a string."
         ),
     ),
     Mutant(
@@ -431,7 +441,9 @@ class _Harness:
                 "-x",
                 "-q",
                 "--tb=no",
-                "-rf",
+                # BOTH f and E: `-rf` alone omits the ERROR summary lines entirely, so the
+                # collection-error check below would parse an empty list and never fire. Measured.
+                "-rfE",
                 "-p",
                 "no:cacheprovider",
                 *[arg for nodeid in _DESELECT for arg in ("--deselect", nodeid)],
@@ -460,7 +472,37 @@ class _Harness:
             assert path.read_text(encoding="utf-8") == original, (
                 f"{mutant.id}: the sandbox file did not revert; every later verdict is unreliable"
             )
-        failures = [ln for ln in proc.stdout.splitlines() if ln.startswith("FAILED ") or ln.startswith("ERROR ")]
+        # ONLY 0 AND 1 ARE VERDICTS. pytest also exits 5 (nothing collected), 4 (usage error),
+        # 3 (internal error) and 2 (interrupted) -- and `returncode != 0` would read every one of
+        # them as "the suite noticed the defect". A mutant that breaks COLLECTION rather than a test
+        # would then be recorded as killed, which is the same false-kill class the ratchet
+        # deselection above guards against, arriving through the exit code instead.
+        if proc.returncode not in (0, 1):
+            raise AssertionError(
+                f"{mutant.id}: the child pytest exited {proc.returncode}, which is not a verdict "
+                "(1 = tests failed, 0 = tests passed; anything else is a collection, usage or "
+                f"internal error). This mutant's result is unknowable, not a kill.\n{proc.stdout[-2000:]}"
+            )
+        failed = [ln for ln in proc.stdout.splitlines() if ln.startswith("FAILED ")]
+        errored = [ln for ln in proc.stdout.splitlines() if ln.startswith("ERROR ")]
+
+        # A COLLECTION ERROR IS NOT A KILL, and the exit code cannot tell you so: pytest returns 1
+        # for "a module failed to import" exactly as it does for "a test failed", so a mutant that
+        # produced a syntax error would be recorded as caught by a suite that never ran. Measured --
+        # this is not the exit-code case above, which is why both checks exist.
+        #
+        # The discriminator is the `::`. A collection error names a FILE (`ERROR tests/test_x.py`);
+        # a fixture blowing up inside a test names a NODE (`ERROR tests/test_x.py::TestC::test_m`),
+        # and that one IS the suite noticing something. So only a run whose errors are all
+        # file-level, with no `FAILED` at all, is refused.
+        if not failed and errored and all("::" not in ln for ln in errored):
+            raise AssertionError(
+                f"{mutant.id}: the child run collected nothing to judge -- every diagnostic is a "
+                "file-level collection error and no test FAILED. The mutant broke the suite's "
+                "ability to run rather than being caught by it, so this is not a kill.\n" + "\n".join(errored[:5])
+            )
+
+        failures = failed + errored
         return _Verdict(
             killed=proc.returncode != 0,
             first_failure=failures[0] if failures else "",

@@ -45,7 +45,7 @@ git config core.hooksPath scripts/hooks
    The deck-review e2e smoke (`tests/test_e2e_deck_review.py`) is gated by the `e2e` marker and skips unless one of these is set: `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, or local `claude /login` auth (macOS Keychain or `~/.claude/.credentials.json`). To explicitly skip it for a faster run:
 
    ```bash
-   uv run pytest -m "not e2e"
+   uv run pytest -m "not e2e and not mutation"
    ```
 
 3. **If you touched a skill body, agent, reference, or command**, also run the two Cowork gates below — they run on every PR and are not covered by `ruff`/`mypy`/`pytest`.

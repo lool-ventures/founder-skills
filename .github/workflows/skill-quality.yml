@@ -261,7 +261,11 @@ jobs:
     # fixture). Gating on it converts "someone forgot to publish" into "a flaky red withheld the
     # Release and nobody looked". That is the better failure — it is visible in the Actions tab and
     # a re-run fixes it — but it is a trade, not a free win, and fixing the flake is the real fix.
-    needs: deck-review-e2e-smoke
+    # BOTH gates, not just the paid one. `mutation-corpus` also runs on a tag push, and
+    # without it here a red corpus would still publish the Release -- a job that reports a
+    # failure nothing consumes is the 'green checkmark for nothing' this workflow's header
+    # warns about, in its other form.
+    needs: [deck-review-e2e-smoke, mutation-corpus]
     permissions:
       # NOT an escalation. The repo default is already `write` across ALL scopes
       # (`gh api repos/:owner/:repo/actions/permissions/workflow` -> "write"), and a job with no

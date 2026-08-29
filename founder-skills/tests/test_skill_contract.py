@@ -2345,8 +2345,20 @@ def test_paid_lanes_require_explicit_opt_in_not_merely_credentials() -> None:
     rest = config[ini_start + 1 :]
     next_section = rest.find("\n[tool.")
     ini = rest if next_section == -1 else rest[:next_section]
-    assert "addopts" in ini, "pytest has no addopts, so nothing deselects the paid lanes by default"
-    assert "not e2e" in ini, "the default pytest run does not deselect `e2e`; a plain `pytest` will start paid runs"
+
+    # READ THE `addopts` LINE, NOT THE SECTION. This used to substring-test the whole
+    # `[tool.pytest.ini_options]` slice, which also contains the `markers` list -- and a marker
+    # DESCRIPTION that quotes the expression (`... must say -m "not e2e and not mutation"`) then
+    # satisfies the check on prose. Measured: with `addopts` emptied entirely, the section-wide
+    # version of this test PASSED. A guard against unauthorised spend that a docstring can satisfy
+    # is not a guard, and this one is asserting about `addopts` in particular -- so it must look
+    # there in particular.
+    addopts_line = re.search(r"^addopts\s*=\s*(.+)$", ini, re.MULTILINE)
+    assert addopts_line, "pytest has no addopts, so nothing deselects the paid lanes by default"
+    addopts = addopts_line.group(1)
+    assert "not e2e" in addopts, (
+        f"the default pytest run does not deselect `e2e`; a plain `pytest` will start paid runs. addopts={addopts}"
+    )
 
     harness = (REPO_ROOT / "founder-skills" / "tests" / "_e2e_harness.py").read_text(encoding="utf-8")
     assert "RUN_PAID_E2E" in harness, (

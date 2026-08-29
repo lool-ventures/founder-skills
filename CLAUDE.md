@@ -556,15 +556,18 @@ Measured workarounds, current through **1.15.0**. Full detail in
 ```bash
 uv run pytest                                       # all tests (e2e auto-skips without auth; cowork auto-skips without the harness CLI)
 uv run pytest founder-skills/tests/ -v              # verbose
-uv run pytest founder-skills/tests/ -v -m "not e2e" # explicitly skip the LLM-driven e2e (free, fast)
+uv run pytest founder-skills/tests/ -v -m "not e2e and not mutation" # explicitly skip the paid + slow lanes
 uv run pytest -m cowork                             # token-free cowork-harness cassette replay (needs `npm i -g cowork-harness@2.5.0` — exact, matching CI; no Docker/token)
 uv run pytest -m mutation                           # curated mutant corpus (~3 min; deselected by default — see the WARNING below)
 ```
 
-**`addopts` deselects `e2e` AND `mutation`, and a command-line `-m` OVERRIDES `addopts`.** So a bare
-`-m "not e2e"` silently RE-SELECTS the ~3-minute mutation corpus. Every explicit invocation in this repo
-says `-m "not e2e and not mutation"` — `ci.yml`'s test job, `skill-quality.yml`'s contract-tests job and
-`scripts/pre-tag.sh`. The mutation lane has its own `mutation-corpus` job (dispatch and tag only) and its own
+**`addopts` deselects `e2e` AND `mutation`, and a command-line `-m` OVERRIDES `addopts` rather than
+adding to it.** So a bare `-m "not e2e"` silently RE-SELECTS the ~3-minute mutation corpus — and on a
+working tree that is red for any unrelated reason it reports `THE NO-OP CONTROL FAILED`, which reads as
+a break the contributor did not cause. Every explicit `-m` in this repo therefore says
+`-m "not e2e and not mutation"`: `ci.yml`'s test job, `skill-quality.yml`'s contract-tests job,
+`scripts/pre-tag.sh`, `CONTRIBUTING.md`, and the two invocations in this file. That list was wrong when
+first written — it named three sites and this file itself disproved it six lines up. The mutation lane has its own `mutation-corpus` job (dispatch and tag only) and its own
 preflight gate; both must pass `-m mutation`, since naming the file alone collects nothing and reports green.
 
 **A skill's own test file is not what guards it.** `test_<skill>.py` covers the producers;
@@ -572,7 +575,7 @@ preflight gate; both must pass `-m mutation`, since naming the file alone collec
 cross-cutting guards besides (`test_skill_contract.py` size ceilings, `test_cowork_invariants.py`
 tool declarations, per-script suites like `test_backward_verifier.py`). Editing a SKILL.md or an
 agent body and running only the matching `test_<skill>.py` reports green while the contract tests
-fail. Run `-m "not e2e"` before believing a skill change is done.
+fail. Run `-m "not e2e and not mutation"` before believing a skill change is done.
 
 **Contract tests slice a fixed character window from an anchor** (`skill_text[start : start + N]`).
 An additive edit to a dispatch template can push the tail past that boundary, so the test fails on
