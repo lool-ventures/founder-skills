@@ -234,7 +234,7 @@ def _validate_structural(
             errors.append(
                 {
                     "code": "BURN_SIGN_ERROR",
-                    "message": "cash.monthly_net_burn must be positive (use --fix to auto-correct)",
+                    "message": "Monthly net burn must be a positive number (auto-fix can correct the sign)",
                     "field": "cash.monthly_net_burn",
                     "layer": 1,
                 }
@@ -252,7 +252,7 @@ def _validate_structural(
                     errors.append(
                         {
                             "code": "OVERRIDE_MALFORMED",
-                            "message": f"metadata.warning_overrides[{i}] must be an object",
+                            "message": f"Warning override #{i + 1} must be an object",
                             "field": f"metadata.warning_overrides[{i}]",
                             "layer": 1,
                         }
@@ -263,7 +263,7 @@ def _validate_structural(
                     errors.append(
                         {
                             "code": "OVERRIDE_MISSING_KEYS",
-                            "message": f"metadata.warning_overrides[{i}] missing required keys: {sorted(missing)}",
+                            "message": f"Warning override #{i + 1} is missing required keys: {sorted(missing)}",
                             "field": f"metadata.warning_overrides[{i}]",
                             "layer": 1,
                         }
@@ -314,7 +314,7 @@ def _validate_structural(
                     errors.append(
                         {
                             "code": "DATE_FORMAT_ERROR",
-                            "message": f"revenue.monthly[{i}].month must be YYYY-MM, got '{m}'",
+                            "message": f"Monthly revenue entry #{i + 1}: month must be YYYY-MM, got '{m}'",
                             "field": f"revenue.monthly[{i}].month",
                             "layer": 1,
                         }
@@ -324,7 +324,7 @@ def _validate_structural(
                     errors.append(
                         {
                             "code": "DATE_FORMAT_ERROR",
-                            "message": f"revenue.monthly[{i}].start_month must be YYYY-MM, got '{start}'",
+                            "message": f"Monthly revenue entry #{i + 1}: start month must be YYYY-MM, got '{start}'",
                             "field": f"revenue.monthly[{i}].start_month",
                             "layer": 1,
                         }
@@ -340,7 +340,7 @@ def _validate_structural(
                     errors.append(
                         {
                             "code": "DATE_FORMAT_ERROR",
-                            "message": f"revenue.quarterly[{i}].quarter must be YYYY-QN, got '{q}'",
+                            "message": f"Quarterly revenue entry #{i + 1}: quarter must be YYYY-QN, got '{q}'",
                             "field": f"revenue.quarterly[{i}].quarter",
                             "layer": 1,
                         }
@@ -356,7 +356,7 @@ def _validate_structural(
                     errors.append(
                         {
                             "code": "DATE_FORMAT_ERROR",
-                            "message": f"expenses.headcount[{i}].start_month must be YYYY-MM, got '{sm}'",
+                            "message": f"Headcount entry #{i + 1}: start month must be YYYY-MM, got '{sm}'",
                             "field": f"expenses.headcount[{i}].start_month",
                             "layer": 1,
                         }
@@ -893,7 +893,7 @@ def _validate_completeness(inputs: dict[str, Any]) -> list[dict[str, Any]]:
         warnings.append(
             {
                 "code": "MISSING_CASH_BALANCE",
-                "message": "cash.current_balance should be provided at seed+",
+                "message": "Current cash balance should be provided at seed stage and later",
                 "field": "cash.current_balance",
                 "layer": 4,
             }
@@ -909,7 +909,7 @@ def _validate_completeness(inputs: dict[str, Any]) -> list[dict[str, Any]]:
         warnings.append(
             {
                 "code": "MISSING_MRR",
-                "message": "revenue.mrr.value or revenue.monthly_total should be provided when revenue key exists",
+                "message": "Either MRR or a monthly revenue total should be provided when revenue data is present",
                 "field": "revenue.mrr.value",
                 "layer": 4,
             }
@@ -920,7 +920,7 @@ def _validate_completeness(inputs: dict[str, Any]) -> list[dict[str, Any]]:
         warnings.append(
             {
                 "code": "MISSING_BURN",
-                "message": "cash.monthly_net_burn should be provided",
+                "message": "Monthly net burn should be provided",
                 "field": "cash.monthly_net_burn",
                 "layer": 4,
             }
@@ -958,7 +958,7 @@ def _validate_completeness(inputs: dict[str, Any]) -> list[dict[str, Any]]:
         warnings.append(
             {
                 "code": "CUSTOMERS_MISSING",
-                "message": "LTV inputs present but revenue.customers missing — ARPU sanity check cannot run",
+                "message": "LTV inputs present but customer count is missing — the ARPU sanity check cannot run",
                 "field": "revenue.customers",
                 "layer": 4,
             }

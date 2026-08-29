@@ -213,6 +213,13 @@ def humanize_token(token: str, *, capitalize: bool = True) -> str:
 # cites them, so a scanner without this reports all 86 of them as violations and a substituter without
 # it rewrites a legal citation into prose.
 #
+# THE COST, which is not obvious from the rationale above: an internal path is invisible in exactly
+# the same way, because `state.aoa_findings.dividend_provisions_present` and a rule id are the same
+# shape. Neither `scan` nor `substitute` will touch one. If you are writing founder-facing text, write
+# a sentence a human can read -- do not put a JSON path in it and expect this module to catch or fix
+# it. Two skills shipped paths to founders on exactly that assumption. Asserted in
+# `tests/test_founder_text.py::test_scan_is_blind_to_a_dotted_internal_path_and_that_is_the_price`.
+#
 # Why not the simpler `(?![\w.])` trailing guard: that also excludes a SENTENCE-FINAL token
 # (`… is switching_costs.`), a real miss. Namespacing is specifically a dot ADJACENT TO a word char,
 # so `(?!\.\w)` excludes `foo_bar.baz` while still matching a token that merely ends a sentence.

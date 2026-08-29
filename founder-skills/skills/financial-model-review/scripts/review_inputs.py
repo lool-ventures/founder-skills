@@ -1815,7 +1815,7 @@ def _coerce_state(state: dict[str, Any]) -> list[dict[str, Any]]:
                         errors.append(
                             {
                                 "code": "COERCION_ERROR",
-                                "message": f"Cannot convert '{val}' to number for expenses.headcount[{i}].{key}",
+                                "message": f"Cannot read '{val}' as a number for headcount entry #{i + 1} ({key})",
                                 "field": f"expenses.headcount[{i}].{key}",
                                 "layer": 0,
                             }
@@ -1841,7 +1841,7 @@ def _coerce_state(state: dict[str, Any]) -> list[dict[str, Any]]:
                     errors.append(
                         {
                             "code": "COERCION_ERROR",
-                            "message": f"Cannot convert '{val}' to number for expenses.opex_monthly[{i}].amount",
+                            "message": f"Cannot read '{val}' as a number for operating-expense entry #{i + 1}",
                             "field": f"expenses.opex_monthly[{i}].amount",
                             "layer": 0,
                         }
@@ -1865,7 +1865,7 @@ def _coerce_state(state: dict[str, Any]) -> list[dict[str, Any]]:
                     errors.append(
                         {
                             "code": "COERCION_ERROR",
-                            "message": f"Cannot convert '{val}' to number for expenses.cogs.{key}",
+                            "message": f"Cannot read '{val}' as a number for cost-of-goods entry ({key})",
                             "field": f"expenses.cogs.{key}",
                             "layer": 0,
                         }

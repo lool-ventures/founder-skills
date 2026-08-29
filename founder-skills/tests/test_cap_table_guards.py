@@ -1276,56 +1276,98 @@ class TestPriorAdEventsAreValidated:
         assert any("series_id" in e for e in self._v([{"event_type": "anti_dilution_applied"}]))
 
 
-# Measured. RATCHET: may only shrink.
-DOTTED_PATH_BASELINE = 18
+# Measured with the CORRECTED detector below. RATCHET: may only shrink.
+#
+# The previous baseline was 18 and was measuring the wrong thing: its regex was `\w+\.\w+\.\w+`, so
+# 17 of the 18 were NVCA Model COI subsection citations (§4.4.4, §4.4.5) and internal version strings
+# -- legal references a lawyer needs, plus a real leak of a different class. A ratchet whose count is
+# dominated by correct content cannot be shrunk by fixing anything, which makes it noise.
+DOTTED_PATH_BASELINE = 0
+
+
+def _delivered_rule_fields() -> list[tuple[str, str, str]]:
+    """(rule_id, field, text) for every rule field that reaches a founder or their lawyer.
+
+    Scope matters and was previously too narrow. `rule_audit.build_counsel_review_items` maps
+    `title` -> the counsel item's heading, `summary` -> `counsel_question`, `applies_when` -> a
+    rendered "Applies when" line, and `warnings[0]` -> `founder_question`. Checking only two of those
+    is why a module.function reference shipped in a rendered title.
+    """
+    import json as _json
+
+    pack = _json.loads((CAP_TABLE / "data" / "cap-table-rules.json").read_text(encoding="utf-8"))
+    out: list[tuple[str, str, str]] = []
+    for rules in pack["domains"].values():
+        for r in rules:
+            for field in ("title", "summary", "applies_when"):
+                out.append((r["rule_id"], field, str(r.get(field) or "")))
+            for i, w in enumerate(r.get("warnings") or []):
+                out.append((r["rule_id"], f"warnings[{i}]", str(w or "")))
+    return out
+
+
+def test_delivered_rule_prose_carries_no_internal_version_string() -> None:
+    """Our plugin version is not a legal fact, and it was opening a counsel handoff.
+
+    One counsel-review rule began "v0.5.0 cap-table scope: ..." (its id deliberately not written
+    out -- the rule ratchet above is a substring test, and naming it here would satisfy it), and
+    `rule_audit` maps `summary` straight to the question a lawyer reads. Hard-fail, not a ratchet:
+    this repo already forbids internal version numbers in user-facing text, and there is no
+    legitimate case for one here -- an NVCA section number is a citation, ours is an implementation
+    detail.
+    """
+    import re as _re
+
+    bad = [f"{rid}.{field}" for rid, field, v in _delivered_rule_fields() if _re.search(r"\bv\d+\.\d+\.\d+", v)]
+    assert bad == [], f"internal version string in text delivered to a founder or counsel: {bad}"
 
 
 def test_delivered_rule_prose_is_english_not_paths() -> None:
-    """Rule `summary` / `applies_when` are delivered verbatim to a founder's lawyer.
+    """Rule prose is delivered verbatim to a founder and their lawyer, and the policy cannot see it.
 
-    `_founder_text.scan` cannot see this class: a snake_case token preceded by a `.` is invisible to
-    both the scanner and the substituter, so `state.founders[*].voting_rights_multiple` reports CLEAN
-    while shipping. That blind spot let a token-level rewording pass leave "warning warning" and
-    "any the cap-table state.preferred_series[*].the unknown-pricing flag" in text addressed to a
-    lawyer -- a regex over token NAMES cannot preserve a SENTENCE.
+    `_founder_text` skips any snake_case token preceded by a dot -- deliberately, because cap-table's
+    rule ids are dotted and counsel cites them, so a substituter without that lookbehind would rewrite
+    a legal citation into prose. The cost is that an internal path is equally invisible, to BOTH the
+    scanner and the substituter. This test covers what the shared policy structurally cannot.
 
-    Checks the shapes a scanner-based guard structurally cannot: dotted paths, index subscripts,
-    duplicated words, and script filenames.
+    THE REGEX IS THE WHOLE DESIGN. An earlier version matched a bare three-segment word pattern, which
+    the NVCA subsection citations this pack is built on (§4.4.4, §4.4.5) -- a count that cannot be
+    reduced by fixing anything. Anchoring on letters and underscores, with subscripts allowed, keeps
+    the citations out and catches `state.outstanding_warrants[]`, which the old form missed twice over
+    (two segments, and `[]` rather than `[*]`).
     """
     import json as _json
     import re as _re
 
     pack = _json.loads((CAP_TABLE / "data" / "cap-table-rules.json").read_text(encoding="utf-8"))
-    problems: list[str] = []
-    for rules in pack["domains"].values():
-        for r in rules:
-            for field in ("summary", "applies_when"):
-                v = str(r.get(field) or "")
-                probe = v.replace("e.g.", "").replace("i.e.", "")
-                if "[*]" in v or _re.search(r"\[[a-z]\]", v):
-                    problems.append(f"{r['rule_id']}.{field}: index subscript")
-                if _re.search(r"\b\w+\.\w+\.\w+\b", probe):
-                    problems.append(f"{r['rule_id']}.{field}: dotted path")
-                if _re.search(r"\.py\b", v):
-                    problems.append(f"{r['rule_id']}.{field}: script filename")
-                if _re.search(r"\b(\w+) \1\b", v):
-                    problems.append(f"{r['rule_id']}.{field}: duplicated word")
-    hard = [x for x in problems if not x.endswith("dotted path")]
-    assert hard == [], (
-        "rule prose delivered to counsel is not English: " + "; ".join(hard[:8]) + ". These classes "
-        "are zero-tolerance: an index subscript, a script filename or a duplicated word is a broken "
-        "sentence, not a style preference, and every one seen so far was produced by a token-level "
-        "rewrite of prose."
-    )
+    rule_ids = {r["rule_id"] for rules in pack["domains"].values() for r in rules}
+    # Letters/underscores only, subscripts allowed. Digits are excluded on purpose: every dotted
+    # digit run in this pack is a legal citation or a version, and neither is an internal path.
+    path_re = _re.compile(r"\b[a-z_]+(?:\[[^\]]*\])?(?:\.[a-z_]+(?:\[[^\]]*\])?)+\b")
+    # Two-segment tails that are domains, not paths -- the pack cites gov.il as a primary source.
+    tlds = {"il", "com", "org", "gov", "net", "io", "co", "uk", "eu"}
 
-    # Dotted paths are PRE-EXISTING debt across the pack, not something one commit introduced, so they
-    # are ratcheted rather than hard-failed. They matter because `_founder_text` is structurally blind
-    # to them -- a snake_case token preceded by `.` is invisible to the scanner AND the substituter --
-    # so this count is the only measure of a class every other guard reports as clean.
-    dotted = [x for x in problems if x.endswith("dotted path")]
+    hard: list[str] = []
+    dotted: list[str] = []
+    for rid, field, v in _delivered_rule_fields():
+        if "[*]" in v or _re.search(r"\[[a-z]\]", v):
+            hard.append(f"{rid}.{field}: index subscript")
+        if _re.search(r"\.py\b", v):
+            hard.append(f"{rid}.{field}: script filename")
+        if _re.search(r"\b(\w+) \1\b", v):
+            hard.append(f"{rid}.{field}: duplicated word")
+        for m in path_re.findall(v):
+            if m in rule_ids or m.split(".")[-1] in tlds or m in {"e.g", "i.e"}:
+                continue
+            dotted.append(f"{rid}.{field} -> {m}")
+
+    assert hard == [], (
+        "rule prose delivered to counsel is not English: " + "; ".join(hard[:8]) + ". These classes are "
+        "zero-tolerance: an index subscript, a script filename or a duplicated word is a broken "
+        "sentence, and every one seen so far came from rewriting prose by regex over token names."
+    )
     assert len(dotted) <= DOTTED_PATH_BASELINE, (
-        f"{len(dotted)} rule fields carry an internal dotted path (baseline {DOTTED_PATH_BASELINE}); "
-        f"a new one shipped: {dotted[:5]}"
+        f"{len(dotted)} rule fields carry an internal path (baseline {DOTTED_PATH_BASELINE}): {dotted[:5]}"
     )
     if len(dotted) < DOTTED_PATH_BASELINE:
-        pytest.fail(f"dotted paths down to {len(dotted)} — lower DOTTED_PATH_BASELINE to lock it in.")
+        pytest.fail(f"internal paths down to {len(dotted)} — lower DOTTED_PATH_BASELINE to lock it in.")

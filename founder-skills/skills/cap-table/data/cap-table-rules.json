@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "version": "0.4.5",
+    "version": "0.4.6",
     "generated_date": "2026-05-21",
     "purpose": "Verified source-backed rule pack for the cap-table skill: SAFE conversion, convertible-note math, option-pool top-up, anti-dilution (including coupled-AD priced-round variants), Israeli equity-tax + AoA gotchas, Delaware cross-border / flip mechanics, and founder benchmarks. Every rule cites a primary or near-primary source (NVCA Model Certificate of Incorporation, Y Combinator SAFE primer / documents, Cooley GO down-round article, Israeli Companies Law / Income Tax Ordinance, Carta benchmarks, etc.). Version history lives in CHANGELOG.md.",
     "source_policy": "Rules cite original quotable legal documents, issuer documents, official agency pages, law-firm publications, and benchmark datasets. AI research notes and intermediate consolidated files are excluded from final references."
@@ -2447,7 +2447,7 @@
           "cap_table_adjacent_counsel"
         ],
         "jurisdiction": "Delaware and Israel",
-        "applies_when": "Use when the cap-table state.aoa_findings.dividend_provisions_present is true (the AoA was extracted and includes a dividend provision). The rule fires regardless of jurisdiction because dividend provisions are not Delaware/Israel-specific.",
+        "applies_when": "Use when the Articles of Association were read and contain a dividend provision. The rule fires regardless of jurisdiction, because dividend provisions are not specific to Delaware or Israel.",
         "warnings": [
           "Cap-table conversion economics here ignore any accruing dividend; founders should confirm with counsel whether the exit waterfall changes the conversion math.",
           "If the dividend is cumulative + PIK, the preferred-conversion shares grow over time and the founder dilution shown here may be understated."
@@ -2511,7 +2511,7 @@
         "domain": "warrants",
         "behavior_target": "source_note",
         "title": "Vested outstanding warrants are included in pre-financing fully-diluted shares",
-        "summary": "v0.5.0 cap-table policy (per YC primer narrow the Company Capitalization denominator, NVCA Model COI §4.4.4 'immediately prior to such issue'): outstanding warrants with vested_flag=true are included in the pre-financing fully-diluted denominator; unvested warrants are surfaced separately but excluded from FD.",
+        "summary": "Current policy (per YC primer narrow the Company Capitalization denominator, NVCA Model COI §4.4.4 'immediately prior to such issue'): outstanding warrants with vested_flag=true are included in the pre-financing fully-diluted denominator; unvested warrants are surfaced separately but excluded from FD.",
         "implementation_action": "informational",
         "confidence": "high",
         "source_ids": [
@@ -2524,7 +2524,7 @@
           "cap_table_core"
         ],
         "jurisdiction": "Delaware C corporation and Israeli Ltd, market practice",
-        "applies_when": "Use when the cap-table state.outstanding_warrants[] is non-empty.",
+        "applies_when": "Use when the company has any outstanding warrants.",
         "warnings": []
       },
       {
@@ -2553,7 +2553,7 @@
         "domain": "warrants",
         "behavior_target": "counsel_review_flag",
         "title": "Warrant repricing under issuer AD is not modeled",
-        "summary": "v0.5.0 cap-table scope: warrants with their own anti_dilution_clause object are recognized but the repricing math is not modeled. If a downstream financing triggers issuer-level AD and the warrant's AD provision also fires, founder counsel must compute the warrant repricing separately. This is a counsel-review handoff; the cap-table report flags it.",
+        "summary": "Current scope: warrants with their own anti_dilution_clause object are recognized but the repricing math is not modeled. If a downstream financing triggers issuer-level AD and the warrant's AD provision also fires, founder counsel must compute the warrant repricing separately. This is a counsel-review handoff; the cap-table report flags it.",
         "implementation_action": "counsel_review",
         "confidence": "medium",
         "source_ids": [

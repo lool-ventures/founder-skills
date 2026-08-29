@@ -416,7 +416,27 @@ def quick_assess(
             md_lines.append(f"- {a}")
         md_lines.append("")
 
-    sentinel["_report_md"] = "\n".join(md_lines)
+    # Founder-text policy. This route applied NONE -- it is the lightweight answer path, outside
+    # `compose_report` (which substitutes) and outside the fleet's compose-driven scans, so nothing
+    # measured it either. It renders solver blocker remedies verbatim, and one of those carried a raw
+    # artifact path until it was rewritten as a sentence.
+    #
+    # Best-effort: the shared module lives outside this skill, and a fast answer is worth delivering
+    # unpolished rather than not at all.
+    _md = "\n".join(md_lines)
+    try:
+        sys.path.insert(
+            0,
+            os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "scripts"
+            ),
+        )
+        import _founder_text  # type: ignore[import-not-found]
+
+        _md = str(_founder_text.substitute(_md))
+    except Exception:
+        pass
+    sentinel["_report_md"] = _md
     return sentinel
 
 

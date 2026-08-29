@@ -136,6 +136,32 @@ def test_substitute_leaves_dot_namespaced_rule_ids_intact() -> None:
     assert ft.substitute(text) == text
 
 
+def test_scan_is_blind_to_a_dotted_internal_path_and_that_is_the_price() -> None:
+    """The INVERSE of the two tests above, recorded because the exemption has a cost nobody had written down.
+
+    A rule id and an internal path are structurally identical to this regex -- `safe.post_money_cap_conversion`
+    and `state.aoa_findings.dividend_provisions_present` differ only in meaning. So the guard that keeps
+    counsel's citations verbatim ALSO makes every internal path invisible, to the scanner and the
+    substituter alike. That is a deliberate trade, not an oversight, and it is the right one: the only
+    precise discriminator is cap-table's rule pack, which has no business in a shared fleet module.
+
+    WHAT THIS MEANS FOR YOU, if you are writing a renderer or a validation message: this policy will
+    NOT catch `expenses.headcount[0].salary_monthly` or `cap_state.as_converted_totals.fully_diluted_shares`
+    in text you send a founder. Two skills shipped exactly that -- financial-model-review's validation
+    messages and cap-table's fast-assess remedies -- and no fleet scan saw either. Write the sentence
+    for a human; do not rely on a substituter to rescue a JSON path.
+
+    This test asserts the blindness so it cannot be "fixed" by accident. If you widen the regex, this
+    test fails and you must first answer what happens to the legal citations.
+    """
+    path = "state.aoa_findings.dividend_provisions_present"
+    assert ft.scan(f"Use when the {path} is true.")["enums"] == [], (
+        "the scanner now sees dotted paths -- which also means it sees dotted RULE IDS. Check what "
+        "substitute() does to a counsel citation before keeping this change."
+    )
+    assert ft.substitute(path) == path
+
+
 def test_scan_still_catches_a_sentence_final_token() -> None:
     """The namespacing guard must not swallow a token that merely ends a sentence.
 

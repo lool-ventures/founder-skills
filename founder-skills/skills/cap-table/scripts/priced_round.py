@@ -941,7 +941,8 @@ def solve_priced_round(
             {
                 "code": "E_SCENARIO_NO_PRE_FD",
                 "instance_id": None,
-                "remedy": "cap_state.as_converted_totals.fully_diluted_shares is 0; founders/preferred/pool must be populated",
+                "remedy": "the cap table has no shares in it -- founder holdings, preferred series or the option pool "
+                "must be filled in before a round can be modelled",
             }
         )
         return {
