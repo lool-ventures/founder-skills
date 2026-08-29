@@ -46,6 +46,7 @@ import sys
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _artifact_io  # type: ignore[import-not-found]  # noqa: E402
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact  # noqa: E402
 
 _SCHEMA_DIR = os.path.join(
@@ -747,30 +748,22 @@ def build_cap_state(
 
     # STALE CONVERSION PRICE. A series whose history records a prior anti-dilution adjustment, while
     # its current conversion price still equals its ORIGINAL, is contradictory: the adjustment either
-    # did not happen or was never written back. Reported here, at cap-state build, because it is a
+    # did not happen or was never written back. Emitted here, at cap-state build, because it is a
     # property of the cap state alone.
     #
-    # The solver has carried this check since long before now (`priced_round`'s W_STALE_CCP_SUSPECTED)
-    # and it could not fire in practice: it sits behind three unrelated gates -- the round must have
-    # anti-dilution protection, the series must be protected, and the new price must be below the
-    # trigger -- so a founder was told only if they happened to be closing a down round with protected
-    # preferred. A cap state carrying the very same contradiction on an unprotected series produced
-    # nothing. Checking it where the state is built removes all three gates.
-    for _s in canonical_preferred:
-        _sid = _s.get("series_id")
-        _ccp, _ocp = _s.get("current_conversion_price"), _s.get("original_conversion_price")
-        if _ccp is None or _ocp is None or abs(float(_ccp) - float(_ocp)) > 1e-9:
-            continue
-        if any(
-            h.get("event_type") == "anti_dilution_applied" and h.get("series_id") == _sid
-            for h in (inputs.get("cap_table_history") or [])
-        ):
-            warnings_list.append(
-                f"W_STALE_CCP_SUSPECTED: series {_sid} records a prior anti-dilution adjustment, but its "
-                f"current conversion price ({_ccp}) still equals its original ({_ocp}). If that earlier "
-                "adjustment was applied, this price is out of date and every ownership figure derived "
-                "from it understates the preferred holders' position."
+    # The solver has carried this check for a long time and it could not fire in practice: it sits
+    # behind three unrelated gates -- the round must have anti-dilution protection, the series must be
+    # protected, and the new price must be below the trigger -- so a founder was told only if they
+    # happened to be closing a down round with protected preferred. Checking it where the state is
+    # built removes all three gates. The PREDICATE is SHARED (`_artifact_io`), never copied: the
+    # build-time, load-time and solver-time answers must not be free to diverge.
+    for _sid in _artifact_io.stale_ccp_series_ids(canonical_preferred, inputs.get("cap_table_history") or []):
+        _s = next((x for x in canonical_preferred if x.get("series_id") == _sid), {})
+        warnings_list.append(
+            _artifact_io.stale_ccp_warning(
+                _sid, _s.get("current_conversion_price"), _s.get("original_conversion_price")
             )
+        )
 
     # Mirror for notes: a note with no usable principal/issuance is kept terms-only, non-convertible
     # by _build_outstanding_notes. Warn so the report + downstream know its conversion math was skipped.

@@ -958,6 +958,22 @@ class TestCharterFloorIsExtractable:
         for field in ("ad_cp2_floor", "ad_a_denominator_basis"):
             assert field in extractor, f"extract_aoa.py does not know about {field}"
 
+        # `cap_table_history` is TOP-LEVEL, not a per-series key, so the proximity test above cannot
+        # reach it -- but it is the same defect class (schema-declared, fully consumed, unsuppliable)
+        # and needs the same guard. Checked on the two surfaces that can supply it plus the validator.
+        for label, path in (
+            ("agents/cap-table.md", Path(__file__).resolve().parents[1] / "agents" / "cap-table.md"),
+            ("inputs-skeleton.md", CAP_TABLE / "references" / "inputs-skeleton.md"),
+        ):
+            text = path.read_text(encoding="utf-8")
+            assert "cap_table_history" in text and "anti_dilution_applied" in text, (
+                f"{label} does not document cap_table_history with its event shape. The solver reads "
+                "it from three sites and the cap state passes it straight through from inputs; a "
+                "surface that never names it cannot supply it, and the stale-price warning that "
+                "depends on it goes back to being unfirable."
+            )
+        assert "cap_table_history" in extractor, "extract_aoa.py does not validate cap_table_history"
+
 
 class TestClampedMagnitudeReachesTheFounder:
     """ "(floor clamped)" told the founder a clamp happened, never how much it cost.
@@ -1081,3 +1097,109 @@ class TestStaleConversionPriceIsReachable:
         assert "out of date" in blob, blob
         assert "series_seed" in blob
         assert "W_STALE_CCP_SUSPECTED" not in blob, "raw code leaked into founder prose"
+
+
+class TestStaleCcpReachesCounselToo:
+    """The founder-facing prose and the counsel item are two deliveries, and only one was wired.
+
+    Moving the check to cap-state build made the warning fire, but `rule_audit`'s gate for
+    `anti_dilution.stale_ccp_detected` still read SOLVER warnings off scenarios — the original,
+    nearly-unfirable channel. So a founder saw the caveat and their lawyer was told nothing, from a
+    rule whose whole purpose is `counsel_review: true`. Half-wiring a fix is harder to notice than
+    not wiring it, because the visible half looks like success.
+    """
+
+    @staticmethod
+    def _inputs(ccp: float) -> dict:
+        return {
+            "preferred_series": [
+                {
+                    "series_id": "series_seed",
+                    "original_conversion_price": 1.0,
+                    "current_conversion_price": ccp,
+                }
+            ],
+            "cap_table_history": [
+                {"event_type": "anti_dilution_applied", "series_id": "series_seed", "previous_ccp": 1.0, "new_ccp": 0.8}
+            ],
+        }
+
+    def test_counsel_gate_opens_on_a_stale_price_with_no_solver_warning(self) -> None:
+        import rule_audit  # type: ignore[import-not-found]
+
+        gate = rule_audit._runtime_event_predicate(
+            "anti_dilution.stale_ccp_detected", {"scenarios": []}, self._inputs(1.0)
+        )
+        assert gate is True, (
+            "the cap state contradicts itself and the counsel rule stayed shut. The founder gets the "
+            "warning; their lawyer gets nothing."
+        )
+
+    def test_counsel_gate_stays_shut_when_the_price_was_updated(self) -> None:
+        import rule_audit  # type: ignore[import-not-found]
+
+        gate = rule_audit._runtime_event_predicate(
+            "anti_dilution.stale_ccp_detected", {"scenarios": []}, self._inputs(0.8)
+        )
+        assert gate is False, "no contradiction, so no counsel obligation"
+
+    def test_one_predicate_not_three(self) -> None:
+        """Build, load and solve must answer this question identically.
+
+        Two copies of it already existed and a third was nearly added. Elsewhere in this skill a
+        third copy of a different derivation had already gone wrong and contradicted the rule pack
+        it audits, so this is a measured hazard rather than a stylistic preference.
+        """
+        import _artifact_io  # type: ignore[import-not-found]
+        import cap_state as cap_state_mod  # type: ignore[import-not-found]
+        import priced_round  # type: ignore[import-not-found]
+
+        for mod in (cap_state_mod, priced_round):
+            src = Path(mod.__file__).read_text(encoding="utf-8")
+            assert "_artifact_io.s" in src or "_artifact_io.series_has_prior_ad_event" in src, (
+                f"{Path(mod.__file__).name} does not use the shared stale-CCP predicate"
+            )
+        assert callable(_artifact_io.stale_ccp_series_ids)
+
+
+class TestPriorAdEventsAreValidated:
+    """A field a sub-agent is told to produce, with nothing checking its shape, is a hallucination
+    surface. `agents/cap-table.md` now asks for prior anti-dilution events; this is the gate."""
+
+    @staticmethod
+    def _v(history: object) -> list[str]:
+        import extract_aoa  # type: ignore[import-not-found]
+
+        series = {
+            "series_name": "S",
+            "original_issue_price": 1.0,
+            "original_conversion_price": 1.0,
+            "current_conversion_price": 1.0,
+        }
+        return list(
+            extract_aoa.validate_aoa_extraction(
+                {
+                    "extraction_type": "articles_of_association",
+                    "fields": {"preferred_series": [series], "cap_table_history": history},
+                }
+            )
+        )
+
+    def test_accepts_a_well_formed_event(self) -> None:
+        assert (
+            self._v([{"event_type": "anti_dilution_applied", "series_id": "s1", "previous_ccp": 1.0, "new_ccp": 0.8}])
+            == []
+        )
+
+    def test_rejects_an_upward_adjustment(self) -> None:
+        """Caught at the DOCUMENT, naming the reading, rather than three artifacts downstream."""
+        errs = self._v(
+            [{"event_type": "anti_dilution_applied", "series_id": "s1", "previous_ccp": 0.8, "new_ccp": 1.0}]
+        )
+        assert any("only ever lowers" in e for e in errs), errs
+
+    def test_rejects_an_invented_event_type(self) -> None:
+        assert any("event_type" in e for e in self._v([{"event_type": "made_up", "series_id": "s1"}]))
+
+    def test_rejects_an_event_with_no_series(self) -> None:
+        assert any("series_id" in e for e in self._v([{"event_type": "anti_dilution_applied"}]))

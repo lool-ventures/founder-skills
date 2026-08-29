@@ -41,6 +41,7 @@ from datetime import date
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _artifact_io  # type: ignore[import-not-found]  # noqa: E402
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact  # noqa: E402
 
 _SCHEMA_DIR = os.path.join(
@@ -1025,7 +1026,21 @@ def _runtime_event_predicate(
         return False
 
     if rule_id == "anti_dilution.stale_ccp_detected":
-        return _any_warning("W_STALE_CCP_SUSPECTED")
+        # TWO channels, because the check moved and this gate did not follow it. `_any_warning` reads
+        # SOLVER warnings off scenarios -- the original home, where the check sits behind three
+        # unrelated gates and almost never fires. The condition is now also evaluated wherever the cap
+        # state is built, which is where it actually catches things. Keying only on the solver channel
+        # left this `counsel_review: true` rule inert even once the warning worked: the founder got the
+        # prose and their lawyer got nothing.
+        if _any_warning("W_STALE_CCP_SUSPECTED"):
+            return True
+        if inputs:
+            return bool(
+                _artifact_io.stale_ccp_series_ids(
+                    inputs.get("preferred_series") or [], inputs.get("cap_table_history") or []
+                )
+            )
+        return False
     if rule_id == "anti_dilution.cp2_floor_applied":
         return _any_warning("W_CP2_FLOOR_APPLIED")
     if rule_id == "anti_dilution.solver_diverged":

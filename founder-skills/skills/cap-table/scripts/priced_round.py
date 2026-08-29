@@ -188,6 +188,7 @@ def _affine_cc_solve(
 
 # Import sibling math producers
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _artifact_io  # type: ignore[import-not-found]  # noqa: E402
 from _emit import add_output_args, emit  # noqa: E402
 from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 from anti_dilution import (  # noqa: E402
@@ -483,10 +484,15 @@ def _compute_a_denominator(components: dict[str, int], basis: str) -> float:
 
 
 def _prior_down_round_in_history(series_id: str, cap_table_history: list[dict[str, Any]]) -> bool:
-    """Check cap_table_history for prior anti_dilution_applied event on this series."""
-    return any(
-        ev.get("event_type") == "anti_dilution_applied" and ev.get("series_id") == series_id for ev in cap_table_history
-    )
+    """Prior anti-dilution event for this series, via the SHARED predicate.
+
+    Delegated rather than reimplemented. This module's copy and the cap-state builder's were two
+    independent statements of one rule, free to drift -- and the solver-side stale-CCP warning that
+    depends on it is gated behind three unrelated conditions, so a divergence here would have been
+    invisible. Same reasoning as `rule_audit._derived_a_basis`, which was a third copy of a different
+    derivation and had already gone wrong.
+    """
+    return bool(_artifact_io.series_has_prior_ad_event(series_id, cap_table_history))
 
 
 def _apply_anti_dilution(

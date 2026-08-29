@@ -156,6 +156,46 @@ def _check_semantic_invariants_cap_state(cap_state: dict[str, Any], path: Path) 
                 )
 
 
+def series_has_prior_ad_event(series_id: str, cap_table_history: list[dict[str, Any]]) -> bool:
+    """Does the recorded history contain an anti-dilution adjustment for this series?"""
+    return any(
+        h.get("event_type") == "anti_dilution_applied" and h.get("series_id") == series_id
+        for h in (cap_table_history or [])
+    )
+
+
+def stale_ccp_series_ids(preferred_series: list[dict[str, Any]], cap_table_history: list[dict[str, Any]]) -> list[str]:
+    """Series whose history records an adjustment while their price says none happened.
+
+    THE ONE definition of "stale conversion price", shared by every consumer rather than copied.
+    Three places ask this question -- the cap-state builder, this module's loader, and the priced-round
+    solver -- and until they shared a function there were two divergent copies. This repo has already
+    paid for a third copy of one derivation drifting from the other two.
+
+    Works on either `inputs.json` or `cap_state.json`: both carry `preferred_series` and
+    `cap_table_history` in the same shape.
+    """
+    out = []
+    for s in preferred_series or []:
+        ccp, ocp = s.get("current_conversion_price"), s.get("original_conversion_price")
+        if ccp is None or ocp is None or abs(float(ccp) - float(ocp)) > 1e-9:
+            continue
+        sid = s.get("series_id")
+        if sid and series_has_prior_ad_event(str(sid), cap_table_history):
+            out.append(str(sid))
+    return out
+
+
+def stale_ccp_warning(series_id: str, ccp: Any, ocp: Any) -> str:
+    """The founder-facing warning string, so the wording cannot drift between emitters."""
+    return (
+        f"W_STALE_CCP_SUSPECTED: series {series_id} records a prior anti-dilution adjustment, but its "
+        f"current conversion price ({ccp}) still equals its original ({ocp}). If that earlier "
+        "adjustment was applied, this price is out of date and every ownership figure derived from it "
+        "understates the preferred holders' position."
+    )
+
+
 def _check_mirror_drift(cap_state: dict[str, Any], instruments: dict[str, Any], path: Path) -> None:
     """Re-derive mirrored fields from instruments.json and check parity (§2.1).
 
@@ -274,6 +314,21 @@ def load_cap_state(
             )
     if validate_invariants:
         _check_semantic_invariants_cap_state(data, path)
+        # Stale-conversion-price backstop. `cap_state.py` emits this at BUILD time, which covers every
+        # state built from an inputs.json. It does not cover one authored by hand or produced by
+        # another tool, and those reach the same downstream math. Appended rather than raised: the
+        # contradiction means a number is probably wrong, not that the file is unloadable, and
+        # refusing to load would take away the founder's report instead of annotating it.
+        _warns = data.setdefault("warnings", [])
+        if isinstance(_warns, list):
+            for _sid in stale_ccp_series_ids(data.get("preferred_series") or [], data.get("cap_table_history") or []):
+                if not any(
+                    isinstance(w, str) and w.startswith(f"W_STALE_CCP_SUSPECTED: series {_sid} ") for w in _warns
+                ):
+                    _s: dict[str, Any] = next((x for x in data["preferred_series"] if x.get("series_id") == _sid), {})
+                    _warns.append(
+                        stale_ccp_warning(_sid, _s.get("current_conversion_price"), _s.get("original_conversion_price"))
+                    )
     if validate_mirror:
         instr_path = Path(workspace_dir) / "instruments.json"
         if instr_path.exists():

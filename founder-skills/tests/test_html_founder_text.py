@@ -83,6 +83,14 @@ def _cap_table_keep() -> frozenset[str]:
     return frozenset(k for m in mod.MAPS.values() for k in m)
 
 
+# The DELIVERABLE's own filename is not internal plumbing. A page that tells a founder "open
+# explore.html directly in Chrome" is naming the file in their hands and giving them something they
+# can act on — which is precisely the test `_founder_text` applies. The filename class cannot make
+# that distinction (a name is a name), so the exception is stated here, narrowly: only the names of
+# files this fleet actually delivers to a founder, never a script or module name.
+_DELIVERABLE_FILENAMES = frozenset({"explore.html", "report.html", "explorer.html", "report.md"})
+
+
 @pytest.mark.parametrize(("skill", "generator"), GENERATORS)
 def test_generated_html_carries_no_internal_tokens(skill: str, generator: str) -> None:
     ft = _founder_text()
@@ -124,6 +132,17 @@ def test_generated_html_carries_no_internal_tokens(skill: str, generator: str) -
     assert found["enums"] == [], (
         f"{skill}/{generator} shows internal token(s) in founder-visible text: {found['enums']}. "
         f"Render them through the shared founder-text policy, or stop writing them into the artifact."
+    )
+    # FILENAMES TOO. This assertion was missing, and its absence was not theoretical: a script name
+    # injected into a counsel question rendered into the page and this test passed. The two classes
+    # need separate assertions because `substitute()` fixes only one of them -- it unsnakes an enum,
+    # and deliberately never rewrites a filename ("renaming a file in prose would be a lie"). So the
+    # policy pass that cleans the enum class leaves this one to arrive intact, which makes a filename
+    # the ONLY thing a scan of policied output can still catch, and it was the one thing unchecked.
+    leaked_files = [f for f in found["filenames"] if f not in _DELIVERABLE_FILENAMES]
+    assert leaked_files == [], (
+        f"{skill}/{generator} shows internal filename(s) in founder-visible text: {leaked_files}. "
+        f"A founder cannot act on a script name; state what it does, or stop writing it into the artifact."
     )
 
 

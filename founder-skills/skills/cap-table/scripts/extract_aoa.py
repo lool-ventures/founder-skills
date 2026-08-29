@@ -69,6 +69,8 @@ VALID_JURISDICTIONS = {"israeli", "delaware"}
 # variant (e.g. one excluding the unallocated reserve) has no representation here -- returning null
 # and letting counsel resolve it is correct; picking the nearer value would be a silent misread.
 VALID_AD_A_DENOMINATOR_BASES = {"nvca_broad", "nvca_narrow"}
+# Mirrors inputs.schema.json's cap_table_history event_type enum.
+VALID_HISTORY_EVENT_TYPES = {"anti_dilution_applied", "warrant_exercised"}
 
 
 def validate_aoa_extraction(extraction: dict[str, Any]) -> list[str]:
@@ -98,6 +100,37 @@ def validate_aoa_extraction(extraction: dict[str, Any]) -> list[str]:
         dt = fields["drag_along_threshold_pct"]
         if not isinstance(dt, (int, float)) or not (0.0 < dt <= 1.0):
             errors.append(f"drag_along_threshold_pct must be in (0, 1]; got {dt!r}")
+
+    # Prior anti-dilution events. The agent contract now asks for these, so the shape has to be
+    # checked -- a field a sub-agent is told to produce and nothing validates is how a malformed
+    # event reaches inputs.json and, from there, three solver sites. Optional: most charters recite
+    # no prior adjustment, and absence must stay a reading of the document rather than a failure.
+    history = fields.get("cap_table_history")
+    if history is not None:
+        if not isinstance(history, list):
+            errors.append("cap_table_history must be an array")
+        else:
+            for i, ev in enumerate(history):
+                hctx = f"cap_table_history[{i}]"
+                if not isinstance(ev, dict):
+                    errors.append(f"{hctx} must be an object")
+                    continue
+                if ev.get("event_type") not in VALID_HISTORY_EVENT_TYPES:
+                    errors.append(
+                        f"{hctx}.event_type must be one of {sorted(VALID_HISTORY_EVENT_TYPES)}; "
+                        f"got {ev.get('event_type')!r}"
+                    )
+                if not ev.get("series_id"):
+                    errors.append(f"{hctx} requires non-empty series_id")
+                prev, new_ = ev.get("previous_ccp"), ev.get("new_ccp")
+                if prev is not None and new_ is not None:
+                    if not isinstance(prev, (int, float)) or not isinstance(new_, (int, float)):
+                        errors.append(f"{hctx} previous_ccp/new_ccp must be numbers")
+                    elif float(new_) > float(prev) + 1e-9:
+                        errors.append(
+                            f"{hctx} has new_ccp ({new_}) above previous_ccp ({prev}); anti-dilution "
+                            "only ever lowers the conversion price, so this reading is wrong"
+                        )
 
     preferred_series = fields.get("preferred_series", [])
     if not isinstance(preferred_series, list):
