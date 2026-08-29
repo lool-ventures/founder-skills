@@ -239,7 +239,9 @@ def build_scenario_digest(scenarios: list[dict[str, Any]]) -> list[dict[str, Any
         if params.get("pre_money"):
             drivers.append(f"{s['type'].replace('_', ' ').title()} at {_money(params['pre_money'])} pre-money")
         if params.get("target_pool_percent"):
-            _tb_assumed = any((w or {}).get("code") == "target_basis_defaulted" for w in (co.get("warnings") or []))
+            _tb_assumed = any(
+                isinstance(w, dict) and w.get("code") == "target_basis_defaulted" for w in (co.get("warnings") or [])
+            )
             _basis_label = params.get("target_basis", "pre_money").replace("_", " ")
             _basis_suffix = " (basis assumed — not stated)" if _tb_assumed else ""
             drivers.append(f"Pool top-up to {params['target_pool_percent']:.0%} {_basis_label}{_basis_suffix}")
@@ -682,6 +684,22 @@ def _render_warning_callouts(cap_state_warnings: list[str]) -> list[str]:
     return _warning_callouts.render_warning_callouts(cap_state_warnings)
 
 
+def _render_solver_warning_callouts(scenarios: list[dict[str, Any]]) -> list[str]:
+    """Founder-facing callout block for the SOLVER's warnings.
+
+    A separate channel from `_render_warning_callouts`: those are `cap_state`'s warning STRINGS, these
+    are the priced-round solver's warning DICTS on `computed_outputs.warnings`. Until this existed the
+    composer read that list only to test for one unrelated code, so every solver warning was computed,
+    written to `scenarios.json`, and dropped before the founder -- including the MFN counterfactual
+    that `agents/cap-table.md` requires the report to label.
+    """
+    collected: list[dict[str, Any]] = []
+    for s in scenarios:
+        co = s.get("computed_outputs", {}) or {}
+        collected.extend(co.get("warnings") or [])
+    return _warning_callouts.render_solver_warning_callouts(collected)
+
+
 def build_pool_basis_note(
     *,
     target_pool_percent: float | None,
@@ -1024,6 +1042,8 @@ def render_report_markdown(
     # cap_state.py warnings array → founder-facing callouts, rendered above Current Cap State so the
     # founder sees engagement scope / data caveats first.
     lines.extend(_render_warning_callouts(cap_state.get("warnings") or []))
+    # Solver warnings ride a different artifact and were reaching the founder through nothing.
+    lines.extend(_render_solver_warning_callouts(scenarios))
 
     # 2. Current Cap State
     lines.append("## Current Cap State")
@@ -1217,7 +1237,7 @@ def render_report_markdown(
         # Assumed-basis disclosure: when target_basis was defaulted rather than supplied, it is
         # absent from `params` above, so the Inputs list never mentions it. Render the assumption
         # explicitly so a defaulted pool denominator never reads as a founder-confirmed input.
-        if any((w or {}).get("code") == "target_basis_defaulted" for w in (co.get("warnings") or [])):
+        if any(isinstance(w, dict) and w.get("code") == "target_basis_defaulted" for w in (co.get("warnings") or [])):
             lines.append(
                 "> ⚠ **Option pool basis ASSUMED, not stated.** No pool-sizing basis was confirmed "
                 "for this scenario — pre-money was assumed. Pre-money vs post-money changes the "
@@ -1309,7 +1329,22 @@ def render_report_markdown(
                     ptype = bd.get("protection_type", "?")
                     ccp_before = bd.get("ccp_before", 0)
                     ccp_after = bd.get("ccp_after", 0)
-                    floor_note = " (floor clamped)" if bd.get("floor_applied") else ""
+                    # The MAGNITUDE, not just the fact. `ccp_unfloored` has always been computed
+                    # and never rendered, so the founder read "(floor clamped)" and was never told
+                    # what the adjustment would have been -- i.e. how much protection the floor cost
+                    # the holder. `.get` + the None check are load-bearing: `ccp_unfloored` is NOT in
+                    # scenarios.schema.json's `required` list, so a schema-valid breakdown may omit
+                    # it, and formatting None would crash the whole report.
+                    floor_note = ""
+                    if bd.get("floor_applied"):
+                        unfloored = bd.get("ccp_unfloored")
+                        if isinstance(unfloored, (int, float)):
+                            floor_note = (
+                                f" — the adjustment would have taken it to ${float(unfloored):.4f}; "
+                                "the floor in the charter stopped it there"
+                            )
+                        else:
+                            floor_note = " (limited by the charter's floor)"
                     lines.append(
                         f"- {sid} ({ptype.replace('_', ' ')}): CCP ${ccp_before:.4f} → ${ccp_after:.4f}{floor_note} "
                         f"(rule: `{bd.get('rule_id')}`)"

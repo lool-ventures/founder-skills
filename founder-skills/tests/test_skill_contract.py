@@ -1075,7 +1075,16 @@ REFERENCES_CEILING: dict[str, int] = {
     # right but contain zeros" — the PRE-FIX world. cap_state.py hard-errors E_NO_EQUITY_BASE now,
     # and prose telling a model that a missing base yields plausible zeros invites it to invent one.
     # lane-2 also claimed extract_cap_table.py emits cap_state.json directly; it does not.
-    "cap-table": 45_663,
+    #
+    # cap-table +934 B: inputs-skeleton.md now documents `ad_cp2_floor`, the anti-dilution
+    # conversion-price floor. Raised deliberately, because the field's ABSENCE from the authoring
+    # surfaces was a founder-adverse defect, not a documentation gap: the solver consumed it and two
+    # schemas declared it while no extractor, no agent field list and no skeleton mentioned it, so a
+    # charter floor could not be supplied and the round math silently ignored it. A missed floor lets
+    # the conversion price fall further than the charter allows and UNDERSTATES founder ownership --
+    # measured 11.11% vs 5.95% on the golden-10 cap table (test_golden_10d). Prose that prevents a
+    # 1.87x ownership error is worth under a kilobyte of on-demand reference content.
+    "cap-table": 46_597,
 }
 
 

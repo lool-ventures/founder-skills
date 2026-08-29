@@ -627,6 +627,38 @@ _SEED_COUNSEL_ITEM = {
 }
 
 
+def _seed_anti_dilution_counsel_item() -> dict:
+    """A second seed, built from the LIVE rule pack rather than a copy of it.
+
+    `counsel_packet.py` performs no founder-text scan of its own, and `rule_audit.py` maps a rule's
+    `summary` straight to the `counsel_question` a founder's lawyer reads. So a rule summary is
+    founder-facing text with nothing checking it -- and two anti-dilution summaries shipped the raw
+    field name `ad_cp2_floor` to counsel for exactly that reason.
+
+    Seeding the single `delaware_cross_border` item did not cover them: one seeded rule scans one
+    rule. This reads the real summary out of the pack, so reintroducing an internal token into it
+    reds the scan instead of shipping. Copying the text here would defeat the point -- the copy would
+    stay clean while the pack drifted.
+    """
+    import json as _json
+
+    pack = _json.loads((SKILLS_DIR / "cap-table" / "data" / "cap-table-rules.json").read_text(encoding="utf-8"))
+    for rules in pack["domains"].values():
+        for r in rules:
+            if r["rule_id"] == "anti_dilution.cp2_floor_applicable":
+                return {
+                    "rule_id": r["rule_id"],
+                    "domain": r["domain"],
+                    "title": r["title"],
+                    "applies_when": r.get("applies_when", ""),
+                    "founder_question": r["summary"],
+                    "counsel_question": r["summary"],
+                    "documents_needed": [],
+                    "source_ids": r.get("source_ids", []),
+                }
+    raise AssertionError("anti_dilution.cp2_floor_applicable is gone from the rule pack")
+
+
 def _produce_extra_deliverables(skill: str, work_dir: Path) -> list[Path]:
     """Run each non-compose producer and return the markdown it delivered."""
     import json as _json
@@ -638,7 +670,10 @@ def _produce_extra_deliverables(skill: str, work_dir: Path) -> list[Path]:
         if audit_path.exists():
             audit = _json.loads(audit_path.read_text(encoding="utf-8"))
             if not audit.get("counsel_review_items"):
-                audit["counsel_review_items"] = [dict(_SEED_COUNSEL_ITEM)]
+                audit["counsel_review_items"] = [
+                    dict(_SEED_COUNSEL_ITEM),
+                    _seed_anti_dilution_counsel_item(),
+                ]
                 audit_path.write_text(_json.dumps(audit), encoding="utf-8")
 
     produced: list[Path] = []

@@ -76,6 +76,7 @@ Insert this block before `option_pool`:
       "liquidation_preference_type": "non_participating",
       "participation_cap_multiple": null,
       "anti_dilution_protection": "broad_based_weighted_average",
+      "ad_cp2_floor": null,
       "pro_rata_rights": true
     }
   ],
@@ -96,6 +97,20 @@ directly.
 - `current_conversion_price` (CCP) — the present conversion price. Equals OCP unless anti-dilution has previously triggered (CCP then < OCP).
 
 For a fresh issuance with no prior AD: **OIP = OCP = CCP**. All three are required.
+
+### The anti-dilution floor (`ad_cp2_floor`)
+
+Optional, `null` for most charters — but supply it when yours has one. Many NVCA-form charters cap how
+far an anti-dilution adjustment may push the conversion price down: *"in no event shall the Conversion
+Price be reduced below the Original Issue Price"* (the floor is then the OIP) or a stated per-share
+figure. Israeli AoAs put it as a proviso inside the "Adjustment of Conversion Price" article.
+
+Omitting a floor the charter has is not cosmetic — the conversion price then falls further than the
+charter allows, which inflates preferred-as-converted and **understates your ownership**. On a
+representative down round: 11.11% founders with a $0.50 floor honoured, 5.95% with it missing.
+
+The floor must be **below** the series' current conversion price. Equal to it admits no reduction at
+all; above it is contradictory and the round math refuses it.
 
 ## Adding common_batches (rare; advisor common, exercised options)
 

@@ -210,7 +210,7 @@ def humanize_token(token: str, *, capitalize: bool = True) -> str:
 #
 # The lookarounds exclude a DOT-NAMESPACED identifier, and they are load-bearing: cap-table's rule ids
 # are dotted (`safe.post_money_cap_conversion`) and are deliberately kept verbatim because counsel
-# cites them, so a scanner without this reports all 85 of them as violations and a substituter without
+# cites them, so a scanner without this reports all 86 of them as violations and a substituter without
 # it rewrites a legal citation into prose.
 #
 # Why not the simpler `(?![\w.])` trailing guard: that also excludes a SENTENCE-FINAL token

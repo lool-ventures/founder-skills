@@ -151,6 +151,24 @@ def validate_aoa_extraction(extraction: dict[str, Any]) -> list[str]:
         if oip is not None and (not isinstance(oip, (int, float)) or oip <= 0):
             errors.append(f"{ctx}.original_issue_price must be > 0; got {oip!r}")
 
+        # Anti-dilution conversion-price FLOOR, > 0 when present.
+        #
+        # Optional: many charters have no floor, and absence must stay a legal reading of the
+        # document rather than an extraction failure. But when the charter HAS one, failing to
+        # extract it is not a cosmetic omission -- the floor limits how far the conversion price
+        # falls, so ignoring it drives the adjusted price too low, inflates preferred-as-converted,
+        # and UNDERSTATES founder ownership. Measured on the golden-10 cap table: 11.11% founder
+        # ownership with a $0.50 charter floor honoured, 5.95% with it missed.
+        #
+        # Only positivity is checked here. A floor ABOVE the current conversion price is a
+        # contradictory term, but that judgement already lives in the solver
+        # (`E_AD_CP2_FLOOR_ABOVE_CURRENT_PRICE`, rule `anti_dilution.ratchet_down_only`) where it can
+        # be stated against the round's own numbers. Duplicating it here would be two copies of one
+        # domain rule, free to drift.
+        floor = series.get("ad_cp2_floor")
+        if floor is not None and (not isinstance(floor, (int, float)) or floor <= 0):
+            errors.append(f"{ctx}.ad_cp2_floor must be > 0 when present; got {floor!r}")
+
     return errors
 
 

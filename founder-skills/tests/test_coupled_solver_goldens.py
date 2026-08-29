@@ -582,6 +582,54 @@ def test_golden_10c_floor_equal_to_cp1_is_accepted_and_cannot_ratchet_up() -> No
 
 
 # ---------------------------------------------------------------------------
+# Golden 10d — a charter floor CHANGES THE FOUNDER'S NUMBER.
+#
+# Goldens 10/10b/10c pin the floor's effect on the conversion price. None of them pins what the
+# founder actually reads, and that is where the cost of this field sits: the skill could not extract
+# `ad_cp2_floor` from any document (absent from extract_aoa.py, the AoA target-field list in
+# agents/cap-table.md, and inputs-skeleton.md), so a founder whose charter HAS a floor got math that
+# silently ignored it. The floor limits how far the conversion price falls; without it the price
+# falls further, preferred-as-converted inflates, and the founder is told they own less than they do.
+#
+# This golden exists to make that cost visible as a percentage rather than a price, so a regression
+# in the extraction path shows up as the number the report leads with.
+# ---------------------------------------------------------------------------
+def test_golden_10d_charter_floor_changes_founder_ownership() -> None:
+    def _solve(floor: float | None) -> dict[str, Any]:
+        series: dict[str, Any] = {
+            "series_id": "series_seed",
+            "shares": 2_000_000,
+            "original_issue_price": 1.00,
+            "original_conversion_price": 1.00,
+            "current_conversion_price": 1.00,
+            "anti_dilution_protection": "broad_based_weighted_average",
+        }
+        if floor is not None:
+            series["ad_cp2_floor"] = floor
+        return solve(
+            common_shares=10_000_000,
+            preferred_series=[series],
+            options_available=1_000_000,
+            pre_money=1_000_000.0,
+            new_money=5_000_000.0,
+        )
+
+    honoured = _solve(0.50)
+    missed = _solve(None)
+
+    f_honoured = honoured["aggregate_ownership_by_class"]["founders_pct"]
+    f_missed = missed["aggregate_ownership_by_class"]["founders_pct"]
+
+    assert abs(honoured["ccp_mutations"]["series_seed"] - 0.50) < 1e-9
+    assert abs(f_honoured - 0.111111) < 1e-5, f_honoured
+    assert abs(f_missed - 0.059524) < 1e-5, f_missed
+    assert f_honoured > f_missed, (
+        "a charter floor must protect the FOUNDER's percentage, not just the conversion price. If "
+        "this ever inverts, the floor is being applied in the wrong direction."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Golden 11 — Stale-CCP guard fires.
 # ---------------------------------------------------------------------------
 def test_golden_11_stale_ccp_guard_fires() -> None:

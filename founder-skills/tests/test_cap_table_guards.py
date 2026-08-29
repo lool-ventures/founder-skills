@@ -21,6 +21,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -149,7 +150,7 @@ def _all_error_codes() -> dict[str, list[str]]:
 # Recorded as a measured baseline rather than an aspiration, in the pattern this repo already uses for
 # the founder-facing leak scan and the no-cassette allowlist. Shrinking it is the work; growing it
 # means a new unguarded diagnostic shipped.
-UNASSERTED_CODE_BASELINE = 30
+UNASSERTED_CODE_BASELINE = 29
 
 
 def test_error_code_assertion_ratchet() -> None:
@@ -160,11 +161,18 @@ def test_error_code_assertion_ratchet() -> None:
     assertions is a guard that can be removed, renamed or mis-fired silently.
     """
     suite = "\n".join(p.read_text(encoding="utf-8") for p in Path(__file__).resolve().parent.glob("test_*.py"))
+    # DISTINCT codes, not occurrences. `_all_error_codes` dedups within a file but not across them, so
+    # a code emitted from two producers used to count twice -- which meant merely MENTIONING an
+    # unasserted code in a second source file raised the count and reddened this test, while the
+    # docstring's question ("how many diagnostics are unguarded") had not changed. That is a baseline
+    # measuring the wrong noun.
     unasserted = sorted(
-        code
-        for codes in _all_error_codes().values()
-        for code in codes
-        if f'"{code}"' not in suite and f"'{code}'" not in suite
+        {
+            code
+            for codes in _all_error_codes().values()
+            for code in codes
+            if f'"{code}"' not in suite and f"'{code}'" not in suite
+        }
     )
     assert len(unasserted) <= UNASSERTED_CODE_BASELINE, (
         f"{len(unasserted)} cap-table diagnostics have no assertion (baseline "
@@ -187,7 +195,7 @@ def test_error_code_assertion_ratchet() -> None:
 # own founder-text policy says must never reach a founder. Hand-picking cannot see that.
 #
 # The enumerable version is objective and self-selecting, and it found something worse than any of
-# them: of the rule pack's 85 rule_ids, 56 are named in no test anywhere, and 23 of those carry
+# them: of the rule pack's 86 rule_ids, 56 are named in no test anywhere, and 23 of those carry
 # `counsel_review: true` -- "take this to your lawyer" obligations with nothing asserting they fire.
 # ---------------------------------------------------------------------------------------------
 
@@ -223,8 +231,8 @@ def _unasserted_rules() -> tuple[list[str], list[str]]:
 # Measured baselines. RATCHETS: they may only shrink. The counsel figure is tracked separately because
 # a counsel-review rule is an obligation a founder is told to take to a lawyer -- a silently-suppressed
 # one is the most expensive thing this skill can get wrong.
-UNASSERTED_RULE_BASELINE = 55
-UNASSERTED_COUNSEL_RULE_BASELINE = 22
+UNASSERTED_RULE_BASELINE = 54
+UNASSERTED_COUNSEL_RULE_BASELINE = 21
 
 
 def test_rule_assertion_ratchet() -> None:
@@ -428,7 +436,13 @@ class TestComputedReachesTheRenderedReport:
     """
 
     @staticmethod
-    def _artifacts(ccp_before: float, ccp_after: float) -> dict:
+    def _artifacts(
+        ccp_before: float,
+        ccp_after: float,
+        *,
+        floor_applied: bool = False,
+        unfloored: float | None = None,
+    ) -> dict:
         scen = {
             "metadata": {"run_id": "t"},
             "scenarios": [
@@ -447,7 +461,8 @@ class TestComputedReachesTheRenderedReport:
                                 "protection_type": "broad_based_weighted_average",
                                 "ccp_before": ccp_before,
                                 "ccp_after": ccp_after,
-                                "floor_applied": False,
+                                "floor_applied": floor_applied,
+                                **({} if unfloored is None else {"ccp_unfloored": unfloored}),
                                 "rule_id": "anti_dilution.trigger_basis_current_conversion_price",
                             }
                         ],
@@ -478,11 +493,18 @@ class TestComputedReachesTheRenderedReport:
             "counsel_packet.json": {"items": [], "metadata": {"run_id": "t"}},
         }
 
-    def _render(self, ccp_before: float, ccp_after: float) -> str:
+    def _render(
+        self,
+        ccp_before: float,
+        ccp_after: float,
+        *,
+        floor_applied: bool = False,
+        unfloored: float | None = None,
+    ) -> str:
         import compose_report  # type: ignore[import-not-found]
 
         md: str = compose_report.render_report_markdown(
-            artifacts=self._artifacts(ccp_before, ccp_after),
+            artifacts=self._artifacts(ccp_before, ccp_after, floor_applied=floor_applied, unfloored=unfloored),
             validation_warnings=[],
             insertion_marker="MARKER",
         )
@@ -637,3 +659,321 @@ class TestAntiDilutionNeverRaisesTheConversionPrice:
                 consideration_received=1_000_000,
                 new_issue_price=0.0,
             )
+
+
+class TestSolverWarningsReachTheFounder:
+    """The solver's warnings were computed, serialised, and dropped before the report.
+
+    `compose_report` rendered only `cap_state["warnings"]` -- a list of STRINGS -- via
+    `_warning_callouts.render_warning_callouts`. The priced-round solver emits DICTS onto
+    `scenarios.json`'s `computed_outputs.warnings`, and the composer read that list in exactly two
+    places, both testing for one unrelated code. So `W_MFN_NOT_MOST_FAVORABLE`,
+    `W_MFN_ELECTION_OVERRIDES_INSTRUMENT`, `W_CP2_FLOOR_APPLIED`, `W_STALE_CCP_SUSPECTED` and
+    `W_SOLVER_AITKEN_FALLBACK` reached the founder through nothing at all.
+
+    The MFN case is a stated contract, not just an omission: `agents/cap-table.md` says that when the
+    solver emits `W_MFN_NOT_MOST_FAVORABLE` "the report should label it as such, not as the holder's
+    actual entitlement." Nothing labelled it, so a counterfactual election was presented as the
+    holder's entitlement.
+    """
+
+    @staticmethod
+    def _artifacts(solver_warnings: list[dict]) -> dict:
+        return {
+            "inputs.json": {
+                "company_name": "X",
+                "founders": [{"founder_id": "f1", "name": "A", "common_shares": 8_000_000}],
+                "metadata": {"run_id": "t", "schema_version": "v0.5.0-inputs"},
+            },
+            "cap_state.json": {
+                "as_converted_totals": {
+                    "fully_diluted_shares": 8_000_000,
+                    "common_shares": 8_000_000,
+                    "preferred_shares_as_converted": 0,
+                    "options_outstanding": 0,
+                    "options_available": 0,
+                    "warrants_underlying_total": 0,
+                },
+                "outstanding_safes": [],
+                "metadata": {"run_id": "t"},
+            },
+            "scenarios.json": {
+                "metadata": {"run_id": "t"},
+                "scenarios": [
+                    {
+                        "scenario_id": "s1",
+                        "type": "priced_round",
+                        "computed_outputs": {
+                            "completeness": "full",
+                            "aggregate_ownership_by_class": {"founders_pct": 0.63},
+                            "equity_financing_price": 1.18,
+                            "warnings": solver_warnings,
+                        },
+                    }
+                ],
+            },
+            "rule_audit.json": {"date_sensitive_watchlist": [], "metadata": {"run_id": "t"}},
+            "counsel_packet.json": {"items": [], "metadata": {"run_id": "t"}},
+        }
+
+    def _render(self, solver_warnings: list[dict]) -> str:
+        import compose_report  # type: ignore[import-not-found]
+
+        md: str = compose_report.render_report_markdown(
+            artifacts=self._artifacts(solver_warnings),
+            validation_warnings=[],
+            insertion_marker="MARKER",
+        )
+        return md
+
+    def test_mfn_counterfactual_is_labelled_as_the_agent_contract_requires(self) -> None:
+        md = self._render(
+            [
+                {
+                    "code": "W_MFN_NOT_MOST_FAVORABLE",
+                    "instance_id": "safe_mfn_1",
+                    "detail": "elected terms are not the most favourable available",
+                }
+            ]
+        )
+        assert "counterfactual" in md.lower(), (
+            "the solver said this MFN election is NOT the holder's entitlement and the report did not "
+            "say so. agents/cap-table.md requires the report to label it."
+        )
+        assert "safe_mfn_1" in md, "the founder is not told WHICH instrument the caveat is about"
+
+    def test_floor_clamp_warning_reaches_the_report(self) -> None:
+        md = self._render([{"code": "W_CP2_FLOOR_APPLIED", "series_id": "series_seed"}])
+        assert "floor" in md.lower() and "series_seed" in md
+
+    def test_an_unrecognised_solver_warning_is_still_surfaced(self) -> None:
+        """Unknown codes must render, not vanish.
+
+        Skipping them would reintroduce the exact silent-drop defect this renderer exists to fix: a
+        warning family added to the solver later would be invisible until someone remembered to add a
+        branch here. The code itself stays out of the prose -- it is our vocabulary, not a founder's.
+        """
+        md = self._render([{"code": "W_SOME_FUTURE_SOLVER_WARNING", "instance_id": "note_1"}])
+        assert "worth checking" in md.lower(), "an unrecognised solver warning was dropped silently"
+        assert "W_SOME_FUTURE_SOLVER_WARNING" not in md, "raw warning code leaked into founder prose"
+
+    def test_convergence_fallback_warning_reaches_the_report(self) -> None:
+        """Guards the one solver warning this renderer newly surfaces that nothing else asserted.
+
+        It matters more than it looks: it is the solver saying its own arithmetic was hard to settle.
+        A founder is entitled to know the ownership figures came out of a fallback path.
+        """
+        md = self._render([{"code": "W_SOLVER_AITKEN_FALLBACK"}])
+        assert "fallback" in md.lower()
+        assert "W_SOLVER_AITKEN_FALLBACK" not in md, "raw code leaked into founder prose"
+
+    def test_no_solver_warnings_renders_nothing(self) -> None:
+        """The block must not appear as an empty scare-callout on a clean round."""
+        md = self._render([])
+        assert "worth checking" not in md.lower()
+
+    def test_the_same_warning_about_the_same_instrument_is_stated_once(self) -> None:
+        dup = {"code": "W_CP2_FLOOR_APPLIED", "series_id": "series_seed"}
+        md = self._render([dup, dict(dup), dict(dup)])
+        assert md.lower().count("charter's price floor") == 1
+
+    def test_malformed_entries_do_not_cost_the_founder_the_valid_ones(self) -> None:
+        """This list is read back off a JSON artifact a prior step may have written loosely."""
+        junk: list[Any] = ["not-a-dict", {}, {"code": ""}, {"code": "W_CP2_FLOOR_APPLIED", "series_id": "s"}]
+        md = self._render(junk)
+        assert "charter's price floor" in md
+
+
+class TestCharterFloorIsExtractable:
+    """A real charter term the skill could not read, costing the founder ownership.
+
+    An anti-dilution conversion-price floor is a common NVCA charter term -- the rule pack says so on
+    primary sourcing (the CP2-floor rule carries source_basis "primary"). Its rule_id is deliberately
+    NOT written out here: `_unasserted_rules` above is a bare substring test over the suite text, so
+    naming a rule in a docstring drops it out of the ratchet with no assertion behind it. That would
+    be a false win in the guard whose whole purpose is counting false wins. The solver has
+    consumed `ad_cp2_floor` all along, and `af4523d` hardened its edge cases. But NOTHING could
+    produce it: absent from `extract_aoa.py`, from the AoA target-field list in `agents/cap-table.md`,
+    and from `references/inputs-skeleton.md`, which enumerated the preferred-series fields and omitted
+    it. Two schemas declared it and `cap_state.py` passed it through, so the field looked supported.
+
+    The cost is not cosmetic and it runs AGAINST the founder. The floor limits how far the conversion
+    price falls; missing it lets the price fall further, inflating preferred-as-converted. Measured on
+    the golden-10 cap table: 11.11% founder ownership with a $0.50 floor honoured, 5.95% without --
+    a 1.87x understatement, silently, in the skill whose job is telling founders what they own.
+    (`test_golden_10d` pins those figures.)
+
+    These tests guard the PATH, not the math: that the extractor accepts the field, that it survives
+    the merge into inputs.json, and that the three authoring surfaces still document it.
+    """
+
+    def test_extractor_accepts_a_charter_floor(self) -> None:
+        import extract_aoa  # type: ignore[import-not-found]
+
+        errors = extract_aoa.validate_aoa_extraction(
+            {
+                "extraction_type": "articles_of_association",
+                "fields": {
+                    "preferred_series": [
+                        {
+                            "series_name": "Series Seed",
+                            "original_issue_price": 1.00,
+                            "original_conversion_price": 1.00,
+                            "current_conversion_price": 1.00,
+                            "anti_dilution_protection": "broad_based_weighted_average",
+                            "ad_cp2_floor": 0.50,
+                        }
+                    ]
+                },
+            }
+        )
+        assert errors == [], errors
+
+    def test_extractor_rejects_a_non_positive_floor(self) -> None:
+        """A zero or negative floor is a misread, not a charter term."""
+        import extract_aoa  # type: ignore[import-not-found]
+
+        errors = extract_aoa.validate_aoa_extraction(
+            {
+                "extraction_type": "articles_of_association",
+                "fields": {
+                    "preferred_series": [
+                        {
+                            "series_name": "Series Seed",
+                            "original_issue_price": 1.00,
+                            "original_conversion_price": 1.00,
+                            "current_conversion_price": 1.00,
+                            "ad_cp2_floor": 0,
+                        }
+                    ]
+                },
+            }
+        )
+        assert any("ad_cp2_floor" in e for e in errors), errors
+
+    def test_absent_floor_is_not_an_error(self) -> None:
+        """Most charters have no floor. Absence must stay a reading of the document, not a failure."""
+        import extract_aoa  # type: ignore[import-not-found]
+
+        errors = extract_aoa.validate_aoa_extraction(
+            {
+                "extraction_type": "articles_of_association",
+                "fields": {
+                    "preferred_series": [
+                        {
+                            "series_name": "Series Seed",
+                            "original_issue_price": 1.00,
+                            "original_conversion_price": 1.00,
+                            "current_conversion_price": 1.00,
+                        }
+                    ]
+                },
+            }
+        )
+        assert errors == [], errors
+
+    def test_floor_survives_the_merge_into_inputs(self, tmp_path: Path) -> None:
+        """The whole point is end-to-end reach: extractor -> inputs.json -> cap_state -> solver.
+
+        Guards against a future field whitelist in `merge_into_inputs` silently dropping it, which
+        would restore the defect while every extraction test stayed green.
+        """
+        import extract_aoa  # type: ignore[import-not-found]
+
+        inputs_path = tmp_path / "inputs.json"
+        inputs_path.write_text(
+            json.dumps(
+                {
+                    "company_name": "X",
+                    "founders": [{"founder_id": "f1", "name": "A", "common_shares": 8_000_000}],
+                    "metadata": {"run_id": "t", "schema_version": "v0.5.0-inputs"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        extract_aoa.merge_into_inputs(
+            str(inputs_path),
+            [
+                {
+                    "series_name": "Series Seed",
+                    "original_issue_price": 1.00,
+                    "original_conversion_price": 1.00,
+                    "current_conversion_price": 1.00,
+                    "anti_dilution_protection": "broad_based_weighted_average",
+                    "ad_cp2_floor": 0.50,
+                }
+            ],
+            source_doc="aoa.pdf",
+        )
+        merged = json.loads(inputs_path.read_text(encoding="utf-8"))
+        assert merged["preferred_series"][0]["ad_cp2_floor"] == 0.50, (
+            "the charter floor was dropped between extraction and inputs.json; the solver would "
+            "silently understate founder ownership"
+        )
+
+    def test_all_three_authoring_surfaces_document_the_floor(self) -> None:
+        """The drift guard for the defect class, not just this field.
+
+        `ad_cp2_floor` was consumed by the solver and declared in two schemas while no authoring
+        surface mentioned it, so it read as supported and was unreachable. A field can only be
+        supplied if the thing that supplies it has been told the field exists: the sub-agent reads
+        the agent body, a founder or agent filling inputs by hand reads the skeleton, and the
+        validator decides what is accepted.
+        """
+        agent = (Path(__file__).resolve().parents[1] / "agents" / "cap-table.md").read_text(encoding="utf-8")
+        skeleton = (CAP_TABLE / "references" / "inputs-skeleton.md").read_text(encoding="utf-8")
+        extractor = (SCRIPTS / "extract_aoa.py").read_text(encoding="utf-8")
+
+        for name, text in (
+            ("agents/cap-table.md", agent),
+            ("inputs-skeleton.md", skeleton),
+            ("extract_aoa.py", extractor),
+        ):
+            assert "ad_cp2_floor" in text, (
+                f"{name} does not mention ad_cp2_floor. The solver consumes it and two schemas "
+                "declare it; a surface that never names it cannot supply it, and the founder's "
+                "ownership is understated with no warning."
+            )
+
+
+class TestClampedMagnitudeReachesTheFounder:
+    """ "(floor clamped)" told the founder a clamp happened, never how much it cost.
+
+    `ccp_unfloored` -- the conversion price the anti-dilution adjustment WOULD have produced -- has
+    always been computed and written to `scenarios.json`, and was rendered by nothing. Both surfaces
+    (`compose_report`'s markdown and `visualize`'s HTML) printed the bare parenthetical. The number
+    that makes a floor meaningful, i.e. how much protection it removed, never reached anyone.
+
+    This is the same shape as the solver-warning drop above: computed, serialised, discarded at the
+    last step.
+    """
+
+    def test_markdown_states_what_the_adjustment_would_have_been(self) -> None:
+        md = TestComputedReachesTheRenderedReport()._render(1.0, 0.50, floor_applied=True, unfloored=0.2045)
+        assert "0.2045" in md, (
+            "the founder is told the floor clamped but not what it clamped FROM, which is the only "
+            "number that says how much protection the floor removed"
+        )
+
+    def test_missing_unfloored_value_does_not_crash_the_report(self) -> None:
+        """`ccp_unfloored` is NOT in scenarios.schema.json's `required` list.
+
+        A schema-valid breakdown may omit it, and an f-string over None would take down the entire
+        report for a cosmetic field. Degrade to the plainer sentence instead.
+        """
+        md = TestComputedReachesTheRenderedReport()._render(1.0, 0.50, floor_applied=True, unfloored=None)
+        assert "charter's floor" in md
+        assert "None" not in md.split("Anti-dilution")[-1][:400]
+
+    def test_no_floor_note_when_no_clamp_occurred(self) -> None:
+        md = TestComputedReachesTheRenderedReport()._render(1.0, 0.82)
+        assert "would have taken it to" not in md
+
+    def test_html_renderer_states_the_same_magnitude(self) -> None:
+        """Both renderers or neither: report.html is a second surface that has drifted before."""
+        import visualize  # type: ignore[import-not-found]
+
+        note = visualize._floor_note({"floor_applied": True, "ccp_unfloored": 0.2045})
+        assert "0.2045" in note
+        assert visualize._floor_note({"floor_applied": False, "ccp_unfloored": 0.2045}) == ""
+        assert "0.0000" not in visualize._floor_note({"floor_applied": True})

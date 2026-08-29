@@ -180,6 +180,24 @@ def _palette_color(cat: str) -> str:
     return _palette.slice_color(cat)
 
 
+def _floor_note(b: dict) -> str:
+    """The charter-floor clause for one AD breakdown row, with the magnitude the founder needs.
+
+    Kept in step with `compose_report`'s markdown line: both render the number the solver already
+    computed (`ccp_unfloored`) instead of the bare fact that a clamp happened, so the founder learns
+    how much protection the floor cost rather than only that it exists. The isinstance guard is
+    load-bearing -- `ccp_unfloored` is not in scenarios.schema.json's `required` list.
+    """
+    if not b.get("floor_applied"):
+        return ""
+    unfloored = b.get("ccp_unfloored")
+    if isinstance(unfloored, (int, float)):
+        return _esc(
+            f" — the adjustment would have taken it to ${float(unfloored):.4f}; the floor in the charter stopped it there"
+        )
+    return " (limited by the charter's floor)"
+
+
 def _esc(s: Any) -> str:
     """HTML-escape per design doc §10."""
     return html.escape(str(s) if s is not None else "", quote=True)
@@ -570,7 +588,7 @@ def render_report_html(
                 f"<li>{_esc(b.get('series_id', '?'))} "
                 f"({_esc(str(b.get('protection_type', '?')).replace('_', ' '))}): "
                 f"CCP ${b.get('ccp_before', 0):.4f} → ${b.get('ccp_after', 0):.4f}"
-                f"{' (floor clamped)' if b.get('floor_applied') else ''}</li>"
+                f"{_floor_note(b)}</li>"
                 for b in ad_bd
             )
             ad_html = f'<p class="ad-summary">{" | ".join(parts)}</p><ul class="ad-series">{series}</ul>'

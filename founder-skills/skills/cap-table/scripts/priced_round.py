@@ -1009,9 +1009,14 @@ def solve_priced_round(
     # _refresh_as_converted_totals — preserves the no-AD output bit-for-bit.
     has_ad_protection = any(s.get("anti_dilution_protection", "none") != "none" for s in preferred_series)
 
-    # A CP2 floor at or above the CURRENT conversion price is a contradictory charter term: the floor
-    # would raise the conversion price, and anti-dilution only ever lowers it
-    # (`anti_dilution.ratchet_down_only`). Rejected here, loudly, rather than clamped: the clamp below
+    # A CP2 floor ABOVE the CURRENT conversion price is a contradictory charter term: clamping to it
+    # would RAISE the conversion price, and anti-dilution only ever lowers it
+    # (`anti_dilution.ratchet_down_only`). Strictly above, matching the check below and the rule's own
+    # wording ("greater than the current conversion price"). A floor EQUAL to CP1 is a different case
+    # and is deliberately allowed: it clamps CP2 back to exactly CP1, so no ratchet-up occurs and no
+    # event is written. `test_golden_10c` pins that boundary from the permissive side -- tightening
+    # this to `>=` to match a looser comment would break it.
+    # Rejected here, loudly, rather than clamped: the clamp below
     # is what silently produced a ratchet-UP, recorded as an `anti_dilution_applied` event that the
     # repo's own loader rejects. Validated at the entry point so the per-series math can treat the
     # ratchet-down post-condition as an invariant rather than an input check.

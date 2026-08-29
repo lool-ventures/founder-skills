@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "version": "0.4.2",
+    "version": "0.4.3",
     "generated_date": "2026-05-21",
     "purpose": "Verified source-backed rule pack for the cap-table skill: SAFE conversion, convertible-note math, option-pool top-up, anti-dilution (including coupled-AD priced-round variants), Israeli equity-tax + AoA gotchas, Delaware cross-border / flip mechanics, and founder benchmarks. Every rule cites a primary or near-primary source (NVCA Model Certificate of Incorporation, Y Combinator SAFE primer / documents, Cooley GO down-round article, Israeli Companies Law / Income Tax Ordinance, Carta benchmarks, etc.). Version history lives in CHANGELOG.md.",
     "source_policy": "Rules cite original quotable legal documents, issuer documents, official agency pages, law-firm publications, and benchmark datasets. AI research notes and intermediate consolidated files are excluded from final references."
@@ -1513,7 +1513,7 @@
         "domain": "anti_dilution",
         "behavior_target": "validation_rule",
         "title": "Per-series CP2 floor enforcement",
-        "summary": "Many NVCA-form COIs include a floor on the AD-adjusted conversion price (e.g., CP2 cannot fall below OIP / 2). When ad_cp2_floor is set on a preferred series, the solver clamps CP2 at that value and emits a warning. Counsel verifies the floor matches the founder's actual charter.",
+        "summary": "Many NVCA-form charters cap how far an anti-dilution adjustment may push the conversion price down (e.g. it may not fall below half the original issue price, or below the original issue price itself). When the charter states such a floor, the round math applies the adjustment and then stops it at the floor. A floor EQUAL to the series' current conversion price admits no reduction at all, so the protection cannot operate; one set above it is a contradictory term and the round math refuses it outright rather than guessing. Counsel confirms the floor value against the founder's actual charter.",
         "implementation_action": "parameterize",
         "confidence": "medium",
         "source_ids": [
@@ -1545,7 +1545,7 @@
         "domain": "anti_dilution",
         "behavior_target": "warning_rule",
         "title": "CP2 was clamped to the per-series floor",
-        "summary": "Runtime event emitted when the AntiDilutionAdjuster's computed CP2 fell below the configured ad_cp2_floor and was clamped. Counsel reviews the un-floored CP2 + floor value to verify the clamp matches the founder's charter language.",
+        "summary": "Runtime event: the computed anti-dilution conversion price fell below the floor stated in the charter and was stopped there. Counsel reviews the unadjusted figure alongside the floor to confirm the limit matches the charter's language, since the floor determines how much protection the holder actually receives.",
         "implementation_action": "warn",
         "confidence": "high",
         "source_ids": [
