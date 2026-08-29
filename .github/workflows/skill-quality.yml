@@ -52,8 +52,10 @@ jobs:
           # `**/uv.lock` glob errors out on cache setup if no match.
           cache-dependency-glob: "**/pyproject.toml"
       - run: uv sync --extra dev
-      # `-m "not e2e"` is defensive: today none of these tests carry the e2e
-      # marker, but it prevents accidental marker drift from making this job
+      # `-m "not e2e and not mutation"` is defensive: today none of these four files carry
+      # either marker, but a command-line `-m` overrides pyproject's `addopts`, so naming only
+      # `e2e` would re-select the mutation corpus the moment one of them grew that marker.
+      # The e2e half prevents accidental marker drift from making this job
       # slow + paid in the future.
       - run: |
           uv run pytest \
@@ -61,13 +63,31 @@ jobs:
             founder-skills/tests/test_cowork_invariants.py \
             founder-skills/tests/test_skill_orchestration.py \
             founder-skills/tests/test_compose_invariants.py \
-            -v -m "not e2e"
+            -v -m "not e2e and not mutation"
       # THE WHOLE FREE SUITE, because this job is what the paid lane and the release tag
       # depend on. The four files above are the skill-quality meta-checks; the gate
       # authorization tests, the ledger grammar and the reconciliation rules live
       # elsewhere, so a tag could go green having run none of them. `ci.yml` runs the full
       # suite on push and PR, which covers merges — it does not cover the tag path.
       - run: uv run pytest founder-skills/tests/ -q
+
+  mutation-corpus:
+    name: Curated mutant corpus (cap-table)
+    # DISPATCH AND TAG ONLY. It is a ~3-minute structural check whose value is periodic, and the
+    # per-PR gate is already the thing people wait on. Running it on every PR would buy nothing a
+    # weekly/pre-release run does not, at the cost of the gate everyone blocks on.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/pyproject.toml"
+      - run: uv sync --extra dev
+      # `-m mutation` is required, not decorative: pyproject's `addopts` deselects the marker, so
+      # naming the file alone collects zero tests and reports green.
+      - run: uv run pytest founder-skills/tests/test_mutation_corpus.py -v -m mutation
 
   deck-review-e2e-smoke:
     # Job id kept as `deck-review-e2e-smoke` deliberately: it is the required status

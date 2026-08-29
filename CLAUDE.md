@@ -45,6 +45,15 @@
 - `founder-skills/tests/test_cap_table.py` — Cap-table regression tests (math producers + 11-gotcha regression suite)
 - `founder-skills/tests/test_cap_table_freeform.py` — Lane-3 freeform mapper tests (`freeform_mapper.map_freeform` golden maps + blockers + `--mode=freeform-emit` CLI + the `cap_state` `E_NO_EQUITY_BASE` guard)
 - `founder-skills/tests/test_visualize_cap_table.py` — Cap-table HTML visualization tests
+- `founder-skills/tests/mutation_corpus.py` + `test_mutation_corpus.py` — Curated mutant corpus over cap-table's
+  math producers: named defects injected into a temp-dir copy of the repo, with the cap-table selection asserted to
+  notice (`MUST_KILL`) or recorded as not noticing (`KNOWN_SURVIVORS`). Both lists are SHRINK-ONLY. The registry lives
+  in the non-`test_*` module **deliberately**: its mutants quote error-code literals verbatim, and inside a scanned
+  test file those payloads make `test_cap_table_guards.py`'s ratchets count a code as guarded that the corpus is
+  simultaneously recording as unguarded — measured, it dropped `test_error_code_assertion_ratchet` below its baseline.
+  Carries a **no-op control**: a comment-only mutant that must leave the selection PASSING, without which a broken
+  harness greens every entry. The two count ratchets are `--deselect`ed from the child run — a count ratchet is not a
+  defect detector, so a rename mutant can red it while noticing nothing.
 - `founder-skills/tests/cowork_async_subagent_filter.py` — Cowork sub-agent tool-name compatibility helper (skill-quality CI; v0.4.0-regression detector)
 - `cowork-tests/leak_scan.py` — Shared detector for founder-facing "internal plumbing" leaks in assistant narration. Ten classes: nine syntactic (script names, `*.py`, `--flags`, `$vars`, exit codes, `W_`/`E_` codes, JSON, step/route labels, ALLCAPS-with-underscore) plus `plumbing_verb`, which is semantic. Reads a cassette or a run dir's `events.jsonl` — point it at the FILE, since a directory glob finds only `*.json` and reports a silent false-clean.
 - `founder-skills/tests/test_founder_facing_leaks.py` — Ratchet over `leak_scan.py` across the committed cassettes. **Gates "no NEW leaks beyond `BASELINE`", not zero** — the cassettes predate the narration rule. Ratchet the constant DOWN after a re-record; never raise it.
@@ -549,7 +558,14 @@ uv run pytest                                       # all tests (e2e auto-skips 
 uv run pytest founder-skills/tests/ -v              # verbose
 uv run pytest founder-skills/tests/ -v -m "not e2e" # explicitly skip the LLM-driven e2e (free, fast)
 uv run pytest -m cowork                             # token-free cowork-harness cassette replay (needs `npm i -g cowork-harness@2.5.0` — exact, matching CI; no Docker/token)
+uv run pytest -m mutation                           # curated mutant corpus (~3 min; deselected by default — see the WARNING below)
 ```
+
+**`addopts` deselects `e2e` AND `mutation`, and a command-line `-m` OVERRIDES `addopts`.** So a bare
+`-m "not e2e"` silently RE-SELECTS the ~3-minute mutation corpus. Every explicit invocation in this repo
+says `-m "not e2e and not mutation"` — `ci.yml`'s test job, `skill-quality.yml`'s contract-tests job and
+`scripts/pre-tag.sh`. The mutation lane has its own `mutation-corpus` job (dispatch and tag only) and its own
+preflight gate; both must pass `-m mutation`, since naming the file alone collects nothing and reports green.
 
 **A skill's own test file is not what guards it.** `test_<skill>.py` covers the producers;
 `test_<skill>_skill_contract.py` covers the SKILL.md / agent-body contracts, and there are

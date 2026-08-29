@@ -70,12 +70,13 @@ ignore_missing_imports = true
 # hypothetical: an audit running the default suite on a macOS host began two paid
 # market-sizing runs nobody had approved. Opting IN is one flag (`-m e2e`), which is the
 # right side for the cost to sit on.
-addopts = "-m 'not e2e'"
+addopts = "-m 'not e2e and not mutation'"
 testpaths = ["founder-skills/tests"]
 python_files = "test_*.py"
 pythonpath = ["founder-skills/tests"]
 markers = [
     "e2e: end-to-end tests that invoke real LLMs (any of ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN / local `claude /login`; ~5-20 min wall time per run; ~$5-15 on API; subscription rate limits change — check Anthropic policy before using subscription for CI)",
+    "mutation: curated mutant-corpus regression (test_mutation_corpus.py). Copies the repo to a temp dir, injects each named defect, and asserts the cap-table selection notices (or records that it does not). ~3 min (measured), deselected from the default suite; run with `uv run pytest -m mutation`. NOTE: a command line `-m` OVERRIDES addopts, so every explicit `-m \"not e2e\"` invocation must say `-m \"not e2e and not mutation\"` or it silently re-selects this lane.",
     "cowork: token-free cowork-harness cassette replay via the shipped pytest helper (needs `npm i -g cowork-harness@2.5.0` (exact, matching CI); no Docker/token — deterministic replay only). Auto-skips when the CLI is absent. Run with `uv run pytest -m cowork`.",
 ]
 

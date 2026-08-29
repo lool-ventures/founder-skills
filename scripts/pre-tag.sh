@@ -59,8 +59,15 @@ run_gate "mypy cap-table"               uv run mypy founder-skills/skills/cap-ta
 run_gate "mypy tests"                   uv run mypy founder-skills/tests/
 
 # --- tests --------------------------------------------------------------------------------
-run_gate "pytest"            uv run pytest founder-skills/tests/ -q -m "not e2e"
+run_gate "pytest"            uv run pytest founder-skills/tests/ -q -m "not e2e and not mutation"
 run_gate "pytest evals"      uv run pytest evals/cap-table/ -q
+# Deselected from the run above by `addopts`, so it needs its own invocation with `-m mutation`
+# (without the flag it collects nothing and reports green). ~3 min: it copies the repo to a temp
+# dir once, then injects each named defect and re-runs the cap-table selection. Mirrors the
+# `mutation-corpus` job in
+# skill-quality.yml, which fires on tag push — i.e. AFTER the tag exists, which is the wrong side
+# of the decision this script is for.
+run_gate "mutation corpus"   uv run pytest founder-skills/tests/test_mutation_corpus.py -q -m mutation
 
 # --- privacy ------------------------------------------------------------------------------
 run_gate "privacy guard"     uv run python scripts/privacy_guard.py --tree --no-names
