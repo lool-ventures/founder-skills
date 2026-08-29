@@ -223,8 +223,8 @@ def _unasserted_rules() -> tuple[list[str], list[str]]:
 # Measured baselines. RATCHETS: they may only shrink. The counsel figure is tracked separately because
 # a counsel-review rule is an obligation a founder is told to take to a lawyer -- a silently-suppressed
 # one is the most expensive thing this skill can get wrong.
-UNASSERTED_RULE_BASELINE = 56
-UNASSERTED_COUNSEL_RULE_BASELINE = 23
+UNASSERTED_RULE_BASELINE = 55
+UNASSERTED_COUNSEL_RULE_BASELINE = 22
 
 
 def test_rule_assertion_ratchet() -> None:
@@ -286,3 +286,226 @@ class TestRuleApplicabilityPredicates:
         unknown = rule_audit._evaluate_freshness(None, date(2026, 1, 1), date(2026, 2, 1))
         fresh = rule_audit._evaluate_freshness(date(2026, 1, 15), date(2026, 1, 1), date(2026, 2, 1))
         assert unknown != fresh, f"a benchmark with no reference date scores {unknown!r}, same as fresh"
+
+
+class TestConciseReportDoesNotClobberOnReject:
+    """A rejected concise run must leave the founder-facing markdown untouched.
+
+    It used to render, WRITE, then evaluate, then return 2 — leaving a file the producer had just
+    called empty at the path the founder is pointed to. Milder than the defect `_fail_invalid` exists
+    for (those six wrote a stub through `-o` and returned 0) but the same shape: an honest exit code
+    and a dishonest artifact.
+    """
+
+    @staticmethod
+    def _run(tmp_path: Path, scenarios: dict, prior: str) -> tuple[int, str, str, str]:
+        import subprocess
+
+        inputs = {
+            "company_name": "X",
+            "founders": [{"founder_id": "f1", "name": "A", "common_shares": 8_000_000}],
+            "metadata": {"run_id": "t", "schema_version": "v0.5.0-inputs"},
+        }
+        (tmp_path / "in.json").write_text(json.dumps(inputs), encoding="utf-8")
+        (tmp_path / "sc.json").write_text(json.dumps(scenarios), encoding="utf-8")
+        out = tmp_path / "out.md"
+        out.write_text(prior, encoding="utf-8")
+        r = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "concise_report.py"),
+                "--inputs",
+                str(tmp_path / "in.json"),
+                "--scenarios",
+                str(tmp_path / "sc.json"),
+                "--run-id",
+                "t",
+                "-o",
+                str(out),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        return r.returncode, r.stdout, r.stderr, out.read_text(encoding="utf-8")
+
+    def test_rejected_render_leaves_the_prior_markdown_intact(self, tmp_path: Path) -> None:
+        rc, stdout, stderr, body = self._run(tmp_path, {"scenarios": [], "metadata": {"run_id": "t"}}, "PRIOR")
+        assert rc != 0, "an empty concise answer must not report success"
+        assert body == "PRIOR", (
+            "the rejected run overwrote the founder-facing markdown. The prior good answer is gone and "
+            f"what replaced it is the one the producer called empty. body={body!r}"
+        )
+        assert '"ok": false' in stdout.replace(" ", "").replace('"ok":false', '"ok": false'), stdout
+        assert "left unchanged" in stderr, stderr
+
+    def test_ok_render_still_writes(self, tmp_path: Path) -> None:
+        """Non-vacuity: the guard must not block a real answer."""
+        scenarios = {
+            "metadata": {"run_id": "t"},
+            "scenarios": [
+                {
+                    "scenario_id": "s",
+                    "label": "Series A",
+                    "type": "priced_round",
+                    "parameters": {"pre_money": 12_000_000, "new_money": 3_000_000},
+                    "computed_outputs": {
+                        "completeness": "full",
+                        "aggregate_ownership_by_class": {"founders_pct": 0.63, "new_money_pct": 0.20},
+                        "equity_financing_price": 1.1813,
+                    },
+                }
+            ],
+        }
+        rc, _stdout, _stderr, body = self._run(tmp_path, scenarios, "PRIOR")
+        assert rc == 0, f"a complete scenario was rejected: {_stdout} {_stderr}"
+        assert body != "PRIOR" and body.strip(), "an accepted render wrote nothing"
+
+
+class TestWarrantHolderElection:
+    """`holder_election` — an entire warrant settlement type with no test.
+
+    A holder-election warrant lets the holder choose cash exercise or net-share settlement AT exercise.
+    The choice changes the share count added to the cap table, so getting it wrong changes every
+    founder percentage downstream. `warrant_exercise.py` is the lowest-covered cap-table file (66%) and
+    this branch is the reason.
+    """
+
+    @staticmethod
+    def _warrant(choice: object) -> dict:
+        return {
+            "warrant_id": "w1",
+            "settlement_type": "holder_election",
+            "holder_election_choice": choice,
+            "shares_underlying": 100_000,
+            "exercise_price": 1.0,
+        }
+
+    def test_election_of_cash_routes_to_cash_exercise(self) -> None:
+        import warrant_exercise  # type: ignore[import-not-found]
+
+        r = warrant_exercise.exercise_warrant(
+            self._warrant("cash"), last_priced_round_pps=2.0, pre_money=None, pre_pump_fully_diluted=None
+        )
+        assert r["exercise_path"] == "holder_election -> cash_exercise", r
+
+    def test_election_of_net_share_routes_to_net_share_settlement(self) -> None:
+        import warrant_exercise  # type: ignore[import-not-found]
+
+        r = warrant_exercise.exercise_warrant(
+            self._warrant("net_share"), last_priced_round_pps=2.0, pre_money=None, pre_pump_fully_diluted=None
+        )
+        assert r["exercise_path"] == "holder_election -> net_share_settlement", r
+        assert r["shares_added"] != 100_000, (
+            "net-share settlement must withhold shares to cover the exercise price; adding the full "
+            f"underlying count means the founder is diluted as if the holder paid cash. {r}"
+        )
+
+    def test_unspecified_election_is_refused_not_guessed(self) -> None:
+        """The one that matters: an unstated choice must NOT silently default to either branch."""
+        import warrant_exercise  # type: ignore[import-not-found]
+
+        with pytest.raises(warrant_exercise.WarrantPumpError) as excinfo:
+            warrant_exercise.exercise_warrant(
+                self._warrant(None), last_priced_round_pps=2.0, pre_money=None, pre_pump_fully_diluted=None
+            )
+        assert "E_WARRANT_HOLDER_ELECTION_UNSPECIFIED" in str(excinfo.value)
+
+
+class TestComputedReachesTheRenderedReport:
+    """The "computed, not rendered" class — which this repo records as UNGATED for cap-table.
+
+    `test_delivery_coverage.py` lists cap-table in `_UNGATED_SKILLS` for exactly this defect class: a
+    producer computes a number and the renderer never prints it, or prints a different one. The
+    per-series anti-dilution breakdown is the clearest instance — 115 statements of
+    `render_report_markdown` execute in no test, so no composed `report.md` in the suite has ever
+    contained this block, and the fleet's founder-text scan cannot inspect a section that never rendered.
+
+    NOT a leak, checked: the `(rule: ...)` provenance token this block emits is a type-3 identifier
+    under `_founder_text` (`_ID_KEY_SUFFIXES` includes `_id`), preserved verbatim on purpose so an id
+    correlates across report.md, the explorer and the counsel packet. cap-table ships
+    `_Provenance: rules:` lines in production for the same reason. Asserting it away would break
+    traceability, so this asserts the NUMBERS instead.
+    """
+
+    @staticmethod
+    def _artifacts(ccp_before: float, ccp_after: float) -> dict:
+        scen = {
+            "metadata": {"run_id": "t"},
+            "scenarios": [
+                {
+                    "scenario_id": "s",
+                    "label": "Series A",
+                    "type": "priced_round",
+                    "parameters": {"pre_money": 12_000_000, "new_money": 3_000_000},
+                    "computed_outputs": {
+                        "completeness": "full",
+                        "aggregate_ownership_by_class": {"founders_pct": 0.63},
+                        "equity_financing_price": 1.18,
+                        "anti_dilution_breakdown": [
+                            {
+                                "series_id": "series_a",
+                                "protection_type": "broad_based_weighted_average",
+                                "ccp_before": ccp_before,
+                                "ccp_after": ccp_after,
+                                "floor_applied": False,
+                                "rule_id": "anti_dilution.trigger_basis_current_conversion_price",
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+        return {
+            "inputs.json": {
+                "company_name": "X",
+                "founders": [{"founder_id": "f1", "name": "A", "common_shares": 8_000_000}],
+                "metadata": {"run_id": "t", "schema_version": "v0.5.0-inputs"},
+            },
+            "cap_state.json": {
+                "as_converted_totals": {
+                    "fully_diluted_shares": 8_000_000,
+                    "common_shares": 8_000_000,
+                    "preferred_shares_as_converted": 0,
+                    "options_outstanding": 0,
+                    "options_available": 0,
+                    "warrants_underlying_total": 0,
+                },
+                "outstanding_safes": [],
+                "metadata": {"run_id": "t"},
+            },
+            "scenarios.json": scen,
+            "rule_audit.json": {"date_sensitive_watchlist": [], "metadata": {"run_id": "t"}},
+            "counsel_packet.json": {"items": [], "metadata": {"run_id": "t"}},
+        }
+
+    def _render(self, ccp_before: float, ccp_after: float) -> str:
+        import compose_report  # type: ignore[import-not-found]
+
+        md: str = compose_report.render_report_markdown(
+            artifacts=self._artifacts(ccp_before, ccp_after),
+            validation_warnings=[],
+            insertion_marker="MARKER",
+        )
+        return md
+
+    def test_anti_dilution_breakdown_reaches_the_report(self) -> None:
+        md = self._render(1.0, 0.82)
+        assert "Anti-dilution adjustments (per series)" in md, (
+            "the per-series AD breakdown was computed and never rendered. A founder whose preferred "
+            "conversion price moved is not told it moved."
+        )
+
+    def test_rendered_conversion_prices_are_the_computed_ones(self) -> None:
+        """Computed == rendered. The check the delivery-coverage map records as missing here.
+
+        Asserting the section merely EXISTS would pass against a renderer printing constants; these
+        are two different CCP pairs and the rendered text must track them.
+        """
+        for before, after in ((1.0, 0.82), (2.5, 1.25)):
+            md = self._render(before, after)
+            line = next((line for line in md.splitlines() if "CCP $" in line), None)
+            assert line, f"no CCP line rendered for {before} -> {after}"
+            assert f"${before:.4f}" in line and f"${after:.4f}" in line, (
+                f"renderer printed {line!r} for a breakdown computed as CCP {before} -> {after}. "
+                "The founder is reading a number the math did not produce."
+            )

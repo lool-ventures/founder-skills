@@ -185,6 +185,33 @@ def main() -> int:
         return 2
 
     md = render(inputs, scenarios_doc, rule_audit, cap_state=cap_state)
+
+    # DECIDE BEFORE WRITING. This used to write the markdown, then evaluate it, then return 2 --
+    # leaving a file the producer itself had just called empty sitting at the founder-facing path.
+    # That is the defect `_fail_invalid` exists to prevent (CLAUDE.md, Script Conventions: "-o left
+    # untouched"), in its milder form: the original six producers wrote a stub through `-o` and
+    # returned 0; this wrote a stub through `-o` and returned 2. The exit code was honest and the
+    # artifact was not, and a founder is pointed at the artifact.
+    #
+    # Precedence note, since it reads as a bug and is not one: `not md.strip() or ("—" in md and
+    # "Founders" not in md)`. Empty -> reject; em-dash placeholders with no Founders section ->
+    # reject; a real answer containing an em-dash -> accept. The truth table is intended.
+    rejected = not md.strip() or ("—" in md and "Founders" not in md)
+    if rejected:
+        payload = {
+            "ok": False,
+            "path": args.output_md,
+            "run_id": args.run_id,
+            "warning": "rendered answer looks empty — check scenarios.json computed_outputs",
+        }
+        print(json.dumps(payload, indent=2 if args.pretty else None))
+        print(
+            "Error: concise answer rendered empty, no output written: check scenarios.json computed_outputs",
+            file=sys.stderr,
+        )
+        print(f"Error: {os.path.abspath(args.output_md)} was left unchanged.", file=sys.stderr)
+        return 2
+
     with open(args.output_md, "w", encoding="utf-8") as fh:
         fh.write(md)
 
@@ -195,11 +222,8 @@ def main() -> int:
         "bytes": len(md),
         "run_id": args.run_id,
     }
-    if not md.strip() or "—" in md and "Founders" not in md:
-        receipt["ok"] = False
-        receipt["warning"] = "rendered answer looks empty — check scenarios.json computed_outputs"
     print(json.dumps(receipt, indent=2 if args.pretty else None))
-    return 0 if receipt["ok"] else 2
+    return 0
 
 
 if __name__ == "__main__":

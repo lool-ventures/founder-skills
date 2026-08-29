@@ -8,6 +8,15 @@ docs/internal/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+# Coverage artifacts. Never commit these: `.coverage` is a per-run binary SQLite file that stores
+# ABSOLUTE paths (`/Users/<name>/...`), so it is machine-specific, changes on every run, and leaks a
+# local directory layout into a public repo. `.coverage.*` are the per-process files that subprocess
+# tracing produces before `coverage combine` — measuring this repo correctly yields ~1,600 of them,
+# because the tests drive producers via subprocess.
+.coverage
+.coverage.*
+coverage.json
+htmlcov/
 .venv/
 uv.lock
 .worktrees/
