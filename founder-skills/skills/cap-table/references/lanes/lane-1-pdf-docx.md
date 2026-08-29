@@ -253,6 +253,8 @@ After the sub-agent returns, gate the hand-off per the Context A hand-off protoc
         "liquidation_preference_type": "non_participating",
         "participation_cap_multiple": null,
         "anti_dilution_protection": "broad_based_weighted_average",
+        "ad_cp2_floor": null,
+        "ad_a_denominator_basis": null,
         "dividend_rate_percent": 0.08,
         "dividend_cumulative": true,
         "pro_rata_rights": true

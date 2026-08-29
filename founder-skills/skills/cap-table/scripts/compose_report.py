@@ -1251,6 +1251,23 @@ def render_report_markdown(
             # When AD fires, show three-way headline (pre-AD baseline /
             # coupled with-AD / delta) so founders understand the AD impact.
             ad_breakdown = co.get("anti_dilution_breakdown") or []
+            # A breakdown row with ccp_before == ccp_after is an adjustment that was ATTEMPTED and
+            # changed nothing — the ordinary result of the OIP trigger convention, which widens the
+            # window in which the math runs without widening the range in which it moves anything.
+            # Rendering those produced a founder-facing "anti-dilution-aware" block reporting
+            # "+0.00 pp of additional dilution from anti-dilution adjustment" for a down round that
+            # never adjusted. `cap_state_after_round.py` already applies this same filter before
+            # writing a history event; the renderer did not.
+            ad_breakdown = [
+                b
+                for b in ad_breakdown
+                if not (
+                    isinstance(b, dict)
+                    and isinstance(b.get("ccp_before"), (int, float))
+                    and isinstance(b.get("ccp_after"), (int, float))
+                    and abs(float(b["ccp_before"]) - float(b["ccp_after"])) < 1e-9
+                )
+            ]
             if ad_breakdown:
                 pre_ad_founder = agg.get("founders_pct_pre_anti_dilution")
                 post_ad_founder = agg.get("founders_pct")

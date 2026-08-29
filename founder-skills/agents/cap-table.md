@@ -503,6 +503,7 @@ This sub-context exists specifically for AoA documents. CLAs and convertible sec
 - `participation_cap_multiple` (number | null) — only when `participating_capped`
 - `anti_dilution_protection` (enum) — one of `none | broad_based_weighted_average | narrow_based_weighted_average | full_ratchet`. Israeli AoAs use "Adjustment of Conversion Price" phrasing for BBWA.
 - `ad_cp2_floor` (number | null) — a FLOOR on how far anti-dilution may reduce the conversion price, when the charter states one. Phrased as a proviso inside the same "Adjustment of Conversion Price" article, e.g. *"provided, however, that in no event shall the Conversion Price be reduced below US$ X.XX"* or *"below the Original Issue Price"* (in which case the floor IS the OIP — resolve it to the number). Return `null` when the article states no floor; do not infer one. Getting this wrong is not cosmetic: a missed floor understates founder ownership, because it lets the adjusted conversion price fall further than the charter allows.
+- `ad_a_denominator_basis` (`"nvca_broad"` | `"nvca_narrow"` | null) — which shares count in the weighted-average denominator, when the "Adjustment of Conversion Price" article spells it out. Broad-based language counts outstanding shares *plus* options/convertibles ("on a fully-diluted basis"); narrow-based counts only outstanding preferred. Return `null` when the article does not distinguish them — a default is derived from `anti_dilution_protection`, and guessing here costs the founder 0.24–0.47 percentage points.
 - `dividend_rate_percent` (number | null)
 - `dividend_cumulative` (boolean)
 - `pro_rata_rights` (boolean)
@@ -667,6 +668,8 @@ This sub-context exists specifically for AoA documents. CLAs and convertible sec
         "liquidation_preference_type": "participating",
         "participation_cap_multiple": null,
         "anti_dilution_protection": "broad_based_weighted_average",
+        "ad_cp2_floor": null,
+        "ad_a_denominator_basis": null,
         "dividend_rate_percent": 0.08,
         "dividend_cumulative": true,
         "pro_rata_rights": true

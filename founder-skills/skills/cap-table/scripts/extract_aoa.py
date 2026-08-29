@@ -65,6 +65,10 @@ VALID_ANTI_DILUTION = {
     "full_ratchet",
 }
 VALID_JURISDICTIONS = {"israeli", "delaware"}
+# Only the two shapes `_compute_a_denominator` implements. A charter defining a third broad-based
+# variant (e.g. one excluding the unallocated reserve) has no representation here -- returning null
+# and letting counsel resolve it is correct; picking the nearer value would be a silent misread.
+VALID_AD_A_DENOMINATOR_BASES = {"nvca_broad", "nvca_narrow"}
 
 
 def validate_aoa_extraction(extraction: dict[str, Any]) -> list[str]:
@@ -168,6 +172,21 @@ def validate_aoa_extraction(extraction: dict[str, Any]) -> list[str]:
         floor = series.get("ad_cp2_floor")
         if floor is not None and (not isinstance(floor, (int, float)) or floor <= 0):
             errors.append(f"{ctx}.ad_cp2_floor must be > 0 when present; got {floor!r}")
+
+        # Weighted-average DENOMINATOR basis. Broad-based counts the option pool and other
+        # convertibles in the "A" term; narrow-based counts only outstanding preferred, which makes
+        # the adjustment more favourable to the holder and costs the founder more. Measured on a
+        # representative round, the two differ by 0.24-0.47 percentage points of founder ownership.
+        #
+        # `cap_state.py` stamps a default derived from `anti_dilution_protection`, which is right for
+        # the ordinary charter that labels its protection consistently. Extraction is the only route
+        # by which a charter that does NOT can reach the math -- and the derived default gives no
+        # signal that it was a guess.
+        basis = series.get("ad_a_denominator_basis")
+        if basis is not None and basis not in VALID_AD_A_DENOMINATOR_BASES:
+            errors.append(
+                f"{ctx}.ad_a_denominator_basis must be one of {sorted(VALID_AD_A_DENOMINATOR_BASES)}; got {basis!r}"
+            )
 
     return errors
 

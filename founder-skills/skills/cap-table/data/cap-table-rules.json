@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "version": "0.4.3",
+    "version": "0.4.4",
     "generated_date": "2026-05-21",
     "purpose": "Verified source-backed rule pack for the cap-table skill: SAFE conversion, convertible-note math, option-pool top-up, anti-dilution (including coupled-AD priced-round variants), Israeli equity-tax + AoA gotchas, Delaware cross-border / flip mechanics, and founder benchmarks. Every rule cites a primary or near-primary source (NVCA Model Certificate of Incorporation, Y Combinator SAFE primer / documents, Cooley GO down-round article, Israeli Companies Law / Income Tax Ordinance, Carta benchmarks, etc.). Version history lives in CHANGELOG.md.",
     "source_policy": "Rules cite original quotable legal documents, issuer documents, official agency pages, law-firm publications, and benchmark datasets. AI research notes and intermediate consolidated files are excluded from final references."
@@ -1384,7 +1384,7 @@
         "domain": "anti_dilution",
         "behavior_target": "script_formula",
         "title": "BBWA applied within the coupled priced-round solver",
-        "summary": "Same BBWA formula as anti_dilution.broad_based_weighted_average, but applied per-iteration inside the priced_round.solve_priced_round fixed-point solver. CP1 is frozen at iter 0 (the original CCP); new_pps moves through the iteration; the AD adjustment mutates current_conversion_price on the preferred series and the orchestrator recomputes as_converted_totals so subsequent stages see AD-adjusted preferred-as-converted in total_FD.",
+        "summary": "Same BBWA formula as anti_dilution.broad_based_weighted_average, but applied per-iteration inside the priced_round.solve_priced_round fixed-point solver. CP1 is frozen at iter 0 (the original CCP); the new price per share moves through the iteration; the AD adjustment mutates current_conversion_price on the preferred series and the orchestrator recomputes the as-converted totals so subsequent stages see AD-adjusted preferred-as-converted in total_FD.",
         "implementation_action": "hardcode",
         "confidence": "high",
         "source_ids": [
@@ -1439,7 +1439,7 @@
         "domain": "anti_dilution",
         "behavior_target": "validation_rule",
         "title": "OIP-based AD trigger threshold (term-sheet variant)",
-        "summary": "The NVCA Model COI §4.4.4 trigger compares the new issuance price against 'the Series A Conversion Price in effect immediately prior to such issuance' (= the current conversion price CP1). Some term sheets and charters instead trigger on the series' original_issue_price (OIP). When OIP == CP1 (no prior AD) the two are equivalent; when a prior AD round has already reduced CP1 below OIP, the OIP basis fires on a wider window of down-rounds (any price below OIP, including prices above CP1). This implementation defaults ad_trigger_basis to 'original_issue_price' as a conservative charter-specific variant. Note: the BBWA formula's B-divisor and the inner new_pps >= CP1 guard both use CP1 regardless of this trigger flag, so the computed CP2 is always anchored to CP1; the trigger flag only governs whether AD fires at all for a given new_pps.",
+        "summary": "The NVCA Model COI §4.4.4 trigger compares the new issuance price against 'the Series A Conversion Price in effect immediately prior to such issuance' (= the current conversion price CP1). Some term sheets and charters instead trigger on the series' original_issue_price (OIP). When OIP == CP1 (no prior AD) the two are equivalent; when a prior AD round has already reduced CP1 below OIP, the OIP basis fires on a wider window of down-rounds (any price below OIP, including prices above CP1). This implementation defaults the trigger-price convention to 'original_issue_price' as a conservative charter-specific variant. Note: the BBWA formula's B-divisor and the inner the new price per share >= CP1 guard both use CP1 regardless of this trigger flag, so the computed CP2 is always anchored to CP1; the trigger flag only governs whether AD fires at all for a given the new price per share.",
         "implementation_action": "parameterize",
         "confidence": "medium",
         "source_ids": [
@@ -1460,7 +1460,7 @@
         "domain": "anti_dilution",
         "behavior_target": "validation_rule",
         "title": "NVCA-model AD trigger threshold: Conversion Price in effect immediately prior (CP1)",
-        "summary": "NVCA Model COI §4.4.4 triggers anti-dilution when shares are issued 'for a consideration per share less than the Series A Conversion Price in effect immediately prior to such issuance' — that is, the current conversion price (CP1), not the original issue price (OIP). Per-series ad_trigger_basis=current_conversion_price implements this NVCA model trigger. When CCP < OIP (post-prior-AD state), the CP1 trigger fires on a narrower window than the OIP trigger: only prices below CP1 (not merely below OIP) trigger AD. This is the stricter (less founder-dilutive) trigger from the investor's perspective in a multi-round context.",
+        "summary": "NVCA Model COI §4.4.4 triggers anti-dilution when shares are issued 'for a consideration per share less than the Series A Conversion Price in effect immediately prior to such issuance' — that is, the current conversion price (CP1), not the original issue price (OIP). Per-series the trigger-price convention=current_conversion_price implements this NVCA model trigger. When CCP < OIP (post-prior-AD state), the CP1 trigger fires on a narrower window than the OIP trigger: only prices below CP1 (not merely below OIP) trigger AD. This is the stricter (less founder-dilutive) trigger from the investor's perspective in a multi-round context.",
         "implementation_action": "parameterize",
         "confidence": "high",
         "source_ids": [
@@ -1480,7 +1480,7 @@
         "domain": "anti_dilution",
         "behavior_target": "validation_rule",
         "title": "Broad-based A denominator components (NVCA §4.4.4 core + market broad variant)",
-        "summary": "This implementation's nvca_broad A = common stock outstanding + preferred stock outstanding (as-converted) + options and warrants outstanding + shares reserved but unissued under equity plans (the option pool). The NVCA Model COI §4.4.4 A definition includes 'shares of Common Stock outstanding immediately prior' treating as outstanding all shares issuable upon exercise of 'Options outstanding' (where Option is defined to include warrants) and upon conversion of 'Convertible Securities (including the Series A Preferred Stock) outstanding'. A NVCA §4.4.4 footnote describes including 'all shares reserved under stock plans, whether or not subject to outstanding options' as 'an even broader formula' beyond the model text. This implementation adopts the footnote's broader variant by including the unallocated pool. Default when anti_dilution_protection=broad_based_weighted_average.",
+        "summary": "This implementation's the broad-based denominator A = common stock outstanding + preferred stock outstanding (as-converted) + options and warrants outstanding + shares reserved but unissued under equity plans (the option pool). The NVCA Model COI §4.4.4 A definition includes 'shares of Common Stock outstanding immediately prior' treating as outstanding all shares issuable upon exercise of 'Options outstanding' (where Option is defined to include warrants) and upon conversion of 'Convertible Securities (including the Series A Preferred Stock) outstanding'. A NVCA §4.4.4 footnote describes including 'all shares reserved under stock plans, whether or not subject to outstanding options' as 'an even broader formula' beyond the model text. This implementation adopts the footnote's broader variant by including the unallocated pool. Default when anti_dilution_protection=broad_based_weighted_average.",
         "implementation_action": "parameterize",
         "confidence": "high",
         "source_ids": [
@@ -1496,7 +1496,7 @@
         "domain": "anti_dilution",
         "behavior_target": "validation_rule",
         "title": "Narrow-based A denominator components (NVCA footnote narrow variant)",
-        "summary": "This implementation's nvca_narrow A = common stock outstanding + preferred stock outstanding (as-converted) only. Excludes options, warrants, and reserved-pool shares. The NVCA §4.4.4 footnote describes a 'narrower formula' that 'might include…only those shares of Common Stock that are actually outstanding (i.e., excluding shares…issuable on conversion of options, warrants and, potentially, even the Preferred Stock itself)'. This implementation includes as-converted preferred (a moderate narrow variant that excludes options and warrants). Default when anti_dilution_protection=narrow_based_weighted_average.",
+        "summary": "This implementation's the narrow-based denominator A = common stock outstanding + preferred stock outstanding (as-converted) only. Excludes options, warrants, and reserved-pool shares. The NVCA §4.4.4 footnote describes a 'narrower formula' that 'might include…only those shares of Common Stock that are actually outstanding (i.e., excluding shares…issuable on conversion of options, warrants and, potentially, even the Preferred Stock itself)'. This implementation includes as-converted preferred (a moderate narrow variant that excludes options and warrants). Default when anti_dilution_protection=narrow_based_weighted_average.",
         "implementation_action": "parameterize",
         "confidence": "medium",
         "source_ids": [
@@ -1529,7 +1529,7 @@
         "domain": "anti_dilution",
         "behavior_target": "validation_rule",
         "title": "Anti-dilution adjusts the conversion price DOWNWARD only",
-        "summary": "A broad-based weighted-average or full-ratchet anti-dilution adjustment protects the holder against a lower-priced issuance by REDUCING the conversion price. An adjustment that raises it (CP2 > CP1) is not a protection and has no basis in the NVCA form: the charter's floor limits how far CP2 may FALL, so a floor set above CP1 is a contradictory term rather than a binding one. Producers must reject a per-series ad_cp2_floor greater than the current conversion price, and must not emit a computed CP2 above CP1.",
+        "summary": "A broad-based weighted-average or full-ratchet anti-dilution adjustment protects the holder against a lower-priced issuance by REDUCING the conversion price. An adjustment that raises it (CP2 > CP1) is not a protection and has no basis in the NVCA form: the charter's floor limits how far CP2 may FALL, so a floor set above CP1 is a contradictory term rather than a binding one. Producers must reject a per-series a charter floor on the adjusted conversion price greater than the current conversion price, and must not emit a computed CP2 above CP1.",
         "implementation_action": "hardcode",
         "confidence": "high",
         "source_ids": [
@@ -1554,7 +1554,7 @@
         "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "US startup market; charter-specific",
-        "applies_when": "Use when the solver emits W_CP2_FLOOR_APPLIED warning."
+        "applies_when": "Use when the solver emits the conversion-price-floor warning warning."
       },
       {
         "rule_id": "anti_dilution.stale_ccp_detected",
@@ -1570,7 +1570,7 @@
         "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "US startup market; data-integrity check",
-        "applies_when": "Use when the solver emits W_STALE_CCP_SUSPECTED warning."
+        "applies_when": "Use when the solver emits the stale-conversion-price warning warning."
       },
       {
         "rule_id": "anti_dilution.solver_diverged",
@@ -1607,7 +1607,7 @@
         "domain": "anti_dilution",
         "behavior_target": "warning_rule",
         "title": "Aitken Δ² acceleration engaged",
-        "summary": "Convergence-guard event: the solver estimated |f'_est| > 0.9 for 3+ iterations and switched to Aitken Δ² acceleration to project the fixed-point limit. Per the Shanks transformation, p* ≈ p_{n-2} - (p_{n-1} - p_{n-2})² / (p_n - 2 p_{n-1} + p_{n-2}).",
+        "summary": "Convergence-guard event: the solver estimated |f'_est| > 0.9 for 3+ iterations and switched to Aitken Δ² acceleration to project the fixed-point limit. Per the Shanks transformation, p* ≈ p_{n-2} - (p_{n-1} - p_{n-2})² / (the iterate - 2 p_{n-1} + p_{n-2}).",
         "implementation_action": "warn",
         "confidence": "high",
         "source_ids": [
@@ -1788,7 +1788,7 @@
         "domain": "anti_dilution",
         "behavior_target": "counsel_review_flag",
         "title": "Pay-to-play provision detected in AoA",
-        "summary": "Text-pattern detection from extract_aoa.py: the founder's Articles of Association include a pay-to-play provision (preferred holder must participate pro-rata in the new round or forfeit AD protection / convert to common). The current solver does NOT implement pay-to-play math; the rule fires as a counsel-review item flagging the gap. If the founder has investors that may not participate, the dilution numbers may over-protect them.",
+        "summary": "Text-pattern detection from the Articles-of-Association reader: the founder's Articles of Association include a pay-to-play provision (preferred holder must participate pro-rata in the new round or forfeit AD protection / convert to common). The current solver does NOT implement pay-to-play math; the rule fires as a counsel-review item flagging the gap. If the founder has investors that may not participate, the dilution numbers may over-protect them.",
         "implementation_action": "counsel_review",
         "confidence": "medium",
         "source_ids": [
@@ -1797,7 +1797,7 @@
         "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "US startup market; charter-specific",
-        "applies_when": "Use when extract_aoa.py detects pay-to-play text patterns OR a founder/agent explicitly identifies the provision.",
+        "applies_when": "Use when the Articles-of-Association reader detects pay-to-play text patterns OR a founder/agent explicitly identifies the provision.",
         "warnings": [
           "Current limitation: AD math does not model pay-to-play forced conversion. Counsel verifies whether each AD-protected holder will participate at full pro-rata."
         ]
@@ -2003,7 +2003,7 @@
         "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "Israel",
-        "applies_when": "Use when an Israeli AoA defines a drag-along right with a threshold strictly less than 75% (i.e., < 0.75 of issued share capital + relevant class consents). Detected via the extract_aoa.py validator from the AoA's drag-along provision.",
+        "applies_when": "Use when an Israeli AoA defines a drag-along right with a threshold strictly less than 75% (i.e., < 0.75 of issued share capital + relevant class consents). Detected via the the Articles-of-Association reader validator from the AoA's drag-along provision.",
         "warnings": [
           "75% is the Israeli market norm; sub-75% thresholds may be unenforceable in fiduciary-duty disputes per Israeli Companies Law §341.",
           "Confirm drag-along structure with Israeli counsel before signing or relying on the provision."
@@ -2023,7 +2023,7 @@
         "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "Israel",
-        "applies_when": "Use when an Israeli AoA is extracted and the section_102_plan_reference flag is false. Detected by extract_aoa.py.",
+        "applies_when": "Use when an Israeli AoA is extracted and the section_102_plan_reference flag is false. Detected by the Articles-of-Association reader.",
         "warnings": [
           "Filing §102 with the ITA 30 days before the first grant is mandatory for capital-gains-track treatment; missing this deadline forces ordinary-income classification.",
           "If the company has already granted options without a §102 plan in place, those grants likely fall under §3(i) (ordinary income) — confirm with Israeli tax counsel."
@@ -2043,7 +2043,7 @@
         "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "Israel",
-        "applies_when": "Use when a preferred-series block extracted from an Israeli AoA has liquidation_preference_multiple > 1.0. Detected by extract_aoa.py.",
+        "applies_when": "Use when a preferred-series block extracted from an Israeli AoA has liquidation_preference_multiple > 1.0. Detected by the Articles-of-Association reader.",
         "warnings": [
           "Above-1x liquidation preferences materially shift exit waterfall in favor of preferred holders — confirm with founder + counsel that the terms reflect actual negotiated downside protection (not boilerplate error).",
           "Israeli courts have not consistently upheld above-2x preferences in fiduciary-duty challenges; document the commercial rationale at the time of issuance."
@@ -2064,7 +2064,7 @@
         "source_basis": "primary",
         "counsel_review": true,
         "jurisdiction": "Israel",
-        "applies_when": "Use when a preferred-series block extracted from an Israeli AoA has anti_dilution_protection='full_ratchet'. Detected by extract_aoa.py.",
+        "applies_when": "Use when a preferred-series block extracted from an Israeli AoA has anti_dilution_protection='full_ratchet'. Detected by the Articles-of-Association reader.",
         "warnings": [
           "Broad-based weighted average is the market norm in Israel; full ratchet is a red flag for founder dilution exposure.",
           "Cooley GO reports < 5% of US Series A AoAs use full ratchet; even rarer in Israel. Confirm with counsel that this was negotiated, not boilerplate error.",
@@ -2447,7 +2447,7 @@
           "cap_table_adjacent_counsel"
         ],
         "jurisdiction": "Delaware and Israel",
-        "applies_when": "Use when cap_state.aoa_findings.dividend_provisions_present is true (the AoA was extracted and includes a dividend provision). The rule fires regardless of jurisdiction because dividend provisions are not Delaware/Israel-specific.",
+        "applies_when": "Use when the cap-table state.aoa_findings.dividend_provisions_present is true (the AoA was extracted and includes a dividend provision). The rule fires regardless of jurisdiction because dividend provisions are not Delaware/Israel-specific.",
         "warnings": [
           "Cap-table conversion economics here ignore any accruing dividend; founders should confirm with counsel whether the exit waterfall changes the conversion math.",
           "If the dividend is cumulative + PIK, the preferred-conversion shares grow over time and the founder dilution shown here may be understated."
@@ -2458,7 +2458,7 @@
         "domain": "cap_table",
         "behavior_target": "counsel_review_flag",
         "title": "Preferred pricing unknown — anti-dilution and 1:1 conversion assumption disclosed to counsel",
-        "summary": "One or more preferred series is marked pricing_unknown because the founder/mapper could not confirm the actual original_issue_price / original_conversion_price / current_conversion_price. The skill substitutes a numeric $1.00 sentinel for all three prices (so the schema's required-numeric and >0 gates pass without fabricating a real price) and forces anti_dilution_protection to 'none' for that series, since anti-dilution adjustment formulas are defined against the original issue/conversion price and cannot be run against a placeholder. This means anti-dilution and liquidation preference are NOT modeled for the series, and the conversion ratio is assumed 1:1 (original_conversion_price == current_conversion_price == 1.0) — i.e. no historical down-round adjustment is reflected even if one in fact occurred. Counsel/founder must confirm the actual issuance terms before relying on ownership, dilution, or preference figures involving this series.",
+        "summary": "One or more preferred series is marked the unknown-pricing flag because the founder/mapper could not confirm the actual original_issue_price / original_conversion_price / current_conversion_price. The skill substitutes a numeric $1.00 sentinel for all three prices (so the schema's required-numeric and >0 gates pass without fabricating a real price) and forces anti_dilution_protection to 'none' for that series, since anti-dilution adjustment formulas are defined against the original issue/conversion price and cannot be run against a placeholder. This means anti-dilution and liquidation preference are NOT modeled for the series, and the conversion ratio is assumed 1:1 (original_conversion_price == current_conversion_price == 1.0) — i.e. no historical down-round adjustment is reflected even if one in fact occurred. Counsel/founder must confirm the actual issuance terms before relying on ownership, dilution, or preference figures involving this series.",
         "implementation_action": "counsel_review",
         "confidence": "high",
         "source_ids": [
@@ -2470,7 +2470,7 @@
           "cap_table_adjacent_counsel"
         ],
         "jurisdiction": "Delaware and Israel",
-        "applies_when": "Use when any cap_state.preferred_series[*].pricing_unknown is true. Does not fire when every preferred series has confirmed pricing.",
+        "applies_when": "Use when any the cap-table state.preferred_series[*].the unknown-pricing flag is true. Does not fire when every preferred series has confirmed pricing.",
         "warnings": [
           "Anti-dilution and liquidation preference are not modeled for a pricing-unknown series — the $1.00 sentinel price cannot support that math.",
           "Conversion ratio is assumed 1:1 (no historical pricing) for a pricing-unknown series; a real down-round adjustment (current_conversion_price < original_conversion_price) would not be reflected until the actual terms are confirmed."
@@ -2497,7 +2497,7 @@
           "cap_table_adjacent_counsel"
         ],
         "jurisdiction": "Delaware (NVCA model); applies generally where dual-class structures are used",
-        "applies_when": "Use when any cap_state.founders[*].voting_rights_multiple or cap_state.common_batches[*].voting_rights_multiple is not equal to 1.0.",
+        "applies_when": "Use when any the cap-table state.founders[*].voting_rights_multiple or the cap-table state.common_batches[*].voting_rights_multiple is not equal to 1.0.",
         "warnings": [
           "Series A+ investors typically negotiate sunset provisions or carve-outs on super-voting common; confirm the term sheet does not unwind the structure.",
           "IPO-readiness: most major exchanges accept dual-class but require disclosure; some institutional investors will not participate in dual-class IPOs without sunsets.",
@@ -2511,7 +2511,7 @@
         "domain": "warrants",
         "behavior_target": "source_note",
         "title": "Vested outstanding warrants are included in pre-financing fully-diluted shares",
-        "summary": "v0.5.0 cap-table policy (per YC primer narrow company_capitalization, NVCA Model COI §4.4.4 'immediately prior to such issue'): outstanding warrants with vested_flag=true are included in the pre-financing fully-diluted denominator; unvested warrants are surfaced separately but excluded from FD.",
+        "summary": "v0.5.0 cap-table policy (per YC primer narrow the Company Capitalization denominator, NVCA Model COI §4.4.4 'immediately prior to such issue'): outstanding warrants with vested_flag=true are included in the pre-financing fully-diluted denominator; unvested warrants are surfaced separately but excluded from FD.",
         "implementation_action": "informational",
         "confidence": "high",
         "source_ids": [
@@ -2524,7 +2524,7 @@
           "cap_table_core"
         ],
         "jurisdiction": "Delaware C corporation and Israeli Ltd, market practice",
-        "applies_when": "Use when cap_state.outstanding_warrants[] is non-empty.",
+        "applies_when": "Use when the cap-table state.outstanding_warrants[] is non-empty.",
         "warnings": []
       },
       {
@@ -2532,7 +2532,7 @@
         "domain": "warrants",
         "behavior_target": "counsel_review_flag",
         "title": "Unvested warrants surfaced but excluded from FD",
-        "summary": "Counsel-review item: cap_state surfaces unvested warrants as a separate line but excludes them from pre-financing FD. Founders should confirm with counsel that the engagement's term sheets and SAFEs use the same convention (some custom term sheets define company_capitalization to include unvested warrants).",
+        "summary": "Counsel-review item: the cap-table state surfaces unvested warrants as a separate line but excludes them from pre-financing FD. Founders should confirm with counsel that the engagement's term sheets and SAFEs use the same convention (some custom term sheets define the Company Capitalization denominator to include unvested warrants).",
         "implementation_action": "counsel_review",
         "confidence": "high",
         "source_ids": [
@@ -2545,7 +2545,7 @@
           "cap_table_core"
         ],
         "jurisdiction": "Delaware and Israeli startup market",
-        "applies_when": "Use when any cap_state.outstanding_warrants[i].vested_flag is false.",
+        "applies_when": "Use when any the cap-table state.outstanding_warrants[i].vested_flag is false.",
         "warnings": []
       },
       {
@@ -2574,7 +2574,7 @@
         "domain": "warrants",
         "behavior_target": "counsel_review_flag",
         "title": "Net-share warrant exercise pre-round used an FMV approximation",
-        "summary": "When a net-share-settlement warrant exercises pre-round AND no prior priced-round PPS is available (the typical first-round case), the pump approximates FMV as pre_money / pre_pump_fully_diluted. This is the only morally-correct value available pre-solver (Option A determinism avoids a circular dependency with the AD fixed point). For warrants that are a large fraction of FD, this approximation may diverge sub-percent from the converged round PPS; counsel should confirm the founder is comfortable with the proxy.",
+        "summary": "When a net-share-settlement warrant exercises pre-round AND no prior priced-round PPS is available (the typical first-round case), the pump approximates FMV as pre_money / the pre-round fully-diluted count. This is the only morally-correct value available pre-solver (Option A determinism avoids a circular dependency with the AD fixed point). For warrants that are a large fraction of FD, this approximation may diverge sub-percent from the converged round PPS; counsel should confirm the founder is comfortable with the proxy.",
         "implementation_action": "counsel_review",
         "confidence": "high",
         "source_ids": [
@@ -2646,7 +2646,7 @@
         "domain": "acquisition",
         "behavior_target": "script_formula",
         "title": "Acquisition timing drives SAFE Company-Capitalization inclusion",
-        "summary": "A concurrent acquisition's consideration is excluded from the YC post-money SAFE Company Capitalization (so it dilutes the SAFE via post_fd only); a pre-round-closed acquisition is stock outstanding immediately prior (folded into Company Capitalization, protecting the SAFE).",
+        "summary": "A concurrent acquisition's consideration is excluded from the YC post-money SAFE Company Capitalization (so it dilutes the SAFE via the post-round fully-diluted count only); a pre-round-closed acquisition is stock outstanding immediately prior (folded into Company Capitalization, protecting the SAFE).",
         "implementation_action": "parameterize",
         "confidence": "medium",
         "source_ids": [

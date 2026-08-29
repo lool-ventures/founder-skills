@@ -77,6 +77,7 @@ Insert this block before `option_pool`:
       "participation_cap_multiple": null,
       "anti_dilution_protection": "broad_based_weighted_average",
       "ad_cp2_floor": null,
+      "ad_a_denominator_basis": null,
       "pro_rata_rights": true
     }
   ],
@@ -92,7 +93,7 @@ directly.
 
 ### Why three price fields
 
-- `original_issue_price` (OIP) — per-share consideration investors paid. The NVCA model trigger is the conversion price in effect immediately prior (CP1); the OIP trigger is a charter-specific variant this pipeline uses as its soft default — counsel confirms which the charter adopts.
+- `original_issue_price` (OIP) — per-share consideration investors paid. Two trigger conventions exist — the NVCA model tests CP1, some charters test the OIP (this pipeline's soft default). **The choice changes no number here:** both formulas are anchored on CP1 and return it unchanged at or above it, so the OIP convention widens only the range in which an adjustment is *attempted*.
 - `original_conversion_price` (OCP) — drives the as-converted ratio. `preferred_shares_as_converted = shares × OCP / CCP` in `cap_state.py:_compute_as_converted_totals`.
 - `current_conversion_price` (CCP) — the present conversion price. Equals OCP unless anti-dilution has previously triggered (CCP then < OCP).
 
@@ -111,6 +112,14 @@ representative down round: 11.11% founders with a $0.50 floor honoured, 5.95% wi
 
 The floor must be **below** the series' current conversion price. Equal to it admits no reduction at
 all; above it is contradictory and the round math refuses it.
+
+`ad_a_denominator_basis` (`nvca_broad` | `nvca_narrow` | `null`) picks which shares count in the
+weighted-average denominator. Broad-based includes the option pool and other convertibles;
+narrow-based counts only outstanding preferred, adjusting further and costing founders more — worth
+0.24–0.47 percentage points. Left `null` it is derived from `anti_dilution_protection`, which is right
+whenever the charter labels its protection consistently; set it only when the denominator language
+disagrees with that label. A charter defining a third variant (e.g. excluding the unallocated reserve)
+has no shape here — leave `null` and raise it with counsel.
 
 ## Adding common_batches (rare; advisor common, exercised options)
 

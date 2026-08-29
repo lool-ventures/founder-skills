@@ -1084,7 +1084,16 @@ REFERENCES_CEILING: dict[str, int] = {
     # the conversion price fall further than the charter allows and UNDERSTATES founder ownership --
     # measured 11.11% vs 5.95% on the golden-10 cap table (test_golden_10d). Prose that prevents a
     # 1.87x ownership error is worth under a kilobyte of on-demand reference content.
-    "cap-table": 46_597,
+    #
+    # cap-table +799 B: `ad_a_denominator_basis` documented (same class as the floor -- solver-consumed,
+    # schema-declared, supplied by nothing; measured 0.24-0.47 pp of founder ownership), plus a
+    # CORRECTION to the trigger-basis prose, which told the reader the OIP-vs-CP1 choice is
+    # charter-specific and counsel-confirmed while giving them no field for the answer. Measured: the
+    # choice moves nothing in 42 of 42 scenarios, because both formulas are CP1-anchored and
+    # `test_golden_9` has always pinned the two bases producing identical prices. Prose that implies a
+    # knob matters when it does not is worse than silence -- it invites a founder to pay counsel for
+    # an answer that changes no number.
+    "cap-table": 47_396,
 }
 
 

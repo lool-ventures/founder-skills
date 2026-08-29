@@ -47,8 +47,45 @@ def rule_title(rule_id: str) -> str:
     return (_rules_by_id().get(rule_id) or {}).get("title") or rule_id
 
 
+@functools.lru_cache(maxsize=1)
+def _policy() -> Any:
+    """The shared founder-text policy, or None when it cannot be imported.
+
+    Best-effort by design: these scripts are standalone, and a rule summary is worth rendering
+    unpolished rather than not at all.
+    """
+    import sys
+
+    try:
+        sys.path.insert(
+            0,
+            os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "scripts"
+            ),
+        )
+        import _founder_text  # type: ignore[import-not-found]
+
+        return _founder_text
+    except Exception:
+        return None
+
+
 def rule_summary(rule_id: str) -> str:
-    return (_rules_by_id().get(rule_id) or {}).get("summary") or ""
+    """A rule's summary, with internal vocabulary unsnaked.
+
+    Applied HERE rather than at each call site because this one function feeds every founder-visible
+    surface that shows a rule: `visualize.rule_ref`'s `title=` tooltip in report.html and
+    `explore.py`'s JS payload in explorer.html. Neither applies the policy itself -- only
+    `compose_report` did, and only to report.md -- so every rule summary in the pack was reaching
+    both HTML surfaces raw, in a form no fleet test could see (the HTML scan reads text nodes, not
+    attribute values or script bodies).
+
+    Unsnaking only. Our knob names and plumbing are fixed in the pack itself, because `substitute`
+    is detect-only for ALLCAPS and never rewrites filenames.
+    """
+    raw = (_rules_by_id().get(rule_id) or {}).get("summary") or ""
+    pol = _policy()
+    return str(pol.substitute(raw)) if pol is not None and raw else raw
 
 
 def _rule_source_ids(rule_id: str) -> list[str]:

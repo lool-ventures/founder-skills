@@ -630,6 +630,50 @@ def test_golden_10d_charter_floor_changes_founder_ownership() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Golden 10e — the weighted-average DENOMINATOR basis changes the founder's number.
+#
+# Written because a review measured `ad_trigger_basis` at exactly ZERO effect (Golden 9 already pins
+# both bases producing identical prices), while this sibling field — the one nobody proposed
+# documenting — moves founder ownership by 0.24-0.47 pp. Broad-based counts the option pool and other
+# convertibles in the denominator; narrow-based counts only outstanding preferred, adjusting further
+# and costing the founder more.
+#
+# Until now no authoring surface named the field, so a charter whose denominator language disagrees
+# with its protection label could not be represented: `cap_state.py` stamps a value derived from
+# `anti_dilution_protection`, and a derived default gives no signal that it was a guess.
+# ---------------------------------------------------------------------------
+def test_golden_10e_a_denominator_basis_changes_founder_ownership() -> None:
+    def _solve(basis: str) -> dict[str, Any]:
+        return solve(
+            common_shares=10_000_000,
+            preferred_series=[
+                {
+                    "series_id": "series_seed",
+                    "shares": 2_000_000,
+                    "original_issue_price": 1.00,
+                    "original_conversion_price": 1.00,
+                    "current_conversion_price": 1.00,
+                    "anti_dilution_protection": "broad_based_weighted_average",
+                    "ad_a_denominator_basis": basis,
+                }
+            ],
+            options_outstanding=500_000,
+            options_available=1_000_000,
+            pre_money=2_000_000.0,
+            new_money=5_000_000.0,
+        )
+
+    broad = _solve("nvca_broad")["aggregate_ownership_by_class"]["founders_pct"]
+    narrow = _solve("nvca_narrow")["aggregate_ownership_by_class"]["founders_pct"]
+
+    assert abs(broad - 0.160882) < 1e-5, broad
+    assert abs(narrow - 0.156199) < 1e-5, narrow
+    # Narrow-based counts fewer shares in the denominator, so it adjusts FURTHER and the founder ends
+    # up with less. If this inverts, the basis is wired backwards.
+    assert narrow < broad, (broad, narrow)
+
+
+# ---------------------------------------------------------------------------
 # Golden 11 — Stale-CCP guard fires.
 # ---------------------------------------------------------------------------
 def test_golden_11_stale_ccp_guard_fires() -> None:

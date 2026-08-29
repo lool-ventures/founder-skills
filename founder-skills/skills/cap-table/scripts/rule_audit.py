@@ -457,6 +457,15 @@ def _matcher_always(_i: dict[str, Any], _inst: dict[str, Any], _cs: dict[str, An
     return True
 
 
+def _derived_a_basis(series: dict[str, Any]) -> str:
+    """The A-basis a series gets when it does not state one.
+
+    Mirrors `cap_state.py`'s canonicalization and `priced_round._default_a_basis`. Kept as a named
+    function so the third copy of this derivation is at least visibly a copy.
+    """
+    return "nvca_narrow" if series.get("anti_dilution_protection") == "narrow_based_weighted_average" else "nvca_broad"
+
+
 _RULE_MATCHERS: dict[str, Any] = {
     # SAFE rules (US/document-specific — always applicable when SAFEs exist
     # or when modeling SAFEs hypothetically; default True for v0.1 flexibility)
@@ -518,14 +527,20 @@ _RULE_MATCHERS: dict[str, Any] = {
         for s in (cs.get("preferred_series") or [])
     ),
     # A-denominator-basis rules — apply when respective basis is in use
+    # A-denominator basis. The fallback must MATCH the one the math uses -- `cap_state.py` derives it
+    # from `anti_dilution_protection` and `priced_round._default_a_basis` agrees, so a hardcoded
+    # "nvca_broad" default here made the audit contradict both (and the rule pack, whose own narrow
+    # summary states the derivation) for a narrow-based series with the field absent. Latent today,
+    # because pre_math reads the canonicalized cap_state where the field is always stamped -- but a
+    # third, divergent copy of one derivation is how the first two stop agreeing.
     "anti_dilution.a_denominator_nvca_broad": lambda i, inst, cs: any(
         s.get("anti_dilution_protection") in {"broad_based_weighted_average", "narrow_based_weighted_average"}
-        and s.get("ad_a_denominator_basis", "nvca_broad") == "nvca_broad"
+        and (s.get("ad_a_denominator_basis") or _derived_a_basis(s)) == "nvca_broad"
         for s in (cs.get("preferred_series") or [])
     ),
     "anti_dilution.a_denominator_nvca_narrow": lambda i, inst, cs: any(
         s.get("anti_dilution_protection") in {"broad_based_weighted_average", "narrow_based_weighted_average"}
-        and s.get("ad_a_denominator_basis") == "nvca_narrow"
+        and (s.get("ad_a_denominator_basis") or _derived_a_basis(s)) == "nvca_narrow"
         for s in (cs.get("preferred_series") or [])
     ),
     # CP2 floor configuration rule — applies when any series has a floor configured

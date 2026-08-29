@@ -627,26 +627,29 @@ _SEED_COUNSEL_ITEM = {
 }
 
 
-def _seed_anti_dilution_counsel_item() -> dict:
-    """A second seed, built from the LIVE rule pack rather than a copy of it.
+def _seed_all_rule_counsel_items() -> list[dict]:
+    """Seed EVERY rule in the pack as a counsel item, on both text fields it delivers.
 
     `counsel_packet.py` performs no founder-text scan of its own, and `rule_audit.py` maps a rule's
-    `summary` straight to the `counsel_question` a founder's lawyer reads. So a rule summary is
-    founder-facing text with nothing checking it -- and two anti-dilution summaries shipped the raw
-    field name `ad_cp2_floor` to counsel for exactly that reason.
+    `summary` to the `counsel_question` and renders `applies_when` verbatim right above it. So both
+    are founder-facing text with nothing checking them -- which is how a script filename
+    (`extract_aoa.py`, on five rules) and two internal warning codes ended up addressed to a lawyer.
 
-    Seeding the single `delaware_cross_border` item did not cover them: one seeded rule scans one
-    rule. This reads the real summary out of the pack, so reintroducing an internal token into it
-    reds the scan instead of shipping. Copying the text here would defeat the point -- the copy would
-    stay clean while the pack drifted.
+    The earlier version of this seeded ONE rule and its own docstring admitted "one seeded rule scans
+    one rule": 1 of 86, on 1 of 2 fields. Looping gives 86 x 2 through the real producer, needs no
+    new baseline constant to maintain, and exercises the rendering path rather than the JSON.
+
+    Read from the LIVE pack, never copied: a copy stays clean while the pack drifts, which is exactly
+    the failure this is meant to catch.
     """
     import json as _json
 
     pack = _json.loads((SKILLS_DIR / "cap-table" / "data" / "cap-table-rules.json").read_text(encoding="utf-8"))
+    items = []
     for rules in pack["domains"].values():
         for r in rules:
-            if r["rule_id"] == "anti_dilution.cp2_floor_applicable":
-                return {
+            items.append(
+                {
                     "rule_id": r["rule_id"],
                     "domain": r["domain"],
                     "title": r["title"],
@@ -656,7 +659,9 @@ def _seed_anti_dilution_counsel_item() -> dict:
                     "documents_needed": [],
                     "source_ids": r.get("source_ids", []),
                 }
-    raise AssertionError("anti_dilution.cp2_floor_applicable is gone from the rule pack")
+            )
+    assert len(items) > 50, f"only {len(items)} rules seeded — the pack shape changed"
+    return items
 
 
 def _produce_extra_deliverables(skill: str, work_dir: Path) -> list[Path]:
@@ -670,10 +675,7 @@ def _produce_extra_deliverables(skill: str, work_dir: Path) -> list[Path]:
         if audit_path.exists():
             audit = _json.loads(audit_path.read_text(encoding="utf-8"))
             if not audit.get("counsel_review_items"):
-                audit["counsel_review_items"] = [
-                    dict(_SEED_COUNSEL_ITEM),
-                    _seed_anti_dilution_counsel_item(),
-                ]
+                audit["counsel_review_items"] = [dict(_SEED_COUNSEL_ITEM), *_seed_all_rule_counsel_items()]
                 audit_path.write_text(_json.dumps(audit), encoding="utf-8")
 
     produced: list[Path] = []

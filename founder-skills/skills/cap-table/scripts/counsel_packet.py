@@ -77,6 +77,37 @@ def build_packet(
     }
 
 
+def _apply_founder_text_policy(md: str) -> str:
+    """Unsnake internal vocabulary in the delivered packet.
+
+    This packet is read by a founder's lawyer and had NO founder-text pass of any kind, while
+    `rule_audit` maps a rule's `summary` straight to the counsel question and renders `applies_when`
+    verbatim above it. Both arrived raw.
+
+    Scope is deliberately just unsnaking, and that is a division of labour with the rule pack rather
+    than laziness. Domain vocabulary is what `substitute` handles WELL -- "current_conversion_price"
+    becomes "current conversion price", which is the term counsel maps onto a charter clause, so
+    paraphrasing it would destroy the precision they need. What substitute cannot fix -- our own knob
+    names, script filenames, internal warning codes -- is fixed in the pack itself, because it is
+    detect-only for ALLCAPS and deliberately never rewrites a filename ("renaming a file in prose
+    would be a lie").
+
+    Best-effort: the shared policy module lives outside this skill, and a packet is worth delivering
+    unpolished rather than not at all.
+    """
+    try:
+        sys.path.insert(
+            0,
+            os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "scripts"
+            ),
+        )
+        import _founder_text  # type: ignore[import-not-found]
+    except Exception:
+        return md
+    return str(_founder_text.substitute(md))
+
+
 def render_markdown(packet: dict[str, Any]) -> str:
     lines = []
     lines.append(f"# Counsel Packet — {packet['company_name']}")
@@ -119,7 +150,7 @@ def render_markdown(packet: dict[str, Any]) -> str:
             if sources:
                 lines.append(f"**Sources:** {', '.join(f'`{s}`' for s in sources)}")
                 lines.append("")
-    return "\n".join(lines)
+    return _apply_founder_text_policy("\n".join(lines))
 
 
 def main() -> int:

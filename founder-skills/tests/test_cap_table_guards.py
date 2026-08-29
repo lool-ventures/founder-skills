@@ -231,8 +231,17 @@ def _unasserted_rules() -> tuple[list[str], list[str]]:
 # Measured baselines. RATCHETS: they may only shrink. The counsel figure is tracked separately because
 # a counsel-review rule is an obligation a founder is told to take to a lawyer -- a silently-suppressed
 # one is the most expensive thing this skill can get wrong.
-UNASSERTED_RULE_BASELINE = 54
-UNASSERTED_COUNSEL_RULE_BASELINE = 21
+# 54 -> 55, a deliberate RAISE that corrects a false win rather than conceding ground. The 54 was
+# earned earlier today because a counsel-packet seed named ONE rule id verbatim (deliberately not
+# repeated here -- writing it would re-satisfy the very substring test this comment is about), and
+# this ratchet's oracle is a bare substring test over the suite text. That seed checked
+# the rule's TEXT was clean; it never checked the rule FIRES, which is what this ratchet counts. When
+# the seed was replaced by a strictly stronger loop over all 86 rules, the verbatim mention vanished
+# and the number went back up -- the guard improved and the metric worsened, which is the tell that
+# the metric was measuring the mention, not the assertion. Ratcheting down on a substring is the
+# exact failure this file was written to catch, so it is corrected here rather than preserved.
+UNASSERTED_RULE_BASELINE = 55
+UNASSERTED_COUNSEL_RULE_BASELINE = 22  # same correction as above
 
 
 def test_rule_assertion_ratchet() -> None:
@@ -911,29 +920,43 @@ class TestCharterFloorIsExtractable:
             "silently understate founder ownership"
         )
 
-    def test_all_three_authoring_surfaces_document_the_floor(self) -> None:
-        """The drift guard for the defect class, not just this field.
+    def test_authoring_surfaces_document_the_charter_fields(self) -> None:
+        """The drift guard for the defect class -- and it must check the LOAD-BEARING surface.
 
-        `ad_cp2_floor` was consumed by the solver and declared in two schemas while no authoring
-        surface mentioned it, so it read as supported and was unreachable. A field can only be
-        supplied if the thing that supplies it has been told the field exists: the sub-agent reads
-        the agent body, a founder or agent filling inputs by hand reads the skeleton, and the
-        validator decides what is accepted.
+        The first version of this test asserted the field name appeared anywhere in three files. It
+        passed on a prose bullet in `agents/cap-table.md` while BOTH JSON return-shape blocks -- the
+        thing a sub-agent actually copies, one of them headed "load-bearing (`extract_aoa.py` won't
+        accept other shapes)" -- omitted the field entirely. `lane-1-pdf-docx.md` was not even in the
+        file list. So the guard was green with the field unsuppliable: a test that cannot fail when
+        the thing it names is broken, which is the defect this file exists to catch.
+
+        Now it parses the fenced JSON block and asserts the key is IN the object a sub-agent returns.
         """
-        agent = (Path(__file__).resolve().parents[1] / "agents" / "cap-table.md").read_text(encoding="utf-8")
-        skeleton = (CAP_TABLE / "references" / "inputs-skeleton.md").read_text(encoding="utf-8")
-        extractor = (SCRIPTS / "extract_aoa.py").read_text(encoding="utf-8")
+        surfaces = {
+            "agents/cap-table.md": Path(__file__).resolve().parents[1] / "agents" / "cap-table.md",
+            "lanes/lane-1-pdf-docx.md": CAP_TABLE / "references" / "lanes" / "lane-1-pdf-docx.md",
+            "inputs-skeleton.md": CAP_TABLE / "references" / "inputs-skeleton.md",
+        }
+        # The test is JSON-KEY form (`"field":`) near the other per-series keys -- not the bare name
+        # anywhere in the file. That distinction IS the defect: `ad_cp2_floor` appeared only as a
+        # prose bullet in agents/cap-table.md and not at all in lane-1's block, which is headed
+        # "load-bearing (extract_aoa.py won't accept other shapes)". Prose tells a sub-agent the field
+        # exists; the block is what it copies.
+        for field in ("ad_cp2_floor", "ad_a_denominator_basis"):
+            for label, path in surfaces.items():
+                text = path.read_text(encoding="utf-8")
+                anchors = [i for i in range(len(text)) if text.startswith('"anti_dilution_protection":', i)]
+                assert anchors, f"{label} has no per-series JSON example to check"
+                assert any(f'"{field}":' in text[max(0, a - 1200) : a + 1200] for a in anchors), (
+                    f'{label} does not carry "{field}" as a JSON key beside the other per-series '
+                    "keys. A prose mention does not make a field suppliable -- the sub-agent copies "
+                    "the block, and the solver then silently uses a default the charter may contradict."
+                )
 
-        for name, text in (
-            ("agents/cap-table.md", agent),
-            ("inputs-skeleton.md", skeleton),
-            ("extract_aoa.py", extractor),
-        ):
-            assert "ad_cp2_floor" in text, (
-                f"{name} does not mention ad_cp2_floor. The solver consumes it and two schemas "
-                "declare it; a surface that never names it cannot supply it, and the founder's "
-                "ownership is understated with no warning."
-            )
+        # The validator must also accept them, or a compliant extraction is rejected.
+        extractor = (SCRIPTS / "extract_aoa.py").read_text(encoding="utf-8")
+        for field in ("ad_cp2_floor", "ad_a_denominator_basis"):
+            assert field in extractor, f"extract_aoa.py does not know about {field}"
 
 
 class TestClampedMagnitudeReachesTheFounder:
