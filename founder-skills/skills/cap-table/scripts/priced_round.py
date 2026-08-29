@@ -203,6 +203,28 @@ from safe_conversion import (  # noqa: E402
     safe_has_usable_purchase_amount,
 )
 
+# Absolute tolerance for anti-dilution price comparisons. Conversion prices are dollars-per-share
+# in the 0.01--100 range, so a fixed epsilon is well-conditioned here; a relative one would make the
+# ratchet-down post-condition weaker for cheap shares, which is exactly where a ratchet-up hides.
+_AD_EPS = 1e-9
+
+
+class AntiDilutionContradiction(ValueError):
+    """An anti-dilution computation produced a result the domain forbids.
+
+    Raised, not returned. This signals a PRODUCER DEFECT: the one contradictory-input case
+    (`ad_cp2_floor` above CP1) is rejected at the solver entry point with a blocker, so anything
+    reaching here is arithmetic the code should not have been able to produce. Crashing beats
+    emitting numbers a founder would act on -- the defect this replaces shipped a silent
+    W_CP2_FLOOR_APPLIED warning naming the symptom instead.
+    """
+
+    def __init__(self, code: str, message: str, *, series_id: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.series_id = series_id
+
+
 # ============================================================================
 # Adjuster Protocol — types
 # ============================================================================
@@ -523,7 +545,6 @@ def _apply_anti_dilution(
                 pre_issuance_share_count_A=A,
                 consideration_received=consideration,
                 new_issue_price=new_pps,
-                new_shares_issued_C=C,
             )
             cp2 = result["new_conversion_price"]
             rule_id = f"anti_dilution.{protection}_coupled"
@@ -537,7 +558,21 @@ def _apply_anti_dilution(
         else:
             raise ValueError(f"Unknown anti_dilution_protection: {protection}")
 
-        # CP2 floor enforcement (per-series)
+        # CP2 floor enforcement (per-series).
+        #
+        # A CHARTER FLOOR LIMITS HOW FAR CP2 MAY FALL. It is not a target and not a re-price, so a
+        # floor above the CURRENT conversion price is a contradictory term, not a binding one --
+        # clamping to it turns an anti-dilution protection into a conversion-price INCREASE. Rule
+        # `anti_dilution.ratchet_down_only`; the sibling rule `anti_dilution.cp2_floor_applicable`
+        # states the intent in the charter's own words ("CP2 cannot fall below OIP / 2").
+        #
+        # This was reachable with schema-valid founder input: `ad_cp2_floor` is typed
+        # `["number","null"]` with no bound in either inputs.schema.json or cap_state.schema.json,
+        # and cap_state.py copies it through unvalidated. A floor of 2.50 against a CP1 of 1.00
+        # produced CP2 = 2.50, which `cap_state_after_round.py` then persisted as an
+        # `anti_dilution_applied` event -- a record the repo's own loader rejects as
+        # E_AD_RATCHET_UP_NOT_ALLOWED. The only signal was W_CP2_FLOOR_APPLIED, which names the
+        # symptom ("clamped") rather than the cause, so nothing downstream could act on it.
         floor = series.get("ad_cp2_floor")
         cp2_unfloored = cp2
         floor_applied = False
@@ -551,6 +586,20 @@ def _apply_anti_dilution(
                     "cp2_unfloored": cp2_unfloored,
                     "cp2_floor": floor,
                 }
+            )
+
+        # POST-CONDITION, after the clamp because the clamp is what could violate it. Anti-dilution
+        # adjusts DOWNWARD only (`anti_dilution.ratchet_down_only`). Belt-and-braces against the
+        # rejection above: this catches any future path that produces a CP2 above CP1, not just the
+        # floor one.
+        if cp2 > cp1 + _AD_EPS:
+            raise AntiDilutionContradiction(
+                "E_AD_RATCHET_UP_NOT_ALLOWED",
+                f"series {sid!r} computed CP2 {cp2:.6f} above CP1 {cp1:.6f}. Anti-dilution reduces "
+                "the conversion price; an adjustment that raises it is not a protection "
+                "(anti_dilution.ratchet_down_only). Reaching this means a producer defect, not bad "
+                "input -- the contradictory-floor case is rejected at the entry point.",
+                series_id=sid,
             )
 
         ccp_mutations[sid] = cp2
@@ -959,6 +1008,44 @@ def solve_priced_round(
     # AntiDilutionAdjuster short-circuits and we never call
     # _refresh_as_converted_totals — preserves the no-AD output bit-for-bit.
     has_ad_protection = any(s.get("anti_dilution_protection", "none") != "none" for s in preferred_series)
+
+    # A CP2 floor at or above the CURRENT conversion price is a contradictory charter term: the floor
+    # would raise the conversion price, and anti-dilution only ever lowers it
+    # (`anti_dilution.ratchet_down_only`). Rejected here, loudly, rather than clamped: the clamp below
+    # is what silently produced a ratchet-UP, recorded as an `anti_dilution_applied` event that the
+    # repo's own loader rejects. Validated at the entry point so the per-series math can treat the
+    # ratchet-down post-condition as an invariant rather than an input check.
+    if has_ad_protection:
+        for _s in preferred_series:
+            if _s.get("anti_dilution_protection", "none") == "none":
+                continue
+            _floor = _s.get("ad_cp2_floor")
+            if _floor is None:
+                continue
+            _cp1 = pre_financing_cp1_snapshots[_s["series_id"]]
+            if float(_floor) > _cp1 + _AD_EPS:
+                blockers.append(
+                    {
+                        "code": "E_AD_CP2_FLOOR_ABOVE_CURRENT_PRICE",
+                        "instance_id": _s["series_id"],
+                        "rule_id": "anti_dilution.ratchet_down_only",
+                        "rule_pack_version": RULE_PACK_VERSION,
+                        "remedy": (
+                            f"ad_cp2_floor for {_s['series_id']!r} is {float(_floor):.6f}, above its current "
+                            f"conversion price of {_cp1:.6f}. A floor above the current price would RAISE the "
+                            "conversion price, which is dilution, not protection. Check the charter: the floor "
+                            "is usually the original issue price of an EARLIER series, or the term does not apply."
+                        ),
+                    }
+                )
+        if blockers:
+            return {
+                "completeness": "structural_only",
+                "blockers": blockers,
+                "per_safe": {},
+                "per_note": {},
+                "math_provenance": [],
+            }
 
     # Initial price estimate: pre_money / pre_FD
     price = pre_money / pre_fd

@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "version": "0.4.1",
+    "version": "0.4.2",
     "generated_date": "2026-05-21",
     "purpose": "Verified source-backed rule pack for the cap-table skill: SAFE conversion, convertible-note math, option-pool top-up, anti-dilution (including coupled-AD priced-round variants), Israeli equity-tax + AoA gotchas, Delaware cross-border / flip mechanics, and founder benchmarks. Every rule cites a primary or near-primary source (NVCA Model Certificate of Incorporation, Y Combinator SAFE primer / documents, Cooley GO down-round article, Israeli Companies Law / Income Tax Ordinance, Carta benchmarks, etc.). Version history lives in CHANGELOG.md.",
     "source_policy": "Rules cite original quotable legal documents, issuer documents, official agency pages, law-firm publications, and benchmark datasets. AI research notes and intermediate consolidated files are excluded from final references."
@@ -1525,6 +1525,22 @@
         "applies_when": "Use when the founder's charter includes an AD floor on conversion-price reduction."
       },
       {
+        "rule_id": "anti_dilution.ratchet_down_only",
+        "domain": "anti_dilution",
+        "behavior_target": "validation_rule",
+        "title": "Anti-dilution adjusts the conversion price DOWNWARD only",
+        "summary": "A broad-based weighted-average or full-ratchet anti-dilution adjustment protects the holder against a lower-priced issuance by REDUCING the conversion price. An adjustment that raises it (CP2 > CP1) is not a protection and has no basis in the NVCA form: the charter's floor limits how far CP2 may FALL, so a floor set above CP1 is a contradictory term rather than a binding one. Producers must reject a per-series ad_cp2_floor greater than the current conversion price, and must not emit a computed CP2 above CP1.",
+        "implementation_action": "hardcode",
+        "confidence": "high",
+        "source_ids": [
+          "NVCA-CERT-OF-INC"
+        ],
+        "source_basis": "primary",
+        "counsel_review": false,
+        "jurisdiction": "US startup market; charter-specific",
+        "applies_when": "Use whenever a per-series anti-dilution adjustment is computed or a charter CP2 floor is applied."
+      },
+      {
         "rule_id": "anti_dilution.cp2_floor_applied",
         "domain": "anti_dilution",
         "behavior_target": "warning_rule",
@@ -2427,7 +2443,9 @@
         ],
         "source_basis": "primary_doc",
         "counsel_review": true,
-        "surfaces": ["cap_table_adjacent_counsel"],
+        "surfaces": [
+          "cap_table_adjacent_counsel"
+        ],
         "jurisdiction": "Delaware and Israel",
         "applies_when": "Use when cap_state.aoa_findings.dividend_provisions_present is true (the AoA was extracted and includes a dividend provision). The rule fires regardless of jurisdiction because dividend provisions are not Delaware/Israel-specific.",
         "warnings": [
@@ -2448,7 +2466,9 @@
         ],
         "source_basis": "near_primary",
         "counsel_review": true,
-        "surfaces": ["cap_table_adjacent_counsel"],
+        "surfaces": [
+          "cap_table_adjacent_counsel"
+        ],
         "jurisdiction": "Delaware and Israel",
         "applies_when": "Use when any cap_state.preferred_series[*].pricing_unknown is true. Does not fire when every preferred series has confirmed pricing.",
         "warnings": [
@@ -2472,7 +2492,10 @@
         ],
         "source_basis": "primary_doc",
         "counsel_review": true,
-        "surfaces": ["cap_table_core", "cap_table_adjacent_counsel"],
+        "surfaces": [
+          "cap_table_core",
+          "cap_table_adjacent_counsel"
+        ],
         "jurisdiction": "Delaware (NVCA model); applies generally where dual-class structures are used",
         "applies_when": "Use when any cap_state.founders[*].voting_rights_multiple or cap_state.common_batches[*].voting_rights_multiple is not equal to 1.0.",
         "warnings": [
@@ -2497,7 +2520,9 @@
         ],
         "source_basis": "primary_doc",
         "counsel_review": false,
-        "surfaces": ["cap_table_core"],
+        "surfaces": [
+          "cap_table_core"
+        ],
         "jurisdiction": "Delaware C corporation and Israeli Ltd, market practice",
         "applies_when": "Use when cap_state.outstanding_warrants[] is non-empty.",
         "warnings": []
@@ -2516,7 +2541,9 @@
         ],
         "source_basis": "primary_doc",
         "counsel_review": true,
-        "surfaces": ["cap_table_core"],
+        "surfaces": [
+          "cap_table_core"
+        ],
         "jurisdiction": "Delaware and Israeli startup market",
         "applies_when": "Use when any cap_state.outstanding_warrants[i].vested_flag is false.",
         "warnings": []
@@ -2535,7 +2562,9 @@
         ],
         "source_basis": "primary_doc",
         "counsel_review": true,
-        "surfaces": ["cap_table_core"],
+        "surfaces": [
+          "cap_table_core"
+        ],
         "jurisdiction": "Delaware",
         "applies_when": "Use when any instruments.warrants[i].anti_dilution_clause is non-null.",
         "warnings": []
@@ -2553,7 +2582,9 @@
         ],
         "source_basis": "primary_doc",
         "counsel_review": true,
-        "surfaces": ["cap_table_core"],
+        "surfaces": [
+          "cap_table_core"
+        ],
         "jurisdiction": "Delaware market practice",
         "applies_when": "Use when scenarios[*].computed_outputs.warrant_exercise_events[*].fmv_approximation_used is true.",
         "warnings": []
@@ -2571,7 +2602,9 @@
         ],
         "source_basis": "primary_doc",
         "counsel_review": false,
-        "surfaces": ["cap_table_core"],
+        "surfaces": [
+          "cap_table_core"
+        ],
         "jurisdiction": "Delaware and Israeli market practice",
         "applies_when": "Use when scenarios[*].computed_outputs.warrant_exercise_events is non-empty.",
         "warnings": []
@@ -2586,7 +2619,9 @@
         "summary": "An acquired entity's holders receive consideration shares C equal to a negotiated percentage t of post-close fully-diluted; C = t * post_FD, solved inside the priced round via D = numerator/(1 - t*k), k = 1 + new_money/pre_money.",
         "implementation_action": "hardcode",
         "confidence": "medium",
-        "source_ids": ["YC-PMSAFE-PRIMER"],
+        "source_ids": [
+          "YC-PMSAFE-PRIMER"
+        ],
         "source_basis": "mixed",
         "counsel_review": true,
         "applies_when": "Concurrent negotiated-% share consideration in/around a priced round; t*k < 1."
@@ -2599,7 +2634,9 @@
         "summary": "When the option pool target is post-money fully-diluted and an acquisition closes in connection with the round, the consideration shares C are part of the post-close denominator the pool is sized against (default include); excluding C is a negotiable term.",
         "implementation_action": "parameterize",
         "confidence": "medium",
-        "source_ids": ["COOLEY-PRICING-METHODS"],
+        "source_ids": [
+          "COOLEY-PRICING-METHODS"
+        ],
         "source_basis": "secondary",
         "counsel_review": true,
         "applies_when": "post_money option-pool target + concurrent acquisition consideration."
@@ -2612,7 +2649,10 @@
         "summary": "A concurrent acquisition's consideration is excluded from the YC post-money SAFE Company Capitalization (so it dilutes the SAFE via post_fd only); a pre-round-closed acquisition is stock outstanding immediately prior (folded into Company Capitalization, protecting the SAFE).",
         "implementation_action": "parameterize",
         "confidence": "medium",
-        "source_ids": ["YC-PMSAFE-PRIMER", "YC-SAFE-DOCUMENTS"],
+        "source_ids": [
+          "YC-PMSAFE-PRIMER",
+          "YC-SAFE-DOCUMENTS"
+        ],
         "source_basis": "primary",
         "counsel_review": true,
         "applies_when": "Post-money SAFE present alongside an acquisition; timing in {concurrent_with_round, pre_round_closed}."

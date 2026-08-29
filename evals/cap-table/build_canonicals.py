@@ -298,8 +298,9 @@ def _derive_bbwa_downround(_tmp: Path) -> dict[str, Any]:
         "3000000",
         "--new-price",
         "1.00",
-        "--shares-C",
-        "3000000",
+        # C is derived (3,000,000 / 1.00), which is the value this used to pass explicitly via
+        # --shares-C. The override is gone: a caller-supplied C can break B/C == new_price/CP1, the
+        # identity that makes CP2 <= CP1 arithmetic rather than hopeful.
     )
     return {"cp2": _round(out["new_conversion_price"], 3)}
 

@@ -922,7 +922,6 @@ class TestAntiDilution:
             pre_issuance_share_count_A=10_000_000,
             consideration_received=1_000_000,
             new_issue_price=0.50,
-            new_shares_issued_C=2_000_000,
         )
         assert r["triggered"] is True
         # B = 1M / 1.0 = 1M (NOT 1M / OIP)
@@ -946,7 +945,9 @@ class TestAntiDilution:
             pre_issuance_share_count_A=10_000_000,
             consideration_received=1_000_000,
             new_issue_price=0.50,
-            # new_shares_issued_C omitted → derived as 1M / 0.5 = 2M
+            # C is always derived: 1M / 0.5 = 2M. It was once an optional override; that
+            # parameter is gone, because a caller-supplied C can break B/C == new_price/CP1,
+            # which is the identity that makes CP2 <= CP1 arithmetic rather than hopeful.
         )
         assert r["intermediate"]["C"] == 2_000_000
 
@@ -1695,7 +1696,7 @@ class TestStackedPostMoneySAFEsGolden:
         assert sentinel["schema_version"] == "v0.1.0-cap-table-fast-assess"
         assert sentinel["mode"] == "fast_assess"
         assert sentinel["produces_canonical_artifacts"] is False
-        assert sentinel["rule_pack_version"] == "0.4.1"
+        assert sentinel["rule_pack_version"] == "0.4.2"
         # inputs_fingerprint structurally valid
         fp = sentinel["inputs_fingerprint"]
         assert "sha256" in fp and len(fp["sha256"]) == 64
@@ -2868,7 +2869,6 @@ class TestGotchas:
             pre_issuance_share_count_A=10_000_000,
             consideration_received=1_000_000,
             new_issue_price=1.0,
-            new_shares_issued_C=1_000_000,
         )
         # B = 1M / 2.0 = 500_000 (NOT 1M / OIP)
         assert r["intermediate"]["B"] == 500_000

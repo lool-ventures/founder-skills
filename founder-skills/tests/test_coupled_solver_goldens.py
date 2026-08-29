@@ -501,6 +501,87 @@ def test_golden_10_cp2_floor_enforcement() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Golden 10b — a floor ABOVE the current conversion price is rejected, not clamped.
+#
+# This is the defect Golden 10 could not see. Golden 10 fixes floor=0.50 under CP1=1.00, where the
+# clamp only ever raises CP2 toward a price still below CP1. Nothing pinned what happens when the
+# floor is above CP1 -- and there the same clamp raised CP2 ABOVE CP1, i.e. anti-dilution that
+# dilutes. It emitted W_CP2_FLOOR_APPLIED (a medium warning naming the clamp, not the contradiction)
+# and recorded an `anti_dilution_applied` event whose new_ccp exceeds its previous_ccp.
+#
+# Reachable from schema-valid founder input: `ad_cp2_floor` is typed `["number", "null"]` with no
+# relation to the series it sits on.
+# ---------------------------------------------------------------------------
+def test_golden_10b_cp2_floor_above_cp1_is_rejected() -> None:
+    r = solve(
+        common_shares=10_000_000,
+        preferred_series=[
+            {
+                "series_id": "series_seed",
+                "shares": 2_000_000,
+                "original_issue_price": 1.00,
+                "original_conversion_price": 1.00,
+                "current_conversion_price": 1.00,
+                "anti_dilution_protection": "broad_based_weighted_average",
+                # Above CP1. A charter floor limits how far CP2 may FALL; one set above the current
+                # price cannot bind, so the term is contradictory rather than restrictive.
+                "ad_cp2_floor": 2.00,
+            }
+        ],
+        options_available=1_000_000,
+        pre_money=1_000_000.0,
+        new_money=5_000_000.0,
+    )
+
+    assert r["completeness"] == "structural_only", (
+        "a contradictory charter floor must stop the round, not produce numbers. Before the fix this "
+        f"returned a converged solve with a ratchet-UP: {r.get('ccp_mutations')!r}"
+    )
+    codes = [b.get("code") for b in r["blockers"]]
+    assert codes == ["E_AD_CP2_FLOOR_ABOVE_CURRENT_PRICE"], codes
+    assert r["blockers"][0]["instance_id"] == "series_seed"
+    assert r["blockers"][0]["rule_id"] == "anti_dilution.ratchet_down_only"
+    # No math may be presented alongside the rejection.
+    assert not r["per_safe"] and not r["per_note"] and not r["math_provenance"]
+    assert "ccp_mutations" not in r and "anti_dilution_breakdown" not in r
+
+
+def test_golden_10c_floor_equal_to_cp1_is_accepted_and_cannot_ratchet_up() -> None:
+    """The boundary, pinned from the side the domain actually supports.
+
+    floor == CP1 is NOT the contradiction 10b rejects: it clamps CP2 to exactly CP1, so no ratchet-up
+    occurs and `cap_state_after_round` writes no event (it appends only on ccp_before != ccp_after).
+    The term is inert rather than harmful -- it makes the protection unable to fire, which is a
+    disclosure question, not a math one.
+
+    This pins `>` against `>=` at the guard from the permissive side: tightening the comparison would
+    turn this legitimate (if pointless) charter into a blocked round. 10b pins the other side.
+    """
+    r = solve(
+        common_shares=10_000_000,
+        preferred_series=[
+            {
+                "series_id": "series_seed",
+                "shares": 2_000_000,
+                "original_issue_price": 1.00,
+                "original_conversion_price": 1.00,
+                "current_conversion_price": 1.00,
+                "anti_dilution_protection": "broad_based_weighted_average",
+                "ad_cp2_floor": 1.00,
+            }
+        ],
+        options_available=1_000_000,
+        pre_money=1_000_000.0,
+        new_money=5_000_000.0,
+    )
+    assert r["completeness"] == "full"
+    assert not r.get("blockers")
+    # The property that matters regardless of how the floor is spelled: anti-dilution never raises
+    # the conversion price.
+    assert r["ccp_mutations"]["series_seed"] <= 1.00 + 1e-9, r["ccp_mutations"]
+
+
+# ---------------------------------------------------------------------------
 # Golden 11 — Stale-CCP guard fires.
 # ---------------------------------------------------------------------------
 def test_golden_11_stale_ccp_guard_fires() -> None:

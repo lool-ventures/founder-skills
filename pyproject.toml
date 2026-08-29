@@ -16,7 +16,12 @@ dependencies = [
 # `scripts/pre-tag.sh` reported "safe to tag" and the tag then failed CI on two `var-annotated`
 # errors 1.19.1 does not emit. A preflight that cannot see what CI sees is not a gate. Bump this
 # deliberately (and re-run the 7 mypy dirs) rather than letting it float.
-dev = ["ruff", "mypy==2.3.0", "pytest", "pyyaml", "types-openpyxl", "types-PyYAML", "claude-agent-sdk==0.1.80"]
+# hypothesis is PINNED for the same reason as mypy, plus one of its own: property tests are only a
+# regression gate if the examples are stable. `derandomize=True` (see tests/test_cap_table_properties.py)
+# fixes the seed, but the GENERATOR is the library's -- a minor bump can change which examples are
+# drawn, so an unpinned hypothesis turns "this property held" into "this property held on whatever
+# examples CI happened to draw today", and a red would land on a commit that changed nothing.
+dev = ["ruff", "mypy==2.3.0", "pytest", "pyyaml", "types-openpyxl", "types-PyYAML", "claude-agent-sdk==0.1.80", "hypothesis==6.165.10"]
 
 [tool.ruff]
 target-version = "py310"

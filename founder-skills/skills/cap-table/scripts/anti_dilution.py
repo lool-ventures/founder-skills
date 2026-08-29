@@ -38,18 +38,28 @@ def bbwa_new_conversion_price(
     pre_issuance_share_count_A: float,
     consideration_received: float,
     new_issue_price: float,
-    new_shares_issued_C: float | None = None,
 ) -> dict[str, Any]:
     """Broad-based weighted-average anti-dilution.
 
     B = consideration / CP1 (NOT consideration / OIP — Gotcha #2)
-    C = either supplied directly OR derived as consideration / new_issue_price.
+    C = consideration / new_issue_price, always DERIVED and never supplied.
+
+    C was formerly an optional override. Nothing passed a value that disagreed with the derivation,
+    so the parameter bought no expressiveness -- but it made the identity `B/C == new_price/CP1`
+    breakable by a caller, and that identity is what makes CP2 <= CP1 an arithmetic guarantee rather
+    than a hope. Deriving it unconditionally means the only way to reach a ratchet-up is a floor, and
+    the floor is validated at the solver entry point.
 
     Returns CP2 (new conversion price) plus the intermediate B and C values
     for transparency in math provenance.
     """
     if current_conversion_price <= 0:
         raise ValueError("current_conversion_price must be > 0")
+    if new_issue_price <= 0:
+        # Reachable only for a non-positive price, which still satisfies `< current_conversion_price`
+        # and would divide by zero deriving C. A free or negative-priced issuance is not a
+        # weighted-average input; the caller must decide what it means.
+        raise ValueError("new_issue_price must be > 0")
     if new_issue_price >= current_conversion_price:
         # No down-round trigger; AD does not adjust
         return {
@@ -60,11 +70,7 @@ def bbwa_new_conversion_price(
         }
 
     B = consideration_received / current_conversion_price  # noqa: N806
-    C = (
-        new_shares_issued_C  # noqa: N806
-        if new_shares_issued_C is not None
-        else consideration_received / new_issue_price
-    )
+    C = consideration_received / new_issue_price  # noqa: N806
     A = pre_issuance_share_count_A  # noqa: N806
     cp2 = current_conversion_price * (A + B) / (A + C)
     return {
@@ -147,7 +153,6 @@ def _cli() -> int:
     bb.add_argument("--A", type=float, required=True)
     bb.add_argument("--consideration", type=float, required=True)
     bb.add_argument("--new-price", type=float, required=True)
-    bb.add_argument("--shares-C", type=float, default=None)
 
     fr = sub.add_parser("full-ratchet", parents=[shared])
     fr.add_argument("--cp1", type=float, required=True)
@@ -161,7 +166,6 @@ def _cli() -> int:
             pre_issuance_share_count_A=args.A,
             consideration_received=args.consideration,
             new_issue_price=args.new_price,
-            new_shares_issued_C=args.shares_C,
         )
     else:
         result = full_ratchet_new_conversion_price(
