@@ -1093,7 +1093,14 @@ REFERENCES_CEILING: dict[str, int] = {
     # `test_golden_9` has always pinned the two bases producing identical prices. Prose that implies a
     # knob matters when it does not is worse than silence -- it invites a founder to pay counsel for
     # an answer that changes no number.
-    "cap-table": 47_396,
+    #
+    # cap-table +1,052 B: `cap_table_history` documented — how a founder records a PRIOR down round.
+    # Third instance of one defect class in one day (after `ad_cp2_floor` and `ad_a_denominator_basis`):
+    # schema-declared, fully consumed (`cap_state.py` passes it straight through from inputs.json, and
+    # three solver sites read it), named by no authoring surface. Its absence made
+    # W_STALE_CCP_SUSPECTED unfirable — the skill could not be told a conversion price was stale
+    # because it could not be told the earlier adjustment happened.
+    "cap-table": 48_448,
 }
 
 

@@ -136,8 +136,10 @@ def counsel_item_html(item: dict[str, Any]) -> str:
     source link + secondary 'also' links, and the rule code as muted mono
     small-print. Reuses _rules.rule_ref for title/links."""
     ref = _rules.rule_ref(item["rule_id"], item_title=item.get("title"), item_source_ids=item.get("source_ids"))
-    title = _esc(str(ref["title"]))
-    question = _esc(item.get("counsel_question", ""))
+    title = _esc(_rules.founder_text(str(ref["title"])))
+    # The counsel question is the rule's raw `summary`, mapped straight across by rule_audit and
+    # rendered below as a text node. Neither hop applied the founder-text policy.
+    question = _esc(_rules.founder_text(str(item.get("counsel_question", ""))))
     links = ref["links"]
     src_html = ""
     if links:

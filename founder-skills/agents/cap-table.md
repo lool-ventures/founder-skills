@@ -509,6 +509,13 @@ This sub-context exists specifically for AoA documents. CLAs and convertible sec
 - `pro_rata_rights` (boolean)
 - `issuance_date` (string) — from AoA filing/effective date
 
+**Prior anti-dilution events** — when the AoA (or a recital in it) states that a series' conversion
+price has ALREADY been adjusted by an earlier down round, return that as a top-level
+`cap_table_history` array entry: `{"event_type": "anti_dilution_applied", "series_id": ...,
+"previous_ccp": ..., "new_ccp": ...}`. Do NOT infer one from `current_conversion_price` differing
+from `original_conversion_price` — that difference is the *result*, and re-asserting it as an event
+adds nothing. Record it only when the document says an adjustment happened.
+
 **Fields NOT extracted from AoA** (must come from cap-table / founder input):
 
 - `series_id` — assigned at ingest time

@@ -121,6 +121,32 @@ whenever the charter labels its protection consistently; set it only when the de
 disagrees with that label. A charter defining a third variant (e.g. excluding the unallocated reserve)
 has no shape here — leave `null` and raise it with counsel.
 
+## Recording a PRIOR down round (`cap_table_history`)
+
+Optional, and absent for most companies. If a series has **already** been adjusted by a previous
+down round, say so — otherwise the model has no way to know, and cannot tell you when the conversion
+price you supplied looks stale.
+
+```json
+  "cap_table_history": [
+    {
+      "event_type": "anti_dilution_applied",
+      "series_id": "series_seed",
+      "previous_ccp": 1.00,
+      "new_ccp": 0.80,
+      "round_id": "series_a_2024",
+      "applied_at": "2024-03-01"
+    }
+  ],
+```
+
+`event_type` and `series_id` are required; the rest are recorded when known. Supply this **together
+with the adjusted price** — a series whose `current_conversion_price` still equals its
+`original_conversion_price` while this history says it was adjusted is contradictory, and the model
+flags it rather than silently trusting the higher price. That contradiction is the whole reason to
+record the history: it is the only way the skill can catch a conversion price that was never updated
+after a prior round.
+
 ## Adding common_batches (rare; advisor common, exercised options)
 
 Insert this block after `founders`:

@@ -43,8 +43,28 @@ def _sources() -> dict[str, dict[str, Any]]:
     return {s["source_id"]: s for s in _pack().get("source_bibliography", []) if s.get("source_id")}
 
 
+def founder_text(s: str) -> str:
+    """Unsnake internal vocabulary in a string bound for a founder-visible surface.
+
+    The single entry point for the HTML generators, which apply the shared policy nowhere else --
+    `compose_report` substitutes its markdown, and `visualize` / `explore` did neither, so a rule's
+    counsel question reached `report.html` as raw text in a `<div class="ci-q">`. Not a tooltip: a
+    visible block, carrying names like `current_conversion_price` on seven counsel-review rules.
+
+    Deliberately NOT applied to a whole HTML document. Substitution over markup would rewrite class
+    names, JS identifiers and URLs; it is applied per founder-visible STRING at the render boundary.
+    """
+    pol = _policy()
+    return str(pol.substitute(s)) if pol is not None and s else s
+
+
 def rule_title(rule_id: str) -> str:
-    return (_rules_by_id().get(rule_id) or {}).get("title") or rule_id
+    """A rule's title, policied for the same reason as `rule_summary`.
+
+    `c3e9483` policied the summary and left this sibling, so two titles kept leaking through the
+    same text nodes (anchor text in `visualize.rule_ref`, and `<div class="ci-title">`).
+    """
+    return founder_text((_rules_by_id().get(rule_id) or {}).get("title") or rule_id)
 
 
 @functools.lru_cache(maxsize=1)

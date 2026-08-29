@@ -1000,3 +1000,84 @@ class TestClampedMagnitudeReachesTheFounder:
         assert "0.2045" in note
         assert visualize._floor_note({"floor_applied": False, "ccp_unfloored": 0.2045}) == ""
         assert "0.0000" not in visualize._floor_note({"floor_applied": True})
+
+
+class TestStaleConversionPriceIsReachable:
+    """The stale-price warning existed for a long time and could not fire for a real founder.
+
+    Two independent reasons, both fixed here rather than worked around:
+
+    1. WRONG PLACE. `priced_round`'s copy sits behind three unrelated gates -- the round must carry
+       anti-dilution protection, the SERIES must be protected, and the new price must be below the
+       trigger. A cap table carrying the exact contradiction on an unprotected series produced
+       nothing. The predicate is a property of the cap state alone, so it belongs where the cap state
+       is built.
+    2. NO INPUT ROUTE. It reads `cap_table_history`, which `cap_state.py` passes straight through
+       from `inputs.json` and which NO authoring surface mentioned -- not SKILL.md, not the agent
+       body, not the skeleton. Same shape as the `ad_cp2_floor` defect: schema-declared, fully
+       consumed, unsuppliable. Documented now on both surfaces.
+
+    What a founder gets: told that a conversion price they supplied contradicts their own recorded
+    history, before every ownership percentage is computed from it.
+    """
+
+    @staticmethod
+    def _build(protection: str, ccp: float, *, history: bool = True) -> dict:
+        import cap_state as cap_state_mod  # type: ignore[import-not-found]
+
+        inputs = {
+            "company_name": "T",
+            "founders": [{"founder_id": "f1", "name": "A", "common_shares": 8_000_000}],
+            "preferred_series": [
+                {
+                    "series_id": "series_seed",
+                    "series_name": "Seed",
+                    "shares": 2_000_000,
+                    "issuance_date": "2024-01-01",
+                    "original_issue_price": 1.0,
+                    "original_conversion_price": 1.0,
+                    "current_conversion_price": ccp,
+                    "anti_dilution_protection": protection,
+                }
+            ],
+            "metadata": {"run_id": "t", "schema_version": "v0.5.0-inputs"},
+        }
+        if history:
+            inputs["cap_table_history"] = [
+                {"event_type": "anti_dilution_applied", "series_id": "series_seed", "previous_ccp": 1.0, "new_ccp": 0.8}
+            ]
+        built: dict = cap_state_mod.build_cap_state(inputs, {"safes": [], "convertible_notes": []})
+        return built
+
+    @staticmethod
+    def _stale(built: dict) -> list[str]:
+        return [w for w in (built.get("warnings") or []) if w.startswith("W_STALE_CCP_SUSPECTED")]
+
+    def test_fires_on_an_unprotected_series(self) -> None:
+        """THE case the solver-side check structurally could not reach."""
+        assert self._stale(self._build("none", 1.0)), (
+            "a series with no anti-dilution protection can still carry a stale conversion price from "
+            "an earlier round; the old check was gated on protection and missed it entirely"
+        )
+
+    def test_fires_on_a_protected_series_too(self) -> None:
+        assert self._stale(self._build("broad_based_weighted_average", 1.0))
+
+    def test_silent_when_the_price_was_updated(self) -> None:
+        """The ordinary correct state: history says adjusted, and the price reflects it."""
+        assert not self._stale(self._build("none", 0.8))
+
+    def test_silent_with_no_history(self) -> None:
+        """Most companies. Absence of history is not evidence of a stale price."""
+        assert not self._stale(self._build("none", 1.0, history=False))
+
+    def test_warning_reaches_the_founder_as_prose(self) -> None:
+        """A warning nothing renders is the defect one layer up — this fleet has shipped that twice."""
+        import _warning_callouts  # type: ignore[import-not-found]
+
+        built = self._build("none", 1.0)
+        lines = _warning_callouts.render_warning_callouts(built.get("warnings") or [])
+        blob = "\n".join(lines)
+        assert "out of date" in blob, blob
+        assert "series_seed" in blob
+        assert "W_STALE_CCP_SUSPECTED" not in blob, "raw code leaked into founder prose"

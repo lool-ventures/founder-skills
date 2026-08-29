@@ -166,7 +166,13 @@ def render_explorer_html(
         # Resolve the rule's plain-English summary + primary-source links so the
         # counsel rail can show a linked, readable reference.
         ref = _rules.rule_ref(it.get("rule_id", ""), item_source_ids=it.get("source_ids"))
-        return {**it, "_summary": ref["summary"], "_links": ref["links"]}
+        # `counsel_question` is rendered by the explorer in preference to `_summary`
+        # (`it.counsel_question || it._summary`), and rides the payload raw unless policied here.
+        out = {**it, "_summary": ref["summary"], "_links": ref["links"]}
+        for k in ("counsel_question", "founder_question", "title", "applies_when"):
+            if isinstance(out.get(k), str):
+                out[k] = _rules.founder_text(out[k])
+        return out
 
     company = _esc(inputs.get("company_name", "Company"))
 

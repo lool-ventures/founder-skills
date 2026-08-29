@@ -101,6 +101,17 @@ def render_warning_callouts(cap_state_warnings: list[str]) -> list[str]:
             detail = w.split(":", 1)[1].strip() if ":" in w else w
             out.append(f"> - {detail}")
         out.append("")
+    stale = [w for w in cap_state_warnings if w.startswith("W_STALE_CCP_SUSPECTED")]
+    if stale:
+        out.append("> ⚠ **A conversion price looks out of date.** The cap table records an earlier")
+        out.append("> anti-dilution adjustment for the series below, yet its conversion price is still the")
+        out.append("> original one. Either that adjustment was never applied to your records, or it did not")
+        out.append("> happen. Resolve it before relying on any ownership figure — every percentage in this")
+        out.append("> report is computed from these prices:")
+        for w in stale:
+            detail = w.split(":", 1)[1].strip() if ":" in w else w
+            out.append(f"> - {detail}")
+        out.append("")
     ad = [w for w in cap_state_warnings if w.startswith("W_ANTI_DILUTION")]
     if ad:
         out.append("> ⚠ **Anti-dilution input recovered — confirm with counsel.** The anti-dilution intent")
