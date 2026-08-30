@@ -2124,12 +2124,12 @@ def main() -> None:
     runway_reason = _stub_reason(runway)
     ue_reason = _stub_reason(ue)
     if not _usable(runway):
-        reason = runway_reason or "runway.json not available"
+        reason = runway_reason or "the runway analysis was not produced for this review"
         stub_reasons["runway"] = reason
         stub_reasons["raise_planner"] = reason
         stub_reasons["stress_test"] = reason
     if not _usable(ue):
-        reason = ue_reason or "unit_economics.json not available"
+        reason = ue_reason or "the unit-economics analysis was not produced for this review"
         stub_reasons["unit_economics"] = reason
 
     # Build data payload

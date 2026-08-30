@@ -237,6 +237,49 @@ _BASHISMS = [
 ]
 
 
+# One specimen per pattern above, so each arm is exercised against known input. A detector that only
+# scans live files and asserts "no offenders" is vacuous once the files are clean -- which is the goal
+# state -- and this one is proven so: blinding all eight patterns left it green. That matters more
+# here than for a cosmetic guard, because a bashism reaching a runnable snippet fails at RUNTIME in
+# Cowork, where the workspace shell is dash rather than bash.
+_BASHISM_SPECIMENS = [
+    "FILES=(a b c)",
+    'echo "${FILES[@]}"',
+    'echo "${FILES[0]}"',
+    "if [[ -f x ]]; then :; fi",
+    "diff <(sort a) <(sort b)",
+    "declare -a items",
+    "mapfile -t lines < f",
+    "set -o pipefail",
+]
+# POSIX equivalents of the same intent: the patterns must not fire on the correct form, or the guard
+# teaches authors to avoid shell rather than to write portable shell.
+_POSIX_SPECIMENS = [
+    "set -- a b c",
+    'for f in "$@"; do echo "$f"; done',
+    "if [ -f x ]; then :; fi",
+    "sort a > /tmp/a && sort b > /tmp/b && diff /tmp/a /tmp/b",
+    "set -eu",
+]
+
+
+def test_the_bashism_patterns_catch_bashisms_and_spare_posix() -> None:
+    """The positive case for the scan below, which cannot otherwise fail.
+
+    Each pattern is matched against a snippet that must trip it, and every POSIX form is matched
+    against all patterns to confirm none fires. Without this, a rotted pattern is indistinguishable
+    from a clean corpus.
+    """
+    assert len(_BASHISM_SPECIMENS) == len(_BASHISMS), (
+        "every bashism pattern needs a specimen — a pattern added without one is unexercised"
+    )
+    for (pat, name), specimen in zip(_BASHISMS, _BASHISM_SPECIMENS, strict=True):
+        assert pat.search(specimen), f"pattern for {name!r} no longer matches its own example: {specimen!r}"
+    for ok in _POSIX_SPECIMENS:
+        for pat, name in _BASHISMS:
+            assert not pat.search(ok), f"{name!r} fires on POSIX-correct shell: {ok!r}"
+
+
 def _shell_block_lines(text: str) -> Iterator[tuple[int, str]]:
     in_block = False
     for i, line in enumerate(text.splitlines(), 1):

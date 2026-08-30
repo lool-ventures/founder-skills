@@ -271,7 +271,10 @@ def test_validation_messages_carry_no_json_paths() -> None:
     SKILLS = Path(__file__).resolve().parents[1] / "skills"
     path_re = _re.compile(r"\b[a-z_]{3,}(?:\[[^\]]*\])?(?:\.[a-z_]{3,}(?:\[[^\]]*\])?)+\b")
     offenders: list[str] = []
+    scripts_scanned = 0
+    messages_examined = 0
     for script in sorted(SKILLS.glob("*/scripts/*.py")):
+        scripts_scanned += 1
         try:
             tree = _ast.parse(script.read_text(encoding="utf-8"))
         except SyntaxError:  # pragma: no cover - defensive
@@ -295,10 +298,24 @@ def test_validation_messages_carry_no_json_paths() -> None:
                     elif isinstance(cur, _ast.BinOp):
                         stack.extend([cur.left, cur.right])
                 text = " ".join(parts)
+                messages_examined += 1
                 for tok in path_re.findall(text):
                     if tok.endswith((".py", ".json", ".md", ".csv", ".xlsx")):
                         continue
                     offenders.append(f"{script.parent.parent.name}/{script.name}:{node.lineno} {tok}")
+    # COVERAGE FLOOR, before the verdict. This scan walks skill scripts for `"message"` dict keys, and
+    # every step of that is fragile in a way that fails SILENTLY: a moved directory, a renamed key, a
+    # message built by a helper instead of a literal. Each would leave `offenders` empty and the test
+    # green, which is indistinguishable from "the messages are clean". Measured 112 literals across
+    # 107 scripts today. Raise when the fleet grows; never lower to accommodate a scan that stopped
+    # finding things.
+    assert scripts_scanned >= 90, (
+        f"only {scripts_scanned} skill scripts were scanned (floor 90) — the glob or the layout moved"
+    )
+    assert messages_examined >= 90, (
+        f"only {messages_examined} founder-facing message literals were examined (floor 90). The scan "
+        "went quiet, and a quiet scan reads exactly like a clean one."
+    )
     assert offenders == [], (
         "founder-facing validation messages name internal JSON paths: "
         + "; ".join(sorted(set(offenders))[:8])

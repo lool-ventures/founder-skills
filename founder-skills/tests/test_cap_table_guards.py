@@ -1332,6 +1332,28 @@ def _founder_text_policy() -> Any:
     return mod
 
 
+# Coverage floor. A detector that scans live data and asserts "no offenders" is vacuous when the
+# corpus is clean -- which is the GOAL state -- so its silence proves nothing about the matcher. It is
+# also vacuous when the SCAN finds nothing, and that failure is invisible: a rotted glob, a renamed
+# field, a shrunk registry all read as "clean". Measured 334 non-empty fields today; the floor pins
+# that the population is still there. Shrink-only in the opposite direction to a normal ratchet: it
+# may be RAISED when the pack grows, never lowered to accommodate a scan that stopped finding things.
+_RULE_FIELD_FLOOR = 300
+
+
+# A determiner collision -- "the the", "implementation's the" -- is what splicing a humanised token
+# into a sentence leaves behind. The possessive arm EXCLUDES the common contractions, because "what's
+# the exposure" and "that's a reasonable term" are correct English, and a live counsel question in
+# `flip_scenario.py` uses one. Without the exclusion this arm reds on prose a lawyer should read; it
+# was green only because it scanned a corpus that happened to contain no contraction. Found by the
+# specimen set below, not by a reader -- which is the point of having one.
+_DETERMINER_COLLISION = re.compile(
+    r"\b(?:the|a|an|its|this|any)\s+(?:the|a|an)\b"
+    r"|(?<!what)(?<!that)(?<!\bit)(?<!here)(?<!there)(?<!who)(?<!let)'s\s+(?:the|a|an)\b",
+    re.I,
+)
+
+
 def _delivered_rule_fields() -> list[tuple[str, str, str]]:
     """(rule_id, field, text) for every rule field that reaches a founder or their lawyer.
 
@@ -1350,6 +1372,10 @@ def _delivered_rule_fields() -> list[tuple[str, str, str]]:
                 out.append((r["rule_id"], field, str(r.get(field) or "")))
             for i, w in enumerate(r.get("warnings") or []):
                 out.append((r["rule_id"], f"warnings[{i}]", str(w or "")))
+    assert len(out) >= _RULE_FIELD_FLOOR, (
+        f"only {len(out)} rule prose fields were collected (floor {_RULE_FIELD_FLOOR}). Every detector "
+        "reading this helper just went quiet, and a quiet detector reads exactly like a clean one."
+    )
     return out
 
 
@@ -1781,7 +1807,7 @@ def test_delivered_rule_prose_is_not_code_shorthand() -> None:
     """
     import re as _re
 
-    det = _re.compile(r"\b(?:the|a|an|its|this|any)\s+(?:the|a|an)\b|'s\s+(?:the|a|an)\b", _re.I)
+    det = _DETERMINER_COLLISION
     # `token=token` with NO surrounding spaces, and not inside backticks. Both qualifiers are
     # load-bearing, and each was learned from a false positive:
     #   * spaced operators are formulas ("Price = cap / Company Capitalization"), which are correct
@@ -2084,3 +2110,83 @@ class TestNullMeansUnsuppliedEverywhere:
         assert "maturity_default_treatment_defaulted" not in [w.get("code") for w in (r.get("warnings") or [])], (
             "nothing was assumed, so nothing should be disclosed"
         )
+
+
+# Specimens for the three rule-prose detectors above. Every BAD entry is a string that ACTUALLY
+# SHIPPED to a founder or their lawyer this session -- not a construction, because inventing examples
+# from the defects already in hand is how the matchers came to catch only those defects. Every OK
+# entry is live prose that must survive, so broadening an arm cannot be done by matching everything.
+_PROSE_BAD = {
+    "version string": "v0.5.0 cap-table scope: warrants with their own clause are out of scope.",
+    "code shorthand": "Default when anti_dilution_protection=broad_based_weighted_average.",
+    "quoted shorthand": "has anti_dilution_protection='full_ratchet'. Detected by the reader.",
+    "determiner collision": "This implementation's the broad-based denominator A counts common stock.",
+    "duplicated clause": (
+        "The narrow denominator counts common and preferred only, excluding options and warrants. "
+        "The narrow denominator counts common and preferred only, excluding options and warrants."
+    ),
+    "internal path": "Use when the cap-table state.aoa_findings.dividend_provisions_present is true.",
+    "script filename": "Detected by extract_aoa.py during the reading pass.",
+}
+_PROSE_OK = {
+    # Legal citations the pack is built on — these are what a lawyer needs, and an earlier baseline
+    # was 94% composed of them, which is how a ratchet came to measure noise.
+    "NVCA subsection": "The NVCA Model COI §4.4.4 trigger compares the new issuance price.",
+    "backticked identity": ("The load-bearing identity is `safe_ownership_i = purchase_amount_i / post_money_cap_i`."),
+    "spaced formula": "Price = cap / Company Capitalization, computed per series.",
+    "domain vocabulary": "Compare the current conversion price against the original issue price.",
+    "possessive english": "Does the flip require IP migration, and what's the transfer-pricing exposure?",
+}
+
+
+def test_the_prose_matchers_catch_what_shipped_and_spare_what_must_survive() -> None:
+    """The positive case for the three rule-prose detectors, which are otherwise unfalsifiable.
+
+    Each asserts "no offenders in the pack". The pack is clean, so each passes with its matcher
+    blinded to a regex that matches nothing — measured, all three did. The matchers are therefore
+    exercised here against strings that shipped, in both directions.
+
+    The OK set is the half that stops the fix becoming its own defect: every one of these was, at some
+    point today, either flagged by an over-broad arm or nearly rewritten by a sweep. A legal citation
+    rewritten into prose is worse than the shorthand it replaced.
+    """
+    import re as _re
+
+    version = _re.compile(r"\bv\d+\.\d+\.\d+")
+    assign = _re.compile(r"(?<![`\s])[a-z0-9_]*[a-z0-9]=['\"]?[a-z][a-z0-9_]*")
+    det = _DETERMINER_COLLISION
+    path = _re.compile(r"\b[a-z_]+(?:\[[^\]]*\])?(?:\.[a-z_]+(?:\[[^\]]*\])?)+\b")
+    pyfile = _re.compile(r"\.py\b")
+
+    def _clauses_repeat(s: str) -> bool:
+        c = [x.strip().lower().rstrip(",;") for x in s.split(".") if len(x.strip()) > 25]
+        return len(c) != len(set(c))
+
+    def _flagged(s: str) -> bool:
+        if version.search(s) or assign.search(s) or det.search(s) or pyfile.search(s):
+            return True
+        if _clauses_repeat(s):
+            return True
+        # A dotted rule id is a legitimate citation counsel uses; an internal path is not. The real
+        # detector distinguishes them by pack membership, so this does too.
+        rule_ids = set(_rule_pack())
+        return any(m not in rule_ids and m.split(".")[-1] not in {"il", "com", "org"} for m in path.findall(s))
+
+    for label, s in _PROSE_BAD.items():
+        assert _flagged(s), f"a matcher stopped catching {label!r}, which shipped: {s[:70]}"
+
+    # The OK set is checked against every arm EXCEPT the path arm, which legitimately fires on
+    # dotted rule ids and is scoped by the pack membership check in the real detector.
+    for label, s in _PROSE_OK.items():
+        tripped = [
+            n
+            for n, hit in (
+                ("version", version.search(s)),
+                ("shorthand", assign.search(s)),
+                ("determiner", det.search(s)),
+                ("filename", pyfile.search(s)),
+                ("duplicate", _clauses_repeat(s)),
+            )
+            if hit
+        ]
+        assert tripped == [], f"{label!r} is correct prose and would be flagged by {tripped}: {s[:70]}"

@@ -177,31 +177,144 @@ def test_the_scanner_would_catch_a_filename_in_a_text_node() -> None:
 _ = Callable  # re-exported type import kept for parametrize signature clarity
 
 
-def test_no_generator_puts_a_raw_value_in_a_tooltip() -> None:
-    """A hover tooltip is founder-visible text, and no fleet scan can see it.
+# Every attribute whose value a browser shows to a person on hover or to a screen reader. Not a
+# guess: `data-tooltip` is the DOMINANT mechanism in this fleet (four live sites against two for
+# `title`), with its own JS handler in two skills, and the first version of this check dismissed that
+# class as a hypothetical variant.
+_TOOLTIP_ATTRS = ("title", "data-tooltip", "aria-label")
 
-    `_text_nodes` strips attributes by design (asserted above), and the explorer's tooltips are built
-    in JavaScript, so they never exist as static HTML at all — two independent reasons the generated
-    page cannot be scanned for this. cap-table's explorer rendered the humanised label as the visible
-    text and the RAW enum in the `title=`, so `broad_based_weighted_average` was one hover away from a
-    founder on every term.
+# The signature of the defect that actually shipped: the SAME expression rendered RAW in the tooltip
+# and HUMANISED in the visible text beside it, so the founder reads "broad-based weighted average"
+# and hovers to find `broad_based_weighted_average`.
+#
+# The predicate is the RELATIONSHIP, not "the value looks internal" and not "the placeholder is
+# unresolved". Both of those were tried and are unsound: a template placeholder is substituted by the
+# browser after delivery, so a legitimate prose tooltip built by concatenation
+# (`fmr/explore.py:1733`, whose value is a benchmark explanation) is indistinguishable from a defect
+# by that test -- measured, it false-positives on the first real site it meets.
+_RAW_BESIDE_HUMANISED = re.compile(
+    r'title="[^"]*?escape\(\s*([A-Za-z_][\w.]*)\s*\)[^"]*"[^>]*>[^<]{0,80}?humanize\([^)]*?\1'
+)
 
-    This reads the generator SOURCE rather than its output, because that is the only place the
-    construction is visible. Narrow on purpose: it looks for a tooltip interpolating a raw value
-    beside a humanised display, not for tooltips in general — a `title="Compare two scenarios"` is
-    good UI and must stay.
+# Specimens live INSIDE the detector, not beside it. A companion control can be deleted on its own;
+# these cannot be removed without removing the assertion that uses them. HISTORICAL are the exact
+# strings that shipped; LEGITIMATE are live lines that must survive, quoted from the tree so the set
+# cannot drift into strawmen.
+_TOOLTIP_SPECIMENS_BAD = (
+    '`<span class="term" title="${escape(val)}">${escape(humanize(cat, val))}</span>`',
+    '<span class="badge ${s.completeness}" title="${escape(s.completeness)}">'
+    '${escape(humanize("completeness", s.completeness))}</span>',
+)
+_TOOLTIP_SPECIMENS_OK = (
+    # fmr/explore.py:1733 — prose built by concatenation; the value is a benchmark explanation.
+    """'<td><span class="badge ' + referenceRating + '" title="' + escHtml(refNote) + '">' + refIcon""",
+    # cap-table/explore.py:494 — a literal prose tooltip on a button.
+    '<button class="btn" id="compare-toggle" title="Compare two scenarios side by side">',
+)
+
+
+def test_the_tooltip_signature_catches_what_shipped_and_spares_what_did_not() -> None:
+    """The positive case for the detector below, which is otherwise unfalsifiable.
+
+    A detector that scans live data and asserts "no offenders" proves nothing once the data is clean
+    -- and clean is the goal. Blinding its matcher to `(?!x)x` left it green. So the matcher is
+    exercised here against known input in both directions: it must flag every string that actually
+    shipped, and spare every live line that must survive.
     """
-    import re as _re
+    for s in _TOOLTIP_SPECIMENS_BAD:
+        assert _RAW_BESIDE_HUMANISED.search(s), f"the matcher no longer catches a shipped defect: {s[:70]}"
+    for s in _TOOLTIP_SPECIMENS_OK:
+        assert not _RAW_BESIDE_HUMANISED.search(s), f"the matcher flags legitimate prose: {s[:70]}"
 
-    SKILLS = Path(__file__).resolve().parents[1] / "skills"
-    # A title= that interpolates a bare value expression, i.e. not a literal string of prose.
-    raw_tip = _re.compile(r'title="\$\{+\s*escape\(\s*(?!humanize)[A-Za-z_][\w.]*\s*\)\s*\}+"')
-    offenders = []
-    for script in sorted(SKILLS.glob("*/scripts/*.py")):
-        for i, line in enumerate(script.read_text(encoding="utf-8").splitlines(), 1):
-            if raw_tip.search(line):
-                offenders.append(f"{script.parent.parent.name}/{script.name}:{i}")
-    assert offenders == [], (
-        "a tooltip shows a raw internal value: " + "; ".join(offenders) + ". The visible label is "
-        "already humanised, so the tooltip adds only our vocabulary — drop it, or write prose."
+
+@pytest.mark.parametrize(("skill", "generator"), GENERATORS)
+def test_no_generator_puts_a_raw_value_in_a_tooltip(skill: str, generator: str) -> None:
+    """Tooltips are founder-visible text that no text-node scan reaches.
+
+    Read from the GENERATED PAGE, not from generator source. The first version read Python source on
+    the stated grounds that JS-built tooltips "never exist as static HTML at all" -- false, and
+    measuring it is what replaced the instrument: a JS template literal is emitted verbatim and the
+    browser substitutes after delivery, so the page carries both. Source-reading also inherits the
+    generator's own quoting and f-string layers, and measured 0 of 6 live tooltip sites.
+    """
+    ft = _founder_text()
+    script = REPO_ROOT / "founder-skills" / "skills" / skill / "scripts" / generator
+    if not script.exists():
+        pytest.skip(f"{skill} has no {generator}")
+
+    with tempfile.TemporaryDirectory() as td:
+        work = Path(td)
+        drive_compose(skill, FIXTURES / skill, work)
+        out = work / "page.html"
+        if generator == "review_inputs.py":
+            argv = [str(script), str(work / "inputs.json"), "--static", str(out)]
+        else:
+            argv = [str(script), "--dir", str(work), "-o", str(out)]
+            if skill == "deck-review" and generator == "visualize.py":
+                argv.append("--ungated")
+        result = subprocess.run([sys.executable, *argv], capture_output=True, text=True)
+        assert result.returncode == 0, f"{skill}/{generator} failed: {result.stderr[-400:]}"
+        html = out.read_text(encoding="utf-8")
+
+    assert not _RAW_BESIDE_HUMANISED.search(html), (
+        f"{skill}/{generator} shows a humanised label and hides the raw code in its tooltip. The "
+        "visible text is already readable; the tooltip adds only our vocabulary."
     )
+
+    values: list[str] = []
+    for attr in _TOOLTIP_ATTRS:
+        values.extend(re.findall(rf'{attr}="([^"]*)"', html))
+        values.extend(re.findall(rf"{attr}='([^']*)'", html))
+    keep = _cap_table_keep() if skill == "cap-table" else None
+    found = ft.scan(" ".join(values), extra_keep=keep)
+    assert found["enums"] == [] and found["filenames"] == [], (
+        f"{skill}/{generator} hides internal vocabulary in a tooltip: {found}"
+    )
+
+
+def test_a_disabled_lens_explains_itself_without_naming_an_artifact() -> None:
+    """The branch the fleet scan cannot reach, because the fixture never takes it.
+
+    THE THIRD VACUITY MECHANISM. The parametrized scan above asserts "no internal token in the
+    generated page", and it is honest about what it finds — but the financial-model-review fixture
+    carries every artifact, so the code path that renders a DISABLED lens never executes. The scan
+    therefore reported clean on a page that had nothing to say, while the disabled-lens path shipped
+    `runway.json` into a founder-visible `<div class="stub-reason">` and into a tooltip beside it.
+
+    A detector's silence means nothing when the candidate population is empty. Specimens cannot fix
+    that; only exercising the branch can, which is what this does — it stages the fixture, stubs one
+    artifact out, and scans the page the founder would actually get.
+    """
+    import json as _json
+    import subprocess
+    import sys as _sys
+
+    ft = _founder_text()
+    script = REPO_ROOT / "founder-skills" / "skills" / "financial-model-review" / "scripts" / "explore.py"
+    with tempfile.TemporaryDirectory() as td:
+        work = Path(td)
+        drive_compose("financial-model-review", FIXTURES / "financial-model-review", work)
+        # A skipped artifact, the shape the producer writes when a lens could not be computed.
+        (work / "runway.json").write_text(
+            _json.dumps({"skipped": True, "metadata": {"run_id": "test-run"}}), encoding="utf-8"
+        )
+        out = work / "page.html"
+        result = subprocess.run(
+            [_sys.executable, str(script), "--dir", str(work), "-o", str(out)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr[-400:]
+        html = out.read_text(encoding="utf-8")
+
+    assert "stub-reason" in html, (
+        "the disabled-lens path did not render — this test exists to exercise it, so if the page no "
+        "longer takes that branch the guard has gone back to proving nothing"
+    )
+    text = _text_nodes(html)
+    found = ft.scan(text)
+    assert found["filenames"] == [], (
+        f"a disabled lens names our artifact files to the founder: {found['filenames']}. They cannot "
+        "act on a filename — say which analysis is missing, not which file."
+    )
+    assert found["enums"] == [], found["enums"]
