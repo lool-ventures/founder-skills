@@ -261,7 +261,7 @@ _NO_CASSETTE_ALLOWLIST: dict[str, str] = {
 # below, which is the FLOOR at which this test still means something. Telling a developer to
 # install `@^2.1.0` handed them whatever npm's newest 2.x was and put them on a different CLI
 # from CI — the skew the exact pin exists to remove, pointing the other way.
-_CI_PIN = "2.5.0"
+_CI_PIN = "3.0.0"
 
 _MIN_HARNESS = (2, 1, 0)
 

@@ -55,7 +55,7 @@ name: cowork-replay
 #     (A RANGE in that input is DOCUMENTED as of harness 1.12.0 — `action.yml` now states `version`
 #     accepts an npm range, not only an exact pin. It was already mechanically sound: the value is
 #     interpolated as `cowork-harness@$v` into `npm install --global`.)
-#   * the `skill-static-analysis` job's standalone `npm i -g cowork-harness@2.5.0`.
+#   * the `skill-static-analysis` job's standalone `npm i -g cowork-harness@3.0.0`.
 #
 #   PINNED EXACTLY AS OF 2026-08-27 — these five sites are SELECTORS (they decide which CLI runs a
 #   gate), and they were carets until 2.4.0. The caret auto-adopted every upstream release into CI
@@ -228,11 +228,11 @@ jobs:
       # CLI hard-fails (exit 2, "unrecognized arguments"), so this step cannot ride the Action's default
       # `latest`. See the header's version policy.
       - name: Lint scenarios (no silent false-greens)
-        uses: yaniv-golan/cowork-harness@v2
+        uses: yaniv-golan/cowork-harness@v3
         with:
           command: lint
           path: cowork-tests/scenarios/
-          version: "2.5.0"
+          version: "3.0.0"
           # `strict: true` is the Action's first-class input (action.yml `inputs.strict` -> `--strict`),
           # not `extra-args`. WITHOUT it this step CANNOT fail on a WARN-class rule — measured: a WARN
           # finding exits 0 bare and 1 under --strict, while an ERROR (`assert-contradiction`) exits 1
@@ -260,11 +260,11 @@ jobs:
       # `--skip-scenario-drift`. Scenario-drift, like staleness, is only fixable by re-recording, which
       # CI can't do; it surfaces (WARN) in the staleness step below instead of reddening this gate.
       - name: Privacy gate (HARD)
-        uses: yaniv-golan/cowork-harness@v2
+        uses: yaniv-golan/cowork-harness@v3
         with:
           command: verify-cassettes
           path: cowork-tests/cassettes/
-          version: "2.5.0"
+          version: "3.0.0"
           extra-args: "--skip-staleness --skip-scenario-drift ${{ steps.allow.outputs.args }}"
 
       # Email canary: the SAME allowlist must still FLAG a non-synthetic email. The check asserts an
@@ -288,11 +288,11 @@ jobs:
 
       - name: Staleness gate (WARN — does not fail the job; CI cannot re-record)
         continue-on-error: true
-        uses: yaniv-golan/cowork-harness@v2
+        uses: yaniv-golan/cowork-harness@v3
         with:
           command: verify-cassettes
           path: cowork-tests/cassettes/
-          version: "2.5.0"
+          version: "3.0.0"
           extra-args: "--skip-privacy"
 
       # Floored, and NOT for a missing flag. An unknown top-level scenario key inside a frozen
@@ -301,11 +301,11 @@ jobs:
       # it can return the OPPOSITE verdict with no signal. Frozen assertions ARE validated and
       # hard-reject, so this is not "replay validates nothing"; only the scenario object is loose.
       - name: Replay content + manifest-backed assertions (token-free)
-        uses: yaniv-golan/cowork-harness@v2
+        uses: yaniv-golan/cowork-harness@v3
         with:
           command: replay
           path: cowork-tests/cassettes/
-          version: "2.5.0"
+          version: "3.0.0"
 
       # `cowork-tests/gate_prefix_check.py` and `delivery_check.py` are implemented and
       # unit-tested (`founder-skills/tests/test_gate_prefix_check.py` /
@@ -410,7 +410,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install cowork-harness (pinned 2.5.0 — see header version policy)
-        run: npm i -g cowork-harness@2.5.0
+        run: npm i -g cowork-harness@3.0.0
       # The LOADER is the strict surface, and nothing else in CI reaches it:
       #   * `lint` WARNS on an unknown/too-new top-level key and exits 0 (lenient by design);
       #   * `replay` evaluates the scenario FROZEN in each cassette and never reads the on-disk YAML;

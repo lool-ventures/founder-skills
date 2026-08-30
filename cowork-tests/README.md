@@ -10,13 +10,21 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 > version, and the sites are NOT uniform — do not bump them as a block. Enumerate them, never count
 > them from prose:
 >
-> - **`cowork-tests/rerecord.sh` — `>= 2.5.0` (a FLOOR).** Recording bakes
+> - **`cowork-tests/rerecord.sh` — `>= 3.0.0` (a FLOOR).** Recording bakes
 >   the harness version into the artifact, and a lane asserting `present_files_called` at hostloop
 >   cannot be recorded below 2.2.0: presence there comes from the count of `present_files` invocations
 >   (input shape), whereas below that floor it comes from the classified `presentedFiles` list, which
 >   drops the non-absolute path that host-path redaction produces — so the assert flips under redaction
 >   and `record` refuses to write. The numeric gate and its FATAL message are ADJACENT lines; edit both
 >   (`grep -n 'minor.*-ge' rerecord.sh`).
+>   **3.0.0 raised it for a THIRD kind of reason: agent-ELF resolution, the 1.20.0 class.** 2.5.0's
+>   newest baseline (`desktop-1.37937.1`, from harness v2.3.0) pins agent 2.1.246; on this recording
+>   host that directory is empty while 2.1.247 carries the ELF, so a record under the 2.5.0 pin needs
+>   `COWORK_HARNESS_ALLOW_AGENT_FALLBACK=1` and would freeze a tolerated ELF mismatch into a paid
+>   cassette. Under 3.0.0 (`desktop-1.40609.0`, agent 2.1.247) `doctor --tier hostloop` reports
+>   `sha256 ✓ vs baseline`. Scope it honestly: that is a property of THIS host, not a defect in 2.5.0.
+>   3.0.0 itself adds no fidelity debt — its breaking changes are all `protocol`/L0 and we run zero
+>   protocol scenarios. See docs/internal/2026-08-29-cowork-harness-3.0.0-adoption-plan.md.
 >   **2.5.0 raised it for a DIFFERENT KIND of reason, and the difference matters.** Every floor before
 >   it exists because recording bakes the harness version into the artifact. 2.5.0 bakes nothing —
 >   no baseline move, `cassetteVersion` still 12, and no emulation directory changed at all. It is an
@@ -25,12 +33,12 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 >   records silently and freezes a vacuous assert into a paid cassette — and nothing downstream will
 >   ever flag it (the new cassette-satisfiability guard covers `tool_not_called` only, and lives in
 >   upstream's test suite, not a CLI surface). See the dispatch-contract bullet below.
-> - **The four `version:` inputs in the `replay` job — PINNED EXACTLY at `2.5.0`.** LINT, PRIVACY,
+> - **The four `version:` inputs in the `replay` job — PINNED EXACTLY at `3.0.0`.** LINT, PRIVACY,
 >   STALENESS and REPLAY. Exact, not a floor, since 2026-08-27: a caret auto-adopted every upstream
 >   release into CI with nobody choosing it, and five CI steps red on rules the harness adds.
 >   Enumerate with `grep -n 'version: "' ../.github/workflows/cowork-replay.yml`. The **email canary is
 >   not among them**: it is a bare `run:` step riding the CLI the preceding Action step installed.
-> - **The `skill-static-analysis` job's standalone `npm i -g` — PINNED EXACTLY at `2.5.0`.** That step runs
+> - **The `skill-static-analysis` job's standalone `npm i -g` — PINNED EXACTLY at `3.0.0`.** That step runs
 >   `record --dry-run`, i.e. the LOADER, which is the strict surface `lint` cannot substitute for.
 > - **`test_cowork_cassette_replay.py::_MIN_HARNESS` — `(2, 1, 0)`, and it STAYS A FLOOR.** It is a
 >   skip guard, not a selector: raising it turns a below-floor developer's red into a silent skip.

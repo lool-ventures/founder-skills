@@ -557,7 +557,7 @@ Measured workarounds, current through **1.15.0**. Full detail in
 uv run pytest                                       # all tests (e2e auto-skips without auth; cowork auto-skips without the harness CLI)
 uv run pytest founder-skills/tests/ -v              # verbose
 uv run pytest founder-skills/tests/ -v -m "not e2e and not mutation" # explicitly skip the paid + slow lanes
-uv run pytest -m cowork                             # token-free cowork-harness cassette replay (needs `npm i -g cowork-harness@2.5.0` — exact, matching CI; no Docker/token)
+uv run pytest -m cowork                             # token-free cowork-harness cassette replay (needs `npm i -g cowork-harness@3.0.0` — exact, matching CI; no Docker/token)
 uv run pytest -m mutation                           # curated mutant corpus (~3 min; deselected by default — see the WARNING below)
 ```
 
@@ -767,15 +767,18 @@ Tag-push triggers `deck-review-e2e-smoke` in `.github/workflows/skill-quality.ym
 **CURRENT STATE (2.x). Read this before any per-release note below it — those are floor history and several of their numbers are superseded here.**
 
 * **Three postures, per site, not one number — and two of them are no longer floors at all.**
-  **CI selectors are PINNED EXACTLY at `2.5.0`** (the four workflow `version:` inputs, the
+  **CI selectors are PINNED EXACTLY at `3.0.0`** (raised from 2.5.0 on 2026-08-30) (the four workflow `version:` inputs, the
   `skill-static-analysis` `npm i -g`, and the three install instructions in `CONTRIBUTING.md`,
   `CLAUDE.md` and `pyproject.toml`). Carets auto-adopted every upstream release into CI with nobody
   choosing it — 2.4.0 was live in our gates before its adoption plan was written — and five CI steps
   red on rules the harness adds. Raise them deliberately, in an adoption pass, never to chase a red.
   `test_cowork_harness_floors.py` gates all of them, `CLAUDE.md` included (it was ungated until
-  2026-08-27). Recording: **`>= 2.5.0`** (`rerecord.sh`'s gate — the numeric
-  test and its FATAL message are ADJACENT lines; find them with `grep -n 'minor.*-ge'`, never by line
-  number, which has been wrong here before). Replay floor: **`^2.1.0` at exactly ONE site now** —
+  2026-08-27). Recording: **`>= 3.0.0`** (`rerecord.sh` — FOUR sites, and the file
+  says so itself at its `# FLOOR:` header: that header, the numeric gate, its FATAL message, and
+  `_RECORDING_FLOOR`. Find the gate with `grep -n 'minor.*-ge'`, never by line number, which has been
+  wrong here before. The gate keeps the shape `-eq <major> && -ge <minor>` even though `-ge 0` is
+  vacuous at a `.0` floor: the floors test's regex reads that shape and asserts its own pattern
+  matched, so "simplifying" it blinds the guard rather than the gate). Replay floor: **`^2.1.0` at exactly ONE site now** —
   `test_cowork_cassette_replay.py::_MIN_HARNESS`. The other sites this line used to name (the four
   workflow `version:` inputs, the `skill-static-analysis` install, `pyproject.toml`'s marker) became
   exact CI pins on 2026-08-27 and are no longer floors. `_MIN_HARNESS` is a SKIP GUARD, not a
@@ -791,6 +794,43 @@ Tag-push triggers `deck-review-e2e-smoke` in `.github/workflows/skill-quality.ym
   **12**; `MIN_SUPPORTED_CASSETTE_VERSION` is **9**; the hand-authored email canary is deliberately
   **v10**. Any count in prose elsewhere in this file is stale by construction — the corpus was cut on
   2026-08-24 and prose has been wrong about it repeatedly.
+* **`3.0.0` (adopted 2026-08-30) adds NO fidelity debt and NO re-record debt of its own — every
+  breaking change is `protocol`/L0, and we run ZERO protocol scenarios.** The rename
+  `l0_plugin_divergence` → `l0_host_config_contamination` (signal, modifier, `RunResult` field)
+  appears nowhere here. L0 now actually passes `--plugin-dir` (it was silently inert before, so an L0
+  run measured whatever the operator had installed). Measured 2.5.0-vs-3.0.0 across every token-free
+  surface on this tree — `replay` ×10, `verify-cassettes` + allowlist, `lint --strict`, both
+  `record --dry-run` forms, `analyze-skill --strict`, `lint-skill --strict` — **identical verdicts and
+  exit codes**, 0 PII findings both, `lint` byte-identical; the only textual delta anywhere is the
+  staleness target string. `CASSETTE_VERSION` 12 / `MIN_SUPPORTED` 9 unchanged. Four emulation files
+  changed and each was READ (`baselines/` byte-identity is NOT the argument — 2.4.0 is the
+  counterexample): `argv.ts` is a pure refactor extracting `pluginDirArgs()` with `baseAgentArgs`
+  unchanged, `lima.ts` is microvm-only, `protocol.ts` is L0-only, `sync/cowork-sync.ts` is the
+  authoring tool.
+  **Why the recording floor moved anyway — a THIRD class of reason, not fidelity.** 2.5.0's newest
+  baseline pins agent 2.1.246, whose directory is empty on this recording host; 3.0.0's pins 2.1.247,
+  which is staged, so `doctor --tier hostloop` reads `sha256 ✓ vs baseline`. Recording below it needs
+  `COWORK_HARNESS_ALLOW_AGENT_FALLBACK=1` and freezes a tolerated ELF mismatch into a paid cassette.
+  Host-specific, not a 2.5.0 defect.
+  **One gate DID move and an "exhaustive" diff first reported zero**:
+  `provenance.gates.subagentPromptServerOverride:124685897` flips OFF→ON at `1.40609.0`, meaning a
+  server-delivered sub-agent-append override is active with no captured text. No run path reads it
+  (only `sync/cowork-sync.ts`) and it is server-side, so it is already true of production whatever
+  baseline we record against — but **no cassette can now prove what sub-agent prompt text production
+  sent**. It was missed by classifying the whole `provenance.*` prefix as noise; an exhaustive diff
+  that pre-classifies a prefix is a hand-list with extra steps.
+  **Upstream bug found during this pass, FIXED but UNRELEASED — 3.0.0 still ships it.** The harness's
+  hook detection keys only on `<plugin>/hooks/hooks.json`, so it is blind to hooks declared in a
+  plugin **manifest** — which is how this plugin declares its `SessionStart` hook. Proven from our own
+  cassettes: all 10 carry a matched `hook_started`/`hook_response` `SessionStart:startup` pair, one
+  each, **including `host-path-canary` at sealed `container`** (`HOME=/tmp`, no host-config
+  inheritance), so it cannot be the operator's. Consequences: 3.0.0's new `checkHostHookConsent` gate
+  is **bypassable** by that spelling, and the tier-independent disclosure has never fired for us — 9
+  hostloop recordings ran `session-setup.sh` as a native host process silently. Fixed upstream in
+  `3c4d5fe` (union of both channels), unreleased. **When that ships and we re-record, a hook
+  disclosure naming `founder-skills (SessionStart)` will appear where nothing printed before — that is
+  the fix working, not drift.** Full analysis:
+  `docs/internal/2026-08-29-cowork-harness-3.0.0-adoption-plan.md`.
 * **`2.5.0` adds NO fidelity debt, and BLOCKS RECORDING until 24 scenarios are fixed. Read the second
   half before the next re-record.** The blocker: 2.5.0 refuses, at scenario load and **pre-spend**, a
   `tool_not_called`/`subagent_tool_absent` naming a tool the tier provably does not serve. All 26
@@ -862,7 +902,7 @@ Tag-push triggers `deck-review-e2e-smoke` in `.github/workflows/skill-quality.ym
   `no_scratchpad_leak` can now genuinely fail at container (we assert it nowhere), and a baseline with
   no `spawn` block is refused at the sandbox tiers (ours has one).
 
-**In principle a single-skill fix is a single-skill re-record. In practice, right now, it is not** — measured 2026-08-15, all committed cassettes are ALREADY fleet-stale on two counts that no skill edit can avoid: a baseline move (now `1.24012.9 → 1.32352.0`), and shared-root changes since record. Zero cassettes are stale for skill-local reasons alone. So scoping tells you what a change *adds* to the backlog, not that the backlog is small; until the next full refresh clears the baseline drift, "just re-record that skill's four" leaves everything else red. Re-derive with `cowork-harness verify-cassettes cowork-tests/cassettes --skip-scenario-drift` rather than trusting this paragraph. `rerecord.sh` enforces a **harness floor of `>=1.24.0`** (see its own header for why each floor moved; the numeric gate and its message are ADJACENT LINES — locate them with `grep -n 'minor.*-ge' cowork-tests/rerecord.sh`, because editing the string alone leaves the gate a minor behind, and the line numbers quoted here have already been wrong once) — recording is the one operation that bakes the harness version into the artifact: **1.12.0 fixes a bug that made an upload-bearing scenario impossible to record while still spending the paid run** (the artifact↔root check measured `uploads/` artifacts against the user-visible roots, which exclude uploads, and threw *after* the agent run — five scenarios here are upload-bearing), 1.11.0 stamps `environment.harnessVersion` (never backfilled, so an older CLI records a permanently provenance-less cassette), and 1.10.0 is the first release whose sandbox declares the skill/plugin discovery SDK-MCP servers (an older CLI freezes a tool inventory five tools short of what real Cowork advertises). **Committed cassette state — SUPERSEDED, kept only because the paragraph's MECHANISM is still right. Re-measured 2026-08-27: 27 scenarios / 10 cassettes. The 2026-08-18 reading below (26 scenarios / 22 cassettes — 4 uncassetted)** (`competitive-positioning-deck-no-slide`, `competitive-positioning-recall-adoption`, `deck-review-numeric-chain` — the last deliberately, see `_NO_CASSETTE_ALLOWLIST` — and `market-sizing-fx-conversion`). Three were re-recorded at 1.19.0 for 0.7.0 (`ic-sim-smoke`, `competitive-positioning-smoke`, `financial-model-review-smoke`); the rest are older and stale-but-accepted; `cassetteVersion` is 10 except the `lane: remote` one, which is v11. (This line previously said "all 16, recorded at 1.12.0" — **re-derive it after every re-record rather than trusting the number here**; it has now been wrong twice.) The v9-read-floor urgency that used to live here is spent, and so is the outstanding 1.10.0 discovery-surface refresh — that re-record happened. What remains is *mostly* ordinary `skillHash` staleness, which the WARN-only gate reports and only a re-record clears — the one exception is `market-sizing-smoke`, whose on-disk `present_files_called` assert postdates its 1.12.0 recording and so never runs under plain `replay` at all (see the mechanism note below — it is NOT the "evaluated but vacuous" case this line used to describe). A future read-floor raise would refuse them at load time and `rehash` cannot cross a version boundary, so the next floor bump still means a re-record — but that is a future event, not a live risk. The bare form refreshes only scenarios that already have a committed cassette (it prints what it skipped); author a new cassette by name.
+**In principle a single-skill fix is a single-skill re-record. In practice, right now, it is not** — measured 2026-08-15, all committed cassettes are ALREADY fleet-stale on two counts that no skill edit can avoid: a baseline move, and shared-root changes since record. **Do NOT quote a baseline number from this paragraph — it has been wrong. DERIVE it:** each cassette's own `fingerprint.baseline` is what it recorded against, and `latest` is the numerically highest file in the harness's `baselines/` dir. Measured 2026-08-29: `1.32885.1` (×4, the harness-1.25.0 lanes) and `1.34493.1` (×6), against a current `latest` of `desktop-1.40609.0` — NOT the `1.32352.0` this line asserted for months. Zero cassettes are stale for skill-local reasons alone. So scoping tells you what a change *adds* to the backlog, not that the backlog is small; until the next full refresh clears the baseline drift, "just re-record that skill's four" leaves everything else red. Re-derive with `cowork-harness verify-cassettes cowork-tests/cassettes --skip-scenario-drift` rather than trusting this paragraph. `rerecord.sh` enforces a **harness floor of `>=1.24.0`** (see its own header for why each floor moved; the numeric gate and its message are ADJACENT LINES — locate them with `grep -n 'minor.*-ge' cowork-tests/rerecord.sh`, because editing the string alone leaves the gate a minor behind, and the line numbers quoted here have already been wrong once) — recording is the one operation that bakes the harness version into the artifact: **1.12.0 fixes a bug that made an upload-bearing scenario impossible to record while still spending the paid run** (the artifact↔root check measured `uploads/` artifacts against the user-visible roots, which exclude uploads, and threw *after* the agent run — five scenarios here are upload-bearing), 1.11.0 stamps `environment.harnessVersion` (never backfilled, so an older CLI records a permanently provenance-less cassette), and 1.10.0 is the first release whose sandbox declares the skill/plugin discovery SDK-MCP servers (an older CLI freezes a tool inventory five tools short of what real Cowork advertises). **Committed cassette state — SUPERSEDED, kept only because the paragraph's MECHANISM is still right. Re-measured 2026-08-27: 27 scenarios / 10 cassettes. The 2026-08-18 reading below (26 scenarios / 22 cassettes — 4 uncassetted)** (`competitive-positioning-deck-no-slide`, `competitive-positioning-recall-adoption`, `deck-review-numeric-chain` — the last deliberately, see `_NO_CASSETTE_ALLOWLIST` — and `market-sizing-fx-conversion`). Three were re-recorded at 1.19.0 for 0.7.0 (`ic-sim-smoke`, `competitive-positioning-smoke`, `financial-model-review-smoke`); the rest are older and stale-but-accepted; `cassetteVersion` is 10 except the `lane: remote` one, which is v11. (This line previously said "all 16, recorded at 1.12.0" — **re-derive it after every re-record rather than trusting the number here**; it has now been wrong twice.) The v9-read-floor urgency that used to live here is spent, and so is the outstanding 1.10.0 discovery-surface refresh — that re-record happened. What remains is *mostly* ordinary `skillHash` staleness, which the WARN-only gate reports and only a re-record clears — the one exception is `market-sizing-smoke`, whose on-disk `present_files_called` assert postdates its 1.12.0 recording and so never runs under plain `replay` at all (see the mechanism note below — it is NOT the "evaluated but vacuous" case this line used to describe). A future read-floor raise would refuse them at load time and `rehash` cannot cross a version boundary, so the next floor bump still means a re-record — but that is a future event, not a live risk. The bare form refreshes only scenarios that already have a committed cassette (it prints what it skipped); author a new cassette by name.
 
 **Re-record trigger (beyond "a skill changed"):** re-record on every harness **major**, *and* on any release — including a minor — whose changelog reports a change to the **emulated tool surface, spawn env, or system prompt**. Those are the fidelity inputs with no automatic staleness tripwire, so nothing will tell you: the changelog is the authority. `1.10.0` was the first such minor (it added the discovery SDK-MCP servers) and **that debt is settled** — every committed cassette is at `1.12.0` or later, which necessarily carries them. The `1.14.0` trigger (`present_files` served at **hostloop**, the tier this fleet records at, where the harness previously served it only at `container`, so a recording froze a toolset one `alwaysLoad` tool short of production's) is **now discharged for 20 of 21** — see the measured note below. The one remaining `1.12.0` cassette (`market-sizing-smoke`) still carries the short toolset. (`1.15.0` adds no re-record debt: a CLI flag, a notice and docs, with `baselines/` and `schema/` byte-identical to 1.14.0.) Full analysis: `docs/internal/2026-07-31-cowork-harness-1.14.0-adoption-plan.md`.
 

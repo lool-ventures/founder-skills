@@ -31,11 +31,31 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# FLOOR: >=2.5.0 with no upper bound. Recording is the one operation where the harness version is
+# FLOOR: >=3.0.0 with no upper bound. Recording is the one operation where the harness version is
 #   THIS HEADER WAS ONE MINOR BEHIND THE GATE when 2.3.0 was adopted (header said 2.1.0, gate required
 #   2.2) — the exact drift the next paragraph warns about, sitting unfixed in the file that warns about
 #   it. If you are here to change the floor, change all FOUR sites: this header, the numeric gate, its
 #   FATAL message, and `_RECORDING_FLOOR` in founder-skills/tests/test_cowork_harness_floors.py.
+#   * 3.0.0 is required because it is THE FIRST RELEASE WHOSE DEFAULT BASELINE PINS AN AGENT ELF THIS
+#     MACHINE ACTUALLY STAGES — the same class of reason as the 1.20.0 floor, not a fidelity one.
+#     2.5.0's newest baseline is `desktop-1.37937.1` (shipped in harness v2.3.0) and it pins agent
+#     2.1.246; measured 2026-08-29, that directory is EMPTY here while 2.1.247 carries the ELF. So a
+#     record under the 2.5.0 pin resolves no agent and needs `COWORK_HARNESS_ALLOW_AGENT_FALLBACK=1`,
+#     which freezes a TOLERATED ELF MISMATCH into a paid cassette — precisely what the 1.20.0 floor was
+#     raised to prevent. Under 3.0.0 (baseline `desktop-1.40609.0`, agent 2.1.247) `doctor --tier
+#     hostloop` reports `sha256 ✓ vs baseline`. NOTE the scope: this is a property of THIS recording
+#     host, not a defect in 2.5.0 — a machine still holding 2.1.246 sees no block.
+#     3.0.0 adds NO fidelity debt of its own. Its breaking changes are all `protocol`/L0
+#     (`l0_plugin_divergence` -> `l0_host_config_contamination`, L0 finally passing `--plugin-dir`, the
+#     new `allow_host_hooks` consent) and we run ZERO protocol scenarios. `CASSETTE_VERSION` stays 12,
+#     `MIN_SUPPORTED` stays 9. Four emulation files changed and each was read: `argv.ts` is a pure
+#     refactor extracting `pluginDirArgs()` with `baseAgentArgs` behaviour unchanged, `lima.ts` is
+#     microvm-only, `protocol.ts` is L0-only, `sync/cowork-sync.ts` is the authoring tool. Baseline
+#     delta from what our cassettes actually froze (1.32885.1 / 1.34493.1): the ELF, plus exactly two
+#     added `spawn.env` keys (`CLAUDE_CODE_PROMPT_CACHE_TTL`, `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`);
+#     tools, allowedTools, promptTemplate, both sub-agent appends, mountLayout, settings and the
+#     allowDomains SET are all identical. Full analysis:
+#     docs/internal/2026-08-29-cowork-harness-3.0.0-adoption-plan.md.
 #   * 2.5.0 is required for a DIFFERENT REASON FROM EVERY FLOOR BELOW IT, and the difference is the
 #     point. Every earlier floor exists because recording bakes the harness version into the artifact.
 #     2.5.0 bakes NOTHING: no baseline move, `CASSETTE_VERSION` stays 12, `MIN_SUPPORTED` stays 9, and
@@ -201,9 +221,14 @@ echo "cowork-harness $ver"
 # replay now collapses it to one `N/M cassette(s) - <reason> [kind]` line. The `cassette stale:` lines
 # themselves are unchanged and still `::warning::`. Parse the JSON envelope instead.
 major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
-# `-gt 2` first so a future 3.x passes — a bare minor check would FATAL on 3.0.0.
-{ [ "$major" -gt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -ge 5 ]; }; } \
-  || { echo "FATAL: need >=2.5.0 (have $ver) — see the floor note above"; exit 1; }
+# `-gt 3` first so a future 4.x passes — a bare minor check would FATAL on 4.0.0.
+# The `-ge 0` minor clause is VACUOUS at a .0 floor and is kept DELIBERATELY: the shape
+# `[ "$major" -eq N ] && [ "$minor" -ge M ]` is what test_cowork_harness_floors.py's gate regex reads,
+# and that test asserts its own pattern matched — so collapsing this to `[ "$major" -ge 3 ]` does not
+# simplify the gate, it makes the guard that watches the gate match nothing. It re-earns its keep the
+# moment the floor moves to 3.1+.
+{ [ "$major" -gt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -ge 0 ]; }; } \
+  || { echo "FATAL: need >=3.0.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi
