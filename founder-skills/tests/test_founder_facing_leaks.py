@@ -247,3 +247,60 @@ def test_the_published_command_keep_set_is_narrow() -> None:
         assert leak_scan.scan_text(f"run `{published}`"), "the keep-set is not what suppresses this"
     finally:
         leak_scan.PUBLISHED_COMMANDS = original
+
+
+def test_validation_messages_carry_no_json_paths() -> None:
+    """Founder-facing validation messages are a surface NOTHING else scans.
+
+    `validate_inputs.py` and `review_inputs.py` build warning dicts whose `message` is rendered
+    straight into the founder's review page. Neither imports the founder-text policy, and the policy
+    could not help anyway: a snake_case token after a dot is invisible to it by design, because
+    cap-table's rule ids are dotted and counsel cites them verbatim.
+
+    So sixteen messages shipped JSON paths -- "expenses.headcount[0].salary_monthly",
+    "cash.monthly_net_burn" -- to founders for months, with every fleet guard green. This is the
+    detector for that surface, and it is deliberately NOT in the shared module: the shape is only
+    unambiguous where there are no rule ids to protect.
+
+    The machine-readable `field` key is untouched and must stay a path -- the UI targets it. Only the
+    half a human reads is checked.
+    """
+    import ast as _ast
+    import re as _re
+
+    SKILLS = Path(__file__).resolve().parents[1] / "skills"
+    path_re = _re.compile(r"\b[a-z_]{3,}(?:\[[^\]]*\])?(?:\.[a-z_]{3,}(?:\[[^\]]*\])?)+\b")
+    offenders: list[str] = []
+    for script in sorted(SKILLS.glob("*/scripts/*.py")):
+        try:
+            tree = _ast.parse(script.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover - defensive
+            continue
+        for node in _ast.walk(tree):
+            # A dict literal with a "message" key: the founder-facing half of a warning.
+            if not isinstance(node, _ast.Dict):
+                continue
+            for k, v in zip(node.keys, node.values, strict=False):
+                if not (isinstance(k, _ast.Constant) and k.value == "message"):
+                    continue
+                # Collect the literal text of an f-string or plain string, ignoring interpolations.
+                parts: list[str] = []
+                stack = [v]
+                while stack:
+                    cur = stack.pop()
+                    if isinstance(cur, _ast.Constant) and isinstance(cur.value, str):
+                        parts.append(cur.value)
+                    elif isinstance(cur, _ast.JoinedStr):
+                        stack.extend(cur.values)
+                    elif isinstance(cur, _ast.BinOp):
+                        stack.extend([cur.left, cur.right])
+                text = " ".join(parts)
+                for tok in path_re.findall(text):
+                    if tok.endswith((".py", ".json", ".md", ".csv", ".xlsx")):
+                        continue
+                    offenders.append(f"{script.parent.parent.name}/{script.name}:{node.lineno} {tok}")
+    assert offenders == [], (
+        "founder-facing validation messages name internal JSON paths: "
+        + "; ".join(sorted(set(offenders))[:8])
+        + ". Keep the path in the machine-readable `field` key; write the message for a human."
+    )

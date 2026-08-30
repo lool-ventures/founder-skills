@@ -3,7 +3,16 @@
 # requires-python = ">=3.10"
 # dependencies = []
 # ///
-"""Builds cap_state_after_round.json — the post-round cap-state snapshot.
+"""
+STATUS: UNREACHED BY ANY WORKFLOW. Nothing in any SKILL.md, reference or agent body invokes this
+producer, and the loader that would validate its output (`_artifact_io.load_cap_state`) has no
+production callers either. It is kept because multi-round modelling is a product decision that
+has not been taken, not because it is live. Before wiring it up: route the write through
+`_artifact_writer.write_artifact` (which validates on write, unlike the raw `json.dump` here),
+stamp fresh metadata rather than deep-copying the pre-round `run_id`, and add a round-trip test
+through `load_cap_state`. Its four tests call the builder directly and would not catch any of
+those. The null-date defect below was found exactly that way.
+Builds cap_state_after_round.json — the post-round cap-state snapshot.
 
 Per v3 design §4.5: when a priced_round scenario applies AD adjustments, the
 solver emits `ccp_mutations` (per-series CCP after the round). This script
@@ -108,7 +117,11 @@ def build_cap_state_after_round(
             {
                 "event_type": "anti_dilution_applied",
                 "round_id": round_id,
-                "applied_at": applied_at,
+                # Omitted, not null, when no date is supplied. The schema types this `string`, so
+                # writing null produced an artifact that failed its own validation under the usage
+                # this file documents at the top. Same rule the rest of the skill now follows: an
+                # absent optional is absent, never a null.
+                **({"applied_at": applied_at} if applied_at is not None else {}),
                 "series_id": sid,
                 "previous_ccp": bd.get("ccp_before"),
                 "new_ccp": bd.get("ccp_after"),

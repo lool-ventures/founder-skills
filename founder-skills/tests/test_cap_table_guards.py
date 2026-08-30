@@ -222,9 +222,39 @@ def _rule_pack() -> dict[str, bool]:
 
 
 def _unasserted_rules() -> tuple[list[str], list[str]]:
-    suite = "\n".join(p.read_text(encoding="utf-8") for p in Path(__file__).resolve().parent.glob("test_*.py"))
+    """Rules named in no NON-DOCSTRING string literal anywhere in the suite.
+
+    The oracle used to be a raw text scan of every test file, so a comment or a docstring MENTIONING a
+    rule id satisfied it. That is not a hypothetical: five rules counted as covered on prose alone,
+    and the workaround -- "do not name a rule id in a docstring" -- had to be applied three times in
+    one session, each time hiding the fact that the oracle was wrong rather than the docstring.
+
+    Parsing with `ast` and considering only string literals that are not docstrings removes the
+    comment channel entirely. Note what it still does NOT do: it measures MENTION, not assertion.
+    Measured, 12 of the 26 rules it counts as covered appear in no `assert` statement at all -- one
+    qualifies solely by being a sample string in an unrelated text-policy test. Treat the number as
+    "how many rules could be deleted without any test noticing by name", not as a coverage figure.
+    """
+    import ast as _ast
+
+    literals: set[str] = set()
+    for path in Path(__file__).resolve().parent.glob("test_*.py"):
+        try:
+            tree = _ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover - defensive
+            continue
+        docstrings = set()
+        for node in _ast.walk(tree):
+            if isinstance(node, (_ast.Module, _ast.ClassDef, _ast.FunctionDef, _ast.AsyncFunctionDef)):
+                doc = _ast.get_docstring(node, clean=False)
+                if doc is not None:
+                    docstrings.add(doc)
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.Constant) and isinstance(node.value, str) and node.value not in docstrings:
+                literals.add(node.value)
+    joined = "\n".join(literals)
     rules = _rule_pack()
-    unasserted = sorted(r for r in rules if r not in suite)
+    unasserted = sorted(r for r in rules if r not in joined)
     return unasserted, sorted(r for r in unasserted if rules[r])
 
 
@@ -240,7 +270,11 @@ def _unasserted_rules() -> tuple[list[str], list[str]]:
 # and the number went back up -- the guard improved and the metric worsened, which is the tell that
 # the metric was measuring the mention, not the assertion. Ratcheting down on a substring is the
 # exact failure this file was written to catch, so it is corrected here rather than preserved.
-UNASSERTED_RULE_BASELINE = 55
+# NOT a raise of the old 55. That number came from a different instrument -- a raw text scan that
+# counted comments and docstrings -- and the two are not comparable, so the constant is renamed rather
+# than adjusted. Under the AST oracle the true figure is 60; the five-rule difference is the prose
+# mentions the old scan was crediting.
+UNASSERTED_RULE_BASELINE_AST = 60
 UNASSERTED_COUNSEL_RULE_BASELINE = 22  # same correction as above
 
 
@@ -252,17 +286,17 @@ def test_rule_assertion_ratchet() -> None:
     to consult counsel and not being told.
     """
     unasserted, counsel = _unasserted_rules()
-    assert len(unasserted) <= UNASSERTED_RULE_BASELINE, (
-        f"{len(unasserted)} rule_ids have no assertion (baseline {UNASSERTED_RULE_BASELINE}); "
+    assert len(unasserted) <= UNASSERTED_RULE_BASELINE_AST, (
+        f"{len(unasserted)} rule_ids have no assertion (baseline {UNASSERTED_RULE_BASELINE_AST}); "
         f"a new unguarded rule shipped: {sorted(set(unasserted))[:8]}"
     )
     assert len(counsel) <= UNASSERTED_COUNSEL_RULE_BASELINE, (
         f"{len(counsel)} COUNSEL-REVIEW rules have no assertion (baseline "
         f"{UNASSERTED_COUNSEL_RULE_BASELINE}): {counsel[:8]}"
     )
-    if len(unasserted) < UNASSERTED_RULE_BASELINE or len(counsel) < UNASSERTED_COUNSEL_RULE_BASELINE:
+    if len(unasserted) < UNASSERTED_RULE_BASELINE_AST or len(counsel) < UNASSERTED_COUNSEL_RULE_BASELINE:
         pytest.fail(
-            f"unasserted rules down to {len(unasserted)} (baseline {UNASSERTED_RULE_BASELINE}) and "
+            f"unasserted rules down to {len(unasserted)} (baseline {UNASSERTED_RULE_BASELINE_AST}) and "
             f"counsel-review to {len(counsel)} (baseline {UNASSERTED_COUNSEL_RULE_BASELINE}) -- good. "
             "Lower the baselines to lock the win in."
         )
@@ -1285,6 +1319,19 @@ class TestPriorAdEventsAreValidated:
 DOTTED_PATH_BASELINE = 0
 
 
+def _founder_text_policy() -> Any:
+    """The shared policy module, or None when it cannot be imported."""
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "_founder_text.py"
+    spec = importlib.util.spec_from_file_location("_founder_text", path)
+    if not (spec and spec.loader):
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def _delivered_rule_fields() -> list[tuple[str, str, str]]:
     """(rule_id, field, text) for every rule field that reaches a founder or their lawyer.
 
@@ -1711,3 +1758,49 @@ class TestPricedRoundRefusesCollapsingInstrumentIds:
         assert set(out["per_safe"]) == {"s1", "s2"}, (
             f"two distinct SAFEs must produce two rows; got {list(out['per_safe'])}"
         )
+
+
+def test_delivered_rule_prose_is_not_code_shorthand() -> None:
+    """Rule prose is humanised at render time, and shorthand does not survive that.
+
+    `counsel_packet.py` runs the whole packet through `_founder_text.substitute`, which unsnakes
+    tokens. That is CORRECT for domain vocabulary -- a lawyer maps "current conversion price" onto a
+    charter clause, and paraphrasing would cost them precision. It is wrong for anything that was
+    never a sentence: `anti_dilution_protection=full_ratchet` becomes "anti dilution protection=full
+    ratchet", and a token spliced in as a noun leaves a determiner collision behind ("This
+    implementation's the broad-based denominator"). Four such strings were shipping to counsel, one
+    of them on a counsel_review rule.
+
+    WHAT THIS CANNOT SEE, stated so a green is not read as "the prose is good". The arms are shapes,
+    and there are more ways to break a sentence than shapes to enumerate. Measured misses include: a
+    quoted enum ("recorded as 'full_ratchet'"), colon shorthand, an enum list after a colon with no
+    parentheses, article/noun disagreement, a dangling conjunction, and a token used as a verb. This
+    is a regression guard for the shapes that have actually shipped, not a grammar checker.
+    """
+    import re as _re
+
+    det = _re.compile(r"\b(?:the|a|an|its|this|any)\s+(?:the|a|an)\b|'s\s+(?:the|a|an)\b", _re.I)
+    # `token=token` with NO surrounding spaces, and not inside backticks. Both qualifiers are
+    # load-bearing, and each was learned from a false positive:
+    #   * spaced operators are formulas ("Price = cap / Company Capitalization"), which are correct
+    #     and must survive;
+    #   * a backticked identity ("`safe_shares = purchase / (cap / company_capitalization)`") is
+    #     written FOR an implementer and reads correctly after unsnaking.
+    # What shipped, and what this catches, is the unspaced bare form: `anti_dilution_protection=full_ratchet`.
+    assign = _re.compile(r"(?<![`\s])[a-z0-9_]*[a-z0-9]=['\"]?[a-z][a-z0-9_]*")
+
+    ft = _founder_text_policy()
+    problems: list[str] = []
+    for rid, field, raw in _delivered_rule_fields():
+        if not raw:
+            continue
+        if assign.search(raw):
+            problems.append(f"{rid}.{field}: code shorthand (token=value)")
+        if ft is not None and det.search(str(ft.substitute(raw))):
+            problems.append(f"{rid}.{field}: determiner collision after humanising")
+        # Duplicated CLAUSE, not duplicated word. The word-level arm elsewhere missed a repeated
+        # sentence introduced by a previous repair pass, which is how this one earned its place.
+        clauses = [c.strip().lower().rstrip(",;") for c in raw.split(".") if len(c.strip()) > 25]
+        if len(clauses) != len(set(clauses)):
+            problems.append(f"{rid}.{field}: duplicated clause")
+    assert problems == [], "rule prose delivered to counsel reads as code: " + "; ".join(problems[:8])

@@ -274,8 +274,7 @@ def _validate_structural(
                         {
                             "code": "OVERRIDE_INVALID_REVIEWER",
                             "message": (
-                                f"metadata.warning_overrides[{i}].reviewed_by must be "
-                                f"'agent' or 'founder', got '{reviewer}'"
+                                f"Warning override #{i + 1}: reviewer must be 'agent' or 'founder', got '{reviewer}'"
                             ),
                             "field": f"metadata.warning_overrides[{i}].reviewed_by",
                             "layer": 1,
@@ -588,11 +587,11 @@ def _validate_sanity(inputs: dict[str, Any]) -> list[dict[str, Any]]:
                 {
                     "code": "GROWTH_RATE_ZERO_SUSPECT",
                     "message": (
-                        f"growth_rate_monthly is 0.0 but company has"
+                        f"Monthly growth rate is 0.0 but the company has"
                         f" ${_mrr_val:,.0f} MRR and {int(_customers)}"
-                        f" customers. Set to null if growth rate is"
-                        f" unknown, or confirm 0.0 via"
-                        f" metadata.warning_overrides."
+                        f" customers. Leave it blank if the growth rate is"
+                        f" unknown, or record a warning override to confirm"
+                        f" it really is zero."
                     ),
                     "field": "revenue.growth_rate_monthly",
                     "layer": 3,

@@ -64,6 +64,9 @@ def _make_cap_state(
     return cap_state
 
 
+_ABSENT = object()
+
+
 def solve(
     *,
     common_shares: int,
@@ -671,6 +674,49 @@ def test_golden_10e_a_denominator_basis_changes_founder_ownership() -> None:
     # Narrow-based counts fewer shares in the denominator, so it adjusts FURTHER and the founder ends
     # up with less. If this inverts, the basis is wired backwards.
     assert narrow < broad, (broad, narrow)
+
+
+# ---------------------------------------------------------------------------
+# Golden 10f — an explicit null A-basis behaves exactly like an absent key.
+#
+# A regression, not a feature. The schemas were widened to accept `null` for this field (the authoring
+# skeleton writes null for every optional a founder leaves blank) and `cap_state.py` was taught to
+# treat it as "not specified" -- while the solver kept reading it with `.get(key, default)`, which
+# returns the null rather than the default. Net effect: a cap state that PASSED schema validation
+# reached the A-denominator computation as None and died with a raw ValueError. It had been rejected
+# at the schema before the widening, so the change made a previously-safe input crash.
+# ---------------------------------------------------------------------------
+def test_golden_10f_null_a_basis_resolves_to_the_default() -> None:
+    def _solve(basis: Any) -> dict[str, Any]:
+        series: dict[str, Any] = {
+            "series_id": "series_seed",
+            "shares": 2_000_000,
+            "original_issue_price": 1.00,
+            "original_conversion_price": 1.00,
+            "current_conversion_price": 1.00,
+            "anti_dilution_protection": "broad_based_weighted_average",
+        }
+        if basis is not _ABSENT:
+            series["ad_a_denominator_basis"] = basis
+        return solve(
+            common_shares=10_000_000,
+            preferred_series=[series],
+            options_available=1_000_000,
+            pre_money=1_000_000.0,
+            new_money=5_000_000.0,
+        )
+
+    explicit_null = _solve(None)
+    absent = _solve(_ABSENT)
+    assert (
+        explicit_null["aggregate_ownership_by_class"]["founders_pct"]
+        == (absent["aggregate_ownership_by_class"]["founders_pct"])
+    ), "an explicit null must mean the same thing as an omitted key, or the skeleton teaches a crash"
+    # And a supplied value must still be honoured, or the fix has swallowed the field entirely.
+    narrow = _solve("nvca_narrow")
+    assert (
+        narrow["aggregate_ownership_by_class"]["founders_pct"] != absent["aggregate_ownership_by_class"]["founders_pct"]
+    )
 
 
 # ---------------------------------------------------------------------------

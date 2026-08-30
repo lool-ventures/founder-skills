@@ -92,7 +92,7 @@
                     "series_id": {"type": "string"},
                     "protection_type": {"enum": ["broad_based_weighted_average", "narrow_based_weighted_average", "full_ratchet"]},
                     "ad_trigger_basis": {"enum": ["original_issue_price", "current_conversion_price"]},
-                    "ad_a_denominator_basis": {"enum": ["nvca_broad", "nvca_narrow"]},
+                    "ad_a_denominator_basis": {"enum": ["nvca_broad", "nvca_narrow", null]},
                     "trigger_price": {"type": "number"},
                     "new_pps": {"type": "number"},
                     "ccp_before": {"type": "number"},

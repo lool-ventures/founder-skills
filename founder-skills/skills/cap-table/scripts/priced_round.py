@@ -537,7 +537,13 @@ def _apply_anti_dilution(
         if cp1 == ocp and _prior_down_round_in_history(sid, cap_table_history):
             warnings.append({"code": "W_STALE_CCP_SUSPECTED", "series_id": sid})
 
-        a_basis = series.get("ad_a_denominator_basis", _default_a_basis(protection))
+        # `or`, not `.get(k, default)`. An explicitly-null value means "not specified", exactly like
+        # an absent key -- the authoring skeleton writes `null` for every optional field a founder has
+        # not filled in. The schemas were widened to accept that null and `cap_state.py` was fixed to
+        # honour it, while this call site was not: a schema-VALID cap state then reached
+        # `_compute_a_denominator(None)` and died with a raw ValueError. Widening a schema without
+        # sweeping every consumer is how that happens.
+        a_basis = series.get("ad_a_denominator_basis") or _default_a_basis(protection)
         A = _compute_a_denominator(a_components, a_basis)
 
         B: float | None = None

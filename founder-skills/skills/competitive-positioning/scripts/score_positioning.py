@@ -231,8 +231,8 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
                 "code": "RATIONALE_MISSING",
                 "severity": "medium",
                 "message": (
-                    f"View '{view['id']}': X-axis rationale is missing "
-                    "(checked both x_axis.rationale and the x_axis_rationale sibling)"
+                    f"View '{view['id']}': the X-axis has no stated rationale — "
+                    "explain what the axis measures and why it separates these companies"
                 ),
             }
         )
@@ -242,8 +242,8 @@ def _score_view(view: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, An
                 "code": "RATIONALE_MISSING",
                 "severity": "medium",
                 "message": (
-                    f"View '{view['id']}': Y-axis rationale is missing "
-                    "(checked both y_axis.rationale and the y_axis_rationale sibling)"
+                    f"View '{view['id']}': the Y-axis has no stated rationale — "
+                    "explain what the axis measures and why it separates these companies"
                 ),
             }
         )
