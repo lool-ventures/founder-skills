@@ -1774,8 +1774,10 @@ def test_delivered_rule_prose_is_not_code_shorthand() -> None:
     WHAT THIS CANNOT SEE, stated so a green is not read as "the prose is good". The arms are shapes,
     and there are more ways to break a sentence than shapes to enumerate. Measured misses include: a
     quoted enum ("recorded as 'full_ratchet'"), colon shorthand, an enum list after a colon with no
-    parentheses, article/noun disagreement, a dangling conjunction, and a token used as a verb. This
-    is a regression guard for the shapes that have actually shipped, not a grammar checker.
+    parentheses, verb elision ("This implementation the footnote's broader variant"), article/noun
+    disagreement, a dangling conjunction, a near-duplicate sentence that is not a byte-for-byte repeat,
+    and a token used as a verb. Eight measured misses against three arms — this is a regression guard
+    for the shapes that have actually shipped, not a grammar checker.
     """
     import re as _re
 
@@ -1804,3 +1806,213 @@ def test_delivered_rule_prose_is_not_code_shorthand() -> None:
         if len(clauses) != len(set(clauses)):
             problems.append(f"{rid}.{field}: duplicated clause")
     assert problems == [], "rule prose delivered to counsel reads as code: " + "; ".join(problems[:8])
+
+
+class TestCapStateRejectsDuplicateIds:
+    """The id-collapse class, guarded once at the artifact instead of once per consumer.
+
+    THE HISTORY IS THE ARGUMENT. Duplicate ids were fixed twice at the point of use -- the
+    cap-implied SAFE path, then the priced path -- and SIX more consumers were still collapsing:
+    `preferred_series` in the anti-dilution CP1 snapshot, `founder_id` in the post-round breakdown,
+    `results_by_id` in the warrant pump, `per_note` on the note-conversion route, rule_audit's gating
+    key, and the option-grant subscript. Each fix was scoped to the example a reviewer named. The
+    invariant belongs to the ARTIFACT, so it is now stated once where the artifact is assembled.
+
+    Measured before the fix, all with `completeness: "full"` and zero blockers:
+      * two preferred series sharing an id -> ~5 percentage points of founder ownership;
+      * two notes sharing an id -> 720,000 shares reported where the truth was 1,120,000;
+      * two founders sharing an id -> one row showing 8,000,000 shares for a founder holding
+        5,000,000, and the whole per-founder section suppressed because it renders only when there
+        is more than one key.
+
+    A schema `uniqueItems` was considered and does not work: `_cap_table_schema_validator.py`
+    implements only type/enum/items/properties/required, so the keyword would be inert -- and the
+    derived-id case below is not expressible in a schema at all, because the collision is created
+    during canonicalization, after validation.
+    """
+
+    BASE = {"company_name": "X", "metadata": {"run_id": "t", "schema_version": "v0.5.0-inputs"}}
+    FOUNDER = [{"founder_id": "f1", "name": "F", "common_shares": 8_000_000}]
+
+    @staticmethod
+    def _series(series_id: str | None, name: str, price: float) -> dict:
+        s = {
+            "series_name": name,
+            "shares": 1_000_000,
+            "original_issue_price": price,
+            "original_conversion_price": price,
+            "current_conversion_price": price,
+            "anti_dilution_protection": "broad_based_weighted_average",
+            "issuance_date": "2024-01-01",
+        }
+        if series_id:
+            s["series_id"] = series_id
+        return s
+
+    @staticmethod
+    def _note(note_id: str, principal: float) -> dict:
+        return {
+            "id": note_id,
+            "principal": principal,
+            "issuance_date": "2025-01-01",
+            "maturity_date": "2027-01-01",
+            "annual_interest_rate": 0.0,
+            "valuation_cap": 10_000_000,
+            "capitalization_denominator": 8_000_000,
+        }
+
+    @staticmethod
+    def _safe(safe_id: str, amount: float) -> dict:
+        return {
+            "id": safe_id,
+            "form": "yc_postmoney_cap",
+            "purchase_amount": amount,
+            "post_money_valuation_cap": 5_000_000,
+            "issuance_date": "2025-01-01",
+        }
+
+    @staticmethod
+    def _warrant(warrant_id: str) -> dict:
+        return {
+            "id": warrant_id,
+            "warrant_type": "common",
+            "shares_underlying": 1_000,
+            "exercise_price": 1.0,
+            "issuance_date": "2024-01-01",
+            "settlement_type": "cash_exercise",
+        }
+
+    def _build(self, inputs_extra: dict, instruments: dict) -> dict:
+        import cap_state  # type: ignore[import-not-found]
+
+        built: dict = cap_state.build_cap_state(
+            {**self.BASE, "founders": self.FOUNDER, **inputs_extra},
+            {"safes": [], "convertible_notes": [], **instruments},
+        )
+        return built
+
+    def _refuses(self, inputs_extra: dict, instruments: dict) -> str:
+        import cap_state  # type: ignore[import-not-found]
+
+        with pytest.raises(cap_state.CapStateInvariantError) as exc:
+            self._build(inputs_extra, instruments)
+        assert "E_DUPLICATE_ID_IN_CAP_TABLE" in str(exc.value), exc.value
+        return str(exc.value)
+
+    def test_duplicate_founder_ids_are_refused(self) -> None:
+        import cap_state  # type: ignore[import-not-found]
+
+        with pytest.raises(cap_state.CapStateInvariantError) as exc:
+            cap_state.build_cap_state(
+                {
+                    **self.BASE,
+                    "founders": [
+                        {"founder_id": "f1", "name": "Alice", "common_shares": 5_000_000},
+                        {"founder_id": "f1", "name": "Bob", "common_shares": 3_000_000},
+                    ],
+                },
+                {"safes": [], "convertible_notes": []},
+            )
+        assert "E_DUPLICATE_ID_IN_CAP_TABLE" in str(exc.value)
+
+    def test_duplicate_series_ids_are_refused(self) -> None:
+        self._refuses(
+            {"preferred_series": [self._series("a", "Series A", 1.0), self._series("a", "Series A2", 2.0)]}, {}
+        )
+
+    def test_series_ids_DERIVED_into_a_collision_are_refused(self) -> None:
+        """The case nobody can see coming: no duplicate is typed anywhere.
+
+        `series_id` is derived from `series_name.lower().replace(" ", "_")` when the document does
+        not state one -- which is what the freeform lane produces. Two series named "Series A" and
+        "series a" therefore collide, and the anti-dilution snapshot runs both against one CP1.
+        """
+        message = self._refuses(
+            {"preferred_series": [self._series(None, "Series A", 1.0), self._series(None, "series a", 2.0)]}, {}
+        )
+        assert "DERIVED" in message, (
+            "a collision the founder never typed must say so; otherwise the remedy reads as "
+            "'stop repeating an id' about ids they did not write"
+        )
+
+    def test_duplicate_note_ids_are_refused(self) -> None:
+        self._refuses({}, {"convertible_notes": [self._note("n1", 500_000), self._note("n1", 900_000)]})
+
+    def test_duplicate_safe_ids_are_refused(self) -> None:
+        self._refuses({}, {"safes": [self._safe("s1", 500_000), self._safe("s1", 900_000)]})
+
+    def test_duplicate_warrant_ids_are_refused(self) -> None:
+        self._refuses({}, {"warrants": [self._warrant("w1"), self._warrant("w1")]})
+
+    def test_duplicate_grant_ids_are_refused(self) -> None:
+        self._refuses(
+            {},
+            {
+                "option_grants": [
+                    {"id": "g1", "shares": 1_000, "status": "outstanding"},
+                    {"id": "g1", "shares": 2_000, "status": "outstanding"},
+                ]
+            },
+        )
+
+    def test_every_guarded_array_is_actually_reached(self) -> None:
+        """The vacuity check, and it caught a real defect while this was being written.
+
+        The canonical row RENAMES the input's `id` to `safe_id`/`note_id`/`warrant_id`/`grant_id`,
+        so a uniqueness check written against `"id"` inspects a field nothing carries and passes
+        silently. The notes entry was written that way: five arrays were caught and notes sailed
+        through. Asserting per-array is what surfaced it -- a single "duplicates are refused" test
+        over one array would have shipped the hole.
+        """
+        import cap_state  # type: ignore[import-not-found]
+
+        for array, canonical_key in (
+            ("founders", "founder_id"),
+            ("preferred_series", "series_id"),
+            ("option_grants", "grant_id"),
+            ("safes", "safe_id"),
+            ("convertible_notes", "note_id"),
+            ("warrants", "warrant_id"),
+        ):
+            source = (Path(cap_state.__file__).read_text(encoding="utf-8")).split("_check_unique_ids(")[-1]
+            assert f'("{array}", "{canonical_key}"' in source, (
+                f"{array} is checked against a key other than {canonical_key!r}, so its uniqueness "
+                "check inspects a field the canonical rows do not carry and can never fire"
+            )
+
+    def test_distinct_ids_across_every_array_still_build(self) -> None:
+        """No false positives: a populated, well-formed cap table must be unaffected."""
+        built = self._build(
+            {
+                "founders": [
+                    {"founder_id": "f1", "name": "A", "common_shares": 5_000_000},
+                    {"founder_id": "f2", "name": "B", "common_shares": 3_000_000},
+                ],
+                "preferred_series": [self._series("a1", "Series A", 1.0), self._series("a2", "Series B", 2.0)],
+            },
+            {
+                "safes": [self._safe("s1", 500_000), self._safe("s2", 250_000)],
+                "convertible_notes": [self._note("n1", 500_000), self._note("n2", 900_000)],
+                "warrants": [self._warrant("w1"), self._warrant("w2")],
+                "option_grants": [
+                    {"id": "g1", "shares": 1_000, "status": "outstanding"},
+                    {"id": "g2", "shares": 2_000, "status": "outstanding"},
+                ],
+            },
+        )
+        assert built["as_converted_totals"]["fully_diluted_shares"] > 0
+        assert len(built["outstanding_notes"]) == 2, "both notes must survive a clean build"
+
+    def test_absent_ids_are_not_treated_as_duplicates_of_each_other(self) -> None:
+        """`None` is not an id. Two id-less rows are two missing ids, not one repeated one.
+
+        Reporting them as duplicates of `None` points the founder at a value appearing nowhere in
+        their documents -- the required-field checks already name the real defect.
+        """
+        import cap_state  # type: ignore[import-not-found]
+
+        with pytest.raises(cap_state.CapStateInvariantError) as exc:
+            self._build({}, {"option_grants": [{"shares": 1_000}, {"shares": 2_000}]})
+        assert "E_DUPLICATE_ID_IN_CAP_TABLE" not in str(exc.value), (
+            f"two id-less grants were reported as sharing an id: {exc.value}"
+        )

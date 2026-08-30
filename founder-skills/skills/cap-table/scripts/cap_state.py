@@ -274,7 +274,18 @@ def _build_outstanding_options(
     canonical location (cap_state.outstanding_options[*]).
     """
     out = []
-    for g in grants:
+    for i, g in enumerate(grants):
+        # TYPED, like every sibling builder. `"grant_id": g["id"]` below is a subscript, so a grant
+        # with no id raised a bare KeyError out of a function whose peers (_build_outstanding_safes /
+        # _notes / _warrants) all raise E_*_MISSING_FIELD with a remedy. The caller cannot tell a
+        # missing field from a crash, and the founder gets a traceback instead of a sentence.
+        if "id" not in g:
+            holder = g.get("holder_id") or f"index {i}"
+            raise CapStateInvariantError(
+                f"E_OPTION_GRANT_MISSING_FIELD: option_grants[{i}] (holder '{holder}') is missing "
+                "required field 'id'. Remedy: add 'id' (a unique string key for this grant, e.g. "
+                "'grant_001')."
+            )
         # Null-tolerant: an explicit null share numeric is schema-equivalent to an absent key for these
         # not-required ["integer","null"] fields; degrade unknown vesting to fully-unvested (conservative).
         granted = int(g.get("shares_granted") or 0)
@@ -581,6 +592,54 @@ def _normalize_ad_carve_outs(s: dict[str, Any]) -> str:
 _FD_RECONCILE_PPM_THRESHOLD = 1000
 
 
+def _check_unique_ids(arrays: list[tuple[str, str, list[dict[str, Any]]]]) -> None:
+    """Every id-bearing array must have distinct ids. Checked ONCE, here, for all of them.
+
+    WHY HERE AND NOT AT EACH CONSUMER. Ids key the per-instrument outputs across this skill --
+    `per_safe`, `per_note`, `results_by_id`, `cp1_snapshots`, the founder breakdown, rule_audit's
+    gating map. Every one of those is `map[thing["id"]] = row`, so a repeated id silently drops a row
+    while the totals keep counting it. Guarding them one at a time was tried and does not work: two
+    consumers were fixed in separate commits and SIX more were still collapsing, because the
+    invariant belongs to the ARTIFACT, not to whichever function happens to read it next. This is the
+    one place every array is canonicalized, so it is the one place the invariant can be stated once
+    and hold for consumers nobody has written yet.
+
+    Measured, with no duplicate typed by anyone: two preferred series named "Series A" and "series a"
+    both DERIVE `series_id` "series_a" (see the canonicalization below), and the anti-dilution
+    snapshot then runs both series against one CP1 -- a ~5 percentage-point swing in founder
+    ownership with `completeness: "full"` and zero blockers. Two notes sharing an id reported
+    720,000 shares where the truth was 1,120,000.
+
+    A schema `uniqueItems` cannot stand in for this: `_cap_table_schema_validator.py` implements only
+    type/enum/items/properties/required, so the keyword would be inert, and the derived-id case is
+    not expressible in the schema at all -- the collision is created here, after validation.
+    """
+    for array_name, id_field, rows in arrays:
+        seen: dict[Any, int] = {}
+        for i, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+            rid = row.get(id_field)
+            if rid is None or rid == "":
+                continue
+            if rid in seen:
+                raise CapStateInvariantError(
+                    f"E_DUPLICATE_ID_IN_CAP_TABLE: {array_name}[{i}] and {array_name}[{seen[rid]}] "
+                    f"share {id_field} {rid!r}. Ids key the per-item outputs, so a repeat reports one "
+                    f"row for two items while both still count toward the totals -- the summary and "
+                    f"the detail would disagree with no warning. Remedy: give each entry in "
+                    f"{array_name} a distinct {id_field}."
+                    + (
+                        " (Note this id may have been DERIVED from the series name, so two series "
+                        "whose names differ only in case or spacing collide here without anyone "
+                        "typing a duplicate.)"
+                        if array_name == "preferred_series"
+                        else ""
+                    )
+                )
+            seen[rid] = i
+
+
 def build_cap_state(
     inputs: dict[str, Any],
     instruments: dict[str, Any],
@@ -726,6 +785,27 @@ def build_cap_state(
     outstanding_safes = _build_outstanding_safes(instruments.get("safes", []) or [])
     outstanding_notes = _build_outstanding_notes(instruments.get("convertible_notes", []) or [])
     aoa_findings_mirror = _build_aoa_findings_mirror(inputs)
+
+    # Checked on the CANONICAL rows, deliberately -- `preferred_series` ids are derived here when the
+    # document does not state one, so checking the raw input would miss exactly the case a founder
+    # cannot see coming.
+    #
+    # NOTE THE PER-ARRAY KEY NAMES. The canonical row RENAMES the input's `id` to `safe_id` /
+    # `note_id` / `warrant_id` / `grant_id`, so a check written against `"id"` silently matches
+    # nothing and passes. Measured while writing this: the notes row read `"id"` and the duplicate
+    # sailed through while the other five were caught. `test_cap_state_rejects_duplicate_ids`
+    # exercises every array for exactly that reason -- a uniqueness check that inspects a field name
+    # nothing carries is the vacuous-guard failure this repo keeps finding.
+    _check_unique_ids(
+        [
+            ("founders", "founder_id", canonical_founders),
+            ("preferred_series", "series_id", canonical_preferred),
+            ("option_grants", "grant_id", outstanding_options),
+            ("safes", "safe_id", outstanding_safes),
+            ("convertible_notes", "note_id", outstanding_notes),
+            ("warrants", "warrant_id", outstanding_warrants),
+        ]
+    )
 
     # W_AOA_ONLY_NO_INSTRUMENTS — AoA-only engagement detection (§6.0). When all
     # instruments arrays are empty AND aoa_findings has actual data, downstream

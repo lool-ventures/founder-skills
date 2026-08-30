@@ -419,6 +419,22 @@ MUST_KILL: tuple[Mutant, ...] = (
         ),
     ),
     Mutant(
+        id="cap_state_duplicate_ids_not_refused",
+        killed_by="TestCapStateRejectsDuplicateIds::test_duplicate_founder_ids_are_refused",
+        file=f"{_SCRIPTS}/cap_state.py",
+        find="    for array_name, id_field, rows in arrays:",
+        replace="    for array_name, id_field, rows in []:",
+        rationale=(
+            "Disables the artifact-level uniqueness check, restoring an entire CLASS rather than one "
+            "defect: ids key every per-item output in this skill, and six consumers were measured "
+            "collapsing on a repeat -- the AD CP1 snapshot (~5 percentage points of founder "
+            "ownership), the note route (720,000 shares reported against a true 1,120,000), the "
+            "founder breakdown, the warrant pump, rule_audit's gating map and the option-grant "
+            "subscript. Two earlier commits guarded two consumers each and left the rest; this is "
+            "the check that made the invariant hold for consumers nobody has written yet."
+        ),
+    ),
+    Mutant(
         id="priced_round_duplicate_ids_collapse_silently",
         killed_by="TestPricedRoundRefusesCollapsingInstrumentIds::test_duplicate_safe_ids_block_the_round",
         file=f"{_SCRIPTS}/priced_round.py",
