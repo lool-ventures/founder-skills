@@ -446,8 +446,9 @@ def quick_assess(
             ),
         )
         import _founder_text  # type: ignore[import-not-found]
+        from _founder_text_keep import cap_table_keep
 
-        _md = str(_founder_text.substitute(_md))
+        _md = str(_founder_text.substitute(_md, extra_keep=cap_table_keep()))
     except Exception:
         pass
     sentinel["_report_md"] = _md

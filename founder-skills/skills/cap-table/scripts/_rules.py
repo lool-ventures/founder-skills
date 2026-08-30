@@ -55,7 +55,13 @@ def founder_text(s: str) -> str:
     names, JS identifiers and URLs; it is applied per founder-visible STRING at the render boundary.
     """
     pol = _policy()
-    return str(pol.substitute(s)) if pol is not None and s else s
+    if pol is None or not s:
+        return s
+    # Same keep set compose uses. Without it this boundary destroyed the very glossary the skill
+    # maintains -- and it feeds HTML TEXT NODES, so the mangled form is what the founder reads.
+    from _founder_text_keep import cap_table_keep
+
+    return str(pol.substitute(s, extra_keep=cap_table_keep()))
 
 
 def rule_title(rule_id: str) -> str:

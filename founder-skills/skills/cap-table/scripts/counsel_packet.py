@@ -105,7 +105,11 @@ def _apply_founder_text_policy(md: str) -> str:
         import _founder_text  # type: ignore[import-not-found]
     except Exception:
         return md
-    return str(_founder_text.substitute(md))
+    # Keep set, not bare substitute: counsel needs the exact term, and this route was mangling the
+    # skill's own glossed vocabulary while `report.md` preserved it.
+    from _founder_text_keep import cap_table_keep
+
+    return str(_founder_text.substitute(md, extra_keep=cap_table_keep()))
 
 
 def render_markdown(packet: dict[str, Any]) -> str:

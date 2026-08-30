@@ -1790,9 +1790,11 @@ def main() -> int:
     # disagree with the JSON, the explorer and the counsel packet about what a scenario is called.
     _ft = _founder_text_policy()
     if _ft is not None:
-        _keep = frozenset(k for _m in _labels.MAPS.values() for k in _m) | _ft.identifier_values(
-            artifacts, include_map_keys=True
-        )
+        from _founder_text_keep import cap_table_keep
+
+        # Static floor shared with quick_assess / counsel_packet / _rules, unioned with the
+        # data-dependent ids only this call site has (scenario + instrument ids from the artifacts).
+        _keep = cap_table_keep() | _ft.identifier_values(artifacts, include_map_keys=True)
         report_md = _ft.substitute(report_md, extra_keep=_keep)
         _found = _ft.scan(report_md, extra_keep=_keep)
         for _tok in _found["enums"]:
