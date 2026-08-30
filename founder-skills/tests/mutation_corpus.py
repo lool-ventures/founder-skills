@@ -286,16 +286,30 @@ MUST_KILL: tuple[Mutant, ...] = (
         id="concise_report_writes_before_deciding",
         killed_by="TestConciseReportDoesNotClobberOnReject::test_rejected_render_leaves_the_prior_markdown_intact",
         file=f"{_SCRIPTS}/concise_report.py",
-        find='    rejected = not md.strip() or ("—" in md and "Founders" not in md)',
+        find="    rejected = not md.strip() or not has_content",
         replace=(
             '    with open(args.output_md, "w", encoding="utf-8") as fh:\n'
             "        fh.write(md)\n"
-            '    rejected = not md.strip() or ("—" in md and "Founders" not in md)'
+            "    rejected = not md.strip() or not has_content"
         ),
         rationale=(
             "Restores write-then-evaluate. The exit code stays honest and the artifact does not: the "
             "founder is pointed at a file the producer itself just called empty, and the prior good "
             "answer is gone."
+        ),
+    ),
+    Mutant(
+        id="concise_gate_ignores_whether_anything_rendered",
+        killed_by="TestConciseReportDoesNotClobberOnReject::test_rejected_render_leaves_the_prior_markdown_intact",
+        file=f"{_SCRIPTS}/concise_report.py",
+        find="    rejected = not md.strip() or not has_content",
+        replace="    rejected = not md.strip()",
+        rationale=(
+            "Restores the property the old predicate lost: a render that produced no fact, no warning "
+            "callout and no flag is still non-empty as a STRING -- it carries a title and a footer -- so "
+            "a strip()-only gate writes it and the founder is handed a heading with nothing under it. "
+            "This is the half of the gate that has to survive; the half that was broken refused real "
+            "answers, and a fix that only loosens would trade one silent defect for the other."
         ),
     ),
     Mutant(

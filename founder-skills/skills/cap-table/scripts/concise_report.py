@@ -70,17 +70,25 @@ def _ownership_lines(co: dict) -> list[str]:
     return rows
 
 
-def _scenario_block(scenario: dict) -> list[str]:
-    co = scenario.get("computed_outputs", {}) or {}
-    label = scenario.get("label") or scenario.get("scenario_id") or "Scenario"
-    completeness = co.get("completeness", "structural_only")
-    out = [f"### {label}"]
+def _scenario_facts(co: dict) -> list[str]:
+    """Every founder-facing FACT line for one scenario, and nothing else.
+
+    Separated from `_scenario_block` so the pre-write gate can ask "did this render anything?"
+    by COUNTING what the renderer produced, rather than pattern-matching the rendered prose.
+    The header, the completeness note and the trailing blank are deliberately not facts: a block
+    consisting only of those is the empty answer the gate must refuse.
+    """
+    out: list[str] = []
 
     price = co.get("equity_financing_price")
     if price is not None:
         out.append(f"- **Price per share:** ${float(price):,.4f}")
 
     per_safe = co.get("per_safe") or {}
+
+    # PRICED conversion. The cap-implied arm emits a different key set entirely (below), so this
+    # loop must stay keyed on the priced fields -- widening it to cover both is what would break
+    # the priced path.
     for sid, s in per_safe.items():
         cp = s.get("conversion_price")
         shares = s.get("conversion_shares")
@@ -92,21 +100,50 @@ def _scenario_block(scenario: dict) -> list[str]:
 
     own = _ownership_lines(co)
     if own:
-        out.append("")
         out.extend(own)
         fd = co.get("post_round_fully_diluted_shares")
         if fd:
             out.append(f"- **Fully-diluted total:** {round(float(fd)):,} shares")
-    elif completeness in {"cap_implied_only", "structural_only"}:
-        ci = co.get("cap_implied_ownership")
-        if ci is not None:
-            out.append(f"- **Cap-implied ownership (pre-financing):** {_pct(ci)}")
+    elif co.get("cap_implied_only") and per_safe:
+        # CAP-IMPLIED snapshot -- a separate block, mirroring `compose_report._render_scenarios`
+        # and `visualize`. Gated on `per_safe` as well as the flag: a BLOCKED cap-implied run
+        # carries `cap_implied_only: True` with an empty `per_safe`, and heading a refusal with an
+        # ownership label prints a promise with nothing under it.
+        rows = [(sid, r) for sid, r in per_safe.items() if "cap_implied_ownership" in r]
+        if rows:
+            out.append("- **Cap-implied ownership (pre-financing):**")
+            for sid, r in rows:
+                bits = _pct(r["cap_implied_ownership"])
+                price_i = r.get("safe_price")
+                shares_i = r.get("cap_implied_shares")
+                if price_i is not None:
+                    bits += f" (SAFE price ${float(price_i):,.4f}"
+                    if shares_i is not None:
+                        bits += f", {round(float(shares_i)):,} shares"
+                    bits += ")"
+                out.append(f"  - **{sid}:** {bits}")
 
-    blockers = co.get("blockers") or []
-    for b in blockers:
-        code = b.get("code") if isinstance(b, dict) else b
-        out.append(f"- ⚠️ **Blocked:** {code}")
+    # A blocked run's answer IS the blocker. Carry the remedy, not the bare code: the code alone is
+    # internal vocabulary, and `compose_report` already renders both to the founder.
+    for b in co.get("blockers") or []:
+        if isinstance(b, dict):
+            code = b.get("code")
+            remedy = (b.get("remedy") or "").strip()
+            where = f" on {b['instance_id']}" if b.get("instance_id") else ""
+            out.append(f"- ⚠️ **Blocked** (`{code}`{where}){f': {remedy}' if remedy else ''}")
+        else:
+            out.append(f"- ⚠️ **Blocked** (`{b}`)")
 
+    return out
+
+
+def _scenario_block(scenario: dict) -> list[str]:
+    co = scenario.get("computed_outputs", {}) or {}
+    label = scenario.get("label") or scenario.get("scenario_id") or "Scenario"
+    completeness = co.get("completeness", "structural_only")
+
+    out = [f"### {label}"]
+    out.extend(_scenario_facts(co))
     if completeness not in {"full", "mixed"}:
         out.append(f"- _(completeness: {completeness} — not a post-financing table)_")
     out.append("")
@@ -193,10 +230,25 @@ def main() -> int:
     # returned 0; this wrote a stub through `-o` and returned 2. The exit code was honest and the
     # artifact was not, and a founder is pointed at the artifact.
     #
-    # Precedence note, since it reads as a bug and is not one: `not md.strip() or ("—" in md and
-    # "Founders" not in md)`. Empty -> reject; em-dash placeholders with no Founders section ->
-    # reject; a real answer containing an em-dash -> accept. The truth table is intended.
-    rejected = not md.strip() or ("—" in md and "Founders" not in md)
+    # DECIDE FROM THE DATA, NOT FROM THE PROSE. The previous predicate was
+    # `not md.strip() or ("—" in md and "Founders" not in md)`, described in a comment here as an
+    # intended truth table. It was not: the title is always `# {company} — concise cap-table
+    # answer`, so `"—" in md` is a tautology and the whole thing collapsed to `"Founders" not in
+    # md` -- and "Founders" renders only when `aggregate_ownership_by_class.founders_pct` is
+    # present. Measured, EVERY documented concise route was refused (cap-implied snapshot, blocked
+    # run, priced round with no founders row); only a priced round carrying founders_pct survived.
+    # A complete answer was discarded and the founder told it "looks empty".
+    #
+    # The gate now counts what the renderers actually produced. Any of three kinds of content is a
+    # real answer: a scenario fact, a cap_state warning callout, or a rule_audit flag -- a run whose
+    # only content is "your cap base is ASSUMED" is still an answer, and refusing it would be the
+    # same defect in a new place.
+    has_content = (
+        any(_scenario_facts(s.get("computed_outputs", {}) or {}) for s in (scenarios_doc.get("scenarios") or []))
+        or bool(_warning_callouts.render_warning_callouts((cap_state or {}).get("warnings") or []))
+        or bool(_flag_lines(rule_audit))
+    )
+    rejected = not md.strip() or not has_content
     if rejected:
         payload = {
             "ok": False,
