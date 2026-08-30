@@ -167,6 +167,40 @@ def test_total_listing_budget_under_default_floor() -> None:
 _INTERNAL_VERSION_REF = re.compile(r"\bv0\.\d+\.\d+")
 
 
+def test_the_internal_version_matcher_and_its_exemptions_work() -> None:
+    """The positive case for the scan below, which cannot otherwise fail.
+
+    Measured: blinding `_INTERNAL_VERSION_REF` to a regex that matches nothing leaves the whole file's
+    158 tests green. The corpus is clean — the goal state — so its silence says nothing about the
+    matcher, and a rotted pattern would read exactly like a compliant fleet.
+
+    The exemptions get specimens too, and they are the half that matters here. Both are contractual
+    identifiers that LOOK like the thing being banned: a `schema_version` pins an artifact contract,
+    and the rule-pack version is data a lawyer's citation depends on. An over-broad matcher that
+    swept them would push an author to delete a real contract to get green.
+    """
+    must_flag = [
+        "This skill is v0.5.0 and expects the v0.4.2 rule pack.",
+        "Added in v0.10.0.",
+    ]
+    must_not_flag_by_pattern = [
+        "Version 1.2.3 of the NVCA model form.",  # not the v0.x plugin shape
+        "See §4.4.4 of the certificate.",  # a legal citation, not a version
+    ]
+    exempted_by_line_rule = [
+        'The artifact carries "schema_version": "v0.5.0-cap-state".',
+        "The rule pack is cap-table-rules.json v0.4.9.",
+    ]
+    for s in must_flag:
+        assert _INTERNAL_VERSION_REF.search(s), f"an internal version ref is no longer caught: {s!r}"
+    for s in must_not_flag_by_pattern:
+        assert not _INTERNAL_VERSION_REF.search(s), f"the matcher is too broad: {s!r}"
+    for s in exempted_by_line_rule:
+        assert "schema_version" in s or "cap-table-rules" in s, (
+            f"specimen no longer exercises an exemption — the scan's skip rule and this list have drifted apart: {s!r}"
+        )
+
+
 def test_no_internal_version_refs_in_user_facing_files() -> None:
     """Internal plugin version numbers belong in CHANGELOG / commits /
     docs/internal — never in SKILL.md, skill references, or agent bodies

@@ -756,6 +756,73 @@ def test_fenced_task_calls_pin_subagent_type_individually(skill_md: Path) -> Non
     )
 
 
+# Specimens for the detector above, exercised through the WHOLE chain -- fence detection, call
+# detection, argument extraction, pin check -- not just the arg parser, which already has its own
+# test. Every BAD form must be flagged and every OK form spared.
+#
+# What this guards is not cosmetic: a `Task(` with no `subagent_type=` falls back to the wildcard
+# `general-purpose` agent, which is bash-capable. This fleet's Context A sub-agents are declared
+# WITHOUT a shell on purpose, so a type-less dispatch silently hands one a shell and discards the
+# scoped persona. The model copies the fenced example, not the prose above it.
+_TASK_SPECIMENS_BAD = [
+    ("bare call", '```python\nTask(description="extract", prompt="…")\n```'),
+    (
+        "pin in prose, not in the call",
+        'Always pass `subagent_type=`.\n\n```python\nTask(description="d", prompt="p")\n```',
+    ),
+    (
+        "pinned sibling, unpinned neighbour",
+        '```python\nTask(subagent_type="founder-skills:cap-table", description="a")\n'
+        'Task(description="b", prompt="p")\n```',
+    ),
+]
+_TASK_SPECIMENS_OK = [
+    ("pinned", '```python\nTask(subagent_type="founder-skills:cap-table", description="d")\n```'),
+    (
+        "pinned with a comment carrying a paren",
+        "```python\nTask(  # REQUIRED (omitting it downgrades the agent)\n"
+        '  subagent_type="founder-skills:cap-table", description="d")\n```',
+    ),
+    ("no fenced call at all", "Prose about Task( dispatch that is not inside a fence."),
+]
+
+
+def test_the_task_pin_detector_catches_an_unpinned_dispatch() -> None:
+    """End-to-end specimens for the scan above — CORRECTING a premise, so it is not re-derived.
+
+    That scan looked blind-vacuous when run alone: blinding its call-detection regex and running only
+    that test leaves it green. It is NOT unguarded. Two neighbouring tests already cover its parts —
+    one exercises the matcher on a synthetic block, another the fence detector — and blinding either
+    reds them. Running a detector in isolation is not how the suite runs, and the isolation reading
+    produced a false "vacuous" verdict that reached a written review.
+
+    What those two do NOT cover, and what this adds, is the whole chain plus the defect class the
+    scan's own docstring names: a pin stated in PROSE while the fenced call beside it omits it. The
+    model copies the fence, not the sentence. That case passes through fence detection and the matcher
+    individually, and only fails when they are composed.
+
+    Stakes, since they are easy to understate: a `Task(` with no `subagent_type=` falls back to the
+    wildcard general-purpose agent, which is bash-capable. This fleet's Context A sub-agents are
+    declared WITHOUT a shell deliberately.
+    """
+
+    def _offenders(text: str) -> list[str]:
+        out = []
+        for block in _fenced_blocks(text):
+            for m in _TASK_CALL_START.finditer(block):
+                args = _extract_call_args(block, m.end() - 1)
+                if args is None:
+                    continue
+                if not _PIN_KWARG.search(args):
+                    out.append(block[m.start() : m.start() + 60])
+        return out
+
+    for label, text in _TASK_SPECIMENS_BAD:
+        assert _offenders(text), f"an unpinned dispatch is no longer caught ({label}) — a type-less "
+    for label, text in _TASK_SPECIMENS_OK:
+        assert not _offenders(text), f"a conforming dispatch is flagged ({label})"
+
+
 def test_extract_call_args_skips_hash_comments_inside_the_arg_list() -> None:
     """A `#` comment between kwargs must not truncate or derail the scan.
 
