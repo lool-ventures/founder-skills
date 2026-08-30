@@ -239,3 +239,67 @@ def test_cowork_readme_floor_list_matches_the_registry() -> None:
         f"cowork-tests/README.md still describes CI selectors as caret ranges: "
         f"{sorted(set(stale) - allowed)} — they are pinned exactly at {_CI_PIN}"
     )
+
+
+def test_prose_pin_statements_are_not_stale() -> None:
+    """The English sentences that DESCRIBE the pins must state the pins.
+
+    The 3.0.0 adoption moved every gated site, went green, and left EIGHT prose statements saying
+    `2.5.0` — including this workflow's own "Version policy" header and the step NAME on the install
+    step whose `run:` had just been bumped, so CI logs would have read "pinned 2.5.0" while installing
+    3.0.0. That is the exact failure this module's docstring claims to prevent ("an adoption pass has
+    already updated the code and left the prose a major behind"), committed in the sites the module
+    did not read.
+
+    Gated here rather than left to review because the drift is invisible: nothing executes prose, and
+    the numbers only disagree with reality, never with each other.
+
+    THE COUNT IS PART OF THE ASSERTION, and it is not decoration. Mutation-tested on the way in: all
+    ten value-swaps red, but DELETING one of the two `PINNED EXACTLY at` sentences left the other
+    matching and the test GREEN — a non-emptiness check cannot see a sentence disappear when a
+    sibling survives. Pinning the expected occurrence count closes that. If you legitimately add or
+    remove one of these sentences, update its count deliberately; that edit is the point.
+
+    SCOPE. Only statements about the CURRENT posture are matched. Release history ("2.5.0 refuses
+    ...", "THE FLOOR WAS 1.25.0") is deliberately untouched — it is accurate about its own release
+    and must stay readable, which is why these patterns key on present-tense policy phrasing rather
+    than on the bare version string.
+    """
+    wf = WORKFLOW.read_text(encoding="utf-8")
+    claude = CLAUDE_MD.read_text(encoding="utf-8")
+    readme = COWORK_README.read_text(encoding="utf-8")
+
+    # (label, text, pattern, expected occurrences, expected value)
+    sites: tuple[tuple[str, str, str, int, str], ...] = (
+        ("workflow version-policy header", wf, r"PINNED EXACTLY at (\d+\.\d+\.\d+)", 1, _CI_PIN),
+        ("workflow 'now PINNED at' note", wf, r"sites are now PINNED at (\d+\.\d+\.\d+)", 1, _CI_PIN),
+        ("workflow 'the exact' note", wf, r"all four are now the exact `(\d+\.\d+\.\d+)`", 1, _CI_PIN),
+        ("workflow install step NAME", wf, r"- name: Install cowork-harness \(pinned (\d+\.\d+\.\d+)", 1, _CI_PIN),
+        ("CLAUDE.md 'PINNED EXACTLY at'", claude, r"PINNED EXACTLY at `(\d+\.\d+\.\d+)`", 2, _CI_PIN),
+        ("CLAUDE.md registry description (pin)", claude, r"pinned exactly, `(\d+\.\d+\.\d+)`\)", 1, _CI_PIN),
+        ("CLAUDE.md 'RECORDING floor'", claude, r"RECORDING floor `>=(\d+\.\d+\.\d+)`", 1, _RECORDING_FLOOR),
+        (
+            "CLAUDE.md registry description (floor)",
+            claude,
+            r"FLOORS \(recording `>=(\d+\.\d+\.\d+)`",
+            1,
+            _RECORDING_FLOOR,
+        ),
+        (
+            "CLAUDE.md 'rerecord.sh enforces'",
+            claude,
+            r"`rerecord\.sh` enforces a \*\*harness floor of `>=(\d+\.\d+\.\d+)`\*\*",
+            1,
+            _RECORDING_FLOOR,
+        ),
+        ("cowork README 'the floor is now'", readme, r"the floor is now (\d+\.\d+\.\d+)", 1, _RECORDING_FLOOR),
+    )
+
+    for label, text, pattern, count, want in sites:
+        got = _found(re.findall(pattern, text), label)
+        assert len(got) == count, (
+            f"{label}: expected {count} statement(s), found {len(got)}. A sentence was added or "
+            f"removed — update the declared count deliberately (see this test's docstring: a bare "
+            f"non-emptiness check let a DELETED sentence pass)"
+        )
+        assert set(got) == {want}, f"{label} states {sorted(set(got))}, registry says {want}"

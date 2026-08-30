@@ -67,7 +67,7 @@ Docker); replay/verify are **token/agent-free** (stock CI).
 >
 > Node **22+** as of 1.14.0 (20 is EOL; `doctor` fails on it).
 >
-> **Why not below 2.2.0 for RECORDING (the original reason; the floor is now 2.5.0 — see above).**
+> **Why not below 2.2.0 for RECORDING (the original reason; the floor is now 3.0.0 — see above).**
 > `present_files_called` at hostloop is unrecordable below it
 > (see the floor list above). Adopting 2.2.0 changed nothing else here: measured against a pinned
 > 2.1.0, every token-free surface on this repo is byte-identical — `replay` ×10, `verify-cassettes`,
