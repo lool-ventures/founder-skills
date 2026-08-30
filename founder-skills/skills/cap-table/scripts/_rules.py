@@ -43,6 +43,28 @@ def _sources() -> dict[str, dict[str, Any]]:
     return {s["source_id"]: s for s in _pack().get("source_bibliography", []) if s.get("source_id")}
 
 
+def _keep() -> frozenset[str]:
+    """The shared keep set, resolved defensively.
+
+    `_policy()` below catches its own import precisely so "a rule summary is worth rendering
+    unpolished rather than not at all". An unguarded import here defeated that: with the helper
+    missing, `visualize` and `explore` both died and neither report.html nor explorer.html was
+    written at all. Degrade to the empty set, never to no deliverable.
+    """
+    try:
+        import os
+        import sys
+
+        d = os.path.dirname(os.path.abspath(__file__))
+        if d not in sys.path:
+            sys.path.insert(0, d)
+        from _founder_text_keep import cap_table_keep
+
+        return frozenset(cap_table_keep())
+    except Exception:
+        return frozenset()
+
+
 def founder_text(s: str) -> str:
     """Unsnake internal vocabulary in a string bound for a founder-visible surface.
 
@@ -57,11 +79,7 @@ def founder_text(s: str) -> str:
     pol = _policy()
     if pol is None or not s:
         return s
-    # Same keep set compose uses. Without it this boundary destroyed the very glossary the skill
-    # maintains -- and it feeds HTML TEXT NODES, so the mangled form is what the founder reads.
-    from _founder_text_keep import cap_table_keep
-
-    return str(pol.substitute(s, extra_keep=cap_table_keep()))
+    return str(pol.substitute(s, extra_keep=_keep()))
 
 
 def rule_title(rule_id: str) -> str:
@@ -111,7 +129,9 @@ def rule_summary(rule_id: str) -> str:
     """
     raw = (_rules_by_id().get(rule_id) or {}).get("summary") or ""
     pol = _policy()
-    return str(pol.substitute(raw)) if pol is not None and raw else raw
+    # FIFTH call site. It was left on a bare substitute when the other four were unified, which
+    # recreated inside this one file the exact "invisible by inspection" asymmetry being removed.
+    return str(pol.substitute(raw, extra_keep=_keep())) if pol is not None and raw else raw
 
 
 def _rule_source_ids(rule_id: str) -> list[str]:

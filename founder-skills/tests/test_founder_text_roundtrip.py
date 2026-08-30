@@ -23,9 +23,12 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import re
 import sys
 import types
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 SKILLS = REPO / "skills"
@@ -33,12 +36,14 @@ SKILLS = REPO / "skills"
 # Dict keys whose values are rendered to a founder verbatim by some producer.
 _FOUNDER_TEXT_KEYS = frozenset({"remedy", "reason", "detail", "message", "guidance", "recommendation"})
 
-# MEASURED 2026-08-30 on HEAD 410cf88 + the keep-parity fix, against THIS file's key set. SHRINK ONLY.
+# MEASURED against THIS file's key set AND its literal walk. SHRINK ONLY; fails in BOTH directions.
 #
-# Do not inherit this number from anywhere else. An adversarial review of the plan that produced this
-# test reported 55 for a WIDER key set; adopting it here would have left 26 slots of silent headroom
-# for exactly the defect the ratchet exists to catch. Re-measure when you change `_FOUNDER_TEXT_KEYS`.
-_BASELINE = 29
+# It was 29 when the walk saw only `ast.Constant`. That number was not a smaller problem, it was a
+# blinder: f-strings outnumber constants ~2:1 in founder-text values (105 vs 59 measured), so the
+# ratchet could not see the very remedy it was written about. Widening the walk to f-string and
+# concatenation segments took the true count to 68. Re-measure whenever `_FOUNDER_TEXT_KEYS` or
+# `_literal_parts` changes; never inherit a count from a review or a sibling file.
+_BASELINE = 68
 
 
 def _founder_text() -> types.ModuleType:
@@ -62,6 +67,31 @@ def _cap_table_keep() -> frozenset[str]:
     return frozenset(mod.cap_table_keep())
 
 
+def _literal_parts(node: ast.AST) -> list[str]:
+    """The literal text of a founder-facing value, including inside an f-string.
+
+    F-STRINGS ARE THE DOMINANT SHAPE, and a Constant-only walk could not see them: measured across
+    the fleet, 105 founder-text values are f-strings against 59 plain constants. The remedy that
+    motivated this whole detector -- `f"{len(notes)} convertible note(s) are outstanding ... "` --
+    was itself invisible to the first version of this function, so the ratchet could not see the
+    defect it was written about.
+
+    Interpolations are skipped and their surrounding literal segments checked individually: a
+    computed value cannot be audited statically, but the prose around it can.
+    """
+    out: list[str] = []
+    if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.strip():
+        out.append(node.value)
+    elif isinstance(node, ast.JoinedStr):
+        for part in node.values:
+            if isinstance(part, ast.Constant) and isinstance(part.value, str) and part.value.strip():
+                out.append(part.value)
+    elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        out.extend(_literal_parts(node.left))
+        out.extend(_literal_parts(node.right))
+    return out
+
+
 def _founder_strings(path: Path) -> list[tuple[int, str]]:
     """Every literal string a producer assigns to a founder-facing key.
 
@@ -76,23 +106,14 @@ def _founder_strings(path: Path) -> list[tuple[int, str]]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Dict):
             for k, v in zip(node.keys, node.values, strict=False):
-                if (
-                    isinstance(k, ast.Constant)
-                    and k.value in _FOUNDER_TEXT_KEYS
-                    and isinstance(v, ast.Constant)
-                    and isinstance(v.value, str)
-                    and v.value.strip()
-                ):
-                    out.append((getattr(v, "lineno", 0), v.value))
+                if isinstance(k, ast.Constant) and k.value in _FOUNDER_TEXT_KEYS:
+                    for text in _literal_parts(v):
+                        out.append((getattr(v, "lineno", 0), text))
         elif isinstance(node, ast.Call):
             for kw in node.keywords:
-                if (
-                    kw.arg in _FOUNDER_TEXT_KEYS
-                    and isinstance(kw.value, ast.Constant)
-                    and isinstance(kw.value.value, str)
-                    and kw.value.value.strip()
-                ):
-                    out.append((getattr(kw.value, "lineno", 0), kw.value.value))
+                if kw.arg in _FOUNDER_TEXT_KEYS:
+                    for text in _literal_parts(kw.value):
+                        out.append((getattr(kw.value, "lineno", 0), text))
     return out
 
 
@@ -116,9 +137,17 @@ def test_founder_text_roundtrip_ratchet() -> None:
         f"{len(offenders)} founder-facing producer strings are rewritten by substitute (baseline "
         f"{_BASELINE}). A NEW one shipped: the founder will read a mangled version of what you "
         f"wrote. Either drop the internal token from the prose, or gloss it in _labels.py.\n"
-        + "\n".join(offenders[_BASELINE:] or offenders[-5:])
+        # Sorted for a stable, readable report: `_offenders()` returns ast.walk order, so slicing it
+        # printed an arbitrary element rather than anything related to what changed.
+        + "\n".join(sorted(offenders))
     )
-    assert len(offenders) >= 0
+    if len(offenders) < _BASELINE:
+        pytest.fail(
+            f"only {len(offenders)} offenders remain (baseline {_BASELINE}) -- good. Lower "
+            f"_BASELINE to {len(offenders)} to lock the win in. This ratchet fails in BOTH "
+            f"directions, like the rest of this repo's: an un-lowered baseline is headroom for the "
+            f"next regression to hide in."
+        )
 
 
 def test_ratchet_is_not_vacuous() -> None:
@@ -142,11 +171,50 @@ def _looks_substituted(span: str) -> bool:
     `pre money` is one substitute got to. The test is round-trip: re-snake it, humanize it, and see
     if you land back on what is rendered.
     """
-    ft = _founder_text()
-    if " " not in span.strip() or "`" in span:
+    span = span.strip()
+    if " " not in span:
         return False
-    candidate = span.strip().replace(" ", "_").lower()
-    return bool(str(ft.humanize_token(candidate)).lower() == span.strip().lower())
+    # The naive round-trip (re-snake, humanize, compare) is the IDENTITY for any span whose only
+    # structure is spaces -- measured, it returned True for `npm install`, `uv run pytest` and
+    # `SELECT * FROM t`. It collapsed to "contains a space", so the baseline of 1 was luck: the
+    # committed fixtures happen to render only one multi-word span.
+    #
+    # A de-snaked token is narrower than that. Every part must be a plausible identifier fragment
+    # (lowercase alphanumeric, no punctuation, no shell/SQL shape), and the whole must re-snake into
+    # a token some producer or schema in this repo actually uses -- otherwise it is just prose.
+    # Ask the POLICY what each known token becomes, and look for that. This catches both shapes a
+    # de-snaked token actually takes: the plain humanize (`pre_money` -> `pre money`) and the
+    # _labels-mapped form (`hard_pass` -> `Decline — hard pass`), which carries an em dash and a
+    # capital and so is invisible to any rule about identifier-looking parts.
+    return span.lower() in _substituted_forms()
+
+
+def _substituted_forms() -> frozenset[str]:
+    """What `substitute` turns each real snake_case token in this repo into.
+
+    Grounded in actual vocabulary, not shape. Shape alone cannot distinguish `npm install` from
+    `pre money` -- the first predicate here tried and was measured to return True for `npm install`,
+    `uv run pytest` and `SELECT * FROM t`, i.e. it had collapsed to "contains a space".
+    """
+    global _FORMS
+    if _FORMS is None:
+        ft = _founder_text()
+        pat = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
+        forms: set[str] = set()
+        for f in list(SKILLS.glob("*/scripts/*.py")) + list(SKILLS.glob("*/references/schemas/*.json")):
+            try:
+                text = f.read_text(encoding="utf-8")
+            except OSError:  # pragma: no cover
+                continue
+            for tok in pat.findall(text):
+                sub = str(ft.substitute(tok))
+                if sub != tok and " " in sub:
+                    forms.add(sub.lower())
+        _FORMS = frozenset(forms)
+    return _FORMS
+
+
+_FORMS: frozenset[str] | None = None
 
 
 def test_delivered_artifacts_carry_no_de_snaked_code_span() -> None:
@@ -164,6 +232,7 @@ def test_delivered_artifacts_carry_no_de_snaked_code_span() -> None:
 
     code_span = re.compile(r"`([^`\n]+)`")
     hits: list[str] = []
+    scanned = 0
     for skill_dir in sorted(SKILLS.iterdir()):
         skill = skill_dir.name
         fixture = REPO / "tests" / "fixtures" / skill
@@ -175,6 +244,7 @@ def test_delivered_artifacts_carry_no_de_snaked_code_span() -> None:
             drive_compose(skill, fixture, work)
         except Exception:  # pragma: no cover - a skill that cannot compose is another test's problem
             continue
+        scanned += 1
         md = work / "report.md"
         if not md.exists():
             continue
@@ -184,5 +254,8 @@ def test_delivered_artifacts_carry_no_de_snaked_code_span() -> None:
 
     assert len(hits) <= _DELIVERED_BASELINE, (
         f"{len(hits)} delivered code span(s) look de-snaked (baseline {_DELIVERED_BASELINE}). The "
-        f"founder is reading a token that does not exist:\n" + "\n".join(hits)
+        f"founder is reading a token that does not exist:\n" + "\n".join(sorted(hits))
     )
+    if len(hits) < _DELIVERED_BASELINE:
+        pytest.fail(f"only {len(hits)} delivered hit(s) remain (baseline {_DELIVERED_BASELINE}) -- lower it.")
+    assert scanned, "no skill composed a report.md -- the scan proved nothing (see the except below)"

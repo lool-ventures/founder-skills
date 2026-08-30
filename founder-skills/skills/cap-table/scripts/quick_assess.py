@@ -316,7 +316,13 @@ def quick_assess(
                     )
             md_lines.append(line)
     else:
-        md_lines.append(f"_Solver could not produce a full answer ({completeness})._")
+        # md_term, not the bare enum. Keeping the glossary verbatim is right where the renderer
+        # GLOSSES it (compose emits "Structure only — no priced round yet (`structural_only`)");
+        # here the token was interpolated naked, so the keep set turned readable prose into a raw
+        # internal token. The keep set is not a licence to stop glossing.
+        import _labels
+
+        md_lines.append(f"_Solver could not produce a full answer ({_labels.md_term('completeness', completeness)})._")
         for b in solver_result.get("blockers", []):
             md_lines.append(f"- `{b['code']}`: {b['remedy']}")
     if completeness == "full" and headline:
@@ -446,9 +452,17 @@ def quick_assess(
             ),
         )
         import _founder_text  # type: ignore[import-not-found]
-        from _founder_text_keep import cap_table_keep
 
-        _md = str(_founder_text.substitute(_md, extra_keep=cap_table_keep()))
+        # Resolved separately from the policy import: folding it into the same try meant a missing
+        # helper silently disabled ALL substitution (the except is bare), turning a partial failure
+        # into total silence. An unavailable keep set degrades to the previous behaviour instead.
+        try:
+            from _founder_text_keep import cap_table_keep
+
+            _keep = cap_table_keep()
+        except Exception:
+            _keep = frozenset()
+        _md = str(_founder_text.substitute(_md, extra_keep=_keep))
     except Exception:
         pass
     sentinel["_report_md"] = _md

@@ -106,10 +106,16 @@ def _apply_founder_text_policy(md: str) -> str:
     except Exception:
         return md
     # Keep set, not bare substitute: counsel needs the exact term, and this route was mangling the
-    # skill's own glossed vocabulary while `report.md` preserved it.
-    from _founder_text_keep import cap_table_keep
+    # skill's own glossed vocabulary while `report.md` preserved it. Guarded separately -- the
+    # try/except above exists so "a packet is worth delivering unpolished rather than not at all",
+    # and an unguarded import here defeated that: a missing helper meant NO counsel_packet.md.
+    try:
+        from _founder_text_keep import cap_table_keep
 
-    return str(_founder_text.substitute(md, extra_keep=cap_table_keep()))
+        keep = cap_table_keep()
+    except Exception:
+        keep = frozenset()
+    return str(_founder_text.substitute(md, extra_keep=keep))
 
 
 def render_markdown(packet: dict[str, Any]) -> str:

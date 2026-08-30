@@ -126,6 +126,7 @@ _SELECTION = tuple(
         "test_solver_convergence_guards.py",
         "test_solver_warning_surfaces.py",
         "test_founder_text_keep_parity.py",
+        "test_founder_text_roundtrip.py",
         "test_v48_hotfix_regressions.py",
         "test_verify_one.py",
         "test_visualize_cap_table.py",
@@ -322,7 +323,7 @@ MUST_KILL: tuple[Mutant, ...] = (
         id="rules_boundary_drops_the_shared_keep_set",
         killed_by="test_founder_text_keep_parity.py::test_rules_boundary_keeps_the_glossary",
         file=f"{_SCRIPTS}/_rules.py",
-        find="    return str(pol.substitute(s, extra_keep=cap_table_keep()))",
+        find="    return str(pol.substitute(s, extra_keep=_keep()))",
         replace="    return str(pol.substitute(s))",
         rationale=(
             "Restores the state three of four cap-table call sites shipped in: substitute with no "
