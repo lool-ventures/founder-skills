@@ -53,7 +53,22 @@
   simultaneously recording as unguarded — measured, it dropped `test_error_code_assertion_ratchet` below its baseline.
   Carries a **no-op control**: a comment-only mutant that must leave the selection PASSING, without which a broken
   harness greens every entry. The two count ratchets are `--deselect`ed from the child run — a count ratchet is not a
-  defect detector, so a rename mutant can red it while noticing nothing.
+  defect detector, so a rename mutant can red it while noticing nothing. Every `MUST_KILL` entry names the test
+  that must be the one to notice (`killed_by`, **measured by running the mutant, never guessed**) and a kill from
+  anywhere else fails: this corpus has twice been caught scoring a kill for the wrong reason (a count ratchet, then
+  a collection error — `pytest` exits 1 for a failed import exactly as for a failed test), so "something went red"
+  is deliberately not accepted as "the guard noticed".
+- `founder-skills/tests/test_release_gating.py` — The release chain, asserted rather than assumed:
+  whenever `publish-release` runs, every job in its TRANSITIVE `needs` closure must run too. **In Actions
+  a skipped dependency SKIPS the dependent** (no status function in `publish-release`'s `if:`), so a
+  condition that stops firing on a tag push does not merely stop gating — it stops the Release
+  publishing, invisibly, and this repo has already shipped four tags with no Release. Two independent
+  checks because they fail differently: the job `if:` strings are **frozen verbatim** beside a
+  hand-derived tag-push truth value (an edit reds and forces re-derivation), AND a small evaluator runs
+  the closure under a simulated tag push. The evaluator **raises on an unknown context property** rather
+  than defaulting it — a silent default would green a job GitHub actually skips, i.e. the exact failure
+  it exists to catch. Asserts WIRING, never that a job passes. Note the chain is unexercised: v0.10.0
+  predates the `publish-release` job.
 - `founder-skills/tests/cowork_async_subagent_filter.py` — Cowork sub-agent tool-name compatibility helper (skill-quality CI; v0.4.0-regression detector)
 - `cowork-tests/leak_scan.py` — Shared detector for founder-facing "internal plumbing" leaks in assistant narration. Ten classes: nine syntactic (script names, `*.py`, `--flags`, `$vars`, exit codes, `W_`/`E_` codes, JSON, step/route labels, ALLCAPS-with-underscore) plus `plumbing_verb`, which is semantic. Reads a cassette or a run dir's `events.jsonl` — point it at the FILE, since a directory glob finds only `*.json` and reports a silent false-clean.
 - `founder-skills/tests/test_founder_facing_leaks.py` — Ratchet over `leak_scan.py` across the committed cassettes. **Gates "no NEW leaks beyond `BASELINE`", not zero** — the cassettes predate the narration rule. Ratchet the constant DOWN after a re-record; never raise it.

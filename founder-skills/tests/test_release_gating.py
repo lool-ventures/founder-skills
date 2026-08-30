@@ -60,6 +60,13 @@ TAG_DISPATCH: dict[str, Any] = {
     "inputs": {"verify_release_notes_for": "v0.11.0"},
 }
 
+# CLEAR `founder-skills/tests/__pycache__` BEFORE TRUSTING A RUN THAT EDITED THIS BLOCK. Measured: a
+# break-test swapped 'refs/tags/v' for 'refs/heads/' -- both 11 characters -- so the source SIZE was
+# unchanged, and Python's mtime+size invalidation served the mutated bytecode after the source had been
+# restored. The file greps clean while the test reports a condition that appears nowhere in it, which
+# reads as a bug in the guard rather than a stale artifact. Same class as the repo's standing note that
+# an mtime-preserving restore leaves a stale .pyc serving old behaviour.
+#
 # FROZEN. Left side: the `if:` verbatim (None = no condition, which means "always runs"). Right side:
 # whether that condition is TRUE ON A TAG PUSH, derived by hand. Change a condition and this reds --
 # that is the point. Re-derive the boolean by reading the new condition, never by running the evaluator

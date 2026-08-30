@@ -81,6 +81,12 @@ def test_must_kill_mutant_is_caught(harness: _Harness, mutant: Mutant) -> None:
         "assertion -- do not move the entry to KNOWN_SURVIVORS, which is shrink-only.\n"
         f"{verdict.tail}"
     )
+    assert mutant.killed_by, (
+        f"{mutant.id} has no `killed_by`. Every MUST_KILL entry must name the test that has to be the "
+        "one to notice -- run the mutant, read the FAILED line, and record it. An entry without one "
+        "asserts only that something went red, which this corpus has twice measured to be a different "
+        "claim from 'the guard noticed'."
+    )
     if mutant.killed_by:
         assert mutant.killed_by in verdict.first_failure, (
             f"{mutant.id} was killed, but not by the test it names.\n"

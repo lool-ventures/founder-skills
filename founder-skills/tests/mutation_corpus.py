@@ -25,9 +25,12 @@ hours, which nobody will run, so it would gate nothing. And a score is the wrong
 same reason a coverage percentage was: it optimises an aggregate over a surface where most mutants are
 equivalent or trivial.
 
-NO LINE COUNT APPEARS IN THAT SENTENCE, DELIBERATELY. It used to read "the nine math producers (5,581
-lines)". That number was CORRECT when it was written and false about a day later -- measured across 60
-commits, the same nine files score 5450 / 5565 / 5581 / 5672 / 5677 / 5703 / 5704 / 5707 / 5708. Worse,
+NO CURRENT LINE COUNT APPEARS IN THAT SENTENCE, DELIBERATELY. It used to read "the nine math producers
+(5,581 lines)". EVERY FIGURE IN THIS PARAGRAPH IS HISTORY, NOT A MEASUREMENT OF TODAY'S TREE -- they are
+kept because they are the evidence for the rule, and a rule with its evidence deleted gets undone by the
+next person who thinks it is fussy. That number was CORRECT when written and false about a day later:
+measured across the 60 commits following it, the same nine files scored 5450 / 5565 / 5581 / 5672 /
+5677 / 5703 / 5704 / 5707 / 5708. Worse,
 two people independently tried to reconstruct it and each picked a different nine (one swapped
 `rule_audit` in, one swapped `cap_state_after_round` in), so both concluded it was fabricated when it
 was merely stale. Naming the files removes that ambiguity; quoting no total removes the rot. The two
@@ -81,6 +84,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # `evals/cap-table`; `pyproject.toml` because it carries pytest's rootdir, `pythonpath` and
 # `addopts` -- without it the child run resolves imports differently from CI and a green means
 # nothing.
+#
+# ENUMERATED, NOT A WHOLE-ROOT COPY WITH AN IGNORE LIST. The wider copy was considered and refused for
+# one reason that outranks its convenience: `docs/internal/` is gitignored and holds private working
+# notes, and a whole-root copy would replicate them into a temp dir on every run. An explicit list
+# cannot pick up a directory nobody named. The cost of the choice is that a new `_SELECTION` file
+# needing an uncopied root fails as the no-op control -- which is why the control message names that
+# case explicitly rather than leaving it to read as a broken harness.
 #
 # THE LIST IS DELIBERATELY WIDER THAN `_SELECTION` NEEDS. It used to be exactly what the selection
 # needed, which made the sandbox a trap for whoever widens the selection later: measured, the
@@ -160,11 +170,14 @@ class Mutant:
     find: str
     replace: str
     rationale: str
-    # The test that must be the one to notice. Optional, because most entries predate it and a
-    # required field would mean inventing an expectation for each. Where it IS set, a kill is only
-    # accepted from that test: the corpus otherwise records only THAT the selection failed, and its
-    # kill detection has already been caught twice accepting the wrong reason (a count ratchet, then
-    # a collection error). "Something went red" is not the same claim as "the guard noticed".
+    # The test that must be the one to notice. REQUIRED on every MUST_KILL entry (empty only for the
+    # no-op control and for survivors, which by definition nothing catches): a kill from anywhere else
+    # is not accepted. Without it the corpus records only THAT the selection failed, and its kill
+    # detection has already been caught twice accepting the wrong reason -- a count ratchet, then a
+    # collection error. "Something went red" is not the same claim as "the guard noticed", and the
+    # gap between them is the whole reason this corpus exists rather than a coverage number.
+    #
+    # Every value here was MEASURED by running the mutant, never guessed from the rationale.
     killed_by: str = ""
 
 
@@ -192,6 +205,7 @@ NO_OP = Mutant(
 MUST_KILL: tuple[Mutant, ...] = (
     Mutant(
         id="cap_implied_denominator_is_pre_financing_base",
+        killed_by="TestSafeConversion::test_cap_implied_basic",
         file=f"{_SCRIPTS}/safe_conversion.py",
         find="    total = pre_financing_fd / residual",
         replace="    total = pre_financing_fd",
@@ -203,6 +217,7 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="cap_implied_notes_guard_disabled",
+        killed_by="TestCapImpliedNotesGuard::test_note_present_blocks_the_snapshot",
         file=f"{_SCRIPTS}/run_scenario.py",
         find='        notes = instruments.get("convertible_notes") or []\n        if notes:',
         replace='        notes = instruments.get("convertible_notes") or []\n        if False:',
@@ -214,6 +229,7 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="no_conversion_path_typo_at_the_covered_site",
+        killed_by="TestNoConversionPathBranch",
         file=f"{_SCRIPTS}/note_conversion.py",
         find=(
             "        if priced_context and cap is None and discount is None:\n"
@@ -235,6 +251,7 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="benchmark_freshness_always_fresh",
+        killed_by="TestRuleApplicabilityPredicates::test_stale_and_fresh_benchmarks_are_distinguished",
         file=f"{_SCRIPTS}/rule_audit.py",
         find=(
             "    if benchmark_reference is None:\n"
@@ -254,6 +271,7 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="concise_report_writes_before_deciding",
+        killed_by="TestConciseReportDoesNotClobberOnReject",
         file=f"{_SCRIPTS}/concise_report.py",
         find='    rejected = not md.strip() or ("—" in md and "Founders" not in md)',
         replace=(
@@ -269,6 +287,7 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="warrant_holder_election_defaults_to_cash",
+        killed_by="TestWarrantHolderElection::test_unspecified_election_is_refused_not_guessed",
         file=f"{_SCRIPTS}/warrant_exercise.py",
         find=(
             '        if choice not in ("cash", "net_share"):\n'
@@ -287,6 +306,7 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="mfn_audit_fields_corrupted",
+        killed_by="TestMfnElectionOverride::test_scenario_route_forwards_mfn_elections",
         file=f"{_SCRIPTS}/priced_round.py",
         find=(
             '            if anchor.get("post_money_valuation_cap") is not None:\n'
@@ -314,6 +334,7 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="mfn_anchor_terms_not_inherited",
+        killed_by="TestStackedPostMoneySAFEsGolden::test_uncapped_mfn_auto_binds_to_elected_safes_terms",
         file=f"{_SCRIPTS}/priced_round.py",
         find=(
             '            shadow["form"] = anchor["form"]\n'
@@ -392,6 +413,7 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="anti_dilution_renderer_prints_constant_prices",
+        killed_by="TestComputedReachesTheRenderedReport::test_rendered_conversion_prices_are_the_computed_ones",
         file=f"{_SCRIPTS}/compose_report.py",
         find=(
             '                    ccp_before = bd.get("ccp_before", 0)\n'
