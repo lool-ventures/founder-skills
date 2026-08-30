@@ -851,8 +851,15 @@ def build_cap_state(
 
     # Mirror for notes: a note with no usable principal/issuance is kept terms-only, non-convertible
     # by _build_outstanding_notes. Warn so the report + downstream know its conversion math was skipped.
-    if any(n.get("convertible") is False for n in outstanding_notes):
+    #
+    # TWO causes, TWO codes. These were one code (`W_NOTE_PRINCIPAL_MISSING`) for both, so a note
+    # carrying a real principal but no issuance date told the founder it "has no principal" and asked
+    # them to provide one they had already provided — a factual error with no way to act on it.
+    _nonconvertible = [n for n in outstanding_notes if n.get("convertible") is False]
+    if any(n.get("principal") is None for n in _nonconvertible):
         warnings_list.append("W_NOTE_PRINCIPAL_MISSING")
+    if any(not (n.get("issuance_date") or "").strip() for n in _nonconvertible):
+        warnings_list.append("W_NOTE_ISSUANCE_DATE_MISSING")
 
     # A warrant whose strike is genuinely not stated is kept non-exercisable by _build_outstanding_warrants
     # (its shares STILL count in fully-diluted; only exercise/pump math is unavailable). Warn so the report

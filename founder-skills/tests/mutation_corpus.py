@@ -124,6 +124,7 @@ _SELECTION = tuple(
         "test_coupled_solver_goldens.py",
         "test_quick_check_lane.py",
         "test_solver_convergence_guards.py",
+        "test_solver_warning_surfaces.py",
         "test_v48_hotfix_regressions.py",
         "test_verify_one.py",
         "test_visualize_cap_table.py",
@@ -299,6 +300,21 @@ MUST_KILL: tuple[Mutant, ...] = (
             "Restores write-then-evaluate. The exit code stays honest and the artifact does not: the "
             "founder is pointed at a file the producer itself just called empty, and the prior good "
             "answer is gone."
+        ),
+    ),
+    Mutant(
+        id="terms_only_note_blames_the_wrong_missing_field",
+        killed_by="TestTermsOnlyNoteDisclosure::test_missing_date_is_not_reported_as_a_missing_principal",
+        file=f"{_SCRIPTS}/cap_state.py",
+        find='    if any(not (n.get("issuance_date") or "").strip() for n in _nonconvertible):\n'
+        '        warnings_list.append("W_NOTE_ISSUANCE_DATE_MISSING")',
+        replace='    if False:\n        warnings_list.append("W_NOTE_ISSUANCE_DATE_MISSING")',
+        rationale=(
+            "Collapses two causes back into one code. A note carrying a real $1M principal but no "
+            "issuance date is then reported as having NO PRINCIPAL, and the founder is told to "
+            "provide a figure they already provided -- a factually false statement about their own "
+            "instrument, with no field named that would let them act. The note is dropped either "
+            "way, so nothing in the numbers reveals it; only the words are wrong."
         ),
     ),
     Mutant(

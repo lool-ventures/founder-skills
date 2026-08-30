@@ -73,11 +73,23 @@ def render_warning_callouts(cap_state_warnings: list[str]) -> list[str]:
         out.append("> conversion math was skipped, so it contributes NO shares and is excluded from the")
         out.append("> ownership/dilution figures below. Provide the SAFE's purchase amount to model it.")
         out.append("")
+    # Each of these names the field that is ACTUALLY missing, and states the DIRECTION of the error.
+    # "Contributes no shares" is the mechanism; the consequence is that every remaining stake — the
+    # founder's included — is displayed HIGHER than it will really be, and that is the part worth
+    # saying out loud, because the error flatters the reader.
     if any(w == "W_NOTE_PRINCIPAL_MISSING" for w in cap_state_warnings):
         out.append("> ⚠ **A convertible note has no principal (blank / template) — kept as terms-only.** Its")
-        out.append("> conversion math was skipped, so it contributes NO shares and is excluded from the")
-        out.append("> figures below — the amount may live in a Schedule of Lenders. Provide the principal")
-        out.append("> to model the note's conversion.")
+        out.append("> conversion math was skipped, so it mints no shares here. **Every ownership figure")
+        out.append("> below is therefore shown HIGHER than it will actually be**, including yours — the")
+        out.append("> note still dilutes you, it just cannot be sized yet. The amount may live in a")
+        out.append("> Schedule of Lenders. Provide the principal to model the note's conversion.")
+        out.append("")
+    if any(w == "W_NOTE_ISSUANCE_DATE_MISSING" for w in cap_state_warnings):
+        out.append("> ⚠ **A convertible note has no issuance date — kept as terms-only.** Interest accrues")
+        out.append("> from issuance, so without that date the note's conversion cannot be computed even")
+        out.append("> when its principal is known. It mints no shares here, so **every ownership figure")
+        out.append("> below is shown HIGHER than it will actually be**, including yours. Provide the")
+        out.append("> note's issuance date to model its conversion.")
         out.append("")
     if any(w == "W_WARRANT_EXERCISE_PRICE_MISSING" for w in cap_state_warnings):
         out.append("> ⚠ **A warrant has no stated exercise price (strike) — its shares ARE still counted.**")

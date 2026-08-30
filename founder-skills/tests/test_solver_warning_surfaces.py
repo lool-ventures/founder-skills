@@ -169,3 +169,65 @@ class TestCoachingPayload:
         )
         blob = str(payload)
         assert "W_MFN_NOT_MOST_FAVORABLE" in blob, "coaching payload cannot see solver warnings"
+
+
+class TestTermsOnlyNoteDisclosure:
+    """A note the math cannot convert is DROPPED and the founder is warned. Two things were wrong
+    with that warning, and the first one is a factual error.
+
+    `cap_state` raised the single code `W_NOTE_PRINCIPAL_MISSING` for two different causes — a
+    missing principal AND a missing issuance date. So a founder holding a $1,000,000 note with no
+    date was told the note "has no principal" and asked to "provide the principal". They already
+    had; the field actually missing was the date, and nothing said so, which leaves no way to act.
+
+    Second, both texts described the MECHANISM ("contributes NO shares") without the CONSEQUENCE.
+    Dropping a note removes shares from the denominator, so every remaining stake — the founder's
+    included — displays HIGHER than it will really be. The error flatters the reader, which is the
+    direction that most needs saying out loud.
+    """
+
+    @staticmethod
+    def _warnings_for(note: dict) -> list[str]:
+        cs = _load("cap_state")
+        inst = dict(_fx("instruments.json"))
+        inst["convertible_notes"] = [note]
+        built = cs.build_cap_state(_fx("inputs.json"), inst)
+        return [w for w in built.get("warnings") or [] if "NOTE" in w]
+
+    _BASE = {
+        "id": "n1",
+        "investor_name": "X",
+        "interest_rate_type": "none",
+        "extraction_confidence": "high",
+        "valuation_cap": 10_000_000,
+    }
+
+    def test_missing_date_is_not_reported_as_a_missing_principal(self) -> None:
+        got = self._warnings_for({**self._BASE, "principal": 1_000_000, "issuance_date": None})
+        assert "W_NOTE_PRINCIPAL_MISSING" not in got, (
+            "a $1M note with no issuance date was reported as having no principal — the founder is "
+            "asked to supply a field they already supplied"
+        )
+        assert "W_NOTE_ISSUANCE_DATE_MISSING" in got, got
+
+    def test_missing_principal_still_reports_a_missing_principal(self) -> None:
+        got = self._warnings_for({**self._BASE, "principal": None, "issuance_date": "2024-01-01"})
+        assert "W_NOTE_PRINCIPAL_MISSING" in got, got
+        assert "W_NOTE_ISSUANCE_DATE_MISSING" not in got, got
+
+    def test_both_causes_are_named_when_both_are_missing(self) -> None:
+        got = self._warnings_for({**self._BASE, "principal": None, "issuance_date": None})
+        assert set(got) >= {"W_NOTE_PRINCIPAL_MISSING", "W_NOTE_ISSUANCE_DATE_MISSING"}, got
+
+    def test_each_text_names_its_own_field_and_the_direction_of_the_error(self) -> None:
+        for code, must_name in [
+            ("W_NOTE_PRINCIPAL_MISSING", "principal"),
+            ("W_NOTE_ISSUANCE_DATE_MISSING", "issuance date"),
+        ]:
+            text = " ".join(WC.render_warning_callouts([code])).lower()
+            assert text.strip(), f"{code} has no founder-facing prose"
+            assert must_name in text, f"{code} does not name the field that is actually missing: {text}"
+            assert "higher" in text, (
+                f"{code} does not tell the founder their ownership is shown HIGHER than it will be — "
+                "'contributes no shares' is the mechanism, not the consequence"
+            )
