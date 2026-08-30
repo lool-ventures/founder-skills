@@ -126,8 +126,20 @@ def _classify_branch(
     threshold = note.get("qualified_financing_threshold")
     nqft = note.get("non_qualified_financing_treatment")
     override = note.get("maturity_conversion_price_override")
-    mdt_absent = "maturity_default_treatment" not in note
-    mdt = note.get("maturity_default_treatment", "convert_at_cap")
+    # NOT SUPPLIED means absent OR an explicit null, and the two must behave identically. The schema
+    # types this field `["string", "null"]` with null in its enum, and three surfaces deliberately
+    # write that null: the lane-1 doc tells the extractor to set the field to null when the note does
+    # not state a treatment, its enum lists null, and the Carta importer emits one.
+    #
+    # Read with `.get(key, default)` the null came through as the value, which did two things. The
+    # branch flipped -- measured, an otherwise identical note went from `maturity_convert_at_cap` to
+    # `no_conversion_path`, because a None matches none of the `mdt ==` arms below. And
+    # `mdt_absent` was False, suppressing the one warning written to tell a founder this treatment
+    # was ASSUMED rather than read from their document. So the input class that most needs the
+    # disclosure was the class that silently lost it.
+    mdt_supplied = note.get("maturity_default_treatment")
+    mdt_absent = mdt_supplied is None
+    mdt = mdt_supplied or "convert_at_cap"
 
     # A note evaluated with priced-round inputs but NEITHER a cap NOR a discount has no conversion
     # price for the round — a more specific diagnosis than the maturity-default no_conversion_path

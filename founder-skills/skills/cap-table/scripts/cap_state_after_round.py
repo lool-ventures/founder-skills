@@ -7,11 +7,11 @@
 STATUS: UNREACHED BY ANY WORKFLOW. Nothing in any SKILL.md, reference or agent body invokes this
 producer, and the loader that would validate its output (`_artifact_io.load_cap_state`) has no
 production callers either. It is kept because multi-round modelling is a product decision that
-has not been taken, not because it is live. Before wiring it up: route the write through
-`_artifact_writer.write_artifact` (which validates on write, unlike the raw `json.dump` here),
-stamp fresh metadata rather than deep-copying the pre-round `run_id`, and add a round-trip test
-through `load_cap_state`. Its four tests call the builder directly and would not catch any of
-those. The null-date defect below was found exactly that way.
+has not been taken, not because it is live. It now writes through `_artifact_writer.write_artifact`,
+so it cannot emit an artifact its own schema rejects, and it stamps a fresh `run_id` rather than
+inheriting the pre-round one from the deep copy. STILL OUTSTANDING before wiring it up: a round-trip
+test through `load_cap_state` -- which is itself callerless in production, so that test proves the
+output loads, not that anything loads it.
 Builds cap_state_after_round.json — the post-round cap-state snapshot.
 
 Per v3 design §4.5: when a priced_round scenario applies AD adjustments, the
@@ -31,6 +31,7 @@ Usage:
         --cap-state pre/cap_state.json \
         --scenarios pre/scenarios.json \
         --scenario-id series_a \
+        --run-id post_round_run_id \
         -o post/cap_state_after_round.json
 """
 
@@ -114,10 +115,6 @@ def build_cap_state_after_round(
         # No AD applied; return the pre-round snapshot unchanged
         return post
 
-    # A null history on the way IN must not become a null on the way OUT: the schema types this field
-    # as an array, so copying the null through produced an artifact that fails its own validation.
-    # Same rule the rest of the skill follows -- an absent optional is absent, never a null. Placed
-    # before the no-mutation early return, which otherwise passes the null straight to disk.
     # Apply CCP mutations
     for s in post.get("preferred_series", []):
         sid = s.get("series_id")
@@ -163,7 +160,11 @@ def _cli() -> int:
     p.add_argument("--scenarios", required=True, help="Path to scenarios.json")
     p.add_argument("--scenario-id", required=True, help="Which scenario to apply (priced_round)")
     p.add_argument("--run-id", required=True, help="Run id stamped on the produced artifact")
-    p.add_argument("--applied-at", default=None, help="ISO date for cap_table_history event (default null)")
+    p.add_argument(
+        "--applied-at",
+        default=None,
+        help="ISO date for the cap_table_history event; omitted from the event when not given",
+    )
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--pretty", action="store_true")
     args = p.parse_args()

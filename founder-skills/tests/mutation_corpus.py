@@ -236,7 +236,13 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="no_conversion_path_typo_at_the_covered_site",
-        killed_by="TestNoConversionPathBranch::test_note_with_no_cap_no_discount_and_no_maturity_has_no_conversion_path",
+        # RE-MEASURED. It was TestNoConversionPathBranch, which still notices but is no longer FIRST.
+        # `note_conversion` now treats an explicit `maturity_default_treatment: null` the same as an
+        # absent key (the schema permits the null and three surfaces write it), so this fixture --
+        # which carries exactly that null -- moved off the fallthrough return and onto the one this
+        # mutant typos. That the move happened is itself evidence the null fix was needed: a realistic
+        # note fixture already in the suite was taking the wrong branch.
+        killed_by="TestNoteNoConversionPathReason::test_reason_names_capitalization_denominator",
         file=f"{_SCRIPTS}/note_conversion.py",
         find=(
             "        if priced_context and cap is None and discount is None:\n"

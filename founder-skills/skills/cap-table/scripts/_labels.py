@@ -2,7 +2,7 @@
 
 Single source of truth shared by the three user-facing generators
 (``visualize.py`` / ``explore.py`` / ``compose_report.py``). We lead with a
-plain-language label and preserve the raw code — as an HTML hover tooltip or a
+plain-language label and keep the friendly label or a
 Markdown small-print parenthetical — so counsel and power users keep the exact
 term. Rule ids are deliberately NOT mapped here: they are stable references
 counsel cites, so they stay visible verbatim.
@@ -61,17 +61,6 @@ def humanize(category: str, value: str | None) -> str:
     if value is None or value == "":
         return "—"
     return MAPS.get(category, {}).get(value, value.replace("_", " "))
-
-
-def html_term(category: str, value: str | None) -> str:
-    """`<span>` with the friendly label; the raw code is the hover tooltip.
-
-    Values come from closed enum sets (no user input), so no escaping is needed.
-    """
-    label = humanize(category, value)
-    if value is None or value == "":
-        return label
-    return f'<span class="term" title="{value}">{label}</span>'
 
 
 def md_term(category: str, value: str | None) -> str:

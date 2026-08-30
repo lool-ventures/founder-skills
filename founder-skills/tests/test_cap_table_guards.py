@@ -2016,3 +2016,71 @@ class TestCapStateRejectsDuplicateIds:
         assert "E_DUPLICATE_ID_IN_CAP_TABLE" not in str(exc.value), (
             f"two id-less grants were reported as sharing an id: {exc.value}"
         )
+
+
+class TestNullMeansUnsuppliedEverywhere:
+    """An explicit null and an absent key must mean the same thing, on every nullable field.
+
+    This class exists because the same construction has now produced two separate defects in one
+    skill. `.get(key, default)` returns the NULL when the key is present with a null value, so a
+    field the schema types nullable — and that the authoring surfaces explicitly tell an extractor to
+    write as null — silently skips its default.
+
+    The first instance crashed the solver on the anti-dilution denominator basis. The second is worse
+    because it is silent: a convertible note whose maturity treatment was written as null took a
+    different CONVERSION BRANCH than the identical note with the key omitted, and the warning that
+    exists to tell a founder the treatment was assumed was suppressed on exactly that input. Three
+    surfaces write that null, including the Carta importer, so this is a real founder's note.
+    """
+
+    @staticmethod
+    def _note(**over: object) -> dict:
+        n = {
+            "id": "n1",
+            "principal": 500_000,
+            "issuance_date": "2023-01-01",
+            "maturity_date": "2024-01-01",
+            "annual_interest_rate": 0.05,
+            "interest_rate_type": "simple",
+            "valuation_cap": 8_000_000,
+            "capitalization_denominator": 10_000_000,
+        }
+        n.update(over)  # type: ignore[arg-type]
+        return n
+
+    def test_null_maturity_treatment_takes_the_same_branch_as_an_absent_one(self) -> None:
+        import note_conversion  # type: ignore[import-not-found]
+
+        absent = note_conversion.convert_note(self._note(), conversion_event_date="2024-06-01")
+        null = note_conversion.convert_note(
+            self._note(maturity_default_treatment=None), conversion_event_date="2024-06-01"
+        )
+        assert null["branch"] == absent["branch"], (
+            f"an explicit null took branch {null['branch']!r} where an omitted key takes "
+            f"{absent['branch']!r} — the schema permits the null and the lane docs instruct writing it"
+        )
+
+    def test_null_maturity_treatment_still_discloses_the_assumption(self) -> None:
+        """The disclosure is the whole point: the founder is told we assumed a treatment."""
+        import note_conversion  # type: ignore[import-not-found]
+
+        r = note_conversion.convert_note(
+            self._note(maturity_default_treatment=None), conversion_event_date="2024-06-01"
+        )
+        codes = [w.get("code") for w in (r.get("warnings") or [])]
+        assert "maturity_default_treatment_defaulted" in codes, (
+            "the treatment was assumed and the founder was not told. A present null is precisely the "
+            f"case that needs the disclosure, and it was the case that lost it. Got: {codes}"
+        )
+
+    def test_a_supplied_treatment_is_still_honoured_and_undisclosed(self) -> None:
+        """Guards the over-correction: `or` must not swallow a real value."""
+        import note_conversion  # type: ignore[import-not-found]
+
+        r = note_conversion.convert_note(
+            self._note(maturity_default_treatment="repay"), conversion_event_date="2024-06-01"
+        )
+        assert r["branch"] == "maturity_repay"
+        assert "maturity_default_treatment_defaulted" not in [w.get("code") for w in (r.get("warnings") or [])], (
+            "nothing was assumed, so nothing should be disclosed"
+        )
