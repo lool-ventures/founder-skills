@@ -522,6 +522,8 @@ LEGACY_REFERENCES_CAP = 8 * 1024  # historical; references now ship whole
 # what it IS and links it, and states that this does not license naming internal files (the founder
 # reads the label, never the path) so it cannot be read as loosening the founder-text rules.
 # cap-table 145,518 -> 145,844 (+326 B) on 2026-08-26, for TWO fixes in the promote block.
+# cap-table 145,844 -> 146,053 (+209 B) on 2026-08-30: the scenario-selection gate now says a
+# convertible note rules out `safe_conversion`, so the agent does not offer a route that refuses.
 # 1. `SLUG_TITLE` was BROKEN for every multi-word company. It ran `sed 's/-/_/g'` and then capitalised
 #    per awk FIELD — but after the join `acmecorp_inc` is ONE field, so only the leading letter was
 #    raised: `Acmecorp_inc`. Correct for a one-word slug (`cadence` -> `Cadence`) and wrong for all
@@ -926,7 +928,7 @@ SKILL_MD_CEILING: dict[str, int] = {
     # the pre-coaching text and a raw uuid insertion marker (measured 5,592 B adrift on a live
     # run). Syncing rather than dropping the key, because ~200 test sites across the fleet read
     # report_markdown out of the composed JSON to inspect report content.
-    "cap-table": 145_844,
+    "cap-table": 146_053,
 }
 
 

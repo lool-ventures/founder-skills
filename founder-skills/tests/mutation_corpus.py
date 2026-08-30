@@ -224,10 +224,13 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="cap_implied_notes_guard_disabled",
-        killed_by="TestCapImpliedNotesGuard::test_note_present_blocks_the_snapshot",
+        # MEASURED. The guard now sits above the arm split, so disabling it strands the priced arm
+        # too -- and that test collects first. Recorded as measured rather than left at the older,
+        # semantically neater attribution, which no longer describes what notices.
+        killed_by="TestCapImpliedNotesGuard::test_priced_params_do_not_route_around_the_guard",
         file=f"{_SCRIPTS}/run_scenario.py",
-        find='        notes = instruments.get("convertible_notes") or []\n        if notes:',
-        replace='        notes = instruments.get("convertible_notes") or []\n        if False:',
+        find='    notes = instruments.get("convertible_notes") or []\n    if notes:',
+        replace='    notes = instruments.get("convertible_notes") or []\n    if False:',
         rationale=(
             "Deletes the guard that blocks a cap-implied snapshot while a convertible note is "
             "outstanding. THE ORIGINAL FINDING: this guard was added one day in response to a "
@@ -296,6 +299,26 @@ MUST_KILL: tuple[Mutant, ...] = (
             "Restores write-then-evaluate. The exit code stays honest and the artifact does not: the "
             "founder is pointed at a file the producer itself just called empty, and the prior good "
             "answer is gone."
+        ),
+    ),
+    Mutant(
+        id="cap_implied_notes_guard_returns_to_the_dropping_path",
+        killed_by="TestCapImpliedNotesGuard::test_priced_params_do_not_route_around_the_guard",
+        file=f"{_SCRIPTS}/run_scenario.py",
+        find=('    notes = instruments.get("convertible_notes") or []\n    if notes:\n        return {'),
+        replace=(
+            '    notes = instruments.get("convertible_notes") or []\n'
+            "    if notes and (priced_pre is None or priced_new is None):\n"
+            "        return {"
+        ),
+        rationale=(
+            "Restores the guard to the cap-implied arm only -- the state this blocker shipped in for "
+            "a full release. With priced params supplied the function delegates with a hardcoded "
+            "`notes=[]`, so the note leaves the post-money denominator and every SAFE percentage is "
+            "overstated with nothing said. The blocker's own remedy used to name the params that "
+            "reach that arm, so the documented fix WAS the defect. Appending to `blockers` instead "
+            "of returning reproduces it just as well: the priced arm returns the solver's output and "
+            "never reads that list."
         ),
     ),
     Mutant(

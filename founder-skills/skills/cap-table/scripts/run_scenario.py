@@ -132,6 +132,50 @@ def run_safe_conversion_scenario(
     priced_pre = params.get("priced_round_pre_money")
     priced_new = params.get("priced_round_new_money")
 
+    # A convertible note is a CONVERTING SECURITY, so it belongs in the post-money SAFE's Company
+    # Capitalization (rule `safe.company_capitalization_yc_post_money`). NEITHER arm of this function
+    # counts one: the cap-implied arm cannot price a note without a round, and the priced arm below
+    # delegates with a hardcoded `notes=[]`. Refuse on both rather than silently omit, which
+    # understates the denominator and overstates every SAFE's ownership.
+    #
+    # This sits ABOVE the arm split deliberately, and returns rather than appending to `blockers`.
+    # It used to live inside the cap-implied arm and name `priced_round_pre_money` /
+    # `priced_round_new_money` as the remedy -- which are THIS function's params, so following it
+    # crossed to the arm that drops the note, converting a loud refusal into a silent overstatement.
+    # Appending to `blockers` here would not help either: the priced arm returns the solver's output
+    # directly and never reads that list.
+    #
+    # `run_priced_round_scenario` is the route that actually counts notes (it passes
+    # `instruments["convertible_notes"]` through), and its params are `pre_money` / `new_money`.
+    notes = instruments.get("convertible_notes") or []
+    if notes:
+        return {
+            "completeness": "structural_only",
+            "blockers": [
+                {
+                    "code": "E_CAP_IMPLIED_NOTES_PRESENT",
+                    "instance_id": None,
+                    "remedy": (
+                        f"{len(notes)} convertible note(s) are outstanding. A note converts only "
+                        "against a priced round, but it counts in the post-money SAFE denominator, "
+                        "so converting the SAFEs without it would overstate their ownership. Author "
+                        "a `priced_round` scenario (parameters `pre_money` / `new_money`) — that "
+                        "route converts the notes alongside the SAFEs."
+                    ),
+                }
+            ],
+            "per_safe": {},
+            "math_provenance": [
+                {
+                    "output_field": "blockers",
+                    "source_type": "rule",
+                    "rule_id": "safe.company_capitalization_yc_post_money",
+                    "rule_pack_version": RULE_PACK_VERSION,
+                    "source_ref": None,
+                }
+            ],
+        }
+
     per_safe: dict[str, dict[str, Any]] = {}
     if priced_pre is None or priced_new is None:
         # Cap-implied path only. MFN elections need a priced round to resolve against
@@ -146,27 +190,6 @@ def run_safe_conversion_scenario(
                     "priced_round_new_money); the cap-implied path cannot resolve an MFN election.",
                 }
             )
-        # A convertible note is a CONVERTING SECURITY, so it belongs in the post-money SAFE's
-        # Company Capitalization (rule `safe.company_capitalization_yc_post_money`) — the priced path
-        # counts it (`priced_round.py`: `adj_pre_fd + safe_shares + note_shares`). This path cannot:
-        # a note has no conversion price without a round, so its share count is undefined here.
-        # Refuse rather than silently omit it, which would understate the denominator and overstate
-        # every SAFE's cap-implied ownership.
-        notes = instruments.get("convertible_notes") or []
-        if notes:
-            blockers.append(
-                {
-                    "code": "E_CAP_IMPLIED_NOTES_PRESENT",
-                    "instance_id": None,
-                    "remedy": (
-                        f"{len(notes)} convertible note(s) are outstanding. A note converts only "
-                        "against a priced round, but it counts in the post-money SAFE denominator, so "
-                        "a cap-implied snapshot would overstate SAFE ownership. Model a priced round "
-                        "(priced_round_pre_money / priced_round_new_money) to see conversion."
-                    ),
-                }
-            )
-
         company_capitalization: float | None = None
         if not blockers:
             solved = convert_safes_cap_implied(safes, pre_financing_fd=pre_fd)
@@ -208,6 +231,8 @@ def run_safe_conversion_scenario(
     priced_outputs = solve_priced_round(
         cap_state=cap_state,
         safes=safes,
+        # Unreachable with notes outstanding: the guard above returns before this point. Kept
+        # explicit so the empty list reads as an asserted invariant rather than an omission.
         notes=[],
         pre_money=priced_pre,
         new_money=priced_new,

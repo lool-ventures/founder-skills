@@ -62,6 +62,63 @@ class TestCapImpliedNotesGuard:
     SAFE's cap-implied ownership: exactly the class of error the denominator fix was for.
     """
 
+    def test_priced_params_do_not_route_around_the_guard(self) -> None:
+        """THE DEFECT: the guard fired only on the cap-implied arm, and its own remedy named the
+        params that leave that arm.
+
+        `run_safe_conversion_scenario` reads `priced_round_pre_money` / `priced_round_new_money` and,
+        when both are present, delegates to `solve_priced_round(..., notes=[])` -- a hardcoded empty
+        list. So a founder who followed the remedy got no refusal and no note in the denominator:
+        SAFE ownership overstated by exactly the class the blocker exists to prevent. `blockers` is
+        also never read on that arm, so appending to it there is inert; the refusal needs its own
+        return.
+        """
+        out = run_scenario.run_safe_conversion_scenario(
+            {
+                "scenario_id": "snap",
+                "label": "snap",
+                "type": "safe_conversion",
+                "parameters": {"priced_round_pre_money": 12_000_000, "priced_round_new_money": 3_000_000},
+            },
+            instruments={
+                "safes": [SAFE],
+                "convertible_notes": [{"id": "n1", "principal": 1_000_000, "valuation_cap": 10_000_000}],
+            },
+            cap_state=_cap_state(8_000_000),
+        )
+        codes = {b.get("code") for b in out.get("blockers") or []}
+        assert "E_CAP_IMPLIED_NOTES_PRESENT" in codes, (
+            "priced params on a safe_conversion request routed around the notes guard; the note is "
+            f"absent from the denominator and nothing said so. got: {out!r}"
+        )
+        assert not out.get("per_safe"), (
+            "the refusal must not also ship per-SAFE numbers computed against a note-free denominator"
+        )
+        assert out.get("completeness") == "structural_only"
+
+    def test_remedy_names_a_route_that_counts_the_note(self) -> None:
+        """The remedy must not name `priced_round_pre_money` / `priced_round_new_money`.
+
+        Those are `safe_conversion`'s own params -- following them re-enters the function that drops
+        the note. The route that actually counts notes is a `priced_round` scenario, whose params are
+        `pre_money` / `new_money`. (Neither `priced_round_*` name appears in SKILL.md, any agent body,
+        reference or schema -- they exist only in this module and its consumers, which is why the old
+        text read as authoritative and was not.)
+        """
+        out = run_scenario.run_safe_conversion_scenario(
+            {"scenario_id": "snap", "label": "snap", "type": "safe_conversion", "parameters": {}},
+            instruments={
+                "safes": [SAFE],
+                "convertible_notes": [{"id": "n1", "principal": 1_000_000, "valuation_cap": 10_000_000}],
+            },
+            cap_state=_cap_state(8_000_000),
+        )
+        remedy = next(b["remedy"] for b in out["blockers"] if b.get("code") == "E_CAP_IMPLIED_NOTES_PRESENT")
+        assert "priced_round_pre_money" not in remedy and "priced_round_new_money" not in remedy, (
+            f"remedy still names the params that route back into the note-dropping path: {remedy!r}"
+        )
+        assert "priced_round" in remedy, "remedy must name the scenario type that counts notes"
+
     def test_note_present_blocks_the_snapshot(self) -> None:
         out = run_scenario.run_safe_conversion_scenario(
             {"scenario_id": "snap", "label": "snap", "type": "safe_conversion", "parameters": {}},

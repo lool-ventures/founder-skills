@@ -233,12 +233,25 @@ def test_priced_arm_still_renders_after_cap_implied_block_added() -> None:
 
 
 def test_blocked_cap_implied_run_renders_no_ownership_number() -> None:
-    """A blocked run carries `cap_implied_only: True` with an EMPTY `per_safe`. Gating the block on
-    `cap_implied_only` alone would print an ownership heading with nothing under it on every
-    refusal."""
-    inst = dict(_fixture("instruments.json"))
-    inst["convertible_notes"] = [{"id": "n1", "principal": 1_000_000, "valuation_cap": 10_000_000}]
-    co = _cap_implied_outputs(inst)
+    """A run blocked INSIDE the cap-implied arm carries `cap_implied_only: True` with an EMPTY
+    `per_safe`. Gating the block on the flag alone would print an ownership heading with nothing
+    under it on every such refusal.
+
+    An MFN election with no priced round is used because it blocks inside that arm, so the flag is
+    still stamped. A notes-present refusal returns BEFORE the arm split and carries no flag at all --
+    it cannot exercise this gate, which is why it is not the fixture here.
+    """
+    rs = _run_scenario_mod()
+    co = rs.run_safe_conversion_scenario(
+        {
+            "scenario_id": "snap",
+            "label": "Blocked",
+            "type": "safe_conversion",
+            "parameters": {"mfn_elections": {"safe_001": "x"}},
+        },
+        instruments=_fixture("instruments.json"),
+        cap_state=_fixture("cap_state.json"),
+    )
     assert co.get("cap_implied_only") is True and not co.get("per_safe"), "precondition drifted"
     md = CR.render(INPUTS, {"scenarios": [{"label": "Blocked", "computed_outputs": co}]}, rule_audit=None)
     assert "Cap-implied ownership (pre-financing)" not in md
