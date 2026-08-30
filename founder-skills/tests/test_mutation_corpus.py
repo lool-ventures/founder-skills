@@ -47,11 +47,13 @@ def harness(tmp_path_factory: pytest.TempPathFactory) -> _Harness:
             "THE NO-OP CONTROL FAILED, so every verdict in this file is void: a comment-only change "
             "left the selection failing.\n"
             f"  first failure: {control.first_failure or '(see tail)'}\n"
-            "TWO CAUSES, OPPOSITE RESPONSES -- check the named test before assuming either. Either "
-            "the harness is broken (a bad copy, an unresolvable path, a pytest invocation erroring "
-            "for its own reasons), or the selection is ALREADY RED on the working tree, in which "
-            "case nothing here is wrong and the corpus simply cannot issue a verdict against a "
-            "baseline that is not green.\n"
+            "THREE CAUSES, DIFFERENT RESPONSES -- check the named test before assuming any of them. "
+            "(1) The harness is broken: a bad copy, an unresolvable path, a pytest invocation "
+            "erroring for its own reasons. (2) The selection is ALREADY RED on the working tree, in "
+            "which case nothing here is wrong and the corpus simply cannot issue a verdict against a "
+            "baseline that is not green. (3) A file was added to `_SELECTION` that needs a repo root "
+            "`_COPY_DIRS`/`_COPY_FILES` does not copy -- that reads as (1) and is not; the fix is to "
+            "add the root, not to debug the harness.\n"
             f"{control.tail}"
         )
     return h
@@ -79,6 +81,15 @@ def test_must_kill_mutant_is_caught(harness: _Harness, mutant: Mutant) -> None:
         "assertion -- do not move the entry to KNOWN_SURVIVORS, which is shrink-only.\n"
         f"{verdict.tail}"
     )
+    if mutant.killed_by:
+        assert mutant.killed_by in verdict.first_failure, (
+            f"{mutant.id} was killed, but not by the test it names.\n"
+            f"  expected: {mutant.killed_by}\n"
+            f"  actual:   {verdict.first_failure or '(no FAILED line)'}\n"
+            "A kill by something else is not evidence that the guard works -- it is the false-kill "
+            "class this corpus has already hit twice. Either the guard stopped noticing and an "
+            "unrelated test is now failing, or the expectation is stale."
+        )
 
 
 @pytest.mark.parametrize("mutant", KNOWN_SURVIVORS, ids=lambda m: m.id)

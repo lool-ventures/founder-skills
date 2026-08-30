@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from typing import Any
@@ -50,6 +51,7 @@ E_SAFE_CAP_MISSING_DENOMINATOR = "E_SAFE_CAP_MISSING_DENOMINATOR"
 # greater than or equal to 100 percent." Distinct from the priced path's E_SOLVER_* codes, which
 # describe an iteration that failed to converge; here the infeasibility is closed-form and exact.
 E_SAFE_AGGREGATE_CAP_OWNERSHIP_INFEASIBLE = "E_SAFE_AGGREGATE_CAP_OWNERSHIP_INFEASIBLE"
+E_SAFE_DUPLICATE_INSTRUMENT_ID = "E_SAFE_DUPLICATE_INSTRUMENT_ID"
 E_SAFE_CIRCULAR_MFN = "E_SAFE_CIRCULAR_MFN"
 E_SAFE_INVALID_PRICE_INPUT = "E_SAFE_INVALID_PRICE_INPUT"
 E_UNKNOWN_SAFE_FORM = "E_UNKNOWN_SAFE_FORM"
@@ -111,6 +113,27 @@ def convert_safes_cap_implied(
             "reason": "pre_financing_fd must be > 0 (pre-financing FD share count)",
         }
 
+    # DUPLICATE IDS MUST BE REFUSED, NOT COLLAPSED. `priced` and `per_safe` below are keyed by id,
+    # so two SAFEs sharing one silently become one: measured, two SAFEs with id "same" returned a
+    # clean `cap_implied_set` whose denominator counted only the second, dropping a $500k instrument
+    # from BOTH the denominator and the output with no diagnostic. That is the same class as the
+    # all-or-nothing rule above -- a converting security missing from `total` inflates every other
+    # SAFE's ownership -- and nothing upstream prevents it: the schemas declare no `uniqueItems`,
+    # `cap_state` does not dedupe, and `extract_instrument.py` guards ids only on its own lane, so a
+    # hand-authored or freeform-mapped instruments.json reaches this function directly.
+    ids = [s.get("id") for s in safes]
+    duplicates = sorted({str(i) for i in ids if ids.count(i) > 1})
+    if duplicates:
+        return {
+            "branch": "rejected",
+            "error": E_SAFE_DUPLICATE_INSTRUMENT_ID,
+            "reason": (
+                f"{len(safes)} SAFEs carry {len(duplicates)} duplicated id(s): {', '.join(duplicates)}. "
+                "Ids key the conversion output, so a repeat would silently drop an instrument from the "
+                "denominator and overstate every other SAFE's ownership. Give each SAFE a distinct id."
+            ),
+        }
+
     priced: dict[str, float] = {}
     for safe in safes:
         cap = safe.get("post_money_valuation_cap")
@@ -139,7 +162,36 @@ def convert_safes_cap_implied(
             ),
         }
 
-    total = pre_financing_fd / (1.0 - aggregate)
+    # A NEAR-DEGENERATE AGGREGATE IS NOT A USABLE ANSWER. The check above blocks `aggregate >= 1.0`,
+    # but the interesting failure is just below it: at 1 - 1.1e-16 the division returned a
+    # `company_capitalization` of 7.2e22 and handed each SAFE 3.6e22 shares, branch `cap_implied_set`,
+    # `error: None` -- garbage presented as a clean result. With a large enough `pre_financing_fd` the
+    # same path overflows to `inf` and the per-SAFE price becomes 0.0, raising ZeroDivisionError out of
+    # a function whose entire contract is typed rejections. Refuse the arithmetic rather than report
+    # its output.
+    residual = 1.0 - aggregate
+    if residual <= 1e-9:
+        return {
+            "branch": "rejected",
+            "error": E_SAFE_AGGREGATE_CAP_OWNERSHIP_INFEASIBLE,
+            "reason": (
+                f"stacked post-money SAFEs reserve {aggregate:.9%} of the company, leaving {residual:.3g} "
+                "for everyone else. The denominator is numerically degenerate at this point and any "
+                "ownership figure derived from it would be meaningless. Confirm each cap and purchase "
+                "amount against the signed documents."
+            ),
+        }
+
+    total = pre_financing_fd / residual
+    if not math.isfinite(total):
+        return {
+            "branch": "rejected",
+            "error": E_SAFE_AGGREGATE_CAP_OWNERSHIP_INFEASIBLE,
+            "reason": (
+                f"cap-implied denominator overflowed to {total} from a pre-financing base of "
+                f"{pre_financing_fd:,} against {aggregate:.9%} reserved. Confirm the inputs."
+            ),
+        }
 
     per_safe: dict[str, Any] = {}
     for safe in safes:

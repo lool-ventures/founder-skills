@@ -18,10 +18,23 @@ Across the work that produced `test_cap_table_guards.py`, no new test found a bu
 from reading output, reading code, or running mutants by hand -- mutation is the only technique here
 with a demonstrated hit rate, and until now it was a hand-discipline with no record.
 
-A full mutation run over the nine math producers (5,581 lines) yields thousands of mutants at ~7 s
-each: four to eight hours, which nobody will run, so it would gate nothing. And a score is the wrong
-number anyway, for the same reason a coverage percentage was: it optimises an aggregate over a surface
-where most mutants are equivalent or trivial. The eight mutants run by hand found six survivors -- a
+A full mutation run over cap-table's math producers -- `cap_state`, `safe_conversion`,
+`note_conversion`, `option_pool`, `anti_dilution`, `priced_round`, `flip_scenario`, `warrant_exercise`
+and `run_scenario` -- yields thousands of mutants, and each one costs a full selection run. That is
+hours, which nobody will run, so it would gate nothing. And a score is the wrong number anyway, for the
+same reason a coverage percentage was: it optimises an aggregate over a surface where most mutants are
+equivalent or trivial.
+
+NO LINE COUNT APPEARS IN THAT SENTENCE, DELIBERATELY. It used to read "the nine math producers (5,581
+lines)". That number was CORRECT when it was written and false about a day later -- measured across 60
+commits, the same nine files score 5450 / 5565 / 5581 / 5672 / 5677 / 5703 / 5704 / 5707 / 5708. Worse,
+two people independently tried to reconstruct it and each picked a different nine (one swapped
+`rule_audit` in, one swapped `cap_state_after_round` in), so both concluded it was fabricated when it
+was merely stale. Naming the files removes that ambiguity; quoting no total removes the rot. The two
+numbers a reader actually wants -- how big the selection is and how long it takes -- are MEASURED AND
+PRINTED by the harness on every verdict (see `_Verdict.tail`), so they cannot go stale in prose.
+
+The eight mutants run by hand found six survivors -- a
 25% kill rate that no aggregate would have communicated as sharply as the list did. (Two of those
 hand-measured survivors were measured KILLED the first time this corpus ran; see the KNOWN_SURVIVORS
 header. Hand-run mutation is exactly as perishable as any other undated measurement, which is the
@@ -58,6 +71,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -67,8 +81,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # `evals/cap-table`; `pyproject.toml` because it carries pytest's rootdir, `pythonpath` and
 # `addopts` -- without it the child run resolves imports differently from CI and a green means
 # nothing.
-_COPY_DIRS = ("founder-skills", "evals")
-_COPY_FILES = ("pyproject.toml",)
+#
+# THE LIST IS DELIBERATELY WIDER THAN `_SELECTION` NEEDS. It used to be exactly what the selection
+# needed, which made the sandbox a trap for whoever widens the selection later: measured, the
+# narrow list ABORTS COLLECTION on the full suite in ~4 s (`24 deselected, 2 errors`), and the
+# symptom surfaces as the no-op control failing -- i.e. pointing at the harness rather than at the
+# copy list. With these roots the sandbox runs the whole free suite to exactly the same result as
+# the real tree, so `_SELECTION` can be widened to anything without touching this. The cost that
+# buys it is 0.13 s of copying (`cowork-tests/` is 9.9 MB and 0.04 s of that), against a ~3 min run.
+_COPY_DIRS = ("founder-skills", "evals", "scripts", ".github", "cowork-tests")
+_COPY_FILES = ("pyproject.toml", "CLAUDE.md", "CHANGELOG.md", "CONTRIBUTING.md", "README.md")
 _IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "artifacts", ".git", ".venv")
 
 _SCRIPTS = "founder-skills/skills/cap-table/scripts"
@@ -138,6 +160,12 @@ class Mutant:
     find: str
     replace: str
     rationale: str
+    # The test that must be the one to notice. Optional, because most entries predate it and a
+    # required field would mean inventing an expectation for each. Where it IS set, a kill is only
+    # accepted from that test: the corpus otherwise records only THAT the selection failed, and its
+    # kill detection has already been caught twice accepting the wrong reason (a count ratchet, then
+    # a collection error). "Something went red" is not the same claim as "the guard noticed".
+    killed_by: str = ""
 
 
 # ---------------------------------------------------------------------------------------------
@@ -165,7 +193,7 @@ MUST_KILL: tuple[Mutant, ...] = (
     Mutant(
         id="cap_implied_denominator_is_pre_financing_base",
         file=f"{_SCRIPTS}/safe_conversion.py",
-        find="    total = pre_financing_fd / (1.0 - aggregate)",
+        find="    total = pre_financing_fd / residual",
         replace="    total = pre_financing_fd",
         rationale=(
             "Reverts the post-money SAFE's Company Capitalization to the PRE-financing share count, "
@@ -303,6 +331,66 @@ MUST_KILL: tuple[Mutant, ...] = (
         ),
     ),
     Mutant(
+        id="safe_cap_missing_denominator_code_renamed",
+        killed_by="TestCapImpliedDenominatorRejections",
+        file=f"{_SCRIPTS}/safe_conversion.py",
+        find='E_SAFE_CAP_MISSING_DENOMINATOR = "E_SAFE_CAP_MISSING_DENOMINATOR"',
+        replace='E_SAFE_CAP_MISSING_DENOMINATOR = "E_SAFE_CAP_MISSING_DENOMINATOR_RENAMED"',
+        rationale=(
+            "Renames a founder-visible diagnostic emitted at four sites. It was a recorded survivor, "
+            "and the reason was worse than 'nothing asserts the string': coverage over the full free "
+            "suite showed only the constant DEFINITION executing -- every emit site was dead, so it "
+            "survived because the code never ran. `TestCapImpliedDenominatorRejections` now reaches "
+            "three of the four (the fourth is a closed-fixed-point post-condition, an algebraic "
+            "identity, deliberately untested and documented as such)."
+        ),
+    ),
+    Mutant(
+        id="note_discount_non_positive_guard_removed",
+        killed_by="TestNoteRejectsANonPositiveDiscount",
+        file=f"{_SCRIPTS}/note_conversion.py",
+        find=(
+            "        if discount <= 0:\n"
+            '            base["branch"] = "rejected"\n'
+            '            base["error"] = E_NOTE_INVALID_PRICE_INPUT\n'
+            '            base["reason"] = f"discount_multiplier must be > 0; got {discount!r}"\n'
+            "            return base\n"
+        ),
+        replace="",
+        rationale=(
+            "Removes the reject for a non-positive discount multiplier. A zero multiplier produces a "
+            "conversion price of 0 and an unbounded share count; a negative one produces a negative "
+            "price. The guard existed all along -- nothing reached it through the public entry point, "
+            "which is why this survived. `TestNoteRejectsANonPositiveDiscount` drives `convert_note`."
+        ),
+    ),
+    Mutant(
+        id="duplicate_safe_ids_collapse_silently",
+        killed_by="test_duplicate_ids_are_refused_rather_than_collapsed",
+        file=f"{_SCRIPTS}/safe_conversion.py",
+        find='    ids = [s.get("id") for s in safes]',
+        replace="    ids = []",
+        rationale=(
+            "Disables the duplicate-id refusal, restoring a measured defect: `priced` and `per_safe` "
+            "are id-keyed, so two SAFEs sharing an id returned a clean `cap_implied_set` computed from "
+            "one of them -- a $500k instrument absent from BOTH the denominator and the output, with "
+            "no diagnostic. Found by adversarial review of this corpus, not by the corpus itself."
+        ),
+    ),
+    Mutant(
+        id="degenerate_cap_implied_denominator_not_refused",
+        killed_by="TestCapImpliedRefusesUnusableInstrumentSets",
+        file=f"{_SCRIPTS}/safe_conversion.py",
+        find="    if residual <= 1e-9:",
+        replace="    if False:",
+        rationale=(
+            "Removes the near-degenerate-aggregate guard. `aggregate >= 1.0` is blocked; one ulp below "
+            "it was not, and returned company_capitalization 7.2e22 with 3.6e22 shares per SAFE as a "
+            "clean result. With a large pre-financing base the same path overflowed and raised "
+            "ZeroDivisionError out of a producer whose contract is typed rejections."
+        ),
+    ),
+    Mutant(
         id="anti_dilution_renderer_prints_constant_prices",
         file=f"{_SCRIPTS}/compose_report.py",
         find=(
@@ -325,38 +413,19 @@ MUST_KILL: tuple[Mutant, ...] = (
 # SHRINK-ONLY. An entry here is a claim that the suite does not notice this defect; if one starts
 # failing the selection, the claim is stale and the entry must move to MUST_KILL.
 #
-# Recording is not the same as endorsing. Two of these (`_artifact_io`) are in a module no PRODUCER
-# imports, so their guards protect a path nothing takes; they are here because the honest report is
-# "the suite would not notice", not because each is worth a test. Read the rationale before spending
-# effort on one.
+# THE LIST IS DOWN TO TWO, AND BOTH ARE IN THE SAME UNIMPORTED MODULE. Read that as "this corpus
+# currently records no gap anyone should act on", NOT as "the fleet has no gaps" -- a near-empty
+# survivor list is exactly as easy to misread as a silently empty one, which is why both halves are
+# spelled out. Everything that was here and mattered has been fixed and promoted: the four kept
+# entries in MUST_KILL above were survivors when the corpus was written.
 #
-# WHAT SEEDING MEASURED, AND WHY THIS LIST IS SHORTER THAN THE PLAN'S. Six entries were proposed as
-# survivors on the strength of a hand-run pass. Two -- both MFN mutants -- were measured KILLED when
-# the corpus first ran, and one of those had additionally been argued to be non-load-bearing. Both are
-# in MUST_KILL above. That is the corpus paying for itself on its first execution: a hand-maintained
-# list of "things the suite misses" had drifted, in the direction that matters least visibly, since
-# a stale survivor entry reads as ordinary debt and never fails anything.
-# ---------------------------------------------------------------------------------------------
-
+# WHAT SEEDING AND REVIEW MEASURED. Six entries were proposed as survivors from a hand-run pass. Two
+# were measured KILLED on the corpus's first execution. Two more were real gaps that adversarial
+# review turned into fixes. And the flagship survivor's own rationale claimed its emit sites were
+# "all executed by the suite" when coverage showed every one of them dead -- a hand-maintained list
+# of "what the suite misses" drifting in the direction that shows least, since a stale survivor entry
+# reads as ordinary debt and fails nothing.
 KNOWN_SURVIVORS: tuple[Mutant, ...] = (
-    Mutant(
-        id="safe_cap_missing_denominator_code_renamed",
-        file=f"{_SCRIPTS}/safe_conversion.py",
-        find='E_SAFE_CAP_MISSING_DENOMINATOR = "E_SAFE_CAP_MISSING_DENOMINATOR"',
-        replace='E_SAFE_CAP_MISSING_DENOMINATOR = "E_SAFE_CAP_MISSING_DENOMINATOR_RENAMED"',
-        rationale=(
-            "Renames a founder-visible diagnostic emitted at four sites. It is the error-code half "
-            "of `UNASSERTED_CODE_BASELINE` in `test_cap_table_guards.py`, shown concretely rather "
-            "than as a count.\n"
-            "WHY IT SURVIVES IS WORSE THAN 'NOTHING ASSERTS THE STRING', and an earlier version of "
-            "this rationale asserted the opposite as measured fact. Measured with coverage over the "
-            "FULL free suite (5,064 tests): only the constant DEFINITION at `safe_conversion.py:47` "
-            "executes. All four emit sites -- :110, :180, :373, :429 -- are dead. So this survives "
-            "because the code never runs, not because the code runs unwatched. The module docstring "
-            "makes that distinction load-bearing, and the flagship survivor was on the wrong side "
-            "of it. Fixing it needs a test that REACHES a rejection, not one that names a string."
-        ),
-    ),
     Mutant(
         id="artifact_io_fd_sum_invariant_disabled",
         file=f"{_SCRIPTS}/_artifact_io.py",
@@ -379,23 +448,6 @@ KNOWN_SURVIVORS: tuple[Mutant, ...] = (
             "Disables `E_FOUNDER_SHARES_REQUIRED` on load. Same standing as the FD-sum invariant "
             "above and for the same reason -- an unimported module -- so the two rise and fall "
             "together."
-        ),
-    ),
-    Mutant(
-        id="note_discount_non_positive_guard_removed",
-        file=f"{_SCRIPTS}/note_conversion.py",
-        find=(
-            "        if discount <= 0:\n"
-            '            base["branch"] = "rejected"\n'
-            '            base["error"] = E_NOTE_INVALID_PRICE_INPUT\n'
-            '            base["reason"] = f"discount_multiplier must be > 0; got {discount!r}"\n'
-            "            return base\n"
-        ),
-        replace="",
-        rationale=(
-            "Removes the reject for a non-positive discount multiplier. A zero multiplier then "
-            "produces a conversion price of 0 and an unbounded share count; a negative one produces "
-            "a negative price. Either reaches the founder as ownership arithmetic."
         ),
     ),
 )
@@ -466,7 +518,9 @@ class _Harness:
         )
         path.write_text(original.replace(mutant.find, mutant.replace), encoding="utf-8")
         try:
+            started = time.monotonic()
             proc = self._pytest()
+            elapsed = time.monotonic() - started
         finally:
             path.write_text(original, encoding="utf-8")
             assert path.read_text(encoding="utf-8") == original, (
@@ -502,9 +556,16 @@ class _Harness:
                 "ability to run rather than being caught by it, so this is not a kill.\n" + "\n".join(errored[:5])
             )
 
+        # MEASURED, NOT ASSERTED IN PROSE. The selection's size and cost are the two numbers a
+        # reader wants when judging "is a full mutation run affordable?", and both used to live in a
+        # comment, where one of them went stale within a day. Emitting them from the run that just
+        # happened makes them true by construction.
+        sized = next((ln for ln in reversed(proc.stdout.splitlines()) if " passed" in ln or " failed" in ln), "")
+        measured = f"[selection: {sized.strip()} | {elapsed:.1f}s]"
+
         failures = failed + errored
         return _Verdict(
             killed=proc.returncode != 0,
             first_failure=failures[0] if failures else "",
-            tail="\n".join((proc.stdout + proc.stderr).splitlines()[-12:]),
+            tail=measured + "\n" + "\n".join((proc.stdout + proc.stderr).splitlines()[-12:]),
         )

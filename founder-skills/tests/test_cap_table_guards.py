@@ -150,7 +150,7 @@ def _all_error_codes() -> dict[str, list[str]]:
 # Recorded as a measured baseline rather than an aspiration, in the pattern this repo already uses for
 # the founder-facing leak scan and the no-cassette allowlist. Shrinking it is the work; growing it
 # means a new unguarded diagnostic shipped.
-UNASSERTED_CODE_BASELINE = 29
+UNASSERTED_CODE_BASELINE = 27
 
 
 def test_error_code_assertion_ratchet() -> None:
@@ -1371,3 +1371,204 @@ def test_delivered_rule_prose_is_english_not_paths() -> None:
     )
     if len(dotted) < DOTTED_PATH_BASELINE:
         pytest.fail(f"internal paths down to {len(dotted)} — lower DOTTED_PATH_BASELINE to lock it in.")
+
+
+class TestCapImpliedDenominatorRejections:
+    """`E_SAFE_CAP_MISSING_DENOMINATOR` — four emit sites, zero executions, zero assertions.
+
+    The mutant corpus recorded this code as a survivor and its rationale said the sites were "all of
+    them executed by the suite". Coverage over the full free suite says otherwise: only the constant
+    definition runs. Every emit site is dead, so the code survived because the code never ran — a
+    weaker and less honest position than "the code runs unwatched", and worth closing rather than
+    recording.
+
+    THE STRING IS WRITTEN OUT INLINE, three times, ON PURPOSE. Do NOT lift it into a module constant
+    named after itself: that form reproduces the corpus mutant's `find` text byte-for-byte and trips
+    `test_mutation_corpus.py::test_no_mutant_payload_lives_in_this_scanned_test_file`, whose remedy
+    message then says "keep the registry in mutation_corpus.py" — wrong advice here, and the likely
+    response is to weaken that guard. Repetition is the cheaper of the two costs. (Measured twice: the
+    refactor trips it, and so did an earlier version of THIS PARAGRAPH, which quoted the offending
+    line to warn against it. A differently-named constant is fine.)
+
+    One site is deliberately NOT tested: the post-condition after the fixed point closes. It fires only
+    if `total` and the shares derived from it disagree, which is an algebraic identity — the same shape
+    as the anti-dilution post-condition above, reachable only by fabricating its precondition.
+    """
+
+    @staticmethod
+    def _safe(**over: object) -> dict:
+        s = {"id": "s1", "purchase_amount": 500_000, "post_money_valuation_cap": 5_000_000}
+        s.update(over)  # type: ignore[arg-type]
+        return s
+
+    def test_cap_implied_rejects_a_non_positive_pre_financing_base(self) -> None:
+        import safe_conversion  # type: ignore[import-not-found]
+
+        r = safe_conversion.convert_safes_cap_implied([self._safe()], pre_financing_fd=0)
+        assert r["branch"] == "rejected", r
+        assert r["error"] == "E_SAFE_CAP_MISSING_DENOMINATOR", (
+            "a zero pre-financing share count produced a priced answer. Every SAFE's ownership is "
+            f"measured against that base, so the percentages would be meaningless. {r}"
+        )
+
+    def test_priced_round_rejects_a_missing_post_money_denominator(self) -> None:
+        import safe_conversion  # type: ignore[import-not-found]
+
+        r = safe_conversion.convert_safe_priced_round(
+            form="yc_postmoney_cap",
+            purchase_amount=500_000,
+            post_money_valuation_cap=5_000_000,
+            discount_multiplier=None,
+            company_capitalization=0,
+            equity_financing_price=1.0,
+        )
+        assert r["branch"] == "rejected", r
+        assert r["error"] == "E_SAFE_CAP_MISSING_DENOMINATOR", r
+
+    def test_priced_round_rejects_a_missing_pre_money_denominator(self) -> None:
+        """The pre-money cap branch has its own denominator and its own way of being absent."""
+        import safe_conversion  # type: ignore[import-not-found]
+
+        r = safe_conversion.convert_safe_priced_round(
+            form="yc_premoney_cap_only",
+            purchase_amount=500_000,
+            post_money_valuation_cap=None,
+            pre_money_valuation_cap=5_000_000,
+            discount_multiplier=None,
+            company_capitalization=8_000_000,
+            pre_money_fd=None,
+            equity_financing_price=1.0,
+        )
+        assert r["branch"] == "rejected", r
+        assert r["error"] == "E_SAFE_CAP_MISSING_DENOMINATOR", r
+
+
+class TestCapImpliedRefusesUnusableInstrumentSets:
+    """Two ways a set of SAFEs produced a confident wrong number, both found by mutation review.
+
+    Neither is exotic. The first needs only a copy-pasted id; the second needs caps that happen to
+    reserve almost the whole company, which is what a stack of aggressive SAFEs looks like.
+    """
+
+    def test_duplicate_ids_are_refused_rather_than_collapsed(self) -> None:
+        """Measured before the fix: 2 SAFEs in, 1 out, and the $500k one gone from the denominator.
+
+        The output keyed both `priced` and `per_safe` by id, so the second silently overwrote the
+        first and `company_capitalization` came back as 9,142,857 — a number computed from half the
+        cap table, returned as a clean `cap_implied_set` with no diagnostic. Nothing upstream prevents
+        it: no schema uniqueness, no dedupe in cap_state, and the extraction-lane guard does not cover
+        a hand-authored or freeform-mapped instruments.json.
+        """
+        import safe_conversion  # type: ignore[import-not-found]
+
+        r = safe_conversion.convert_safes_cap_implied(
+            [
+                {"id": "same", "purchase_amount": 500_000, "post_money_valuation_cap": 5_000_000},
+                {"id": "same", "purchase_amount": 1_000_000, "post_money_valuation_cap": 8_000_000},
+            ],
+            pre_financing_fd=8_000_000,
+        )
+        assert r["branch"] == "rejected", (
+            "two SAFEs sharing an id were priced. One of them is missing from the denominator and "
+            f"from the output, and every remaining ownership figure is overstated. {r}"
+        )
+        assert r["error"] == "E_SAFE_DUPLICATE_INSTRUMENT_ID", r
+        assert "same" in r["reason"], "the founder is not told WHICH id is duplicated"
+
+    def test_a_numerically_degenerate_aggregate_is_refused(self) -> None:
+        """`aggregate >= 1.0` was blocked; `aggregate == 1 - 1.1e-16` was not.
+
+        It returned company_capitalization 7.2e22 and 3.6e22 shares per SAFE, branch `cap_implied_set`,
+        error None. The guard above reads as if it covers this and does not — the gap is one ulp wide
+        and everything inside it is arithmetic no founder can use.
+        """
+        import math
+
+        import safe_conversion  # type: ignore[import-not-found]
+
+        r = safe_conversion.convert_safes_cap_implied(
+            [{"id": "s1", "purchase_amount": math.nextafter(1.0, 0.0) * 1e12, "post_money_valuation_cap": 1e12}],
+            pre_financing_fd=8_000_000,
+        )
+        assert r["branch"] == "rejected", f"a degenerate denominator produced ownership figures: {r}"
+        assert r["error"] == "E_SAFE_AGGREGATE_CAP_OWNERSHIP_INFEASIBLE", r
+
+    def test_an_overflowing_denominator_does_not_raise_out_of_a_typed_producer(self) -> None:
+        """The same path with a huge base divided by ~0 and raised ZeroDivisionError.
+
+        This function's whole contract is typed rejections; a bare exception from it crashes the
+        scenario run rather than telling the founder what is wrong with their inputs.
+        """
+        import math
+
+        import safe_conversion  # type: ignore[import-not-found]
+
+        r = safe_conversion.convert_safes_cap_implied(
+            [{"id": "s1", "purchase_amount": math.nextafter(1.0, 0.0) * 1e12, "post_money_valuation_cap": 1e12}],
+            pre_financing_fd=1e300,
+        )
+        assert r["branch"] == "rejected" and r["error"] == "E_SAFE_AGGREGATE_CAP_OWNERSHIP_INFEASIBLE", r
+
+    def test_ordinary_stacked_safes_still_price(self) -> None:
+        """Non-vacuity for all three guards above: the common case must be untouched."""
+        import safe_conversion  # type: ignore[import-not-found]
+
+        r = safe_conversion.convert_safes_cap_implied(
+            [
+                {"id": "a", "purchase_amount": 500_000, "post_money_valuation_cap": 5_000_000},
+                {"id": "b", "purchase_amount": 250_000, "post_money_valuation_cap": 10_000_000},
+            ],
+            pre_financing_fd=8_000_000,
+        )
+        assert r["branch"] == "cap_implied_set", r
+        assert r["company_capitalization"] > 8_000_000
+        assert set(r["per_safe"]) == {"a", "b"}
+
+
+class TestNoteRejectsANonPositiveDiscount:
+    """A zero or negative discount multiplier must be refused, not multiplied through.
+
+    `discount_price = qualified_financing_price * discount` — at 0 the conversion price is 0 and the
+    share count unbounded; negative gives a negative price. The guard exists; nothing reached it from
+    the public entry point, which is what let the mutant that deletes it survive.
+    """
+
+    def test_zero_discount_is_rejected(self) -> None:
+        import note_conversion  # type: ignore[import-not-found]
+
+        r = note_conversion.convert_note(
+            {
+                "id": "n1",
+                "principal": 100_000,
+                "discount_multiplier": 0,
+                "issuance_date": "2025-01-01",
+                "maturity_date": "2027-01-01",
+                "annual_interest_rate": 0.0,
+                "maturity_default_treatment": "convert_at_cap",
+            },
+            conversion_event_date="2026-01-01",
+            qualified_financing_price=1.25,
+            priced_round_new_money=3_000_000,
+        )
+        assert r["branch"] == "rejected", f"a zero discount multiplier produced a conversion: {r}"
+        assert r["error"] == "E_NOTE_INVALID_PRICE_INPUT", r
+
+    def test_an_ordinary_discount_still_converts(self) -> None:
+        """Non-vacuity: 0.8 is the common term and must be unaffected."""
+        import note_conversion  # type: ignore[import-not-found]
+
+        r = note_conversion.convert_note(
+            {
+                "id": "n1",
+                "principal": 100_000,
+                "discount_multiplier": 0.8,
+                "issuance_date": "2025-01-01",
+                "maturity_date": "2027-01-01",
+                "annual_interest_rate": 0.0,
+                "maturity_default_treatment": "convert_at_cap",
+            },
+            conversion_event_date="2026-01-01",
+            qualified_financing_price=1.25,
+            priced_round_new_money=3_000_000,
+        )
+        assert r["branch"] != "rejected", r

@@ -104,8 +104,17 @@ jobs:
     # Without it, `gh workflow run skill-quality.yml -f verify_release_notes_for=vX.Y.Z`
     # also satisfied this guard and spent $15-45 on the paid e2e job — the rehearsal is sold
     # two screens down as a cheap safety net, which was true of publishing and false of cost.
-    # (On a `push` the `inputs` context is null, and null == '' in an Actions expression.)
-    if: github.event_name != 'pull_request' && inputs.verify_release_notes_for == ''
+    # DO NOT MAKE THE RELEASE HINGE ON THE NULL COERCION. `inputs` is null on a `push`, and
+    # null == '' is true in an Actions expression — but `publish-release` now `needs:` this job,
+    # and a skipped dependency skips the dependent, so if that coercion were ever wrong the
+    # Release would silently not publish. The tag path has never executed (v0.10.0 predates
+    # `publish-release`), so the coercion is untested here. Guarding the `inputs` read behind an
+    # explicit `workflow_dispatch` test makes the tag-push branch reach it not at all: on a push
+    # the first disjunct is already true. Same behaviour, one fewer untested assumption in the
+    # release chain.
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.event_name != 'workflow_dispatch' || inputs.verify_release_notes_for == '')
     needs: contract-tests
     # Tag-push: never cancel in-flight authoritative tag run if a quick
     # re-tag follows. workflow_dispatch on the same ref will queue the
