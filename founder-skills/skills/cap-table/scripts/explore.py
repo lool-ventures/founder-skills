@@ -594,7 +594,7 @@ function humanize(cat, val) {{
 }}
 function term(cat, val) {{
   if (val === null || val === undefined || val === "") return humanize(cat, val);
-  return `<span class="term" title="${{escape(val)}}">${{escape(humanize(cat, val))}}</span>`;
+  return `<span class="term">${{escape(humanize(cat, val))}}</span>`;
 }}
 
 const PALETTE = {{
@@ -1085,7 +1085,7 @@ function selectScenario(idx) {{
   const isFull = (s.completeness === "full" || s.completeness === "mixed");
 
   // Variable region (rebuilt each switch): heading + badge + type + blockers.
-  let head = `<h2 style="margin-top:0;">${{escape(s.label)}} <span class="badge ${{s.completeness}}" title="${{escape(s.completeness)}}">${{escape(humanize("completeness", s.completeness))}}</span></h2>`;
+  let head = `<h2 style="margin-top:0;">${{escape(s.label)}} <span class="badge ${{s.completeness}}">${{escape(humanize("completeness", s.completeness))}}</span></h2>`;
   if (s.cap_implied_only) head += `<p class="meta">Pre-round snapshot — ${{CAP_IMPLIED_GLOSS}}</p>`;
   head += `<p class="meta">Type: ${{term("scenario_type", s.type)}}</p>`;
   document.getElementById("scenario-head").innerHTML = head;

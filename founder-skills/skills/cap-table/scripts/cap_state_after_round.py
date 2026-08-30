@@ -39,8 +39,19 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import sys
 from typing import Any
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _artifact_writer import (  # type: ignore[import-not-found]  # noqa: E402
+    ArtifactValidationError,
+    load_schema,
+    write_artifact,
+)
+
+CAP_STATE_SCHEMA_VERSION = "v0.5.0-cap-state"
+_SCHEMA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "references", "schemas")
 
 
 def _recompute_as_converted_totals(cap_state: dict[str, Any]) -> None:
@@ -89,6 +100,13 @@ def build_cap_state_after_round(
     """
     post = copy.deepcopy(pre_cap_state)
 
+    # A null history on the way IN must not become a null on the way OUT: the schema types this field
+    # as an array, so copying the null through produced an artifact that fails its own validation.
+    # Same rule the rest of this skill follows -- an absent optional is absent, never a null. Placed
+    # before the no-mutation early return below, which otherwise hands the null straight to disk.
+    if post.get("cap_table_history", ...) is None:
+        del post["cap_table_history"]
+
     ccp_mutations = scenario_output.get("ccp_mutations") or {}
     ad_breakdown = scenario_output.get("anti_dilution_breakdown") or []
 
@@ -96,6 +114,10 @@ def build_cap_state_after_round(
         # No AD applied; return the pre-round snapshot unchanged
         return post
 
+    # A null history on the way IN must not become a null on the way OUT: the schema types this field
+    # as an array, so copying the null through produced an artifact that fails its own validation.
+    # Same rule the rest of the skill follows -- an absent optional is absent, never a null. Placed
+    # before the no-mutation early return, which otherwise passes the null straight to disk.
     # Apply CCP mutations
     for s in post.get("preferred_series", []):
         sid = s.get("series_id")
@@ -140,6 +162,7 @@ def _cli() -> int:
     p.add_argument("--cap-state", required=True, help="Path to pre-round cap_state.json")
     p.add_argument("--scenarios", required=True, help="Path to scenarios.json")
     p.add_argument("--scenario-id", required=True, help="Which scenario to apply (priced_round)")
+    p.add_argument("--run-id", required=True, help="Run id stamped on the produced artifact")
     p.add_argument("--applied-at", default=None, help="ISO date for cap_table_history event (default null)")
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--pretty", action="store_true")
@@ -166,11 +189,28 @@ def _cli() -> int:
         applied_at=args.applied_at,
     )
 
-    with open(args.output, "w", encoding="utf-8") as f:
-        if args.pretty:
-            json.dump(out, f, indent=2)
-        else:
-            json.dump(out, f)
+    # Written through `write_artifact`, which VALIDATES against the schema before touching disk, so
+    # this producer physically cannot emit an artifact its own schema rejects. It used to raw-dump,
+    # and shipped exactly that: a null `applied_at` where the schema requires a string, reachable
+    # from the usage documented at the top of this file. Its four unit tests all call the builder
+    # directly, so none of them could see it.
+    #
+    # `run_id` is stamped fresh rather than inherited: `build_cap_state_after_round` deep-copies the
+    # pre-round metadata, so without this the post-round artifact would claim to be the run that
+    # produced its INPUT.
+    try:
+        write_artifact(
+            data=out,
+            schema=load_schema(os.path.join(_SCHEMA_DIR, "cap_state.schema.json")),
+            run_id=args.run_id,
+            output_path=args.output,
+            pretty=bool(args.pretty),
+            schema_version=CAP_STATE_SCHEMA_VERSION,
+        )
+    except ArtifactValidationError as exc:
+        sys.stderr.write(f"cap_state_after_round.py: refusing to write an invalid artifact: {exc}\n")
+        print(json.dumps({"ok": False, "error": "E_CAP_STATE_SCHEMA_INVALID", "detail": str(exc)}))
+        return 1
     print(
         json.dumps(
             {

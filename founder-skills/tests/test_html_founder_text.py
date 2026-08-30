@@ -175,3 +175,33 @@ def test_the_scanner_would_catch_a_filename_in_a_text_node() -> None:
 
 
 _ = Callable  # re-exported type import kept for parametrize signature clarity
+
+
+def test_no_generator_puts_a_raw_value_in_a_tooltip() -> None:
+    """A hover tooltip is founder-visible text, and no fleet scan can see it.
+
+    `_text_nodes` strips attributes by design (asserted above), and the explorer's tooltips are built
+    in JavaScript, so they never exist as static HTML at all — two independent reasons the generated
+    page cannot be scanned for this. cap-table's explorer rendered the humanised label as the visible
+    text and the RAW enum in the `title=`, so `broad_based_weighted_average` was one hover away from a
+    founder on every term.
+
+    This reads the generator SOURCE rather than its output, because that is the only place the
+    construction is visible. Narrow on purpose: it looks for a tooltip interpolating a raw value
+    beside a humanised display, not for tooltips in general — a `title="Compare two scenarios"` is
+    good UI and must stay.
+    """
+    import re as _re
+
+    SKILLS = Path(__file__).resolve().parents[1] / "skills"
+    # A title= that interpolates a bare value expression, i.e. not a literal string of prose.
+    raw_tip = _re.compile(r'title="\$\{+\s*escape\(\s*(?!humanize)[A-Za-z_][\w.]*\s*\)\s*\}+"')
+    offenders = []
+    for script in sorted(SKILLS.glob("*/scripts/*.py")):
+        for i, line in enumerate(script.read_text(encoding="utf-8").splitlines(), 1):
+            if raw_tip.search(line):
+                offenders.append(f"{script.parent.parent.name}/{script.name}:{i}")
+    assert offenders == [], (
+        "a tooltip shows a raw internal value: " + "; ".join(offenders) + ". The visible label is "
+        "already humanised, so the tooltip adds only our vocabulary — drop it, or write prose."
+    )

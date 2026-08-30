@@ -7097,6 +7097,18 @@ class TestCapStateAfterRoundNullHistory:
                 },
                 "cap_table_history": None,
                 "preferred_series": [],
+                # Completed so the artifact validates on write. The null history above is the point
+                # of the test and stays; these four are required root fields the fixture omitted
+                # while nothing validated the output.
+                "as_of_date": "2024-01-01",
+                "currency": "USD",
+                "founders": [],
+                "option_pool": {
+                    "plan_type": "iso",
+                    "authorized": 0,
+                    "issued_and_outstanding": 0,
+                    "available_for_grant": 0,
+                },
             }
             scenarios = {"scenarios": [{"scenario_id": "round_a", "computed_outputs": {}}]}
             pre_path = os.path.join(d, "cap_state.json")
@@ -7115,6 +7127,10 @@ class TestCapStateAfterRoundNullHistory:
                     scen_path,
                     "--scenario-id",
                     "round_a",
+                    # Required now: the producer stamps its own run_id rather than inheriting the
+                    # pre-round one, matching every other producer in this skill.
+                    "--run-id",
+                    "test-run",
                     "-o",
                     out_path,
                 ],

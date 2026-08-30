@@ -29,39 +29,6 @@ import _palette  # noqa: E402
 import _rules  # noqa: E402
 from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 
-
-def _rule_html(
-    rule_id: str,
-    *,
-    item_title: str | None = None,
-    item_source_ids: list[str] | None = None,
-    compact: bool = False,
-) -> str:
-    """Readable rule reference: title → primary source (new tab), summary as a
-    tooltip. Full form adds extra 'also' source links + the raw rule_id as
-    small-print; `compact=True` (for dense tables) keeps just the linked title
-    and folds the rule_id into the tooltip."""
-    ref = _rules.rule_ref(rule_id, item_title=item_title, item_source_ids=item_source_ids)
-    title = html.escape(str(ref["title"]), quote=True)
-    summary = str(ref["summary"])
-    tip = html.escape((f"{summary} · " if summary else "") + rule_id if compact else summary, quote=True)
-    links = ref["links"]
-    if links:
-        primary = html.escape(str(links[0][1]), quote=True)
-        out = f'<a href="{primary}" target="_blank" rel="noopener noreferrer" class="term" title="{tip}">{title} ↗</a>'
-        if not compact and links[1:]:
-            joined = " · ".join(
-                f'<a href="{html.escape(str(u), quote=True)}" target="_blank" rel="noopener noreferrer">{html.escape(str(p), quote=True)} ↗</a>'
-                for p, u in links[1:]
-            )
-            out += f' <span class="rule-extra">· also {joined}</span>'
-    else:
-        out = f'<span class="term" title="{tip}">{title}</span>' if tip else title
-    if not compact:
-        out += f' <code class="rule-code">{html.escape(str(rule_id), quote=True)}</code>'
-    return out
-
-
 _COUNSEL_DOMAIN_LABELS = {
     "safe": "SAFEs & Israeli tax",
     "israel_equity_tax": "Section 102 & equity tax",
