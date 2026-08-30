@@ -52,6 +52,7 @@ E_SAFE_CAP_MISSING_DENOMINATOR = "E_SAFE_CAP_MISSING_DENOMINATOR"
 # describe an iteration that failed to converge; here the infeasibility is closed-form and exact.
 E_SAFE_AGGREGATE_CAP_OWNERSHIP_INFEASIBLE = "E_SAFE_AGGREGATE_CAP_OWNERSHIP_INFEASIBLE"
 E_SAFE_DUPLICATE_INSTRUMENT_ID = "E_SAFE_DUPLICATE_INSTRUMENT_ID"
+E_SAFE_INSTRUMENT_ID_MISSING = "E_SAFE_INSTRUMENT_ID_MISSING"
 E_SAFE_CIRCULAR_MFN = "E_SAFE_CIRCULAR_MFN"
 E_SAFE_INVALID_PRICE_INPUT = "E_SAFE_INVALID_PRICE_INPUT"
 E_UNKNOWN_SAFE_FORM = "E_UNKNOWN_SAFE_FORM"
@@ -121,6 +122,23 @@ def convert_safes_cap_implied(
     # SAFE's ownership -- and nothing upstream prevents it: the schemas declare no `uniqueItems`,
     # `cap_state` does not dedupe, and `extract_instrument.py` guards ids only on its own lane, so a
     # hand-authored or freeform-mapped instruments.json reaches this function directly.
+    # A MISSING id is its own defect, reported separately. Folding it in as a duplicate of `None`
+    # names a value that appears nowhere in the founder's documents, and the two need different
+    # fixes. It also has to be checked FIRST: `priced[safe["id"]]` below is a subscript, so a single
+    # id-less SAFE raised KeyError out of a function whose entire contract is typed rejections --
+    # the same objection this file already makes about ZeroDivisionError, three lines away.
+    missing = sum(1 for s in safes if s.get("id") in (None, ""))
+    if missing:
+        return {
+            "branch": "rejected",
+            "error": E_SAFE_INSTRUMENT_ID_MISSING,
+            "reason": (
+                f"{missing} of {len(safes)} SAFEs carry no id. Ids key the conversion output, so a "
+                "SAFE without one cannot be reported separately from the others. Give each SAFE a "
+                "distinct id."
+            ),
+        }
+
     ids = [s.get("id") for s in safes]
     duplicates = sorted({str(i) for i in ids if ids.count(i) > 1})
     if duplicates:
@@ -162,23 +180,30 @@ def convert_safes_cap_implied(
             ),
         }
 
-    # A NEAR-DEGENERATE AGGREGATE IS NOT A USABLE ANSWER. The check above blocks `aggregate >= 1.0`,
-    # but the interesting failure is just below it: at 1 - 1.1e-16 the division returned a
-    # `company_capitalization` of 7.2e22 and handed each SAFE 3.6e22 shares, branch `cap_implied_set`,
-    # `error: None` -- garbage presented as a clean result. With a large enough `pre_financing_fd` the
-    # same path overflows to `inf` and the per-SAFE price becomes 0.0, raising ZeroDivisionError out of
-    # a function whose entire contract is typed rejections. Refuse the arithmetic rather than report
-    # its output.
+    # NUMERICAL degeneracy, and deliberately ONLY that. The check above blocks `aggregate >= 1.0`; at
+    # 1 - 1.1e-16 the division returned a `company_capitalization` of 7.2e22 and handed each SAFE
+    # 3.6e22 shares, branch `cap_implied_set`, `error: None`. With a large enough `pre_financing_fd`
+    # the same path overflows to `inf` and the per-SAFE price becomes 0.0, raising ZeroDivisionError
+    # out of a function whose entire contract is typed rejections.
+    #
+    # SCOPE, because the threshold invites a fair objection. `1e-9` is where float arithmetic stops
+    # producing a meaningful denominator, not where a cap table stops being plausible: an aggregate of
+    # 0.99 still prices, and returns a company capitalization 100x the pre-financing base. That is an
+    # extreme cap table, not a broken computation, and refusing it would be this function inventing an
+    # economic policy the rule pack does not state. Implausible-but-computable belongs to a warning
+    # someone writes deliberately; this guard's job is to stop reporting arithmetic that has lost its
+    # meaning.
     residual = 1.0 - aggregate
     if residual <= 1e-9:
         return {
             "branch": "rejected",
             "error": E_SAFE_AGGREGATE_CAP_OWNERSHIP_INFEASIBLE,
             "reason": (
-                f"stacked post-money SAFEs reserve {aggregate:.9%} of the company, leaving {residual:.3g} "
-                "for everyone else. The denominator is numerically degenerate at this point and any "
-                "ownership figure derived from it would be meaningless. Confirm each cap and purchase "
-                "amount against the signed documents."
+                "stacked post-money SAFEs reserve so close to the whole company that the remaining "
+                f"share is {residual:.3g} -- below the point where this arithmetic stays meaningful. "
+                "(Distinct from the at-or-above-100% case above: this one is a rounding-scale "
+                "problem, not an outright impossible one.) Confirm each cap and purchase amount "
+                "against the signed documents."
             ),
         }
 

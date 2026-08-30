@@ -81,12 +81,6 @@ def test_must_kill_mutant_is_caught(harness: _Harness, mutant: Mutant) -> None:
         "assertion -- do not move the entry to KNOWN_SURVIVORS, which is shrink-only.\n"
         f"{verdict.tail}"
     )
-    assert mutant.killed_by, (
-        f"{mutant.id} has no `killed_by`. Every MUST_KILL entry must name the test that has to be the "
-        "one to notice -- run the mutant, read the FAILED line, and record it. An entry without one "
-        "asserts only that something went red, which this corpus has twice measured to be a different "
-        "claim from 'the guard noticed'."
-    )
     if mutant.killed_by:
         assert mutant.killed_by in verdict.first_failure, (
             f"{mutant.id} was killed, but not by the test it names.\n"
@@ -196,4 +190,28 @@ def test_noop_control_still_passes_after_every_mutant(harness: _Harness) -> None
         "the no-op control passed before the corpus ran and fails after it. Every verdict above was "
         "read from an instrument that stopped working at some point during the run, so none of them "
         f"can be trusted.\n{verdict.tail}"
+    )
+
+
+def test_every_must_kill_entry_names_the_test_that_must_notice() -> None:
+    """`killed_by` is required, and checked STATICALLY.
+
+    It lived inside `test_must_kill_mutant_is_caught`, after a ~15 s child run and after the kill
+    assertion -- so a missing value cost a full run to discover and was masked entirely if the mutant
+    also survived. The requirement is a property of the registry, not of a run, so it belongs with the
+    other cheap registry checks where it fails in milliseconds and names every offender at once.
+
+    The `Class::method` form is required too: a bare class name is satisfied by any test in that
+    class, which asserts something weaker than "the test that must be the one to notice".
+    """
+    missing = [m.id for m in MUST_KILL if not m.killed_by]
+    assert not missing, (
+        f"these MUST_KILL entries name no test: {missing}. Run the mutant, read the FAILED line, and "
+        "record it -- an entry without one asserts only that something went red, which this corpus "
+        "has twice measured to be a different claim from 'the guard noticed'."
+    )
+    bare = [m.id for m in MUST_KILL if "::" not in m.killed_by]
+    assert not bare, (
+        f"these name a bare class rather than `Class::method`: {bare}. Any test in the class would "
+        "satisfy the assertion, including one that cannot notice this mutant."
     )

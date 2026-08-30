@@ -821,6 +821,52 @@ def _note_shares_at_price(
 # ============================================================================
 
 
+def _duplicate_id_blockers(safes: list[dict[str, Any]], notes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Refuse instrument sets whose ids collapse the per-instrument output.
+
+    Separate from a schema `uniqueItems` because nothing upstream enforces one: the instruments
+    schema declares no uniqueness, `cap_state` does not dedupe, and the extraction-lane guard covers
+    only its own lane -- so a hand-authored or freeform-mapped instruments.json reaches the solver
+    directly.
+
+    A MISSING id is reported as its own defect rather than folded in as a duplicate of `None`. They
+    need different fixes ("give it an id" vs "make the ids distinct"), and two id-less SAFEs are not
+    two SAFEs with the same id -- reporting the founder a duplicated id of `None` names a value that
+    appears nowhere in their documents.
+    """
+    out: list[dict[str, Any]] = []
+    for label, items in (("safes", safes), ("convertible_notes", notes)):
+        missing = sum(1 for i in items if i.get("id") in (None, ""))
+        if missing:
+            out.append(
+                {
+                    "code": "E_INSTRUMENT_ID_MISSING",
+                    "instance_id": None,
+                    "remedy": (
+                        f"{missing} of {len(items)} {label} carry no id. Ids key the per-instrument "
+                        "output, so an instrument without one cannot be reported separately from the "
+                        "others. Give each one a distinct id."
+                    ),
+                }
+            )
+        ids = [i.get("id") for i in items if i.get("id") not in (None, "")]
+        dupes = sorted({str(i) for i in ids if ids.count(i) > 1})
+        if dupes:
+            out.append(
+                {
+                    "code": "E_INSTRUMENT_DUPLICATE_ID",
+                    "instance_id": ",".join(dupes),
+                    "remedy": (
+                        f"{len(items)} {label} carry {len(dupes)} duplicated id(s): {', '.join(dupes)}. "
+                        "Ids key the per-instrument output, so a repeat would show one row for two "
+                        "instruments while both count toward the totals -- the summary and the detail "
+                        "would disagree. Give each one a distinct id."
+                    ),
+                }
+            )
+    return out
+
+
 def solve_priced_round(
     *,
     cap_state: dict[str, Any],
@@ -907,6 +953,27 @@ def solve_priced_round(
         return {
             "completeness": "structural_only",
             "blockers": _mfn_override_blockers,
+            "per_safe": {},
+            "per_note": {},
+            "math_provenance": [],
+        }
+
+    # DUPLICATE INSTRUMENT IDS MUST BE REFUSED HERE TOO, AND THIS PATH IS THE WORSE ONE.
+    # `_safe_shares_at_price` / `_note_shares_at_price` build `per_safe`/`per_note` keyed by id, so
+    # two instruments sharing one leave a single row. The DENOMINATOR is unaffected — `total`
+    # accumulates per iteration, so both are counted — which is exactly what makes it dangerous:
+    # measured, two identical SAFEs produced `safe_pct` 16% in the aggregate beside ONE per-instrument
+    # row carrying half of it, `completeness: "full"`, zero blockers. The founder reconciles the
+    # summary against the detail and the detail is missing an instrument.
+    #
+    # The cap-implied path refuses the same shape (`convert_safes_cap_implied`) and at least reported
+    # `structural_only`; this path reported `full`. Fixing one and not the other left the more
+    # confident of the two lying.
+    _dupe_blockers = _duplicate_id_blockers(safes, notes)
+    if _dupe_blockers:
+        return {
+            "completeness": "structural_only",
+            "blockers": _dupe_blockers,
             "per_safe": {},
             "per_note": {},
             "math_provenance": [],

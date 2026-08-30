@@ -142,8 +142,8 @@ _SELECTION = tuple(
 #
 # BE PRECISE ABOUT WHICH HALF OF THIS IS MEASURED, because an earlier version of this comment was
 # not. The false-KILL hazard above is PROPHYLAXIS: recomputing both ratchets' quantities under all
-# 14 entries gives (29, 55, 22) for every one of them, identical to baseline, so nothing in today's
-# corpus would move either ratchet -- the one rename entry swaps an unasserted code for another
+# every entry gave the then-current baseline for all three counts, so nothing in the corpus moved
+# either ratchet -- the one rename entry swaps an unasserted code for another
 # unasserted code. It is a hazard the next entry can trip, not one this one did.
 #
 # The false-ALARM half WAS observed, twice. Both ratchets red the moment their count drifts by one
@@ -177,7 +177,14 @@ class Mutant:
     # collection error. "Something went red" is not the same claim as "the guard noticed", and the
     # gap between them is the whole reason this corpus exists rather than a coverage number.
     #
-    # Every value here was MEASURED by running the mutant, never guessed from the rationale.
+    # ALWAYS `Class::method`, never a bare class. A bare class name is satisfied by ANY test in it --
+    # measured, `TestCapImpliedRefusesUnusableInstrumentSets` holds four tests of which only two can
+    # notice their entry's mutant -- so it asserts a weaker thing than the field's name promises.
+    #
+    # Every value here was MEASURED by running the mutant and reading the FAILED line, never guessed
+    # from the rationale. Note the harness runs with `-x`, so this records the FIRST test to notice;
+    # if a new file earlier in `_SELECTION` also catches a mutant, the recorded value needs
+    # re-measuring rather than the guard needing loosening.
     killed_by: str = ""
 
 
@@ -229,7 +236,7 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="no_conversion_path_typo_at_the_covered_site",
-        killed_by="TestNoConversionPathBranch",
+        killed_by="TestNoConversionPathBranch::test_note_with_no_cap_no_discount_and_no_maturity_has_no_conversion_path",
         file=f"{_SCRIPTS}/note_conversion.py",
         find=(
             "        if priced_context and cap is None and discount is None:\n"
@@ -271,7 +278,7 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="concise_report_writes_before_deciding",
-        killed_by="TestConciseReportDoesNotClobberOnReject",
+        killed_by="TestConciseReportDoesNotClobberOnReject::test_rejected_render_leaves_the_prior_markdown_intact",
         file=f"{_SCRIPTS}/concise_report.py",
         find='    rejected = not md.strip() or ("—" in md and "Founders" not in md)',
         replace=(
@@ -353,7 +360,7 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="safe_cap_missing_denominator_code_renamed",
-        killed_by="TestCapImpliedDenominatorRejections",
+        killed_by="TestCapImpliedDenominatorRejections::test_cap_implied_rejects_a_non_positive_pre_financing_base",
         file=f"{_SCRIPTS}/safe_conversion.py",
         find='E_SAFE_CAP_MISSING_DENOMINATOR = "E_SAFE_CAP_MISSING_DENOMINATOR"',
         replace='E_SAFE_CAP_MISSING_DENOMINATOR = "E_SAFE_CAP_MISSING_DENOMINATOR_RENAMED"',
@@ -368,7 +375,7 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="note_discount_non_positive_guard_removed",
-        killed_by="TestNoteRejectsANonPositiveDiscount",
+        killed_by="TestNoteRejectsANonPositiveDiscount::test_zero_discount_is_rejected",
         file=f"{_SCRIPTS}/note_conversion.py",
         find=(
             "        if discount <= 0:\n"
@@ -387,7 +394,7 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="duplicate_safe_ids_collapse_silently",
-        killed_by="test_duplicate_ids_are_refused_rather_than_collapsed",
+        killed_by="TestCapImpliedRefusesUnusableInstrumentSets::test_duplicate_ids_are_refused_rather_than_collapsed",
         file=f"{_SCRIPTS}/safe_conversion.py",
         find='    ids = [s.get("id") for s in safes]',
         replace="    ids = []",
@@ -400,7 +407,7 @@ MUST_KILL: tuple[Mutant, ...] = (
     ),
     Mutant(
         id="degenerate_cap_implied_denominator_not_refused",
-        killed_by="TestCapImpliedRefusesUnusableInstrumentSets",
+        killed_by="TestCapImpliedRefusesUnusableInstrumentSets::test_a_numerically_degenerate_aggregate_is_refused",
         file=f"{_SCRIPTS}/safe_conversion.py",
         find="    if residual <= 1e-9:",
         replace="    if False:",
@@ -409,6 +416,21 @@ MUST_KILL: tuple[Mutant, ...] = (
             "it was not, and returned company_capitalization 7.2e22 with 3.6e22 shares per SAFE as a "
             "clean result. With a large pre-financing base the same path overflowed and raised "
             "ZeroDivisionError out of a producer whose contract is typed rejections."
+        ),
+    ),
+    Mutant(
+        id="priced_round_duplicate_ids_collapse_silently",
+        killed_by="TestPricedRoundRefusesCollapsingInstrumentIds::test_duplicate_safe_ids_block_the_round",
+        file=f"{_SCRIPTS}/priced_round.py",
+        find="    _dupe_blockers = _duplicate_id_blockers(safes, notes)",
+        replace="    _dupe_blockers = []",
+        rationale=(
+            "Restores the collapse on the PRICED path, which is worse than the cap-implied one the "
+            "corpus already covers: the denominator counts both instruments while `per_safe` keeps "
+            "one, so a founder reads `safe_pct` 16% in the aggregate beside a single row carrying "
+            "half of it -- `completeness: full`, zero blockers. Found by adversarial review after the "
+            "cap-implied half shipped fixed; fixing one path had left the more confident of the two "
+            "lying."
         ),
     ),
     Mutant(

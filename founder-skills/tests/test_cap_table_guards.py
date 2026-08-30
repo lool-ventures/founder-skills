@@ -1494,23 +1494,60 @@ class TestCapImpliedRefusesUnusableInstrumentSets:
         assert r["error"] == "E_SAFE_AGGREGATE_CAP_OWNERSHIP_INFEASIBLE", r
 
     def test_an_overflowing_denominator_does_not_raise_out_of_a_typed_producer(self) -> None:
-        """The same path with a huge base divided by ~0 and raised ZeroDivisionError.
+        """The overflow branch specifically — which needs an aggregate ABOVE the degeneracy floor.
 
-        This function's whole contract is typed rejections; a bare exception from it crashes the
-        scenario run rather than telling the founder what is wrong with their inputs.
+        Measured: an earlier version of this test used `1 - 1.1e-16`, which the `residual` check
+        returns on first, so `math.isfinite` was never called and this was a byte-identical twin of
+        the test above it with a different `pre_financing_fd`. It asserted the right outcome for the
+        wrong reason and left its own named guard unexecuted — the exact "covered and unasserted"
+        shape this file exists for, one directory over.
+
+        So the aggregate sits just ABOVE the floor (residual ~1e-9), where the division is still
+        attempted and overflows to inf against a huge base. Instrumented to confirm `isfinite` is
+        reached; without the guard this raises ZeroDivisionError out of a function whose entire
+        contract is typed rejections.
         """
-        import math
-
         import safe_conversion  # type: ignore[import-not-found]
 
         r = safe_conversion.convert_safes_cap_implied(
-            [{"id": "s1", "purchase_amount": math.nextafter(1.0, 0.0) * 1e12, "post_money_valuation_cap": 1e12}],
+            [{"id": "s1", "purchase_amount": (1 - 1.0001e-9) * 1e12, "post_money_valuation_cap": 1e12}],
             pre_financing_fd=1e300,
         )
         assert r["branch"] == "rejected" and r["error"] == "E_SAFE_AGGREGATE_CAP_OWNERSHIP_INFEASIBLE", r
+        assert "overflowed" in r["reason"], (
+            "this test exists for the overflow branch; a reason that does not mention overflow means "
+            f"the degeneracy check returned first and the isfinite guard is still unexercised. {r}"
+        )
+
+    def test_a_missing_id_is_refused_rather_than_raising(self) -> None:
+        """One id-less SAFE raised KeyError; two were reported as duplicates of `None`.
+
+        Both wrong, differently. The subscript `priced[safe["id"]]` crashes a producer whose contract
+        is typed rejections — the same objection this module makes about ZeroDivisionError — and
+        naming `None` as the duplicated id points the founder at a value appearing nowhere in their
+        documents. A missing id and a repeated id need different fixes, so they get different codes.
+        """
+        import safe_conversion  # type: ignore[import-not-found]
+
+        r = safe_conversion.convert_safes_cap_implied(
+            [
+                {"id": "a", "purchase_amount": 500_000, "post_money_valuation_cap": 5_000_000},
+                {"purchase_amount": 250_000, "post_money_valuation_cap": 5_000_000},
+            ],
+            pre_financing_fd=8_000_000,
+        )
+        assert r["branch"] == "rejected", r
+        assert r["error"] == "E_SAFE_INSTRUMENT_ID_MISSING", r
+        assert "None" not in r["reason"], "the founder is pointed at a `None` id that is not in their documents"
 
     def test_ordinary_stacked_safes_still_price(self) -> None:
-        """Non-vacuity for all three guards above: the common case must be untouched."""
+        """NO FALSE POSITIVES — which is NOT the same as non-vacuity, and the label used to say it was.
+
+        Measured against the pre-fix producer (all guards absent) this test PASSES, so it cannot
+        detect a guard being removed. What it does prove is the other direction, which is the one that
+        would hurt a founder: an ordinary stack of SAFEs is not refused by any of the three checks.
+        The guards' own regression coverage is the three tests above plus their corpus entries.
+        """
         import safe_conversion  # type: ignore[import-not-found]
 
         r = safe_conversion.convert_safes_cap_implied(
@@ -1572,3 +1609,105 @@ class TestNoteRejectsANonPositiveDiscount:
             priced_round_new_money=3_000_000,
         )
         assert r["branch"] != "rejected", r
+
+
+class TestPricedRoundRefusesCollapsingInstrumentIds:
+    """The same id collapse on the PRICED path, which is the more dangerous of the two.
+
+    `_safe_shares_at_price` / `_note_shares_at_price` key `per_safe`/`per_note` by id. The
+    denominator is unaffected — `total` accumulates per iteration — so two identical SAFEs produced
+    `safe_pct` 16% in the aggregate beside ONE per-instrument row carrying half of it, with
+    `completeness: "full"` and zero blockers. A founder reconciling the summary against the detail
+    finds an instrument missing and no warning that anything is wrong.
+
+    That is worse than the cap-implied case fixed alongside it, which at least reported
+    `structural_only`. Fixing one path and not the other left the more confident of the two lying —
+    found by adversarial review, not by the suite.
+    """
+
+    @staticmethod
+    def _state(fd: int) -> dict:
+        import cap_state as cap_state_mod  # type: ignore[import-not-found]
+
+        built: dict = cap_state_mod.build_cap_state(
+            {
+                "company_name": "X",
+                "founders": [{"founder_id": "f1", "name": "F", "common_shares": fd}],
+                "metadata": {"run_id": "t", "schema_version": "v0.5.0-inputs"},
+            },
+            {"safes": [], "convertible_notes": []},
+        )
+        return built
+
+    @staticmethod
+    def _safe(**over: object) -> dict:
+        s = {
+            "id": "s1",
+            "form": "yc_postmoney_cap",
+            "purchase_amount": 500_000,
+            "post_money_valuation_cap": 5_000_000,
+        }
+        s.update(over)  # type: ignore[arg-type]
+        return s
+
+    def _solve(self, safes: list[dict], notes: list[dict] | None = None) -> dict:
+        import priced_round  # type: ignore[import-not-found]
+
+        out: dict = priced_round.solve_priced_round(
+            cap_state=self._state(8_000_000),
+            safes=safes,
+            notes=notes or [],
+            pre_money=12_000_000,
+            new_money=3_000_000,
+            # Supplied unconditionally so the note cases reach the id check rather than stopping at
+            # `E_NOTE_NO_CONVERSION_DATE`, which fires earlier and would make the note test pass for
+            # the wrong reason.
+            conversion_event_date="2026-01-01",
+        )
+        return out
+
+    def test_duplicate_safe_ids_block_the_round(self) -> None:
+        out = self._solve([self._safe(), self._safe()])
+        codes = {b["code"] for b in out.get("blockers") or []}
+        assert "E_INSTRUMENT_DUPLICATE_ID" in codes, (
+            "two SAFEs sharing an id were priced. Both count toward the totals while only one appears "
+            f"per-instrument, so the summary and the detail disagree with no warning. {out}"
+        )
+        assert out["completeness"] != "full", "a round missing an instrument row must not report `full`"
+
+    def test_duplicate_note_ids_block_the_round(self) -> None:
+        """Notes collapse identically; the fix would be half-done if it covered SAFEs only."""
+        note = {
+            "id": "n1",
+            "principal": 1_000_000,
+            "valuation_cap": 10_000_000,
+            "issuance_date": "2025-01-01",
+            "maturity_date": "2027-01-01",
+            "annual_interest_rate": 0.0,
+            "capitalization_denominator": 8_000_000,
+            "maturity_default_treatment": "convert_at_cap",
+        }
+        out = self._solve([], [note, dict(note)])
+        codes = {b["code"] for b in out.get("blockers") or []}
+        assert "E_INSTRUMENT_DUPLICATE_ID" in codes, out
+
+    def test_a_missing_instrument_id_is_its_own_diagnostic(self) -> None:
+        """Not folded in as a duplicate of `None` — the two need different fixes."""
+        anon = self._safe()
+        del anon["id"]
+        out = self._solve([anon])
+        codes = {b["code"] for b in out.get("blockers") or []}
+        assert "E_INSTRUMENT_ID_MISSING" in codes, out
+        assert "E_INSTRUMENT_DUPLICATE_ID" not in codes, (
+            "one id-less instrument was reported as a duplicate; the founder is pointed at a repeated "
+            "id that does not exist in their documents"
+        )
+
+    def test_distinct_ids_still_price_and_report_every_instrument(self) -> None:
+        """No false positives, and the property the guard protects: one row per instrument."""
+        out = self._solve([self._safe(id="s1"), self._safe(id="s2")])
+        assert not (out.get("blockers") or []), out
+        assert out["completeness"] == "full"
+        assert set(out["per_safe"]) == {"s1", "s2"}, (
+            f"two distinct SAFEs must produce two rows; got {list(out['per_safe'])}"
+        )

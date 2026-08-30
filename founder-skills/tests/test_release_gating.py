@@ -174,12 +174,17 @@ def evaluate(expr: str | None, ctx: dict[str, Any]) -> bool:
     if expr is None:
         return True
     expr = " ".join(expr.split()).strip()
-    while expr.startswith("(") and expr.endswith(")") and _split_top(expr[1:-1], ")") is None:
-        inner = expr[1:-1]
-        if _balanced(inner):
-            expr = inner.strip()
-        else:
-            break
+    # Strip ONE fully-enclosing paren pair at a time. The `_balanced` test is what makes this safe:
+    # `(a) && (b)` also starts with "(" and ends with ")", and stripping there would corrupt it --
+    # `a) && (b` is unbalanced, so the loop stops.
+    #
+    # A third conjunct used to sit here, `_split_top(expr[1:-1], ")") is None`. It was a CONSTANT:
+    # `_split_top` decrements depth on ")" in an earlier branch than the one that could match it as an
+    # operator, so splitting on ")" returns None for every input -- verified exhaustively over ~600k
+    # strings. It read as a safety check and could not fail, in the one file whose thesis is that a
+    # guard must be able to fail. Removed rather than repaired: `_balanced` already does the work.
+    while expr.startswith("(") and expr.endswith(")") and _balanced(expr[1:-1]):
+        expr = expr[1:-1].strip()
 
     for op, combine in (("||", any), ("&&", all)):
         parts = _split_top(expr, op)
