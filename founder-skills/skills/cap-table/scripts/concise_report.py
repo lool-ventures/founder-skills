@@ -183,6 +183,11 @@ def render(inputs: dict, scenarios_doc: dict, rule_audit: dict | None, cap_state
     # W_CAP_BASE_ASSUMED / W_AOA_ONLY_NO_INSTRUMENTS / W_FOUNDER_LOOKS_LIKE_INVESTOR from being silently
     # dropped on that route.
     lines.extend(_warning_callouts.render_warning_callouts((cap_state or {}).get("warnings") or []))
+    # SOLVER warnings are a second channel -- dicts on `computed_outputs.warnings`, not cap_state
+    # strings. Rendering one is not rendering the other, and the concise route is where a founder
+    # asks a single question and gets a single answer, so an unlabelled MFN counterfactual here is
+    # the whole answer being wrong.
+    lines.extend(_warning_callouts.render_solver_warning_callouts(_warning_callouts.collect_solver_warnings(scenarios)))
     for sc in scenarios:
         lines.extend(_scenario_block(sc))
     flags = _flag_lines(rule_audit)

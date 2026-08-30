@@ -210,8 +210,16 @@ def quick_assess(
     # sentinel too — only when non-empty (the schema declares `warnings` optional; an empty array
     # would still validate but adds noise). This carries the same backstops the full pipeline shows.
     _cs_warnings = list(cs.get("warnings") or [])
-    if _cs_warnings:
-        sentinel["warnings"] = _cs_warnings
+    # SOLVER warnings as well. This route calls `solve_priced_round` directly and forwarded only the
+    # cap_state channel, so the fast path -- the one a founder asking a quick priced-round question
+    # actually lands on -- was the surface most likely to drop an MFN counterfactual or an applied
+    # CP2 floor. Codes only in the sentinel (it is a compact machine block); the prose goes in the
+    # markdown below.
+    _solver_warnings = [
+        w for w in (solver_result.get("warnings") or []) if isinstance(w, dict) and str(w.get("code") or "")
+    ]
+    if _cs_warnings or _solver_warnings:
+        sentinel["warnings"] = _cs_warnings + [str(w["code"]) for w in _solver_warnings]
 
     # Founder-facing markdown
     md_lines: list[str] = []
@@ -229,6 +237,12 @@ def quick_assess(
             "confirm it is a founder, not an investor."
         )
         md_lines.append("")
+    # Solver warnings, in the SAME prose the full report uses -- via the shared renderer, so the fast
+    # route cannot drift from the full one on wording a founder may act on.
+    if _solver_warnings:
+        import _warning_callouts as _wc
+
+        md_lines.extend(_wc.render_solver_warning_callouts(_solver_warnings))
     md_lines.append(
         "_Fast-assess mode: a 1-page directional answer. For the full review "
         "(counsel packet, rule audit, anti-dilution, interactive explorer), "

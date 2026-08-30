@@ -455,6 +455,22 @@ def build_coaching_payload(
     high_severity = [
         {"warning_id": b["code"], "severity": "high", "title": b["code"], "detail": b["remedy"]} for b in failed_items
     ]
+    # SOLVER warnings, not just blockers. The Context-B sub-agent's commentary is inserted into
+    # `report.md`, so this payload is a founder-facing surface -- and sourcing it from `failed_items`
+    # alone meant a sub-agent coaching a founder through a priced round could not see that the MFN
+    # line it was reading is a counterfactual, which `agents/cap-table.md` requires the report to
+    # label. Kept at medium: a solver warning qualifies a number, where a blocker means the number
+    # does not exist.
+    high_severity.extend(
+        {
+            "warning_id": w.get("code"),
+            "severity": "medium",
+            "title": w.get("code"),
+            "detail": w.get("detail") or w.get("reason") or "",
+        }
+        for w in _warning_callouts.collect_solver_warnings(scenarios)
+        if isinstance(w, dict) and str(w.get("code") or "").startswith("W_")
+    )
 
     # summary.passed / summary.failed are SCENARIO counts, not blocker counts. A
     # single scenario can carry several blockers, so counting blockers here would
@@ -693,11 +709,7 @@ def _render_solver_warning_callouts(scenarios: list[dict[str, Any]]) -> list[str
     written to `scenarios.json`, and dropped before the founder -- including the MFN counterfactual
     that `agents/cap-table.md` requires the report to label.
     """
-    collected: list[dict[str, Any]] = []
-    for s in scenarios:
-        co = s.get("computed_outputs", {}) or {}
-        collected.extend(co.get("warnings") or [])
-    return _warning_callouts.render_solver_warning_callouts(collected)
+    return _warning_callouts.render_solver_warning_callouts(_warning_callouts.collect_solver_warnings(scenarios))
 
 
 def build_pool_basis_note(

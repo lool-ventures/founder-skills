@@ -56,6 +56,11 @@ _SLIDER_FIELDS = (
     "per_safe",
     "per_note",
     "blockers",
+    # Solver warnings ride each swept frame: the sweep re-solves at every pre-money, so a frame can
+    # newly TRIP W_CP2_FLOOR_APPLIED or W_MFN_NOT_MOST_FAVORABLE that the base scenario never hit.
+    # Omitting them made the slider the one view where moving a control could silently cross a
+    # threshold the founder is entitled to be told about.
+    "warnings",
 )
 
 

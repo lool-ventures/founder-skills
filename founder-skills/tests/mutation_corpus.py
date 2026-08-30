@@ -302,6 +302,23 @@ MUST_KILL: tuple[Mutant, ...] = (
         ),
     ),
     Mutant(
+        id="solver_warnings_collected_but_never_rendered",
+        # MEASURED. Caught by the pre-existing report.md guard, not by the new per-surface suite --
+        # the shared collector is upstream of both, so the oldest assertion reaches it first.
+        killed_by="TestSolverWarningsReachTheFounder::test_mfn_counterfactual_is_labelled_as_the_agent_contract_requires",
+        file=f"{_SCRIPTS}/_warning_callouts.py",
+        find="    collected: list[dict] = []\n    for s in scenarios or []:",
+        replace="    collected: list[dict] = []\n    for s in []:",
+        rationale=(
+            "Restores 'computed, then dropped' at the new chokepoint. Every founder-facing surface "
+            "now reads its solver warnings through this one walk, which is the point of sharing it -- "
+            "and also means one edit here silently empties all six at once. The class already has "
+            "form in this skill: W_MFN_NOT_MOST_FAVORABLE was computed, written to scenarios.json "
+            "and dropped before the founder for a full release, and the report is REQUIRED to label "
+            "that election as a counterfactual rather than as the holder's entitlement."
+        ),
+    ),
+    Mutant(
         id="cap_implied_notes_guard_returns_to_the_dropping_path",
         killed_by="TestCapImpliedNotesGuard::test_priced_params_do_not_route_around_the_guard",
         file=f"{_SCRIPTS}/run_scenario.py",

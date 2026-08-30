@@ -654,6 +654,24 @@ def render_report_html(
             f'line-height:1.55;color:var(--lool-ink);">{conf_text}</div>'
         )
 
+    # SOLVER warnings -- a SEPARATE block from the confidence banner above, deliberately. Those are
+    # cap_state's base-confidence strings; these are the priced-round solver's dicts. Folding them
+    # into one tinted banner would give a warning that QUALIFIES a number the same visual severity
+    # as one that says the base itself is untrustworthy. Text comes from the shared plaintext helper,
+    # never `_strip_md_markers`, which deletes the underscores in an instrument id.
+    import _warning_callouts as _wc
+
+    solver_banner_html = ""
+    _solver_lines = _wc.solver_callouts_plaintext(scenarios_doc.get("scenarios") or [])
+    if _solver_lines:
+        _items = "".join(f"<li>{_esc(line)}</li>" for line in _solver_lines)
+        solver_banner_html = (
+            '<div class="solver-warnings" style="background:var(--lool-warning-tint);'
+            "border-left:4px solid var(--lool-warning);padding:12px 16px;border-radius:4px;"
+            'margin-bottom:16px;font-size:13px;line-height:1.5;color:var(--lool-ink);">'
+            '<ul style="margin:0;padding-left:18px;">' + _items + "</ul></div>"
+        )
+
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
@@ -812,7 +830,7 @@ def render_report_html(
   <button class="printbtn" onclick="window.print()">Print / Save PDF</button>
 </div>
 <div class="doc-sheet">
-  {confidence_banner_html}{banner_html}<div class="title-row">
+  {confidence_banner_html}{solver_banner_html}{banner_html}<div class="title-row">
     <div>
       <div class="eyebrow">Cap table report</div>
       <h1>{company}</h1>

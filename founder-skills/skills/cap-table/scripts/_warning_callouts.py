@@ -189,6 +189,51 @@ def _solver_subject(w: dict) -> str:
     return ""
 
 
+def solver_callouts_plaintext(scenarios: list[dict]) -> list[str]:
+    """Solver callouts as PLAIN PROSE, for the HTML renderers.
+
+    Deliberately not `visualize._strip_md_markers`, which does `.replace("_", "")` -- it deletes
+    every underscore, so `safe_003_mfn` reaches the founder as `safe003mfn`, a name matching nothing
+    in their cap table. Solver callouts always name an instrument by its snake_case id, so that
+    helper is exactly wrong for this channel even though it is right for the one beside it.
+
+    Strips the blockquote marker, bold markers and code backticks; leaves the text otherwise intact.
+    Callers still HTML-escape.
+    """
+    out: list[str] = []
+    lines = render_solver_warning_callouts(collect_solver_warnings(scenarios))
+    for line in lines:
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith(">"):
+            s = s[1:].strip()
+        s = s.replace("**", "").replace("`", "")
+        out.append(s)
+    return out
+
+
+def collect_solver_warnings(scenarios: list[dict]) -> list[dict]:
+    """Walk scenarios -> `computed_outputs.warnings` and return the solver's warning dicts.
+
+    Shared because it must be: this walk lived inline in `compose_report`, which is precisely why
+    the other five founder-facing surfaces did not do it. Each of them renders `cap_state`'s warning
+    STRINGS and stops, so every one of them read as "warnings are handled here" while the solver's
+    channel -- including the MFN counterfactual -- reached only `report.md`.
+
+    Tolerant of a scenario with no `computed_outputs` and of a null `warnings`: this is read back off
+    a JSON artifact, and one malformed scenario must not cost the founder the warnings beside it.
+    """
+    collected: list[dict] = []
+    for s in scenarios or []:
+        if not isinstance(s, dict):
+            continue
+        co = s.get("computed_outputs") or {}
+        if isinstance(co, dict):
+            collected.extend(co.get("warnings") or [])
+    return collected
+
+
 def render_solver_warning_callouts(solver_warnings: list[dict]) -> list[str]:
     """Render `computed_outputs.warnings` (solver dicts) as founder-facing callouts.
 
