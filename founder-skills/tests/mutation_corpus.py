@@ -126,7 +126,12 @@ _SELECTION = tuple(
         "test_solver_convergence_guards.py",
         "test_solver_warning_surfaces.py",
         "test_founder_text_keep_parity.py",
-        "test_founder_text_roundtrip.py",
+        # test_founder_text_roundtrip.py is DELIBERATELY absent. It carries two COUNT RATCHETS, and
+        # `_DESELECT` below exists because a count ratchet is not a defect detector: it reds on
+        # ordinary mid-edit drift, and a red anywhere in the selection trips the no-op control into
+        # reporting a broken harness. These two fail in BOTH directions, so they are strictly more
+        # fragile than the two already deselected. Its sibling keep-parity file IS here -- that one
+        # asserts behaviour, not a count.
         "test_v48_hotfix_regressions.py",
         "test_verify_one.py",
         "test_visualize_cap_table.py",

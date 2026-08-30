@@ -316,13 +316,25 @@ def quick_assess(
                     )
             md_lines.append(line)
     else:
-        # md_term, not the bare enum. Keeping the glossary verbatim is right where the renderer
-        # GLOSSES it (compose emits "Structure only — no priced round yet (`structural_only`)");
-        # here the token was interpolated naked, so the keep set turned readable prose into a raw
-        # internal token. The keep set is not a licence to stop glossing.
-        import _labels
+        # Gloss the enum HERE rather than leaning on the keep set. The token is interpolated naked
+        # into a prose sentence, so keeping it verbatim (as the keep set does, correctly, where the
+        # renderer glosses it) shipped a raw internal token to a founder.
+        #
+        # `humanize`, not `md_term`: md_term emits `Label (`code`)`, and this site already wraps its
+        # value in parentheses inside an italic run -- nesting them read worse than the bare enum it
+        # replaced. The small-print code belongs in a table cell, not mid-sentence.
+        #
+        # GUARDED. This function's own contract is that a fast answer is worth delivering unpolished
+        # rather than not at all, and an unguarded import here would have deleted the report
+        # entirely when `_labels.py` is missing -- the exact defect this commit's parent was fixing,
+        # reintroduced one line away from the fix.
+        try:
+            import _labels
 
-        md_lines.append(f"_Solver could not produce a full answer ({_labels.md_term('completeness', completeness)})._")
+            _stage = str(_labels.humanize("completeness", completeness))
+        except Exception:
+            _stage = str(completeness)
+        md_lines.append(f"_Solver could not produce a full answer ({_stage})._")
         for b in solver_result.get("blockers", []):
             md_lines.append(f"- `{b['code']}`: {b['remedy']}")
     if completeness == "full" and headline:

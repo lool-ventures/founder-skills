@@ -39,7 +39,7 @@ _FOUNDER_TEXT_KEYS = frozenset({"remedy", "reason", "detail", "message", "guidan
 # MEASURED against THIS file's key set AND its literal walk. SHRINK ONLY; fails in BOTH directions.
 #
 # It was 29 when the walk saw only `ast.Constant`. That number was not a smaller problem, it was a
-# blinder: f-strings outnumber constants ~2:1 in founder-text values (105 vs 59 measured), so the
+# blinder: f-strings outnumber constants ~2:1 in founder-text values (110 vs 61 measured), so the
 # ratchet could not see the very remedy it was written about. Widening the walk to f-string and
 # concatenation segments took the true count to 68. Re-measure whenever `_FOUNDER_TEXT_KEYS` or
 # `_literal_parts` changes; never inherit a count from a review or a sibling file.
@@ -161,7 +161,25 @@ def test_ratchet_is_not_vacuous() -> None:
 # producer literal contains (composed at runtime, or assembled from a rule pack).
 # ------------------------------------------------------------------------------------------------
 
-_DELIVERED_BASELINE = 1  # MEASURED 2026-08-30: ic-sim's verdict legend. SHRINK ONLY.
+# An ALLOWLIST, not a count. A count was the wrong mechanism twice over:
+#
+#   - The predicate cannot distinguish a mangled token from domain English that happens to share its
+#     shape. `option pool`, `term sheet`, `common stock`, `pro rata`, `fully diluted` and
+#     `accrued interest` are all substituted forms of real tokens AND ordinary things a report might
+#     legitimately backtick. Under a count, the first innocent one reds CI.
+#   - Failing in both directions made that worse: fixing the one known hit forces the baseline to 0,
+#     at which point the test asserts nothing, and a partial fixture failure prints "lower it" --
+#     instructing the maintainer to disarm the detector.
+#
+# So: every accepted span is named, with the reason. A new span reds, and the fix is either to stop
+# mangling it or to add a line here saying why it is fine. Both are a human decision.
+_ALLOWED_DELIVERED: dict[str, str] = {
+    # ic-sim's verdict legend renders `**Decline — Hard Pass** (internal `hard_pass`)`; substitute
+    # de-snakes the parenthetical, destroying the legend's purpose (it exists to show the raw token
+    # beside the label). A REAL defect, allowlisted because fixing it belongs to the `substitute`
+    # code-span work. Remove this line when that lands.
+    "ic-sim/report.md: `Decline — hard pass`": "known: verdict legend, pending code-span protection",
+}
 
 
 def _looks_substituted(span: str) -> bool:
@@ -217,6 +235,36 @@ def _substituted_forms() -> frozenset[str]:
 _FORMS: frozenset[str] | None = None
 
 
+def test_delivered_scan_actually_examines_code_spans() -> None:
+    """Companion to the producer half's non-vacuity test, which this side was missing.
+
+    The delivered scan can only find a mangled span if the fixtures render code spans at all. Four
+    of the six skills render none, so this asserts the corpus it examines is non-empty -- otherwise
+    a fixture change could quietly reduce the whole detector to `assert True`.
+    """
+    import re
+    import tempfile
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    from test_compose_invariants import drive_compose
+
+    spans = 0
+    for skill_dir in sorted(SKILLS.iterdir()):
+        fixture = REPO / "tests" / "fixtures" / skill_dir.name
+        if not fixture.exists():
+            continue
+        work = Path(tempfile.mkdtemp()) / skill_dir.name
+        work.mkdir(parents=True)
+        try:
+            drive_compose(skill_dir.name, fixture, work)
+        except Exception:  # pragma: no cover
+            continue
+        md = work / "report.md"
+        if md.exists():
+            spans += len(re.findall(r"`([^`\n]+)`", md.read_text(encoding="utf-8")))
+    assert spans, "the delivered scan sees no code spans at all -- it can no longer detect anything"
+
+
 def test_delivered_artifacts_carry_no_de_snaked_code_span() -> None:
     """Fleet scan over every composed report.md.
 
@@ -244,18 +292,30 @@ def test_delivered_artifacts_carry_no_de_snaked_code_span() -> None:
             drive_compose(skill, fixture, work)
         except Exception:  # pragma: no cover - a skill that cannot compose is another test's problem
             continue
-        scanned += 1
         md = work / "report.md"
         if not md.exists():
             continue
+        # Counted HERE, not after drive_compose: a skill that composes but writes no report.md
+        # contributes no evidence, and counting it there let the vacuity guard pass on nothing.
+        scanned += 1
         for span in code_span.findall(md.read_text(encoding="utf-8")):
             if _looks_substituted(span):
                 hits.append(f"{skill}/report.md: `{span}`")
 
-    assert len(hits) <= _DELIVERED_BASELINE, (
-        f"{len(hits)} delivered code span(s) look de-snaked (baseline {_DELIVERED_BASELINE}). The "
-        f"founder is reading a token that does not exist:\n" + "\n".join(sorted(hits))
+    # Vacuity FIRST. A partial fixture failure used to surface as "lower the baseline", which reads
+    # as an instruction to disarm the detector rather than as evidence the scan saw nothing.
+    assert scanned, (
+        "no skill composed a report.md, so this scan proved nothing. A skill whose fixture stops "
+        "composing drops out of the loop silently; that is a false green, not a pass."
     )
-    if len(hits) < _DELIVERED_BASELINE:
-        pytest.fail(f"only {len(hits)} delivered hit(s) remain (baseline {_DELIVERED_BASELINE}) -- lower it.")
-    assert scanned, "no skill composed a report.md -- the scan proved nothing (see the except below)"
+    unexpected = sorted(h for h in hits if h not in _ALLOWED_DELIVERED)
+    assert not unexpected, (
+        "delivered code span(s) look de-snaked -- the founder is reading a token that does not "
+        "exist:\n" + "\n".join(unexpected) + "\n\nEither stop mangling it, or add it to "
+        "_ALLOWED_DELIVERED with the reason it is acceptable."
+    )
+    stale = sorted(k for k in _ALLOWED_DELIVERED if k not in hits)
+    assert not stale, (
+        "these allowlisted spans no longer occur -- delete them, or the allowlist becomes headroom "
+        "nobody is watching:\n" + "\n".join(stale)
+    )
