@@ -59,7 +59,7 @@ Most of these skills are run by founders inside **Claude Cowork**, whose runtime
 Two CI jobs cover it, both token-free, both runnable locally. They use [`cowork-harness`](https://github.com/yaniv-golan/cowork-harness) (MIT), a Cowork-runtime emulator installed as a dev-time CLI — it is **not** part of the distributed plugin and is not a runtime dependency:
 
 ```bash
-npm i -g cowork-harness@3.0.0           # Node 22+; EXACT, matching CI — see the pin note in .github/workflows/cowork-replay.yml
+npm i -g cowork-harness@3.2.0           # Node 22+; EXACT, matching CI — see the pin note in .github/workflows/cowork-replay.yml
 
 # 1. Static analysis over every skill body, agent, reference and command
 cowork-harness analyze-skill founder-skills/ --strict

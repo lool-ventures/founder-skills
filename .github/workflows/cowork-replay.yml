@@ -14,7 +14,7 @@ name: cowork-replay
 #   4. replay          — content + manifest-backed file_exists/artifact_json across the whole dir.
 # No model tokens, no Docker, no staged agent binary → runs on a stock GitHub-hosted runner.
 #
-# Version policy: **PINNED EXACTLY at 3.0.0 as of 2026-08-30** — see the block at the `npm i -g` site
+# Version policy: **PINNED EXACTLY at 3.2.0 as of 2026-09-01** — see the block at the `npm i -g` site
 # below for why the caret was retired. The paragraphs that follow are the FLOOR-ERA history, kept
 # because each explains why a given step depends on a version at all; read every `^1.x` in them as a
 # historical reason, NOT as the current value. There are TWO independent CLI sources here:
@@ -27,7 +27,7 @@ name: cowork-replay
 #     `--min-severity`, which needs >=1.11.0. Without that floor a
 #     `latest` that resolved older would not degrade — it hard-fails, exit 2, "unrecognized arguments".
 #     ALL FOUR carried `^1.20.0` at the time, each for its own reason — this is not a blanket bump;
-#     all four are now the exact `3.0.0`. NOTE the
+#     all four are now the exact `3.2.0`. NOTE the
 #     four sites are LINT / PRIVACY / STALENESS / REPLAY. The email canary is NOT one of them: it is a
 #     bare `run:` step with no `version:` input, riding whatever CLI the preceding Action step
 #     installed. Enumerate with `grep -n 'version: "' ` before editing this list — a plan-stage draft
@@ -55,7 +55,7 @@ name: cowork-replay
 #     (A RANGE in that input is DOCUMENTED as of harness 1.12.0 — `action.yml` now states `version`
 #     accepts an npm range, not only an exact pin. It was already mechanically sound: the value is
 #     interpolated as `cowork-harness@$v` into `npm install --global`.)
-#   * the `skill-static-analysis` job's standalone `npm i -g cowork-harness@3.0.0`.
+#   * the `skill-static-analysis` job's standalone `npm i -g cowork-harness@3.2.0`.
 #
 #   PINNED EXACTLY AS OF 2026-08-27 — these five sites are SELECTORS (they decide which CLI runs a
 #   gate), and they were carets until 2.4.0. The caret auto-adopted every upstream release into CI
@@ -81,7 +81,7 @@ name: cowork-replay
 #   docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md §7.4-7.5.
 #   (A RANGE is still accepted in the Action's `version` input — documented since harness 1.12.0 —
 #   so reverting to a caret is mechanically possible; it is a posture decision, not a limitation.)
-# THE FLOOR WAS 1.25.0 (historical — the sites are now PINNED at 3.0.0). Five reasons, and they
+# THE FLOOR WAS 1.25.0 (historical — the sites are now PINNED at 3.2.0). Five reasons, and they
 # raised the floor for different steps:
 #   (0'') 1.25.0 — CI HYGIENE ONLY, deliberately. `^1.24.0` already resolves to 1.25.0, so CI was
 #       running it before this pin moved; nothing CI executes reads a surface 1.25.0 changed.
@@ -232,7 +232,7 @@ jobs:
         with:
           command: lint
           path: cowork-tests/scenarios/
-          version: "3.0.0"
+          version: "3.2.0"
           # `strict: true` is the Action's first-class input (action.yml `inputs.strict` -> `--strict`),
           # not `extra-args`. WITHOUT it this step CANNOT fail on a WARN-class rule — measured: a WARN
           # finding exits 0 bare and 1 under --strict, while an ERROR (`assert-contradiction`) exits 1
@@ -264,7 +264,7 @@ jobs:
         with:
           command: verify-cassettes
           path: cowork-tests/cassettes/
-          version: "3.0.0"
+          version: "3.2.0"
           extra-args: "--skip-staleness --skip-scenario-drift ${{ steps.allow.outputs.args }}"
 
       # Email canary: the SAME allowlist must still FLAG a non-synthetic email. The check asserts an
@@ -292,7 +292,7 @@ jobs:
         with:
           command: verify-cassettes
           path: cowork-tests/cassettes/
-          version: "3.0.0"
+          version: "3.2.0"
           extra-args: "--skip-privacy"
 
       # Floored, and NOT for a missing flag. An unknown top-level scenario key inside a frozen
@@ -305,7 +305,7 @@ jobs:
         with:
           command: replay
           path: cowork-tests/cassettes/
-          version: "3.0.0"
+          version: "3.2.0"
 
       # `cowork-tests/gate_prefix_check.py` and `delivery_check.py` are implemented and
       # unit-tested (`founder-skills/tests/test_gate_prefix_check.py` /
@@ -409,8 +409,8 @@ jobs:
       - uses: actions/setup-python@v5   # lint-skill bundles scenario.py (needs python3)
         with:
           python-version: '3.12'
-      - name: Install cowork-harness (pinned 3.0.0 — see header version policy)
-        run: npm i -g cowork-harness@3.0.0
+      - name: Install cowork-harness (pinned 3.2.0 — see header version policy)
+        run: npm i -g cowork-harness@3.2.0
       # The LOADER is the strict surface, and nothing else in CI reaches it:
       #   * `lint` WARNS on an unknown/too-new top-level key and exits 0 (lenient by design);
       #   * `replay` evaluates the scenario FROZEN in each cassette and never reads the on-disk YAML;

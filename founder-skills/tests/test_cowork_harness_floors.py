@@ -44,10 +44,10 @@ CANARY = REPO_ROOT / "cowork-tests" / "canary" / "email-canary.cassette.json"
 # questions -- "which CLI runs this gate" vs "is this CLI new enough for the check to mean anything"
 # -- and collapsing them is the error this split exists to prevent. Rationale:
 # docs/internal/2026-08-27-cowork-harness-2.4.0-adoption-plan.md SS7.4-7.5.
-_CI_PIN = "3.0.0"
+_CI_PIN = "3.2.0"
 
 # The declared floor per site, with the reason it differs where it does.
-_RECORDING_FLOOR = "3.0.0"
+_RECORDING_FLOOR = "3.2.0"
 _REPLAY_FLOOR = "2.1.0"
 
 # Sites that SELECT the CLI a gate runs. Exact, never a range: a caret auto-adopted every upstream

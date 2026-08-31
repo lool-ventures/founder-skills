@@ -31,11 +31,38 @@ command -v cowork-harness >/dev/null || { echo "FATAL: cowork-harness not on PAT
 ver="$(cowork-harness --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 [ -n "$ver" ] || { echo "FATAL: could not parse cowork-harness version"; exit 1; }
 echo "cowork-harness $ver"
-# FLOOR: >=3.0.0 with no upper bound. Recording is the one operation where the harness version is
+# FLOOR: >=3.2.0 with no upper bound. Recording is the one operation where the harness version is
 #   THIS HEADER WAS ONE MINOR BEHIND THE GATE when 2.3.0 was adopted (header said 2.1.0, gate required
 #   2.2) — the exact drift the next paragraph warns about, sitting unfixed in the file that warns about
 #   it. If you are here to change the floor, change all FOUR sites: this header, the numeric gate, its
 #   FATAL message, and `_RECORDING_FLOOR` in founder-skills/tests/test_cowork_harness_floors.py.
+#   * 3.2.0 is required because 3.1.0 STAMPS A RECORD-TIME FIELD NO LATER RUN CAN BACKFILL — the
+#     `environment.model` block in `schema/cassette.v12.json`: the model the recording actually ran
+#     (`id`, from what the agent reported, so it survives a mid-run fallback) plus where it came from
+#     (`source`). Same class as the 1.11.0 `environment.harnessVersion` floor below: an older CLI
+#     records a permanently provenance-less cassette. 3.1.0 also WIDENS THE SESSION FINGERPRINT to
+#     cover the pinned `model:`, so a pre-coverage cassette can no longer distinguish "the field was
+#     never covered" from "the pin changed since record".
+#     MEASURED 2026-09-01, same corpus and allowlist, the two CLIs side by side: `verify-cassettes`
+#     goes 60 -> 70 lines from 3.0.0 to 3.2.0, the delta being exactly ten
+#     `[note] session-fingerprint: predates \`model\` coverage ... Re-record to adopt it.` lines, one
+#     per cassette. (CI is unaffected: its privacy step passes `--skip-staleness
+#     --skip-scenario-drift`, measured rc=0 / "10 cassette(s) clean" / 0 notes.)
+#     WHY THIS IS A FLOOR AND NOT A SHRUG: the next re-record is a FULL PAID BATCH already owed for
+#     baseline staleness. Recording it below 3.1.0 would buy ten cassettes that cannot say which model
+#     produced them and that CI's own gate flags on sight — and `rehash` migrates hash FORMATS, not
+#     fingerprint SHAPE, so it is not repairable after the fact. 3.2.0 rather than 3.1.0 because
+#     nothing wants a 3.1.0-only recording and it keeps the floor level with the CI pin (they were
+#     already equal at 3.0.0 — equal VALUES, still separate postures).
+#     3.2.0 itself adds NO fidelity debt: `git diff --name-only v3.0.0..v3.2.0 -- baselines/` is EMPTY
+#     and so is the same diff over `src/{runtime,hostloop,staging,agent,egress,sync}/`; `CASSETTE_VERSION`
+#     stays 12, `MIN_SUPPORTED` stays 9, default baseline stays `desktop-1.40609.0`. Its changes are
+#     exit codes, a new `enum-value-invalid` lint ERROR (zero findings on our 35, non-vacuity probed),
+#     and docs. Full analysis: docs/internal/2026-09-01-cowork-harness-3.2.0-adoption-plan.md.
+#     A WARNING ABOUT HOW THIS WAS ALMOST MISSED: the first pass concluded "no re-record debt" from a
+#     prefix-scoped diff (`src/{runtime,hostloop,...}`) that structurally could not see `src/run/` —
+#     where `cassette.ts` (+261/-78) and the new `model-provenance.ts` live. Diff `src/` and `schema/`
+#     WHOLE and account for every file; a pre-classified prefix list is a hand-list with extra steps.
 #   * 3.0.0 is required because it is THE FIRST RELEASE WHOSE DEFAULT BASELINE PINS AN AGENT ELF THIS
 #     MACHINE ACTUALLY STAGES — the same class of reason as the 1.20.0 floor, not a fidelity one.
 #     2.5.0's newest baseline is `desktop-1.37937.1` (shipped in harness v2.3.0) and it pins agent
@@ -226,9 +253,9 @@ major="${ver%%.*}"; minor="$(echo "$ver" | cut -d. -f2)"
 # `[ "$major" -eq N ] && [ "$minor" -ge M ]` is what test_cowork_harness_floors.py's gate regex reads,
 # and that test asserts its own pattern matched — so collapsing this to `[ "$major" -ge 3 ]` does not
 # simplify the gate, it makes the guard that watches the gate match nothing. It re-earns its keep the
-# moment the floor moves to 3.1+.
-{ [ "$major" -gt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -ge 0 ]; }; } \
-  || { echo "FATAL: need >=3.0.0 (have $ver) — see the floor note above"; exit 1; }
+# moment the floor moves off a .0 — as it did at 3.2.0.
+{ [ "$major" -gt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -ge 2 ]; }; } \
+  || { echo "FATAL: need >=3.2.0 (have $ver) — see the floor note above"; exit 1; }
 if [ -n "${COWORK_AGENT_BINARY:-}" ]; then
   [ -x "$COWORK_AGENT_BINARY" ] || { echo "FATAL: agent binary not executable: $COWORK_AGENT_BINARY"; exit 1; }
 fi
@@ -336,15 +363,21 @@ BUDGET="${COWORK_RERECORD_MAX_USD:-120}"
 if [ "$BUDGET" != "0" ]; then
   echo "=== cost pre-flight (cap \$$BUDGET; set COWORK_RERECORD_MAX_USD=0 to skip) ==="
   # THE TWO FAILURE EXIT CODES ARE NOT INTERCHANGEABLE. Measured 2026-08-31, identical at 2.5.0,
-  # 3.0.0 (the pin), 3.1.0, and the 3.2.0 pre-release:
+  # 3.0.0, 3.1.0, and 3.2.0 (the pin as of 2026-09-01):
   #     0 = every scenario loads AND the estimate is under the cap
   #     2 = the BUDGET gate refused (estimate over the cap)
   #     1 = a scenario did not LOAD — `✗ broken: <file>` naming the rejected key
-  #   Budget wins when both apply (broken + over cap -> 2, with the `✗ broken:` line still printed).
-  #   The broken line goes to STDERR, so the `>/dev/null` below (stdout only) does not hide it.
-  #   3.2.0 states batch exit codes are UNCHANGED and adds one case: a directory where EVERY file
-  #   fails to load exits 1 (was 2) — the same branch, so nothing here changes at a pin raise.
-  #   (The single-file arm DOES change at 3.2.0 — policy refusals there go 2 -> 1 — but this gate does
+  #   When both apply the answer depends on whether SOME or ALL files are broken — measured, and the
+  #   distinction is easy to miss: SOME broken + over cap -> 2 (budget wins); ALL broken + over cap
+  #   -> 1 (broken wins). Both land in a sensible branch below, so this is a precision note, not a
+  #   hazard. The `✗ broken:` lines go to STDERR, so the `>/dev/null` (stdout only) never hides them.
+  #   WHY that split: all-broken means nothing loaded, so there is nothing to spend on and the budget
+  #   gate never runs (SPEC.md states this as of 3.2.0). Derivable, not arbitrary.
+  #   THE 3.2.0 PIN RAISE (2026-09-01) changed nothing here. The one batch outcome that moves is the REAL arm
+  #   (`record <dir/>` with no --dry-run) on an all-broken dir, 2 -> 1; this gate uses the PREVIEW arm,
+  #   which already answered 1 at 3.0.0 and 3.1.0. Verified against the full batch matrix, 3.1.0 vs
+  #   3.2.0: ten outcomes, exactly one differs.
+  #   (The SINGLE-FILE arm also changes at 3.2.0 — policy refusals there go 2 -> 1 — but this gate does
   #   not use that arm. Do not port the boundary across: "above 3.0.1" is wrong, 3.1.0 still exits 2.)
   # This block used to collapse both into "batch cost pre-flight refused", which sent you off to raise
   # COWORK_RERECORD_MAX_USD for a problem that has nothing to do with money: you raise it, re-run, and
