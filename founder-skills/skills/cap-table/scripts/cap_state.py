@@ -279,12 +279,12 @@ def _build_outstanding_options(
         # with no id raised a bare KeyError out of a function whose peers (_build_outstanding_safes /
         # _notes / _warrants) all raise E_*_MISSING_FIELD with a remedy. The caller cannot tell a
         # missing field from a crash, and the founder gets a traceback instead of a sentence.
-        if "id" not in g:
+        if "id" not in g or _artifact_io.id_missing(g["id"]):
             holder = g.get("holder_id") or f"index {i}"
             raise CapStateInvariantError(
                 f"E_OPTION_GRANT_MISSING_FIELD: option_grants[{i}] (holder '{holder}') is missing "
-                "required field 'id'. Remedy: add 'id' (a unique string key for this grant, e.g. "
-                "'grant_001')."
+                "required field 'id'. Remedy: add a non-blank 'id' (a unique string key for this grant, "
+                "e.g. 'grant_001')."
             )
         # Null-tolerant: an explicit null share numeric is schema-equivalent to an absent key for these
         # not-required ["integer","null"] fields; degrade unknown vesting to fully-unvested (conservative).
@@ -324,10 +324,10 @@ def _build_outstanding_safes(safes: list[dict[str, Any]]) -> list[dict[str, Any]
     for i, s in enumerate(safes):
         investor = s.get("investor_name") or f"index {i}"
         for field, hint in [
-            ("id", "add 'id' (a unique string key for this SAFE, e.g. 'safe_seed_1')"),
+            ("id", "add a non-blank 'id' (a unique string key for this SAFE, e.g. 'safe_seed_1')"),
             ("issuance_date", "add 'issuance_date' (ISO date the SAFE was signed, e.g. '2024-01-15')"),
         ]:
-            if field not in s:
+            if field not in s or (field == "id" and _artifact_io.id_missing(s["id"])):
                 raise CapStateInvariantError(
                     f"E_SAFE_MISSING_FIELD: safes[{i}] (investor '{investor}') is missing required field "
                     f"'{field}'. Remedy: {hint}."
@@ -358,10 +358,10 @@ def _build_outstanding_notes(notes: list[dict[str, Any]]) -> list[dict[str, Any]
         # principal is NOT required-present (mirror _build_outstanding_safes' purchase_amount): a
         # blank/template note whose amount lives in a Schedule of Lenders is kept terms-only.
         for field, hint in [
-            ("id", "add 'id' (a unique string key for this note, e.g. 'note_seed_1')"),
+            ("id", "add a non-blank 'id' (a unique string key for this note, e.g. 'note_seed_1')"),
             ("issuance_date", "add 'issuance_date' (ISO date the note was issued, e.g. '2024-03-01')"),
         ]:
-            if field not in n:
+            if field not in n or (field == "id" and _artifact_io.id_missing(n["id"])):
                 raise CapStateInvariantError(
                     f"E_NOTE_MISSING_FIELD: notes[{i}] (investor '{investor}') is missing required field "
                     f"'{field}'. Remedy: {hint}."
@@ -398,13 +398,13 @@ def _build_outstanding_warrants(warrants: list[dict[str, Any]]) -> list[dict[str
     out = []
     for i, w in enumerate(warrants):
         for field, hint in [
-            ("id", "add 'id' (a unique string key for this warrant, e.g. 'warrant_1')"),
+            ("id", "add a non-blank 'id' (a unique string key for this warrant, e.g. 'warrant_1')"),
             ("shares_underlying", "add 'shares_underlying' (shares the warrant exercises into)"),
             ("warrant_type", "add 'warrant_type' (e.g. 'common_stock' or 'preferred_stock_series')"),
             ("issuance_date", "add 'issuance_date' (ISO date the warrant was issued)"),
             ("settlement_type", "add 'settlement_type' (e.g. 'physical', 'net_share', 'holder_election')"),
         ]:
-            if field not in w:
+            if field not in w or (field == "id" and _artifact_io.id_missing(w["id"])):
                 raise CapStateInvariantError(
                     f"E_WARRANT_MISSING_FIELD: warrants[{i}] (id '{w.get('id', f'index {i}')}') is missing "
                     f"required field '{field}'. Remedy: {hint}."
@@ -601,8 +601,18 @@ def _check_unique_ids(arrays: list[tuple[str, str, list[dict[str, Any]]]]) -> No
     while the totals keep counting it. Guarding them one at a time was tried and does not work: two
     consumers were fixed in separate commits and SIX more were still collapsing, because the
     invariant belongs to the ARTIFACT, not to whichever function happens to read it next. This is the
-    one place every array is canonicalized, so it is the one place the invariant can be stated once
-    and hold for consumers nobody has written yet.
+    one place every array is canonicalized, so it is where the invariant is stated for the
+    CANONICAL ARTIFACT.
+
+    ITS SCOPE IS NARROWER THAN AN EARLIER VERSION OF THIS DOCSTRING CLAIMED, and the overstatement
+    mattered. It said this was "the one place the invariant can be stated once and hold for
+    consumers nobody has written yet". That is false for a whole class of consumer: the scenario
+    math routes read RAW `instruments.json`, not these canonical arrays, so a duplicate reaches
+    them whether or not this check ran. Measured -- build the artifact from clean instruments, run
+    a scenario against dirty ones, and the wrong number comes out with zero blockers. What actually
+    holds: this guards the canonical artifact; raw-instrument consumers carry their own
+    point-of-use blockers (`_artifact_io.instrument_id_blockers`); and the inventory test in
+    `tests/test_cap_table_guards.py` enumerates both kinds so a new site of either sort fails CI.
 
     Measured, with no duplicate typed by anyone: two preferred series named "Series A" and "series a"
     both DERIVE `series_id` "series_a" (see the canonicalization below), and the anti-dilution
@@ -620,7 +630,27 @@ def _check_unique_ids(arrays: list[tuple[str, str, list[dict[str, Any]]]]) -> No
             if not isinstance(row, dict):
                 continue
             rid = row.get(id_field)
-            if rid is None or rid == "":
+            # BLANK RAISES; only `None` skips. These are not the same case and treating them alike
+            # is what shipped a founder-facing wrong number: a blank id is PRESENT, so it passed the
+            # builders' `field not in row` checks, then was skipped here, then keyed a per-item map
+            # and collapsed two instruments into one row (720,000 shares reported against a true
+            # 1,120,000). The builders now reject blanks too, but that is not enough on its own --
+            # two arrays reach this check WITHOUT passing an id-rejecting builder: `founders`, whose
+            # `founder_id` default mints only on an ABSENT key, and `preferred_series`, whose
+            # `series_id` is DERIVED from `series_name` and is blank when that name is empty. This
+            # raise is what closes the anti-dilution CP1 snapshot for that second case.
+            #
+            # `None` still skips, and that stays right: on the canonical path it is now impossible
+            # by construction, so the skip is defense for direct callers, and two id-less rows are
+            # two MISSING ids -- a different defect with a different remedy -- not one repeated id.
+            if rid is not None and _artifact_io.id_missing(rid):
+                raise CapStateInvariantError(
+                    f"E_BLANK_ID_IN_CAP_TABLE: {array_name}[{i}] has a blank {id_field} ({rid!r}). "
+                    f"A blank id is not an id: it keys the per-item output, so two blank-id entries "
+                    f"collapse into one row while both still count toward the totals. Remedy: give "
+                    f"{array_name}[{i}] a distinct, non-blank {id_field}."
+                )
+            if rid is None:
                 continue
             if rid in seen:
                 raise CapStateInvariantError(

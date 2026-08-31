@@ -193,16 +193,29 @@ def evaluate(expr: str | None, ctx: dict[str, Any]) -> bool:
 
     m = re.fullmatch(r"startsWith\((.+?),\s*('.*?')\)", expr)
     if m:
-        return str(_operand(m.group(1), ctx)).startswith(str(_operand(m.group(2), ctx)))
+        haystack = str(_operand(m.group(1), ctx))
+        needle = str(_operand(m.group(2), ctx))
+        return haystack.casefold().startswith(needle.casefold())
     for op in ("==", "!="):
         parts = _split_top(expr, op)
         if parts and len(parts) == 2:
             left, right = (_operand(p, ctx) for p in parts)
-            return bool(left == right) if op == "==" else bool(left != right)
+            return _eq(left, right) if op == "==" else not _eq(left, right)
     raise UnknownExpression(
         f"unparseable condition {expr!r}. Extend the evaluator deliberately and re-derive the frozen "
         "truth values; do not widen it until this passes."
     )
+
+
+def _eq(left: Any, right: Any) -> bool:
+    """GitHub's `==`: docs state plainly "GitHub ignores case when comparing strings." `startsWith`,
+    `contains`, and `endsWith` each carry their own "This function is not case sensitive." Only the
+    string case matters here -- `_operand` never returns anything but `str` or `bool`, and case has no
+    meaning for a bool, so this does not need (and does not attempt) GitHub's fuller numeric/array
+    coercion rules for `==`."""
+    if isinstance(left, str) and isinstance(right, str):
+        return left.casefold() == right.casefold()
+    return bool(left == right)
 
 
 def _balanced(s: str) -> bool:
@@ -297,6 +310,18 @@ def test_the_evaluator_refuses_what_it_does_not_model() -> None:
         evaluate("inputs.not_a_declared_input == ''", TAG_PUSH)
     with pytest.raises(UnknownExpression):
         evaluate("contains(github.ref, 'v')", TAG_PUSH)
+
+
+def test_string_comparisons_are_case_insensitive_like_githubs() -> None:
+    """GitHub's docs, verbatim: `==` -- "GitHub ignores case when comparing strings" -- and
+    `startsWith()` -- "This function is not case sensitive." A case-sensitive evaluator disagrees with
+    GitHub on these inputs (would report False for all three below), which is a spurious-red risk, not
+    a false-green one -- but every literal in FROZEN_CONDITIONS today happens to be lowercase, so that
+    divergence is accidental, not designed in. Pin GitHub's real behaviour rather than relying on luck.
+    """
+    assert evaluate("startsWith(github.ref, 'REFS/TAGS/V')", TAG_PUSH) is True
+    assert evaluate("github.event_name == 'PUSH'", TAG_PUSH) is True
+    assert evaluate("github.event_name != 'PUSH'", TAG_PUSH) is False
 
 
 def test_evaluator_agrees_with_the_frozen_values_everywhere() -> None:

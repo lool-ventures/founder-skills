@@ -2328,3 +2328,227 @@ class TestAoaMergeRefusesWithinPayloadDuplicates:
         assert sum(s["shares"] for s in merged["preferred_series"]) == 3_000_000, (
             "both series' shares must survive the merge; the collapse reported 2,000,000 of 3,000,000"
         )
+
+
+class TestBlankIdsAreNotIds:
+    """A blank id is PRESENT but is not an id — the gap a founder-facing wrong number lived in.
+
+    Three checks disagreed about the same value. `cap_state`'s required-field tests asked
+    `"id" not in row`, so `""` PASSED them. `_check_unique_ids` skipped blanks. Only
+    `safe_conversion` and `priced_round` treated `in (None, "")` as missing, which was the correct
+    call. The gap between them is exactly the width of the empty string, and two convertible notes
+    with `id: ""` fell into it: **720,000 shares reported against a true 1,120,000**, one row for
+    two notes, `completeness: "full"`, zero blockers.
+
+    `_artifact_io.id_missing` is now the single definition and every site imports it. These tests
+    pin the two layers SEPARATELY and deliberately: the second exists precisely for callers that
+    bypass the first, which is not hypothetical — the scenario math routes read raw
+    `instruments.json` and never the canonical arrays, so the artifact check does not cover them.
+    """
+
+    NOTE = {
+        "principal": 500_000,
+        "issuance_date": "2025-01-01",
+        "maturity_date": "2027-01-01",
+        "annual_interest_rate": 0.0,
+        "valuation_cap": 10_000_000,
+        "capitalization_denominator": 8_000_000,
+        "maturity_default_treatment": "convert_at_cap",
+    }
+    INPUTS = {
+        "company_name": "X",
+        "founders": [{"founder_id": "f1", "name": "F", "common_shares": 8_000_000}],
+        "metadata": {"run_id": "t", "schema_version": "v0.5.0-inputs"},
+    }
+
+    @classmethod
+    def _note(cls, note_id: object, principal: float) -> dict:
+        n = dict(cls.NOTE)
+        n["principal"] = principal
+        if note_id is not None:
+            n["id"] = note_id
+        return n
+
+    # -- layer 1: the canonical artifact ------------------------------------------------------
+
+    def test_blank_note_id_is_refused_at_canonicalization(self) -> None:
+        import cap_state  # type: ignore[import-not-found]
+
+        with pytest.raises(cap_state.CapStateInvariantError) as exc:
+            cap_state.build_cap_state(
+                self.INPUTS,
+                {"safes": [], "convertible_notes": [self._note("", 500_000), self._note("", 900_000)]},
+            )
+        assert "MISSING_FIELD" in str(exc.value), (
+            f"a blank id must read as a MISSING id, not as a present one: {exc.value}"
+        )
+
+    def test_blank_founder_id_is_refused_even_though_no_builder_rejects_it(self) -> None:
+        """`founder_id` mints only on an ABSENT key, so a blank one reaches the uniqueness check.
+
+        This is why `_check_unique_ids` must RAISE on blank rather than skip: founders and
+        preferred series are the two arrays that get here without passing an id-rejecting builder.
+        """
+        import cap_state  # type: ignore[import-not-found]
+
+        with pytest.raises(cap_state.CapStateInvariantError) as exc:
+            cap_state.build_cap_state(
+                {
+                    **self.INPUTS,
+                    "founders": [
+                        {"founder_id": "", "name": "Alice", "common_shares": 5_000_000},
+                        {"founder_id": "", "name": "Bob", "common_shares": 3_000_000},
+                    ],
+                },
+                {"safes": [], "convertible_notes": []},
+            )
+        assert "E_BLANK_ID_IN_CAP_TABLE" in str(exc.value), exc.value
+
+    def test_blank_derived_series_id_is_refused(self) -> None:
+        """Site 6: `series_id` is DERIVED from `series_name`, so an empty name derives a blank id.
+
+        Two such series then shared one CP1 snapshot in the anti-dilution math — a founder-ownership
+        error with `completeness: "full"`. No duplicate is typed by anyone to reach it.
+        """
+        import cap_state  # type: ignore[import-not-found]
+
+        series = {
+            "series_name": "",
+            "shares": 1_000_000,
+            "original_issue_price": 1.0,
+            "original_conversion_price": 1.0,
+            "current_conversion_price": 1.0,
+            "anti_dilution_protection": "broad_based_weighted_average",
+            "issuance_date": "2024-01-01",
+        }
+        with pytest.raises(cap_state.CapStateInvariantError) as exc:
+            cap_state.build_cap_state(
+                {**self.INPUTS, "preferred_series": [dict(series), dict(series)]},
+                {"safes": [], "convertible_notes": []},
+            )
+        assert "E_BLANK_ID_IN_CAP_TABLE" in str(exc.value), exc.value
+
+    # -- layer 2: the raw-instrument consumer, which layer 1 does not cover -------------------
+
+    @staticmethod
+    def _clean_cap_state() -> dict:
+        import cap_state  # type: ignore[import-not-found]
+
+        built: dict = cap_state.build_cap_state(
+            TestBlankIdsAreNotIds.INPUTS,
+            {"safes": [], "convertible_notes": [TestBlankIdsAreNotIds._note("n1", 500_000)]},
+        )
+        return built
+
+    @staticmethod
+    def _run(notes: list[dict]) -> dict:
+        import run_scenario  # type: ignore[import-not-found]
+
+        out: dict = run_scenario.run_note_conversion_scenario(
+            {
+                "scenario_id": "s",
+                "label": "s",
+                "type": "note_conversion",
+                "parameters": {
+                    "transaction_event_date": "2026-01-01",
+                    "qualified_financing_price": 1.25,
+                    "priced_round_new_money": 3_000_000,
+                },
+            },
+            instruments={"safes": [], "convertible_notes": notes},
+            cap_state=TestBlankIdsAreNotIds._clean_cap_state(),
+        )
+        return out
+
+    def test_the_note_route_refuses_blank_ids_against_a_CLEAN_artifact(self) -> None:
+        """The measured bypass: a clean cap_state plus dirty raw instruments.
+
+        This is the case the artifact-level check structurally cannot see, and it is the one that
+        produced the 720,000. If this ever passes again, the point-of-use guard is gone.
+        """
+        out = self._run([self._note("", 500_000), self._note("", 900_000)])
+        codes = {b["code"] for b in out.get("blockers") or []}
+        assert "E_INSTRUMENT_ID_MISSING" in codes, f"blank note ids reached the math against a clean artifact: {out}"
+        assert out["completeness"] != "full"
+        assert not out.get("per_note")
+
+    def test_the_note_route_refuses_duplicate_ids_against_a_CLEAN_artifact(self) -> None:
+        out = self._run([self._note("d", 500_000), self._note("d", 900_000)])
+        codes = {b["code"] for b in out.get("blockers") or []}
+        assert "E_INSTRUMENT_DUPLICATE_ID" in codes, out
+
+    def test_a_note_with_no_id_key_is_refused_rather_than_raising(self) -> None:
+        """`n["id"]` in the filter was a bare KeyError — an untyped crash from a typed route."""
+        out = self._run([self._note(None, 500_000)])
+        codes = {b["code"] for b in out.get("blockers") or []}
+        assert "E_INSTRUMENT_ID_MISSING" in codes, out
+
+    def test_distinct_note_ids_still_convert_and_the_total_is_right(self) -> None:
+        """Non-vacuity, pinning the number the collapse got wrong: 1,120,000, not 720,000."""
+        out = self._run([self._note("n1", 500_000), self._note("n2", 900_000)])
+        assert not (out.get("blockers") or []), out
+        assert out["completeness"] == "full"
+        per_note = out["per_note"]
+        assert len(per_note) == 2, f"both notes must be reported separately: {list(per_note)}"
+        total = sum((v or {}).get("conversion_shares") or 0 for v in per_note.values())
+        assert round(total) == 1_120_000, f"expected 1,120,000 shares, got {total:,.0f}"
+
+
+class TestScenarioIdsMustBeUniqueAndPresent:
+    """A scenario id collapse costs a founder-visible ROW, not a number — which is why it survived.
+
+    Measured before the guard: two priced-round scenarios sharing a `scenario_id` both compute and
+    both come back, so the math looks untouched and no count anywhere reads wrong. The loss is in
+    `rule_audit`'s gating map, keyed `f"scenario:{scenario_id or 'global'}"` — two scenarios, one
+    gating entry, one `date_sensitive_watchlist` row instead of two. That row is rendered into
+    `report.md`, so a financing date's sensitivity status (inside or outside a legal window)
+    vanishes silently. Two blank ids collapse the same way, onto `scenario:global`.
+
+    Found by measuring a site nobody had checked, not by a test failing. Unlike instrument ids a
+    `scenario_id` is authored by the caller rather than read out of a document, so this raises
+    rather than returning blockers: it is a programming error in the request, not a defect in the
+    founder's paperwork.
+    """
+
+    INPUTS = {
+        "company_name": "X",
+        "founders": [{"founder_id": "f1", "name": "F", "common_shares": 8_000_000}],
+        "metadata": {"run_id": "t", "schema_version": "v0.5.0-inputs"},
+    }
+
+    @staticmethod
+    def _scenario(scenario_id: str, pre_money: int) -> dict:
+        return {
+            "scenario_id": scenario_id,
+            "label": f"pre {pre_money}",
+            "type": "priced_round",
+            "parameters": {"pre_money": pre_money, "new_money": 3_000_000},
+        }
+
+    def _run(self, ids: list[str]) -> list[dict]:
+        import cap_state  # type: ignore[import-not-found]
+        import run_scenario  # type: ignore[import-not-found]
+
+        state = cap_state.build_cap_state(self.INPUTS, {"safes": [], "convertible_notes": []})
+        out: list[dict] = run_scenario.run_all_scenarios(
+            inputs=self.INPUTS,
+            instruments={"safes": [], "convertible_notes": []},
+            cap_state=state,
+            scenario_requests=[self._scenario(ids[0], 12_000_000), self._scenario(ids[1], 20_000_000)],
+        )
+        return out
+
+    def test_duplicate_scenario_ids_are_refused(self) -> None:
+        with pytest.raises(ValueError, match="E_SCENARIO_ID_DUPLICATE"):
+            self._run(["s1", "s1"])
+
+    def test_blank_scenario_ids_are_refused(self) -> None:
+        """Both blank ids land on the same `scenario:global` gating key — same collapse, no repeat typed."""
+        with pytest.raises(ValueError, match="E_SCENARIO_ID_MISSING"):
+            self._run(["", ""])
+
+    def test_distinct_scenario_ids_still_run(self) -> None:
+        """Non-vacuity: two ordinary scenarios must both compute and keep their own parameters."""
+        out = self._run(["s1", "s2"])
+        assert [s.get("scenario_id") for s in out] == ["s1", "s2"]
+        assert [s["parameters"]["pre_money"] for s in out] == [12_000_000, 20_000_000]

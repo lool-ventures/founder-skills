@@ -26,6 +26,7 @@ import sys
 from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _artifact_io import id_missing, instrument_id_blockers  # noqa: E402
 from _artifact_writer import ArtifactValidationError, load_schema, write_artifact  # noqa: E402
 from _rule_pack import RULE_PACK_VERSION  # noqa: E402
 from flip_scenario import flip_share_for_share  # noqa: E402
@@ -256,6 +257,24 @@ def run_note_conversion_scenario(
     params = scenario.get("parameters", {}) or {}
     notes_filter = params.get("note_ids")
     all_notes = instruments.get("convertible_notes", [])
+
+    # POINT-OF-USE GUARD, because this route reads RAW `instruments.json` and never the canonical
+    # cap_state arrays. `build_cap_state`'s uniqueness check therefore does not protect it: measured,
+    # a clean artifact built from good instruments plus a scenario run against dirty ones produced
+    # `completeness: "full"`, zero blockers, and 720,000 shares where the truth was 1,120,000,
+    # because `per_note[n["id"]]` below keeps one row for two notes while the total counts both.
+    #
+    # It also fixes the `n["id"]` subscript on the next line, which raised a bare KeyError on a note
+    # with no id at all -- an untyped crash out of a route whose refusal channel is typed blockers.
+    id_blockers = instrument_id_blockers(all_notes, "convertible_notes")
+    if id_blockers:
+        return {
+            "completeness": "structural_only",
+            "blockers": id_blockers,
+            "per_note": {},
+            "math_provenance": [],
+        }
+
     notes = [n for n in all_notes if not notes_filter or n["id"] in notes_filter]
     # Partial/blank notes (null principal / missing issuance_date) would crash convert_note; exclude
     # them from the math and surface them as terms-only, never silently dropped.
@@ -452,7 +471,44 @@ def run_all_scenarios(
     cap_state: dict[str, Any],
     scenario_requests: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Dispatch each scenario_request to the right runner and collect outputs."""
+    """Dispatch each scenario_request to the right runner and collect outputs.
+
+    SCENARIO IDS MUST BE UNIQUE AND NON-BLANK, checked here because this is where they are first
+    consumed as keys. The math itself survives a repeat -- both scenarios are computed and both come
+    back -- so the damage is entirely downstream and entirely silent:
+
+      * `rule_audit`'s gating map keys on `f"scenario:{scenario_id or 'global'}"`, so two scenarios
+        sharing an id (or both blank, which collapse onto `scenario:global`) keep ONE gating entry.
+        Measured: two scenarios in, one `date_sensitive_watchlist` row out. That row is rendered to
+        the founder in `report.md`, so a real financing date's sensitivity status -- whether it
+        falls inside or outside a legal window -- disappears with no error, no warning, and no
+        count anywhere that looks wrong.
+      * `flip_outputs[req["scenario_id"]]` below collapses the same way, mis-routing a chained
+        scenario's `chained_from_scenario_id` lookup to the wrong parent.
+
+    Unlike the instrument ids, a `scenario_id` is authored here rather than extracted from a
+    document, so this is a caller error rather than a document-reading error -- but it is unchecked
+    everywhere (no schema `uniqueItems`, no runtime test), and its cost is a founder-visible row
+    quietly missing rather than a visibly wrong number.
+    """
+    _sids = [r.get("scenario_id") for r in scenario_requests]
+    _blank = sum(1 for s in _sids if id_missing(s))
+    if _blank:
+        raise ValueError(
+            f"E_SCENARIO_ID_MISSING: {_blank} of {len(_sids)} scenario requests carry no scenario_id. "
+            "Scenario ids key the rule-audit gating map and the chained-scenario lookup, so a blank "
+            "one silently merges two scenarios' results. Give each scenario request a distinct, "
+            "non-blank scenario_id."
+        )
+    _dupes = sorted({str(s) for s in _sids if _sids.count(s) > 1})
+    if _dupes:
+        raise ValueError(
+            f"E_SCENARIO_ID_DUPLICATE: scenario_id(s) {', '.join(_dupes)} appear more than once. "
+            "Scenario ids key the rule-audit gating map and the chained-scenario lookup, so a repeat "
+            "drops one scenario's date-sensitivity rows from the report with no warning. Give each "
+            "scenario request a distinct scenario_id."
+        )
+
     results = []
     flip_outputs: dict[str, dict[str, Any]] = {}
     for req in scenario_requests:

@@ -156,6 +156,86 @@ def _check_semantic_invariants_cap_state(cap_state: dict[str, Any], path: Path) 
                 )
 
 
+def id_missing(value: Any) -> bool:
+    """THE definition of "this instrument has no id", for the whole skill.
+
+    Three states must stay distinct and they have three different remedies:
+      * MISSING (this function) -- "give it an id";
+      * DUPLICATE -- "make the ids distinct";
+      * present-and-unique -- fine.
+    Collapsing missing into duplicate produces a diagnostic naming an id the founder never wrote
+    (`None` or `""`), which is why they are separate codes downstream.
+
+    WHY THIS EXISTS AS ONE FUNCTION. The same decision was made independently in five places and
+    disagreed with itself: `cap_state`'s required-field checks test `"id" not in row`, so a blank
+    string PASSES them; `_check_unique_ids` skipped blanks; `safe_conversion` and `priced_round`
+    treated `in (None, "")` as missing, which is the correct call. The gap between the first two
+    and the last two is exactly the width of the empty string, and a founder-facing wrong number
+    lived in it: two convertible notes with `id: ""` reported 720,000 shares against a true
+    1,120,000, `completeness: "full"`, zero blockers. One predicate, imported everywhere, is what
+    stops that gap reopening at the next site.
+
+    Blank-after-strip counts as missing: `" "` is not an identifier anyone typed on purpose, and
+    it collides in a dict exactly as `""` does.
+
+    NON-STR COUNTS AS MISSING, and that is defense rather than policy: `instruments.schema.json`
+    types every instrument `id` as `{"type": "string"}` (verified), so a non-str id is an upstream
+    schema failure. Treating it as missing yields a typed, founder-legible refusal instead of a
+    `TypeError` from a dict lookup or an `AttributeError` from `.strip()`.
+    """
+    if value is None or not isinstance(value, str):
+        return True
+    return not value.strip()
+
+
+def instrument_id_blockers(
+    items: list[dict[str, Any]],
+    label: str,
+    *,
+    id_field: str = "id",
+) -> list[dict[str, Any]]:
+    """Blockers for an instrument list whose ids would collapse the per-item output.
+
+    Generalizes `priced_round._duplicate_id_blockers` so every consumer states the same rule.
+    Returns the scenario-route refusal shape (`code` / `instance_id` / `remedy`); producers that
+    exit rather than return blockers should raise on a non-empty result.
+
+    Ids key the per-item outputs across this skill (`per_safe`, `per_note`, `results_by_id`, the
+    CP1 snapshots, the founder breakdown), so a repeat reports one row for two instruments while
+    both still count toward the totals -- the summary and the detail disagree, with no warning.
+    """
+    missing = sum(1 for i in items if not isinstance(i, dict) or id_missing(i.get(id_field)))
+    out: list[dict[str, Any]] = []
+    if missing:
+        out.append(
+            {
+                "code": "E_INSTRUMENT_ID_MISSING",
+                "instance_id": None,
+                "remedy": (
+                    f"{missing} of {len(items)} {label} carry no id. Ids key the per-item output, so "
+                    "an instrument without one cannot be reported separately from the others. Give "
+                    "each one a distinct id."
+                ),
+            }
+        )
+    ids = [i.get(id_field) for i in items if isinstance(i, dict) and not id_missing(i.get(id_field))]
+    dupes = sorted({str(i) for i in ids if ids.count(i) > 1})
+    if dupes:
+        out.append(
+            {
+                "code": "E_INSTRUMENT_DUPLICATE_ID",
+                "instance_id": ",".join(dupes),
+                "remedy": (
+                    f"{len(items)} {label} carry {len(dupes)} duplicated id(s): {', '.join(dupes)}. "
+                    "Ids key the per-item output, so a repeat would show one row for two instruments "
+                    "while both count toward the totals -- the summary and the detail would disagree. "
+                    "Give each one a distinct id."
+                ),
+            }
+        )
+    return out
+
+
 def series_has_prior_ad_event(series_id: str, cap_table_history: list[dict[str, Any]]) -> bool:
     """Does the recorded history contain an anti-dilution adjustment for this series?"""
     return any(
