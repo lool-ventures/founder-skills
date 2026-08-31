@@ -192,8 +192,20 @@ def assert_cap_implied_self_consistent(review_dir: Path) -> None:
 
     for scenario in scenarios.get("scenarios") or []:
         outputs = scenario.get("computed_outputs") or {}
-        per_safe = outputs.get("per_safe") or {}
-        cap_implied = {k: v for k, v in per_safe.items() if v.get("branch") == "cap_implied"}
+        # `per_safe` is a LIST of id-bearing rows, not a dict keyed by id. It became one when the
+        # id-keyed maps were removed -- an id read out of a founder's PDF cannot be a dict key,
+        # because two colliding ids drop a row while the totals keep counting both. This file was
+        # ON the measured migration list and was missed anyway: `addopts` deselects `e2e`, so the
+        # suite that would have caught it never collects this module, and the tag gate skips this
+        # lane by name. Two independent reasons a broken assertion stayed green.
+        per_safe = outputs.get("per_safe") or []
+        assert isinstance(per_safe, list), (
+            f"per_safe is {type(per_safe).__name__}, expected a list of id-bearing rows. If the "
+            "producer went back to an id-keyed map, that is the defect this shape exists to prevent."
+        )
+        cap_implied = {
+            row.get("id"): row for row in per_safe if isinstance(row, dict) and row.get("branch") == "cap_implied"
+        }
         if not cap_implied:
             continue
 
